@@ -1,0 +1,128 @@
+.root {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-sidebar);
+  flex-shrink: 0;
+  gap: 8px;
+  min-height: 44px;
+}
+
+.header_left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.header_right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.workspace {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tag_main,
+.tag_subagent {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.tag_main    { background: var(--tag-main-bg); color: var(--tag-main-fg); }
+.tag_subagent{ background: var(--tag-sub-bg);  color: var(--tag-sub-fg); }
+
+.slug {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+.ide {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.tokens {
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.close_btn {
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 12px;
+}
+.close_btn:hover { background: var(--color-bg-secondary); color: var(--color-text); }
+
+/* Path */
+.path {
+  padding: 4px 16px;
+  font-size: 10px;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Scroll area */
+.scroll_area {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Empty state */
+.empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-dim);
+  gap: 10px;
+  background: var(--color-bg);
+}
+
+.empty_icon {
+  font-size: 48px;
+  opacity: 0.3;
+}
+
+.empty p {
+  font-size: 14px;
+  margin: 0;
+}

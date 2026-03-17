@@ -1,0 +1,24 @@
+[package]
+name = "claude-fleet"
+version = "0.1.0"
+description = "Claude Fleet - Monitor all Claude sessions"
+authors = ["hoveychen"]
+edition = "2021"
+
+[lib]
+name = "claude_fleet_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+notify = "6"
+dirs = "5"
+libc = "0.2"
+chrono = { version = "0.4", features = ["serde"] }
+reqwest = { version = "0.12", features = ["json", "blocking"] }

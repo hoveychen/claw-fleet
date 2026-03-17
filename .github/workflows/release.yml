@@ -1,0 +1,203 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build — ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── macOS Apple Silicon ──────────────────────────────────────────
+          - name: macOS (Apple Silicon)
+            runner: macos-latest
+            rust_target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
+            artifact_glob: 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg'
+
+          # ── macOS Intel ──────────────────────────────────────────────────
+          - name: macOS (Intel)
+            runner: macos-13
+            rust_target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
+            artifact_glob: 'src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg'
+
+          # ── Windows x64 ──────────────────────────────────────────────────
+          - name: Windows (x64)
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            args: --target x86_64-pc-windows-msvc
+            artifact_glob: 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe'
+
+          # ── Windows ARM64 ────────────────────────────────────────────────
+          - name: Windows (ARM64)
+            runner: windows-latest
+            rust_target: aarch64-pc-windows-msvc
+            args: --target aarch64-pc-windows-msvc
+            artifact_glob: 'src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe'
+
+          # ── Linux x86_64 ─────────────────────────────────────────────────
+          - name: Linux (x86_64)
+            runner: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            args: --target x86_64-unknown-linux-gnu
+            artifact_glob: |
+              src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
+              src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Node.js ────────────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # ── Rust ───────────────────────────────────────────────────────────────
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # ── Linux system dependencies ──────────────────────────────────────────
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev
+
+      # ── Frontend ───────────────────────────────────────────────────────────
+      - name: Install frontend dependencies
+        run: npm ci
+
+      # ── Build ──────────────────────────────────────────────────────────────
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Disable update checks and auto-publish — we handle upload ourselves
+          TAURI_SIGNING_PRIVATE_KEY: ''
+        with:
+          args: ${{ matrix.args }}
+          # Do NOT set tagName / releaseName here — prevents tauri-action from
+          # creating or publishing its own draft release with Tauri internals.
+          includeUpdaterJson: false
+
+      # ── Collect artifacts ──────────────────────────────────────────────────
+      - name: Collect artifacts (macOS DMG)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          find src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg \
+            -name "*.dmg" -exec cp {} dist-artifacts/ \;
+
+      - name: Collect artifacts (Windows NSIS)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          find src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis \
+            -name "*.exe" -exec cp {} dist-artifacts/ \;
+
+      - name: Collect artifacts (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          find src-tauri/target/${{ matrix.rust_target }}/release/bundle/deb \
+            -name "*.deb" -exec cp {} dist-artifacts/ \; 2>/dev/null || true
+          find src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage \
+            -name "*.AppImage" -exec cp {} dist-artifacts/ \; 2>/dev/null || true
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.rust_target }}
+          path: dist-artifacts/
+          if-no-files-found: error
+
+  # ── Create GitHub Release ──────────────────────────────────────────────────
+  publish:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: all-artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh all-artifacts/
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          cat >> release_notes.md << 'EOF'
+          ## Downloads
+
+          | Platform | Architecture | File |
+          |---|---|---|
+          | macOS | Apple Silicon (M1/M2/M3/M4) | `*_aarch64.dmg` |
+          | macOS | Intel | `*_x64.dmg` |
+          | Windows | x64 | `*_x64-setup.exe` |
+          | Windows | ARM64 | `*_arm64-setup.exe` |
+          | Linux | x86_64 | `*.deb` / `*.AppImage` |
+
+          > **macOS:** Not notarized — right-click → Open on first launch to bypass Gatekeeper.
+
+          ## What's Changed
+
+          See [CHANGELOG](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}) for full commit history.
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Claude Fleet v${{ steps.version.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          files: all-artifacts/*
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

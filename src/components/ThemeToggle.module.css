@@ -1,0 +1,28 @@
+.group {
+  display: flex;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.btn {
+  padding: 3px 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  line-height: 1;
+  transition: background 0.1s, color 0.1s;
+}
+
+.btn:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.btn.active {
+  background: var(--color-accent);
+  color: #fff;
+}

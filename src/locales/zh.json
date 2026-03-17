@@ -1,0 +1,64 @@
+{
+  "title": "Claude Fleet",
+  "filter_placeholder": "过滤会话…",
+  "active": "活跃",
+  "recent": "最近",
+  "no_sessions": "未找到会话。",
+  "select_session": "选择一个会话以查看详情",
+  "tokens_out": "tokens 输出",
+  "tokens": "tokens",
+  "tok_s": "tok/s",
+  "main": "主进程",
+  "subagent": "子进程",
+  "just_now": "刚刚",
+  "m_ago": "{{n}}分钟前",
+  "h_ago": "{{n}}小时前",
+  "d_ago": "{{n}}天前",
+  "status": {
+    "streaming": "流式输出",
+    "processing": "处理中",
+    "waitingInput": "等待输入",
+    "active": "活跃",
+    "delegating": "委托中",
+    "idle": "空闲"
+  },
+  "theme": {
+    "light": "浅色",
+    "dark": "深色",
+    "system": "系统"
+  },
+  "language": "语言",
+  "view_list": "列表",
+  "view_gallery": "画廊",
+  "account": {
+    "title": "账户",
+    "plan": "套餐",
+    "org": "组织",
+    "auth": "认证",
+    "usage": "用量",
+    "five_hour": "5小时",
+    "seven_day": "7天",
+    "seven_day_sonnet": "7天 Sonnet",
+    "resets": "重置",
+    "auto_refresh": "自动刷新",
+    "refresh": "刷新",
+    "updated": "{{n}}分钟前更新"
+  },
+  "chart": {
+    "title": "Token 速度",
+    "unit": "tok/s",
+    "no_data": "暂无数据"
+  },
+  "tray": {
+    "show": "显示",
+    "hide": "隐藏",
+    "quit": "退出",
+    "active_agents": "{{n}} 个活跃 Agent",
+    "main_agents": "主进程: {{n}}",
+    "sub_agents": "子进程: {{n}}"
+  },
+  "inspect": {
+    "close": "关闭",
+    "path": "路径"
+  }
+}

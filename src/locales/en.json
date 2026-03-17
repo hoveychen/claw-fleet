@@ -1,0 +1,64 @@
+{
+  "title": "Claude Fleet",
+  "filter_placeholder": "Filter sessions…",
+  "active": "Active",
+  "recent": "Recent",
+  "no_sessions": "No sessions found.",
+  "select_session": "Select a session to inspect",
+  "tokens_out": "tokens out",
+  "tokens": "tokens",
+  "tok_s": "tok/s",
+  "main": "Main",
+  "subagent": "Subagent",
+  "just_now": "just now",
+  "m_ago": "{{n}}m ago",
+  "h_ago": "{{n}}h ago",
+  "d_ago": "{{n}}d ago",
+  "status": {
+    "streaming": "Streaming",
+    "processing": "Processing",
+    "waitingInput": "Waiting",
+    "active": "Active",
+    "delegating": "Delegating",
+    "idle": "Idle"
+  },
+  "theme": {
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "language": "Language",
+  "view_list": "List",
+  "view_gallery": "Gallery",
+  "account": {
+    "title": "Account",
+    "plan": "Plan",
+    "org": "Org",
+    "auth": "Auth",
+    "usage": "Usage",
+    "five_hour": "5-hour",
+    "seven_day": "7-day",
+    "seven_day_sonnet": "7-day Sonnet",
+    "resets": "Resets",
+    "auto_refresh": "Auto-refresh",
+    "refresh": "Refresh",
+    "updated": "Updated {{n}}m ago"
+  },
+  "chart": {
+    "title": "Token Speed",
+    "unit": "tok/s",
+    "no_data": "No data yet"
+  },
+  "tray": {
+    "show": "Show",
+    "hide": "Hide",
+    "quit": "Quit",
+    "active_agents": "{{n}} active agent(s)",
+    "main_agents": "Main: {{n}}",
+    "sub_agents": "Subagents: {{n}}"
+  },
+  "inspect": {
+    "close": "Close",
+    "path": "Path"
+  }
+}
