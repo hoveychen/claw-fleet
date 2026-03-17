@@ -25,7 +25,7 @@ jobs:
 
           # ── macOS Intel ──────────────────────────────────────────────────
           - name: macOS (Intel)
-            runner: macos-13
+            runner: macos-latest
             rust_target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
             artifact_glob: 'src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg'
@@ -52,6 +52,15 @@ jobs:
             artifact_glob: |
               src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
               src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
+
+          # ── Linux ARM64 ──────────────────────────────────────────────────
+          - name: Linux (ARM64)
+            runner: ubuntu-22.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            args: --target aarch64-unknown-linux-gnu
+            artifact_glob: |
+              src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
+              src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
     runs-on: ${{ matrix.runner }}
 
@@ -84,7 +93,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
             librsvg2-dev \
             patchelf \
             libglib2.0-dev \
@@ -208,6 +216,7 @@ jobs:
           | Windows | x64 | `*_x64-setup.exe` |
           | Windows | ARM64 | `*_arm64-setup.exe` |
           | Linux | x86_64 | `*.deb` / `*.AppImage` |
+          | Linux | ARM64 | `*.deb` / `*.AppImage` |
 
           ## What's Changed
 

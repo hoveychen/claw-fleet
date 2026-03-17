@@ -56,6 +56,7 @@ Download the latest pre-built binary for your platform from the [Releases page](
 | Windows | x64 | `Claude.Fleet_x.y.z_x64-setup.exe` |
 | Windows | ARM64 | `Claude.Fleet_x.y.z_arm64-setup.exe` |
 | Linux | x86\_64 | `claude-fleet_x.y.z_amd64.deb` / `.AppImage` |
+| Linux | ARM64 | `claude-fleet_x.y.z_arm64.deb` / `.AppImage` |
 
 ### Prerequisites
 
