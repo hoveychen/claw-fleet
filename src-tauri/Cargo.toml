@@ -3,6 +3,7 @@ name = "claude-fleet"
 version = "0.1.0"
 description = "Claude Fleet - Monitor all Claude sessions"
 authors = ["hoveychen"]
+license = "AGPL-3.0-only"
 edition = "2021"
 
 [lib]

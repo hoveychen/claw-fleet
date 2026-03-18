@@ -123,8 +123,14 @@ Pull requests are welcome! A few pointers:
 
 Please open an issue before starting large changes so we can coordinate.
 
+By submitting a pull request, you agree to the [Contributor License Agreement (CLA)](CLA.md). The CLA grants the project owner the right to relicense contributions under other licenses (including commercial ones) while keeping the public release under AGPL-3.0.
+
 ---
 
 ## License
 
-[MIT](LICENSE) — © 2025 hoveychen
+This project is licensed under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only).
+
+Copyright © 2025 hoveychen
+
+Under AGPL-3.0, if you run a modified version of this software to provide a service over a network, you must make the complete source code of your modified version available to users of that service.

@@ -148,16 +148,24 @@ pub struct AccountInfo {
 
 #[cfg(target_os = "macos")]
 fn read_keychain_credentials() -> Result<(String, String), String> {
+    // Try keychain first (older Claude Code versions)
     let out = std::process::Command::new("security")
         .args(["find-generic-password", "-s", "Claude Code-credentials", "-w"])
         .output()
         .map_err(|e| format!("security command failed: {e}"))?;
 
-    if !out.status.success() {
-        return Err("Credentials not found in keychain".to_string());
-    }
+    let raw = if out.status.success() {
+        String::from_utf8(out.stdout).map_err(|e| e.to_string())?
+    } else {
+        // Fallback to credentials file (newer Claude Code versions)
+        let cred_path = dirs::home_dir()
+            .ok_or("No home dir")?
+            .join(".claude")
+            .join(".credentials.json");
+        std::fs::read_to_string(&cred_path)
+            .map_err(|_| "Credentials not found in keychain or file".to_string())?
+    };
 
-    let raw = String::from_utf8(out.stdout).map_err(|e| e.to_string())?;
     let json: Value = serde_json::from_str(raw.trim()).map_err(|e| e.to_string())?;
 
     let oauth = json.get("claudeAiOauth").ok_or("No claudeAiOauth key")?;
