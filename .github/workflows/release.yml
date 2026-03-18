@@ -22,36 +22,42 @@ jobs:
             rust_target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
             fleet_bin: fleet-cli
+            fixed_suffix: macos-arm64
 
           - name: macOS (Intel)
             runner: macos-latest
             rust_target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
             fleet_bin: fleet-cli
+            fixed_suffix: macos-x64
 
           - name: Windows (x64)
             runner: windows-latest
             rust_target: x86_64-pc-windows-msvc
             args: --target x86_64-pc-windows-msvc
             fleet_bin: fleet-cli.exe
+            fixed_suffix: windows-x64
 
           - name: Windows (ARM64)
             runner: windows-latest
             rust_target: aarch64-pc-windows-msvc
             args: --target aarch64-pc-windows-msvc
             fleet_bin: fleet-cli.exe
+            fixed_suffix: windows-arm64
 
           - name: Linux (x86_64)
             runner: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
             args: --target x86_64-unknown-linux-gnu
             fleet_bin: fleet-cli
+            fixed_suffix: linux-x64
 
           - name: Linux (ARM64)
             runner: ubuntu-22.04-arm
             rust_target: aarch64-unknown-linux-gnu
             args: --target aarch64-unknown-linux-gnu
             fleet_bin: fleet-cli
+            fixed_suffix: linux-arm64
 
     runs-on: ${{ matrix.runner }}
 
@@ -162,39 +168,39 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist-artifacts
-          # App bundle (DMG) — fleet is embedded inside via externalBin
+          # App bundle (DMG) — rename to fixed filename
           find src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg \
-            -name "*.dmg" -exec cp {} dist-artifacts/ \;
+            -name "*.dmg" | head -1 | xargs -I{} cp {} dist-artifacts/claude-fleet-${{ matrix.fixed_suffix }}.dmg
           # Standalone fleet binary (for users who want it without the app)
           cp src-tauri/target/${{ matrix.rust_target }}/release/fleet-cli \
-             dist-artifacts/fleet-${{ matrix.rust_target }}
+             dist-artifacts/fleet-${{ matrix.fixed_suffix }}
 
       - name: Collect artifacts (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           mkdir -p dist-artifacts
-          # App installer (NSIS) — fleet.exe is embedded inside via externalBin
+          # App installer (NSIS) — rename to fixed filename
           find src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis \
-            -name "*.exe" -exec cp {} dist-artifacts/ \;
+            -name "*.exe" | head -1 | xargs -I{} cp {} dist-artifacts/claude-fleet-${{ matrix.fixed_suffix }}-setup.exe
           # Standalone fleet binary
           cp src-tauri/target/${{ matrix.rust_target }}/release/fleet-cli.exe \
-             dist-artifacts/fleet-${{ matrix.rust_target }}.exe
+             dist-artifacts/fleet-${{ matrix.fixed_suffix }}.exe
 
       - name: Collect artifacts (Linux)
         if: runner.os == 'Linux'
         shell: bash
         run: |
           mkdir -p dist-artifacts
-          # .deb — fleet is at /usr/bin/fleet via deb.files
+          # .deb — rename to fixed filename
           find src-tauri/target/${{ matrix.rust_target }}/release/bundle/deb \
-            -name "*.deb" -exec cp {} dist-artifacts/ \; 2>/dev/null || true
-          # AppImage — fleet is bundled inside via externalBin
+            -name "*.deb" | head -1 | xargs -I{} cp {} dist-artifacts/claude-fleet-${{ matrix.fixed_suffix }}.deb 2>/dev/null || true
+          # AppImage — rename to fixed filename
           find src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage \
-            -name "*.AppImage" -exec cp {} dist-artifacts/ \; 2>/dev/null || true
+            -name "*.AppImage" | head -1 | xargs -I{} cp {} dist-artifacts/claude-fleet-${{ matrix.fixed_suffix }}.AppImage 2>/dev/null || true
           # Standalone fleet binary
           cp src-tauri/target/${{ matrix.rust_target }}/release/fleet-cli \
-             dist-artifacts/fleet-${{ matrix.rust_target }}
+             dist-artifacts/fleet-${{ matrix.fixed_suffix }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -236,25 +242,25 @@ jobs:
 
           ### App Installers
 
-          | Platform | Architecture | File |
-          |---|---|---|
-          | macOS | Apple Silicon (M1/M2/M3/M4) | `*_aarch64.dmg` |
-          | macOS | Intel | `*_x64.dmg` |
-          | Windows | x64 | `*_x64-setup.exe` |
-          | Windows | ARM64 | `*_arm64-setup.exe` |
-          | Linux | x86_64 | `*.deb` / `*.AppImage` |
-          | Linux | ARM64 | `*.deb` / `*.AppImage` |
+          | | Platform | Architecture | File |
+          |---|---|---|---|
+          | <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Apple Silicon (M1/M2/M3/M4) | `claude-fleet-macos-arm64.dmg` |
+          | <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Intel | `claude-fleet-macos-x64.dmg` |
+          | <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | x64 | `claude-fleet-windows-x64-setup.exe` |
+          | <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | ARM64 | `claude-fleet-windows-arm64-setup.exe` |
+          | <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | x86_64 | `claude-fleet-linux-x64.deb` / `claude-fleet-linux-x64.AppImage` |
+          | <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | ARM64 | `claude-fleet-linux-arm64.deb` / `claude-fleet-linux-arm64.AppImage` |
 
           ### `fleet` CLI (standalone binaries)
 
-          | Platform | Architecture | File |
-          |---|---|---|
-          | macOS | Apple Silicon | `fleet-aarch64-apple-darwin` |
-          | macOS | Intel | `fleet-x86_64-apple-darwin` |
-          | Windows | x64 | `fleet-x86_64-pc-windows-msvc.exe` |
-          | Windows | ARM64 | `fleet-aarch64-pc-windows-msvc.exe` |
-          | Linux | x86_64 | `fleet-x86_64-unknown-linux-gnu` |
-          | Linux | ARM64 | `fleet-aarch64-unknown-linux-gnu` |
+          | | Platform | Architecture | File |
+          |---|---|---|---|
+          | <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Apple Silicon | `fleet-macos-arm64` |
+          | <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Intel | `fleet-macos-x64` |
+          | <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | x64 | `fleet-windows-x64.exe` |
+          | <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | ARM64 | `fleet-windows-arm64.exe` |
+          | <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | x86_64 | `fleet-linux-x64` |
+          | <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | ARM64 | `fleet-linux-arm64` |
 
           ## Installing the `fleet` CLI
 

@@ -49,14 +49,14 @@ When you run Claude Code across multiple projects simultaneously — or lean on 
 
 Download the latest pre-built binary for your platform from the [Releases page](https://github.com/hoveychen/claude-fleet/releases/latest):
 
-| Platform | Architecture | File |
-|---|---|---|
-| macOS | Apple Silicon (M1/M2/M3/M4) | `Claude.Fleet_x.y.z_aarch64.dmg` |
-| macOS | Intel | `Claude.Fleet_x.y.z_x64.dmg` |
-| Windows | x64 | `Claude.Fleet_x.y.z_x64-setup.exe` |
-| Windows | ARM64 | `Claude.Fleet_x.y.z_arm64-setup.exe` |
-| Linux | x86\_64 | `claude-fleet_x.y.z_amd64.deb` / `.AppImage` |
-| Linux | ARM64 | `claude-fleet_x.y.z_arm64.deb` / `.AppImage` |
+| | Platform | Architecture | Download |
+|---|---|---|---|
+| <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Apple Silicon (M1/M2/M3/M4) | [claude-fleet-macos-arm64.dmg](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-macos-arm64.dmg) |
+| <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Intel | [claude-fleet-macos-x64.dmg](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-macos-x64.dmg) |
+| <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | x64 | [claude-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-windows-x64-setup.exe) |
+| <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | ARM64 | [claude-fleet-windows-arm64-setup.exe](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-windows-arm64-setup.exe) |
+| <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | x86\_64 | [claude-fleet-linux-x64.deb](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-x64.deb) · [claude-fleet-linux-x64.AppImage](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-x64.AppImage) |
+| <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | ARM64 | [claude-fleet-linux-arm64.deb](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-arm64.deb) · [claude-fleet-linux-arm64.AppImage](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-arm64.AppImage) |
 
 ### Prerequisites
 
