@@ -15,6 +15,9 @@ pub struct WatcherState {
     pub sessions: Arc<Mutex<Vec<SessionInfo>>>,
     pub viewed_session: Arc<Mutex<Option<String>>>, // jsonl_path currently viewed
     pub viewed_offset: Arc<Mutex<u64>>,             // byte offset for tail
+    /// When `true`, the local watcher suppresses all session rescans and
+    /// tail-emit operations because the remote poller is handling them.
+    pub is_remote: Arc<Mutex<bool>>,
 }
 
 pub fn run(app_handle: AppHandle, state: Arc<WatcherState>) {
@@ -90,6 +93,10 @@ pub fn run(app_handle: AppHandle, state: Arc<WatcherState>) {
 }
 
 fn handle_rescan(claude_dir: &Path, app_handle: &AppHandle, state: &WatcherState) {
+    // Skip local scan while a remote connection is active
+    if *state.is_remote.lock().unwrap() {
+        return;
+    }
     let sessions = scan_sessions(claude_dir);
     *state.sessions.lock().unwrap() = sessions.clone();
     let _ = app_handle.emit("sessions-updated", &sessions);
@@ -116,6 +123,9 @@ fn handle_jsonl_change(
 }
 
 fn emit_tail_lines(path: &Path, app_handle: &AppHandle, state: &WatcherState) {
+    if *state.is_remote.lock().unwrap() {
+        return;
+    }
     let mut offset = state.viewed_offset.lock().unwrap();
     let current_offset = *offset;
 

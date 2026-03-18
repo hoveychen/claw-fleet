@@ -1,4 +1,5 @@
 pub mod account;
+pub mod remote;
 pub mod session;
 mod watcher;
 
@@ -12,6 +13,7 @@ use tauri::menu::{MenuBuilder, MenuItemBuilder};
 use tauri::tray::{TrayIconBuilder, TrayIconEvent};
 
 use account::{AccountInfo, read_keychain_credentials};
+use remote::ActiveRemote;
 use session::SessionInfo;
 use watcher::WatcherState;
 
@@ -294,6 +296,10 @@ pub struct AppState {
     pub sessions: Arc<Mutex<Vec<SessionInfo>>>,
     pub viewed_session: Arc<Mutex<Option<String>>>,
     pub viewed_offset: Arc<Mutex<u64>>,
+    /// Active remote connection, `None` when in local mode.
+    pub remote: Arc<Mutex<Option<ActiveRemote>>>,
+    /// `true` when connected to a remote — used by the local watcher to stay quiet.
+    pub is_remote: Arc<Mutex<bool>>,
 }
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -304,7 +310,18 @@ fn list_sessions(state: tauri::State<AppState>) -> Vec<SessionInfo> {
 }
 
 #[tauri::command]
-fn get_messages(jsonl_path: String) -> Result<Vec<Value>, String> {
+fn get_messages(
+    jsonl_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<Value>, String> {
+    let remote_guard = state.remote.lock().unwrap();
+    if let Some(ref active) = *remote_guard {
+        // Remote mode: proxy to the probe
+        return remote::remote_get_messages(&active.base_url, &active.token, &jsonl_path);
+    }
+    drop(remote_guard);
+
+    // Local mode: read file directly
     let content = std::fs::read_to_string(&jsonl_path).map_err(|e| e.to_string())?;
     let messages: Vec<Value> = content
         .lines()
@@ -317,12 +334,37 @@ fn get_messages(jsonl_path: String) -> Result<Vec<Value>, String> {
 #[tauri::command]
 fn start_watching_session(
     jsonl_path: String,
+    app: tauri::AppHandle,
     state: tauri::State<AppState>,
 ) -> Result<u64, String> {
+    let remote_guard = state.remote.lock().unwrap();
+    if let Some(ref active) = *remote_guard {
+        // Remote mode: get file size from probe, then start tail poller
+        let file_size = remote::remote_file_size(&active.base_url, &active.token, &jsonl_path);
+        let tail_running = active.tail_running.clone();
+
+        // Reset the flag so the new tail thread starts fresh
+        *tail_running.lock().unwrap() = true;
+
+        remote::start_remote_tail(
+            active.base_url.clone(),
+            active.token.clone(),
+            jsonl_path.clone(),
+            file_size,
+            app,
+            tail_running,
+        );
+
+        *state.viewed_session.lock().unwrap() = Some(jsonl_path);
+        *state.viewed_offset.lock().unwrap() = file_size;
+        return Ok(file_size);
+    }
+    drop(remote_guard);
+
+    // Local mode
     let file_size = std::fs::metadata(&jsonl_path)
         .map(|m| m.len())
         .map_err(|e| e.to_string())?;
-
     *state.viewed_session.lock().unwrap() = Some(jsonl_path);
     *state.viewed_offset.lock().unwrap() = file_size;
     Ok(file_size)
@@ -330,6 +372,10 @@ fn start_watching_session(
 
 #[tauri::command]
 fn stop_watching_session(state: tauri::State<AppState>) {
+    // Stop remote tail poller if running
+    if let Some(ref active) = *state.remote.lock().unwrap() {
+        *active.tail_running.lock().unwrap() = false;
+    }
     *state.viewed_session.lock().unwrap() = None;
     *state.viewed_offset.lock().unwrap() = 0;
 }
@@ -382,10 +428,10 @@ fn install_fleet_cli(app: tauri::AppHandle) -> Result<String, String> {
 
 // ── Skill installer ──────────────────────────────────────────────────────────
 
-const FLEET_SKILL_MD: &str = include_str!("../../skills/fleet/SKILL.md");
+pub const FLEET_SKILL_MD: &str = include_str!("../../skills/fleet/SKILL.md");
 
 /// Tools we know support the Agent Skills standard, keyed by their home dir name.
-const SKILL_TARGETS: &[(&str, &str)] = &[
+pub const SKILL_TARGETS: &[(&str, &str)] = &[
     ("Claude Code", ".claude"),
     ("GitHub Copilot", ".copilot"),
     ("Cursor", ".cursor"),
@@ -430,6 +476,16 @@ fn detect_ai_tools() -> Result<Vec<DetectedTool>, String> {
         })
         .collect();
     Ok(detected)
+}
+
+/// Open a native file-open dialog and return the chosen path.
+#[tauri::command]
+async fn pick_file(title: String) -> Option<String> {
+    rfd::AsyncFileDialog::new()
+        .set_title(&title)
+        .pick_file()
+        .await
+        .map(|f| f.path().to_string_lossy().to_string())
 }
 
 /// Open a native save dialog and write SKILL.md to the chosen path.
@@ -527,11 +583,13 @@ pub fn run() {
     let sessions: Arc<Mutex<Vec<SessionInfo>>> = Arc::new(Mutex::new(Vec::new()));
     let viewed_session: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let viewed_offset: Arc<Mutex<u64>> = Arc::new(Mutex::new(0));
+    let is_remote: Arc<Mutex<bool>> = Arc::new(Mutex::new(false));
 
     let watcher_state = Arc::new(WatcherState {
         sessions: sessions.clone(),
         viewed_session: viewed_session.clone(),
         viewed_offset: viewed_offset.clone(),
+        is_remote: is_remote.clone(),
     });
 
     tauri::Builder::default()
@@ -540,6 +598,8 @@ pub fn run() {
             sessions,
             viewed_session,
             viewed_offset,
+            remote: Arc::new(Mutex::new(None)),
+            is_remote,
         })
         .setup(move |app| {
             // ── Tray icon ────────────────────────────────────────────────────
@@ -611,6 +671,11 @@ pub fn run() {
             detect_ai_tools,
             install_fleet_skill,
             save_skill_file,
+            remote::list_saved_connections,
+            remote::delete_connection,
+            remote::connect_remote,
+            remote::disconnect_remote,
+            pick_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

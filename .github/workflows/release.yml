@@ -244,23 +244,23 @@ jobs:
 
           | | Platform | Architecture | File |
           |---|---|---|---|
-          | <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Apple Silicon (M1/M2/M3/M4) | `claude-fleet-macos-arm64.dmg` |
-          | <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Intel | `claude-fleet-macos-x64.dmg` |
-          | <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | x64 | `claude-fleet-windows-x64-setup.exe` |
-          | <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | ARM64 | `claude-fleet-windows-arm64-setup.exe` |
-          | <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | x86_64 | `claude-fleet-linux-x64.deb` / `claude-fleet-linux-x64.AppImage` |
-          | <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | ARM64 | `claude-fleet-linux-arm64.deb` / `claude-fleet-linux-arm64.AppImage` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon (M1/M2/M3/M4) | `claude-fleet-macos-arm64.dmg` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | `claude-fleet-macos-x64.dmg` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | `claude-fleet-windows-x64-setup.exe` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | `claude-fleet-windows-arm64-setup.exe` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | `claude-fleet-linux-x64.deb` / `claude-fleet-linux-x64.AppImage` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | `claude-fleet-linux-arm64.deb` / `claude-fleet-linux-arm64.AppImage` |
 
           ### `fleet` CLI (standalone binaries)
 
           | | Platform | Architecture | File |
           |---|---|---|---|
-          | <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Apple Silicon | `fleet-macos-arm64` |
-          | <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Intel | `fleet-macos-x64` |
-          | <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | x64 | `fleet-windows-x64.exe` |
-          | <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | ARM64 | `fleet-windows-arm64.exe` |
-          | <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | x86_64 | `fleet-linux-x64` |
-          | <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | ARM64 | `fleet-linux-arm64` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon | `fleet-macos-arm64` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | `fleet-macos-x64` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | `fleet-windows-x64.exe` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | `fleet-windows-arm64.exe` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | `fleet-linux-x64` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | `fleet-linux-arm64` |
 
           ## Installing the `fleet` CLI
 

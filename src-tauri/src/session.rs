@@ -25,7 +25,7 @@ pub struct IdeSession {
 
 // ── Exported types ───────────────────────────────────────────────────────────
 
-#[derive(Serialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub enum SessionStatus {
     Thinking,     // streaming: last partial assistant msg has thinking blocks
@@ -38,7 +38,7 @@ pub enum SessionStatus {
     Idle,         // no recent activity
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: String,

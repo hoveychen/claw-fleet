@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use claude_fleet_lib::account::{fetch_account_info, AccountInfo, UsageStats};
 use claude_fleet_lib::session::{get_claude_dir, scan_sessions, SessionInfo, SessionStatus};
+use claude_fleet_lib::{FLEET_SKILL_MD, SKILL_TARGETS};
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
 
@@ -178,6 +179,26 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Start the HTTP probe server (used by Fleet app for remote monitoring)
+    Serve {
+        /// Port to listen on
+        #[arg(short, long, default_value = "7007")]
+        port: u16,
+        /// Authentication token (required)
+        #[arg(long)]
+        token: String,
+    },
+    /// Manage Fleet skill for AI coding tools
+    Skill {
+        #[command(subcommand)]
+        action: SkillCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum SkillCommands {
+    /// Install Fleet skill to all detected AI tools (Claude Code, Cursor, Copilot, Gemini CLI)
+    Install,
 }
 
 fn main() {
@@ -188,6 +209,10 @@ fn main() {
         Commands::Stop { id, force } => cmd_stop(&id, force),
         Commands::Account { json } => cmd_account(json),
         Commands::Speed { json } => cmd_speed(json),
+        Commands::Serve { port, token } => cmd_serve(port, token),
+        Commands::Skill { action } => match action {
+            SkillCommands::Install => cmd_skill_install(),
+        },
     }
 }
 
@@ -500,6 +525,168 @@ fn print_account(info: &AccountInfo) {
     }
 }
 
+// ── fleet serve ────────────────────────────────────────────────────────────────
+
+fn cmd_serve(port: u16, token: String) {
+    use std::io::{Read, Seek, SeekFrom};
+    use percent_encoding::percent_decode_str;
+
+    let claude_dir = match get_claude_dir() {
+        Some(d) => d,
+        None => {
+            eprintln!("Error: cannot locate ~/.claude directory");
+            std::process::exit(1);
+        }
+    };
+
+    let addr = format!("127.0.0.1:{}", port);
+    let server = tiny_http::Server::http(&addr).unwrap_or_else(|e| {
+        eprintln!("Error: cannot bind to {}: {}", addr, e);
+        std::process::exit(1);
+    });
+    eprintln!("[fleet serve] listening on {} (version {})", addr, env!("CARGO_PKG_VERSION"));
+
+    let expected_auth = format!("Bearer {}", token);
+
+    for request in server.incoming_requests() {
+        // Auth check
+        let auth_ok = request
+            .headers()
+            .iter()
+            .any(|h| h.field.equiv("authorization")
+                && h.value.as_str() == expected_auth.as_str());
+
+        if !auth_ok {
+            let _ = request.respond(tiny_http::Response::empty(401));
+            continue;
+        }
+
+        let url = request.url().to_string();
+        let (path, query_str) = match url.split_once('?') {
+            Some((p, q)) => (p, q),
+            None => (url.as_str(), ""),
+        };
+
+        let query = parse_query(query_str);
+
+        let json_header: tiny_http::Header = "Content-Type: application/json".parse().unwrap();
+
+        match path {
+            "/health" => {
+                let body = format!(
+                    r#"{{"version":"{}","status":"ok"}}"#,
+                    env!("CARGO_PKG_VERSION")
+                );
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/sessions" => {
+                let sessions = scan_sessions(&claude_dir);
+                let body = serde_json::to_string(&sessions).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/messages" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                match std::fs::read_to_string(&file_path) {
+                    Ok(content) => {
+                        let messages: Vec<serde_json::Value> = content
+                            .lines()
+                            .filter(|l| !l.trim().is_empty())
+                            .filter_map(|l| serde_json::from_str(l).ok())
+                            .collect();
+                        let body = serde_json::to_string(&messages).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
+            }
+
+            "/file_size" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+                let body = format!(r#"{{"size":{}}}"#, size);
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/tail" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let offset: u64 = query
+                    .get("offset")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(0);
+
+                match std::fs::File::open(&file_path) {
+                    Ok(mut file) => {
+                        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+                        if file_size <= offset {
+                            let body = format!(r#"{{"lines":[],"newOffset":{}}}"#, offset);
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        } else {
+                            let _ = file.seek(SeekFrom::Start(offset));
+                            let mut buf = String::new();
+                            let _ = file.read_to_string(&mut buf);
+                            let lines: Vec<serde_json::Value> = buf
+                                .lines()
+                                .filter(|l| !l.trim().is_empty())
+                                .filter_map(|l| serde_json::from_str(l).ok())
+                                .collect();
+                            let body = serde_json::json!({
+                                "lines": lines,
+                                "newOffset": file_size
+                            })
+                            .to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
+            }
+
+            _ => {
+                let _ = request.respond(tiny_http::Response::empty(404));
+            }
+        }
+    }
+}
+
+fn parse_query(query_str: &str) -> std::collections::HashMap<String, String> {
+    let mut map = std::collections::HashMap::new();
+    for pair in query_str.split('&') {
+        if pair.is_empty() {
+            continue;
+        }
+        match pair.split_once('=') {
+            Some((k, v)) => {
+                map.insert(k.to_string(), v.to_string());
+            }
+            None => {
+                map.insert(pair.to_string(), String::new());
+            }
+        }
+    }
+    map
+}
+
 fn cmd_speed(as_json: bool) {
     let sessions = load_sessions();
     let total: f64 = sessions.iter().map(|s| s.token_speed).sum();
@@ -571,5 +758,45 @@ fn cmd_speed(as_json: bool) {
             d = c_dim(),
             r = c_reset()
         );
+    }
+}
+
+// ── fleet skill ────────────────────────────────────────────────────────────────
+
+fn cmd_skill_install() {
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| {
+            eprintln!("Error: cannot determine home directory");
+            std::process::exit(1);
+        });
+
+    let b = c_bold();
+    let mut any = false;
+
+    for (name, dir) in SKILL_TARGETS {
+        let tool_home = home.join(dir);
+        if !tool_home.exists() {
+            continue;
+        }
+        let skill_dir = tool_home.join("skills").join("fleet");
+        let skill_path = skill_dir.join("SKILL.md");
+        match std::fs::create_dir_all(&skill_dir)
+            .and_then(|_| std::fs::write(&skill_path, FLEET_SKILL_MD))
+        {
+            Ok(_) => {
+                println!("  {b}✓{r}  {name}  {d}{}{r}", skill_path.display(), d = c_dim(), r = c_reset());
+                any = true;
+            }
+            Err(e) => {
+                eprintln!("  ✗  {name}: {e}");
+            }
+        }
+    }
+
+    if !any {
+        eprintln!("No supported AI tools detected. Install Claude Code, Cursor, GitHub Copilot, or Gemini CLI first.");
+        std::process::exit(1);
     }
 }

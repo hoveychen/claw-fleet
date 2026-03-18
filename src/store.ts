@@ -1,7 +1,29 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import type { RemoteConnection } from "./components/ConnectionDialog";
 import type { RawMessage, SessionInfo } from "./types";
+
+// ── Connection store ──────────────────────────────────────────────────────────
+
+interface ConnectionState {
+  /** `null` = not yet connected (dialog is shown) */
+  connected: boolean;
+  /** `null` = local mode */
+  remoteConnection: RemoteConnection | null;
+  setConnected: (remote: RemoteConnection | null) => void;
+  disconnect: () => Promise<void>;
+}
+
+export const useConnectionStore = create<ConnectionState>((set) => ({
+  connected: false,
+  remoteConnection: null,
+  setConnected: (remote) => set({ connected: true, remoteConnection: remote }),
+  disconnect: async () => {
+    await invoke("disconnect_remote").catch(() => {});
+    set({ connected: false, remoteConnection: null });
+  },
+}));
 
 // ── Theme store ───────────────────────────────────────────────────────────────
 

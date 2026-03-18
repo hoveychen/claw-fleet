@@ -1,0 +1,340 @@
+/* ── overlay ──────────────────────────────────────────────────────────────── */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--color-bg-modal-overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+/* ── dialog box ───────────────────────────────────────────────────────────── */
+.dialog {
+  background: var(--color-bg-modal);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 28px 32px;
+  width: 480px;
+  max-width: 96vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── header ───────────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.icon {
+  font-size: 28px;
+  line-height: 1;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+/* ── mode selector tabs ───────────────────────────────────────────────────── */
+.modeTabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.modeTab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 14px 16px;
+  background: var(--color-bg-secondary);
+  border: 2px solid var(--color-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.modeTab:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+.modeTab.active {
+  border-color: var(--color-accent);
+  background: rgba(217, 119, 87, 0.1);
+  color: var(--color-text);
+}
+
+.modeIcon {
+  font-size: 22px;
+}
+
+/* ── saved connections ────────────────────────────────────────────────────── */
+.savedSection {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-dim);
+}
+
+.savedList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.savedItem {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.savedItem:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-accent);
+}
+
+.savedItem.selectedSaved {
+  background: var(--color-bg-card-selected);
+  border-color: var(--color-accent);
+}
+
+.savedItemInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.savedItemLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.savedItemHost {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.deleteBtn {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 0.12s, background 0.12s;
+  flex-shrink: 0;
+}
+
+.deleteBtn:hover {
+  color: var(--color-error-fg);
+  background: var(--color-error-bg);
+}
+
+/* ── new-connection form ──────────────────────────────────────────────────── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.formRow {
+  display: flex;
+  gap: 10px;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1;
+}
+
+.fieldLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-dim);
+}
+
+.fieldInput {
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 7px 10px;
+  color: var(--color-text);
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.fieldInput:focus {
+  border-color: var(--color-accent);
+}
+
+.fieldInput::placeholder {
+  color: var(--color-text-dim);
+}
+
+.fileRow {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+
+.fileRow .fieldInput {
+  flex: 1;
+}
+
+.browseBtn {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 7px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.browseBtn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+}
+
+/* ── progress area ────────────────────────────────────────────────────────── */
+.progress {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+  font-size: 13px;
+}
+
+.progressSpinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.progressText {
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+}
+
+.progressError {
+  color: var(--color-error-fg);
+}
+
+.progressDone {
+  color: var(--color-success);
+}
+
+/* ── action buttons ───────────────────────────────────────────────────────── */
+.actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.btnSecondary {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 8px 16px;
+  font-size: 13px;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.btnSecondary:hover {
+  border-color: var(--color-text-secondary);
+  color: var(--color-text);
+}
+
+.btnPrimary {
+  background: var(--color-accent);
+  border: none;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  padding: 8px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  transition: opacity 0.12s;
+}
+
+.btnPrimary:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.btnPrimary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.addNewBtn {
+  background: none;
+  border: 1px dashed var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 8px 12px;
+  font-size: 12px;
+  text-align: center;
+  transition: border-color 0.12s, color 0.12s;
+}
+
+.addNewBtn:hover {
+  border-color: var(--color-accent);
+  color: var(--color-text-secondary);
+}

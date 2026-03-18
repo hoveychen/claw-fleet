@@ -29,19 +29,31 @@ When you run Claude Code across multiple projects simultaneously — or lean on 
 
 ---
 
+## Why Claude Fleet?
+
+<div align="center">
+<img src="docs/comic_status.png" width="720" alt="Comic: 8-State Intelligence" />
+<img src="docs/comic_stop.png" width="720" alt="Comic: Stop Runaway Agents" />
+<img src="docs/comic_skill.png" width="720" alt="Comic: AI Managing AI" />
+</div>
+
+---
+
 ## Features
 
+**Zero configuration.** Claude Fleet reads Claude Code's local session files directly — no server, no extra API key, no setup beyond installing the app.
 
 | | Feature | Details |
 |---|---|---|
-| 🟢 | **Live Status Tracking** | Every session is tagged: `streaming` · `processing` · `waiting input` · `active` · `delegating` · `idle` |
-| ⚡ | **Token Speed Monitor** | Real-time area chart showing aggregate tokens/s across all active agents |
-| 🌲 | **Agent Hierarchy** | Gallery view groups main sessions with their spawned subagents, auto-promoting `delegating` parents |
-| 🔍 | **Full Message Inspection** | Browse the complete conversation history with Markdown, GFM tables, syntax-highlighted code blocks, and thinking blocks |
-| 🔔 | **System Tray** | Lives in your menu bar; shows active agent count as a badge (macOS) without cluttering your taskbar |
-| 👤 | **Account & Usage** | Displays your Claude plan, organization, and rate-limit utilization (5-hour / 7-day windows) |
-| 🎨 | **Dark / Light / System Theme** | Follows your OS preference or override it manually |
-| 🌐 | **i18n** | Ships with English and Chinese; adding a locale is a single JSON file |
+| 🧠 | **8-State Intelligent Status** | Distinguishes `thinking` · `executing` · `streaming` · `processing` · `waiting input` · `active` · `delegating` · `idle` — inferred from content blocks and file modification time, not just polling |
+| 🌲 | **Multi-Agent Hierarchy** | Gallery view groups parent sessions with their spawned subagents; idle parents auto-promote to `delegating` when children are still running |
+| ⚡ | **Real-Time Token Speed** | Scrolling area chart of aggregate tokens/s across all active agents; per-agent speeds shown on each card |
+| 🔍 | **Full Conversation Inspection** | Browse complete message history with rendered Markdown, syntax-highlighted code, collapsible thinking blocks, and tool use/result pairs |
+| 🛑 | **Stop Agents** | Kill any running session directly from the dashboard — sends SIGTERM then SIGKILL to the full process tree |
+| 📊 | **Rate-Limit Dashboard** | Live utilization bars for the 5-hour and 7-day usage windows, with trend comparison to the previous cycle so you know before you hit the wall |
+| 💻 | **`fleet` CLI** | Standalone binary for terminal use: `fleet agents`, `fleet stop <id>`, `fleet account`, `fleet speed` — all with `--json` output for scripting |
+| 🤖 | **Fleet Skill** | One-click install of a Claude Code / Cursor / Copilot skill that lets your AI assistant monitor and stop other agents autonomously |
+| 🔔 | **System Tray** | Lives in your menu bar with a live agent-count badge; never clutters your taskbar |
 
 ---
 
@@ -51,12 +63,12 @@ Download the latest pre-built binary for your platform from the [Releases page](
 
 | | Platform | Architecture | Download |
 |---|---|---|---|
-| <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Apple Silicon (M1/M2/M3/M4) | [claude-fleet-macos-arm64.dmg](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-macos-arm64.dmg) |
-| <img src="https://cdn.simpleicons.org/apple/555555" width="18"> | macOS | Intel | [claude-fleet-macos-x64.dmg](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-macos-x64.dmg) |
-| <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | x64 | [claude-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-windows-x64-setup.exe) |
-| <img src="https://cdn.simpleicons.org/windows/0078D4" width="18"> | Windows | ARM64 | [claude-fleet-windows-arm64-setup.exe](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-windows-arm64-setup.exe) |
-| <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | x86\_64 | [claude-fleet-linux-x64.deb](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-x64.deb) · [claude-fleet-linux-x64.AppImage](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-x64.AppImage) |
-| <img src="https://cdn.simpleicons.org/linux/FCC624" width="18"> | Linux | ARM64 | [claude-fleet-linux-arm64.deb](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-arm64.deb) · [claude-fleet-linux-arm64.AppImage](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-arm64.AppImage) |
+| <img src="docs/icon-apple.svg" width="24"> | macOS | Apple Silicon (M1/M2/M3/M4) | [claude-fleet-macos-arm64.dmg](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-macos-arm64.dmg) |
+| <img src="docs/icon-apple.svg" width="24"> | macOS | Intel | [claude-fleet-macos-x64.dmg](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-macos-x64.dmg) |
+| <img src="docs/icon-windows.svg" width="24"> | Windows | x64 | [claude-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-windows-x64-setup.exe) |
+| <img src="docs/icon-windows.svg" width="24"> | Windows | ARM64 | [claude-fleet-windows-arm64-setup.exe](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-windows-arm64-setup.exe) |
+| <img src="docs/icon-linux.svg" width="24"> | Linux | x86\_64 | [claude-fleet-linux-x64.deb](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-x64.deb) · [claude-fleet-linux-x64.AppImage](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-x64.AppImage) |
+| <img src="docs/icon-linux.svg" width="24"> | Linux | ARM64 | [claude-fleet-linux-arm64.deb](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-arm64.deb) · [claude-fleet-linux-arm64.AppImage](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-arm64.AppImage) |
 
 ### Prerequisites
 
