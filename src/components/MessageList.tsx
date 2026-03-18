@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import type {
   ContentBlock,
   RawMessage,
@@ -41,7 +41,7 @@ interface BlocksProps {
   isPartial: boolean;
 }
 
-function ContentBlocks({ content, resultMap, isPartial }: BlocksProps) {
+const ContentBlocks = memo(function ContentBlocks({ content, resultMap, isPartial }: BlocksProps) {
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -126,7 +126,7 @@ function ContentBlocks({ content, resultMap, isPartial }: BlocksProps) {
   }
 
   return <>{elements}</>;
-}
+});
 
 // ── Single message row ────────────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@ interface MsgProps {
   resultMap: Map<string, ToolResultBlock>;
 }
 
-function MessageRow({ msg, resultMap }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap }: MsgProps) {
   if (!msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
@@ -205,7 +205,7 @@ function MessageRow({ msg, resultMap }: MsgProps) {
       </div>
     </div>
   );
-}
+});
 
 // ── Waiting for input indicator ───────────────────────────────────────────────
 
@@ -225,25 +225,83 @@ interface Props {
   isLoading: boolean;
 }
 
+const PAGE_SIZE = 100;
+
 export function MessageList({ messages, isLoading }: Props) {
+  const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const topSentinelRef = useRef<HTMLDivElement>(null);
+  const [visibleStart, setVisibleStart] = useState(0);
+  // Saved before loading more; used by useLayoutEffect to restore scroll position
+  const scrollAnchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
-  // Auto-scroll to bottom on new messages
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  const resultMap = useMemo(() => buildResultMap(messages), [messages]);
 
-  const resultMap = buildResultMap(messages);
-
-  // Only show user/assistant messages
-  const displayMsgs = messages.filter(
-    (m) => m.type === "user" || m.type === "assistant"
+  const displayMsgs = useMemo(
+    () => messages.filter((m) => m.type === "user" || m.type === "assistant"),
+    [messages]
   );
 
-  // Check if last assistant message is waiting for input
-  const lastAssistant = [...displayMsgs]
-    .reverse()
-    .find((m) => m.type === "assistant");
+  // Reset window when switching to a new session (total message count drops)
+  const prevCountRef = useRef(displayMsgs.length);
+  useEffect(() => {
+    if (displayMsgs.length < prevCountRef.current) {
+      setVisibleStart(0);
+    }
+    prevCountRef.current = displayMsgs.length;
+  }, [displayMsgs.length]);
+
+  const effectiveStart = Math.max(visibleStart, displayMsgs.length - PAGE_SIZE);
+  const visibleMsgs = displayMsgs.slice(effectiveStart);
+  const hiddenCount = effectiveStart;
+
+  // After prepending messages, restore scroll so the viewport doesn't jump
+  useLayoutEffect(() => {
+    const anchor = scrollAnchor.current;
+    if (!anchor || !listRef.current) return;
+    const scroller = listRef.current.parentElement;
+    if (scroller) {
+      scroller.scrollTop = anchor.scrollTop + (listRef.current.scrollHeight - anchor.scrollHeight);
+    }
+    scrollAnchor.current = null;
+  });
+
+  // Observe the top sentinel relative to the actual scroll container (.scroll_area)
+  useEffect(() => {
+    const sentinel = topSentinelRef.current;
+    if (!sentinel || hiddenCount === 0) return;
+    const scroller = listRef.current?.parentElement;
+    if (!scroller) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0].isIntersecting) return;
+        // scrollAnchor acts as a loading guard: skip if a load is already in flight
+        if (scrollAnchor.current) return;
+        scrollAnchor.current = {
+          scrollTop: scroller.scrollTop,
+          scrollHeight: listRef.current!.scrollHeight,
+        };
+        setVisibleStart((prev) => Math.max(0, prev - PAGE_SIZE));
+      },
+      { root: scroller, threshold: 0 }
+    );
+
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [hiddenCount]);
+
+  // Auto-scroll to bottom only when user is already near the bottom
+  useEffect(() => {
+    const scroller = listRef.current?.parentElement;
+    if (!scroller) return;
+    const distFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    if (distFromBottom < 200) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [displayMsgs.length]);
+
+  const lastAssistant = [...displayMsgs].reverse().find((m: RawMessage) => m.type === "assistant");
   const isWaiting = lastAssistant?.message?.stop_reason === "end_turn";
 
   if (isLoading) {
@@ -251,9 +309,11 @@ export function MessageList({ messages, isLoading }: Props) {
   }
 
   return (
-    <div className={styles.list}>
-      {displayMsgs.map((msg, i) => (
-        <MessageRow key={msg.uuid ?? i} msg={msg} resultMap={resultMap} />
+    <div ref={listRef} className={styles.list}>
+      {/* Top sentinel – triggers scroll-load when it enters the viewport */}
+      <div ref={topSentinelRef} className={hiddenCount > 0 ? styles.sentinel : undefined} />
+      {visibleMsgs.map((msg, i) => (
+        <MessageRow key={msg.uuid ?? (effectiveStart + i)} msg={msg} resultMap={resultMap} />
       ))}
       {isWaiting && <WaitingIndicator />}
       <div ref={bottomRef} />

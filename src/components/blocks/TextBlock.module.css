@@ -66,7 +66,7 @@
   padding: 1px 4px;
   font-family: var(--font-mono);
   font-size: 11px;
-  color: #e2c08d;
+  color: var(--color-code-fg);
 }
 
 /* Code block wrapper */

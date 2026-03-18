@@ -15,6 +15,8 @@
   "h_ago": "{{n}}h ago",
   "d_ago": "{{n}}d ago",
   "status": {
+    "thinking": "Thinking",
+    "executing": "Executing",
     "streaming": "Streaming",
     "processing": "Processing",
     "waitingInput": "Waiting",
@@ -32,18 +34,38 @@
   "view_gallery": "Gallery",
   "gallery_show_all": "Show All",
   "gallery_show_active": "Active Only",
+  "gallery": {
+    "subs": "subs",
+    "idle_subs": "{{n}} idle"
+  },
   "account": {
+    "panel_title": "Account & Usage",
     "title": "Account",
     "plan": "Plan",
-    "org": "Org",
-    "auth": "Auth",
+    "org": "Organization",
+    "auth": "Auth method",
+    "email": "Email",
     "usage": "Usage",
-    "five_hour": "5-hour",
-    "seven_day": "7-day",
-    "seven_day_sonnet": "7-day Sonnet",
-    "resets": "Resets",
-    "auto_refresh": "Auto-refresh",
-    "refresh": "Refresh",
+    "five_hour": "Session (5hr)",
+    "seven_day": "Weekly (7 day)",
+    "seven_day_sonnet": "Weekly Sonnet",
+    "resets_in": "Resets in {{t}}",
+    "resets_soon": "soon",
+    "resets_days": "{{n}}d",
+    "resets_hours": "{{n}}h",
+    "resets_mins": "{{n}}m",
+    "tooltip_current": "Current cycle utilization",
+    "tooltip_prev": "Previous cycle: {{n}}% at this same point — {{trend}}",
+    "trend_faster": "consuming faster than last cycle",
+    "trend_slower": "consuming slower than last cycle",
+    "trend_similar": "similar pace to last cycle",
+    "loading": "Loading…",
+    "debug_log": "Debug log: {{path}}",
+    "retry": "Retry",
+    "auto_5m": "Auto (5m)",
+    "refresh_now": "Refresh now",
+    "updated_just_now": "Updated just now",
+    "updated_s_ago": "Updated {{n}}s ago",
     "updated": "Updated {{n}}m ago"
   },
   "chart": {
@@ -62,5 +84,6 @@
   "inspect": {
     "close": "Close",
     "path": "Path"
-  }
+  },
+  "stop_session": "Stop session (kill process tree)"
 }

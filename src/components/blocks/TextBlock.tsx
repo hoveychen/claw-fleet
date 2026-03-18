@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -9,7 +10,7 @@ interface Props {
   isPartial?: boolean;
 }
 
-export function TextBlock({ text, isPartial }: Props) {
+export const TextBlock = memo(function TextBlock({ text, isPartial }: Props) {
   // When streaming, strip the last incomplete paragraph to avoid visual flicker
   const content = isPartial ? stripLastParagraph(text) : text;
 
@@ -75,7 +76,7 @@ export function TextBlock({ text, isPartial }: Props) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 function stripLastParagraph(text: string): string {
   const lines = text.split("\n");

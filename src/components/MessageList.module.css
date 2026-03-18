@@ -14,6 +14,10 @@
   font-size: 13px;
 }
 
+.sentinel {
+  height: 40px;
+}
+
 /* Message row */
 .message {
   display: flex;
@@ -42,9 +46,9 @@
   flex-shrink: 0;
 }
 
-.dot_success { background: #4ade80; }
+.dot_success { background: var(--color-success); }
 .dot_progress {
-  background: #fbbf24;
+  background: var(--color-warning);
   animation: pulse 1s ease-in-out infinite;
 }
 
@@ -106,7 +110,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 18px;
-  color: #fbbf24;
+  color: var(--color-warning);
   font-size: 12px;
 }
 
@@ -114,6 +118,6 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #fbbf24;
+  background: var(--color-warning);
   animation: pulse 1s ease-in-out infinite;
 }

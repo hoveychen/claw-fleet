@@ -3,20 +3,72 @@ import { useTranslation } from "react-i18next";
 import { useSessionsStore } from "../store";
 import type { SessionInfo, SessionStatus } from "../types";
 import { InspectModal } from "./InspectModal";
-import { SessionCard } from "./SessionCard";
+import { SessionCard, StatusBadge, StatusIcon, formatModel } from "./SessionCard";
 import styles from "./GalleryView.module.css";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const ACTIVE_STATUSES: SessionStatus[] = [
-  "streaming", "processing", "waitingInput", "active", "delegating",
+  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating",
 ];
 
 function isActive(s: SessionInfo) {
   return ACTIVE_STATUSES.includes(s.status);
 }
 
-// ── GalleryRow: one main agent with nested subagents ──────────────────────
+// ── Stable chip color from session id ─────────────────────────────────────
+
+const CHIP_HUES = [210, 160, 30, 350, 280, 55, 330, 120, 190, 90];
+
+function chipHue(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return CHIP_HUES[h % CHIP_HUES.length];
+}
+
+// ── SubagentChip ──────────────────────────────────────────────────────────
+
+interface ChipProps {
+  session: SessionInfo;
+  index: number;
+  onSelect: (s: SessionInfo) => void;
+}
+
+function SubagentChip({ session, index, onSelect }: ChipProps) {
+  const { t } = useTranslation();
+  const active = isActive(session);
+  const hue = chipHue(session.id);
+
+  const chipStyle = { '--chip-hue': hue } as React.CSSProperties;
+
+  return (
+    <button
+      className={`${styles.chip} ${active ? styles.chip_active : ""}`}
+      style={chipStyle}
+      onClick={(e) => { e.stopPropagation(); onSelect(session); }}
+      title={session.agentDescription ?? session.agentType ?? t("subagent")}
+    >
+      <StatusIcon status={session.status} />
+      <span className={styles.chip_index}>#{index}</span>
+      <span className={styles.chip_name}>
+        {session.agentType ?? t("subagent")}
+      </span>
+      {session.model && (
+        <span className={styles.chip_model}>{formatModel(session.model)}</span>
+      )}
+      {session.thinkingLevel && session.thinkingLevel !== "medium" && (
+        <span className={styles.chip_thinking}>{session.thinkingLevel}</span>
+      )}
+      {session.tokenSpeed >= 0.5 && (
+        <span className={styles.chip_speed}>
+          {session.tokenSpeed.toFixed(1)}{t("tok_s")}
+        </span>
+      )}
+    </button>
+  );
+}
+
+// ── GalleryRow ────────────────────────────────────────────────────────────
 
 interface RowProps {
   main: SessionInfo;
@@ -25,51 +77,139 @@ interface RowProps {
 }
 
 function GalleryRow({ main, subagents, onSelect }: RowProps) {
+  const { t } = useTranslation();
+  const [idleExpanded, setIdleExpanded] = useState(false);
+
+  // Stable sort by jsonlPath for consistent indices regardless of status changes
+  const sortedSubs = [...subagents].sort((a, b) => a.jsonlPath.localeCompare(b.jsonlPath));
+  const subIndexMap = new Map(sortedSubs.map((s, i) => [s.id, i + 1]));
+
+  const activeSubagents = subagents.filter(isActive);
+  const idleSubagents = subagents.filter((s) => !isActive(s));
+
+  const totalTokens = [main, ...subagents].reduce((sum, s) => sum + s.totalOutputTokens, 0);
+  const totalSpeed = [main, ...subagents].reduce((sum, s) => sum + s.tokenSpeed, 0);
+  const groupActive = isActive(main) || activeSubagents.length > 0;
+
+  // Solo session (no subagents): same group structure as multi-agent, just no chips
+  if (subagents.length === 0) {
+    return (
+      <div className={`${styles.group} ${isActive(main) ? styles.group_active : ""}`}>
+        <div className={styles.group_header} onClick={() => onSelect(main)}>
+          <span className={styles.group_name}>{main.workspaceName}</span>
+          <StatusBadge status={main.status} />
+          <div className={styles.group_stats}>
+            <span className={styles.group_stat}>
+              {main.totalOutputTokens.toLocaleString()} {t("tokens")}
+            </span>
+            {main.tokenSpeed >= 0.5 && (
+              <>
+                <span className={styles.group_divider}>·</span>
+                <span className={`${styles.group_stat} ${styles.group_speed}`}>
+                  {main.tokenSpeed.toFixed(1)} {t("tok_s")}
+                </span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className={styles.group_body}>
+          <SessionCard session={main} isSelected={false} onClick={() => onSelect(main)} variant="group-main" hideHeader />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className={`${styles.row} ${isActive(main) ? styles.row_active : ""}`}>
-      {/* Main card */}
-      <div className={styles.main_card} onClick={() => onSelect(main)}>
-        <SessionCard session={main} isSelected={false} onClick={() => onSelect(main)} />
+    <div className={`${styles.group} ${groupActive ? styles.group_active : ""}`}>
+      {/* Group header */}
+      <div className={styles.group_header} onClick={() => onSelect(main)}>
+        <span className={styles.group_name}>{main.workspaceName}</span>
+        <StatusBadge status={main.status} />
+        <div className={styles.group_stats}>
+          <span className={styles.group_stat}>
+            {subagents.length} {t("gallery.subs")}
+          </span>
+          <span className={styles.group_divider}>·</span>
+          <span className={styles.group_stat}>
+            {totalTokens.toLocaleString()} {t("tokens")}
+          </span>
+          {totalSpeed >= 0.5 && (
+            <>
+              <span className={styles.group_divider}>·</span>
+              <span className={`${styles.group_stat} ${styles.group_speed}`}>
+                {totalSpeed.toFixed(1)} {t("tok_s")}
+              </span>
+            </>
+          )}
+        </div>
       </div>
 
-      {/* Subagent cards */}
-      {subagents.length > 0 && (
-        <div className={styles.subagents}>
-          {subagents.map((sub) => (
-            <div key={sub.jsonlPath} className={styles.sub_card} onClick={() => onSelect(sub)}>
-              <SessionCard session={sub} isSelected={false} onClick={() => onSelect(sub)} />
-            </div>
+      {/* Main agent card */}
+      <div className={styles.group_body}>
+        <SessionCard
+          session={main}
+          isSelected={false}
+          onClick={() => onSelect(main)}
+          variant="group-main"
+          hideHeader
+        />
+      </div>
+
+      {/* Active subagent chips */}
+      {activeSubagents.length > 0 && (
+        <div className={styles.chips_row}>
+          {activeSubagents.map((sub) => (
+            <SubagentChip key={sub.jsonlPath} session={sub} index={subIndexMap.get(sub.id) ?? 0} onSelect={onSelect} />
           ))}
+        </div>
+      )}
+
+      {/* Idle subagents (collapsible) */}
+      {idleSubagents.length > 0 && (
+        <div className={styles.idle_section}>
+          <button
+            className={styles.idle_toggle}
+            onClick={() => setIdleExpanded((v) => !v)}
+          >
+            <span className={`${styles.idle_chevron} ${idleExpanded ? styles.idle_chevron_open : ""}`} />
+            {t("gallery.idle_subs", { n: idleSubagents.length })}
+          </button>
+          {idleExpanded && (
+            <div className={styles.chips_row}>
+              {idleSubagents.map((sub) => (
+                <SubagentChip key={sub.jsonlPath} session={sub} index={subIndexMap.get(sub.id) ?? 0} onSelect={onSelect} />
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-// ── Helper: build rows from a flat session list ───────────────────────────
+// ── buildRows ─────────────────────────────────────────────────────────────
+// mains: non-subagent sessions to render rows for (already filtered/sorted by caller)
+// allSessions: full session list used to look up subagents by parent id
 
 function buildRows(
-  sessions: SessionInfo[],
-  onSelect: (s: SessionInfo) => void
+  mains: SessionInfo[],
+  allSessions: SessionInfo[],
+  onSelect: (s: SessionInfo) => void,
 ) {
-  const mains = sessions.filter((s) => !s.isSubagent);
+  // Build subagent map from ALL sessions so idle subs of active mains are included
   const subByParent = new Map<string, SessionInfo[]>();
-  for (const s of sessions) {
+  for (const s of allSessions) {
     if (s.isSubagent && s.parentSessionId) {
       const arr = subByParent.get(s.parentSessionId) ?? [];
       arr.push(s);
       subByParent.set(s.parentSessionId, arr);
     }
   }
-  const orphans = sessions.filter(
-    (s) =>
-      s.isSubagent &&
-      (!s.parentSessionId || !mains.find((m) => m.id === s.parentSessionId))
-  );
 
+  const mainSessions = mains.filter((s) => !s.isSubagent);
   const sortedMains = [
-    ...mains.filter(isActive),
-    ...mains.filter((s) => !isActive(s)),
+    ...mainSessions.filter(isActive),
+    ...mainSessions.filter((s) => !isActive(s)),
   ];
 
   return (
@@ -81,11 +221,6 @@ function buildRows(
           subagents={subByParent.get(main.id) ?? []}
           onSelect={onSelect}
         />
-      ))}
-      {orphans.map((s) => (
-        <div key={s.jsonlPath} className={styles.orphan_card} onClick={() => onSelect(s)}>
-          <SessionCard session={s} isSelected={false} onClick={() => onSelect(s)} />
-        </div>
       ))}
     </>
   );
@@ -100,27 +235,10 @@ export function GalleryView() {
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
 
-  // Promote idle main sessions that have active subagents → delegating
-  const activeSubagentParentIds = new Set(
-    sessions
-      .filter(
-        (s) =>
-          s.isSubagent &&
-          s.parentSessionId &&
-          ACTIVE_STATUSES.includes(s.status)
-      )
-      .map((s) => s.parentSessionId!)
-  );
-  const promoted = sessions.map((s) =>
-    !s.isSubagent && s.status === "idle" && activeSubagentParentIds.has(s.id)
-      ? { ...s, status: "delegating" as const }
-      : s
-  );
-
-  const activeSessions = promoted.filter(isActive);
+  const activeSessions = sessions.filter(isActive);
 
   // Filter source: active only or all sessions
-  const filterSource = showAll ? promoted : activeSessions;
+  const filterSource = showAll ? sessions : activeSessions;
 
   const filtered = filter
     ? filterSource.filter((s) => {
@@ -134,9 +252,11 @@ export function GalleryView() {
       })
     : filterSource;
 
-  // When showAll, split into active and recent groups
-  const filteredActive = showAll ? filtered.filter(isActive) : filtered;
-  const filteredRecent = showAll ? filtered.filter((s) => !isActive(s)) : [];
+  // Only pass non-subagent sessions as mains; subagents are looked up from sessions
+  const filteredMains = filtered.filter((s) => !s.isSubagent);
+
+  const filteredActiveMains = showAll ? filteredMains.filter(isActive) : filteredMains;
+  const filteredRecentMains = showAll ? filteredMains.filter((s) => !isActive(s)) : [];
 
   return (
     <div className={styles.root}>
@@ -150,7 +270,7 @@ export function GalleryView() {
           onChange={(e) => setFilter(e.target.value)}
         />
         <span className={styles.count}>
-          {activeSessions.length} {t("active")}
+          {activeSessions.filter((s) => !s.isSubagent).length} {t("active")}
         </span>
         <button
           className={`${styles.toggle_btn} ${showAll ? styles.toggle_btn_active : ""}`}
@@ -165,26 +285,32 @@ export function GalleryView() {
       <div className={styles.grid}>
         {showAll ? (
           <>
-            {filteredActive.length > 0 && (
+            {filteredActiveMains.length > 0 && (
               <div className={styles.section}>
                 <div className={styles.section_label}>{t("active")}</div>
-                {buildRows(filteredActive, setInspecting)}
+                <div className={styles.rows_grid}>
+                  {buildRows(filteredActiveMains, sessions, setInspecting)}
+                </div>
               </div>
             )}
-            {filteredRecent.length > 0 && (
+            {filteredRecentMains.length > 0 && (
               <div className={styles.section}>
                 <div className={styles.section_label}>{t("recent")}</div>
-                {buildRows(filteredRecent, setInspecting)}
+                <div className={styles.rows_grid}>
+                  {buildRows(filteredRecentMains, sessions, setInspecting)}
+                </div>
               </div>
             )}
-            {filtered.length === 0 && (
+            {filteredMains.length === 0 && (
               <p className={styles.empty}>{t("no_sessions")}</p>
             )}
           </>
         ) : (
           <>
-            {buildRows(filteredActive, setInspecting)}
-            {filteredActive.length === 0 && (
+            <div className={styles.rows_grid}>
+              {buildRows(filteredActiveMains, sessions, setInspecting)}
+            </div>
+            {filteredActiveMains.length === 0 && (
               <p className={styles.empty}>{t("no_sessions")}</p>
             )}
           </>

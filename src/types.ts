@@ -1,6 +1,8 @@
 // ── Session types (mirroring Rust structs) ───────────────────────────────────
 
 export type SessionStatus =
+  | "thinking"
+  | "executing"
   | "streaming"
   | "processing"
   | "waitingInput"
@@ -23,7 +25,11 @@ export interface SessionInfo {
   totalOutputTokens: number;
   lastMessagePreview: string | null;
   lastActivityMs: number;
+  createdAtMs: number;
   jsonlPath: string;
+  model: string | null;
+  thinkingLevel: string | null;
+  pid: number | null;
 }
 
 // ── Message / content block types ───────────────────────────────────────────

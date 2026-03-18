@@ -1,7 +1,7 @@
 .root {
   margin: 4px 0;
   border-radius: 6px;
-  border: 1px solid #2a2a3a;
+  border: 1px solid var(--thinking-border);
   overflow: hidden;
 }
 
@@ -11,7 +11,7 @@
   align-items: baseline;
   gap: 6px;
   padding: 6px 10px;
-  background: #14141e;
+  background: var(--thinking-toggle-bg);
   border: none;
   cursor: pointer;
   text-align: left;
@@ -19,10 +19,10 @@
   font-size: 12px;
 }
 
-.toggle:hover { background: #1a1a2a; }
+.toggle:hover { background: var(--thinking-toggle-bg-hover); }
 
 .icon { color: var(--color-accent); font-size: 10px; }
-.label { font-weight: 600; color: #a78bfa; white-space: nowrap; }
+.label { font-weight: 600; color: var(--thinking-label); white-space: nowrap; }
 
 .preview {
   flex: 1;
@@ -36,8 +36,8 @@
 .content {
   padding: 10px 12px;
   margin: 0;
-  background: #0d0d1a;
-  color: #a0a0b8;
+  background: var(--thinking-content-bg);
+  color: var(--color-text-secondary);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;

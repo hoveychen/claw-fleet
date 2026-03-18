@@ -1,4 +1,5 @@
 .card {
+  position: relative;
   padding: 10px 12px;
   border-radius: 8px;
   cursor: pointer;
@@ -22,6 +23,11 @@
   border-left: 3px solid var(--color-accent);
 }
 
+/* Inside a group: group container owns the accent border */
+.card.group_main.active {
+  border-left: 3px solid transparent;
+}
+
 /* Header */
 .header {
   display: flex;
@@ -29,6 +35,19 @@
   justify-content: space-between;
   gap: 8px;
   margin-bottom: 4px;
+}
+
+/* When workspace/badge are hidden: collapse to 0 height, stop btn floats in top-right */
+.header_compact {
+  height: 0;
+  overflow: visible;
+  margin-bottom: 0;
+}
+
+.header_compact .stop_btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
 }
 
 .workspace {
@@ -53,6 +72,8 @@
   flex-shrink: 0;
 }
 
+.badge_thinking    { background: var(--badge-thinking-bg);    color: var(--badge-thinking-fg); }
+.badge_executing   { background: var(--badge-executing-bg);   color: var(--badge-executing-fg); }
 .badge_streaming   { background: var(--badge-streaming-bg);   color: var(--badge-streaming-fg); }
 .badge_processing  { background: var(--badge-processing-bg);  color: var(--badge-processing-fg); }
 .badge_waitingInput{ background: var(--badge-waiting-bg);     color: var(--badge-waiting-fg); }
@@ -60,17 +81,106 @@
 .badge_delegating  { background: var(--badge-delegating-bg);  color: var(--badge-delegating-fg); }
 .badge_idle        { background: var(--color-bg-secondary);   color: var(--color-text-dim); }
 
-.dot_anim {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
-  animation: pulse 1.2s ease-in-out infinite;
+/* ── Status icons ─────────────────────────────────────────────────────────── */
+
+.sicon {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  vertical-align: middle;
 }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.3; }
+/* Streaming: equalizer bars bounce */
+.bar1, .bar2, .bar3 {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: bar_bounce 1s ease-in-out infinite;
+}
+.bar1 { animation-delay: 0s; }
+.bar2 { animation-delay: 0.18s; }
+.bar3 { animation-delay: 0.36s; }
+@keyframes bar_bounce {
+  0%, 100% { transform: scaleY(0.35); }
+  50%       { transform: scaleY(1); }
+}
+
+/* Thinking: chat-bubble dots glow one by one */
+.sicon_thinking circle:nth-child(1) { animation: dot_think 1.8s ease-in-out infinite 0s; }
+.sicon_thinking circle:nth-child(2) { animation: dot_think 1.8s ease-in-out infinite 0.3s; }
+.sicon_thinking circle:nth-child(3) { animation: dot_think 1.8s ease-in-out infinite 0.6s; }
+@keyframes dot_think {
+  0%, 100% { opacity: 0.2; }
+  33%       { opacity: 1; }
+}
+
+/* Executing: lightning bolt occasional flicker */
+.sicon_executing { animation: lightning_flicker 2.5s ease-in-out infinite; }
+@keyframes lightning_flicker {
+  0%, 78%, 100% { opacity: 1; }
+  82%           { opacity: 0.1; }
+  85%           { opacity: 1; }
+  88%           { opacity: 0.3; }
+  91%           { opacity: 1; }
+}
+
+/* Processing: clock hand spinning */
+.clock_hand {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: clock_tick 1s linear infinite;
+}
+@keyframes clock_tick {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* WaitingInput: question mark bouncing impatiently */
+.sicon_question {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: q_bounce 2.5s ease-in-out infinite;
+}
+@keyframes q_bounce {
+  0%, 100% { transform: translateY(0); }
+  10%       { transform: translateY(-2px); }
+  20%       { transform: translateY(0); }
+  30%       { transform: translateY(-1.5px); }
+  40%       { transform: translateY(0); }
+}
+
+/* Active: heartbeat double-thump */
+.sicon_heart {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: heartbeat 1.4s ease-in-out infinite;
+}
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  14%       { transform: scale(1.3); }
+  28%       { transform: scale(1); }
+  42%       { transform: scale(1.15); }
+  56%       { transform: scale(1); }
+}
+
+/* Delegating: nodes pulse alternately, lines flash */
+.del_node1 { animation: del_node 1.6s ease-in-out infinite 0s; }
+.del_node2 { animation: del_node 1.6s ease-in-out infinite 0.8s; }
+.del_line1 { animation: del_node 1.6s ease-in-out infinite 0s; }
+.del_line2 { animation: del_node 1.6s ease-in-out infinite 0.8s; }
+@keyframes del_node {
+  0%, 100% { opacity: 0.4; }
+  40%       { opacity: 1; }
+}
+
+/* Idle: three Z's floating upward */
+.z1 { animation: z_float 3s ease-in-out infinite 0s; }
+.z2 { animation: z_float 3s ease-in-out infinite 0.8s; }
+.z3 { animation: z_float 3s ease-in-out infinite 1.6s; }
+@keyframes z_float {
+  0%       { opacity: 0;   transform: translateY(1px); }
+  20%, 60% { opacity: 0.75; }
+  100%     { opacity: 0;   transform: translateY(-4px); }
 }
 
 /* Meta row */
@@ -84,7 +194,9 @@
 
 .tag_main,
 .tag_subagent,
-.tag_ide {
+.tag_ide,
+.tag_model,
+.tag_thinking {
   font-size: 10px;
   padding: 1px 5px;
   border-radius: 4px;
@@ -93,6 +205,8 @@
 .tag_main    { background: var(--tag-main-bg); color: var(--tag-main-fg); }
 .tag_subagent{ background: var(--tag-sub-bg);  color: var(--tag-sub-fg); }
 .tag_ide     { background: var(--color-bg-secondary); color: var(--color-text-dim); }
+.tag_model   { background: var(--color-bg-secondary); color: var(--color-text-secondary); }
+.tag_thinking{ background: var(--thinking-toggle-bg); color: var(--thinking-label); display: inline-flex; align-items: center; }
 
 .slug {
   font-size: 10px;
@@ -132,3 +246,37 @@
 
 .tokens { margin-left: auto; }
 .time { color: var(--color-text-dim); }
+
+/* Stop button */
+.stop_btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 9px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.card:hover .stop_btn,
+.card.selected .stop_btn {
+  opacity: 1;
+}
+
+.stop_btn:hover {
+  background: var(--badge-streaming-bg);
+  color: var(--badge-streaming-fg);
+}
+
+.stop_btn_killing {
+  opacity: 1;
+  animation: pulse 0.8s ease-in-out infinite;
+}

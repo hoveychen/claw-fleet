@@ -34,6 +34,8 @@ html, body, #root {
   --color-accent-tool: #7dd3fc;
 
   /* Status badge colors */
+  --badge-thinking-bg: #2a1a4a;    --badge-thinking-fg: #c084fc;
+  --badge-executing-bg: #0a3a3a;   --badge-executing-fg: #22d3ee;
   --badge-streaming-bg: #1a4a1a;   --badge-streaming-fg: #4ade80;
   --badge-processing-bg: #2a3a1a;  --badge-processing-fg: #a3e635;
   --badge-waiting-bg: #3a2a08;     --badge-waiting-fg: #fbbf24;
@@ -44,8 +46,36 @@ html, body, #root {
   --tag-main-bg: #1e2a40;   --tag-main-fg: #93c5fd;
   --tag-sub-bg: #2d1e40;    --tag-sub-fg: #c4b5fd;
 
+  /* Dynamic chip colors (hue set per-element via --chip-hue) */
+  --chip-bg-s: 28%; --chip-bg-l: 20%;
+  --chip-fg-s: 60%; --chip-fg-l: 72%;
+  --chip-bd-s: 28%; --chip-bd-l: 32%;
+
   /* Token speed */
   --color-speed: #22c55e;
+
+  /* Thinking block */
+  --thinking-border: #2a2a3a;
+  --thinking-toggle-bg: #14141e;
+  --thinking-toggle-bg-hover: #1a1a2a;
+  --thinking-label: #a78bfa;
+  --thinking-content-bg: #0d0d1a;
+
+  /* Tool groups (bash/subagent collapsible) */
+  --tool-group-border: #1e2a1e;
+  --tool-group-bg: #0d1a0d;
+  --tool-group-bg-hover: #101f10;
+  --tool-group-label: #86efac;
+
+  /* Status / semantic colors */
+  --color-success: #4ade80;
+  --color-warning: #fbbf24;
+  --color-error-bg: #4a1a1a;
+  --color-error-fg: #f87171;
+  --color-error-result-bg: #1a0d0d;
+
+  /* Inline code */
+  --color-code-fg: #e2c08d;
 
   --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "Menlo", monospace;
 
@@ -77,6 +107,8 @@ html, body, #root {
   --color-accent-tool: #2563eb;
 
   /* Status badge colors — light */
+  --badge-thinking-bg: #f3e8ff;    --badge-thinking-fg: #7c3aed;
+  --badge-executing-bg: #cffafe;   --badge-executing-fg: #0891b2;
   --badge-streaming-bg: #dcfce7;   --badge-streaming-fg: #16a34a;
   --badge-processing-bg: #ecfccb;  --badge-processing-fg: #65a30d;
   --badge-waiting-bg: #fef9c3;     --badge-waiting-fg: #ca8a04;
@@ -87,8 +119,36 @@ html, body, #root {
   --tag-main-bg: #dbeafe;   --tag-main-fg: #1d4ed8;
   --tag-sub-bg: #f3e8ff;    --tag-sub-fg: #7e22ce;
 
+  /* Dynamic chip colors — light */
+  --chip-bg-s: 60%; --chip-bg-l: 92%;
+  --chip-fg-s: 65%; --chip-fg-l: 28%;
+  --chip-bd-s: 45%; --chip-bd-l: 78%;
+
   /* Token speed */
   --color-speed: #16a34a;
+
+  /* Thinking block — light */
+  --thinking-border: #d0c8f0;
+  --thinking-toggle-bg: #f5f0ff;
+  --thinking-toggle-bg-hover: #ede5ff;
+  --thinking-label: #7c3aed;
+  --thinking-content-bg: #faf8ff;
+
+  /* Tool groups — light */
+  --tool-group-border: #bbf7d0;
+  --tool-group-bg: #f0fdf4;
+  --tool-group-bg-hover: #e8faf0;
+  --tool-group-label: #15803d;
+
+  /* Status / semantic colors — light */
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-error-bg: #fee2e2;
+  --color-error-fg: #dc2626;
+  --color-error-result-bg: #fff5f5;
+
+  /* Inline code — light */
+  --color-code-fg: #92400e;
 
   color-scheme: light;
 }

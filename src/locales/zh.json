@@ -15,6 +15,8 @@
   "h_ago": "{{n}}小时前",
   "d_ago": "{{n}}天前",
   "status": {
+    "thinking": "思考中",
+    "executing": "执行工具",
     "streaming": "流式输出",
     "processing": "处理中",
     "waitingInput": "等待输入",
@@ -32,18 +34,38 @@
   "view_gallery": "画廊",
   "gallery_show_all": "全部显示",
   "gallery_show_active": "仅活跃",
+  "gallery": {
+    "subs": "个子进程",
+    "idle_subs": "{{n}} 个空闲"
+  },
   "account": {
+    "panel_title": "账户 & 用量",
     "title": "账户",
     "plan": "套餐",
     "org": "组织",
-    "auth": "认证",
+    "auth": "认证方式",
+    "email": "邮箱",
     "usage": "用量",
-    "five_hour": "5小时",
-    "seven_day": "7天",
-    "seven_day_sonnet": "7天 Sonnet",
-    "resets": "重置",
-    "auto_refresh": "自动刷新",
-    "refresh": "刷新",
+    "five_hour": "会话 (5小时)",
+    "seven_day": "每周 (7天)",
+    "seven_day_sonnet": "每周 Sonnet",
+    "resets_in": "{{t}}后重置",
+    "resets_soon": "即将",
+    "resets_days": "{{n}}天",
+    "resets_hours": "{{n}}小时",
+    "resets_mins": "{{n}}分",
+    "tooltip_current": "当前周期使用率",
+    "tooltip_prev": "上一周期同一时间点 {{n}}% — {{trend}}",
+    "trend_faster": "消耗速度比上周期更快",
+    "trend_slower": "消耗速度比上周期更慢",
+    "trend_similar": "与上周期消耗速度相近",
+    "loading": "加载中…",
+    "debug_log": "调试日志：{{path}}",
+    "retry": "重试",
+    "auto_5m": "自动 (5分)",
+    "refresh_now": "立即刷新",
+    "updated_just_now": "刚刚更新",
+    "updated_s_ago": "{{n}}秒前更新",
     "updated": "{{n}}分钟前更新"
   },
   "chart": {
@@ -62,5 +84,6 @@
   "inspect": {
     "close": "关闭",
     "path": "路径"
-  }
+  },
+  "stop_session": "停止会话（清除进程树）"
 }

@@ -10,6 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── 1. Build all platforms (macOS: sign only, no notarize) ──────────────────
   build:
     name: Build — ${{ matrix.name }}
     strategy:
@@ -21,46 +22,36 @@ jobs:
             runner: macos-latest
             rust_target: aarch64-apple-darwin
             args: --target aarch64-apple-darwin
-            artifact_glob: 'src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg'
 
           # ── macOS Intel ──────────────────────────────────────────────────
           - name: macOS (Intel)
             runner: macos-latest
             rust_target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
-            artifact_glob: 'src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg'
 
           # ── Windows x64 ──────────────────────────────────────────────────
           - name: Windows (x64)
             runner: windows-latest
             rust_target: x86_64-pc-windows-msvc
             args: --target x86_64-pc-windows-msvc
-            artifact_glob: 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe'
 
           # ── Windows ARM64 ────────────────────────────────────────────────
           - name: Windows (ARM64)
             runner: windows-latest
             rust_target: aarch64-pc-windows-msvc
             args: --target aarch64-pc-windows-msvc
-            artifact_glob: 'src-tauri/target/aarch64-pc-windows-msvc/release/bundle/nsis/*.exe'
 
           # ── Linux x86_64 ─────────────────────────────────────────────────
           - name: Linux (x86_64)
             runner: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
             args: --target x86_64-unknown-linux-gnu
-            artifact_glob: |
-              src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/deb/*.deb
-              src-tauri/target/x86_64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
           # ── Linux ARM64 ──────────────────────────────────────────────────
           - name: Linux (ARM64)
             runner: ubuntu-22.04-arm
             rust_target: aarch64-unknown-linux-gnu
             args: --target aarch64-unknown-linux-gnu
-            artifact_glob: |
-              src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/deb/*.deb
-              src-tauri/target/aarch64-unknown-linux-gnu/release/bundle/appimage/*.AppImage
 
     runs-on: ${{ matrix.runner }}
 
@@ -68,14 +59,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # ── Node.js ────────────────────────────────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      # ── Rust ───────────────────────────────────────────────────────────────
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -100,7 +89,7 @@ jobs:
             libssl-dev \
             libayatana-appindicator3-dev
 
-      # ── macOS code signing ─────────────────────────────────────────────────
+      # ── macOS: import signing certificate (no notarization here) ───────────
       - name: Import macOS signing certificate
         if: runner.os == 'macOS'
         env:
@@ -109,7 +98,7 @@ jobs:
           MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
         run: |
           if [ -z "$MACOS_CERTIFICATE" ]; then
-            echo "MACOS_CERTIFICATE secret not set — skipping certificate import"
+            echo "MACOS_CERTIFICATE not set — skipping"
             exit 0
           fi
           echo "$MACOS_CERTIFICATE" | base64 --decode > certificate.p12
@@ -122,25 +111,19 @@ jobs:
             -S apple-tool:,apple: -s -k "$MACOS_KEYCHAIN_PASSWORD" build.keychain
           rm certificate.p12
 
-      # ── Frontend ───────────────────────────────────────────────────────────
       - name: Install frontend dependencies
         run: npm ci
 
-      # ── Build ──────────────────────────────────────────────────────────────
+      # Sign on macOS, but intentionally omit APPLE_ID/APPLE_PASSWORD/APPLE_TEAM_ID
+      # so Tauri does NOT notarize here — notarization happens in its own job.
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ''
-          # macOS signing & notarization (only used on macOS runners)
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           args: ${{ matrix.args }}
-          # Do NOT set tagName / releaseName here — prevents tauri-action from
-          # creating or publishing its own draft release with Tauri internals.
           includeUpdaterJson: false
 
       # ── Collect artifacts ──────────────────────────────────────────────────
@@ -177,10 +160,57 @@ jobs:
           path: dist-artifacts/
           if-no-files-found: error
 
-  # ── Create GitHub Release ──────────────────────────────────────────────────
+  # ── 2. Notarize macOS DMGs (separate job so Apple's queue doesn't block build)
+  notarize:
+    name: Notarize — ${{ matrix.name }}
+    needs: build
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple Silicon)
+            rust_target: aarch64-apple-darwin
+          - name: macOS (Intel)
+            rust_target: x86_64-apple-darwin
+
+    steps:
+      - name: Download signed DMG
+        uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.rust_target }}
+          path: dmg-signed/
+
+      - name: Notarize and staple
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          mkdir -p dmg-notarized
+          for dmg in dmg-signed/*.dmg; do
+            echo "Submitting $dmg for notarization..."
+            xcrun notarytool submit "$dmg" \
+              --apple-id "$APPLE_ID" \
+              --password "$APPLE_PASSWORD" \
+              --team-id "$APPLE_TEAM_ID" \
+              --wait
+            echo "Stapling $dmg..."
+            xcrun stapler staple "$dmg"
+            cp "$dmg" dmg-notarized/
+          done
+
+      - name: Upload notarized DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: notarized-${{ matrix.rust_target }}
+          path: dmg-notarized/
+          if-no-files-found: error
+
+  # ── 3. Publish: wait for both build (non-macOS) and notarize (macOS) ────────
   publish:
     name: Publish Release
-    needs: build
+    needs: [build, notarize]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -189,10 +219,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download all artifacts
+      # Download notarized macOS DMGs
+      - name: Download notarized macOS artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: release-*
+          pattern: notarized-*
+          path: all-artifacts
+          merge-multiple: true
+
+      # Download Windows artifacts
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*windows*
+          path: all-artifacts
+          merge-multiple: true
+
+      # Download Linux artifacts
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*linux*
           path: all-artifacts
           merge-multiple: true
 
@@ -204,7 +251,6 @@ jobs:
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
-        id: notes
         run: |
           cat >> release_notes.md << 'EOF'
           ## Downloads

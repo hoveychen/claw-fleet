@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore, useUIStore } from "../store";
@@ -32,10 +33,12 @@ export function SessionList() {
   const [filter, setFilter] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
   const [isDragging, setIsDragging] = useState(false);
+  const [isWindows, setIsWindows] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
     refresh();
+    invoke<string>("get_platform").then((p) => setIsWindows(p === "windows"));
     const unlistenPromise = listen<SessionInfo[]>("sessions-updated", (e) => {
       setSessions(e.payload);
     });
@@ -154,14 +157,16 @@ export function SessionList() {
   return (
     <>
       <aside className={styles.sidebar} style={{ width: sidebarWidth }}>
-        {/* Header */}
-        <div className={styles.header}>
-          <img src="/app-icon.png" className={styles.app_icon} alt="icon" />
-          <h1 className={styles.title}>{t("title")}</h1>
-          <span className={styles.count} title={`${activeCount} active`}>
-            {sessions.length}
-          </span>
-        </div>
+        {/* Header — hidden on Windows (title bar already shows product name) */}
+        {!isWindows && (
+          <div className={styles.header}>
+            <img src="/app-icon.png" className={styles.app_icon} alt="icon" />
+            <h1 className={styles.title}>{t("title")}</h1>
+            <span className={styles.count} title={`${activeCount} active`}>
+              {sessions.length}
+            </span>
+          </div>
+        )}
 
         {/* Controls row */}
         <div className={styles.controls}>

@@ -18,6 +18,120 @@ use watcher::WatcherState;
 pub struct UsageStats {
     pub utilization: f64,
     pub resets_at: String,
+    pub prev_utilization: Option<f64>,
+}
+
+// ── Usage snapshot history ────────────────────────────────────────────────────
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct MetricSnap {
+    utilization: f64,
+    resets_at: String,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+struct SnapshotEntry {
+    ts: i64, // unix timestamp in ms
+    five_hour: Option<MetricSnap>,
+    seven_day: Option<MetricSnap>,
+    seven_day_sonnet: Option<MetricSnap>,
+}
+
+fn snapshot_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|h| h.join(".claude").join("claude-fleet-usage-history.json"))
+}
+
+fn load_snapshots() -> Vec<SnapshotEntry> {
+    let path = match snapshot_path() {
+        Some(p) => p,
+        None => return vec![],
+    };
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_snapshots(entries: &[SnapshotEntry]) {
+    if let Some(path) = snapshot_path() {
+        if let Ok(json) = serde_json::to_string(entries) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
+
+fn period_ms(metric: &str) -> i64 {
+    match metric {
+        "five_hour" => 5 * 3600 * 1000,
+        _ => 7 * 24 * 3600 * 1000,
+    }
+}
+
+fn parse_ts_ms(rfc3339: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(rfc3339)
+        .ok()
+        .map(|dt| dt.timestamp_millis())
+}
+
+fn get_metric_snap<'a>(entry: &'a SnapshotEntry, metric: &str) -> Option<&'a MetricSnap> {
+    match metric {
+        "five_hour" => entry.five_hour.as_ref(),
+        "seven_day" => entry.seven_day.as_ref(),
+        "seven_day_sonnet" => entry.seven_day_sonnet.as_ref(),
+        _ => None,
+    }
+}
+
+/// Find what utilization the previous period had at the same relative elapsed fraction.
+fn find_prev_utilization(
+    history: &[SnapshotEntry],
+    metric: &str,
+    current_resets_at: &str,
+    now_ms: i64,
+) -> Option<f64> {
+    let current_reset_ms = parse_ts_ms(current_resets_at)?;
+    let pms = period_ms(metric);
+    let current_start_ms = current_reset_ms - pms;
+    let current_frac =
+        ((now_ms - current_start_ms) as f64 / pms as f64).clamp(0.0, 1.0);
+
+    // Collect distinct resets_at values from earlier periods
+    let mut prev_resets: Vec<String> = history
+        .iter()
+        .filter_map(|e| get_metric_snap(e, metric))
+        .filter(|m| m.resets_at != current_resets_at)
+        .filter(|m| {
+            parse_ts_ms(&m.resets_at)
+                .map(|t| t < current_reset_ms)
+                .unwrap_or(false)
+        })
+        .map(|m| m.resets_at.clone())
+        .collect();
+    prev_resets.sort();
+    prev_resets.dedup();
+
+    let prev_resets_at = prev_resets.last()?;
+    let prev_reset_ms = parse_ts_ms(prev_resets_at)?;
+    let prev_start_ms = prev_reset_ms - pms;
+
+    // Among snapshots in that previous period, pick the one closest in elapsed fraction
+    history
+        .iter()
+        .filter_map(|e| {
+            let snap = get_metric_snap(e, metric)?;
+            if &snap.resets_at != prev_resets_at {
+                return None;
+            }
+            let frac = ((e.ts - prev_start_ms) as f64 / pms as f64).clamp(0.0, 1.0);
+            Some((frac, snap.utilization))
+        })
+        .min_by(|(f1, _), (f2, _)| {
+            (f1 - current_frac)
+                .abs()
+                .partial_cmp(&(f2 - current_frac).abs())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        .map(|(_, u)| u)
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -67,7 +181,8 @@ fn read_keychain_credentials() -> Result<(String, String), String> {
         .ok_or("No home dir")?
         .join(".claude")
         .join(".credentials.json");
-    let raw = std::fs::read_to_string(&cred_path).map_err(|e| e.to_string())?;
+    let raw = std::fs::read_to_string(&cred_path)
+        .map_err(|e| format!("{e} (tried: {})", cred_path.display()))?;
     let json: Value = serde_json::from_str(raw.trim()).map_err(|e| e.to_string())?;
     let oauth = json.get("claudeAiOauth").ok_or("No claudeAiOauth key")?;
     let token = oauth
@@ -81,6 +196,18 @@ fn read_keychain_credentials() -> Result<(String, String), String> {
         .unwrap_or("unknown")
         .to_string();
     Ok((token, sub))
+}
+
+#[tauri::command]
+fn get_log_path() -> String {
+    dirs::home_dir()
+        .map(|h| h.join(".claude").join("claude-fleet-debug.log").to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+#[tauri::command]
+fn get_platform() -> String {
+    std::env::consts::OS.to_string()
 }
 
 fn log_debug(msg: &str) {
@@ -99,7 +226,7 @@ fn log_debug(msg: &str) {
 fn parse_usage(v: &Value) -> Option<UsageStats> {
     let utilization = v.get("utilization")?.as_f64()?;
     let resets_at = v.get("resets_at")?.as_str().unwrap_or("").to_string();
-    Some(UsageStats { utilization, resets_at })
+    Some(UsageStats { utilization, resets_at, prev_utilization: None })
 }
 
 #[tauri::command]
@@ -207,9 +334,9 @@ fn get_account_info() -> Result<AccountInfo, String> {
         "API / Free".to_string()
     };
 
-    let five_hour = usage_resp.get("five_hour").and_then(|v| parse_usage(v));
-    let seven_day = usage_resp.get("seven_day").and_then(|v| parse_usage(v));
-    let seven_day_sonnet = usage_resp
+    let mut five_hour = usage_resp.get("five_hour").and_then(|v| parse_usage(v));
+    let mut seven_day = usage_resp.get("seven_day").and_then(|v| parse_usage(v));
+    let mut seven_day_sonnet = usage_resp
         .get("seven_day_sonnet")
         .and_then(|v| parse_usage(v));
 
@@ -219,6 +346,43 @@ fn get_account_info() -> Result<AccountInfo, String> {
         seven_day.is_some(),
         seven_day_sonnet.is_some()
     ));
+
+    // ── Persist snapshot and compute previous-period utilization ─────────────
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut history = load_snapshots();
+    history.push(SnapshotEntry {
+        ts: now_ms,
+        five_hour: five_hour.as_ref().map(|s| MetricSnap {
+            utilization: s.utilization,
+            resets_at: s.resets_at.clone(),
+        }),
+        seven_day: seven_day.as_ref().map(|s| MetricSnap {
+            utilization: s.utilization,
+            resets_at: s.resets_at.clone(),
+        }),
+        seven_day_sonnet: seven_day_sonnet.as_ref().map(|s| MetricSnap {
+            utilization: s.utilization,
+            resets_at: s.resets_at.clone(),
+        }),
+    });
+    if history.len() > 200 {
+        let drain = history.len() - 200;
+        history.drain(0..drain);
+    }
+    save_snapshots(&history);
+
+    if let Some(ref mut s) = five_hour {
+        let ra = s.resets_at.clone();
+        s.prev_utilization = find_prev_utilization(&history, "five_hour", &ra, now_ms);
+    }
+    if let Some(ref mut s) = seven_day {
+        let ra = s.resets_at.clone();
+        s.prev_utilization = find_prev_utilization(&history, "seven_day", &ra, now_ms);
+    }
+    if let Some(ref mut s) = seven_day_sonnet {
+        let ra = s.resets_at.clone();
+        s.prev_utilization = find_prev_utilization(&history, "seven_day_sonnet", &ra, now_ms);
+    }
 
     Ok(AccountInfo {
         email,
@@ -230,6 +394,86 @@ fn get_account_info() -> Result<AccountInfo, String> {
         seven_day,
         seven_day_sonnet,
     })
+}
+
+// ── Process tree kill ─────────────────────────────────────────────────────────
+
+/// Collect all PIDs in the process tree rooted at `root_pid` (BFS via ps output).
+#[cfg(unix)]
+fn collect_process_tree(root_pid: u32) -> Vec<u32> {
+    let output = match std::process::Command::new("ps")
+        .args(["-A", "-o", "pid=,ppid="])
+        .output()
+    {
+        Ok(o) => o,
+        Err(_) => return vec![root_pid],
+    };
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    let mut children: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    for line in stdout.lines() {
+        let mut parts = line.split_whitespace();
+        let pid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
+            Some(p) => p,
+            None => continue,
+        };
+        let ppid: u32 = match parts.next().and_then(|s| s.parse().ok()) {
+            Some(p) => p,
+            None => continue,
+        };
+        children.entry(ppid).or_default().push(pid);
+    }
+
+    let mut result = Vec::new();
+    let mut queue = std::collections::VecDeque::new();
+    queue.push_back(root_pid);
+    while let Some(pid) = queue.pop_front() {
+        result.push(pid);
+        if let Some(kids) = children.get(&pid) {
+            for &kid in kids {
+                queue.push_back(kid);
+            }
+        }
+    }
+    result
+}
+
+#[cfg(unix)]
+#[tauri::command]
+fn kill_session(pid: u32) -> Result<(), String> {
+    let pids = collect_process_tree(pid);
+    log_debug(&format!(
+        "kill_session: SIGTERM to {} pids (root={}): {:?}",
+        pids.len(), pid, pids
+    ));
+
+    // SIGTERM children-first (reverse BFS order), then root
+    for &p in pids.iter().rev() {
+        unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM) };
+    }
+
+    // Spawn background thread to SIGKILL survivors after 2 s
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(2000));
+        for &p in pids.iter().rev() {
+            let alive = unsafe { libc::kill(p as libc::pid_t, 0) } == 0;
+            if alive {
+                unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
+            }
+        }
+    });
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+#[tauri::command]
+fn kill_session(pid: u32) -> Result<(), String> {
+    std::process::Command::new("taskkill")
+        .args(["/F", "/T", "/PID", &pid.to_string()])
+        .status()
+        .map_err(|e| format!("taskkill failed: {e}"))?;
+    Ok(())
 }
 
 // ── App state ────────────────────────────────────────────────────────────────
@@ -395,6 +639,9 @@ pub fn run() {
             start_watching_session,
             stop_watching_session,
             get_account_info,
+            get_log_path,
+            get_platform,
+            kill_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
