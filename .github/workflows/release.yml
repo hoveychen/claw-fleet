@@ -25,6 +25,19 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" src-tauri/Cargo.toml
 
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            xdg-utils
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -58,6 +71,19 @@ jobs:
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" src-tauri/Cargo.toml
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            xdg-utils
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
