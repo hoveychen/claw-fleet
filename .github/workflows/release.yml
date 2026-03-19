@@ -53,12 +53,13 @@ jobs:
           cargo build --release --bin fleet-cli \
             --manifest-path src-tauri/Cargo.toml \
             --target x86_64-unknown-linux-gnu
+          cp src-tauri/target/x86_64-unknown-linux-gnu/release/fleet-cli /tmp/fleet-linux-x64
 
       - name: Upload probe binary
         uses: actions/upload-artifact@v4
         with:
           name: fleet-linux-x64-probe
-          path: src-tauri/target/x86_64-unknown-linux-gnu/release/fleet-cli
+          path: /tmp/fleet-linux-x64
 
   linux-arm64-probe:
     name: Build Linux ARM64 probe binary
@@ -100,12 +101,13 @@ jobs:
           cargo build --release --bin fleet-cli \
             --manifest-path src-tauri/Cargo.toml \
             --target aarch64-unknown-linux-gnu
+          cp src-tauri/target/aarch64-unknown-linux-gnu/release/fleet-cli /tmp/fleet-linux-arm64
 
       - name: Upload probe binary
         uses: actions/upload-artifact@v4
         with:
           name: fleet-linux-arm64-probe
-          path: src-tauri/target/aarch64-unknown-linux-gnu/release/fleet-cli
+          path: /tmp/fleet-linux-arm64
 
   # ── Build all platforms (macOS: sign only, notarization handled separately) ─
   build:
@@ -174,21 +176,17 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: fleet-linux-x64-probe
-          path: /tmp/probe-x64
+          path: src-tauri/resources
 
       - name: Download Linux arm64 probe
         uses: actions/download-artifact@v4
         with:
           name: fleet-linux-arm64-probe
-          path: /tmp/probe-arm64
+          path: src-tauri/resources
 
-      - name: Place probe binaries into resources
+      - name: Mark probe binaries executable
         shell: bash
-        run: |
-          mkdir -p src-tauri/resources
-          cp /tmp/probe-x64/fleet-cli src-tauri/resources/fleet-linux-x64
-          cp /tmp/probe-arm64/fleet-cli src-tauri/resources/fleet-linux-arm64
-          chmod +x src-tauri/resources/fleet-linux-x64 src-tauri/resources/fleet-linux-arm64
+        run: chmod +x src-tauri/resources/fleet-linux-x64 src-tauri/resources/fleet-linux-arm64
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
