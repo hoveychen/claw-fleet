@@ -6,6 +6,7 @@ import { useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from
 import type { SessionInfo } from "../types";
 import { AccountInfo } from "./AccountInfo";
 import { GalleryView } from "./GalleryView";
+import { MemoryPanel } from "./MemoryPanel";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { SessionCard } from "./SessionCard";
 import styles from "./SessionList.module.css";
@@ -241,8 +242,11 @@ export function SessionList() {
           </>
         )}
 
-        <div data-wizard="account-info" style={{ marginTop: "auto" }}>
-          <AccountInfo />
+        <div style={{ marginTop: "auto" }}>
+          <MemoryPanel />
+          <div data-wizard="account-info">
+            <AccountInfo />
+          </div>
         </div>
 
         {/* Resize handle */}

@@ -89,6 +89,14 @@
     "ai_skill_save_btn": "保存 skill 文件…",
     "ai_modal_close": "完成"
   },
+  "memory": {
+    "panel_title": "Memory",
+    "loading": "\u52a0\u8f7d\u4e2d\u2026",
+    "no_memories": "\u672a\u627e\u5230\u81ea\u52a8 Memory \u6587\u4ef6\u3002",
+    "tab_content": "\u5185\u5bb9",
+    "tab_history": "\u5386\u53f2",
+    "no_history": "\u672a\u5728\u4f1a\u8bdd\u65e5\u5fd7\u4e2d\u627e\u5230\u7f16\u8f91\u5386\u53f2\u3002"
+  },
   "chart": {
     "title": "Token 速度",
     "unit": "tok/s",

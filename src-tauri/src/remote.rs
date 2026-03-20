@@ -133,6 +133,18 @@ impl crate::backend::Backend for RemoteBackend {
         *self.viewed_session.lock().unwrap() = None;
         *self.viewed_offset.lock().unwrap() = 0;
     }
+
+    fn list_memories(&self) -> Vec<crate::memory::WorkspaceMemory> {
+        remote_list_memories(&self.base_url, &self.token).unwrap_or_default()
+    }
+
+    fn get_memory_content(&self, path: &str) -> Result<String, String> {
+        remote_get_memory_content(&self.base_url, &self.token, path)
+    }
+
+    fn get_memory_history(&self, path: &str) -> Vec<crate::memory::MemoryHistoryEntry> {
+        remote_get_memory_history(&self.base_url, &self.token, path).unwrap_or_default()
+    }
 }
 
 // ── Progress event emitted to the frontend during connect ────────────────────
@@ -950,6 +962,70 @@ pub fn remote_file_size(base_url: &str, token: &str, jsonl_path: &str) -> u64 {
         .and_then(|r| r.json::<serde_json::Value>().ok())
         .and_then(|v| v["size"].as_u64())
         .unwrap_or(0)
+}
+
+// ── Remote memory helpers ─────────────────────────────────────────────────────
+
+fn remote_list_memories(
+    base_url: &str,
+    token: &str,
+) -> Result<Vec<crate::memory::WorkspaceMemory>, String> {
+    let url = format!("{}/memories", base_url);
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    resp.json().map_err(|e| e.to_string())
+}
+
+fn remote_get_memory_content(
+    base_url: &str,
+    token: &str,
+    path: &str,
+) -> Result<String, String> {
+    let url = format!("{}/memory_content?path={}", base_url, encode_path(path));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    resp.json::<String>().map_err(|e| e.to_string())
+}
+
+fn remote_get_memory_history(
+    base_url: &str,
+    token: &str,
+    path: &str,
+) -> Result<Vec<crate::memory::MemoryHistoryEntry>, String> {
+    let url = format!("{}/memory_history?path={}", base_url, encode_path(path));
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let resp = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
+    }
+    resp.json().map_err(|e| e.to_string())
 }
 
 /// Spawn a background thread that polls `/tail` and emits `session-tail` events.

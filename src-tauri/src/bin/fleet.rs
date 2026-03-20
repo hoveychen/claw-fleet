@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use claude_fleet_lib::account::{fetch_account_info, AccountInfo, UsageStats};
+use claude_fleet_lib::memory;
 use claude_fleet_lib::session::{get_claude_dir, scan_sessions, SessionInfo, SessionStatus};
 use claude_fleet_lib::{FLEET_SKILL_MD, SKILL_TARGETS};
 
@@ -965,6 +966,40 @@ fn cmd_serve(port: u16, token: String) {
                         let _ = request.respond(tiny_http::Response::empty(404));
                     }
                 }
+            }
+
+            "/memories" => {
+                let memories = memory::scan_all_memories();
+                let body = serde_json::to_string(&memories).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/memory_content" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                match memory::read_memory_file(&file_path) {
+                    Ok(content) => {
+                        let body = serde_json::to_string(&content).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
+            }
+
+            "/memory_history" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let history = memory::trace_memory_history(&file_path);
+                let body = serde_json::to_string(&history).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
             }
 
             _ => {

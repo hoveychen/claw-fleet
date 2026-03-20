@@ -1,6 +1,7 @@
 pub mod account;
 pub mod backend;
 pub mod local_backend;
+pub mod memory;
 pub mod remote;
 pub mod session;
 
@@ -458,6 +459,23 @@ fn install_fleet_skill() -> Result<SkillInstallResult, String> {
     Ok(SkillInstallResult { installed, errors })
 }
 
+// ── Memory commands ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_memories(state: tauri::State<AppState>) -> Vec<memory::WorkspaceMemory> {
+    state.backend.lock().unwrap().list_memories()
+}
+
+#[tauri::command]
+fn get_memory_content(path: String, state: tauri::State<AppState>) -> Result<String, String> {
+    state.backend.lock().unwrap().get_memory_content(&path)
+}
+
+#[tauri::command]
+fn get_memory_history(path: String, state: tauri::State<AppState>) -> Vec<memory::MemoryHistoryEntry> {
+    state.backend.lock().unwrap().get_memory_history(&path)
+}
+
 // ── Tray helpers ─────────────────────────────────────────────────────────────
 
 pub fn update_tray(app: &tauri::AppHandle, sessions: &[SessionInfo]) {
@@ -592,6 +610,9 @@ pub fn run() {
             remote::connect_remote,
             remote::disconnect_remote,
             pick_file,
+            list_memories,
+            get_memory_content,
+            get_memory_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

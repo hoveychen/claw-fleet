@@ -4,6 +4,7 @@
 //! no `if remote { … } else { … }` branching.
 
 use crate::account::AccountInfo;
+use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::SessionInfo;
 use serde_json::Value;
 
@@ -18,6 +19,11 @@ pub trait Backend: Send + Sync {
     /// New lines are delivered as `session-tail` Tauri events.
     fn start_watch(&self, path: String) -> Result<u64, String>;
     fn stop_watch(&self);
+
+    // ── Memory ───────────────────────────────────────────────────────────────
+    fn list_memories(&self) -> Vec<WorkspaceMemory>;
+    fn get_memory_content(&self, path: &str) -> Result<String, String>;
+    fn get_memory_history(&self, path: &str) -> Vec<MemoryHistoryEntry>;
 }
 
 /// No-op placeholder used before the real backend is initialised in
@@ -46,4 +52,13 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
     fn stop_watch(&self) {}
+    fn list_memories(&self) -> Vec<WorkspaceMemory> {
+        vec![]
+    }
+    fn get_memory_content(&self, _: &str) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
+    fn get_memory_history(&self, _: &str) -> Vec<MemoryHistoryEntry> {
+        vec![]
+    }
 }

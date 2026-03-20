@@ -89,6 +89,14 @@
     "ai_skill_save_btn": "Save skill file…",
     "ai_modal_close": "Done"
   },
+  "memory": {
+    "panel_title": "Memory",
+    "loading": "Loading\u2026",
+    "no_memories": "No auto-memory files found.",
+    "tab_content": "Content",
+    "tab_history": "History",
+    "no_history": "No edit history found in session logs."
+  },
   "chart": {
     "title": "Token Speed",
     "unit": "tok/s",

@@ -340,6 +340,18 @@ impl Backend for LocalBackend {
         *self.viewed_session.lock().unwrap() = None;
         *self.viewed_offset.lock().unwrap() = 0;
     }
+
+    fn list_memories(&self) -> Vec<crate::memory::WorkspaceMemory> {
+        crate::memory::scan_all_memories()
+    }
+
+    fn get_memory_content(&self, path: &str) -> Result<String, String> {
+        crate::memory::read_memory_file(path)
+    }
+
+    fn get_memory_history(&self, path: &str) -> Vec<crate::memory::MemoryHistoryEntry> {
+        crate::memory::trace_memory_history(path)
+    }
 }
 
 // ── Unix process-tree helper ──────────────────────────────────────────────────
