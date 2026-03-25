@@ -696,6 +696,50 @@ fn find_openclaw_binary() -> Option<PathBuf> {
     None
 }
 
+/// Build an augmented PATH that includes common Node.js installation directories.
+/// GUI apps (like Tauri) often lack the full shell PATH, which causes `#!/usr/bin/env node`
+/// scripts (like openclaw) to fail with exit code 127.
+fn augmented_path() -> String {
+    let mut dirs: Vec<String> = vec![
+        "/opt/homebrew/bin".to_string(),
+        "/usr/local/bin".to_string(),
+    ];
+    if let Some(home) = dirs::home_dir() {
+        let h = home.display().to_string();
+        // nvm
+        if let Ok(nvm_dir) = std::env::var("NVM_DIR") {
+            // Try to find the default node version
+            let default_path = std::path::PathBuf::from(&nvm_dir).join("alias/default");
+            if let Ok(version) = std::fs::read_to_string(&default_path) {
+                let version = version.trim();
+                let nvm_bin = format!("{nvm_dir}/versions/node/v{version}/bin");
+                if std::path::Path::new(&nvm_bin).is_dir() {
+                    dirs.push(nvm_bin);
+                }
+            }
+            // Also try current symlink
+            let current = format!("{nvm_dir}/current/bin");
+            if std::path::Path::new(&current).is_dir() {
+                dirs.push(current);
+            }
+        }
+        // fnm
+        dirs.push(format!("{h}/Library/Application Support/fnm/aliases/default/bin"));
+        dirs.push(format!("{h}/.local/share/fnm/aliases/default/bin"));
+        // volta
+        dirs.push(format!("{h}/.volta/bin"));
+        // Common global install paths
+        dirs.push(format!("{h}/.local/bin"));
+        dirs.push(format!("{h}/.npm-global/bin"));
+        dirs.push(format!("{h}/.cargo/bin"));
+    }
+    // Append the existing PATH so we don't lose anything
+    if let Ok(existing) = std::env::var("PATH") {
+        dirs.push(existing);
+    }
+    dirs.join(":")
+}
+
 /// Fetch OpenClaw account info (providers, model, version) via `openclaw models status --json`.
 pub async fn fetch_openclaw_account_info() -> Result<OpenClawAccountInfo, String> {
     let bin = find_openclaw_binary().ok_or("OpenClaw binary not found")?;
@@ -713,6 +757,7 @@ pub fn fetch_openclaw_account_blocking() -> Result<OpenClawAccountInfo, String> 
 fn fetch_openclaw_account_blocking_impl(bin: &Path) -> Result<OpenClawAccountInfo, String> {
     let output = std::process::Command::new(bin)
         .args(["models", "status", "--json"])
+        .env("PATH", augmented_path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()
@@ -781,6 +826,7 @@ fn fetch_openclaw_account_blocking_impl(bin: &Path) -> Result<OpenClawAccountInf
     // Get version from the CLI
     let version = std::process::Command::new(bin)
         .args(["--version"])
+        .env("PATH", augmented_path())
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -811,6 +857,7 @@ pub fn fetch_openclaw_usage_blocking() -> Result<OpenClawUsageInfo, String> {
 fn fetch_openclaw_usage_blocking_impl(bin: &Path) -> Result<OpenClawUsageInfo, String> {
     let output = std::process::Command::new(bin)
         .args(["status", "--json"])
+        .env("PATH", augmented_path())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null())
         .output()

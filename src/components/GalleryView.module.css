@@ -57,6 +57,11 @@
   gap: 12px;
 }
 
+/* Narrower cards when detail drawer is open */
+.rows_grid.compact {
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+}
+
 
 /* ── Group (main + subagents) ────────────────────────────────────────────── */
 .group {

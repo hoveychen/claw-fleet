@@ -139,6 +139,17 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
             { std::process::Command::new("where").arg("codex").output().map_or(false, |o| o.status.success()) }
         };
 
+    // Apply source enable/disable config — disabled sources should not appear in the UI.
+    let config = agent_source::SourcesConfig::load();
+    let claude_enabled = config.is_source_enabled("claude");
+    let cli = cli && claude_enabled;
+    let vscode = vscode && claude_enabled;
+    let jetbrains = jetbrains && claude_enabled;
+    let desktop = desktop && claude_enabled;
+    let cursor = cursor && config.is_source_enabled("cursor");
+    let openclaw = openclaw && config.is_source_enabled("openclaw");
+    let codex = codex && config.is_source_enabled("codex");
+
     backend::DetectedTools { cli, vscode, jetbrains, desktop, cursor, openclaw, codex }
 }
 
@@ -527,6 +538,11 @@ fn get_memory_history(path: String, state: tauri::State<AppState>) -> Vec<memory
     state.backend.lock().unwrap().get_memory_history(&path)
 }
 
+#[tauri::command]
+fn get_claude_md_content(workspace_path: String) -> Result<String, String> {
+    memory::read_claude_md(&workspace_path)
+}
+
 // ── Agent sources config ─────────────────────────────────────────────────────
 
 /// Return the current sources config merged with availability info.
@@ -865,6 +881,7 @@ pub fn run() {
             list_memories,
             get_memory_content,
             get_memory_history,
+            get_claude_md_content,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,

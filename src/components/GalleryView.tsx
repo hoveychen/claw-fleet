@@ -237,6 +237,7 @@ export function GalleryView() {
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
   const handleSelect = (s: SessionInfo) => open(s);
+  const gridCls = `${styles.rows_grid}${openSession ? ` ${styles.compact}` : ""}`;
 
   // Close detail drawer when clicking on empty gallery space
   const handleGridClick = (e: React.MouseEvent) => {
@@ -298,7 +299,7 @@ export function GalleryView() {
             {filteredActiveMains.length > 0 && (
               <div className={styles.section}>
                 <div className={styles.section_label}>{t("active")}</div>
-                <div className={styles.rows_grid} onClick={handleGridClick}>
+                <div className={gridCls} onClick={handleGridClick}>
                   {buildRows(filteredActiveMains, sessions, handleSelect)}
                 </div>
               </div>
@@ -306,7 +307,7 @@ export function GalleryView() {
             {filteredRecentMains.length > 0 && (
               <div className={styles.section}>
                 <div className={styles.section_label}>{t("recent")}</div>
-                <div className={styles.rows_grid} onClick={handleGridClick}>
+                <div className={gridCls} onClick={handleGridClick}>
                   {buildRows(filteredRecentMains, sessions, handleSelect)}
                 </div>
               </div>
@@ -317,7 +318,7 @@ export function GalleryView() {
           </>
         ) : (
           <>
-            <div className={styles.rows_grid} onClick={handleGridClick}>
+            <div className={gridCls} onClick={handleGridClick}>
               {buildRows(filteredActiveMains, sessions, handleSelect)}
             </div>
             {filteredActiveMains.length === 0 && (

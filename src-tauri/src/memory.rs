@@ -95,12 +95,14 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
         }
 
         let workspace_path = decode_project_key(&project_key);
-        let workspace_name = workspace_path
+        let workspace_name = match workspace_path
             .split('/')
             .filter(|s| !s.is_empty())
             .last()
-            .unwrap_or(&workspace_path)
-            .to_string();
+        {
+            Some(name) => name.to_string(),
+            None => continue, // skip degenerate keys that decode to "/"
+        };
 
         // Check for CLAUDE.md
         let has_claude_md = Path::new(&workspace_path).join("CLAUDE.md").exists()
@@ -243,6 +245,23 @@ pub fn read_memory_file(path: &str) -> Result<String, String> {
     }
 
     fs::read_to_string(path).map_err(|e| e.to_string())
+}
+
+// ── Read CLAUDE.md from a workspace ─────────────────────────────────────────
+
+pub fn read_claude_md(workspace_path: &str) -> Result<String, String> {
+    let root = Path::new(workspace_path);
+    // Try <workspace>/CLAUDE.md first, then <workspace>/.claude/CLAUDE.md
+    let candidates = [
+        root.join("CLAUDE.md"),
+        root.join(".claude").join("CLAUDE.md"),
+    ];
+    for candidate in &candidates {
+        if candidate.is_file() {
+            return fs::read_to_string(candidate).map_err(|e| e.to_string());
+        }
+    }
+    Err("CLAUDE.md not found".into())
 }
 
 // ── Trace history of a memory file ───────────────────────────────────────────
@@ -702,5 +721,45 @@ mod tests {
             &mut history,
         );
         assert!(history.is_empty());
+    }
+
+    // ── decode_project_key tests ──────────────────────────────────────────
+
+    #[test]
+    fn decode_project_key_single_dash_returns_slash() {
+        // A project directory named "-" decodes to "/" which causes a lone
+        // "/" to appear as the workspace name in the Memory panel.
+        let result = decode_project_key("-");
+        // This demonstrates the bug: the decoded path is just "/"
+        assert_eq!(result, "/");
+    }
+
+    #[test]
+    fn decode_project_key_empty_string() {
+        let result = decode_project_key("");
+        // Empty string splits into [""] which also produces "/"
+        assert_eq!(result, "/");
+    }
+
+    #[test]
+    fn workspace_name_from_root_path_is_none() {
+        // A workspace_path of "/" has no meaningful last component,
+        // so scan_all_memories should skip it (continue).
+        let workspace_path = "/";
+        let workspace_name = workspace_path
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .last();
+        assert!(workspace_name.is_none());
+    }
+
+    #[test]
+    fn decode_project_key_normal_path() {
+        // Normal project keys should decode correctly (filesystem-dependent,
+        // but the naive fallback still produces a reasonable path).
+        let result = decode_project_key("-tmp");
+        // /tmp exists on macOS/Linux, so greedy matching finds it
+        assert!(result.starts_with('/'));
+        assert!(result.len() > 1);
     }
 }

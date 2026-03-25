@@ -72,6 +72,12 @@ export function MemoryPanel() {
     workspaceName: string;
   } | null>(null);
 
+  // CLAUDE.md modal state
+  const [claudeMdWorkspace, setClaudeMdWorkspace] = useState<{
+    workspaceName: string;
+    workspacePath: string;
+  } | null>(null);
+
   const load = useCallback(async () => {
     try {
       const data = await invoke<WorkspaceMemory[]>("list_memories");
@@ -119,7 +125,16 @@ export function MemoryPanel() {
                   {ws.workspaceName}
                 </span>
                 {ws.hasClaudeMd && (
-                  <span className={`${styles.badge} ${styles.badge_claude}`}>
+                  <span
+                    className={`${styles.badge} ${styles.badge_claude} ${styles.badge_clickable}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setClaudeMdWorkspace({
+                        workspaceName: ws.workspaceName,
+                        workspacePath: ws.workspacePath,
+                      });
+                    }}
+                  >
                     CLAUDE.md
                   </span>
                 )}
@@ -162,6 +177,14 @@ export function MemoryPanel() {
           onClose={() => setSelectedFile(null)}
         />
       )}
+
+      {claudeMdWorkspace && (
+        <ClaudeMdModal
+          workspaceName={claudeMdWorkspace.workspaceName}
+          workspacePath={claudeMdWorkspace.workspacePath}
+          onClose={() => setClaudeMdWorkspace(null)}
+        />
+      )}
     </div>
   );
 }
@@ -201,18 +224,7 @@ function MemoryDetailModal({
   }, [tab, file.path, history]);
 
   return (
-    <div className={styles.modal_overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        {/* Header */}
-        <div className={styles.modal_header}>
-          <span className={styles.modal_title}>
-            {file.workspaceName} / {file.name}
-          </span>
-          <button className={styles.modal_close} onClick={onClose}>
-            ✕
-          </button>
-        </div>
-
+    <ModalShell title={`${file.workspaceName} / ${file.name}`} onClose={onClose}>
         {/* Tabs */}
         <div className={styles.modal_tabs}>
           <button
@@ -298,7 +310,68 @@ function MemoryDetailModal({
             </>
           )}
         </div>
+    </ModalShell>
+  );
+}
+
+// ── Modal Shell ───────────────────────────────────────────────────────────────
+
+function ModalShell({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={styles.modal_overlay} onClick={onClose}>
+      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.modal_header}>
+          <span className={styles.modal_title}>{title}</span>
+          <button className={styles.modal_close} onClick={onClose}>
+            ✕
+          </button>
+        </div>
+        {children}
       </div>
     </div>
+  );
+}
+
+// ── CLAUDE.md Modal ───────────────────────────────────────────────────────────
+
+function ClaudeMdModal({
+  workspaceName,
+  workspacePath,
+  onClose,
+}: {
+  workspaceName: string;
+  workspacePath: string;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [content, setContent] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    invoke<string>("get_claude_md_content", { workspacePath })
+      .then(setContent)
+      .catch(() => setContent("(error reading CLAUDE.md)"))
+      .finally(() => setLoading(false));
+  }, [workspacePath]);
+
+  return (
+    <ModalShell title={`${workspaceName} / CLAUDE.md`} onClose={onClose}>
+      <div className={styles.modal_body}>
+        {loading && <p className={styles.loading}>{t("memory.loading")}</p>}
+        {content !== null && (
+          <div className={styles.content_markdown}>
+            <TextBlock text={content} />
+          </div>
+        )}
+      </div>
+    </ModalShell>
   );
 }

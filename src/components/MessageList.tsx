@@ -246,7 +246,10 @@ export function MessageList({ messages, isLoading }: Props) {
   const prevCountRef = useRef(displayMsgs.length);
   const sessionSwitchedRef = useRef(false);
   useEffect(() => {
-    if (displayMsgs.length < prevCountRef.current) {
+    if (
+      displayMsgs.length < prevCountRef.current ||
+      (prevCountRef.current === 0 && displayMsgs.length > 0)
+    ) {
       setVisibleStart(0);
       sessionSwitchedRef.current = true;
     }

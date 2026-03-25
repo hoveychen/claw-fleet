@@ -75,6 +75,14 @@
   color: var(--color-accent);
 }
 
+.badge_clickable {
+  cursor: pointer;
+}
+
+.badge_clickable:hover {
+  background: rgba(217, 119, 87, 0.3);
+}
+
 .file_list {
   display: flex;
   flex-direction: column;
