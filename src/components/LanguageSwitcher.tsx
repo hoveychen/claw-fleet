@@ -1,4 +1,6 @@
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
+import { setItem } from "../storage";
 import styles from "./LanguageSwitcher.module.css";
 
 const LANGS = [
@@ -11,7 +13,8 @@ export function LanguageSwitcher() {
 
   const change = (code: string) => {
     i18n.changeLanguage(code);
-    localStorage.setItem("lang", code);
+    setItem("lang", code);
+    invoke("set_locale", { locale: code }).catch(() => {});
   };
 
   return (

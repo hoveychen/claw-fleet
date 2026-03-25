@@ -52,7 +52,7 @@
 /* Responsive multi-column grid for the rows */
 .rows_grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
   align-items: start;
   gap: 12px;
 }
@@ -74,7 +74,8 @@
 .group_header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   padding: 8px 12px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-sidebar);
@@ -93,6 +94,7 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  width: 100%;
   flex-shrink: 1;
   min-width: 0;
 }

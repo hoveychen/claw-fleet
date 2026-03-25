@@ -251,6 +251,57 @@
   padding-top: 4px;
 }
 
+/* ── Source selection ────────────────────────────────────────────────────── */
+.source_list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.source_item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.source_item:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.source_checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.source_name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  flex: 1;
+}
+
+.source_detected {
+  font-size: 10px;
+  color: var(--color-success);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.source_not_found {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
 /* ── Footer actions ──────────────────────────────────────────────────────── */
 .footer {
   display: flex;

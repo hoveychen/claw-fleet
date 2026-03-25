@@ -1,0 +1,1000 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
+import { useSessionsStore } from "../store";
+import type { SessionInfo, SessionOutcome } from "../types";
+import styles from "./MascotEyes.module.css";
+
+// ── Dynamic quip generation ─────────────────────────────────────────────────
+
+const QUIP_REGEN_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const MIN_TITLES_FOR_GENERATION = 1;
+
+// ── Mood types ───────────────────────────────────────────────────────────────
+
+export type MascotMood =
+  | "excited" | "focused" | "anxious"
+  | "satisfied" | "bored" | "lonely" | "sleepy"
+  | "attentive" | "proud" | "frustrated" | "embarrassed";
+
+// ── Outcome → mood mapping ──────────────────────────────────────────────────
+
+const OUTCOME_MOOD_MAP: Record<SessionOutcome, MascotMood> = {
+  needs_input:   "attentive",
+  bug_fixed:     "proud",
+  feature_added: "proud",
+  stuck:         "frustrated",
+  apologizing:   "embarrassed",
+  show_off:      "satisfied",
+  concerned:     "anxious",
+  confused:      "anxious",
+  celebrating:   "excited",
+  quick_fix:     "satisfied",
+  overwhelmed:   "frustrated",
+  scheming:      "focused",
+  reporting:     "satisfied",   // neutral fallback
+};
+
+// ── Promotion ────────────────────────────────────────────────────────────────
+
+function promoteSessions(sessions: SessionInfo[]): SessionInfo[] {
+  const activeSubagentParentIds = new Set(
+    sessions
+      .filter(
+        (s) =>
+          s.isSubagent && s.parentSessionId &&
+          ["thinking", "executing", "streaming", "processing", "waitingInput", "active"].includes(s.status)
+      )
+      .map((s) => s.parentSessionId!)
+  );
+  return sessions.map((s) =>
+    !s.isSubagent &&
+    ["idle", "active", "waitingInput", "processing"].includes(s.status) &&
+    activeSubagentParentIds.has(s.id)
+      ? { ...s, status: "delegating" as const }
+      : s
+  );
+}
+
+// ── Mood derivation ──────────────────────────────────────────────────────────
+
+function deriveMood(sessions: SessionInfo[]): MascotMood {
+  if (sessions.length === 0) return "lonely";
+  const promoted = promoteSessions(sessions);
+  const busyStatuses = ["thinking", "executing", "streaming", "processing", "active", "delegating"];
+  const busy = promoted.filter((s) => busyStatuses.includes(s.status));
+  const waiting = promoted.filter((s) => s.status === "waitingInput");
+  const idle = promoted.filter((s) => s.status === "idle");
+  const totalSpeed = promoted.reduce((sum, s) => sum + s.tokenSpeed, 0);
+
+  // No busy / no waiting → bored or sleepy
+  if (busy.length === 0 && waiting.length === 0) {
+    // Check idle sessions for recent outcomes (task just finished).
+    const outcomeMood = pickOutcomeMood([...idle, ...waiting]);
+    if (outcomeMood) return outcomeMood;
+    return idle.length > 3 ? "sleepy" : "bored";
+  }
+
+  // High throughput → excited
+  if (totalSpeed > 80 || busy.length >= 4) return "excited";
+
+  // Still busy → focused
+  if (busy.length >= 1) return "focused";
+
+  // Only waiting sessions remain — use outcome tags if available (Plan C).
+  if (waiting.length > 0 && busy.length === 0) {
+    const outcomeMood = pickOutcomeMood(waiting);
+    if (outcomeMood) return outcomeMood;
+    return "anxious";        // fallback when no analysis has run yet
+  }
+
+  return "satisfied";
+}
+
+/** Pick a mood from outcome tags across sessions.
+ *  Plan C: if any session has `needs_input` → always "attentive".
+ *  Otherwise pick a random outcome tag from the pool. */
+function pickOutcomeMood(sessions: SessionInfo[]): MascotMood | null {
+  const allTags: SessionOutcome[] = sessions
+    .flatMap((s) => (s.lastOutcome ?? []) as SessionOutcome[]);
+  if (allTags.length === 0) return null;
+
+  // needs_input always wins
+  if (allTags.includes("needs_input")) return "attentive";
+
+  // Deterministic pick: use a simple hash of the tags to choose one.
+  const hash = allTags.reduce((h, t) => h + t.charCodeAt(0), 0);
+  const tag = allTags[hash % allTags.length];
+  return OUTCOME_MOOD_MAP[tag] ?? null;
+}
+
+// ── Quip keys ────────────────────────────────────────────────────────────────
+
+const QUIP_KEYS: Record<MascotMood, string[]> = {
+  excited:     ["mascot.excited_1", "mascot.excited_2", "mascot.excited_3"],
+  focused:     ["mascot.focused_1", "mascot.focused_2", "mascot.focused_3"],
+  anxious:     ["mascot.anxious_1", "mascot.anxious_2", "mascot.anxious_3"],
+  satisfied:   ["mascot.satisfied_1", "mascot.satisfied_2", "mascot.satisfied_3"],
+  bored:       ["mascot.bored_1", "mascot.bored_2", "mascot.bored_3"],
+  lonely:      ["mascot.lonely_1", "mascot.lonely_2", "mascot.lonely_3"],
+  sleepy:      ["mascot.sleepy_1", "mascot.sleepy_2", "mascot.sleepy_3"],
+  attentive:   ["mascot.attentive_1", "mascot.attentive_2", "mascot.attentive_3"],
+  proud:       ["mascot.proud_1", "mascot.proud_2", "mascot.proud_3"],
+  frustrated:  ["mascot.frustrated_1", "mascot.frustrated_2", "mascot.frustrated_3"],
+  embarrassed: ["mascot.embarrassed_1", "mascot.embarrassed_2", "mascot.embarrassed_3"],
+};
+
+// ── Click response quips ─────────────────────────────────────────────────────
+
+const CLICK_QUIP_KEYS: Record<MascotMood, string[]> = {
+  excited:     ["mascot.click_excited_1", "mascot.click_excited_2", "mascot.click_excited_3"],
+  focused:     ["mascot.click_focused_1", "mascot.click_focused_2", "mascot.click_focused_3"],
+  anxious:     ["mascot.click_anxious_1", "mascot.click_anxious_2", "mascot.click_anxious_3"],
+  satisfied:   ["mascot.click_satisfied_1", "mascot.click_satisfied_2", "mascot.click_satisfied_3"],
+  bored:       ["mascot.click_bored_1", "mascot.click_bored_2", "mascot.click_bored_3"],
+  lonely:      ["mascot.click_lonely_1", "mascot.click_lonely_2", "mascot.click_lonely_3"],
+  sleepy:      ["mascot.click_sleepy_1", "mascot.click_sleepy_2", "mascot.click_sleepy_3"],
+  attentive:   ["mascot.click_attentive_1", "mascot.click_attentive_2", "mascot.click_attentive_3"],
+  proud:       ["mascot.click_proud_1", "mascot.click_proud_2", "mascot.click_proud_3"],
+  frustrated:  ["mascot.click_frustrated_1", "mascot.click_frustrated_2", "mascot.click_frustrated_3"],
+  embarrassed: ["mascot.click_embarrassed_1", "mascot.click_embarrassed_2", "mascot.click_embarrassed_3"],
+};
+
+// ── Eye shape: just solid circle + eyelid positions ──────────────────────────
+
+interface EyeShape {
+  rx: number;
+  ry: number;
+  lidTop: number;       // 0–1 top eyelid closure
+  lidBot: number;       // 0–1 bottom eyelid closure
+  rightLidTop?: number;
+  rightRy?: number;
+  gazeX?: number;       // directional gaze bias
+  gazeY?: number;
+  eyeShape?: "star" | "cross" | "diamond" | "spiral" | "heart";
+}
+
+const EYE_VARIANTS: Record<MascotMood, EyeShape[]> = {
+  excited: [
+    { rx: 20, ry: 20, lidTop: 0.05, lidBot: 0 },            // wide open, energized
+    { rx: 20, ry: 18, lidTop: 0.08, lidBot: 0 },
+    { rx: 20, ry: 20, lidTop: 0.05, lidBot: 0, rightLidTop: 0.85 },  // wink
+    { rx: 20, ry: 19, lidTop: 0.06, lidBot: 0, gazeY: 0.4 },
+  ],
+  focused: [
+    { rx: 16, ry: 16, lidTop: 0.15, lidBot: 0.08 },         // slightly narrowed, concentrating
+    { rx: 16, ry: 15, lidTop: 0.18, lidBot: 0.10 },
+    { rx: 16, ry: 16, lidTop: 0.15, lidBot: 0.08, rightLidTop: 0.25 },
+    { rx: 16, ry: 15, lidTop: 0.20, lidBot: 0.10, gazeY: 0.5 },  // looking down at work
+  ],
+  anxious: [
+    { rx: 19, ry: 19, lidTop: 0.04, lidBot: 0 },
+    { rx: 19, ry: 20, lidTop: 0.04, lidBot: 0 },
+    { rx: 19, ry: 19, lidTop: 0.04, lidBot: 0, rightLidTop: 0.15 },
+    { rx: 19, ry: 20, lidTop: 0.04, lidBot: 0, gazeY: -0.5 },
+  ],
+  satisfied: [
+    { rx: 18, ry: 16, lidTop: 0.30, lidBot: 0.25 },   // happy squint
+    { rx: 18, ry: 16, lidTop: 0.40, lidBot: 0.32 },   // crescent ^_^
+    { rx: 18, ry: 16, lidTop: 0.28, lidBot: 0.22, rightLidTop: 0.85 },  // wink
+    { rx: 18, ry: 16, lidTop: 0.45, lidBot: 0.38 },   // super happy ^^
+  ],
+  bored: [
+    { rx: 18, ry: 18, lidTop: 0.38, lidBot: 0, gazeY: -0.6 },     // eye roll up
+    { rx: 18, ry: 16, lidTop: 0.45, lidBot: 0, gazeY: -0.8 },     // heavy eye roll
+    { rx: 18, ry: 18, lidTop: 0.32, lidBot: 0, gazeX: 0.7 },      // looking away
+    { rx: 18, ry: 18, lidTop: 0.35, lidBot: 0, gazeY: -0.5, rightLidTop: 0.55 },
+  ],
+  lonely: [
+    { rx: 19, ry: 20, lidTop: 0, lidBot: 0 },          // big puppy
+    { rx: 20, ry: 21, lidTop: 0, lidBot: 0 },           // watery big
+    { rx: 19, ry: 20, lidTop: 0.04, lidBot: 0, gazeY: 0.4 },  // looking down
+    { rx: 19, ry: 20, lidTop: 0, lidBot: 0, gazeX: 0.6 },     // looking away
+  ],
+  sleepy: [
+    { rx: 18, ry: 10, lidTop: 0.62, lidBot: 0 },
+    { rx: 18, ry: 8,  lidTop: 0.72, lidBot: 0 },       // nearly shut
+    { rx: 18, ry: 10, lidTop: 0.58, lidBot: 0, rightLidTop: 0.80 },
+    { rx: 18, ry: 6,  lidTop: 0.78, lidBot: 0 },       // barely a slit
+  ],
+  attentive: [
+    { rx: 20, ry: 20, lidTop: 0.02, lidBot: 0 },       // wide open, curious
+    { rx: 20, ry: 21, lidTop: 0, lidBot: 0, eyeShape: "diamond" },  // diamond sparkle eyes
+    { rx: 20, ry: 20, lidTop: 0.02, lidBot: 0, gazeY: -0.3 }, // looking up
+    { rx: 20, ry: 20, lidTop: 0, lidBot: 0, eyeShape: "diamond" },
+  ],
+  proud: [
+    { rx: 18, ry: 18, lidTop: 0, lidBot: 0, eyeShape: "star" },       // ★ star eyes!
+    { rx: 18, ry: 14, lidTop: 0.40, lidBot: 0.35 },                   // smug ^^
+    { rx: 18, ry: 14, lidTop: 0.32, lidBot: 0.28, rightLidTop: 0.85 }, // proud wink
+    { rx: 18, ry: 18, lidTop: 0, lidBot: 0, eyeShape: "star", gazeY: 0.3 }, // ★
+  ],
+  frustrated: [
+    { rx: 17, ry: 14, lidTop: 0.30, lidBot: 0 },       // glaring
+    { rx: 17, ry: 17, lidTop: 0, lidBot: 0, eyeShape: "cross" },  // X eyes!
+    { rx: 17, ry: 17, lidTop: 0, lidBot: 0, eyeShape: "cross", gazeY: -0.4 },
+    { rx: 17, ry: 13, lidTop: 0.32, lidBot: 0, rightLidTop: 0.45 },
+  ],
+  embarrassed: [
+    { rx: 18, ry: 18, lidTop: 0, lidBot: 0, eyeShape: "spiral" },  // @_@ spiral eyes
+    { rx: 16, ry: 13, lidTop: 0.30, lidBot: 0.20, gazeX: -0.8 },  // looking away left
+    { rx: 18, ry: 18, lidTop: 0, lidBot: 0, eyeShape: "spiral" },  // @_@
+    { rx: 16, ry: 13, lidTop: 0.25, lidBot: 0.15, gazeX: 0.8, gazeY: 0.5 }, // averted down-right
+  ],
+};
+
+// ── Special actions ──────────────────────────────────────────────────────────
+
+type SpecialAction =
+  | "none" | "yawn" | "lookAround" | "nod" | "bounce"
+  | "dozeOff" | "sigh" | "wiggle" | "stretch" | "spin" | "fistPump"
+  | "eureka" | "typing" | "steam" | "meltdown" | "startle"
+  | "sunglasses" | "victoryPose" | "phoneLook" | "doodle" | "wave"
+  | "huddle" | "sleepBubble" | "headSnap";
+
+const MOOD_ACTIONS: Record<MascotMood, SpecialAction[]> = {
+  excited:     ["bounce", "bounce", "spin", "fistPump"],
+  focused:     ["typing", "typing", "eureka", "nod"],
+  anxious:     ["lookAround", "lookAround", "startle", "startle"],
+  satisfied:   ["nod", "wiggle", "stretch", "sunglasses", "victoryPose"],
+  bored:       ["yawn", "lookAround", "phoneLook", "doodle"],
+  lonely:      ["sigh", "sigh", "wave", "huddle"],
+  sleepy:      ["dozeOff", "dozeOff", "sleepBubble", "headSnap"],
+  attentive:   ["lookAround", "bounce", "wave", "nod"],
+  proud:       ["victoryPose", "fistPump", "sunglasses", "spin"],
+  frustrated:  ["steam", "steam", "meltdown", "startle"],
+  embarrassed: ["lookAround", "sigh", "huddle", "nod"],
+};
+
+const ACTION_DURATIONS: Partial<Record<SpecialAction, number>> = {
+  yawn: 2500, dozeOff: 3000, spin: 1200, sleepBubble: 3500, headSnap: 2000,
+  steam: 2500, meltdown: 2000, doodle: 2000, huddle: 2500, wave: 2000, eureka: 1800,
+};
+
+// ── Gaze wander config ───────────────────────────────────────────────────────
+
+const GAZE_WANDER: Record<MascotMood, { range: number; interval: [number, number]; dirBlend: number }> = {
+  excited:     { range: 3,   interval: [1000, 2000], dirBlend: 0.2 },
+  focused:     { range: 2,   interval: [2000, 4000], dirBlend: 0.15 },
+  anxious:     { range: 5,   interval: [400, 1200],  dirBlend: 0.4 },
+  satisfied:   { range: 2,   interval: [2500, 5000], dirBlend: 0.2 },
+  bored:       { range: 4,   interval: [1500, 3500], dirBlend: 0.3 },
+  lonely:      { range: 2.5, interval: [2000, 4000], dirBlend: 0.2 },
+  sleepy:      { range: 1,   interval: [3000, 6000], dirBlend: 0.1 },
+  attentive:   { range: 3,   interval: [800, 1500],  dirBlend: 0.35 },  // alert, looking around
+  proud:       { range: 1.5, interval: [2500, 5000], dirBlend: 0.15 },  // calm confidence
+  frustrated:  { range: 2,   interval: [600, 1200],  dirBlend: 0.3 },   // twitchy
+  embarrassed: { range: 3,   interval: [1500, 3000], dirBlend: 0.25 },  // avoidant
+};
+
+// ── Geometry ─────────────────────────────────────────────────────────────────
+
+const EYE_LEFT_CX = 75;
+const EYE_RIGHT_CX = 125;
+const EYE_CY = 40;
+const EYE_COLOR = "var(--color-accent)";   // brand accent color
+
+// ── Component ────────────────────────────────────────────────────────────────
+
+export function MascotEyes() {
+  const { t, i18n } = useTranslation();
+  const { sessions } = useSessionsStore();
+  const mood = useMemo(() => deriveMood(sessions), [sessions]);
+  const [expanded, setExpanded] = useState(true);
+
+  const [isBlinking, setIsBlinking] = useState(false);
+  const [isDoubleBlink, setIsDoubleBlink] = useState(false);
+  const [gazeOffset, setGazeOffset] = useState({ x: 0, y: 0 });
+  const [sizePulse, setSizePulse] = useState(0);
+  const [eyeVariant, setEyeVariant] = useState(0);
+  const [quipIndex, setQuipIndex] = useState(0);
+  const [specialAction, setSpecialAction] = useState<SpecialAction>("none");
+  const [bodyBobPhase, setBodyBobPhase] = useState(0);
+  const [moodJiggle, setMoodJiggle] = useState(false);
+  const [clickReaction, setClickReaction] = useState(false);
+  const [clickQuipKey, setClickQuipKey] = useState("");
+  const [generatedQuips, setGeneratedQuips] = useState<string[]>([]);
+  const [generatedClickQuips, setGeneratedClickQuips] = useState<string[]>([]);
+
+  const blinkTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const gazeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const pulseTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const quipTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const eyeVarTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const actionTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const actionEndTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const bobTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const clickTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const clickCooldown = useRef(false);
+
+  // ── Blink ──────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    function scheduleBlink() {
+      const delay = 2000 + Math.random() * 4000;
+      blinkTimer.current = setTimeout(() => {
+        setIsBlinking(true);
+        if (Math.random() < 0.25) {
+          setIsDoubleBlink(true);
+          setTimeout(() => setIsBlinking(false), 120);
+          setTimeout(() => setIsBlinking(true), 250);
+          setTimeout(() => { setIsBlinking(false); setIsDoubleBlink(false); }, 380);
+        } else {
+          setTimeout(() => setIsBlinking(false), 150);
+        }
+        scheduleBlink();
+      }, delay);
+    }
+    scheduleBlink();
+    return () => clearTimeout(blinkTimer.current);
+  }, []);
+
+  // ── Gaze wander (moves entire eye position) ───────────────────────────────
+  useEffect(() => {
+    const cfg = GAZE_WANDER[mood];
+    function scheduleMove() {
+      const delay = cfg.interval[0] + Math.random() * (cfg.interval[1] - cfg.interval[0]);
+      gazeTimer.current = setTimeout(() => {
+        setGazeOffset({
+          x: (Math.random() - 0.5) * cfg.range * 2,
+          y: (Math.random() - 0.5) * cfg.range,
+        });
+        scheduleMove();
+      }, delay);
+    }
+    scheduleMove();
+    return () => clearTimeout(gazeTimer.current);
+  }, [mood]);
+
+  // ── Size pulse (subtle breathing) ──────────────────────────────────────────
+  useEffect(() => {
+    function schedulePulse() {
+      const delay = 3000 + Math.random() * 5000;
+      pulseTimer.current = setTimeout(() => {
+        const d = mood === "lonely" ? Math.random() * 2 :
+                  (Math.random() - 0.5) * 1.5;
+        setSizePulse(d);
+        schedulePulse();
+      }, delay);
+    }
+    schedulePulse();
+    return () => clearTimeout(pulseTimer.current);
+  }, [mood]);
+
+  // ── Eye variant rotation ───────────────────────────────────────────────────
+  useEffect(() => {
+    setEyeVariant(0);
+    function scheduleVariant() {
+      const delay = 4000 + Math.random() * 6000;
+      eyeVarTimer.current = setTimeout(() => {
+        setEyeVariant((v) => (v + 1) % EYE_VARIANTS[mood].length);
+        scheduleVariant();
+      }, delay);
+    }
+    scheduleVariant();
+    return () => clearTimeout(eyeVarTimer.current);
+  }, [mood]);
+
+  // ── Quip rotation ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    setQuipIndex(Math.floor(Math.random() * 3));
+    function rotateQuip() {
+      quipTimer.current = setTimeout(() => {
+        setQuipIndex((i) => (i + 1) % 3);
+        rotateQuip();
+      }, 8000 + Math.random() * 4000);
+    }
+    rotateQuip();
+    return () => clearTimeout(quipTimer.current);
+  }, [mood]);
+
+  // ── Periodic special actions ───────────────────────────────────────────────
+  useEffect(() => {
+    setSpecialAction("none");
+    function scheduleAction() {
+      const delay = 10000 + Math.random() * 10000;
+      actionTimer.current = setTimeout(() => {
+        const actions = MOOD_ACTIONS[mood];
+        const action = actions[Math.floor(Math.random() * actions.length)];
+        setSpecialAction(action);
+        const duration = ACTION_DURATIONS[action] ?? 1500;
+        actionEndTimer.current = setTimeout(() => setSpecialAction("none"), duration);
+        scheduleAction();
+      }, delay);
+    }
+    scheduleAction();
+    return () => { clearTimeout(actionTimer.current); clearTimeout(actionEndTimer.current); };
+  }, [mood]);
+
+  // ── Body bob ───────────────────────────────────────────────────────────────
+  useEffect(() => {
+    let frame = 0;
+    function tick() {
+      frame++;
+      setBodyBobPhase(Math.sin(frame * 0.04) * 1.5);
+      bobTimer.current = setTimeout(tick, 50);
+    }
+    tick();
+    return () => clearTimeout(bobTimer.current);
+  }, []);
+
+  // ── Mood jiggle ────────────────────────────────────────────────────────────
+  useEffect(() => {
+    setMoodJiggle(true);
+    const t1 = setTimeout(() => setMoodJiggle(false), 400);
+    return () => clearTimeout(t1);
+  }, [mood]);
+
+  // ── Dynamic quip generation ────────────────────────────────────────────────
+  const fetchQuips = useCallback(async (currentMood: string, currentSessions: SessionInfo[]) => {
+    const titles = currentSessions
+      .filter((s) => s.aiTitle)
+      .map((s) => s.aiTitle!)
+      .slice(0, 10);
+
+    if (titles.length < MIN_TITLES_FOR_GENERATION) return;
+
+    try {
+      const quips = await invoke<string[]>("generate_mascot_quips", {
+        titles,
+        mood: currentMood,
+        locale: i18n.language,
+      });
+      if (quips.length > 0) {
+        // Split: first half for normal quips, second half for click quips
+        const mid = Math.ceil(quips.length / 2);
+        setGeneratedQuips(quips.slice(0, mid));
+        setGeneratedClickQuips(quips.slice(mid));
+      }
+    } catch {
+      // CLI not available or failed — silently ignore
+    }
+  }, [i18n.language]);
+
+  // Periodic regeneration + on session count change
+  const lastSessionCount = useRef(0);
+  const lastGenTime = useRef(0);
+
+  useEffect(() => {
+    const now = Date.now();
+    const sessionCount = sessions.length;
+    const countChanged = Math.abs(sessionCount - lastSessionCount.current) >= 2;
+    const timeExpired = now - lastGenTime.current > QUIP_REGEN_INTERVAL;
+
+    if ((countChanged || timeExpired) && sessions.length > 0) {
+      lastSessionCount.current = sessionCount;
+      lastGenTime.current = now;
+      fetchQuips(mood, sessions);
+    }
+
+    // Also set up a periodic timer
+    const interval = setInterval(() => {
+      if (sessions.length > 0) {
+        lastGenTime.current = Date.now();
+        fetchQuips(mood, sessions);
+      }
+    }, QUIP_REGEN_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [sessions.length, mood, fetchQuips, sessions]);
+
+  // ── Click handler ──────────────────────────────────────────────────────────
+  const handleMascotClick = () => {
+    if (clickCooldown.current || clickReaction) return;
+
+    // 50% chance to use a generated click quip if available
+    let key: string;
+    if (generatedClickQuips.length > 0 && Math.random() < 0.5) {
+      const gen = generatedClickQuips[Math.floor(Math.random() * generatedClickQuips.length)];
+      key = `__gen__${gen}`; // prefix to distinguish from i18n keys
+    } else {
+      const keys = CLICK_QUIP_KEYS[mood];
+      key = keys[Math.floor(Math.random() * keys.length)];
+    }
+
+    setClickReaction(true);
+    setClickQuipKey(key);
+    setMoodJiggle(true);
+    setTimeout(() => setMoodJiggle(false), 400);
+    clickCooldown.current = true;
+
+    clickTimer.current = setTimeout(() => {
+      setClickReaction(false);
+      setClickQuipKey("");
+    }, 3500);
+
+    setTimeout(() => { clickCooldown.current = false; }, 5000);
+  };
+
+  // Clean up click timer
+  useEffect(() => () => clearTimeout(clickTimer.current), []);
+
+  // ── Derived values ─────────────────────────────────────────────────────────
+
+  const variants = EYE_VARIANTS[mood];
+  const baseShape = variants[eyeVariant % variants.length];
+  // Override eye shape to heart during click reaction
+  const shape = clickReaction ? { ...baseShape, eyeShape: "heart" as const } : baseShape;
+  // Quip text: mix i18n keys with generated quips.
+  // Generated quips are interleaved — every other rotation shows a generated one.
+  const quipText = useMemo(() => {
+    if (clickReaction && clickQuipKey) {
+      // Click reaction: use generated click quip if available, otherwise i18n
+      if (clickQuipKey.startsWith("__gen__")) {
+        return clickQuipKey.slice(7); // strip prefix, it's raw text
+      }
+      return t(clickQuipKey);
+    }
+    // Normal quip rotation: alternate between i18n and generated
+    const i18nText = t(QUIP_KEYS[mood][quipIndex % 3]);
+    if (generatedQuips.length > 0 && quipIndex % 2 === 1) {
+      return generatedQuips[Math.floor(quipIndex / 2) % generatedQuips.length];
+    }
+    return i18nText;
+  }, [clickReaction, clickQuipKey, mood, quipIndex, generatedQuips, t]);
+
+  const isYawning = specialAction === "yawn";
+  const isDozing = specialAction === "dozeOff";
+  const isBouncing = specialAction === "bounce";
+  const isLookingAround = specialAction === "lookAround";
+  const isSighing = specialAction === "sigh";
+  const isEureka = specialAction === "eureka";
+
+  const yawnLidExtra = isYawning ? 0.35 : 0;
+  const dozeLidExtra = isDozing ? 0.55 : 0;
+  const eurekaLidReduction = isEureka ? -0.12 : 0;
+
+  const wanderCfg = GAZE_WANDER[mood];
+  const effectiveGaze = isLookingAround
+    ? { x: Math.sin(Date.now() * 0.01) * 6, y: 0 }
+    : shape.gazeX !== undefined || shape.gazeY !== undefined
+    ? {
+        x: (shape.gazeX ?? 0) * 5 + gazeOffset.x * wanderCfg.dirBlend,
+        y: (shape.gazeY ?? 0) * 5 + gazeOffset.y * wanderCfg.dirBlend,
+      }
+    : gazeOffset;
+
+  const bodyTranslateY = bodyBobPhase
+    + (isBouncing ? Math.sin(Date.now() * 0.02) * 3 : 0)
+    + (isSighing ? 2 : 0);
+
+  // ── Special eye shape SVG paths ──────────────────────────────────────────────
+
+  const renderSpecialEyeShape = (cx: number, cy: number, size: number, type: "star" | "cross" | "diamond" | "spiral" | "heart") => {
+    switch (type) {
+      case "star": {
+        // 5-pointed star
+        const pts: string[] = [];
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? size : size * 0.45;
+          const angle = (Math.PI / 2) + (i * Math.PI / 5);
+          pts.push(`${cx + r * Math.cos(angle)},${cy - r * Math.sin(angle)}`);
+        }
+        return (
+          <g className={styles.eyeShape_star}>
+            <polygon points={pts.join(" ")} fill={EYE_COLOR} />
+            <polygon points={pts.join(" ")} fill="url(#grad-special)" opacity={0.4} />
+          </g>
+        );
+      }
+      case "cross": {
+        // Bold X shape
+        const w = size * 0.3;
+        return (
+          <g className={styles.eyeShape_cross}>
+            <line x1={cx - size} y1={cy - size} x2={cx + size} y2={cy + size}
+              stroke={EYE_COLOR} strokeWidth={w} strokeLinecap="round" />
+            <line x1={cx + size} y1={cy - size} x2={cx - size} y2={cy + size}
+              stroke={EYE_COLOR} strokeWidth={w} strokeLinecap="round" />
+          </g>
+        );
+      }
+      case "diamond": {
+        // 4-pointed diamond/sparkle
+        const d = `M ${cx},${cy - size} L ${cx + size * 0.5},${cy} L ${cx},${cy + size} L ${cx - size * 0.5},${cy} Z`;
+        return (
+          <g className={styles.eyeShape_diamond}>
+            <path d={d} fill={EYE_COLOR} />
+            <path d={d} fill="url(#grad-special)" opacity={0.3} />
+            {/* Small sparkle lines */}
+            <line x1={cx - size * 0.7} y1={cy} x2={cx - size * 0.4} y2={cy}
+              stroke={EYE_COLOR} strokeWidth={1} opacity={0.6} />
+            <line x1={cx + size * 0.4} y1={cy} x2={cx + size * 0.7} y2={cy}
+              stroke={EYE_COLOR} strokeWidth={1} opacity={0.6} />
+          </g>
+        );
+      }
+      case "spiral": {
+        // Archimedean spiral
+        const pts: string[] = [];
+        const turns = 2.5;
+        const steps = 60;
+        for (let i = 0; i <= steps; i++) {
+          const t = (i / steps) * turns * Math.PI * 2;
+          const r = (i / steps) * size;
+          pts.push(`${cx + r * Math.cos(t)},${cy + r * Math.sin(t)}`);
+        }
+        return (
+          <g className={styles.eyeShape_spiral}>
+            <polyline points={pts.join(" ")} fill="none"
+              stroke={EYE_COLOR} strokeWidth={2.5} strokeLinecap="round" />
+          </g>
+        );
+      }
+      case "heart": {
+        // Heart shape using cubic bezier curves
+        const s = size * 0.85;
+        const d = `M ${cx},${cy + s * 0.35}
+          C ${cx},${cy + s * 0.15} ${cx - s * 0.55},${cy - s * 0.15} ${cx - s * 0.55},${cy - s * 0.35}
+          C ${cx - s * 0.55},${cy - s * 0.6} ${cx},${cy - s * 0.55} ${cx},${cy - s * 0.25}
+          C ${cx},${cy - s * 0.55} ${cx + s * 0.55},${cy - s * 0.6} ${cx + s * 0.55},${cy - s * 0.35}
+          C ${cx + s * 0.55},${cy - s * 0.15} ${cx},${cy + s * 0.15} ${cx},${cy + s * 0.35} Z`;
+        return (
+          <g className={styles.eyeShape_heart}>
+            <path d={d} fill={EYE_COLOR} />
+            <path d={d} fill="url(#grad-special)" opacity={0.4} />
+          </g>
+        );
+      }
+    }
+  };
+
+  // ── Render single eye (LOOI-style: solid filled circle) ─────────────────────
+
+  const renderEye = (baseCx: number, isRight: boolean) => {
+    const clipId = isRight ? "clip-eye-r" : "clip-eye-l";
+    const gradId = isRight ? "grad-eye-r" : "grad-eye-l";
+    const { rx, ry, lidTop, lidBot, rightLidTop, rightRy } = shape;
+    const effectiveRy = isRight && rightRy ? rightRy : ry;
+    const baseLidTop = isRight && rightLidTop !== undefined ? rightLidTop : lidTop;
+
+    const blinkLid = isBlinking ? 0.95
+      : Math.max(0, Math.min(baseLidTop + yawnLidExtra + dozeLidExtra + eurekaLidReduction, 0.95));
+
+    // Eye position includes gaze offset
+    const cx = baseCx + effectiveGaze.x;
+    const cy = EYE_CY + effectiveGaze.y;
+
+    // Subtle size pulse
+    const pRx = rx + sizePulse * 0.3;
+    const pRy = effectiveRy + sizePulse * 0.3;
+
+    // Special eye shapes: skip the ellipse+eyelid system entirely
+    if (shape.eyeShape && !isBlinking) {
+      const eyeSize = Math.min(pRx, pRy) * 0.9;
+      return (
+        <g className={moodJiggle ? styles.eyeJiggle : ""}>
+          {renderSpecialEyeShape(cx, cy, eyeSize, shape.eyeShape)}
+        </g>
+      );
+    }
+
+    const eyeTop = cy - pRy;
+    const lidTopHeight = pRy * 2 * blinkLid;
+    const lidBotHeight = pRy * 2 * lidBot;
+
+    return (
+      <g className={moodJiggle ? styles.eyeJiggle : ""}>
+        {/* Watery glow for lonely */}
+        {mood === "lonely" && (
+          <ellipse cx={cx} cy={cy} rx={pRx + 4} ry={pRy + 4}
+            fill="rgba(100,180,255,0.06)" className={styles.waterShimmer} />
+        )}
+
+        <defs>
+          <clipPath id={clipId}>
+            <ellipse cx={cx} cy={cy} rx={pRx + 0.5} ry={pRy + 0.5} />
+          </clipPath>
+          {/* LOOI-style inner shadow: top-to-bottom gradient darkening the lower portion */}
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(0,0,0,0)" />
+            <stop offset="55%" stopColor="rgba(0,0,0,0)" />
+            <stop offset="100%" stopColor="rgba(60,20,120,0.45)" />
+          </linearGradient>
+        </defs>
+
+        {/* Eye content — clipped to eye ellipse */}
+        <g clipPath={`url(#${clipId})`}>
+          {/* Solid accent eye fill */}
+          <ellipse cx={cx} cy={cy} rx={pRx} ry={pRy} fill={EYE_COLOR} className={styles.eyeFill} />
+
+          {/* Inner shadow overlay — purple gradient at bottom of eye (3D sphere look) */}
+          <ellipse cx={cx} cy={cy} rx={pRx} ry={pRy} fill={`url(#${gradId})`} />
+
+          {/* Top eyelid — slides down from above, background-colored */}
+          <rect
+            x={cx - pRx - 2} y={eyeTop - 2}
+            width={pRx * 2 + 4}
+            height={Math.max(0, lidTopHeight + 2)}
+            fill="var(--mascot-bg)" className={styles.eyelid}
+          />
+          {/* Bottom eyelid — rises from below */}
+          {lidBot > 0 && (
+            <rect
+              x={cx - pRx - 2}
+              y={cy + pRy - lidBotHeight}
+              width={pRx * 2 + 4}
+              height={lidBotHeight + 2}
+              fill="var(--mascot-bg)" className={styles.eyelid}
+            />
+          )}
+        </g>
+      </g>
+    );
+  };
+
+  // ── Mouth (LOOI-style small line/curve between eyes) ────────────────────────
+  const MOUTH_CX = (EYE_LEFT_CX + EYE_RIGHT_CX) / 2;
+  const MOUTH_CY = EYE_CY + shape.ry + 8;
+
+  const renderMouth = () => {
+    switch (mood) {
+      case "satisfied":
+        // happy wavy ~~ mouth
+        return (
+          <path
+            d={`M ${MOUTH_CX - 6},${MOUTH_CY} q 3,-3 6,0 q 3,3 6,0`}
+            fill="none" stroke="var(--color-accent)" strokeWidth={1.5}
+            strokeLinecap="round" opacity={0.7} className={styles.mouth}
+          />
+        );
+      case "excited":
+        // big open grin
+        return (
+          <path
+            d={`M ${MOUTH_CX - 9},${MOUTH_CY - 2} q 9,10 18,0`}
+            fill="var(--color-accent)" fillOpacity={0.15} stroke="var(--color-accent)" strokeWidth={1.8}
+            strokeLinecap="round" opacity={0.8} className={styles.mouth}
+          />
+        );
+      case "focused":
+        // asymmetric thinking pout — one side slightly raised
+        return (
+          <path
+            d={`M ${MOUTH_CX - 5},${MOUTH_CY + 1} q 3,-2 6,-1 q 2,1 4,2`}
+            fill="none" stroke="var(--color-accent)" strokeWidth={1.2}
+            strokeLinecap="round" opacity={0.5} className={styles.mouth}
+          />
+        );
+      case "anxious":
+        // small worried squiggle
+        return (
+          <path
+            d={`M ${MOUTH_CX - 5},${MOUTH_CY} q 2.5,-2 5,0 q 2.5,2 5,0`}
+            fill="none" stroke="var(--color-accent)" strokeWidth={1.2}
+            strokeLinecap="round" opacity={0.5} className={styles.mouth}
+          />
+        );
+      case "bored":
+        // flat line
+        return (
+          <line
+            x1={MOUTH_CX - 5} y1={MOUTH_CY} x2={MOUTH_CX + 5} y2={MOUTH_CY}
+            stroke="var(--color-accent)" strokeWidth={1.3}
+            strokeLinecap="round" opacity={0.5} className={styles.mouth}
+          />
+        );
+      case "lonely":
+        // small frown
+        return (
+          <path
+            d={`M ${MOUTH_CX - 5},${MOUTH_CY + 1} q 5,-4 10,0`}
+            fill="none" stroke="var(--color-accent)" strokeWidth={1.2}
+            strokeLinecap="round" opacity={0.5} className={styles.mouth}
+          />
+        );
+      case "sleepy":
+        // tiny open mouth (yawning-ish)
+        return (
+          <ellipse
+            cx={MOUTH_CX} cy={MOUTH_CY}
+            rx={3} ry={2}
+            fill="var(--color-accent)" opacity={0.3} className={styles.mouth}
+          />
+        );
+      case "attentive":
+        // small "o" mouth — surprised / curious
+        return (
+          <ellipse
+            cx={MOUTH_CX} cy={MOUTH_CY}
+            rx={3.5} ry={3}
+            fill="none" stroke="var(--color-accent)" strokeWidth={1.2}
+            opacity={0.6} className={styles.mouth}
+          />
+        );
+      case "proud":
+        // wide smug grin
+        return (
+          <path
+            d={`M ${MOUTH_CX - 8},${MOUTH_CY - 1} q 8,7 16,0`}
+            fill="none" stroke="var(--color-accent)" strokeWidth={1.5}
+            strokeLinecap="round" opacity={0.7} className={styles.mouth}
+          />
+        );
+      case "frustrated":
+        // tight frown
+        return (
+          <path
+            d={`M ${MOUTH_CX - 6},${MOUTH_CY + 2} q 6,-5 12,0`}
+            fill="none" stroke="var(--color-accent)" strokeWidth={1.5}
+            strokeLinecap="round" opacity={0.6} className={styles.mouth}
+          />
+        );
+      case "embarrassed":
+        // lopsided cringe smile — one side up, one side down
+        return (
+          <path
+            d={`M ${MOUTH_CX - 6},${MOUTH_CY + 1} q 4,-4 7,-1 q 2,3 5,2`}
+            fill="none" stroke="var(--color-accent)" strokeWidth={1.3}
+            strokeLinecap="round" opacity={0.5} className={styles.mouth}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
+  // ── Emoji decoration system ──────────────────────────────────────────────────
+
+  interface EmojiItem {
+    emoji: string;
+    x: number;
+    y: number;
+    size: number;
+    anim: string;  // CSS class name from styles
+  }
+
+  const MOOD_EMOJIS: Record<MascotMood, EmojiItem[]> = {
+    excited: [],
+    focused: [],
+    anxious: [],
+    satisfied: [],
+    bored: [],
+    lonely: [],
+    sleepy: [],
+    attentive: [],
+    proud: [],
+    frustrated: [],
+    embarrassed: [],
+  };
+
+  const renderEmojis = () => {
+    const items = (MOOD_EMOJIS as Record<string, EmojiItem[]>)[mood] ?? [];
+    const elements: React.ReactNode[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const { emoji, x, y, size, anim } = items[i];
+      elements.push(
+        <text
+          key={`emoji-${i}`}
+          x={x} y={y}
+          fontSize={size}
+          className={styles[anim] ?? ""}
+          textAnchor="middle"
+          dominantBaseline="central"
+        >{emoji}</text>
+      );
+    }
+
+    // Keep sunglasses SVG overlay for satisfied mood
+    if (mood === "satisfied" && specialAction === "sunglasses") {
+      elements.push(
+        <g key="shades" className={styles.sunglassesDrop}>
+          <rect x={EYE_LEFT_CX - 16} y={EYE_CY - 10} width={28} height={16} rx={4} fill="rgba(30,30,40,0.85)" />
+          <rect x={EYE_RIGHT_CX - 12} y={EYE_CY - 10} width={28} height={16} rx={4} fill="rgba(30,30,40,0.85)" />
+          <line x1={EYE_LEFT_CX + 12} y1={EYE_CY} x2={EYE_RIGHT_CX - 12} y2={EYE_CY}
+            stroke="rgba(30,30,40,0.85)" strokeWidth={2.5} />
+        </g>
+      );
+    }
+
+    // Keep sleep bubbles for sleepy+sleepBubble action
+    if (mood === "sleepy" && specialAction === "sleepBubble") {
+      elements.push(
+        <circle key="b1" cx={112} cy={52} r={2} fill="none" stroke="rgba(200,200,220,0.5)" strokeWidth={0.8} className={styles.sleepBubbleSmall} />,
+        <circle key="b2" cx={118} cy={44} r={4} fill="none" stroke="rgba(200,200,220,0.4)" strokeWidth={0.8} className={styles.sleepBubbleMed} />,
+        <circle key="b3" cx={126} cy={32} r={7} fill="none" stroke="rgba(200,200,220,0.35)" strokeWidth={1} className={styles.sleepBubbleBig} />,
+      );
+    }
+
+    // Keep startle exclamation
+    if (mood === "anxious" && specialAction === "startle") {
+      elements.push(
+        <text key="excl" x={150} y={14} fontSize="14" fill="#fbbf24" fontWeight="bold" className={styles.startleMark}>!</text>,
+      );
+    }
+
+    // Keep embarrassed blush circles (these look good as subtle SVG)
+    if (mood === "embarrassed") {
+      elements.push(
+        <g key="blush" opacity={0.35}>
+          <ellipse cx={EYE_LEFT_CX - 8} cy={EYE_CY + 14} rx={8} ry={4} fill="#f87171" />
+          <ellipse cx={EYE_RIGHT_CX + 8} cy={EYE_CY + 14} rx={8} ry={4} fill="#f87171" />
+        </g>
+      );
+    }
+
+    // Keep frustrated steam for steam action
+    if (mood === "frustrated" && specialAction === "steam") {
+      elements.push(
+        <g key="steam-circles" opacity={0.5}>
+          <circle cx={50} cy={14} r={3} fill="none" stroke="rgba(200,200,200,0.6)" strokeWidth={1} className={styles.steamLeft1} />
+          <circle cx={46} cy={8} r={4} fill="none" stroke="rgba(200,200,200,0.5)" strokeWidth={1} className={styles.steamLeft2} />
+          <circle cx={150} cy={14} r={3} fill="none" stroke="rgba(200,200,200,0.6)" strokeWidth={1} className={styles.steamRight1} />
+          <circle cx={154} cy={8} r={4} fill="none" stroke="rgba(200,200,200,0.5)" strokeWidth={1} className={styles.steamRight2} />
+        </g>
+      );
+    }
+
+    // Click reaction: emoji burst
+    if (clickReaction) {
+      const burstEmojis = ["💕", "✨", "💖", "⭐", "💗"];
+      const burstPositions = [
+        { x: 60, y: 20 }, { x: 140, y: 15 }, { x: 100, y: 5 },
+        { x: 50, y: 8 }, { x: 150, y: 25 },
+      ];
+      burstEmojis.forEach((emoji, i) => {
+        elements.push(
+          <text
+            key={`burst-${i}`}
+            x={burstPositions[i].x}
+            y={burstPositions[i].y}
+            fontSize={11}
+            className={styles[`clickBurstEmoji${i + 1}`]}
+            textAnchor="middle"
+            dominantBaseline="central"
+          >{emoji}</text>
+        );
+      });
+    }
+
+    return elements.length > 0 ? <>{elements}</> : null;
+  };
+
+  // ── Render ─────────────────────────────────────────────────────────────────
+
+  const mascotClasses = [
+    styles.mascot,
+    styles[mood],
+    specialAction !== "none" && !clickReaction ? styles[`action_${specialAction}`] : "",
+    clickReaction ? styles.clickReaction : "",
+    isDoubleBlink ? styles.doubleBlink : "",
+  ].filter(Boolean).join(" ");
+
+  const quipClasses = [
+    styles.quip,
+    clickReaction ? styles.clickQuip : "",
+  ].filter(Boolean).join(" ");
+
+  return (
+    <div className={styles.container}>
+      <button className={styles.toggle} onClick={() => setExpanded((v) => !v)}>
+        <span className={styles.toggle_label}>{t("mascot.panel_title")}</span>
+        <span className={styles.toggle_icon}>{expanded ? "▲" : "▼"}</span>
+      </button>
+      {expanded && (
+        <div className={mascotClasses} onClick={handleMascotClick}>
+          {quipText && (
+            <div className={styles.quipBubble} key={`${mood}-${quipIndex}-${clickReaction}`}>
+              <div className={quipClasses}>{quipText}</div>
+            </div>
+          )}
+          <svg viewBox="0 -14 200 114" className={styles.svg}>
+            <defs>
+              <linearGradient id="grad-special" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="rgba(255,255,255,0.3)" />
+                <stop offset="100%" stopColor="rgba(0,0,0,0.2)" />
+              </linearGradient>
+            </defs>
+            <rect x="0" y="-14" width="200" height="128" fill="var(--mascot-bg)" className={styles.bg} />
+            <g style={{ transform: `translateY(${bodyTranslateY}px)` }} className={styles.bodyGroup}>
+              {renderEye(EYE_LEFT_CX, false)}
+              {renderEye(EYE_RIGHT_CX, true)}
+              {renderMouth()}
+            </g>
+            {renderEmojis()}
+          </svg>
+        </div>
+      )}
+    </div>
+  );
+}

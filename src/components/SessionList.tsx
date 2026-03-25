@@ -4,21 +4,23 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
-import { AccountInfo } from "./AccountInfo";
 import { GalleryView } from "./GalleryView";
+import { MascotEyes } from "./MascotEyes";
 import { MemoryPanel } from "./MemoryPanel";
-import { LanguageSwitcher } from "./LanguageSwitcher";
 import { SessionCard } from "./SessionCard";
+import { SettingsPanel } from "./SettingsPanel";
 import styles from "./SessionList.module.css";
-import { ThemeToggle } from "./ThemeToggle";
 import { TokenSpeedChart } from "./TokenSpeedChart";
+import { UsagePanel } from "./UsagePanel";
+import { AlertBadge } from "./WaitingAlerts";
+import { getItem, setItem } from "../storage";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
 const DEFAULT_WIDTH = 280;
 
 function getSavedWidth(): number {
-  const saved = localStorage.getItem("sidebar-width");
+  const saved = getItem("sidebar-width");
   if (saved) {
     const n = parseInt(saved, 10);
     if (n >= MIN_WIDTH && n <= MAX_WIDTH) return n;
@@ -31,11 +33,13 @@ export function SessionList() {
   const { sessions, refresh, setSessions } = useSessionsStore();
   const { session: viewedSession, open } = useDetailStore();
   const { viewMode, setViewMode } = useUIStore();
-  const { connection, disconnect } = useConnectionStore();
+  const { connection } = useConnectionStore();
   const [filter, setFilter] = useState("");
+  const [showAll, setShowAll] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
   const [isDragging, setIsDragging] = useState(false);
   const [isWindows, setIsWindows] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
@@ -65,7 +69,7 @@ export function SessionList() {
       dragRef.current = null;
       setIsDragging(false);
       setSidebarWidth((prev) => {
-        localStorage.setItem("sidebar-width", String(prev));
+        setItem("sidebar-width", String(prev));
         return prev;
       });
       document.removeEventListener("mousemove", onMouseMove);
@@ -158,6 +162,8 @@ export function SessionList() {
     ["thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating"].includes(s.status)
   ).length;
 
+  const isRemote = connection?.type === "remote";
+
   return (
     <>
       <aside className={styles.sidebar} style={{ width: sidebarWidth }}>
@@ -169,84 +175,66 @@ export function SessionList() {
             <span className={styles.count} title={`${activeCount} active`}>
               {sessions.length}
             </span>
+            <AlertBadge />
           </div>
         )}
 
-        {/* Controls row */}
-        <div className={styles.controls}>
-          <ThemeToggle />
-          <LanguageSwitcher />
+        {/* Navigation */}
+        <nav className={styles.nav} data-wizard="view-toggle">
           <button
-            className={styles.switch_btn}
-            onClick={async () => {
-              await useDetailStore.getState().close();
-              await disconnect();
-            }}
-            title={t("switch_connection")}
+            className={`${styles.nav_item} ${viewMode === "list" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("list")}
           >
-            {connection?.type === "remote" ? "⇄" : "💻"}
+            <span className={styles.nav_icon}>☰</span>
+            <span className={styles.nav_label}>{t("view_list")}</span>
           </button>
-          <div className={styles.view_toggle} data-wizard="view-toggle">
-            <button
-              className={`${styles.view_btn} ${viewMode === "list" ? styles.view_active : ""}`}
-              onClick={() => setViewMode("list")}
-              title={t("view_list")}
-            >
-              ☰
-            </button>
-            <button
-              className={`${styles.view_btn} ${viewMode === "gallery" ? styles.view_active : ""}`}
-              onClick={() => setViewMode("gallery")}
-              title={t("view_gallery")}
-            >
-              ⊞
-            </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "gallery" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("gallery")}
+          >
+            <span className={styles.nav_icon}>⊞</span>
+            <span className={styles.nav_label}>{t("view_gallery")}</span>
+          </button>
+        </nav>
+
+        <div className={styles.separator} />
+
+        {/* Scrollable sidebar content */}
+        <div className={styles.sidebar_content}>
+          {/* Token Speed Chart */}
+          <div data-wizard="token-speed">
+            <TokenSpeedChart />
           </div>
-        </div>
 
-        {/* Token Speed Chart */}
-        <div data-wizard="token-speed">
-          <TokenSpeedChart />
-        </div>
+          {/* Usage panel */}
+          <UsagePanel />
 
-        {/* Search + Session list — hidden in gallery mode */}
-        {viewMode === "list" && (
-          <>
-            <input
-              className={styles.search}
-              type="text"
-              placeholder={t("filter_placeholder")}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-
-            <div className={styles.list}>
-              {active.length > 0 && (
-                <section>
-                  <div className={styles.group_label}>{t("active")}</div>
-                  {renderGroup(active)}
-                </section>
-              )}
-
-              {idle.length > 0 && (
-                <section>
-                  <div className={styles.group_label}>{t("recent")}</div>
-                  {renderGroup(idle)}
-                </section>
-              )}
-
-              {filtered.length === 0 && (
-                <p className={styles.empty}>{t("no_sessions")}</p>
-              )}
-            </div>
-          </>
-        )}
-
-        <div style={{ marginTop: "auto" }}>
+          {/* Memory panel */}
           <MemoryPanel />
-          <div data-wizard="account-info">
-            <AccountInfo />
-          </div>
+
+          {/* Mascot */}
+          <MascotEyes />
+        </div>
+
+        {/* Footer profile card */}
+        <div className={styles.footer} data-wizard="settings-footer">
+          <button
+            className={styles.footer_card}
+            onClick={() => setShowSettings(true)}
+            title={t("settings.title")}
+          >
+            <div className={styles.footer_avatar}>
+              <img src="/app-icon.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+            </div>
+            <div className={styles.footer_info}>
+              <span className={styles.footer_name}>{t("title")}</span>
+              <span className={styles.footer_status}>
+                <span className={`${styles.footer_dot} ${isRemote ? styles.footer_dot_remote : ""}`} />
+                {isRemote ? t("settings.remote") : t("settings.local")}
+              </span>
+            </div>
+            <span className={styles.footer_gear}>⚙</span>
+          </button>
         </div>
 
         {/* Resize handle */}
@@ -256,8 +244,64 @@ export function SessionList() {
         />
       </aside>
 
-      {/* Gallery view rendered as sibling of sidebar, fills main area */}
-      {viewMode === "gallery" && <GalleryView />}
+      {/* Settings panel */}
+      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+
+      {/* Main content area */}
+      {viewMode === "list" ? (
+        <div className={styles.main_area}>
+          <div className={styles.toolbar}>
+            <input
+              className={styles.search}
+              type="text"
+              placeholder={t("filter_placeholder")}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+            />
+            <span className={styles.active_count}>
+              {active.length} {t("active")}
+            </span>
+            <button
+              className={`${styles.toggle_btn} ${showAll ? styles.toggle_btn_active : ""}`}
+              onClick={() => setShowAll((v) => !v)}
+              title={showAll ? t("gallery_show_active") : t("gallery_show_all")}
+            >
+              {showAll ? t("gallery_show_active") : t("gallery_show_all")}
+            </button>
+          </div>
+
+          <div className={styles.list}>
+            {showAll ? (
+              <>
+                {active.length > 0 && (
+                  <section>
+                    <div className={styles.group_label}>{t("active")}</div>
+                    {renderGroup(active)}
+                  </section>
+                )}
+                {idle.length > 0 && (
+                  <section>
+                    <div className={styles.group_label}>{t("recent")}</div>
+                    {renderGroup(idle)}
+                  </section>
+                )}
+                {promoted.length === 0 && (
+                  <p className={styles.empty}>{t("no_sessions")}</p>
+                )}
+              </>
+            ) : (
+              <>
+                {active.length > 0 && renderGroup(active)}
+                {active.length === 0 && (
+                  <p className={styles.empty}>{t("no_sessions")}</p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
+        <GalleryView />
+      )}
     </>
   );
 }

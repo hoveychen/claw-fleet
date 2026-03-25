@@ -61,7 +61,7 @@ function formatTime(iso: string): string {
 
 export function MemoryPanel() {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(true);
   const [memories, setMemories] = useState<WorkspaceMemory[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -83,10 +83,10 @@ export function MemoryPanel() {
   }, []);
 
   useEffect(() => {
-    if (expanded && !loaded) {
+    if (!loaded) {
       load();
     }
-  }, [expanded, loaded, load]);
+  }, [loaded, load]);
 
   const totalFiles = memories.reduce((sum, w) => sum + w.files.length, 0);
 

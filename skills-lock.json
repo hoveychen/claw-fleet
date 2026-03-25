@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "skills": {
+    "_svg-drawing": {
+      "source": "smithery.ai",
+      "sourceType": "well-known",
+      "computedHash": "3e6a0b7153629beb8e55ff0e22b6336256f4de7e2f7631414cfa0453663c1fd4"
+    }
+  }
+}

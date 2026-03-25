@@ -23,7 +23,7 @@ const STEPS: Step[] = [
     placement: "right",
   },
   {
-    target: "account-info",
+    target: "settings-footer",
     titleKey: "wizard.account_info.title",
     descKey: "wizard.account_info.desc",
     placement: "top",

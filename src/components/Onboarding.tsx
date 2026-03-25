@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionsStore } from "../store";
 import styles from "./Onboarding.module.css";
@@ -12,6 +13,8 @@ interface DetectedTools {
   jetbrains: boolean;
   desktop: boolean;
   cursor: boolean;
+  openclaw: boolean;
+  codex: boolean;
 }
 
 interface SetupStatus {
@@ -122,7 +125,7 @@ function CopyableCommand({ cmd }: { cmd: string }) {
   const [copied, setCopied] = useState(false);
 
   const copy = () => {
-    navigator.clipboard.writeText(cmd);
+    writeText(cmd);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -319,6 +322,54 @@ function CelebrationView({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
+// ── Source selection card ─────────────────────────────────────────────────────
+
+interface SourceInfo {
+  name: string;
+  enabled: boolean;
+  available: boolean;
+}
+
+function SourceSelectionCard({
+  sources,
+  onToggle,
+}: {
+  sources: SourceInfo[];
+  onToggle: (name: string, enabled: boolean) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className={`${styles.card} ${styles.card_info}`}>
+      <div className={styles.card_header}>
+        <span className={styles.card_icon}>&#x1F50C;</span>
+        <span className={styles.card_title}>{t("onboarding.sources.title")}</span>
+      </div>
+      <p className={styles.card_description}>{t("onboarding.sources.description")}</p>
+      <div className={styles.source_list}>
+        {sources.map((source) => (
+          <label key={source.name} className={styles.source_item}>
+            <input
+              type="checkbox"
+              checked={source.enabled}
+              onChange={(e) => onToggle(source.name, e.target.checked)}
+              className={styles.source_checkbox}
+            />
+            <span className={styles.source_name}>
+              {t(`settings.source_name.${source.name}`)}
+            </span>
+            {source.available ? (
+              <span className={styles.source_detected}>{t("onboarding.sources.detected")}</span>
+            ) : (
+              <span className={styles.source_not_found}>{t("onboarding.sources.not_detected")}</span>
+            )}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Main Onboarding component ────────────────────────────────────────────────
 
 export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
@@ -329,6 +380,38 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
   const [accountError, setAccountError] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
   const prevSessionCount = useRef(0);
+
+  // ── Sources config ───────────────────────────────────────────────────────
+  const [sources, setSources] = useState<SourceInfo[]>([]);
+  const sourcesChanged = useRef(false);
+
+  useEffect(() => {
+    invoke<SourceInfo[]>("get_sources_config").then(setSources).catch(() => {});
+  }, []);
+
+  const handleToggleSource = useCallback(async (name: string, enabled: boolean) => {
+    try {
+      await invoke("set_source_enabled", { name, enabled });
+      setSources((prev) => prev.map((s) => (s.name === name ? { ...s, enabled } : s)));
+      sourcesChanged.current = true;
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // Show source selection only when there are multiple source types detected
+  const hasMultipleSources = useMemo(() => {
+    return sources.filter((s) => s.available).length > 1;
+  }, [sources]);
+
+  // Wrap onDismiss: if sources were changed, restart to pick up new config
+  const handleDismiss = useCallback(() => {
+    if (sourcesChanged.current) {
+      invoke("restart_app");
+    } else {
+      onDismiss();
+    }
+  }, [onDismiss]);
 
   const check = useCallback(async () => {
     setLoading(true);
@@ -353,7 +436,7 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
         cli_installed: false,
         cli_path: null,
         claude_dir_exists: false,
-        detected_tools: { cli: false, vscode: false, jetbrains: false, desktop: false, cursor: false },
+        detected_tools: { cli: false, vscode: false, jetbrains: false, desktop: false, cursor: false, openclaw: false, codex: false },
         logged_in: false,
         has_sessions: false,
         credentials_valid: null,
@@ -410,7 +493,7 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
     <div className={styles.overlay}>
       <div className={styles.container}>
         {celebrating ? (
-          <CelebrationView onDismiss={onDismiss} />
+          <CelebrationView onDismiss={handleDismiss} />
         ) : (
           <>
             <div className={styles.header}>
@@ -436,6 +519,12 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
                   </div>
                 )}
 
+                {hasMultipleSources && sources.length > 0 && (
+                  <div className={styles.cards}>
+                    <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
+                  </div>
+                )}
+
                 {showWaiting && <WaitingForSession />}
 
                 {noIssues && status?.has_sessions && !celebrating && (
@@ -453,7 +542,7 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
             )}
 
             <div className={styles.footer}>
-              <button className={styles.btn_secondary} onClick={onDismiss}>
+              <button className={styles.btn_secondary} onClick={handleDismiss}>
                 {t("onboarding.skip")}
               </button>
               {!loading && issues.length > 0 && (
@@ -462,7 +551,7 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
                 </button>
               )}
               {noIssues && status?.has_sessions && (
-                <button className={styles.btn_primary} onClick={onDismiss}>
+                <button className={styles.btn_primary} onClick={handleDismiss}>
                   {t("onboarding.dismiss")}
                 </button>
               )}

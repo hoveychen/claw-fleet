@@ -33,7 +33,31 @@ export interface SessionInfo {
   pid: number | null;
   pidPrecise: boolean;
   lastSkill: string | null;
-  agentSource: "claude-code" | "cursor";
+  agentSource: "claude-code" | "cursor" | "openclaw" | "codex";
+  lastOutcome: SessionOutcome[] | null;
+}
+
+export type SessionOutcome =
+  | "needs_input"
+  | "bug_fixed"
+  | "feature_added"
+  | "stuck"
+  | "apologizing"
+  | "show_off"
+  | "concerned"
+  | "confused"
+  | "celebrating"
+  | "quick_fix"
+  | "overwhelmed"
+  | "scheming"
+  | "reporting";
+
+export interface WaitingAlert {
+  sessionId: string;
+  workspaceName: string;
+  summary: string;
+  detectedAtMs: number;
+  jsonlPath: string;
 }
 
 export interface SkillInvocation {

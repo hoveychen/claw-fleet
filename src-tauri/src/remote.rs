@@ -47,6 +47,85 @@ fn default_probe_port() -> u16 {
     7007
 }
 
+// ── ProbeClient ──────────────────────────────────────────────────────────────
+
+/// Reusable HTTP client for communicating with a remote Fleet probe.
+/// Encapsulates base URL, auth token, and a shared `reqwest` client so that
+/// every remote call is a one-liner instead of ~15 lines of boilerplate.
+#[derive(Clone)]
+pub(crate) struct ProbeClient {
+    base_url: String,
+    auth_header: String,
+    client: reqwest::blocking::Client,
+}
+
+impl ProbeClient {
+    fn new(base_url: String, token: &str) -> Self {
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .unwrap();
+        Self {
+            base_url,
+            auth_header: format!("Bearer {}", token),
+            client,
+        }
+    }
+
+    /// GET endpoint and deserialize the JSON response body.
+    fn get<T: serde::de::DeserializeOwned>(&self, endpoint: &str) -> Result<T, String> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client
+            .get(&url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+        resp.json::<T>().map_err(|e| e.to_string())
+    }
+
+    /// GET endpoint, only check that the status is 2xx.
+    fn get_ok(&self, endpoint: &str) -> Result<(), String> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client
+            .get(&url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+        Ok(())
+    }
+
+    /// POST endpoint.  On failure, tries to extract `{"error":"…"}` from the
+    /// response body for a better error message.
+    fn post_ok(&self, endpoint: &str) -> Result<(), String> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            let body = resp.text().unwrap_or_default();
+            let err = serde_json::from_str::<serde_json::Value>(&body)
+                .ok()
+                .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+                .unwrap_or(body);
+            return Err(err);
+        }
+        Ok(())
+    }
+
+    /// GET endpoint and return the raw `serde_json::Value`.
+    fn get_value(&self, endpoint: &str) -> Result<serde_json::Value, String> {
+        self.get::<serde_json::Value>(endpoint)
+    }
+}
+
 // ── RemoteBackend ─────────────────────────────────────────────────────────────
 
 /// Active remote connection.  Implements [`crate::backend::Backend`] so that
@@ -54,9 +133,8 @@ fn default_probe_port() -> u16 {
 pub struct RemoteBackend {
     // Connection metadata (needed for Drop to reach the remote probe).
     connection: RemoteConnection,
-    /// `http://127.0.0.1:<probe_port>`
-    base_url: String,
-    token: String,
+    /// HTTP client for the probe.
+    probe: ProbeClient,
     /// Local `ssh -N -L …` tunnel child process.
     tunnel_child: std::process::Child,
     /// PID of `fleet serve` on the remote host.
@@ -68,8 +146,12 @@ pub struct RemoteBackend {
     // Backend state
     app: tauri::AppHandle,
     sessions: Arc<Mutex<Vec<crate::session::SessionInfo>>>,
-    viewed_session: Arc<Mutex<Option<String>>>,
-    viewed_offset: Arc<Mutex<u64>>,
+    watch: Arc<crate::backend::WatchState>,
+    /// Active waiting-input alerts, keyed by session ID.
+    waiting_alerts: Arc<Mutex<std::collections::HashMap<String, crate::backend::WaitingAlert>>>,
+    /// Semantic outcome tags per session, set by background analysis.
+    #[allow(dead_code)]
+    session_outcomes: Arc<Mutex<std::collections::HashMap<String, Vec<String>>>>,
 }
 
 impl Drop for RemoteBackend {
@@ -91,33 +173,64 @@ impl Drop for RemoteBackend {
     }
 }
 
+/// Encode a path for use in a query parameter.
+fn encode_path(path: &str) -> String {
+    utf8_percent_encode(path, NON_ALPHANUMERIC).to_string()
+}
+
 impl crate::backend::Backend for RemoteBackend {
     fn list_sessions(&self) -> Vec<crate::session::SessionInfo> {
         self.sessions.lock().unwrap().clone()
     }
 
     fn get_messages(&self, path: &str) -> Result<Vec<serde_json::Value>, String> {
-        remote_get_messages(&self.base_url, &self.token, path)
+        self.probe.get(&format!("/messages?path={}", encode_path(path)))
     }
 
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
-        remote_kill_session(&self.base_url, &self.token, pid, false)
+        self.probe.get_ok(&format!("/stop?pid={}&force=false", pid))
     }
 
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String> {
-        remote_kill_workspace(&self.base_url, &self.token, &workspace_path)
+        let encoded = workspace_path.replace('/', "%2F");
+        self.probe.get_ok(&format!("/stop_workspace?path={}", encoded))
     }
 
     fn account_info(&self) -> crate::backend::AccountInfoFuture {
-        let base_url = self.base_url.clone();
-        let token = self.token.clone();
+        let probe = self.probe.clone();
         Box::pin(async move {
-            remote_get_account_info(&base_url, &token)
+            probe.get("/sources/claude/account")
+        })
+    }
+
+    fn source_account(&self, source: &str) -> crate::backend::SourceDataFuture {
+        let config = crate::agent_source::SourcesConfig::load();
+        if !config.is_source_enabled(source) {
+            let msg = format!("Source '{}' is disabled", source);
+            return Box::pin(async move { Err(msg) });
+        }
+        let probe = self.probe.clone();
+        let endpoint = format!("/sources/{}/account", source);
+        Box::pin(async move {
+            probe.get(&endpoint)
+        })
+    }
+
+    fn source_usage(&self, source: &str) -> crate::backend::SourceDataFuture {
+        let config = crate::agent_source::SourcesConfig::load();
+        if !config.is_source_enabled(source) {
+            let msg = format!("Source '{}' is disabled", source);
+            return Box::pin(async move { Err(msg) });
+        }
+        let probe = self.probe.clone();
+        let endpoint = format!("/sources/{}/usage", source);
+        Box::pin(async move {
+            probe.get(&endpoint)
         })
     }
 
     fn check_setup(&self) -> crate::backend::SetupStatus {
-        remote_check_setup_status(&self.base_url, &self.token)
+        self.probe.get::<crate::backend::SetupStatus>("/setup-status")
             .unwrap_or_else(|e| {
                 crate::log_debug(&format!("remote check_setup failed: {e}"));
                 crate::backend::SetupStatus {
@@ -132,38 +245,73 @@ impl crate::backend::Backend for RemoteBackend {
             })
     }
 
+    fn usage_summaries(&self) -> Vec<crate::backend::SourceUsageSummary> {
+        self.probe.get("/usage_summaries").unwrap_or_default()
+    }
+
     fn start_watch(&self, path: String) -> Result<u64, String> {
-        let file_size = remote_file_size(&self.base_url, &self.token, &path);
+        let file_size = self.probe.get_value(&format!("/file_size?path={}", encode_path(&path)))
+            .ok()
+            .and_then(|v| v["size"].as_u64())
+            .unwrap_or(0);
         *self.tail_running.lock().unwrap() = true;
         start_remote_tail(
-            self.base_url.clone(),
-            self.token.clone(),
+            self.probe.clone(),
             path.clone(),
             file_size,
             self.app.clone(),
             self.tail_running.clone(),
         );
-        *self.viewed_session.lock().unwrap() = Some(path);
-        *self.viewed_offset.lock().unwrap() = file_size;
+        self.watch.set(path, file_size);
         Ok(file_size)
     }
 
     fn stop_watch(&self) {
         *self.tail_running.lock().unwrap() = false;
-        *self.viewed_session.lock().unwrap() = None;
-        *self.viewed_offset.lock().unwrap() = 0;
+        self.watch.clear();
     }
 
     fn list_memories(&self) -> Vec<crate::memory::WorkspaceMemory> {
-        remote_list_memories(&self.base_url, &self.token).unwrap_or_default()
+        self.probe.get("/memories").unwrap_or_default()
     }
 
     fn get_memory_content(&self, path: &str) -> Result<String, String> {
-        remote_get_memory_content(&self.base_url, &self.token, path)
+        self.probe.get(&format!("/memory_content?path={}", encode_path(path)))
     }
 
     fn get_memory_history(&self, path: &str) -> Vec<crate::memory::MemoryHistoryEntry> {
-        remote_get_memory_history(&self.base_url, &self.token, path).unwrap_or_default()
+        self.probe.get(&format!("/memory_history?path={}", encode_path(path))).unwrap_or_default()
+    }
+
+    fn get_waiting_alerts(&self) -> Vec<crate::backend::WaitingAlert> {
+        self.waiting_alerts.lock().unwrap().values().cloned().collect()
+    }
+
+    fn get_hooks_plan(&self) -> crate::hooks::HookSetupPlan {
+        self.probe.get("/hooks_plan").unwrap_or(crate::hooks::HookSetupPlan {
+            to_add: vec![],
+            hooks_globally_disabled: false,
+            already_installed: true,
+        })
+    }
+
+    fn apply_hooks(&self) -> Result<(), String> {
+        self.probe.post_ok("/apply_hooks")
+    }
+
+    fn remove_hooks(&self) -> Result<(), String> {
+        self.probe.post_ok("/remove_hooks")
+    }
+
+    fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
+        self.probe.get("/sources_config").unwrap_or_default()
+    }
+
+    fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
+        self.probe.post_ok(&format!(
+            "/set_source_enabled?name={}&enabled={}",
+            name, enabled
+        ))
     }
 }
 
@@ -734,24 +882,13 @@ fn connect_remote_start_probe(
     // ── Step 6: wait for probe to be ready ───────────────────────────────────
     emit_progress(app, "Waiting for probe to be ready…", false, None);
     let base_url = format!("http://127.0.0.1:{}", probe_port);
-    let health_url = format!("{}/health", base_url);
-    let auth_header = format!("Bearer {}", token);
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(3))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let probe = ProbeClient::new(base_url, &token);
 
     let ready = (0..20).any(|i| {
         if i > 0 {
             std::thread::sleep(Duration::from_millis(500));
         }
-        client
-            .get(&health_url)
-            .header("Authorization", &auth_header)
-            .send()
-            .map(|r| r.status().is_success())
-            .unwrap_or(false)
+        probe.get_ok("/health").is_ok()
     });
 
     if !ready {
@@ -779,58 +916,164 @@ fn connect_remote_start_probe(
     let sessions: Arc<Mutex<Vec<SessionInfo>>> = Arc::new(Mutex::new(Vec::new()));
     let poller_running = Arc::new(Mutex::new(true));
     let tail_running = Arc::new(Mutex::new(true));
+    let waiting_alerts: Arc<Mutex<std::collections::HashMap<String, crate::backend::WaitingAlert>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let session_outcomes: Arc<Mutex<std::collections::HashMap<String, Vec<String>>>> =
+        Arc::new(Mutex::new(std::collections::HashMap::new()));
 
     // Do an initial synchronous fetch so list_sessions() is populated immediately.
-    {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .unwrap();
-        if let Ok(resp) = client
-            .get(&format!("{}/sessions", base_url))
-            .header("Authorization", &auth_header)
-            .send()
-        {
-            if let Ok(body) = resp.text() {
-                if let Ok(s) = serde_json::from_str::<Vec<SessionInfo>>(&body) {
-                    *sessions.lock().unwrap() = s.clone();
-                    let _ = app.emit("sessions-updated", &s);
-                    crate::update_tray(app, &s);
-                }
-            }
-        }
+    if let Ok(s) = probe.get::<Vec<SessionInfo>>("/sessions") {
+        *sessions.lock().unwrap() = s.clone();
+        let _ = app.emit("sessions-updated", &s);
+        crate::update_tray(app, &s);
     }
 
-    // Start background poller for continuous session updates.
+    // Start background poller for continuous session updates + waiting alerts.
     {
         let app2 = app.clone();
         let pr = poller_running.clone();
         let sess2 = sessions.clone();
-        let poll_url = format!("{}/sessions", base_url);
-        let poll_auth = format!("Bearer {}", token);
+        let wa2 = waiting_alerts.clone();
+        let so2 = session_outcomes.clone();
+        let probe2 = probe.clone();
+        let locale = app
+            .try_state::<crate::AppState>()
+            .map(|s| s.locale.lock().unwrap().clone())
+            .unwrap_or_else(|| "en".to_string());
 
         std::thread::spawn(move || {
-            let client = reqwest::blocking::Client::builder()
-                .timeout(Duration::from_secs(5))
-                .build()
-                .unwrap();
-            let mut last_json = String::new();
-            while *pr.lock().unwrap() {
+            use std::collections::{HashMap, HashSet};
+            use crate::session::SessionStatus;
+
+            let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
+            let analyzing: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+            let busy_statuses = [
+                SessionStatus::Thinking,
+                SessionStatus::Executing,
+                SessionStatus::Streaming,
+                SessionStatus::Processing,
+                SessionStatus::Active,
+            ];
+
+            loop {
                 std::thread::sleep(Duration::from_secs(1));
-                if let Ok(resp) = client
-                    .get(&poll_url)
-                    .header("Authorization", &poll_auth)
-                    .send()
+                if !*pr.lock().unwrap() {
+                    break;
+                }
+                let Ok(mut s) = probe2.get::<Vec<SessionInfo>>("/sessions") else {
+                    continue;
+                };
+
+                // Inject cached outcome tags.
                 {
-                    if let Ok(body) = resp.text() {
-                        if body != last_json {
-                            last_json = body.clone();
-                            if let Ok(s) = serde_json::from_str::<Vec<SessionInfo>>(&body) {
-                                *sess2.lock().unwrap() = s.clone();
-                                let _ = app2.emit("sessions-updated", &s);
-                                crate::update_tray(&app2, &s);
-                            }
+                    let oc = so2.lock().unwrap();
+                    for sess in &mut s {
+                        if let Some(tags) = oc.get(&sess.id) {
+                            sess.last_outcome = Some(tags.clone());
                         }
+                    }
+                }
+
+                *sess2.lock().unwrap() = s.clone();
+                let _ = app2.emit("sessions-updated", &s);
+                crate::update_tray(&app2, &s);
+
+                // ── Waiting-input detection & outcome analysis ───────────────
+                let mut alerts_changed = false;
+                for sess in &s {
+                    if sess.is_subagent {
+                        continue;
+                    }
+                    let prev = prev_statuses.get(&sess.id);
+                    let is_waiting = sess.status == SessionStatus::WaitingInput;
+                    let was_waiting = prev == Some(&SessionStatus::WaitingInput);
+                    let was_busy = prev.map_or(false, |p| busy_statuses.contains(p));
+
+                    if is_waiting && !was_waiting {
+                        let mut guard = analyzing.lock().unwrap();
+                        if guard.contains(&sess.id) {
+                            continue;
+                        }
+                        guard.insert(sess.id.clone());
+                        drop(guard);
+
+                        let session_id = sess.id.clone();
+                        let display_name = sess.ai_title.clone()
+                            .unwrap_or_else(|| sess.workspace_name.clone());
+                        let last_text = sess.last_message_preview.clone().unwrap_or_default();
+                        let wa = wa2.clone();
+                        let so = so2.clone();
+                        let an = analyzing.clone();
+                        let app_bg = app2.clone();
+                        let lang = locale.clone();
+                        let jsonl_path = sess.jsonl_path.clone();
+
+                        std::thread::spawn(move || {
+                            let result = crate::claude_analyze::analyze_session_outcome(
+                                &last_text, &lang,
+                            );
+                            an.lock().unwrap().remove(&session_id);
+
+                            if let Some(result) = result {
+                                so.lock().unwrap().insert(session_id.clone(), result.tags.clone());
+
+                                if result.tags.contains(&"needs_input".to_string()) {
+                                    let summary = result.summary
+                                        .unwrap_or_else(|| "Waiting for input".to_string());
+                                    let alert = crate::backend::WaitingAlert {
+                                        session_id: session_id.clone(),
+                                        workspace_name: display_name.clone(),
+                                        summary: summary.clone(),
+                                        detected_at_ms: SystemTime::now()
+                                            .duration_since(UNIX_EPOCH)
+                                            .unwrap_or_default()
+                                            .as_millis() as u64,
+                                        jsonl_path,
+                                    };
+                                    wa.lock().unwrap().insert(session_id, alert);
+                                    let alerts: Vec<crate::backend::WaitingAlert> =
+                                        wa.lock().unwrap().values().cloned().collect();
+                                    let _ = app_bg.emit("waiting-alerts-updated", &alerts);
+                                    crate::local_backend::send_os_notification(
+                                        &app_bg, &display_name, &summary,
+                                    );
+                                }
+                            }
+                        });
+                    } else if !is_waiting && was_waiting {
+                        if wa2.lock().unwrap().remove(&sess.id).is_some() {
+                            alerts_changed = true;
+                        }
+                    }
+
+                    // Clear stale outcome when session becomes busy again.
+                    if busy_statuses.contains(&sess.status) && !was_busy {
+                        so2.lock().unwrap().remove(&sess.id);
+                    }
+                }
+
+                // Clean up alerts for sessions that no longer exist.
+                {
+                    let current_ids: HashSet<String> =
+                        s.iter().map(|sess| sess.id.clone()).collect();
+                    let mut wa = wa2.lock().unwrap();
+                    let before = wa.len();
+                    wa.retain(|id, _| current_ids.contains(id));
+                    if wa.len() != before {
+                        alerts_changed = true;
+                    }
+                }
+
+                if alerts_changed {
+                    let alerts: Vec<crate::backend::WaitingAlert> =
+                        wa2.lock().unwrap().values().cloned().collect();
+                    let _ = app2.emit("waiting-alerts-updated", &alerts);
+                }
+
+                prev_statuses.clear();
+                for sess in &s {
+                    if !sess.is_subagent {
+                        prev_statuses.insert(sess.id.clone(), sess.status.clone());
                     }
                 }
             }
@@ -846,16 +1089,16 @@ fn connect_remote_start_probe(
 
     Ok(RemoteBackend {
         connection: conn,
-        base_url,
-        token,
+        probe,
         tunnel_child,
         remote_probe_pid,
         poller_running,
         tail_running,
         app: app.clone(),
         sessions,
-        viewed_session: Arc::new(Mutex::new(None)),
-        viewed_offset: Arc::new(Mutex::new(0)),
+        watch: Arc::new(crate::backend::WatchState::new()),
+        waiting_alerts,
+        session_outcomes,
     })
 }
 
@@ -868,7 +1111,9 @@ pub fn disconnect_remote(
 ) -> Result<(), String> {
     // Construct the new LocalBackend first (triggers initial local scan and
     // emits sessions-updated) before dropping the RemoteBackend.
-    let new_backend = crate::local_backend::LocalBackend::new(app);
+    let locale = state.locale.clone();
+    let sources = crate::agent_source::build_sources();
+    let new_backend = crate::local_backend::LocalBackend::new(app, locale, sources);
     // Swap: drop old backend (RemoteBackend::Drop kills tunnel + remote probe)
     // outside the lock so the SSH cleanup doesn't block other commands.
     let old = {
@@ -882,229 +1127,33 @@ pub fn disconnect_remote(
     Ok(())
 }
 
-// ── HTTP proxy helpers (used by lib.rs mode-aware commands) ──────────────────
+// ── Tail remote helper ──────────────────────────────────────────────────────
 
-/// Encode a path for use in a query parameter.
-pub fn encode_path(path: &str) -> String {
-    utf8_percent_encode(path, NON_ALPHANUMERIC).to_string()
-}
-
-/// GET `{base_url}/stop_workspace?path=<encoded>` to kill all claude processes in a workspace.
-pub fn remote_kill_workspace(base_url: &str, token: &str, workspace_path: &str) -> Result<(), String> {
-    let encoded = workspace_path.replace('/', "%2F");
-    let url = format!("{}/stop_workspace?path={}", base_url, encoded);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Remote stop_workspace error: HTTP {}", resp.status()));
-    }
-    Ok(())
-}
-
-/// POST `{base_url}/stop?pid=<pid>&force=<bool>` to kill a process on the remote host.
-pub fn remote_kill_session(base_url: &str, token: &str, pid: u32, force: bool) -> Result<(), String> {
-    let url = format!("{}/stop?pid={}&force={}", base_url, pid, force);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Remote stop error: HTTP {}", resp.status()));
-    }
-    Ok(())
-}
-
-/// GET `{base_url}/account` and return the remote `AccountInfo`.
-pub fn remote_get_account_info(
-    base_url: &str,
-    token: &str,
-) -> Result<crate::account::AccountInfo, String> {
-    let url = format!("{}/account", base_url);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Remote account error: HTTP {}", resp.status()));
-    }
-    resp.json::<crate::account::AccountInfo>().map_err(|e| e.to_string())
-}
-
-/// GET `{base_url}/setup-status` and return remote setup status.
-fn remote_check_setup_status(
-    base_url: &str,
-    token: &str,
-) -> Result<crate::backend::SetupStatus, String> {
-    let url = format!("{}/setup-status", base_url);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("Remote setup-status error: HTTP {}", resp.status()));
-    }
-    resp.json::<crate::backend::SetupStatus>().map_err(|e| e.to_string())
-}
-
-/// GET `{base_url}/messages?path=<encoded>` and return raw JSON values.
-pub fn remote_get_messages(
-    base_url: &str,
-    token: &str,
-    jsonl_path: &str,
-) -> Result<Vec<serde_json::Value>, String> {
-    let url = format!("{}/messages?path={}", base_url, encode_path(jsonl_path));
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .map_err(|e| e.to_string())?;
-    let messages: Vec<serde_json::Value> = resp.json().map_err(|e| e.to_string())?;
-    Ok(messages)
-}
-
-/// GET `{base_url}/file_size?path=<encoded>` and return the file size.
-pub fn remote_file_size(base_url: &str, token: &str, jsonl_path: &str) -> u64 {
-    let url = format!("{}/file_size?path={}", base_url, encode_path(jsonl_path));
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap();
-    client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .ok()
-        .and_then(|r| r.json::<serde_json::Value>().ok())
-        .and_then(|v| v["size"].as_u64())
-        .unwrap_or(0)
-}
-
-// ── Remote memory helpers ─────────────────────────────────────────────────────
-
-fn remote_list_memories(
-    base_url: &str,
-    token: &str,
-) -> Result<Vec<crate::memory::WorkspaceMemory>, String> {
-    let url = format!("{}/memories", base_url);
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    resp.json().map_err(|e| e.to_string())
-}
-
-fn remote_get_memory_content(
-    base_url: &str,
-    token: &str,
-    path: &str,
-) -> Result<String, String> {
-    let url = format!("{}/memory_content?path={}", base_url, encode_path(path));
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    resp.json::<String>().map_err(|e| e.to_string())
-}
-
-fn remote_get_memory_history(
-    base_url: &str,
-    token: &str,
-    path: &str,
-) -> Result<Vec<crate::memory::MemoryHistoryEntry>, String> {
-    let url = format!("{}/memory_history?path={}", base_url, encode_path(path));
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(30))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err(format!("HTTP {}", resp.status()));
-    }
-    resp.json().map_err(|e| e.to_string())
-}
-
-/// Spawn a background thread that polls `/tail` and emits `session-tail` events.
-/// Returns an `Arc<Mutex<bool>>` stop flag. Set it to `false` to stop the thread.
-pub fn start_remote_tail(
-    base_url: String,
-    token: String,
+fn start_remote_tail(
+    probe: ProbeClient,
     jsonl_path: String,
     initial_offset: u64,
     app: AppHandle,
     tail_running: Arc<Mutex<bool>>,
 ) {
     std::thread::spawn(move || {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(5))
-            .build()
-            .unwrap();
-        let auth = format!("Bearer {}", token);
         let mut offset = initial_offset;
 
         while *tail_running.lock().unwrap() {
             std::thread::sleep(Duration::from_millis(500));
-            let url = format!(
-                "{}/tail?path={}&offset={}",
-                base_url,
+            let endpoint = format!(
+                "/tail?path={}&offset={}",
                 encode_path(&jsonl_path),
                 offset
             );
-            if let Ok(resp) = client.get(&url).header("Authorization", &auth).send() {
-                if let Ok(val) = resp.json::<serde_json::Value>() {
-                    if let Some(lines) = val["lines"].as_array() {
-                        if !lines.is_empty() {
-                            let _ = app.emit("session-tail", lines);
-                        }
+            if let Ok(val) = probe.get_value(&endpoint) {
+                if let Some(lines) = val["lines"].as_array() {
+                    if !lines.is_empty() {
+                        let _ = app.emit("session-tail", lines);
                     }
-                    if let Some(new_offset) = val["newOffset"].as_u64() {
-                        offset = new_offset;
-                    }
+                }
+                if let Some(new_offset) = val["newOffset"].as_u64() {
+                    offset = new_offset;
                 }
             }
         }

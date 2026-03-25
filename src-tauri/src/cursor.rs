@@ -146,7 +146,11 @@ fn workspace_name(path: &str) -> String {
 
 fn decode_workspace_path(encoded: &str) -> String {
     let stripped = encoded.trim_start_matches('-');
-    format!("/{}", stripped.replace('-', "/"))
+    let parts: Vec<&str> = stripped.split('-').collect();
+    if parts.is_empty() {
+        return "/".to_string();
+    }
+    crate::session::decode_workspace_path_with_parts(&parts)
 }
 
 // ── Token estimation ─────────────────────────────────────────────────────────
@@ -507,6 +511,7 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
             pid_precise: false,
             last_skill: None,
             agent_source: "cursor".to_string(),
+            last_outcome: None,
         });
     }
 
@@ -784,6 +789,8 @@ pub struct CursorUsageItem {
     pub name: String,
     pub used: u64,
     pub limit: Option<u64>,
+    /// Utilization as a 0–1 fraction (from usage-summary API).
+    pub utilization: Option<f64>,
     pub resets_at: Option<String>,
 }
 
@@ -840,66 +847,104 @@ async fn fetch_stripe_profile(access_token: &str) -> Result<StripeProfile, Strin
         .map_err(|e| format!("Cannot parse Cursor profile: {e}"))
 }
 
-/// Fetch real-time usage from api2.cursor.sh/auth/usage.
-/// Response format: { "gpt-4": { numRequests, numTokens, maxRequestUsage, ... }, "startOfMonth": "..." }
+/// Fetch aggregated usage from api2.cursor.sh/auth/usage-summary.
+///
+/// This endpoint returns plan-level data with utilization percentages,
+/// premium vs auto breakdown, and billing cycle dates.
 async fn fetch_cursor_usage_api(access_token: &str) -> Result<Vec<CursorUsageItem>, String> {
     let client = reqwest::Client::new();
-
     let resp = client
-        .get("https://api2.cursor.sh/auth/usage")
+        .get("https://api2.cursor.sh/auth/usage-summary")
         .header("Authorization", format!("Bearer {}", access_token))
         .timeout(std::time::Duration::from_secs(5))
         .send()
         .await
-        .map_err(|e| format!("Cursor usage request failed: {e}"))?;
+        .map_err(|e| format!("Cursor usage-summary request failed: {e}"))?;
 
     if !resp.status().is_success() {
-        return Err(format!("Cursor usage API returned {}", resp.status()));
+        return Err(format!("Cursor usage-summary API returned {}", resp.status()));
     }
 
     let body: serde_json::Value = resp
         .json()
         .await
-        .map_err(|e| format!("Cannot parse Cursor usage response: {e}"))?;
+        .map_err(|e| format!("Cannot parse Cursor usage-summary response: {e}"))?;
 
-    parse_cursor_usage(&body)
+    parse_usage_summary(&body)
 }
 
-/// Parse usage response: top-level keys are model names (skip "startOfMonth"),
-/// each value has { numRequests, numRequestsTotal, numTokens, maxTokenUsage, maxRequestUsage }.
-fn parse_cursor_usage(body: &serde_json::Value) -> Result<Vec<CursorUsageItem>, String> {
-    let mut items: Vec<CursorUsageItem> = Vec::new();
-    let start_of_month = body
-        .get("startOfMonth")
-        .and_then(|s| s.as_str())
+/// Parse the usage-summary response into CursorUsageItems.
+fn parse_usage_summary(body: &serde_json::Value) -> Result<Vec<CursorUsageItem>, String> {
+    let billing_end = body
+        .get("billingCycleEnd")
+        .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
-    if let Some(obj) = body.as_object() {
-        for (key, val) in obj {
-            if key == "startOfMonth" {
-                continue;
-            }
-            let num_requests = val
-                .get("numRequests")
-                .and_then(|n| n.as_u64())
-                .unwrap_or(0);
-            let num_tokens = val
-                .get("numTokens")
-                .and_then(|n| n.as_u64())
-                .unwrap_or(0);
-            let max_requests = val
-                .get("maxRequestUsage")
-                .and_then(|n| n.as_u64());
+    let plan = body.pointer("/individualUsage/plan");
 
-            // Include model if it has any activity or a limit set
-            if num_requests > 0 || num_tokens > 0 || max_requests.is_some() {
+    let mut items = Vec::new();
+
+    if let Some(plan_obj) = plan {
+        let used = plan_obj.get("used").and_then(|v| v.as_u64()).unwrap_or(0);
+        let limit = plan_obj.get("limit").and_then(|v| v.as_u64());
+
+        // Auto (total - API = auto portion)
+        let auto_pct = plan_obj.get("autoPercentUsed").and_then(|v| v.as_f64());
+        let api_pct = plan_obj.get("apiPercentUsed").and_then(|v| v.as_f64());
+        let total_pct = plan_obj.get("totalPercentUsed").and_then(|v| v.as_f64());
+
+        // Show premium (API / named models) usage
+        if let Some(pct) = api_pct {
+            items.push(CursorUsageItem {
+                name: "Premium".to_string(),
+                used: 0, // individual count not available in summary
+                limit: None,
+                utilization: Some(pct / 100.0),
+                resets_at: billing_end.clone(),
+            });
+        }
+
+        // Show auto usage
+        if let Some(pct) = auto_pct {
+            items.push(CursorUsageItem {
+                name: "Auto".to_string(),
+                used: 0,
+                limit: None,
+                utilization: Some(pct / 100.0),
+                resets_at: billing_end.clone(),
+            });
+        }
+
+        // Show total plan usage if we have it and both sub-categories
+        if api_pct.is_some() && auto_pct.is_some() {
+            if let Some(pct) = total_pct {
                 items.push(CursorUsageItem {
-                    name: key.clone(),
-                    used: num_requests,
-                    limit: max_requests,
-                    resets_at: start_of_month.clone(),
+                    name: "Total".to_string(),
+                    used,
+                    limit,
+                    utilization: Some(pct / 100.0),
+                    resets_at: billing_end.clone(),
                 });
             }
+        }
+    }
+
+    // On-demand usage
+    if let Some(od) = body.pointer("/individualUsage/onDemand") {
+        let used = od.get("used").and_then(|v| v.as_u64()).unwrap_or(0);
+        let limit = od.get("limit").and_then(|v| v.as_u64());
+        if used > 0 || limit.is_some() {
+            let utilization = match (limit, used) {
+                (Some(l), u) if l > 0 => Some(u as f64 / l as f64),
+                _ => None,
+            };
+            items.push(CursorUsageItem {
+                name: "On-demand".to_string(),
+                used,
+                limit,
+                utilization,
+                resets_at: billing_end,
+            });
         }
     }
 
@@ -988,4 +1033,79 @@ pub async fn fetch_cursor_account_info() -> Result<CursorAccountInfo, String> {
         daily_stats,
         usage: vec![],
     })
+}
+
+/// Blocking wrapper for `fetch_cursor_account_info` (for use in trait methods).
+/// Handles being called both from within a tokio runtime (via `block_in_place`)
+/// and from plain threads (via a new runtime).
+pub fn fetch_cursor_account_info_blocking() -> Result<CursorAccountInfo, String> {
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(fetch_cursor_account_info()))
+    } else {
+        tokio::runtime::Runtime::new()
+            .map_err(|e| format!("failed to create tokio runtime: {e}"))?
+            .block_on(fetch_cursor_account_info())
+    }
+}
+
+// ── AgentSource implementation ──────────────────────────────────────────────
+
+use crate::agent_source::{AgentSource, WatchStrategy};
+use crate::backend::SourceUsageSummary;
+
+pub struct CursorSource;
+
+impl AgentSource for CursorSource {
+    fn name(&self) -> &'static str {
+        "cursor"
+    }
+
+    fn uri_prefix(&self) -> &'static str {
+        CURSOR_URI_PREFIX
+    }
+
+    fn is_available(&self) -> bool {
+        state_vscdb_path().map(|p| p.exists()).unwrap_or(false)
+    }
+
+    fn scan_sessions(&self) -> Vec<SessionInfo> {
+        let cursor_dir = match get_cursor_dir() {
+            Some(d) => d,
+            None => return vec![],
+        };
+        scan_cursor_sessions(&cursor_dir)
+    }
+
+    fn get_messages(&self, path: &str) -> Result<Vec<serde_json::Value>, String> {
+        let composer_id = path
+            .strip_prefix(CURSOR_URI_PREFIX)
+            .ok_or_else(|| format!("Invalid cursor URI: {path}"))?;
+        get_cursor_messages(composer_id)
+    }
+
+    fn resolve_file_path(&self, _path: &str) -> Option<std::path::PathBuf> {
+        None // Cursor uses SQLite, no JSONL file to tail
+    }
+
+    fn watch_strategy(&self) -> WatchStrategy {
+        WatchStrategy::Poll(std::time::Duration::from_secs(5))
+    }
+
+    // Cursor uses SQLite polling, no filesystem paths to watch.
+
+    fn fetch_account(&self) -> Result<serde_json::Value, String> {
+        let info = fetch_cursor_account_info_blocking()?;
+        serde_json::to_value(&info).map_err(|e| e.to_string())
+    }
+
+    fn fetch_usage(&self) -> Result<serde_json::Value, String> {
+        // Cursor account info includes usage data (requests remaining etc.)
+        self.fetch_account()
+    }
+
+    fn usage_summary(&self) -> Option<SourceUsageSummary> {
+        let info = fetch_cursor_account_info_blocking().ok()?;
+        let val = serde_json::to_value(&info).ok()?;
+        Some(SourceUsageSummary::from_cursor(&val))
+    }
 }

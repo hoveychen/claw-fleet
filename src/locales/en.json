@@ -40,7 +40,7 @@
     "idle_subs": "{{n}} idle"
   },
   "account": {
-    "panel_title": "Account & Usage",
+    "panel_title": "Account",
     "title": "Account",
     "plan": "Plan",
     "org": "Organization",
@@ -96,7 +96,12 @@
     "ai_skill_installing": "Installing…",
     "ai_skill_installed_btn": "Skill Installed",
     "ai_skill_save_btn": "Save skill file…",
-    "ai_modal_close": "Done"
+    "ai_modal_close": "Done",
+    "openclaw_version": "Version",
+    "openclaw_model": "Default Model",
+    "openclaw_context_window": "Context window usage",
+    "openclaw_no_sessions": "No recent sessions",
+    "codex_limit": "Rate Limit"
   },
   "memory": {
     "panel_title": "Memory",
@@ -115,9 +120,12 @@
     "show": "Show",
     "hide": "Hide",
     "quit": "Quit",
-    "active_agents": "{{n}} active agent(s)",
+    "active_agents": "{{n}} Active Agent(s)",
+    "no_active_agents": "No Active Agents",
     "main_agents": "Main: {{n}}",
-    "sub_agents": "Subagents: {{n}}"
+    "sub_agents": "+ {{n}} subagent(s)",
+    "switch_connection": "Switch Connection",
+    "usage": "Usage"
   },
   "inspect": {
     "close": "Close",
@@ -125,6 +133,8 @@
   },
   "stop_session": "Stop session (kill process tree)",
   "stop_session_imprecise": "Stop all sessions in this workspace (imprecise PID match — multiple claude processes share this workspace)",
+  "cancel": "Cancel",
+  "confirm": "Confirm",
   "stop_confirm": "Stop session in {{name}}?",
   "stop_imprecise_confirm": "Multiple Claude processes share workspace \"{{workspace}}\" and cannot be individually targeted.\n\nThis will stop ALL Claude agents in this workspace. Continue?",
   "card": {
@@ -212,11 +222,89 @@
       "title": "First session detected!",
       "description": "Congratulations! Claude Fleet is now monitoring your sessions. Enjoy the dashboard!"
     },
+    "sources": {
+      "title": "Agent Sources",
+      "description": "Multiple AI agent tools detected on your system. Choose which ones to monitor.",
+      "detected": "detected",
+      "not_detected": "not detected"
+    },
     "all_good": {
       "title": "All set!",
       "description": "Claude Code is installed, you're logged in, and sessions are being monitored."
     },
     "copy_hint": "Click to copy"
+  },
+  "mascot": {
+    "panel_title": "Assistant",
+    "excited_1": "Let's gooo! Full speed ahead!",
+    "excited_2": "So many tasks — I'm thriving!",
+    "excited_3": "Peak productivity mode!",
+    "focused_1": "Working hard… don't disturb",
+    "focused_2": "Heads down, grinding away",
+    "focused_3": "In the zone right now",
+    "burning_1": "On FIRE! Can't stop won't stop",
+    "burning_2": "Overclocked and loving it",
+    "burning_3": "Maximum output! Need water…",
+    "anxious_1": "Boss, please respond…",
+    "anxious_2": "Waiting… so nerve-wracking",
+    "anxious_3": "Hello? Anyone there?",
+    "satisfied_1": "Good work today~",
+    "satisfied_2": "Another task well done ♪",
+    "satisfied_3": "Time for a little break~",
+    "bored_1": "So bored… got any tasks?",
+    "bored_2": "Slacking_off.jpg",
+    "bored_3": "Twiddling my thumbs here…",
+    "lonely_1": "All alone… send tasks plz",
+    "lonely_2": "So quiet… where is everyone?",
+    "lonely_3": "A worker with no work…",
+    "sleepy_1": "zzZ… so sleepy…",
+    "sleepy_2": "Five more minutes…",
+    "sleepy_3": "Dozing off… wake me if needed",
+    "attentive_1": "Hey boss, need your input!",
+    "attentive_2": "Waiting on you~ what do you think?",
+    "attentive_3": "Got a question for you!",
+    "proud_1": "Nailed it! Another one done!",
+    "proud_2": "Check out this masterpiece~",
+    "proud_3": "Too easy for me!",
+    "frustrated_1": "Ugh… this one's fighting back",
+    "frustrated_2": "Why won't this work?!",
+    "frustrated_3": "Need a moment… deep breaths…",
+    "embarrassed_1": "Oops… my bad…",
+    "embarrassed_2": "Sorry about that…",
+    "embarrassed_3": "Let me try again…",
+    "click_excited_1": "Yay, you noticed me!",
+    "click_excited_2": "Right back at ya, boss!",
+    "click_excited_3": "Hehe~ that tickles!",
+    "click_focused_1": "H-hey! I'm working here!",
+    "click_focused_2": "Poke me later~ I'm in the zone!",
+    "click_focused_3": "Okay okay, quick break!",
+    "click_anxious_1": "EEP! Oh… it's just you~",
+    "click_anxious_2": "Don't scare me like that!",
+    "click_anxious_3": "Phew… I needed that pat~",
+    "click_satisfied_1": "Aww~ you're the best, boss!",
+    "click_satisfied_2": "Hehe, head pats accepted~",
+    "click_satisfied_3": "We make such a great team!",
+    "click_bored_1": "FINALLY some attention!",
+    "click_bored_2": "Ooh! Does this mean work?!",
+    "click_bored_3": "I was SO waiting for that!",
+    "click_lonely_1": "You came back for me!!",
+    "click_lonely_2": "I missed you so much!",
+    "click_lonely_3": "Never leave me again, okay~",
+    "click_sleepy_1": "Huh?! I'm awake, I'm awake!",
+    "click_sleepy_2": "Five more… oh hi boss!",
+    "click_sleepy_3": "Mmm~ that woke me right up~",
+    "click_attentive_1": "Yes yes, I'm all ears!",
+    "click_attentive_2": "Ready when you are, boss!",
+    "click_attentive_3": "Tell me tell me tell me!",
+    "click_proud_1": "I know right~ I'm amazing~",
+    "click_proud_2": "Applause? For me? Thanks!",
+    "click_proud_3": "Autographs later, please~",
+    "click_frustrated_1": "Argh— oh… thanks, I needed that",
+    "click_frustrated_2": "Okay… deep breath… I got this",
+    "click_frustrated_3": "A pat? You believe in me!",
+    "click_embarrassed_1": "Aah~ don't look at me!",
+    "click_embarrassed_2": "S-stop, you're making it worse!",
+    "click_embarrassed_3": "Okay fine… that helped a little"
   },
   "wizard": {
     "skip": "Skip",
@@ -231,8 +319,46 @@
       "desc": "Real-time chart showing the combined token output speed across all active sessions. Helps you monitor overall throughput at a glance."
     },
     "account_info": {
-      "title": "Account & Usage",
-      "desc": "Check your account details and rate limit usage here. Tracks your 5-hour session limit, weekly quota, and Sonnet usage with trend comparisons."
+      "title": "Settings",
+      "desc": "Click here to open Settings. Configure theme, language, connection, hooks, and check your account details and rate limit usage."
     }
+  },
+  "waiting_alerts": {
+    "title": "Needs Your Attention",
+    "dismiss_tip": "Click to dismiss"
+  },
+  "settings": {
+    "title": "Settings",
+    "close": "Close",
+    "appearance": "Appearance",
+    "theme": "Theme",
+    "language": "Language",
+    "connection": "Connection",
+    "current_connection": "Current",
+    "local": "Local",
+    "remote": "Remote",
+    "hooks": "Fleet Hooks",
+    "hooks_desc": "Hooks improve session status detection accuracy",
+    "sources": "Agent Sources",
+    "sources_desc": "Choose which AI agent backends to monitor",
+    "sources_restart": "Restart to apply changes",
+    "sources_restart_btn": "Restart Now",
+    "source_not_detected": "not detected",
+    "source_name": {
+      "claude-code": "Claude Code",
+      "cursor": "Cursor",
+      "openclaw": "OpenClaw",
+      "codex": "Codex"
+    }
+  },
+  "hooks": {
+    "banner": "Install Fleet hooks for more accurate status detection",
+    "install": "Install",
+    "dismiss": "Dismiss",
+    "confirm_title": "Install Fleet Hooks",
+    "confirm_body": "Fleet will add async hooks to ~/.claude/settings.json for these events:\n\n{{events}}\n\nThese hooks run in the background and do not block your agents. Your existing settings will be preserved.",
+    "confirm_body_disabled_warning": "\n\nNote: \"disableAllHooks\" is currently set to true in your settings. Hooks will not work until this is changed.",
+    "installed": "Fleet hooks installed successfully",
+    "install_error": "Failed to install hooks: {{error}}"
   }
 }

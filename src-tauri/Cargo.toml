@@ -28,7 +28,7 @@ notify = "6"
 dirs = "5"
 libc = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "blocking", "native-tls"] }
 sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 clap = { version = "4", features = ["derive"] }
 rfd = "0.15"
@@ -37,3 +37,8 @@ percent-encoding = "2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 futures = "0.3"
+tokio = { version = "1", features = ["rt"] }
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-store = "2.4.2"
+tauri-plugin-clipboard-manager = "2.3.2"
+zstd = "0.13"

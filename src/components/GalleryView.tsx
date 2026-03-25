@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSessionsStore } from "../store";
+import { useDetailStore, useSessionsStore } from "../store";
 import type { SessionInfo, SessionStatus } from "../types";
-import { InspectModal } from "./InspectModal";
 import { SessionCard, StatusBadge, StatusIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
 import styles from "./GalleryView.module.css";
 
@@ -234,9 +233,17 @@ function buildRows(
 export function GalleryView() {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
-  const [inspecting, setInspecting] = useState<SessionInfo | null>(null);
+  const { open, close, session: openSession } = useDetailStore();
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const handleSelect = (s: SessionInfo) => open(s);
+
+  // Close detail drawer when clicking on empty gallery space
+  const handleGridClick = (e: React.MouseEvent) => {
+    if (e.target === e.currentTarget && openSession) {
+      close();
+    }
+  };
 
   const activeSessions = sessions.filter(isActive);
 
@@ -285,22 +292,22 @@ export function GalleryView() {
       </div>
 
       {/* Grid */}
-      <div className={styles.grid}>
+      <div className={styles.grid} onClick={handleGridClick}>
         {showAll ? (
           <>
             {filteredActiveMains.length > 0 && (
               <div className={styles.section}>
                 <div className={styles.section_label}>{t("active")}</div>
-                <div className={styles.rows_grid}>
-                  {buildRows(filteredActiveMains, sessions, setInspecting)}
+                <div className={styles.rows_grid} onClick={handleGridClick}>
+                  {buildRows(filteredActiveMains, sessions, handleSelect)}
                 </div>
               </div>
             )}
             {filteredRecentMains.length > 0 && (
               <div className={styles.section}>
                 <div className={styles.section_label}>{t("recent")}</div>
-                <div className={styles.rows_grid}>
-                  {buildRows(filteredRecentMains, sessions, setInspecting)}
+                <div className={styles.rows_grid} onClick={handleGridClick}>
+                  {buildRows(filteredRecentMains, sessions, handleSelect)}
                 </div>
               </div>
             )}
@@ -310,8 +317,8 @@ export function GalleryView() {
           </>
         ) : (
           <>
-            <div className={styles.rows_grid}>
-              {buildRows(filteredActiveMains, sessions, setInspecting)}
+            <div className={styles.rows_grid} onClick={handleGridClick}>
+              {buildRows(filteredActiveMains, sessions, handleSelect)}
             </div>
             {filteredActiveMains.length === 0 && (
               <p className={styles.empty}>{t("no_sessions")}</p>
@@ -320,10 +327,6 @@ export function GalleryView() {
         )}
       </div>
 
-      {/* Inspect modal */}
-      {inspecting && (
-        <InspectModal session={inspecting} onClose={() => setInspecting(null)} />
-      )}
     </div>
   );
 }

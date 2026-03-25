@@ -23,6 +23,7 @@ jobs:
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
 
     runs-on: macos-latest
+    timeout-minutes: 30
     permissions:
       contents: write
 
@@ -70,7 +71,24 @@ jobs:
               --apple-id "$APPLE_ID" \
               --password "$APPLE_PASSWORD" \
               --team-id "$APPLE_TEAM_ID" \
-              --wait
+              --wait \
+              --timeout 15m \
+              2>&1 | tee notarize-output.log
+
+            # If notarization failed, fetch the detailed log
+            if [ $? -ne 0 ]; then
+              echo "── Notarization failed. Fetching log..."
+              # Extract submission ID from output
+              SUB_ID=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' notarize-output.log | head -1)
+              if [ -n "$SUB_ID" ]; then
+                xcrun notarytool log "$SUB_ID" \
+                  --apple-id "$APPLE_ID" \
+                  --password "$APPLE_PASSWORD" \
+                  --team-id "$APPLE_TEAM_ID" || true
+              fi
+              exit 1
+            fi
+
             echo "── Stapling $(basename "$dmg")..."
             xcrun stapler staple "$dmg"
             echo "── Done: $(basename "$dmg")"

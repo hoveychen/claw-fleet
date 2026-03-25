@@ -2,9 +2,10 @@ import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 import en from "./locales/en.json";
 import zh from "./locales/zh.json";
+import { getItem } from "./storage";
 
 function detectLanguage(): string {
-  const saved = localStorage.getItem("lang");
+  const saved = getItem("lang");
   if (saved) return saved;
   const locale = navigator.language || "";
   return locale.startsWith("zh") ? "zh" : "en";

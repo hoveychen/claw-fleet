@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { RawMessage, SessionInfo } from "./types";
+import type { RawMessage, SessionInfo, WaitingAlert } from "./types";
+import { getItem, setItem } from "./storage";
 
 // ── Connection store ──────────────────────────────────────────────────────────
 
@@ -47,14 +48,14 @@ export function resolveTheme(theme: Theme): "dark" | "light" {
 }
 
 export const useUIStore = create<UIState>((set) => ({
-  theme: (localStorage.getItem("theme") as Theme) ?? "system",
-  viewMode: (localStorage.getItem("viewMode") as ViewMode) ?? "gallery",
+  theme: (getItem("theme") as Theme) ?? "system",
+  viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
   setTheme: (t) => {
-    localStorage.setItem("theme", t);
+    setItem("theme", t);
     set({ theme: t });
   },
   setViewMode: (m) => {
-    localStorage.setItem("viewMode", m);
+    setItem("viewMode", m);
     set({ viewMode: m });
   },
 }));
@@ -138,5 +139,32 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 
   appendMessages: (msgs) => {
     set((state) => ({ messages: [...state.messages, ...msgs] }));
+  },
+}));
+
+// ── Waiting alerts store ────────────────────────────────────────────────────
+
+interface WaitingAlertsState {
+  alerts: WaitingAlert[];
+  /** Session IDs the user has acknowledged (dismissed) in this app session */
+  dismissedIds: Set<string>;
+  setAlerts: (alerts: WaitingAlert[]) => void;
+  dismiss: (sessionId: string) => void;
+  refresh: () => Promise<void>;
+}
+
+export const useWaitingAlertsStore = create<WaitingAlertsState>((set) => ({
+  alerts: [],
+  dismissedIds: new Set(),
+  setAlerts: (alerts) => set({ alerts }),
+  dismiss: (sessionId) =>
+    set((state) => {
+      const next = new Set(state.dismissedIds);
+      next.add(sessionId);
+      return { dismissedIds: next };
+    }),
+  refresh: async () => {
+    const alerts = await invoke<WaitingAlert[]>("get_waiting_alerts");
+    set({ alerts });
   },
 }));

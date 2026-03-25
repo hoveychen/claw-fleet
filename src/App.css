@@ -80,6 +80,15 @@ html, body, #root {
 
   --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "Menlo", monospace;
 
+  /* Mascot panel */
+  --mascot-bg: #1a2540;
+  --mascot-text: rgba(200, 210, 230, 0.8);
+  --mascot-accessory-fill: #2a3050;
+  --mascot-accessory-stroke: #3a4570;
+  --mascot-accessory-accent: #4a5580;
+  --mascot-screen-bg: #0d1525;
+  --mascot-screen-fill: #1a3050;
+
   color-scheme: dark;
 }
 
@@ -151,6 +160,15 @@ html, body, #root {
 
   /* Inline code — light */
   --color-code-fg: #92400e;
+
+  /* Mascot panel */
+  --mascot-bg: #e0dff0;
+  --mascot-text: rgba(60, 60, 90, 0.85);
+  --mascot-accessory-fill: #c8c8e0;
+  --mascot-accessory-stroke: #a0a0c0;
+  --mascot-accessory-accent: #9090b0;
+  --mascot-screen-bg: #d0d0e8;
+  --mascot-screen-fill: #e0e0f0;
 
   color-scheme: light;
 }

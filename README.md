@@ -4,8 +4,9 @@
 
 # Claude Fleet
 
-**Mission control for your Claude Code agents.**  
+**Mission control for your AI coding agents.**
 Monitor every session, track token throughput, and inspect full conversation histories — all from one place.
+Supports **Claude Code**, **Cursor**, **OpenClaw**, and **Codex**.
 
 [![Release](https://img.shields.io/github/v/release/hoveychen/claude-fleet?style=flat-square&logo=github&color=d97757)](https://github.com/hoveychen/claude-fleet/releases/latest)
 [![License](https://img.shields.io/github/license/hoveychen/claude-fleet?style=flat-square&color=4a9eff)](LICENSE)
@@ -29,6 +30,21 @@ When you run Claude Code across multiple projects simultaneously — or lean on 
 
 ---
 
+## Supported Agents
+
+Claude Fleet can monitor sessions from multiple AI coding agents:
+
+| | Agent | Status |
+|---|---|---|
+| <img src="src/assets/icons/claude.svg" width="24" height="24"> | **Claude Code** | Fully supported — enabled by default |
+| <img src="src/assets/icons/cursor.svg" width="24" height="24"> | **Cursor** | Supported — opt-in via Settings |
+| <img src="src/assets/icons/openclaw.svg" width="24" height="24"> | **OpenClaw** | Fully supported |
+| <img src="src/assets/icons/codex.svg" width="24" height="24"> | **Codex** | Fully supported |
+
+> Toggle agent sources on or off in the app's Settings panel. Claude Fleet auto-detects which tools are installed on your system.
+
+---
+
 ## Why Claude Fleet?
 
 <div align="center">
@@ -36,6 +52,37 @@ When you run Claude Code across multiple projects simultaneously — or lean on 
 <img src="docs/comic_stop.png" width="720" alt="Comic: Stop Runaway Agents" />
 <img src="docs/comic_skill.png" width="720" alt="Comic: AI Managing AI" />
 </div>
+
+---
+
+## Screenshots
+
+<table>
+<tr>
+<td width="50%"><strong>Gallery View</strong> — multi-agent dashboard</td>
+<td width="50%"><strong>List View</strong> — active & idle sessions</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/01_gallery_view.png" alt="Gallery View" /></td>
+<td><img src="docs/screenshots/02_list_view.png" alt="List View" /></td>
+</tr>
+<tr>
+<td><strong>Session Detail</strong> — conversation, thinking blocks & code</td>
+<td><strong>Settings</strong> — sources, hooks, appearance</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/03_session_detail.png" alt="Session Detail" /></td>
+<td><img src="docs/screenshots/05_settings.png" alt="Settings" /></td>
+</tr>
+<tr>
+<td><strong>Gallery + Detail Panel</strong></td>
+<td><strong>Light Theme</strong></td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/04_gallery_with_detail.png" alt="Gallery with Detail" /></td>
+<td><img src="docs/screenshots/06_light_theme.png" alt="Light Theme" /></td>
+</tr>
+</table>
 
 ---
 

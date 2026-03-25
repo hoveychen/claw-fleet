@@ -40,7 +40,7 @@
     "idle_subs": "{{n}} 个空闲"
   },
   "account": {
-    "panel_title": "账户 & 用量",
+    "panel_title": "账户",
     "title": "账户",
     "plan": "套餐",
     "org": "组织",
@@ -96,7 +96,12 @@
     "ai_skill_installing": "安装中…",
     "ai_skill_installed_btn": "已安装",
     "ai_skill_save_btn": "保存 skill 文件…",
-    "ai_modal_close": "完成"
+    "ai_modal_close": "完成",
+    "openclaw_version": "版本",
+    "openclaw_model": "默认模型",
+    "openclaw_context_window": "上下文窗口使用",
+    "openclaw_no_sessions": "暂无最近会话",
+    "codex_limit": "速率限制"
   },
   "memory": {
     "panel_title": "Memory",
@@ -116,8 +121,11 @@
     "hide": "隐藏",
     "quit": "退出",
     "active_agents": "{{n}} 个活跃 Agent",
+    "no_active_agents": "无活跃 Agent",
     "main_agents": "主进程: {{n}}",
-    "sub_agents": "子进程: {{n}}"
+    "sub_agents": "+ {{n}} 个子进程",
+    "switch_connection": "切换连接",
+    "usage": "用量"
   },
   "inspect": {
     "close": "关闭",
@@ -125,6 +133,8 @@
   },
   "stop_session": "停止会话（清除进程树）",
   "stop_session_imprecise": "停止该 workspace 下的所有会话（无法精确匹配 PID —— 该 workspace 有多个 claude 进程）",
+  "cancel": "取消",
+  "confirm": "确认",
   "stop_confirm": "停止 {{name}} 中的会话？",
   "stop_imprecise_confirm": "workspace「{{workspace}}」中存在多个 Claude 进程，无法单独定位。\n\n此操作将停止该 workspace 下的所有 Claude Agent，确认继续？",
   "card": {
@@ -212,11 +222,89 @@
       "title": "首个会话已检测到！",
       "description": "恭喜！Claude Fleet 已开始监控你的会话。尽情享受仪表盘吧！"
     },
+    "sources": {
+      "title": "Agent 源",
+      "description": "检测到多个 AI Agent 工具，选择要监控的源。",
+      "detected": "已检测",
+      "not_detected": "未检测到"
+    },
     "all_good": {
       "title": "一切就绪！",
       "description": "Claude Code 已安装，你已登录，会话正在被监控。"
     },
     "copy_hint": "点击复制"
+  },
+  "mascot": {
+    "panel_title": "小助手",
+    "excited_1": "冲冲冲！干劲十足！",
+    "excited_2": "活好多！我超兴奋！",
+    "excited_3": "全力输出模式启动！",
+    "focused_1": "认真搬砖中…别打扰",
+    "focused_2": "埋头苦干ing",
+    "focused_3": "在肝活呢，勿cue",
+    "burning_1": "燃起来了！停不下来！",
+    "burning_2": "超频运行，卷到冒烟",
+    "burning_3": "疯狂输出！需要散热…",
+    "anxious_1": "老板快回复啊…",
+    "anxious_2": "等待中…好焦虑啊",
+    "anxious_3": "有人在吗？急急急",
+    "satisfied_1": "今天的活干完了~",
+    "satisfied_2": "又搞定一个任务 ♪",
+    "satisfied_3": "摸鱼时间到~",
+    "bored_1": "好无聊啊…有活干么",
+    "bored_2": "摸鱼.jpg",
+    "bored_3": "大眼瞪小眼中…",
+    "lonely_1": "一个人好孤单…派点活吧",
+    "lonely_2": "好安静…人都去哪了",
+    "lonely_3": "没有任务的打工人…",
+    "sleepy_1": "zzZ…困了困了…",
+    "sleepy_2": "再眯五分钟…",
+    "sleepy_3": "打瞌睡中…有事叫我",
+    "attentive_1": "老板，需要你的指示！",
+    "attentive_2": "等你回复中~ 你怎么看？",
+    "attentive_3": "有个问题想问你！",
+    "proud_1": "搞定！又拿下一个！",
+    "proud_2": "来看看这杰作~",
+    "proud_3": "小意思啦！",
+    "frustrated_1": "呃…这个有点难搞",
+    "frustrated_2": "为什么就是不行啊？！",
+    "frustrated_3": "让我缓缓…深呼吸…",
+    "embarrassed_1": "啊…我的锅…",
+    "embarrassed_2": "不好意思搞砸了…",
+    "embarrassed_3": "让我重来一次…",
+    "click_excited_1": "耶！你注意到我了！",
+    "click_excited_2": "嘿嘿，老板最好了！",
+    "click_excited_3": "哈哈~好痒好痒！",
+    "click_focused_1": "诶！人家在工作啦！",
+    "click_focused_2": "等下再戳我~正在状态中！",
+    "click_focused_3": "好吧好吧，休息一下！",
+    "click_anxious_1": "吓死了！原来是你…",
+    "click_anxious_2": "别吓我啦！",
+    "click_anxious_3": "呼…被你安慰到了~",
+    "click_satisfied_1": "嘿嘿~老板最棒了！",
+    "click_satisfied_2": "摸头确认，签收了~",
+    "click_satisfied_3": "我们是最佳搭档！",
+    "click_bored_1": "终于有人理我了！",
+    "click_bored_2": "哦！是要派活了吗？！",
+    "click_bored_3": "等这一下等好久！",
+    "click_lonely_1": "你回来找我了！！",
+    "click_lonely_2": "好想你啊！",
+    "click_lonely_3": "别再丢下我了好不好~",
+    "click_sleepy_1": "啊？！我醒了我醒了！",
+    "click_sleepy_2": "再五分…哦老板好！",
+    "click_sleepy_3": "嗯~一下就精神了~",
+    "click_attentive_1": "在在在，洗耳恭听！",
+    "click_attentive_2": "随时准备好了，老板！",
+    "click_attentive_3": "快说快说快说！",
+    "click_proud_1": "没错吧~我就是这么厉害~",
+    "click_proud_2": "鼓掌？给我的？谢谢！",
+    "click_proud_3": "签名会稍后举办~",
+    "click_frustrated_1": "唉—哦…谢谢，我需要这个",
+    "click_frustrated_2": "好…深呼吸…我可以的",
+    "click_frustrated_3": "摸头？你相信我的对吧！",
+    "click_embarrassed_1": "啊~别看我！",
+    "click_embarrassed_2": "别、别这样，更尴尬了！",
+    "click_embarrassed_3": "好吧…确实有被安慰到"
   },
   "wizard": {
     "skip": "跳过",
@@ -231,8 +319,46 @@
       "desc": "实时图表，展示所有活跃会话的综合 Token 输出速度，帮助你一目了然地监控整体吞吐量。"
     },
     "account_info": {
-      "title": "账户 & 用量",
-      "desc": "在这里查看账户详情和速率限制用量。追踪 5 小时会话限额、每周配额和 Sonnet 用量，并提供趋势对比。"
+      "title": "设置",
+      "desc": "点击这里打开设置面板。配置主题、语言、连接方式、Hooks，以及查看账户详情和速率限制用量。"
     }
+  },
+  "waiting_alerts": {
+    "title": "需要你的关注",
+    "dismiss_tip": "点击忽略"
+  },
+  "settings": {
+    "title": "设置",
+    "close": "关闭",
+    "appearance": "外观",
+    "theme": "主题",
+    "language": "语言",
+    "connection": "连接",
+    "current_connection": "当前",
+    "local": "本地",
+    "remote": "远程",
+    "hooks": "Fleet Hooks",
+    "hooks_desc": "Hooks 可以提升会话状态检测的准确性",
+    "sources": "Agent 源",
+    "sources_desc": "选择要监控的 AI Agent 后端",
+    "sources_restart": "重启以应用更改",
+    "sources_restart_btn": "立即重启",
+    "source_not_detected": "未检测到",
+    "source_name": {
+      "claude-code": "Claude Code",
+      "cursor": "Cursor",
+      "openclaw": "OpenClaw",
+      "codex": "Codex"
+    }
+  },
+  "hooks": {
+    "banner": "安装 Fleet Hooks 以获得更准确的状态检测",
+    "install": "安装",
+    "dismiss": "忽略",
+    "confirm_title": "安装 Fleet Hooks",
+    "confirm_body": "Fleet 将在 ~/.claude/settings.json 中添加以下事件的异步 hooks：\n\n{{events}}\n\n这些 hooks 在后台运行，不会阻塞你的 agent。你现有的设置将被完整保留。",
+    "confirm_body_disabled_warning": "\n\n注意：你的设置中 \"disableAllHooks\" 当前为 true，hooks 安装后不会生效，需要先修改此设置。",
+    "installed": "Fleet Hooks 安装成功",
+    "install_error": "安装 hooks 失败：{{error}}"
   }
 }

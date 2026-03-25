@@ -240,7 +240,15 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
 
     let (profile_res, usage_res) = futures::future::join(profile_fut, usage_fut).await;
 
-    let profile_raw = profile_res.map_err(|e| format!("Profile request failed: {e}"))?;
+    let profile_raw = profile_res.map_err(|e| {
+        let mut msg = format!("Profile request failed: {e}");
+        let mut source = std::error::Error::source(&e);
+        while let Some(cause) = source {
+            msg.push_str(&format!("\n  caused by: {cause}"));
+            source = std::error::Error::source(cause);
+        }
+        msg
+    })?;
     let profile_status = profile_raw.status();
     let profile_body = profile_raw
         .json::<Value>()
@@ -344,7 +352,15 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
     })
 }
 
-/// Blocking wrapper for use in the fleet CLI (no async runtime available).
+/// Blocking wrapper for use in the fleet CLI and background threads.
+/// Handles being called both from within a tokio runtime (via `block_in_place`)
+/// and from plain threads (via a new runtime).
 pub fn fetch_account_info_blocking() -> Result<AccountInfo, String> {
-    futures::executor::block_on(fetch_account_info())
+    if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        tokio::task::block_in_place(|| handle.block_on(fetch_account_info()))
+    } else {
+        tokio::runtime::Runtime::new()
+            .map_err(|e| format!("failed to create tokio runtime: {e}"))?
+            .block_on(fetch_account_info())
+    }
 }

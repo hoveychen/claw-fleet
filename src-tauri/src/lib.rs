@@ -1,8 +1,14 @@
 pub mod account;
+pub mod agent_source;
 pub mod backend;
+pub mod claude_analyze;
+pub mod claude_source;
+pub mod codex_source;
 pub mod cursor;
+pub mod hooks;
 pub mod local_backend;
 pub mod memory;
+pub mod openclaw_source;
 pub mod remote;
 pub mod session;
 
@@ -12,7 +18,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{Emitter, Manager};
-use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 
 use account::AccountInfo;
@@ -88,9 +94,17 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
         })
     });
 
-    // Cursor IDE: check ~/.cursor directory or cursor sessions
-    let cursor = cursor::get_cursor_dir().map_or(false, |d| d.is_dir())
-        || sessions.iter().any(|s| s.agent_source == "cursor");
+    // Cursor IDE: check if ~/.cursor exists
+    let cursor = home.as_ref().map_or(false, |h| h.join(".cursor").is_dir());
+
+    // OpenClaw: check if ~/.openclaw exists or `openclaw` is in PATH
+    let openclaw = home.as_ref().map_or(false, |h| h.join(".openclaw").is_dir())
+        || {
+            #[cfg(unix)]
+            { std::process::Command::new("which").arg("openclaw").output().map_or(false, |o| o.status.success()) }
+            #[cfg(not(unix))]
+            { std::process::Command::new("where").arg("openclaw").output().map_or(false, |o| o.status.success()) }
+        };
 
     // JetBrains: check live sessions for JetBrains IDE names
     let jetbrains = sessions.iter().any(|s| {
@@ -116,7 +130,16 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
         { false }
     };
 
-    backend::DetectedTools { cli, vscode, jetbrains, desktop, cursor }
+    // Codex: check if ~/.codex exists or `codex` is in PATH
+    let codex = home.as_ref().map_or(false, |h| h.join(".codex").is_dir())
+        || {
+            #[cfg(unix)]
+            { std::process::Command::new("which").arg("codex").output().map_or(false, |o| o.status.success()) }
+            #[cfg(not(unix))]
+            { std::process::Command::new("where").arg("codex").output().map_or(false, |o| o.status.success()) }
+        };
+
+    backend::DetectedTools { cli, vscode, jetbrains, desktop, cursor, openclaw, codex }
 }
 
 pub fn check_cli_installed() -> (bool, Option<String>) {
@@ -153,18 +176,47 @@ pub fn check_cli_installed() -> (bool, Option<String>) {
 }
 
 #[tauri::command]
-async fn get_account_info(state: tauri::State<'_, AppState>) -> Result<AccountInfo, String> {
+async fn get_account_info(
+    state: tauri::State<'_, AppState>,
+    app: tauri::AppHandle,
+) -> Result<AccountInfo, String> {
     log_debug("get_account_info: start");
     let fut = state.backend.lock().unwrap().account_info();
-    fut.await.map_err(|e| {
+    let info = fut.await.map_err(|e| {
         log_debug(&format!("get_account_info: error: {e}"));
         e
-    })
+    })?;
+    // Update the Claude entry in cached usage summaries for the tray menu.
+    {
+        let app_state = app.state::<AppState>();
+        let mut cached = app_state.cached_usage.lock().unwrap();
+        let summary = backend::SourceUsageSummary::from_claude(&info);
+        if let Some(pos) = cached.iter().position(|s| s.source == "claude") {
+            cached[pos] = summary;
+        } else {
+            cached.insert(0, summary);
+        }
+    }
+    rebuild_tray(&app);
+    Ok(info)
 }
 
 #[tauri::command]
-async fn get_cursor_account_info() -> Result<cursor::CursorAccountInfo, String> {
-    cursor::fetch_cursor_account_info().await
+async fn get_source_account(
+    source: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, String> {
+    let fut = state.backend.lock().unwrap().source_account(&source);
+    fut.await
+}
+
+#[tauri::command]
+async fn get_source_usage(
+    source: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Value, String> {
+    let fut = state.backend.lock().unwrap().source_usage(&source);
+    fut.await
 }
 
 // ── Process kill ──────────────────────────────────────────────────────────────
@@ -184,6 +236,12 @@ fn kill_workspace_sessions(workspace_path: String, state: tauri::State<'_, AppSt
 pub struct AppState {
     /// The active backend (local or remote).  Swapped on connect/disconnect.
     pub backend: Arc<Mutex<Box<dyn Backend>>>,
+    /// User's current UI locale (e.g. "en", "zh"), shared with backend threads.
+    pub locale: Arc<Mutex<String>>,
+    /// Cached sessions for tray menu rebuilds.
+    pub cached_sessions: Arc<Mutex<Vec<SessionInfo>>>,
+    /// Cached per-source usage summaries for tray menu display.
+    pub cached_usage: Arc<Mutex<Vec<backend::SourceUsageSummary>>>,
 }
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -272,6 +330,23 @@ fn stop_watching_session(state: tauri::State<AppState>) {
     state.backend.lock().unwrap().stop_watch();
 }
 
+// ── Hooks setup ──────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_hooks_setup_plan(state: tauri::State<AppState>) -> hooks::HookSetupPlan {
+    state.backend.lock().unwrap().get_hooks_plan()
+}
+
+#[tauri::command]
+fn apply_hooks_setup(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.lock().unwrap().apply_hooks()
+}
+
+#[tauri::command]
+fn remove_hooks(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.lock().unwrap().remove_hooks()
+}
+
 // ── CLI installer (macOS only) ───────────────────────────────────────────────
 
 /// Create a symlink at /usr/local/bin/fleet pointing to the bundled fleet binary.
@@ -328,6 +403,7 @@ pub const SKILL_TARGETS: &[(&str, &str)] = &[
     ("GitHub Copilot", ".copilot"),
     ("Cursor", ".cursor"),
     ("Gemini CLI", ".gemini"),
+    ("OpenClaw", ".openclaw"),
 ];
 
 #[derive(Serialize, Clone)]
@@ -451,40 +527,205 @@ fn get_memory_history(path: String, state: tauri::State<AppState>) -> Vec<memory
     state.backend.lock().unwrap().get_memory_history(&path)
 }
 
+// ── Agent sources config ─────────────────────────────────────────────────────
+
+/// Return the current sources config merged with availability info.
+#[tauri::command]
+fn get_sources_config(state: tauri::State<AppState>) -> Vec<agent_source::SourceInfo> {
+    state.backend.lock().unwrap().get_sources_config()
+}
+
+/// Toggle a source on/off and persist to disk (local or remote).
+#[tauri::command]
+fn set_source_enabled(name: String, enabled: bool, state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.lock().unwrap().set_source_enabled(&name, enabled)
+}
+
+// ── App restart ─────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.restart();
+}
+
+// ── Locale ──────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn set_locale(locale: String, state: tauri::State<AppState>) {
+    *state.locale.lock().unwrap() = locale;
+}
+
+// ── Waiting alerts ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_waiting_alerts(state: tauri::State<AppState>) -> Vec<backend::WaitingAlert> {
+    state.backend.lock().unwrap().get_waiting_alerts()
+}
+
+// ── Mascot quip generation ──────────────────────────────────────────────────
+
+#[tauri::command]
+async fn generate_mascot_quips(titles: Vec<String>, mood: String, locale: String) -> Vec<String> {
+    tokio::task::spawn_blocking(move || {
+        claude_analyze::generate_mascot_quips(&titles, &mood, &locale)
+    })
+    .await
+    .unwrap_or_default()
+}
+
 // ── Tray helpers ─────────────────────────────────────────────────────────────
 
-pub fn update_tray(app: &tauri::AppHandle, sessions: &[SessionInfo]) {
-    use session::SessionStatus;
+fn status_label(s: &session::SessionStatus) -> &'static str {
+    use session::SessionStatus::*;
+    match s {
+        Thinking => "thinking",
+        Executing => "executing",
+        Streaming => "streaming",
+        Processing => "processing",
+        WaitingInput => "waiting input",
+        Active => "active",
+        Delegating => "delegating",
+        Idle => "idle",
+    }
+}
 
-    let is_active = |s: &SessionInfo| matches!(
+fn is_session_active(s: &SessionInfo) -> bool {
+    use session::SessionStatus;
+    matches!(
         s.status,
         SessionStatus::Thinking | SessionStatus::Executing |
         SessionStatus::Streaming | SessionStatus::Processing |
         SessionStatus::WaitingInput | SessionStatus::Active |
         SessionStatus::Delegating
-    );
+    )
+}
 
-    let main_count = sessions.iter().filter(|s| !s.is_subagent && is_active(s)).count();
-    let sub_count = sessions.iter().filter(|s| s.is_subagent && is_active(s)).count();
-    let total = main_count + sub_count;
+pub fn update_tray(app: &tauri::AppHandle, sessions: &[SessionInfo]) {
+    // Cache sessions for use by background usage refresh.
+    let state = app.state::<AppState>();
+    *state.cached_sessions.lock().unwrap() = sessions.to_vec();
+    rebuild_tray(app);
+}
 
+pub fn update_tray_usage(app: &tauri::AppHandle, summaries: Vec<backend::SourceUsageSummary>) {
+    let state = app.state::<AppState>();
+    *state.cached_usage.lock().unwrap() = summaries;
+    rebuild_tray(app);
+}
+
+fn rebuild_tray(app: &tauri::AppHandle) {
+    let state = app.state::<AppState>();
+    let sessions = state.cached_sessions.lock().unwrap().clone();
+    let summaries = state.cached_usage.lock().unwrap().clone();
+
+    let active_main: Vec<&SessionInfo> = sessions.iter()
+        .filter(|s| !s.is_subagent && is_session_active(s))
+        .collect();
+    let sub_count = sessions.iter().filter(|s| s.is_subagent && is_session_active(s)).count();
+    let total = active_main.len() + sub_count;
+
+    // Update tooltip & title
     let tooltip = if total == 0 {
         "Claude Fleet".to_string()
     } else {
         format!(
             "Claude Fleet — {} active  (Main: {}  Sub: {})",
-            total, main_count, sub_count
+            total, active_main.len(), sub_count
         )
     };
 
-    if let Some(tray) = app.tray_by_id("main") {
-        let _ = tray.set_tooltip(Some(&tooltip));
-        #[cfg(target_os = "macos")]
-        {
-            let title = if total > 0 { format!("{}", total) } else { String::new() };
-            let _ = tray.set_title(Some(&title));
-        }
+    let Some(tray) = app.tray_by_id("main") else { return };
+    let _ = tray.set_tooltip(Some(&tooltip));
+    #[cfg(target_os = "macos")]
+    {
+        let title = if total > 0 { format!("{}", total) } else { String::new() };
+        let _ = tray.set_title(Some(&title));
     }
+
+    // Rebuild menu
+    if let Ok(menu) = build_tray_menu(app, &active_main, sub_count, total, &summaries) {
+        let _ = tray.set_menu(Some(menu));
+    }
+}
+
+fn build_tray_menu(
+    app: &tauri::AppHandle,
+    active_main: &[&SessionInfo],
+    sub_count: usize,
+    total: usize,
+    summaries: &[backend::SourceUsageSummary],
+) -> Result<tauri::menu::Menu<tauri::Wry>, tauri::Error> {
+    let mut builder = MenuBuilder::new(app);
+
+    // ── Active agents section ────────────────────────────────────────────
+    let header_text = if total > 0 {
+        format!("{} Active Agent{}", total, if total == 1 { "" } else { "s" })
+    } else {
+        "No Active Agents".to_string()
+    };
+    builder = builder.item(
+        &MenuItemBuilder::new(header_text).id("info-header").enabled(false).build(app)?
+    );
+
+    // List up to 8 active main agents
+    for (i, s) in active_main.iter().take(8).enumerate() {
+        let label = format!("  {} — {}", s.workspace_name, status_label(&s.status));
+        builder = builder.item(
+            &MenuItemBuilder::new(label).id(format!("info-agent-{}", i)).enabled(false).build(app)?
+        );
+    }
+    if active_main.len() > 8 {
+        let more = format!("  ... and {} more", active_main.len() - 8);
+        builder = builder.item(
+            &MenuItemBuilder::new(more).id("info-more").enabled(false).build(app)?
+        );
+    }
+    if sub_count > 0 {
+        let sub_label = format!("  + {} subagent{}", sub_count, if sub_count == 1 { "" } else { "s" });
+        builder = builder.item(
+            &MenuItemBuilder::new(sub_label).id("info-sub").enabled(false).build(app)?
+        );
+    }
+
+    builder = builder.item(&PredefinedMenuItem::separator(app)?);
+
+    // ── Usage section (all sources) ─────────────────────────────────────
+    if !summaries.is_empty() {
+        for (idx, summary) in summaries.iter().enumerate() {
+            if summary.bars.is_empty() {
+                continue;
+            }
+            let parts: Vec<String> = summary.bars.iter()
+                .map(|b| format!("{}: {:.0}%", b.label, b.utilization * 100.0))
+                .collect();
+            let source_label = match summary.source.as_str() {
+                "claude" => "Claude",
+                "cursor" => "Cursor",
+                "codex" => "Codex",
+                "openclaw" => "OpenClaw",
+                other => other,
+            };
+            let line = format!("{}  {}", source_label, parts.join("  |  "));
+            builder = builder.item(
+                &MenuItemBuilder::new(line)
+                    .id(format!("info-usage-{}", idx))
+                    .enabled(false)
+                    .build(app)?
+            );
+        }
+        builder = builder.item(&PredefinedMenuItem::separator(app)?);
+    }
+
+    // ── Actions ──────────────────────────────────────────────────────────
+    builder = builder.item(
+        &MenuItemBuilder::new("Switch Connection").id("switch-connection").build(app)?
+    );
+    builder = builder.item(&PredefinedMenuItem::separator(app)?);
+    builder = builder.item(
+        &MenuItemBuilder::new("Quit").id("quit").build(app)?
+    );
+
+    builder.build()
 }
 
 // ── App setup ────────────────────────────────────────────────────────────────
@@ -499,26 +740,60 @@ pub fn run() {
             }
         }))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState {
             // NullBackend is a placeholder; replaced with LocalBackend in setup().
             backend: Arc::new(Mutex::new(Box::new(backend::NullBackend) as Box<dyn Backend>)),
+            locale: Arc::new(Mutex::new("en".to_string())),
+            cached_sessions: Arc::new(Mutex::new(Vec::new())),
+            cached_usage: Arc::new(Mutex::new(Vec::new())),
         })
         .setup(move |app| {
             // Replace NullBackend with the real LocalBackend now that AppHandle
             // is available.
             {
                 let state = app.state::<AppState>();
-                let local = local_backend::LocalBackend::new(app.handle().clone());
+                let locale = state.locale.clone();
+
+                // Build the agent source registry from config (~/.claude/fleet-sources.json).
+                let sources = agent_source::build_sources();
+
+                let local = local_backend::LocalBackend::new(
+                    app.handle().clone(),
+                    locale,
+                    sources,
+                );
                 *state.backend.lock().unwrap() = Box::new(local);
             }
 
-            // ── Tray icon ────────────────────────────────────────────────────
-            let switch_item = MenuItemBuilder::new("Switch Connection").id("switch-connection").build(app)?;
-            let sep = tauri::menu::PredefinedMenuItem::separator(app)?;
-            let quit_item = MenuItemBuilder::new("Quit").id("quit").build(app)?;
+            // Truncate the hook events file if it has grown too large.
+            hooks::maybe_truncate_events_file();
 
+            // ── Background usage refresh (every 120s) ────────────────────────
+            // Runs network I/O outside the backend lock to avoid blocking IPC.
+            {
+                let app_handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    loop {
+                        let sources = agent_source::build_sources();
+                        let summaries =
+                            local_backend::fetch_usage_summaries_from_sources(&sources);
+                        update_tray_usage(&app_handle, summaries);
+                        std::thread::sleep(std::time::Duration::from_secs(120));
+                    }
+                });
+            }
+
+            // ── Tray icon ────────────────────────────────────────────────────
+            // Build an initial menu; it will be rebuilt dynamically by rebuild_tray().
             let tray_menu = MenuBuilder::new(app)
-                .items(&[&switch_item, &sep, &quit_item])
+                .item(&MenuItemBuilder::new("No Active Agents").id("info-header").enabled(false).build(app)?)
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&MenuItemBuilder::new("Switch Connection").id("switch-connection").build(app)?)
+                .item(&PredefinedMenuItem::separator(app)?)
+                .item(&MenuItemBuilder::new("Quit").id("quit").build(app)?)
                 .build()?;
 
             #[cfg(target_os = "macos")]
@@ -585,10 +860,20 @@ pub fn run() {
             remote::connect_remote,
             remote::disconnect_remote,
             pick_file,
-            get_cursor_account_info,
+            get_source_account,
+            get_source_usage,
             list_memories,
             get_memory_content,
             get_memory_history,
+            get_waiting_alerts,
+            set_locale,
+            get_hooks_setup_plan,
+            apply_hooks_setup,
+            remove_hooks,
+            generate_mascot_quips,
+            get_sources_config,
+            set_source_enabled,
+            restart_app,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

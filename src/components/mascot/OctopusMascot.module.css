@@ -1,0 +1,393 @@
+/* ── Container ──────────────────────────────────────────────────────────── */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+}
+
+.svg {
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+/* ── Body group (smooth bob, mood actions) ──────────────────────────────── */
+
+.bodyGroup {
+  transition: transform 0.3s ease-out;
+  transform-origin: 100px 52px;
+}
+
+/* ── Head dome ───────────────────────────────────────────────────────────── */
+
+.head {
+  transition: fill 0.8s ease;
+}
+
+/* ── Hat ─────────────────────────────────────────────────────────────────── */
+
+.hat {
+  transform-origin: 100px 22px;
+  transition: transform 0.3s ease;
+}
+
+.hatStar {
+  animation: starPulse 4s ease-in-out infinite;
+}
+
+@keyframes starPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.65; }
+}
+
+/* Mood-specific hat animations */
+.excited .hat {
+  animation: hatBounce 1s ease-in-out infinite;
+}
+
+.sleepy .hat {
+  animation: hatDroop 4s ease-in-out infinite;
+}
+
+.burning .hat {
+  animation: hatTremor 0.3s ease-in-out infinite alternate;
+}
+
+@keyframes hatBounce {
+  0%, 100% { transform: rotate(0deg); }
+  25%       { transform: rotate(-4deg); }
+  75%       { transform: rotate(4deg); }
+}
+
+@keyframes hatDroop {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  50%       { transform: rotate(3deg) translateY(3px); }
+}
+
+@keyframes hatTremor {
+  0%   { transform: rotate(-1.5deg); }
+  100% { transform: rotate(1.5deg); }
+}
+
+/* ── Tentacle layers ─────────────────────────────────────────────────────── */
+
+.backTentacles,
+.frontTentacles {
+  /* Individual tentacles are driven by JS wave physics; CSS adds overall mood feel */
+}
+
+.excited .backTentacles,
+.excited .frontTentacles {
+  animation: tentacleFlurry 1.5s ease-in-out infinite;
+  transform-origin: 100px 52px;
+}
+
+@keyframes tentacleFlurry {
+  0%, 100% { transform: scale(1); }
+  50%       { transform: scale(1.03, 0.98); }
+}
+
+.sleepy .frontTentacles {
+  animation: tentacleDroop 5s ease-in-out infinite;
+  transform-origin: 100px 100px;
+}
+
+@keyframes tentacleDroop {
+  0%, 100% { transform: translateY(0); }
+  60%       { transform: translateY(2px); }
+}
+
+/* ── Blush ───────────────────────────────────────────────────────────────── */
+
+.blush {
+  transition: fill 0.8s ease, opacity 0.4s ease;
+}
+
+.blushPulse {
+  animation: blushPulse 1.5s ease-in-out infinite;
+}
+
+@keyframes blushPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.45; }
+}
+
+/* ── Mouth ───────────────────────────────────────────────────────────────── */
+
+.mouth {
+  transition: d 0.4s ease, fill 0.3s ease;
+}
+
+/* ── Eye elements ────────────────────────────────────────────────────────── */
+
+.eyeWhite {
+  transition: rx 0.6s ease, ry 0.6s ease, fill 0.6s ease;
+}
+
+.pupil {
+  transition: cx 0.4s cubic-bezier(0.4, 0, 0.2, 1), cy 0.4s cubic-bezier(0.4, 0, 0.2, 1), r 0.6s ease;
+}
+
+.eyelid {
+  transition: height 0.15s ease, y 0.15s ease, fill 0.8s ease;
+}
+
+/* Eye jiggle on mood change */
+.eyeJiggle {
+  animation: jiggle 0.4s ease-out;
+}
+
+@keyframes jiggle {
+  0%   { transform: scale(1, 1); }
+  15%  { transform: scale(1.08, 0.92); }
+  30%  { transform: scale(0.95, 1.05); }
+  50%  { transform: scale(1.03, 0.97); }
+  70%  { transform: scale(0.99, 1.01); }
+  100% { transform: scale(1, 1); }
+}
+
+/* ── Eye glow effects ────────────────────────────────────────────────────── */
+
+.softGlow {
+  animation: softPulse 3s ease-in-out infinite;
+}
+
+.fireGlow {
+  animation: firePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes softPulse {
+  0%, 100% { opacity: 0.5; }
+  50%       { opacity: 1; }
+}
+
+@keyframes firePulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%       { opacity: 1;   transform: scale(1.08); }
+}
+
+/* ── Tear highlight (lonely) ─────────────────────────────────────────────── */
+
+.tearHighlight {
+  animation: tearGlisten 2s ease-in-out infinite;
+}
+
+@keyframes tearGlisten {
+  0%, 100% { opacity: 0.3; }
+  50%       { opacity: 0.8; }
+}
+
+.waterShimmer {
+  animation: waterShimmer 2s ease-in-out infinite;
+}
+
+@keyframes waterShimmer {
+  0%, 100% { opacity: 0.3; }
+  50%       { opacity: 0.7; }
+}
+
+/* ── Mood-specific body group animations ─────────────────────────────────── */
+
+/* excited: body bounces rhythmically */
+.excited.bodyGroup {
+  animation: excitedBob 0.6s ease-in-out infinite;
+}
+
+@keyframes excitedBob {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25%       { transform: translateY(-3px) rotate(-2deg); }
+  75%       { transform: translateY(-2px) rotate(2deg); }
+}
+
+/* burning: manic jitter */
+.burning.bodyGroup {
+  animation: burningJitter 0.08s ease-in-out infinite alternate;
+}
+
+@keyframes burningJitter {
+  0%   { transform: translateX(0) skewX(0deg); }
+  100% { transform: translateX(0.8px) skewX(0.5deg); }
+}
+
+/* sleepy: slow sway */
+.sleepy.bodyGroup {
+  animation: sleepySway 6s ease-in-out infinite;
+}
+
+@keyframes sleepySway {
+  0%, 100% { transform: rotate(0deg) translateY(0); }
+  40%       { transform: rotate(4deg) translateY(2px); }
+  70%       { transform: rotate(4.5deg) translateY(2.5px); }
+  80%       { transform: rotate(-1deg) translateY(0); }
+}
+
+/* bored: slow drift */
+.bored.bodyGroup {
+  animation: boredDrift 8s ease-in-out infinite;
+}
+
+@keyframes boredDrift {
+  0%, 100% { transform: translateX(0) translateY(0); }
+  30%       { transform: translateX(-1.5px) translateY(1px); }
+  70%       { transform: translateX(1.5px) translateY(-0.5px); }
+}
+
+/* lonely: slow gentle sigh */
+.lonely.bodyGroup {
+  animation: lonelySigh 7s ease-in-out infinite;
+}
+
+@keyframes lonelySigh {
+  0%, 100% { transform: scale(1) translateY(0); }
+  50%       { transform: scale(0.98, 0.97) translateY(2px); }
+}
+
+/* satisfied: happy micro-wiggle */
+.satisfied.bodyGroup {
+  animation: satisfiedWiggle 3s ease-in-out infinite;
+}
+
+@keyframes satisfiedWiggle {
+  0%, 100% { transform: rotate(0deg); }
+  20%       { transform: rotate(-1.5deg); }
+  40%       { transform: rotate(1.5deg); }
+  60%       { transform: rotate(-0.8deg); }
+  80%       { transform: rotate(0.5deg); }
+}
+
+/* anxious: nervous micro-shake */
+.anxious.bodyGroup {
+  animation: anxiousShake 0.25s ease-in-out infinite alternate;
+}
+
+@keyframes anxiousShake {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(0.6px) rotate(0.5deg); }
+}
+
+/* ── Decorations ─────────────────────────────────────────────────────────── */
+
+.sweatDrop  { animation: sweatFall 2s ease-in infinite; }
+.sweatDrop2 { animation: sweatFall 2s ease-in 0.8s infinite; }
+
+@keyframes sweatFall {
+  0%   { opacity: 0; transform: translateY(0); }
+  20%  { opacity: 0.8; }
+  100% { opacity: 0; transform: translateY(12px); }
+}
+
+.fireParticle1 { animation: fireFloat 1.5s ease-out infinite; }
+.fireParticle2 { animation: fireFloat 1.8s ease-out 0.3s infinite; }
+.fireParticle3 { animation: fireFloat 1.4s ease-out 0.7s infinite; }
+
+@keyframes fireFloat {
+  0%   { opacity: 0.9; transform: translateY(0) scale(1); }
+  100% { opacity: 0;   transform: translateY(-14px) scale(0.3); }
+}
+
+.zzz {
+  animation: zzzFloat 3s ease-in-out infinite;
+}
+
+@keyframes zzzFloat {
+  0%, 100% { opacity: 0.4; transform: translateY(0); }
+  50%       { opacity: 0.9; transform: translateY(-5px); }
+}
+
+.tear  { animation: tearDrip 3s ease-in infinite; }
+.tear2 { animation: tearDrip 3s ease-in 1.5s infinite; }
+
+@keyframes tearDrip {
+  0%   { opacity: 0; transform: translateY(0); }
+  30%  { opacity: 0.6; }
+  100% { opacity: 0; transform: translateY(10px); }
+}
+
+.sparkle1 { fill: var(--color-accent, #fbbf24); animation: sparkle 2s ease-in-out infinite; }
+.sparkle2 { fill: var(--color-accent, #fbbf24); animation: sparkle 2s ease-in-out 0.6s infinite; }
+.sparkle3 { fill: var(--color-accent, #fbbf24); animation: sparkle 2s ease-in-out 1.2s infinite; }
+
+@keyframes sparkle {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50%       { opacity: 1;   transform: scale(1.3); }
+}
+
+.floatHeart1 {
+  fill: rgba(255, 100, 120, 0.6);
+  animation: heartFloat 3s ease-out infinite;
+}
+
+.floatHeart2 {
+  fill: rgba(255, 100, 120, 0.5);
+  animation: heartFloat 3s ease-out 1.5s infinite;
+}
+
+@keyframes heartFloat {
+  0%, 100% { opacity: 0.4; transform: scale(0.9); }
+  50%      { opacity: 0.8; transform: scale(1.1); }
+}
+
+/* ── Quip speech bubble ──────────────────────────────────────────────────── */
+
+.quipBubble {
+  position: relative;
+  background: var(--mascot-bubble-bg, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--mascot-bubble-border, rgba(255, 255, 255, 0.15));
+  border-radius: 12px;
+  padding: 5px 10px;
+  margin: 0 8px 4px;
+  animation: quipFadeIn 0.5s ease;
+  max-width: calc(100% - 16px);
+}
+
+/* Tail pointing down */
+.quipBubble::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--mascot-bubble-bg, rgba(255, 255, 255, 0.12));
+}
+
+/* Tail border */
+.quipBubble::before {
+  content: "";
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--mascot-bubble-border, rgba(255, 255, 255, 0.15));
+}
+
+.quip {
+  font-size: 11px;
+  color: var(--mascot-text, #b0c0d8);
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  line-height: 1.4;
+}
+
+@keyframes quipFadeIn {
+  0%   { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.quip.burning   { color: #ff8c42; }
+.quip.excited   { color: var(--color-accent, #fbbf24); }
+.quip.lonely    { color: #7db8f0; }
+.quip.anxious   { color: #fbbf24; }
+.quip.satisfied { color: #4ade80; }

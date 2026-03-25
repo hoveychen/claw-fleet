@@ -155,22 +155,91 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
         });
     }
 
-    // Sort by workspace name
+    // Scan global memory (~/.claude/memory/)
+    let global_memory_dir = claude_dir.join("memory");
+    if global_memory_dir.is_dir() {
+        let mut files = Vec::new();
+        if let Ok(mem_entries) = fs::read_dir(&global_memory_dir) {
+            for mem_entry in mem_entries.flatten() {
+                let mem_path = mem_entry.path();
+                if !mem_path.is_file() {
+                    continue;
+                }
+                if let Some(metadata) = fs::metadata(&mem_path).ok() {
+                    let modified_ms = metadata
+                        .modified()
+                        .ok()
+                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0);
+
+                    files.push(MemoryFile {
+                        name: mem_path
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or_default()
+                            .to_string(),
+                        path: mem_path.to_string_lossy().to_string(),
+                        size_bytes: metadata.len(),
+                        modified_ms,
+                    });
+                }
+            }
+        }
+        if !files.is_empty() {
+            files.sort_by(|a, b| {
+                let a_is_index = a.name == "MEMORY.md";
+                let b_is_index = b.name == "MEMORY.md";
+                b_is_index.cmp(&a_is_index).then(a.name.cmp(&b.name))
+            });
+            results.insert(
+                0,
+                WorkspaceMemory {
+                    workspace_name: "(Global)".to_string(),
+                    workspace_path: global_memory_dir.to_string_lossy().to_string(),
+                    project_key: "__global__".to_string(),
+                    has_claude_md: false,
+                    files,
+                },
+            );
+        }
+    }
+
+    // Sort project memories by workspace name (global stays at front)
+    let global = if results.first().map_or(false, |r| r.project_key == "__global__") {
+        Some(results.remove(0))
+    } else {
+        None
+    };
     results.sort_by(|a, b| a.workspace_name.cmp(&b.workspace_name));
+    if let Some(g) = global {
+        results.insert(0, g);
+    }
     results
 }
 
 // ── Read a memory file's content ─────────────────────────────────────────────
 
 pub fn read_memory_file(path: &str) -> Result<String, String> {
-    // Safety: only allow reading from ~/.claude/projects/*/memory/
+    // Safety: only allow reading from ~/.claude/projects/*/memory/ or ~/.claude/memory/
     let claude_dir = get_claude_dir().ok_or("cannot determine home dir")?;
-    let projects_dir = claude_dir.join("projects");
     let canonical = fs::canonicalize(path).map_err(|e| e.to_string())?;
-    let projects_canonical = fs::canonicalize(&projects_dir).map_err(|e| e.to_string())?;
 
-    if !canonical.starts_with(&projects_canonical) {
-        return Err("path is outside ~/.claude/projects/".into());
+    let projects_dir = claude_dir.join("projects");
+    let global_memory_dir = claude_dir.join("memory");
+
+    let allowed = if let Ok(p) = fs::canonicalize(&projects_dir) {
+        canonical.starts_with(&p)
+    } else {
+        false
+    } || if let Ok(g) = fs::canonicalize(&global_memory_dir) {
+        canonical.starts_with(&g)
+    } else {
+        false
+    };
+
+    if !allowed {
+        return Err("path is outside allowed memory directories".into());
     }
 
     fs::read_to_string(path).map_err(|e| e.to_string())
@@ -389,7 +458,249 @@ fn path_matches_memory(file_path: &str, target_path: &str, target_name: &str) ->
     false
 }
 
+/// Decode a Claude Code project key back to the original filesystem path.
+///
+/// The encoding replaces `/` with `-`, but directory names themselves may
+/// contain `-`.  We greedily match the longest existing directory at each
+/// level so that e.g. `-Users-hoveychen-workspace-claude-fleet` correctly
+/// resolves to `/Users/hoveychen/workspace/claude-fleet` instead of the
+/// incorrect `/Users/hoveychen/workspace/claude/fleet`.
 fn decode_project_key(encoded: &str) -> String {
     let stripped = encoded.trim_start_matches('-');
-    format!("/{}", stripped.replace('-', "/"))
+    let parts: Vec<&str> = stripped.split('-').collect();
+    if parts.is_empty() {
+        return "/".to_string();
+    }
+    crate::session::decode_workspace_path_with_parts(&parts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ── path_matches_memory tests ───────────────────────────────────────────
+
+    #[test]
+    fn path_match_exact() {
+        assert!(path_matches_memory(
+            "/Users/me/.claude/projects/foo/memory/MEMORY.md",
+            "/Users/me/.claude/projects/foo/memory/MEMORY.md",
+            "MEMORY.md",
+        ));
+    }
+
+    #[test]
+    fn path_match_suffix() {
+        assert!(path_matches_memory(
+            "/some/other/path/memory/feedback_testing.md",
+            "/Users/me/.claude/projects/foo/memory/feedback_testing.md",
+            "feedback_testing.md",
+        ));
+    }
+
+    #[test]
+    fn path_no_match() {
+        assert!(!path_matches_memory(
+            "/Users/me/.claude/projects/foo/memory/OTHER.md",
+            "/Users/me/.claude/projects/foo/memory/MEMORY.md",
+            "MEMORY.md",
+        ));
+    }
+
+    #[test]
+    fn path_no_match_similar_name() {
+        // Shouldn't match a file with a similar but different name
+        assert!(!path_matches_memory(
+            "/memory/MEMORY.md.bak",
+            "/some/memory/MEMORY.md",
+            "MEMORY.md",
+        ));
+    }
+
+    // ── scan_jsonl_for_memory_edits tests ───────────────────────────────────
+
+    #[test]
+    fn scan_finds_write_tool_call() {
+        let jsonl = json!({
+            "type": "assistant",
+            "timestamp": "2026-03-01T10:00:00Z",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Write",
+                    "input": {
+                        "file_path": "/home/user/.claude/projects/foo/memory/MEMORY.md",
+                        "content": "# Memory\n\nSome content."
+                    }
+                }]
+            }
+        }).to_string();
+
+        let mut history = Vec::new();
+        scan_jsonl_for_memory_edits(
+            &jsonl,
+            "/home/user/.claude/projects/foo/memory/MEMORY.md",
+            "sess1",
+            "my-project",
+            &mut history,
+        );
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].tool, "Write");
+        assert_eq!(history[0].session_id, "sess1");
+        assert_eq!(history[0].timestamp, "2026-03-01T10:00:00Z");
+        match &history[0].detail {
+            MemoryEditDetail::Write { content } => {
+                assert!(content.contains("# Memory"));
+            }
+            _ => panic!("Expected Write detail"),
+        }
+    }
+
+    #[test]
+    fn scan_finds_edit_tool_call() {
+        let jsonl = json!({
+            "type": "assistant",
+            "timestamp": "2026-03-01T11:00:00Z",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Edit",
+                    "input": {
+                        "file_path": "/home/user/.claude/projects/foo/memory/MEMORY.md",
+                        "old_string": "old text",
+                        "new_string": "new text"
+                    }
+                }]
+            }
+        }).to_string();
+
+        let mut history = Vec::new();
+        scan_jsonl_for_memory_edits(
+            &jsonl,
+            "/home/user/.claude/projects/foo/memory/MEMORY.md",
+            "sess2",
+            "my-project",
+            &mut history,
+        );
+
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].tool, "Edit");
+        match &history[0].detail {
+            MemoryEditDetail::Edit { old_string, new_string } => {
+                assert_eq!(old_string, "old text");
+                assert_eq!(new_string, "new text");
+            }
+            _ => panic!("Expected Edit detail"),
+        }
+    }
+
+    #[test]
+    fn scan_ignores_non_matching_paths() {
+        let jsonl = json!({
+            "type": "assistant",
+            "timestamp": "2026-03-01T12:00:00Z",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Write",
+                    "input": {
+                        "file_path": "/home/user/some/other/file.rs",
+                        "content": "fn main() {}"
+                    }
+                }]
+            }
+        }).to_string();
+
+        let mut history = Vec::new();
+        scan_jsonl_for_memory_edits(
+            &jsonl,
+            "/home/user/.claude/projects/foo/memory/MEMORY.md",
+            "sess3",
+            "project",
+            &mut history,
+        );
+
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn scan_ignores_user_messages() {
+        let jsonl = json!({
+            "type": "user",
+            "timestamp": "2026-03-01T12:00:00Z",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Write",
+                    "input": {
+                        "file_path": "/home/user/.claude/projects/foo/memory/MEMORY.md",
+                        "content": "should not match"
+                    }
+                }]
+            }
+        }).to_string();
+
+        let mut history = Vec::new();
+        scan_jsonl_for_memory_edits(
+            &jsonl,
+            "/home/user/.claude/projects/foo/memory/MEMORY.md",
+            "sess4",
+            "project",
+            &mut history,
+        );
+
+        assert!(history.is_empty());
+    }
+
+    #[test]
+    fn scan_handles_multiple_lines_and_timestamp_tracking() {
+        let line1 = json!({
+            "type": "assistant",
+            "timestamp": "2026-03-01T10:00:00Z",
+            "message": { "content": [] }
+        }).to_string();
+        let line2 = json!({
+            "type": "assistant",
+            "message": {
+                "content": [{
+                    "type": "tool_use",
+                    "name": "Write",
+                    "input": {
+                        "file_path": "/memory/MEMORY.md",
+                        "content": "updated"
+                    }
+                }]
+            }
+        }).to_string();
+        let content = format!("{}\n{}", line1, line2);
+
+        let mut history = Vec::new();
+        scan_jsonl_for_memory_edits(
+            &content,
+            "/some/path/memory/MEMORY.md",
+            "sess5",
+            "proj",
+            &mut history,
+        );
+
+        assert_eq!(history.len(), 1);
+        // Should carry forward the timestamp from line1
+        assert_eq!(history[0].timestamp, "2026-03-01T10:00:00Z");
+    }
+
+    #[test]
+    fn scan_handles_invalid_json_gracefully() {
+        let content = "not valid json\n{also invalid}\n";
+        let mut history = Vec::new();
+        scan_jsonl_for_memory_edits(
+            content,
+            "/memory/MEMORY.md",
+            "sess6",
+            "proj",
+            &mut history,
+        );
+        assert!(history.is_empty());
+    }
 }

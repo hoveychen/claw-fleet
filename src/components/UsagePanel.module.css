@@ -1,0 +1,253 @@
+/* ── Container ──────────────────────────────────────────────────────────── */
+
+.container {
+  flex-shrink: 0;
+  padding: 0 8px;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 8px 6px;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  gap: 4px;
+}
+
+.toggle:hover {
+  color: var(--color-text);
+}
+
+.toggle_label {
+  flex: 1;
+  text-align: left;
+}
+
+.toggle_icon {
+  font-size: 8px;
+  opacity: 0.6;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 6px 8px;
+}
+
+/* ── Tool section ──────────────────────────────────────────────────────── */
+
+.tool_section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+}
+
+.tool_header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.plan_badge {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--color-text-secondary, var(--color-text-dim));
+  background: var(--color-bg-tertiary, rgba(128,128,128,0.15));
+  padding: 1px 5px;
+  border-radius: 4px;
+  text-transform: capitalize;
+}
+
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── Usage bars (shared) ───────────────────────────────────────────────── */
+
+.usage_item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.usage_header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.usage_label {
+  font-size: 10px;
+  color: var(--color-text);
+}
+
+.usage_pct {
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
+
+.bar_track {
+  height: 4px;
+  background: var(--color-bg);
+  border-radius: 2px;
+  overflow: visible;
+  position: relative;
+}
+
+.bar_fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.bar_prev_marker {
+  position: absolute;
+  top: -2px;
+  width: 2px;
+  height: 8px;
+  background: var(--color-text-dim);
+  border-radius: 1px;
+  opacity: 0.4;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.usage_footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.usage_reset {
+  font-size: 9px;
+  color: var(--color-text-dim);
+}
+
+.usage_prev {
+  font-size: 9px;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.trend_faster {
+  color: #fb923c;
+}
+
+.trend_slower {
+  color: #4ade80;
+}
+
+.trend_similar {
+  color: var(--color-text-dim);
+}
+
+/* ── Footer ────────────────────────────────────────────────────────────── */
+
+.tool_footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 2px;
+}
+
+.last_updated {
+  font-size: 9px;
+  color: var(--color-text-dim);
+  opacity: 0.6;
+}
+
+.footer_actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.auto_toggle {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 9px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+.auto_toggle input[type="checkbox"] {
+  width: 10px;
+  height: 10px;
+  accent-color: var(--color-accent);
+  cursor: pointer;
+}
+
+.refresh {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.refresh:hover {
+  color: var(--color-accent);
+}
+
+.refresh:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ── Misc ──────────────────────────────────────────────────────────────── */
+
+.dim {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  margin: 0;
+}
+
+.error {
+  font-size: 10px;
+  color: #f87171;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.error p {
+  margin: 0;
+}
+
+.retry {
+  background: none;
+  border: 1px solid #f87171;
+  color: #f87171;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 9px;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.retry:hover {
+  background: rgba(248, 113, 113, 0.1);
+}

@@ -244,9 +244,11 @@ export function MessageList({ messages, isLoading }: Props) {
 
   // Reset window when switching to a new session (total message count drops)
   const prevCountRef = useRef(displayMsgs.length);
+  const sessionSwitchedRef = useRef(false);
   useEffect(() => {
     if (displayMsgs.length < prevCountRef.current) {
       setVisibleStart(0);
+      sessionSwitchedRef.current = true;
     }
     prevCountRef.current = displayMsgs.length;
   }, [displayMsgs.length]);
@@ -255,7 +257,21 @@ export function MessageList({ messages, isLoading }: Props) {
   const visibleMsgs = displayMsgs.slice(effectiveStart);
   const hiddenCount = effectiveStart;
 
-  // After prepending messages, restore scroll so the viewport doesn't jump
+  // When effectiveStart advances due to new tail messages, save scroll anchor
+  // so the layout effect below can compensate for the removed top element(s)
+  const prevEffectiveStartRef = useRef(effectiveStart);
+  if (effectiveStart > prevEffectiveStartRef.current && !scrollAnchor.current) {
+    const scroller = listRef.current?.parentElement;
+    if (scroller && listRef.current) {
+      scrollAnchor.current = {
+        scrollTop: scroller.scrollTop,
+        scrollHeight: listRef.current.scrollHeight,
+      };
+    }
+  }
+  prevEffectiveStartRef.current = effectiveStart;
+
+  // After prepending/trimming messages, restore scroll so the viewport doesn't jump
   useLayoutEffect(() => {
     const anchor = scrollAnchor.current;
     if (!anchor || !listRef.current) return;
@@ -291,10 +307,15 @@ export function MessageList({ messages, isLoading }: Props) {
     return () => observer.disconnect();
   }, [hiddenCount]);
 
-  // Auto-scroll to bottom only when user is already near the bottom
+  // Auto-scroll to bottom when session switches or when user is already near the bottom
   useEffect(() => {
     const scroller = listRef.current?.parentElement;
     if (!scroller) return;
+    if (sessionSwitchedRef.current) {
+      sessionSwitchedRef.current = false;
+      bottomRef.current?.scrollIntoView({ behavior: "instant" });
+      return;
+    }
     const distFromBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
     if (distFromBottom < 200) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });

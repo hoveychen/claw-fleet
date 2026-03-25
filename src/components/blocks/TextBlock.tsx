@@ -3,6 +3,8 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import styles from "./TextBlock.module.css";
 
 interface Props {
@@ -30,7 +32,7 @@ export const TextBlock = memo(function TextBlock({ text, isPartial }: Props) {
                   <button
                     className={styles.copy_btn}
                     onClick={() =>
-                      navigator.clipboard.writeText(String(children))
+                      writeText(String(children))
                     }
                   >
                     Copy
@@ -63,7 +65,7 @@ export const TextBlock = memo(function TextBlock({ text, isPartial }: Props) {
                 href={href}
                 onClick={(e) => {
                   e.preventDefault();
-                  if (href) window.open(href, "_blank");
+                  if (href) openUrl(href);
                 }}
               >
                 {children}

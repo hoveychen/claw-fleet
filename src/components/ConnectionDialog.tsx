@@ -75,11 +75,16 @@ export function ConnectionDialog({ onConnected }: Props) {
 
   const unlistenRef = useRef<(() => void) | null>(null);
 
-  // Load saved connections and SSH profiles on mount
+  // Load saved connections and SSH profiles on mount.
+  // If local AI tools are detected, prefer local mode even when saved remotes exist.
   useEffect(() => {
-    invoke<RemoteConnection[]>("list_saved_connections").then((conns) => {
+    Promise.all([
+      invoke<RemoteConnection[]>("list_saved_connections"),
+      invoke<{ cli_installed: boolean; claude_dir_exists: boolean; has_sessions: boolean }>("check_setup_status").catch(() => null),
+    ]).then(([conns, status]) => {
       setSavedConns(conns);
-      if (conns.length > 0) {
+      const hasLocalAI = status && (status.cli_installed || status.claude_dir_exists || status.has_sessions);
+      if (conns.length > 0 && !hasLocalAI) {
         setMode("remote");
         setSelectedSavedId(conns[0].id);
       }

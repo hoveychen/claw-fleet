@@ -1,10 +1,13 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+use crate::hooks::HookState;
 
 // ── Lock file ────────────────────────────────────────────────────────────────
 
@@ -68,6 +71,11 @@ pub struct SessionInfo {
     pub last_skill: Option<String>,
     /// Source of this session: "claude-code" or "cursor"
     pub agent_source: String,
+    /// Semantic outcome tags from the last completed turn (e.g. "bug_fixed",
+    /// "needs_input").  Set by background analysis, cleared when a new turn
+    /// starts.  `None` means no analysis has run yet or the session is busy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_outcome: Option<Vec<String>>,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -94,9 +102,43 @@ pub fn is_process_alive(_pid: u32) -> bool {
 
 fn decode_workspace_path(encoded: &str) -> String {
     // "-Users-hoveychen-workspace-netferry" → "/Users/hoveychen/workspace/netferry"
-    // Best-effort; dashes inside path components are lost (e.g. "claude-fleet" ≠ "claude/fleet").
+    //
+    // Dashes are ambiguous (path separator vs literal dash in a directory name).
+    // We resolve this by greedily checking the filesystem: at each level, try the
+    // longest remaining dash-joined segment first, and shorten until we find a real
+    // directory.  Fall back to the naive one-dash-per-slash decode if nothing matches.
     let stripped = encoded.trim_start_matches('-');
-    format!("/{}", stripped.replace('-', "/"))
+    let parts: Vec<&str> = stripped.split('-').collect();
+    if parts.is_empty() {
+        return "/".to_string();
+    }
+    decode_workspace_path_with_parts(&parts)
+}
+
+pub fn decode_workspace_path_with_parts(parts: &[&str]) -> String {
+    let mut current = String::new(); // built path so far (e.g. "/Users/hoveychen")
+    let mut i = 0;
+    while i < parts.len() {
+        // Try longest remaining segment first: join parts[i..] with '-', then parts[i..len-1], etc.
+        let mut matched = false;
+        // Try from longest (all remaining parts) down to single part
+        for end in (i + 1..=parts.len()).rev() {
+            let candidate_segment = parts[i..end].join("-");
+            let candidate_path = format!("{}/{}", current, candidate_segment);
+            if std::path::Path::new(&candidate_path).exists() {
+                current = candidate_path;
+                i = end;
+                matched = true;
+                break;
+            }
+        }
+        if !matched {
+            // Nothing exists on disk — use single part (original naive behavior)
+            current = format!("{}/{}", current, parts[i]);
+            i += 1;
+        }
+    }
+    current
 }
 
 fn encode_workspace_path(path: &str) -> String {
@@ -241,7 +283,24 @@ pub fn scan_ide_sessions(claude_dir: &Path) -> Vec<IdeSession> {
 
 // ── JSONL parsing ────────────────────────────────────────────────────────────
 
-fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
+fn determine_status(
+    last_lines: &[Value],
+    file_age_secs: f64,
+    hook_state: Option<&HookState>,
+) -> SessionStatus {
+    // Phase 0: Hook-based overrides for stale JSONL scenarios.
+    // Hooks give us definitive signals that are more reliable than file-age guessing.
+    // Only apply when the JSONL is not actively streaming (file_age >= 8s),
+    // so we don't override fine-grained streaming detection.
+    if file_age_secs >= 8.0 {
+        match hook_state {
+            Some(HookState::ToolExecuting) => return SessionStatus::Executing,
+            Some(HookState::ModelProcessing) => return SessionStatus::Thinking,
+            Some(HookState::Stopped) => return SessionStatus::WaitingInput,
+            _ => {}
+        }
+    }
+
     if file_age_secs < 8.0 {
         // Find the current turn: everything after the last user message.
         let turn_start = last_lines
@@ -311,10 +370,35 @@ fn determine_status(last_lines: &[Value], file_age_secs: f64) -> SessionStatus {
         }
 
         if last_type == Some("assistant") {
-            let stop_reason = last
+            let stop_value = last
                 .get("message")
-                .and_then(|m| m.get("stop_reason"))
-                .and_then(|s| s.as_str());
+                .and_then(|m| m.get("stop_reason"));
+            let stop_reason = stop_value.and_then(|s| s.as_str());
+            let stop_is_null = stop_value.map_or(true, |s| s.is_null());
+
+            if stop_is_null && file_age_secs < 120.0 {
+                // Still streaming (stop_reason absent or null).
+                // Check content blocks to determine what the model is outputting.
+                let block_types: Vec<&str> = last
+                    .get("message")
+                    .and_then(|m| m.get("content"))
+                    .and_then(|c| c.as_array())
+                    .map(|blocks| {
+                        blocks
+                            .iter()
+                            .filter_map(|b| b.get("type").and_then(|t| t.as_str()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+
+                if block_types.contains(&"tool_use") {
+                    return SessionStatus::Executing;
+                }
+                if block_types.contains(&"thinking") {
+                    return SessionStatus::Thinking;
+                }
+                return SessionStatus::Streaming;
+            }
 
             match stop_reason {
                 Some("end_turn") if file_age_secs < 300.0 => return SessionStatus::WaitingInput,
@@ -501,7 +585,7 @@ fn extract_last_skill(last_lines: &[Value]) -> Option<String> {
     None
 }
 
-fn parse_session_info(
+pub fn parse_session_info(
     jsonl_path: &Path,
     session_id: String,
     workspace_path: String,
@@ -515,6 +599,7 @@ fn parse_session_info(
     meta_thinking_level: Option<String>,
     pid: Option<u32>,
     pid_precise: bool,
+    hook_state: Option<&HookState>,
 ) -> Option<SessionInfo> {
     let metadata = fs::metadata(jsonl_path).ok()?;
     let last_modified = metadata.modified().ok()?;
@@ -548,7 +633,7 @@ fn parse_session_info(
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect();
 
-    let status = determine_status(&last_n, age.as_secs_f64());
+    let status = determine_status(&last_n, age.as_secs_f64(), hook_state);
     let (token_speed, total_output_tokens) = compute_token_stats(&all_lines);
     let last_message_preview = extract_last_text(&last_n);
 
@@ -600,7 +685,77 @@ fn parse_session_info(
         pid_precise,
         last_skill,
         agent_source: "claude-code".to_string(),
+        last_outcome: None,
     })
+}
+
+// ── Scan cache ───────────────────────────────────────────────────────────────
+
+/// Caches expensive operations across rescans: process-table lookups and
+/// already-parsed session files whose mtime hasn't changed.
+pub struct ScanCache {
+    /// Cached `scan_cli_processes()` result + timestamp.
+    pub process_cache: Mutex<(Instant, Vec<CliProcess>)>,
+    /// JSONL path → (mtime_ms, SessionInfo).
+    pub session_cache: Mutex<HashMap<String, (u64, SessionInfo)>>,
+}
+
+impl ScanCache {
+    pub fn new() -> Self {
+        Self {
+            process_cache: Mutex::new((Instant::now() - Duration::from_secs(999), Vec::new())),
+            session_cache: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+/// Downgrade a cached session's status when the file hasn't been touched
+/// and enough wall-clock time has elapsed.
+fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
+    let idle = match info.status {
+        SessionStatus::Streaming if age_secs >= 8.0 => true,
+        SessionStatus::Thinking if age_secs >= 120.0 => true,
+        SessionStatus::Executing if age_secs >= 60.0 => true,
+        SessionStatus::Processing if age_secs >= 60.0 => true,
+        SessionStatus::Active if age_secs >= 30.0 => true,
+        SessionStatus::WaitingInput if age_secs >= 300.0 => true,
+        SessionStatus::Delegating if age_secs >= 300.0 => true,
+        _ => false,
+    };
+    if idle {
+        info.status = SessionStatus::Idle;
+        info.token_speed = 0.0;
+    }
+}
+
+/// Check if a cached session entry is still valid (mtime matches).
+/// Returns `(cached_info, age_secs)` on hit.
+fn check_session_cache(
+    path: &Path,
+    cache: &HashMap<String, (u64, SessionInfo)>,
+) -> Option<(SessionInfo, f64)> {
+    let metadata = fs::metadata(path).ok()?;
+    let last_modified = metadata.modified().ok()?;
+    let mtime_ms = last_modified
+        .duration_since(UNIX_EPOCH)
+        .ok()?
+        .as_millis() as u64;
+    let age_secs = SystemTime::now()
+        .duration_since(last_modified)
+        .unwrap_or(Duration::from_secs(3600))
+        .as_secs_f64();
+
+    if age_secs > 7.0 * 24.0 * 3600.0 {
+        return None;
+    }
+
+    let key = path.to_string_lossy();
+    let (cached_mt, cached_info) = cache.get(key.as_ref())?;
+    if *cached_mt != mtime_ms {
+        return None;
+    }
+
+    Some((cached_info.clone(), age_secs))
 }
 
 // ── Public entry point ───────────────────────────────────────────────────────
@@ -615,10 +770,22 @@ struct SubagentMeta {
     thinking_level: Option<String>,
 }
 
-pub fn scan_claude_sessions(claude_dir: &Path) -> Vec<SessionInfo> {
+pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
     let ide_sessions = scan_ide_sessions(claude_dir);
-    let cli_processes = scan_cli_processes();
+
+    // Reuse cached process list if fresh (< 10 s).
+    let cli_processes = {
+        let mut guard = scan_cache.process_cache.lock().unwrap();
+        if guard.0.elapsed() > Duration::from_secs(10) {
+            guard.1 = scan_cli_processes();
+            guard.0 = Instant::now();
+        }
+        guard.1.clone()
+    };
+
+    let hook_states = crate::hooks::read_hook_states();
+    let session_cache_snapshot = scan_cache.session_cache.lock().unwrap().clone();
 
     let projects_dir = claude_dir.join("projects");
     let Ok(workspace_entries) = fs::read_dir(&projects_dir) else {
@@ -685,9 +852,16 @@ pub fn scan_claude_sessions(claude_dir: &Path) -> Vec<SessionInfo> {
 
                 let (session_pid, pid_precise) = resolve_pid(&procs_in_cwd, &session_id);
 
-                if let Some(info) = parse_session_info(
+                // Try session cache first (skip re-reading unchanged files).
+                if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
+                    age_out_status(&mut info, age);
+                    info.pid = session_pid;
+                    info.pid_precise = pid_precise;
+                    info.ide_name = ide_name.clone();
+                    sessions.push(info);
+                } else if let Some(info) = parse_session_info(
                     &path,
-                    session_id,
+                    session_id.clone(),
                     workspace_path.clone(),
                     ws_name.clone(),
                     ide_name.clone(),
@@ -699,7 +873,10 @@ pub fn scan_claude_sessions(claude_dir: &Path) -> Vec<SessionInfo> {
                     None,
                     session_pid,
                     pid_precise,
+                    hook_states.get(&session_id),
                 ) {
+                    scan_cache.session_cache.lock().unwrap()
+                        .insert(path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
                     sessions.push(info);
                 }
             }
@@ -744,9 +921,16 @@ pub fn scan_claude_sessions(claude_dir: &Path) -> Vec<SessionInfo> {
                     // since we can't kill just the subagent independently.
                     let (sub_pid, _) = resolve_pid(&procs_in_cwd, &parent_session_id);
 
-                    if let Some(info) = parse_session_info(
+                    // Try session cache first for subagents too.
+                    if let Some((mut info, age)) = check_session_cache(&agent_path, &session_cache_snapshot) {
+                        age_out_status(&mut info, age);
+                        info.pid = sub_pid;
+                        info.pid_precise = false;
+                        info.ide_name = ide_name.clone();
+                        sessions.push(info);
+                    } else if let Some(info) = parse_session_info(
                         &agent_path,
-                        agent_id,
+                        agent_id.clone(),
                         workspace_path.clone(),
                         ws_name.clone(),
                         ide_name.clone(),
@@ -758,7 +942,10 @@ pub fn scan_claude_sessions(claude_dir: &Path) -> Vec<SessionInfo> {
                         meta_thinking_level,
                         sub_pid,
                         false, // subagents are never pid_precise: stop parent instead
+                        hook_states.get(&agent_id),
                     ) {
+                        scan_cache.session_cache.lock().unwrap()
+                            .insert(agent_path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
                         sessions.push(info);
                     }
                 }
@@ -795,6 +982,12 @@ pub fn scan_claude_sessions(claude_dir: &Path) -> Vec<SessionInfo> {
         {
             session.status = SessionStatus::Delegating;
         }
+    }
+
+    // Prune stale entries from session cache.
+    {
+        let live_paths: HashSet<String> = sessions.iter().map(|s| s.jsonl_path.clone()).collect();
+        scan_cache.session_cache.lock().unwrap().retain(|k, _| live_paths.contains(k));
     }
 
     // Sort: active first, then by created_at_ms asc (oldest first = stable order)
@@ -853,15 +1046,558 @@ pub fn sort_sessions(sessions: &mut Vec<SessionInfo>) {
 }
 
 /// Scan all agent sources and merge into a single sorted list.
-pub fn scan_sessions(claude_dir: &Path) -> Vec<SessionInfo> {
-    let mut sessions = scan_claude_sessions(claude_dir);
-
-    // Merge Cursor sessions
-    if let Some(cursor_dir) = crate::cursor::get_cursor_dir() {
-        let cursor_sessions = crate::cursor::scan_cursor_sessions(&cursor_dir);
-        sessions.extend(cursor_sessions);
-    }
-
+pub fn scan_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionInfo> {
+    let mut sessions = scan_claude_sessions(claude_dir, scan_cache);
     sort_sessions(&mut sessions);
     sessions
+}
+
+/// Scan all registered agent sources and merge into a single sorted list.
+pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -> Vec<SessionInfo> {
+    let mut sessions = Vec::new();
+    for source in sources {
+        if source.is_available() {
+            sessions.extend(source.scan_sessions());
+        }
+    }
+    sort_sessions(&mut sessions);
+    sessions
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    // ── Helper builders ─────────────────────────────────────────────────────
+
+    /// Build an assistant message with given content blocks and stop_reason.
+    fn assistant_msg(blocks: Vec<Value>, stop_reason: Option<&str>) -> Value {
+        json!({
+            "type": "assistant",
+            "message": {
+                "role": "assistant",
+                "content": blocks,
+                "stop_reason": stop_reason,
+                "model": "claude-sonnet-4-20250514",
+                "usage": { "output_tokens": 100 }
+            }
+        })
+    }
+
+    fn assistant_msg_with_id(blocks: Vec<Value>, stop_reason: Option<&str>, id: &str, ts: &str) -> String {
+        json!({
+            "type": "assistant",
+            "timestamp": ts,
+            "message": {
+                "id": id,
+                "role": "assistant",
+                "content": blocks,
+                "stop_reason": stop_reason,
+                "model": "claude-sonnet-4-20250514",
+                "usage": { "output_tokens": 50 }
+            }
+        }).to_string()
+    }
+
+    fn user_msg() -> Value {
+        json!({ "type": "user", "message": { "role": "user", "content": [{"type": "text", "text": "hello"}] } })
+    }
+
+    fn text_block(text: &str) -> Value {
+        json!({"type": "text", "text": text})
+    }
+
+    fn thinking_block() -> Value {
+        json!({"type": "thinking", "thinking": "hmm..."})
+    }
+
+    fn tool_use_block(name: &str) -> Value {
+        json!({"type": "tool_use", "name": name, "input": {}})
+    }
+
+    fn skill_block(skill: &str) -> Value {
+        json!({"type": "tool_use", "name": "Skill", "input": {"skill": skill}})
+    }
+
+    fn make_session(status: SessionStatus) -> SessionInfo {
+        SessionInfo {
+            id: "test-session".into(),
+            workspace_path: "/tmp/test".into(),
+            workspace_name: "test".into(),
+            ide_name: None,
+            is_subagent: false,
+            parent_session_id: None,
+            agent_type: None,
+            agent_description: None,
+            slug: None,
+            ai_title: None,
+            status,
+            token_speed: 10.0,
+            total_output_tokens: 500,
+            last_message_preview: None,
+            last_activity_ms: 0,
+            created_at_ms: 0,
+            jsonl_path: "/tmp/test.jsonl".into(),
+            model: None,
+            thinking_level: None,
+            pid: None,
+            pid_precise: false,
+            last_skill: None,
+            agent_source: "claude-code".into(),
+            last_outcome: None,
+        }
+    }
+
+    // ── determine_status tests ──────────────────────────────────────────────
+
+    #[test]
+    fn status_streaming_thinking_blocks() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![thinking_block()], None), // stop_reason=null → streaming
+        ];
+        assert_eq!(determine_status(&lines, 2.0, None), SessionStatus::Thinking);
+    }
+
+    #[test]
+    fn status_streaming_tool_use_blocks() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![text_block("let me check"), tool_use_block("Read")], None),
+        ];
+        assert_eq!(determine_status(&lines, 1.0, None), SessionStatus::Executing);
+    }
+
+    #[test]
+    fn status_streaming_text_only() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![text_block("Hello world")], None),
+        ];
+        assert_eq!(determine_status(&lines, 3.0, None), SessionStatus::Streaming);
+    }
+
+    #[test]
+    fn status_end_turn_waiting_input() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![text_block("Done!")], Some("end_turn")),
+        ];
+        assert_eq!(determine_status(&lines, 10.0, None), SessionStatus::WaitingInput);
+    }
+
+    #[test]
+    fn status_end_turn_too_old_becomes_idle() {
+        let lines = vec![
+            assistant_msg(vec![text_block("Done!")], Some("end_turn")),
+        ];
+        assert_eq!(determine_status(&lines, 500.0, None), SessionStatus::Idle);
+    }
+
+    #[test]
+    fn status_tool_use_stop_reason_executing() {
+        let lines = vec![
+            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
+        ];
+        assert_eq!(determine_status(&lines, 15.0, None), SessionStatus::Executing);
+    }
+
+    #[test]
+    fn status_tool_use_too_old_becomes_idle() {
+        let lines = vec![
+            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
+        ];
+        assert_eq!(determine_status(&lines, 120.0, None), SessionStatus::Idle);
+    }
+
+    #[test]
+    fn status_user_message_last_thinking() {
+        let lines = vec![user_msg()];
+        assert_eq!(determine_status(&lines, 5.0, None), SessionStatus::Thinking);
+    }
+
+    #[test]
+    fn status_user_message_too_old() {
+        let lines = vec![user_msg()];
+        assert_eq!(determine_status(&lines, 200.0, None), SessionStatus::Idle);
+    }
+
+    #[test]
+    fn status_no_meaningful_lines_recent() {
+        let lines: Vec<Value> = vec![];
+        assert_eq!(determine_status(&lines, 10.0, None), SessionStatus::Active);
+    }
+
+    #[test]
+    fn status_no_meaningful_lines_old() {
+        let lines: Vec<Value> = vec![];
+        assert_eq!(determine_status(&lines, 60.0, None), SessionStatus::Idle);
+    }
+
+    #[test]
+    fn status_hook_tool_executing_overrides() {
+        let lines = vec![
+            assistant_msg(vec![text_block("old text")], Some("end_turn")),
+        ];
+        assert_eq!(
+            determine_status(&lines, 20.0, Some(&HookState::ToolExecuting)),
+            SessionStatus::Executing,
+        );
+    }
+
+    #[test]
+    fn status_hook_model_processing_overrides() {
+        let lines = vec![
+            assistant_msg(vec![text_block("old")], Some("end_turn")),
+        ];
+        assert_eq!(
+            determine_status(&lines, 20.0, Some(&HookState::ModelProcessing)),
+            SessionStatus::Thinking,
+        );
+    }
+
+    #[test]
+    fn status_hook_stopped_overrides() {
+        let lines = vec![user_msg()];
+        assert_eq!(
+            determine_status(&lines, 20.0, Some(&HookState::Stopped)),
+            SessionStatus::WaitingInput,
+        );
+    }
+
+    #[test]
+    fn status_hook_ignored_when_streaming() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![thinking_block()], None),
+        ];
+        assert_eq!(
+            determine_status(&lines, 2.0, Some(&HookState::Stopped)),
+            SessionStatus::Thinking,
+        );
+    }
+
+    // ── compute_token_stats tests ───────────────────────────────────────────
+
+    #[test]
+    fn token_stats_empty_lines() {
+        let lines: Vec<&str> = vec![];
+        let (speed, total) = compute_token_stats(&lines);
+        assert_eq!(total, 0);
+        assert_eq!(speed, 0.0);
+    }
+
+    #[test]
+    fn token_stats_non_assistant_ignored() {
+        let line = json!({"type": "user", "message": {"content": []}}).to_string();
+        let lines: Vec<&str> = vec![&line];
+        let (_, total) = compute_token_stats(&lines);
+        assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn token_stats_null_stop_reason_ignored() {
+        let line = json!({
+            "type": "assistant",
+            "message": {
+                "stop_reason": null,
+                "usage": {"output_tokens": 100}
+            }
+        }).to_string();
+        let lines: Vec<&str> = vec![&line];
+        let (_, total) = compute_token_stats(&lines);
+        assert_eq!(total, 0);
+    }
+
+    #[test]
+    fn token_stats_counts_finalized_tokens() {
+        let line = json!({
+            "type": "assistant",
+            "message": {
+                "id": "msg_1",
+                "stop_reason": "end_turn",
+                "usage": {"output_tokens": 200}
+            }
+        }).to_string();
+        let lines: Vec<&str> = vec![&line];
+        let (_, total) = compute_token_stats(&lines);
+        assert_eq!(total, 200);
+    }
+
+    #[test]
+    fn token_stats_deduplicates_by_id() {
+        let line = json!({
+            "type": "assistant",
+            "message": {
+                "id": "msg_dup",
+                "stop_reason": "end_turn",
+                "usage": {"output_tokens": 100}
+            }
+        }).to_string();
+        let lines: Vec<&str> = vec![&line, &line];
+        let (_, total) = compute_token_stats(&lines);
+        assert_eq!(total, 100);
+    }
+
+    #[test]
+    fn token_stats_speed_from_recent_timestamps() {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let ts1 = chrono::DateTime::from_timestamp(now as i64 - 60, 0).unwrap().to_rfc3339();
+        let ts2 = chrono::DateTime::from_timestamp(now as i64 - 30, 0).unwrap().to_rfc3339();
+
+        let l1 = assistant_msg_with_id(vec![], Some("end_turn"), "m1", &ts1);
+        let l2 = assistant_msg_with_id(vec![], Some("end_turn"), "m2", &ts2);
+        let lines: Vec<&str> = vec![&l1, &l2];
+        let (speed, total) = compute_token_stats(&lines);
+        assert_eq!(total, 100); // 50 + 50
+        assert!(speed > 3.0 && speed < 4.0, "speed={speed}");
+    }
+
+    // ── extract_model tests ─────────────────────────────────────────────────
+
+    #[test]
+    fn extract_model_from_assistant() {
+        let lines = vec![
+            assistant_msg(vec![text_block("hi")], Some("end_turn")),
+        ];
+        assert_eq!(extract_model(&lines), Some("claude-sonnet-4-20250514".into()));
+    }
+
+    #[test]
+    fn extract_model_ignores_unknown() {
+        let lines = vec![json!({
+            "type": "assistant",
+            "message": {"model": "unknown", "content": [], "stop_reason": "end_turn"}
+        })];
+        assert_eq!(extract_model(&lines), None);
+    }
+
+    #[test]
+    fn extract_model_ignores_synthetic() {
+        let lines = vec![json!({
+            "type": "assistant",
+            "message": {"model": "<synthetic>", "content": [], "stop_reason": "end_turn"}
+        })];
+        assert_eq!(extract_model(&lines), None);
+    }
+
+    #[test]
+    fn extract_model_ignores_user_messages() {
+        let lines = vec![user_msg()];
+        assert_eq!(extract_model(&lines), None);
+    }
+
+    // ── has_thinking_blocks tests ───────────────────────────────────────────
+
+    #[test]
+    fn thinking_blocks_present() {
+        let lines = vec![
+            assistant_msg(vec![thinking_block(), text_block("result")], Some("end_turn")),
+        ];
+        assert!(has_thinking_blocks(&lines));
+    }
+
+    #[test]
+    fn thinking_blocks_absent() {
+        let lines = vec![
+            assistant_msg(vec![text_block("no thinking")], Some("end_turn")),
+        ];
+        assert!(!has_thinking_blocks(&lines));
+    }
+
+    // ── extract_last_text tests ─────────────────────────────────────────────
+
+    #[test]
+    fn extract_text_from_last_assistant() {
+        let lines = vec![
+            assistant_msg(vec![text_block("first message")], Some("end_turn")),
+            assistant_msg(vec![text_block("second message")], Some("end_turn")),
+        ];
+        assert_eq!(extract_last_text(&lines), Some("second message".into()));
+    }
+
+    #[test]
+    fn extract_text_truncates_to_200_chars() {
+        let long_text = "a".repeat(300);
+        let lines = vec![
+            assistant_msg(vec![text_block(&long_text)], Some("end_turn")),
+        ];
+        let result = extract_last_text(&lines).unwrap();
+        assert_eq!(result.len(), 200);
+    }
+
+    #[test]
+    fn extract_text_returns_none_for_no_text() {
+        let lines = vec![
+            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
+        ];
+        assert_eq!(extract_last_text(&lines), None);
+    }
+
+    // ── extract_last_skill tests ────────────────────────────────────────────
+
+    #[test]
+    fn extract_skill_found() {
+        let lines = vec![
+            assistant_msg(vec![skill_block("commit")], Some("tool_use")),
+        ];
+        assert_eq!(extract_last_skill(&lines), Some("commit".into()));
+    }
+
+    #[test]
+    fn extract_skill_not_found() {
+        let lines = vec![
+            assistant_msg(vec![tool_use_block("Read")], Some("tool_use")),
+        ];
+        assert_eq!(extract_last_skill(&lines), None);
+    }
+
+    // ── extract_resume_id tests ─────────────────────────────────────────────
+
+    #[test]
+    fn resume_id_long_flag() {
+        let cmd: Vec<std::ffi::OsString> = vec!["claude".into(), "--resume".into(), "abc123".into()];
+        assert_eq!(extract_resume_id(&cmd), Some("abc123".into()));
+    }
+
+    #[test]
+    fn resume_id_short_flag() {
+        let cmd: Vec<std::ffi::OsString> = vec!["claude".into(), "-r".into(), "xyz".into()];
+        assert_eq!(extract_resume_id(&cmd), Some("xyz".into()));
+    }
+
+    #[test]
+    fn resume_id_equals_syntax() {
+        let cmd: Vec<std::ffi::OsString> = vec!["claude".into(), "--resume=sess42".into()];
+        assert_eq!(extract_resume_id(&cmd), Some("sess42".into()));
+    }
+
+    #[test]
+    fn resume_id_absent() {
+        let cmd: Vec<std::ffi::OsString> = vec!["claude".into(), "--verbose".into()];
+        assert_eq!(extract_resume_id(&cmd), None);
+    }
+
+    // ── resolve_pid tests ───────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_pid_empty() {
+        assert_eq!(resolve_pid(&[], "sess1"), (None, false));
+    }
+
+    #[test]
+    fn resolve_pid_exact_resume_match() {
+        let procs = vec![
+            CliProcess { pid: 100, ppid: None, cwd: "/tmp".into(), resume_session_id: Some("sess1".into()) },
+            CliProcess { pid: 200, ppid: None, cwd: "/tmp".into(), resume_session_id: None },
+        ];
+        assert_eq!(resolve_pid(&procs, "sess1"), (Some(100), true));
+    }
+
+    #[test]
+    fn resolve_pid_single_process() {
+        let procs = vec![
+            CliProcess { pid: 42, ppid: None, cwd: "/tmp".into(), resume_session_id: None },
+        ];
+        assert_eq!(resolve_pid(&procs, "other"), (Some(42), true));
+    }
+
+    #[test]
+    fn resolve_pid_parent_child_filtering() {
+        let procs = vec![
+            CliProcess { pid: 100, ppid: Some(1), cwd: "/tmp".into(), resume_session_id: None },
+            CliProcess { pid: 200, ppid: Some(100), cwd: "/tmp".into(), resume_session_id: None },
+        ];
+        assert_eq!(resolve_pid(&procs, "any"), (Some(100), true));
+    }
+
+    #[test]
+    fn resolve_pid_multiple_roots_imprecise() {
+        let procs = vec![
+            CliProcess { pid: 100, ppid: Some(1), cwd: "/tmp".into(), resume_session_id: None },
+            CliProcess { pid: 200, ppid: Some(2), cwd: "/tmp".into(), resume_session_id: None },
+        ];
+        let (pid, precise) = resolve_pid(&procs, "any");
+        assert!(pid.is_some());
+        assert!(!precise);
+    }
+
+    // ── workspace_name / encode / decode tests ──────────────────────────────
+
+    #[test]
+    fn workspace_name_basic() {
+        assert_eq!(workspace_name("/Users/foo/my-project"), "my-project");
+    }
+
+    #[test]
+    fn workspace_name_trailing_slash() {
+        assert_eq!(workspace_name("/Users/foo/bar/"), "bar");
+    }
+
+    #[test]
+    fn workspace_name_root() {
+        assert_eq!(workspace_name("/"), "/");
+    }
+
+    #[test]
+    fn encode_decode_workspace_path() {
+        let original = "/Users/foo/bar";
+        let encoded = encode_workspace_path(original);
+        assert_eq!(encoded, "-Users-foo-bar");
+        let decoded = decode_workspace_path(&encoded);
+        assert_eq!(decoded, original);
+    }
+
+    // ── age_out_status tests ────────────────────────────────────────────────
+
+    #[test]
+    fn age_out_streaming() {
+        let mut s = make_session(SessionStatus::Streaming);
+        age_out_status(&mut s, 7.0);
+        assert_eq!(s.status, SessionStatus::Streaming);
+        age_out_status(&mut s, 8.0);
+        assert_eq!(s.status, SessionStatus::Idle);
+        assert_eq!(s.token_speed, 0.0);
+    }
+
+    #[test]
+    fn age_out_thinking() {
+        let mut s = make_session(SessionStatus::Thinking);
+        age_out_status(&mut s, 119.0);
+        assert_eq!(s.status, SessionStatus::Thinking);
+        age_out_status(&mut s, 120.0);
+        assert_eq!(s.status, SessionStatus::Idle);
+    }
+
+    #[test]
+    fn age_out_executing() {
+        let mut s = make_session(SessionStatus::Executing);
+        age_out_status(&mut s, 59.0);
+        assert_eq!(s.status, SessionStatus::Executing);
+        age_out_status(&mut s, 60.0);
+        assert_eq!(s.status, SessionStatus::Idle);
+    }
+
+    #[test]
+    fn age_out_waiting_input() {
+        let mut s = make_session(SessionStatus::WaitingInput);
+        age_out_status(&mut s, 299.0);
+        assert_eq!(s.status, SessionStatus::WaitingInput);
+        age_out_status(&mut s, 300.0);
+        assert_eq!(s.status, SessionStatus::Idle);
+    }
+
+    #[test]
+    fn age_out_idle_stays_idle() {
+        let mut s = make_session(SessionStatus::Idle);
+        s.token_speed = 0.0;
+        age_out_status(&mut s, 9999.0);
+        assert_eq!(s.status, SessionStatus::Idle);
+    }
 }

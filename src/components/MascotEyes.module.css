@@ -1,0 +1,926 @@
+.container {
+  flex-shrink: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: var(--color-text-dim);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  gap: 4px;
+}
+
+.toggle:hover {
+  color: var(--color-text);
+}
+
+.toggle_label {
+  flex: 1;
+  text-align: left;
+}
+
+.toggle_icon {
+  font-size: 8px;
+  opacity: 0.6;
+}
+
+.mascot {
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  user-select: none;
+  background: var(--mascot-bg);
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.svg {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+/* ── Background frame ─────────────────────────────────────────────────────── */
+
+.bg {
+  transition: fill 0.8s ease;
+}
+
+/* ── Body group (for smooth bobbing) ─────────────────────────────────────── */
+
+.bodyGroup {
+  transition: transform 0.3s ease-out;
+}
+
+/* ── Eye fill (LOOI-style solid cyan) ────────────────────────────────────── */
+
+.eyeFill {
+  transition: rx 0.6s ease, ry 0.6s ease;
+}
+
+.eyeShadow {
+  transition: cx 0.4s ease, cy 0.4s ease, rx 0.6s ease;
+}
+
+.mouth {
+  transition: d 0.4s ease, opacity 0.4s ease;
+}
+
+/* ── Eye jiggle on mood change ───────────────────────────────────────────── */
+
+.eyeJiggle {
+  animation: jiggle 0.4s ease-out;
+}
+
+@keyframes jiggle {
+  0% { transform: scale(1, 1); }
+  15% { transform: scale(1.08, 0.92); }
+  30% { transform: scale(0.95, 1.05); }
+  50% { transform: scale(1.03, 0.97); }
+  70% { transform: scale(0.99, 1.01); }
+  100% { transform: scale(1, 1); }
+}
+
+/* ── Special action: bounce (excited) ─────────────────────────────────────── */
+
+.action_bounce .bodyGroup {
+  animation: bounceAction 1.5s ease-in-out;
+}
+
+@keyframes bounceAction {
+  0%, 100% { transform: translateY(0); }
+  15% { transform: translateY(-4px); }
+  30% { transform: translateY(0); }
+  45% { transform: translateY(-3px); }
+  60% { transform: translateY(0); }
+  75% { transform: translateY(-2px); }
+  90% { transform: translateY(0); }
+}
+
+/* ── Special action: spin (excited) ──────────────────────────────────────── */
+
+.action_spin .bodyGroup {
+  animation: spinAction 1.2s ease-in-out;
+  transform-origin: 100px 50px;
+}
+
+@keyframes spinAction {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ── Special action: fistPump (excited) ──────────────────────────────────── */
+
+.action_fistPump .bodyGroup {
+  animation: fistPumpAction 1.5s ease-in-out;
+}
+
+@keyframes fistPumpAction {
+  0%, 100% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-4px) rotate(-5deg); }
+  50% { transform: translateY(0) rotate(3deg); }
+  75% { transform: translateY(-2px) rotate(-2deg); }
+}
+
+.fistPumpStar {
+  animation: fistStar 0.6s ease-out infinite alternate;
+}
+
+@keyframes fistStar {
+  0% { opacity: 0.5; transform: scale(0.8); }
+  100% { opacity: 1; transform: scale(1.3); }
+}
+
+/* ── Special action: wiggle (satisfied) ───────────────────────────────────── */
+
+.action_wiggle .bodyGroup {
+  animation: wiggle 0.5s ease-in-out 3;
+}
+
+@keyframes wiggle {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+/* ── Special action: victoryPose (satisfied) ─────────────────────────────── */
+
+.action_victoryPose .bodyGroup {
+  animation: victoryPose 1.5s ease-in-out;
+}
+
+@keyframes victoryPose {
+  0%, 100% { transform: scale(1) translateY(0); }
+  30% { transform: scale(1.05, 0.95) translateY(2px); }
+  50% { transform: scale(0.95, 1.08) translateY(-4px); }
+  70% { transform: scale(1.02, 0.98) translateY(0); }
+}
+
+/* ── Special action: sigh (lonely) ────────────────────────────────────────── */
+
+.action_sigh .bodyGroup {
+  animation: sighDeflate 1.5s ease-in-out;
+}
+
+@keyframes sighDeflate {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(3px) scale(0.97, 0.95); }
+}
+
+/* ── Special action: wave (lonely) ───────────────────────────────────────── */
+
+.action_wave .bodyGroup {
+  animation: waveAction 2s ease-in-out;
+}
+
+@keyframes waveAction {
+  0%, 100% { transform: rotate(0deg); }
+  15% { transform: rotate(-3deg); }
+  25% { transform: rotate(5deg); }
+  35% { transform: rotate(-4deg); }
+  45% { transform: rotate(4deg); }
+  55% { transform: rotate(-2deg); }
+  70% { transform: rotate(0deg); }
+}
+
+/* ── Special action: huddle (lonely) ─────────────────────────────────────── */
+
+.action_huddle .bodyGroup {
+  animation: huddleAction 2.5s ease-in-out;
+}
+
+@keyframes huddleAction {
+  0%, 100% { transform: scale(1) translateY(0); }
+  30% { transform: scale(0.93) translateY(4px); }
+  70% { transform: scale(0.93) translateY(4px); }
+}
+
+/* ── Special action: dozeOff (sleepy) ─────────────────────────────────────── */
+
+.action_dozeOff .bodyGroup {
+  animation: dozeNod 3s ease-in-out;
+}
+
+@keyframes dozeNod {
+  0% { transform: rotate(0deg); }
+  30% { transform: rotate(5deg) translateY(4px); }
+  50% { transform: rotate(6deg) translateY(5px); }
+  55% { transform: rotate(-2deg) translateY(-1px); }
+  70% { transform: rotate(0deg) translateY(0); }
+  100% { transform: rotate(0deg) translateY(0); }
+}
+
+/* ── Special action: headSnap (sleepy) ───────────────────────────────────── */
+
+.action_headSnap .bodyGroup {
+  animation: headSnap 2s ease-in-out;
+}
+
+@keyframes headSnap {
+  0% { transform: rotate(0deg) translateY(0); }
+  30% { transform: rotate(4deg) translateY(4px); }
+  40% { transform: rotate(4deg) translateY(4px); }
+  45% { transform: rotate(-3deg) translateY(-2px); }
+  55% { transform: rotate(0deg) translateY(0); }
+  70% { transform: rotate(3deg) translateY(3px); }
+  100% { transform: rotate(0deg) translateY(0); }
+}
+
+/* ── Special action: sleepBubble (sleepy) ────────────────────────────────── */
+
+.sleepBubbleSmall {
+  animation: bubbleGrow 3.5s ease-in-out infinite;
+}
+
+.sleepBubbleMed {
+  animation: bubbleGrow 3.5s ease-in-out 0.5s infinite;
+}
+
+.sleepBubbleBig {
+  animation: bubbleGrow 3.5s ease-in-out 1s infinite;
+}
+
+@keyframes bubbleGrow {
+  0% { transform: scale(0); opacity: 0; }
+  30% { transform: scale(1); opacity: 0.6; }
+  70% { transform: scale(1.2); opacity: 0.3; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+/* ── Special action: lookAround (anxious/bored) ──────────────────────────── */
+
+.action_lookAround .bodyGroup {
+  animation: lookShift 1.5s ease-in-out;
+}
+
+@keyframes lookShift {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-3px); }
+  50% { transform: translateX(3px); }
+  80% { transform: translateX(-1px); }
+}
+
+/* ── Special action: phoneLook (bored) ───────────────────────────────────── */
+
+.action_phoneLook .bodyGroup {
+  animation: phoneLook 1.5s ease-in-out;
+}
+
+@keyframes phoneLook {
+  0%, 100% { transform: rotate(0deg); }
+  30% { transform: rotate(6deg) translateY(2px); }
+  70% { transform: rotate(6deg) translateY(2px); }
+}
+
+/* ── Special action: doodle (bored) ──────────────────────────────────────── */
+
+.action_doodle .bodyGroup {
+  animation: doodleSway 2s ease-in-out;
+}
+
+@keyframes doodleSway {
+  0% { transform: translateX(0) translateY(0); }
+  25% { transform: translateX(-2px) translateY(-1px); }
+  50% { transform: translateX(0) translateY(-2px); }
+  75% { transform: translateX(2px) translateY(-1px); }
+  100% { transform: translateX(0) translateY(0); }
+}
+
+.doodleSwirl {
+  animation: doodleSpiral 2s linear;
+}
+
+@keyframes doodleSpiral {
+  0% { transform: scale(0); opacity: 0.5; }
+  50% { transform: scale(1.5); opacity: 0.4; }
+  100% { transform: scale(2); opacity: 0; }
+}
+
+/* ── Special action: steam (burning) ─────────────────────────────────────── */
+
+.steamLeft1 { animation: steamRise 2s ease-out infinite; }
+.steamLeft2 { animation: steamRise 2s ease-out 0.5s infinite; }
+.steamRight1 { animation: steamRise 2s ease-out 0.3s infinite; }
+.steamRight2 { animation: steamRise 2s ease-out 0.8s infinite; }
+
+@keyframes steamRise {
+  0% { opacity: 0; transform: translateY(0) scale(0.5); }
+  30% { opacity: 0.5; transform: translateY(-5px) scale(1); }
+  100% { opacity: 0; transform: translateY(-18px) scale(1.5); }
+}
+
+/* ── Special action: meltdown (burning) ──────────────────────────────────── */
+
+.action_meltdown .bodyGroup {
+  animation: meltdown 2s ease-in-out;
+}
+
+@keyframes meltdown {
+  0%, 100% { transform: scale(1) skewX(0deg); }
+  15% { transform: scale(1.03, 0.97) skewX(3deg); }
+  30% { transform: scale(0.97, 1.03) skewX(-3deg); }
+  45% { transform: scale(1.02, 0.98) skewX(2deg); }
+  60% { transform: scale(0.98, 1.02) skewX(-2deg); }
+  80% { transform: scale(1.01, 0.99) skewX(1deg); }
+}
+
+/* ── Special action: startle (anxious) ───────────────────────────────────── */
+
+.action_startle .bodyGroup {
+  animation: startleJump 1.5s ease-out;
+}
+
+@keyframes startleJump {
+  0% { transform: translateY(0); }
+  10% { transform: translateY(-6px) scale(1.05); }
+  20% { transform: translateY(-6px) scale(1.05); }
+  40% { transform: translateY(1px) scale(0.98); }
+  60% { transform: translateY(0) scale(1); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.startleMark {
+  animation: startlePulse 0.3s ease-out infinite alternate;
+}
+
+@keyframes startlePulse {
+  0% { opacity: 0.6; transform: scale(1); }
+  100% { opacity: 1; transform: scale(1.3); }
+}
+
+/* ── Special action: sunglasses (satisfied) ──────────────────────────────── */
+
+.sunglassesDrop {
+  animation: shadesDrop 1.5s ease-out forwards;
+}
+
+@keyframes shadesDrop {
+  0% { transform: translateY(-20px); opacity: 0; }
+  30% { transform: translateY(2px); opacity: 1; }
+  40% { transform: translateY(-1px); }
+  50% { transform: translateY(0); }
+  80% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(0); opacity: 0; }
+}
+
+/* ── Special action: stretch (satisfied) ──────────────────────────────────── */
+
+.action_stretch .bodyGroup {
+  animation: stretchAction 1.5s ease-in-out;
+}
+
+@keyframes stretchAction {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.03, 0.97); }
+}
+
+/* ── Special action: eureka (focused) ────────────────────────────────────── */
+
+.action_eureka .bodyGroup {
+  animation: eurekaAction 1.8s ease-out;
+}
+
+@keyframes eurekaAction {
+  0% { transform: translateY(0); }
+  15% { transform: translateY(-3px) scale(1.03); }
+  30% { transform: translateY(-3px) scale(1.03); }
+  50% { transform: translateY(0) scale(1); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* ── Special action: typing (focused) ────────────────────────────────────── */
+
+.action_typing .bodyGroup {
+  animation: typingVibrate 0.1s ease-in-out 15;
+}
+
+@keyframes typingVibrate {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(0.5px); }
+}
+
+/* ── Special action: nod ──────────────────────────────────────────────────── */
+
+.action_nod .bodyGroup {
+  animation: nodAction 1.2s ease-in-out;
+}
+
+@keyframes nodAction {
+  0%, 100% { transform: translateY(0); }
+  30% { transform: translateY(3px); }
+  60% { transform: translateY(0); }
+  80% { transform: translateY(2px); }
+}
+
+/* ── Eyelid ───────────────────────────────────────────────────────────────── */
+
+.eyelid {
+  transition: height 0.15s ease, y 0.15s ease;
+}
+
+/* ── Watery shimmer (lonely eyes) ─────────────────────────────────────────── */
+
+.waterShimmer {
+  animation: waterShimmer 2s ease-in-out infinite;
+}
+
+@keyframes waterShimmer {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
+}
+
+/* ── Floating hearts (satisfied) ─────────────────────────────────────────── */
+
+.floatHeart1 {
+  fill: rgba(255, 100, 120, 0.6);
+  animation: heartFloat 3s ease-out infinite;
+}
+
+.floatHeart2 {
+  fill: rgba(255, 100, 120, 0.5);
+  animation: heartFloat 3s ease-out 1.5s infinite;
+}
+
+@keyframes heartFloat {
+  0% { opacity: 0; transform: translateY(0) scale(0.5); }
+  20% { opacity: 0.7; transform: translateY(-3px) scale(1); }
+  100% { opacity: 0; transform: translateY(-16px) scale(0.6); }
+}
+
+/* ── Quip speech bubble ──────────────────────────────────────────────────── */
+
+.quipBubble {
+  position: relative;
+  background: var(--mascot-bubble-bg, rgba(255, 255, 255, 0.12));
+  border: 1px solid var(--mascot-bubble-border, rgba(255, 255, 255, 0.15));
+  border-radius: 12px;
+  padding: 5px 10px;
+  margin: 0 8px 4px;
+  animation: quipFadeIn 0.5s ease;
+  max-width: calc(100% - 16px);
+}
+
+/* Tail pointing down */
+.quipBubble::after {
+  content: "";
+  position: absolute;
+  bottom: -6px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 6px solid var(--mascot-bubble-bg, rgba(255, 255, 255, 0.12));
+}
+
+/* Tail border trick */
+.quipBubble::before {
+  content: "";
+  position: absolute;
+  bottom: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0;
+  height: 0;
+  border-left: 7px solid transparent;
+  border-right: 7px solid transparent;
+  border-top: 7px solid var(--mascot-bubble-border, rgba(255, 255, 255, 0.15));
+}
+
+.quip {
+  font-size: 11px;
+  color: var(--mascot-text);
+  text-align: center;
+  white-space: normal;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  max-width: 100%;
+  line-height: 1.4;
+}
+
+@keyframes quipFadeIn {
+  0% { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Glow effects ─────────────────────────────────────────────────────────── */
+
+.softGlow {
+  animation: softPulse 3s ease-in-out infinite;
+}
+
+.fireGlow {
+  animation: firePulse 1.2s ease-in-out infinite;
+}
+
+@keyframes softPulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+@keyframes firePulse {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.08); }
+}
+
+/* ── Decorations ──────────────────────────────────────────────────────────── */
+
+.sweatDrop { animation: sweatFall 2s ease-in infinite; }
+.sweatDrop2 { animation: sweatFall 2s ease-in 0.8s infinite; }
+
+@keyframes sweatFall {
+  0% { opacity: 0; transform: translateY(0); }
+  20% { opacity: 0.8; }
+  100% { opacity: 0; transform: translateY(12px); }
+}
+
+.fireParticle1 { animation: fireFloat 1.5s ease-out infinite; }
+.fireParticle2 { animation: fireFloat 1.8s ease-out 0.3s infinite; }
+.fireParticle3 { animation: fireFloat 1.4s ease-out 0.7s infinite; }
+.fireParticle4 { animation: fireFloat 1.6s ease-out 0.5s infinite; }
+.fireParticle5 { animation: fireFloat 1.3s ease-out 1.0s infinite; }
+
+@keyframes fireFloat {
+  0% { opacity: 0.9; transform: translateY(0) scale(1); }
+  100% { opacity: 0; transform: translateY(-14px) scale(0.3); }
+}
+
+.zzz { animation: zzzFloat 3s ease-in-out infinite; }
+
+@keyframes zzzFloat {
+  0%, 100% { opacity: 0.4; transform: translateY(0); }
+  50% { opacity: 0.9; transform: translateY(-5px); }
+}
+
+.tear { animation: tearDrip 3s ease-in infinite; }
+.tear2 { animation: tearDrip 3s ease-in 1.5s infinite; }
+
+@keyframes tearDrip {
+  0% { opacity: 0; transform: translateY(0); }
+  30% { opacity: 0.6; }
+  100% { opacity: 0; transform: translateY(10px); }
+}
+
+.sparkle1 { fill: var(--color-accent); animation: sparkle 2s ease-in-out infinite; }
+.sparkle2 { fill: var(--color-accent); animation: sparkle 2s ease-in-out 0.6s infinite; }
+.sparkle3 { fill: var(--color-accent); animation: sparkle 2s ease-in-out 1.2s infinite; }
+.sparkle4 { fill: var(--color-accent); animation: sparkle 2s ease-in-out 0.3s infinite; }
+.sparkle5 { fill: var(--color-accent); animation: sparkle 2s ease-in-out 0.9s infinite; }
+
+@keyframes sparkle {
+  0%, 100% { opacity: 0.3; transform: scale(0.8); }
+  50% { opacity: 1; transform: scale(1.3); }
+}
+
+/* ── Keyboard key presses (focused) ──────────────────────────────────────── */
+
+.keyPress { animation: keyBounce 0.8s ease-in-out infinite; }
+.keyPress2 { animation: keyBounce 0.8s ease-in-out 0.3s infinite; }
+.keyPress3 { animation: keyBounce 1.2s ease-in-out 0.5s infinite; }
+
+@keyframes keyBounce {
+  0%, 100% { transform: translateY(0); opacity: 1; }
+  40% { transform: translateY(1px); opacity: 0.7; }
+  60% { transform: translateY(1px); opacity: 0.7; }
+}
+
+/* ── Key smash (burning) ─────────────────────────────────────────────────── */
+
+.keySmash1 { animation: keySmash 0.15s ease-in-out infinite alternate; }
+.keySmash2 { animation: keySmash 0.15s ease-in-out 0.04s infinite alternate; }
+.keySmash3 { animation: keySmash 0.15s ease-in-out 0.08s infinite alternate; }
+.keySmash4 { animation: keySmash 0.15s ease-in-out 0.12s infinite alternate; }
+
+@keyframes keySmash {
+  0% { transform: translateY(0); opacity: 1; }
+  100% { transform: translateY(1.5px); opacity: 0.6; }
+}
+
+/* ── Flying keycaps (burning) ────────────────────────────────────────────── */
+
+.flyKey1 { animation: flyAway1 1.5s ease-out infinite; }
+.flyKey2 { animation: flyAway2 1.8s ease-out 0.3s infinite; }
+.flyKey3 { animation: flyAway3 1.4s ease-out 0.6s infinite; }
+.flyKey4 { animation: flyAway4 1.6s ease-out 0.9s infinite; }
+
+@keyframes flyAway1 {
+  0% { opacity: 0.7; transform: translate(0, 0) rotate(0deg); }
+  100% { opacity: 0; transform: translate(-15px, -20px) rotate(-60deg); }
+}
+@keyframes flyAway2 {
+  0% { opacity: 0.7; transform: translate(0, 0) rotate(0deg); }
+  100% { opacity: 0; transform: translate(12px, -25px) rotate(45deg); }
+}
+@keyframes flyAway3 {
+  0% { opacity: 0.6; transform: translate(0, 0) rotate(0deg); }
+  100% { opacity: 0; transform: translate(-18px, -15px) rotate(-90deg); }
+}
+@keyframes flyAway4 {
+  0% { opacity: 0.6; transform: translate(0, 0) rotate(0deg); }
+  100% { opacity: 0; transform: translate(15px, -18px) rotate(70deg); }
+}
+
+/* ── Whip crack (excited) ────────────────────────────────────────────────── */
+
+.whipCrack { animation: whipSnap 1.2s ease-in-out infinite; }
+
+@keyframes whipSnap {
+  0%, 70% { opacity: 0.8; }
+  80% { opacity: 1; stroke-width: 2.5; }
+  100% { opacity: 0.8; }
+}
+
+.whipSpark { animation: sparkFlash 1.2s ease-in-out infinite; }
+
+@keyframes sparkFlash {
+  0%, 75% { opacity: 0; }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* ── Sound waves (excited megaphone) ─────────────────────────────────────── */
+
+.soundWave1 { animation: soundPulse 1s ease-out infinite; }
+.soundWave2 { animation: soundPulse 1s ease-out 0.3s infinite; }
+
+@keyframes soundPulse {
+  0% { opacity: 0.5; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(-4px); }
+}
+
+/* ── Tumbleweed (lonely) ─────────────────────────────────────────────────── */
+
+.tumbleweedRoll { animation: tumbleweed 6s linear infinite; }
+
+@keyframes tumbleweed {
+  0% { transform: translateX(30px) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.35; }
+  80% { opacity: 0.35; }
+  100% { transform: translateX(-30px) rotate(360deg); opacity: 0; }
+}
+
+/* ── Bell ring (anxious) ─────────────────────────────────────────────────── */
+
+.bellRing { animation: bellSwing 0.6s ease-in-out infinite alternate; transform-origin: 22px 70px; }
+
+@keyframes bellSwing {
+  0% { transform: rotate(-4deg); }
+  100% { transform: rotate(4deg); }
+}
+
+/* ── Nervous lines (anxious) ──────────────────────────────────────────────── */
+
+.nervousLine1 { animation: nervousFlicker 0.8s ease-in-out infinite; }
+.nervousLine2 { animation: nervousFlicker 0.8s ease-in-out 0.4s infinite; }
+
+@keyframes nervousFlicker {
+  0%, 100% { opacity: 0; }
+  50% { opacity: 0.5; }
+}
+
+/* ── Mood-specific quip colors ────────────────────────────────────────────── */
+
+.excited .quip { color: var(--color-accent); }
+.lonely .quip { color: #7db8f0; }
+.anxious .quip { color: #fbbf24; }
+.satisfied .quip { color: #4ade80; }
+.attentive .quip { color: #60a5fa; }
+.proud .quip { color: #fbbf24; }
+.frustrated .quip { color: #f87171; }
+.embarrassed .quip { color: #fb923c; }
+
+/* ── Double blink ─────────────────────────────────────────────────────────── */
+
+.doubleBlink .eyelid {
+  transition: height 0.1s ease, y 0.1s ease;
+}
+
+/* ── Attentive mood (needs_input) ────────────────────────────────────────── */
+
+.attentivePulse1 {
+  animation: attentivePulse 2s ease-in-out infinite;
+}
+.attentivePulse2 {
+  animation: attentivePulse 2s ease-in-out 1s infinite;
+}
+
+@keyframes attentivePulse {
+  0% { opacity: 0; transform: scale(0.8); }
+  50% { opacity: 0.2; transform: scale(1.1); }
+  100% { opacity: 0; transform: scale(1.3); }
+}
+
+/* ── Embarrassed mood ────────────────────────────────────────────────────── */
+
+.embarrassedWave {
+  animation: embarrassedDrift 3s ease-in-out infinite;
+}
+
+@keyframes embarrassedDrift {
+  0%, 100% { opacity: 0.2; transform: translateX(0); }
+  50% { opacity: 0.5; transform: translateX(3px); }
+}
+
+/* ── Special eye shapes ─────────────────────────────────────────────────── */
+
+.eyeShape_star {
+  animation: starPulse 1.8s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes starPulse {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  50% { transform: scale(1.12) rotate(8deg); }
+}
+
+.eyeShape_cross {
+  animation: crossShake 0.6s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes crossShake {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(6deg); }
+  75% { transform: rotate(-6deg); }
+}
+
+.eyeShape_diamond {
+  animation: diamondShimmer 2s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes diamondShimmer {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.1); opacity: 0.85; }
+}
+
+.eyeShape_spiral {
+  animation: spiralSpin 3s linear infinite;
+  transform-origin: center;
+}
+
+@keyframes spiralSpin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ── Emoji animations ───────────────────────────────────────────────────── */
+
+.emojiPulse {
+  animation: emojiPulse 2s ease-in-out infinite;
+}
+
+@keyframes emojiPulse {
+  0%, 100% { opacity: 0.7; transform: scale(1); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+
+.emojiFloat {
+  animation: emojiFloat 3s ease-in-out infinite;
+}
+
+@keyframes emojiFloat {
+  0%, 100% { transform: translateY(0); opacity: 0.8; }
+  50% { transform: translateY(-4px); opacity: 1; }
+}
+
+.emojiBounce {
+  animation: emojiBounce 1.5s ease-in-out infinite;
+}
+
+@keyframes emojiBounce {
+  0%, 100% { transform: translateY(0) scale(1); }
+  30% { transform: translateY(-5px) scale(1.15); }
+  60% { transform: translateY(1px) scale(0.95); }
+}
+
+.emojiSwing {
+  animation: emojiSwing 2s ease-in-out infinite;
+  transform-origin: top center;
+}
+
+@keyframes emojiSwing {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(12deg); }
+  75% { transform: rotate(-12deg); }
+}
+
+.emojiDrip {
+  animation: emojiDrip 2.5s ease-in infinite;
+}
+
+.emojiDrip2 {
+  animation: emojiDrip 2.5s ease-in 1.2s infinite;
+}
+
+@keyframes emojiDrip {
+  0% { opacity: 0; transform: translateY(-2px); }
+  20% { opacity: 0.8; transform: translateY(0); }
+  100% { opacity: 0; transform: translateY(10px); }
+}
+
+.emojiDrift {
+  animation: emojiDrift 4s ease-in-out infinite;
+}
+
+@keyframes emojiDrift {
+  0%, 100% { transform: translateX(0) translateY(0); opacity: 0.5; }
+  50% { transform: translateX(3px) translateY(-3px); opacity: 0.9; }
+}
+
+.emojiWave {
+  animation: emojiWave 1s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+@keyframes emojiWave {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(14deg); }
+  40% { transform: rotate(-8deg); }
+  60% { transform: rotate(10deg); }
+  80% { transform: rotate(-4deg); }
+}
+
+.emojiRise {
+  animation: emojiRise 3s ease-out infinite;
+}
+
+@keyframes emojiRise {
+  0% { opacity: 0.3; transform: translateY(4px) scale(0.7); }
+  40% { opacity: 1; transform: translateY(-3px) scale(1.1); }
+  100% { opacity: 0; transform: translateY(-12px) scale(0.5); }
+}
+
+.emojiShake {
+  animation: emojiShake 0.4s ease-in-out infinite;
+}
+
+@keyframes emojiShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-3px) rotate(-5deg); }
+  75% { transform: translateX(3px) rotate(5deg); }
+}
+
+/* ── Click reaction ──────────────────────────────────────────────────────── */
+
+.clickReaction .bodyGroup {
+  animation: clickBounce 0.6s ease-out;
+}
+
+@keyframes clickBounce {
+  0% { transform: scale(1) translateY(0); }
+  20% { transform: scale(1.08, 0.92) translateY(2px); }
+  40% { transform: scale(0.95, 1.06) translateY(-4px); }
+  60% { transform: scale(1.03, 0.97) translateY(-1px); }
+  80% { transform: scale(0.99, 1.01) translateY(0); }
+  100% { transform: scale(1) translateY(0); }
+}
+
+.eyeShape_heart {
+  animation: heartPulse 0.8s ease-in-out infinite;
+  transform-origin: center;
+}
+
+@keyframes heartPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18); }
+}
+
+.clickQuip {
+  color: #ff6b8a !important;
+  animation: clickQuipPop 0.4s ease-out !important;
+}
+
+@keyframes clickQuipPop {
+  0% { opacity: 0; transform: translateY(6px) scale(0.9); }
+  60% { transform: translateY(-2px) scale(1.05); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ── Click emoji burst ───────────────────────────────────────────────────── */
+
+.clickBurstEmoji1 { animation: burstFloat 1.2s ease-out forwards; }
+.clickBurstEmoji2 { animation: burstFloat 1.2s ease-out 0.1s forwards; }
+.clickBurstEmoji3 { animation: burstFloat 1.2s ease-out 0.2s forwards; }
+.clickBurstEmoji4 { animation: burstFloat 1.2s ease-out 0.15s forwards; }
+.clickBurstEmoji5 { animation: burstFloat 1.2s ease-out 0.25s forwards; }
+
+@keyframes burstFloat {
+  0% { opacity: 0.9; transform: translateY(0) scale(0.5); }
+  30% { opacity: 1; transform: translateY(-8px) scale(1.2); }
+  100% { opacity: 0; transform: translateY(-25px) scale(0.4); }
+}

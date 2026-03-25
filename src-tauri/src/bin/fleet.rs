@@ -2,8 +2,10 @@ use clap::{Parser, Subcommand};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use claude_fleet_lib::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
+use claude_fleet_lib::agent_source::{self, build_sources, find_source_for_path};
+use claude_fleet_lib::hooks;
 use claude_fleet_lib::memory;
-use claude_fleet_lib::session::{get_claude_dir, scan_sessions, SessionInfo, SessionStatus};
+use claude_fleet_lib::session::{get_claude_dir, scan_all_sources, SessionInfo, SessionStatus};
 use claude_fleet_lib::{FLEET_SKILL_MD, SKILL_TARGETS};
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -212,7 +214,7 @@ enum Commands {
 
 #[derive(Subcommand)]
 enum SkillCommands {
-    /// Install Fleet skill to all detected AI tools (Claude Code, Cursor, Copilot, Gemini CLI)
+    /// Install Fleet skill to all detected AI tools (Claude Code, Copilot, Gemini CLI)
     Install,
 }
 
@@ -438,14 +440,8 @@ fn delegate_to_remote(host: &str, remote_bin: &str) -> ! {
 }
 
 fn load_sessions() -> Vec<SessionInfo> {
-    let claude_dir = match get_claude_dir() {
-        Some(d) => d,
-        None => {
-            eprintln!("Error: cannot locate ~/.claude directory");
-            std::process::exit(1);
-        }
-    };
-    scan_sessions(&claude_dir)
+    let sources = build_sources();
+    scan_all_sources(&sources)
 }
 
 fn cmd_agents(show_all: bool, as_json: bool) {
@@ -912,13 +908,7 @@ fn cmd_serve(port: u16, token: String) {
     use std::io::{Read, Seek, SeekFrom};
     use percent_encoding::percent_decode_str;
 
-    let claude_dir = match get_claude_dir() {
-        Some(d) => d,
-        None => {
-            eprintln!("Error: cannot locate ~/.claude directory");
-            std::process::exit(1);
-        }
-    };
+    let sources = build_sources();
 
     let addr = format!("127.0.0.1:{}", port);
     let server = tiny_http::Server::http(&addr).unwrap_or_else(|e| {
@@ -964,7 +954,7 @@ fn cmd_serve(port: u16, token: String) {
             }
 
             "/sessions" => {
-                let sessions = scan_sessions(&claude_dir);
+                let sessions = scan_all_sources(&sources);
                 let body = serde_json::to_string(&sessions).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -1033,31 +1023,66 @@ fn cmd_serve(port: u16, token: String) {
                 }
             }
 
-            "/account" => {
-                match fetch_account_info() {
-                    Ok(info) => {
-                        let body = serde_json::to_string(&info).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
-                    }
-                    Err(e) => {
-                        let body = format!(r#"{{"error":{}}}"#, serde_json::to_string(&e).unwrap_or_default());
+            // ── Unified /sources/{name}/account and /sources/{name}/usage ──
+            _ if path.starts_with("/sources/") => {
+                let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+                // Expected: ["sources", "<name>", "account"|"usage"]
+                if parts.len() == 3 {
+                    let source_name = parts[1];
+                    let kind = parts[2];
+
+                    // Check sources config before serving
+                    let config = claude_fleet_lib::agent_source::SourcesConfig::load();
+                    if !config.is_source_enabled(source_name) {
+                        let body = format!(r#"{{"error":"Source '{}' is disabled"}}"#, source_name);
                         let _ = request.respond(
                             tiny_http::Response::from_string(body)
-                                .with_status_code(500)
+                                .with_status_code(403)
+                                .with_header(json_header),
+                        );
+                        continue;
+                    }
+
+                    if let Some(source) = agent_source::find_source_by_api_name(&sources, source_name) {
+                        let result = match kind {
+                            "account" => source.fetch_account(),
+                            "usage" => source.fetch_usage(),
+                            _ => Err(format!("Unknown endpoint: {kind}")),
+                        };
+                        match result {
+                            Ok(val) => {
+                                let body = serde_json::to_string(&val).unwrap_or_default();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body).with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(404)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    } else {
+                        let body = format!(r#"{{"error":"Unknown source: {}"}}"#, source_name);
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(404)
                                 .with_header(json_header),
                         );
                     }
+                } else {
+                    let _ = request.respond(tiny_http::Response::empty(404));
                 }
             }
 
             "/setup-status" => {
-                let claude_dir = get_claude_dir();
-                let sessions = claude_dir.as_ref().map(|d| scan_sessions(d)).unwrap_or_default();
+                let sessions = scan_all_sources(&sources);
                 let detected_tools = claude_fleet_lib::detect_installed_tools(&sessions);
                 let (cli_installed, cli_path) = claude_fleet_lib::check_cli_installed();
-                let claude_dir_exists = claude_dir.as_ref().map_or(false, |d| d.is_dir());
+                let claude_dir_exists = get_claude_dir().map_or(false, |d| d.is_dir());
                 let logged_in = claude_fleet_lib::account::read_keychain_credentials().is_ok();
                 let has_sessions = !sessions.is_empty();
 
@@ -1076,31 +1101,43 @@ fn cmd_serve(port: u16, token: String) {
                 );
             }
 
+            "/usage_summaries" => {
+                let summaries = claude_fleet_lib::local_backend::fetch_usage_summaries_from_sources(&sources);
+                let body = serde_json::to_string(&summaries).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             "/messages" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                match std::fs::read_to_string(&file_path) {
-                    Ok(content) => {
-                        let messages: Vec<serde_json::Value> = content
-                            .lines()
-                            .filter(|l| !l.trim().is_empty())
-                            .filter_map(|l| serde_json::from_str(l).ok())
-                            .collect();
-                        let body = serde_json::to_string(&messages).unwrap_or_default();
-                        let _ = request.respond(
-                            tiny_http::Response::from_string(body).with_header(json_header),
-                        );
+                if let Some(source) = find_source_for_path(&sources, &file_path) {
+                    match source.get_messages(&file_path) {
+                        Ok(messages) => {
+                            let body = serde_json::to_string(&messages).unwrap_or_default();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(_) => {
+                            let _ = request.respond(tiny_http::Response::empty(404));
+                        }
                     }
-                    Err(_) => {
-                        let _ = request.respond(tiny_http::Response::empty(404));
-                    }
+                } else {
+                    let _ = request.respond(tiny_http::Response::empty(404));
                 }
             }
 
             "/file_size" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                let size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+                let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let resolved = find_source_for_path(&sources, &uri)
+                    .and_then(|s| s.resolve_file_path(&uri));
+                let size = resolved
+                    .and_then(|p| std::fs::metadata(&p).ok())
+                    .map(|m| m.len())
+                    .unwrap_or(0);
                 let body = format!(r#"{{"size":{}}}"#, size);
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -1109,13 +1146,23 @@ fn cmd_serve(port: u16, token: String) {
 
             "/tail" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
-                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 let offset: u64 = query
                     .get("offset")
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
 
-                match std::fs::File::open(&file_path) {
+                let resolved = find_source_for_path(&sources, &uri)
+                    .and_then(|s| s.resolve_file_path(&uri));
+                let resolved = match resolved {
+                    Some(p) => p,
+                    None => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                        continue;
+                    }
+                };
+
+                match std::fs::File::open(&resolved) {
                     Ok(mut file) => {
                         let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
                         if file_size <= offset {
@@ -1149,7 +1196,10 @@ fn cmd_serve(port: u16, token: String) {
             }
 
             "/memories" => {
-                let memories = memory::scan_all_memories();
+                let mut memories = Vec::new();
+                for source in &sources {
+                    memories.extend(source.list_memories());
+                }
                 let body = serde_json::to_string(&memories).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -1159,14 +1209,18 @@ fn cmd_serve(port: u16, token: String) {
             "/memory_content" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                match memory::read_memory_file(&file_path) {
-                    Ok(content) => {
+                // Try each source for memory content; fall back to direct read for Claude Code
+                let result = sources.iter()
+                    .find_map(|s| s.get_memory_content(&file_path).ok())
+                    .or_else(|| memory::read_memory_file(&file_path).ok());
+                match result {
+                    Some(content) => {
                         let body = serde_json::to_string(&content).unwrap_or_default();
                         let _ = request.respond(
                             tiny_http::Response::from_string(body).with_header(json_header),
                         );
                     }
-                    Err(_) => {
+                    None => {
                         let _ = request.respond(tiny_http::Response::empty(404));
                     }
                 }
@@ -1175,11 +1229,105 @@ fn cmd_serve(port: u16, token: String) {
             "/memory_history" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-                let history = memory::trace_memory_history(&file_path);
+                // Aggregate history from all sources; fall back to direct trace
+                let mut history = Vec::new();
+                for source in &sources {
+                    let h = source.get_memory_history(&file_path);
+                    if !h.is_empty() {
+                        history = h;
+                        break;
+                    }
+                }
+                if history.is_empty() {
+                    history = memory::trace_memory_history(&file_path);
+                }
                 let body = serde_json::to_string(&history).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
+            }
+
+            "/hooks_plan" => {
+                let plan = hooks::plan_hook_setup();
+                let body = serde_json::to_string(&plan).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/apply_hooks" => {
+                match hooks::apply_hook_setup() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/sources_config" => {
+                let info = agent_source::get_sources_config_local();
+                let body = serde_json::to_string(&info).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/set_source_enabled" => {
+                let name = query.get("name").cloned().unwrap_or_default();
+                let enabled: bool = query.get("enabled").map(|s| s == "true").unwrap_or(false);
+                if name.is_empty() {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(r#"{"error":"missing name param"}"#)
+                            .with_status_code(400)
+                            .with_header(json_header),
+                    );
+                } else {
+                    match agent_source::set_source_enabled_local(&name, enabled) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    }
+                }
+            }
+
+            "/remove_hooks" => {
+                match hooks::remove_fleet_hooks() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
             }
 
             _ => {
@@ -1316,7 +1464,7 @@ fn cmd_skill_install() {
     }
 
     if !any {
-        eprintln!("No supported AI tools detected. Install Claude Code, Cursor, GitHub Copilot, or Gemini CLI first.");
+        eprintln!("No supported AI tools detected. Install Claude Code, GitHub Copilot, or Gemini CLI first.");
         std::process::exit(1);
     }
 }
