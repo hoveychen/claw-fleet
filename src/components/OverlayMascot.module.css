@@ -105,6 +105,8 @@
   gap: 10px;
   padding: 4px 12px 7px;
   position: relative;
+  -webkit-app-region: drag;
+  cursor: grab;
 }
 
 .ledGroup {
@@ -156,35 +158,74 @@
   50% { opacity: 1; }
 }
 
+/* ── Control buttons (bottom-left of status bar) ─────────────────────────── */
+.controlButtons {
+  position: absolute;
+  left: 6px;
+  bottom: 4px;
+  display: flex;
+  gap: 2px;
+}
+
+.controlBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: rgba(200, 200, 220, 0.35);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  -webkit-app-region: no-drag;
+}
+
+.controlBtn:hover {
+  color: rgba(200, 200, 220, 0.8);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.controlBtnActive {
+  color: rgba(250, 180, 100, 0.7);
+}
+
+.controlBtnActive:hover {
+  color: rgba(250, 180, 100, 1);
+}
+
+[data-theme="light"] .controlBtn {
+  color: rgba(80, 80, 100, 0.3);
+}
+
+[data-theme="light"] .controlBtn:hover {
+  color: rgba(80, 80, 100, 0.7);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="light"] .controlBtnActive {
+  color: rgba(200, 120, 50, 0.7);
+}
+
+[data-theme="light"] .controlBtnActive:hover {
+  color: rgba(200, 120, 50, 1);
+}
+
 /* ── Drag handle (bottom-right of status bar) ────────────────────────────── */
 .dragHandle {
   position: absolute;
   right: 6px;
   bottom: 4px;
   padding: 4px;
-  cursor: grab;
   color: rgba(200, 200, 220, 0.4);
   border-radius: 4px;
-  transition: color 0.15s, background 0.15s;
-  -webkit-app-region: drag;
-}
-
-.dragHandle:hover {
-  color: rgba(200, 200, 220, 0.8);
-  background: rgba(255, 255, 255, 0.06);
-}
-
-.dragHandle:active {
-  cursor: grabbing;
+  pointer-events: none;
 }
 
 [data-theme="light"] .dragHandle {
   color: rgba(80, 80, 100, 0.3);
-}
-
-[data-theme="light"] .dragHandle:hover {
-  color: rgba(80, 80, 100, 0.7);
-  background: rgba(0, 0, 0, 0.04);
 }
 
 /* ── Alert stack (above the frame) ───────────────────────────────────────── */

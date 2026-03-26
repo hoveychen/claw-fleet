@@ -17,6 +17,7 @@ import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { emit } from "@tauri-apps/api/event";
 import { useSessionsStore, useWaitingAlertsStore } from "../store";
 import type { WaitingAlert } from "../types";
+import { getItem, setItem } from "../storage";
 import { MascotEyesCore } from "./MascotEyesCore";
 import styles from "./OverlayMascot.module.css";
 
@@ -73,6 +74,20 @@ export function OverlayMascot() {
   const hasAlerts = visibleAlerts.length > 0;
 
   const [quipText, setQuipText] = useState<string | null>(null);
+  const [muted, setMuted] = useState(() => getItem("overlay-muted") === "true");
+  const [faceHidden, setFaceHidden] = useState(false);
+
+  const toggleMute = useCallback(() => {
+    setMuted((prev) => {
+      const next = !prev;
+      setItem("overlay-muted", next ? "true" : "false");
+      return next;
+    });
+  }, []);
+
+  const toggleFace = useCallback(() => {
+    setFaceHidden((prev) => !prev);
+  }, []);
 
   // Derive status counts — distinguish main vs sub-agent
   const busyStatuses = ["thinking", "executing", "streaming", "processing", "active", "delegating"];
@@ -139,8 +154,8 @@ export function OverlayMascot() {
         </div>
       )}
 
-      {/* Quip bubble above the frame — only when no alerts */}
-      {showQuip && (
+      {/* Quip bubble above the frame — only when no alerts and face visible */}
+      {showQuip && !faceHidden && (
         <div className={styles.quipBubble}>
           <div className={styles.quipText}>{quipText}</div>
           <div className={styles.quipTail} />
@@ -153,13 +168,60 @@ export function OverlayMascot() {
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
       >
-        {/* Screen area with mascot eyes */}
-        <div className={styles.screen}>
-          <MascotEyesCore onQuip={setQuipText} />
-        </div>
+        {/* Screen area with mascot eyes — hidden when faceHidden */}
+        {!faceHidden && (
+          <div className={styles.screen}>
+            <MascotEyesCore onQuip={setQuipText} />
+          </div>
+        )}
 
         {/* Status LED bar with labels */}
-        <div className={styles.statusBar}>
+        <div className={styles.statusBar} data-tauri-drag-region>
+          {/* Control buttons — bottom left */}
+          <div className={styles.controlButtons}>
+            <button
+              className={`${styles.controlBtn} ${muted ? styles.controlBtnActive : ""}`}
+              onClick={toggleMute}
+              title={muted ? t("overlay.unmute") : t("overlay.mute")}
+              aria-label={muted ? t("overlay.unmute") : t("overlay.mute")}
+            >
+              {muted ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                  <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                  <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.12 1.5-.34 2.18" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+              )}
+            </button>
+            <button
+              className={`${styles.controlBtn} ${faceHidden ? styles.controlBtnActive : ""}`}
+              onClick={toggleFace}
+              title={faceHidden ? t("overlay.show_face") : t("overlay.hide_face")}
+              aria-label={faceHidden ? t("overlay.show_face") : t("overlay.hide_face")}
+            >
+              {faceHidden ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              ) : (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+              )}
+            </button>
+          </div>
+
           {mainBusyCount > 0 && (
             <div className={styles.ledGroup}>
               <span className={`${styles.led} ${styles.ledActive}`} />
@@ -195,8 +257,8 @@ export function OverlayMascot() {
             <span className={styles.ledLabel}>{t("overlay.no_agents")}</span>
           )}
 
-          {/* Drag handle — bottom right */}
-          <div className={styles.dragHandle} data-tauri-drag-region>
+          {/* Drag handle icon — bottom right (visual indicator only, whole bar is draggable) */}
+          <div className={styles.dragHandle}>
             <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" opacity="0.4">
               <circle cx="6" cy="2" r="1" />
               <circle cx="9" cy="2" r="1" />

@@ -129,6 +129,7 @@ export async function speakText(text: string, voice?: string) {
 
 /** Play alert: chime (optional) → speech (optional), based on current settings. */
 export async function playAlertSound(summary: string) {
+  if (getItem("overlay-muted") === "true") return;
   const mode = (getItem("tts-mode") as TtsMode) || "off";
   if (mode === "off") return;
 

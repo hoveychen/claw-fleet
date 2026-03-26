@@ -375,7 +375,11 @@
     "led_busy": "工作中",
     "led_sub": "子任务",
     "led_waiting": "等待",
-    "led_idle": "空闲"
+    "led_idle": "空闲",
+    "mute": "静音通知",
+    "unmute": "取消静音",
+    "hide_face": "隐藏表情",
+    "show_face": "显示表情"
   },
   "settings": {
     "title": "设置",

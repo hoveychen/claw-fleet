@@ -375,7 +375,11 @@
     "led_busy": "busy",
     "led_sub": "sub",
     "led_waiting": "input",
-    "led_idle": "idle"
+    "led_idle": "idle",
+    "mute": "Mute notifications",
+    "unmute": "Unmute notifications",
+    "hide_face": "Hide expression",
+    "show_face": "Show expression"
   },
   "settings": {
     "title": "Settings",

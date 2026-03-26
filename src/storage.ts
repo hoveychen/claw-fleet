@@ -26,6 +26,7 @@ const ALL_KEYS = [
   "tts-mode",
   "chime-sound",
   "tts-voice",
+  "overlay-muted",
 ] as const;
 
 /**
