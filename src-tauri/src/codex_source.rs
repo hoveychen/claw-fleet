@@ -28,7 +28,7 @@ use serde_json::{json, Value};
 
 use crate::agent_source::{AgentSource, WatchStrategy};
 use crate::backend::SourceUsageSummary;
-use crate::session::{SessionInfo, SessionStatus};
+use crate::session::{SessionInfo, SessionStatus, compute_context_percent};
 
 /// URI prefix for Codex session identifiers.
 const CODEX_URI_PREFIX: &str = "codex://";
@@ -397,10 +397,27 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64) {
 
             if msg_type == Some("token_count") {
                 if let Some(info) = payload.and_then(|p| p.get("info")) {
-                    let output_tokens =
-                        info.get("output_tokens").and_then(|t| t.as_u64()).unwrap_or(0);
-                    if output_tokens > 0 {
-                        total_output = output_tokens; // token_count is cumulative
+                    let cumulative_output = info
+                        .get("total_token_usage")
+                        .and_then(|u| u.get("output_tokens"))
+                        .and_then(|t| t.as_u64())
+                        .or_else(|| info.get("output_tokens").and_then(|t| t.as_u64()))
+                        .unwrap_or(0);
+                    if cumulative_output > 0 {
+                        total_output = cumulative_output; // token_count is cumulative
+                    }
+
+                    let incremental_output = info
+                        .get("last_token_usage")
+                        .and_then(|u| u.get("output_tokens"))
+                        .and_then(|t| t.as_u64())
+                        .unwrap_or(0);
+                    if incremental_output > 0 {
+                        if let Some(ts_str) = line.get("timestamp").and_then(|t| t.as_str()) {
+                            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
+                                timed_tokens.push((dt.timestamp() as f64, incremental_output));
+                            }
+                        }
                     }
                 }
             }
@@ -452,6 +469,47 @@ fn compute_token_stats(lines: &[Value]) -> (f64, u64) {
     };
 
     (speed, total_output)
+}
+
+/// Extract context utilization from the latest token_count event.
+fn extract_context_percent(lines: &[Value], model: Option<&str>) -> Option<f64> {
+    for line in lines.iter().rev() {
+        if line.get("type").and_then(|t| t.as_str()) != Some("event_msg") {
+            continue;
+        }
+        let payload = line.get("payload")?;
+        if payload.get("type").and_then(|t| t.as_str()) != Some("token_count") {
+            continue;
+        }
+        let info = payload.get("info")?;
+        let usage = info
+            .get("total_token_usage")
+            .or_else(|| info.get("last_token_usage"));
+
+        let input_tokens = usage
+            .and_then(|u| u.get("input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let cached_input_tokens = usage
+            .and_then(|u| u.get("cached_input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let total_input = input_tokens + cached_input_tokens;
+
+        if total_input == 0 {
+            continue;
+        }
+
+        if let Some(window) = info.get("model_context_window").and_then(|w| w.as_u64()) {
+            if window > 0 {
+                return Some((total_input as f64 / window as f64).min(1.0));
+            }
+        }
+
+        return compute_context_percent(total_input, model);
+    }
+
+    None
 }
 
 /// Scan codex processes to find PIDs, including thread IDs from command-line args.
@@ -688,7 +746,7 @@ fn build_session_from_sqlite(
     let mut last_activity_ms = (thread.updated_at as u64) * 1000;
 
     // For recently active sessions, read the rollout file for precise status.
-    let (status, token_speed, total_output_tokens, last_message_preview, model, thinking_level) =
+    let (status, token_speed, total_output_tokens, last_message_preview, model, thinking_level, context_percent) =
         if age_secs < 600.0 && rollout_path.exists() {
             // Update last_activity_ms from file mtime for sub-second precision.
             if let Ok(meta) = fs::metadata(&rollout_path) {
@@ -728,8 +786,9 @@ fn build_session_from_sqlite(
                         } else {
                             None
                         };
-
-                        (st, spd, tok, preview, mdl, tl)
+                        let tok = if tok > 0 { tok } else { thread.tokens_used as u64 };
+                        let ctx = extract_context_percent(&all_parsed, mdl.as_deref());
+                        (st, spd, tok, preview, mdl, tl, ctx)
                     } else {
                         (
                             determine_status_from_age(file_age.as_secs_f64()),
@@ -737,6 +796,7 @@ fn build_session_from_sqlite(
                             thread.tokens_used as u64,
                             None,
                             thread.model.clone(),
+                            None,
                             None,
                         )
                     }
@@ -748,6 +808,7 @@ fn build_session_from_sqlite(
                         None,
                         thread.model.clone(),
                         None,
+                        None,
                     )
                 }
             } else {
@@ -757,6 +818,7 @@ fn build_session_from_sqlite(
                     thread.tokens_used as u64,
                     None,
                     thread.model.clone(),
+                    None,
                     None,
                 )
             }
@@ -775,6 +837,7 @@ fn build_session_from_sqlite(
                 thread.tokens_used as u64,
                 preview,
                 thread.model.clone(),
+                None,
                 None,
             )
         };
@@ -832,10 +895,84 @@ fn build_session_from_sqlite(
         pid,
         pid_precise,
         last_skill: None,
-        context_percent: None,
+        context_percent,
         agent_source: "codex".to_string(),
         last_outcome: None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{compute_token_stats, extract_context_percent};
+    use serde_json::json;
+
+    #[test]
+    fn compute_token_stats_supports_new_token_count_shape() {
+        let lines = vec![
+            json!({
+                "timestamp": "2026-03-27T08:23:14.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": { "output_tokens": 779 },
+                        "last_token_usage": { "output_tokens": 428 }
+                    }
+                }
+            }),
+            json!({
+                "timestamp": "2026-03-27T08:23:16.000Z",
+                "type": "event_msg",
+                "payload": {
+                    "type": "token_count",
+                    "info": {
+                        "total_token_usage": { "output_tokens": 815 },
+                        "last_token_usage": { "output_tokens": 36 }
+                    }
+                }
+            }),
+        ];
+
+        let (_, total_output) = compute_token_stats(&lines);
+        assert_eq!(total_output, 815);
+    }
+
+    #[test]
+    fn compute_token_stats_supports_legacy_token_count_shape() {
+        let lines = vec![json!({
+            "timestamp": "2026-03-27T08:23:14.432Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "output_tokens": 123
+                }
+            }
+        })];
+
+        let (_, total_output) = compute_token_stats(&lines);
+        assert_eq!(total_output, 123);
+    }
+
+    #[test]
+    fn extract_context_percent_prefers_precise_window_from_token_count() {
+        let lines = vec![json!({
+            "type": "event_msg",
+            "payload": {
+                "type": "token_count",
+                "info": {
+                    "total_token_usage": {
+                        "input_tokens": 1000,
+                        "cached_input_tokens": 500
+                    },
+                    "model_context_window": 3000
+                }
+            }
+        })];
+
+        let pct = extract_context_percent(&lines, Some("gpt-5.4"));
+        assert_eq!(pct, Some(0.5));
+    }
 }
 
 /// Simple status from file age when we can't read the rollout file.
@@ -969,6 +1106,7 @@ fn parse_codex_session(
     let (token_speed, total_output_tokens) = compute_token_stats(&all_parsed);
     let last_message_preview = extract_last_text(last_n);
     let model = extract_model(&all_parsed);
+    let context_percent = extract_context_percent(&all_parsed, model.as_deref());
 
     // Detect thinking/reasoning.
     let has_reasoning = last_n.iter().any(|v| {
@@ -1022,7 +1160,7 @@ fn parse_codex_session(
         pid,
         pid_precise,
         last_skill: None,
-        context_percent: None,
+        context_percent,
         agent_source: "codex".to_string(),
         last_outcome: None,
     })

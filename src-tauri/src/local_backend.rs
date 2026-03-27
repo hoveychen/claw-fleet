@@ -72,17 +72,35 @@ impl LocalBackend {
 
         // Collect all trigger extensions across sources.
         let mut all_trigger_exts: HashSet<&'static str> = HashSet::new();
+        // Track all dirs being watched so we don't add duplicates for memory paths.
+        let mut watched_dirs: HashSet<std::path::PathBuf> = HashSet::new();
         for source in sources.iter() {
             if matches!(source.watch_strategy(), WatchStrategy::Filesystem) {
                 for dir in source.watch_paths() {
                     if dir.is_dir() {
                         if let Err(e) = watcher.watch(&dir, RecursiveMode::Recursive) {
                             eprintln!("[LocalBackend] failed to watch {:?}: {}", dir, e);
+                        } else {
+                            watched_dirs.insert(dir);
                         }
                     }
                 }
                 for ext in source.trigger_extensions() {
                     all_trigger_exts.insert(ext);
+                }
+            }
+        }
+
+        // Also watch memory_watch_paths() for every source (filesystem or polling)
+        // that stores memory outside of its session watch dirs.
+        for source in sources.iter() {
+            for dir in source.memory_watch_paths() {
+                if dir.is_dir() && !watched_dirs.contains(&dir) {
+                    if let Err(e) = watcher.watch(&dir, RecursiveMode::Recursive) {
+                        eprintln!("[LocalBackend] failed to watch memory {:?}: {}", dir, e);
+                    } else {
+                        watched_dirs.insert(dir);
+                    }
                 }
             }
         }
@@ -102,14 +120,27 @@ impl LocalBackend {
             let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
             let analyzing: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
             let mut last_rescan = Instant::now();
+            let mut last_memory_rescan = Instant::now();
             let rescan_interval = Duration::from_secs(2);
+            let memory_rescan_interval = Duration::from_secs(1);
             let mut pending_rescan = false;
+            let mut pending_memory_rescan = false;
 
             loop {
                 // Wait for events; use a short timeout when a rescan is pending
                 // so we flush it promptly after the coalescing window.
-                let timeout = if pending_rescan {
-                    rescan_interval.saturating_sub(last_rescan.elapsed())
+                let timeout = if pending_rescan || pending_memory_rescan {
+                    let remaining_session = if pending_rescan {
+                        rescan_interval.saturating_sub(last_rescan.elapsed())
+                    } else {
+                        Duration::from_secs(60)
+                    };
+                    let remaining_memory = if pending_memory_rescan {
+                        memory_rescan_interval.saturating_sub(last_memory_rescan.elapsed())
+                    } else {
+                        Duration::from_secs(60)
+                    };
+                    remaining_session.min(remaining_memory)
                 } else {
                     Duration::from_secs(60)
                 };
@@ -125,6 +156,12 @@ impl LocalBackend {
 
                         for path in &event.paths {
                             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+
+                            // Memory file change: .md file inside a `memory/` directory.
+                            if ext == "md" && path_is_in_memory_dir(path) {
+                                pending_memory_rescan = true;
+                            }
+
                             if !all_trigger_exts.contains(ext) {
                                 continue;
                             }
@@ -148,7 +185,7 @@ impl LocalBackend {
                     Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
                 }
 
-                // Flush the batched rescan once the coalescing window has elapsed.
+                // Flush the batched session rescan once the coalescing window has elapsed.
                 if pending_rescan && last_rescan.elapsed() >= rescan_interval {
                     rescan_and_emit(&sources2, &app2, &sess2, &so2);
                     detect_waiting_transitions(
@@ -162,6 +199,14 @@ impl LocalBackend {
                     );
                     last_rescan = Instant::now();
                     pending_rescan = false;
+                }
+
+                // Flush the batched memory rescan — just emit the event; the
+                // frontend calls `list_memories` itself.
+                if pending_memory_rescan && last_memory_rescan.elapsed() >= memory_rescan_interval {
+                    let _ = app2.emit("memories-updated", ());
+                    last_memory_rescan = Instant::now();
+                    pending_memory_rescan = false;
                 }
             }
         });
@@ -242,6 +287,12 @@ fn rescan_and_emit(
     *sessions.lock().unwrap() = s.clone();
     let _ = app.emit("sessions-updated", &s);
     crate::update_tray(app, &s);
+}
+
+/// Returns true when `path` is a `.md` file residing inside a `memory/`
+/// directory — the marker we use to identify auto-memory files for any source.
+fn path_is_in_memory_dir(path: &std::path::Path) -> bool {
+    path.components().any(|c| c.as_os_str() == "memory")
 }
 
 fn emit_tail_lines(path: &std::path::Path, app: &AppHandle, watch: &crate::backend::WatchState) {
@@ -539,6 +590,14 @@ impl Backend for LocalBackend {
             }
         }
         vec![]
+    }
+
+    fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
+        crate::skills::scan_all_skills()
+    }
+
+    fn get_skill_content(&self, path: &str) -> Result<String, String> {
+        crate::skills::read_skill_file(path)
     }
 
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {

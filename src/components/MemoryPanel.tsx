@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextBlock } from "./blocks/TextBlock";
@@ -93,6 +94,15 @@ export function MemoryPanel() {
       load();
     }
   }, [loaded, load]);
+
+  useEffect(() => {
+    const unlisten = listen("memories-updated", () => {
+      load();
+    });
+    return () => {
+      unlisten.then((f) => f());
+    };
+  }, [load]);
 
   const totalFiles = memories.reduce((sum, w) => sum + w.files.length, 0);
 

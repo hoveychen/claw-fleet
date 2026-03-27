@@ -7,6 +7,7 @@ import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
 import { MemoryPanel } from "./MemoryPanel";
+import { SkillsPanel } from "./SkillsPanel";
 import { SessionCard } from "./SessionCard";
 import { SettingsPanel } from "./SettingsPanel";
 import styles from "./SessionList.module.css";
@@ -211,6 +212,9 @@ export function SessionList() {
 
           {/* Memory panel */}
           <MemoryPanel />
+
+          {/* Skills panel */}
+          <SkillsPanel />
 
           {/* Mascot */}
           <MascotEyes />

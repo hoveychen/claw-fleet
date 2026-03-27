@@ -103,6 +103,11 @@
     "openclaw_no_sessions": "暂无最近会话",
     "codex_limit": "速率限制"
   },
+  "skills": {
+    "panel_title": "Skills",
+    "loading": "加载中…",
+    "no_skills": "未找到 Skill 文件。"
+  },
   "memory": {
     "panel_title": "Memory",
     "loading": "\u52a0\u8f7d\u4e2d\u2026",
@@ -426,6 +431,14 @@
     "chime_soft_bell": "柔和铃声",
     "chime_triple": "三连音",
     "chime_drop": "水滴",
+    "tts_engine": "语音引擎",
+    "tts_engine_system": "系统语音 (macOS Say)",
+    "tts_engine_kokoro": "Kokoro (应用内置，首次需下载 ~90 MB)",
+    "kokoro_loading": "正在加载 Kokoro 模型…",
+    "kokoro_downloading": "正在下载",
+    "kokoro_ready": "Kokoro 模型已就绪",
+    "kokoro_error": "加载 Kokoro 模型失败",
+    "kokoro_voice_auto": "自动（根据语言选择）",
     "tts_voice": "语音音色",
     "tts_voice_default": "系统默认",
     "tts_preview_text": "Agent需要你的关注。登录问题修好了，测试全过了。",

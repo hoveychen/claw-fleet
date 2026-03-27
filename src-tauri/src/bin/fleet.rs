@@ -5,6 +5,7 @@ use claude_fleet_lib::account::{fetch_account_info_blocking as fetch_account_inf
 use claude_fleet_lib::agent_source::{self, build_sources, find_source_for_path};
 use claude_fleet_lib::hooks;
 use claude_fleet_lib::memory;
+use claude_fleet_lib::skills;
 use claude_fleet_lib::session::{get_claude_dir, scan_all_sources, SessionInfo, SessionStatus};
 use claude_fleet_lib::{FLEET_SKILL_MD, SKILL_TARGETS};
 
@@ -1253,6 +1254,30 @@ fn cmd_serve(port: u16, token: String) {
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
+            }
+
+            "/skills" => {
+                let items = skills::scan_all_skills();
+                let body = serde_json::to_string(&items).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/skill_content" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                match skills::read_skill_file(&file_path) {
+                    Ok(content) => {
+                        let body = serde_json::to_string(&content).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
             }
 
             "/hooks_plan" => {

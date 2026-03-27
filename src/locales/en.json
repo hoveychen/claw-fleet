@@ -103,6 +103,11 @@
     "openclaw_no_sessions": "No recent sessions",
     "codex_limit": "Rate Limit"
   },
+  "skills": {
+    "panel_title": "Skills",
+    "loading": "Loading…",
+    "no_skills": "No skill files found."
+  },
   "memory": {
     "panel_title": "Memory",
     "loading": "Loading\u2026",
@@ -426,6 +431,14 @@
     "chime_soft_bell": "Soft Bell",
     "chime_triple": "Triple",
     "chime_drop": "Drop",
+    "tts_engine": "TTS Engine",
+    "tts_engine_system": "System (macOS Say)",
+    "tts_engine_kokoro": "Kokoro (in-app, ~90 MB download)",
+    "kokoro_loading": "Loading Kokoro model\u2026",
+    "kokoro_downloading": "Downloading",
+    "kokoro_ready": "Kokoro model loaded",
+    "kokoro_error": "Failed to load Kokoro model",
+    "kokoro_voice_auto": "Auto (detect language)",
     "tts_voice": "Voice",
     "tts_voice_default": "System Default",
     "tts_preview_text": "Agent needs your attention. Login bug is fixed, tests all green.",

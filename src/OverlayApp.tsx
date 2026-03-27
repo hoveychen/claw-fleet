@@ -38,10 +38,11 @@ function OverlayApp() {
     }
   }, [theme]);
 
-  // Listen for theme changes from main window
+  // Listen for theme changes from main window.
+  // Use setState directly to avoid re-emitting overlay-theme-changed (which would create a loop).
   useEffect(() => {
     const unlisten = listen<string>("overlay-theme-changed", (e) => {
-      useUIStore.getState().setTheme(e.payload as "dark" | "light" | "system");
+      useUIStore.setState({ theme: e.payload as "dark" | "light" | "system" });
     });
     return () => { unlisten.then((fn) => fn()); };
   }, []);

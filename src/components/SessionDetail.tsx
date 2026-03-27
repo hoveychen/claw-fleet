@@ -19,6 +19,10 @@ export function SessionDetail() {
   const { t } = useTranslation();
   const { session, messages, isLoading, close, open } = useDetailStore();
   const sessions = useSessionsStore((s) => s.sessions);
+  const liveSession = useMemo(() => {
+    if (!session) return null;
+    return sessions.find((s) => s.id === session.id) ?? session;
+  }, [session, sessions]);
 
   // Build tabs: [mainSession, ...activeSubagents]
   // Show tabs only when viewing a main agent that has active subagents,
@@ -47,20 +51,20 @@ export function SessionDetail() {
   }, []);
 
   const tabs = useMemo((): SessionInfo[] => {
-    if (!session) return [];
+    if (!liveSession) return [];
 
     let mainSession: SessionInfo | undefined;
     let subagents: SessionInfo[];
 
-    if (session.isSubagent && session.parentSessionId) {
-      mainSession = sessions.find((s) => s.id === session.parentSessionId);
+    if (liveSession.isSubagent && liveSession.parentSessionId) {
+      mainSession = sessions.find((s) => s.id === liveSession.parentSessionId);
       subagents = sessions.filter(
-        (s) => s.isSubagent && s.parentSessionId === session.parentSessionId
+        (s) => s.isSubagent && s.parentSessionId === liveSession.parentSessionId
       );
     } else {
-      mainSession = session;
+      mainSession = liveSession;
       subagents = sessions.filter(
-        (s) => s.isSubagent && s.parentSessionId === session.id
+        (s) => s.isSubagent && s.parentSessionId === liveSession.id
       );
     }
 
@@ -68,41 +72,41 @@ export function SessionDetail() {
     if (activeSubagents.length === 0) return [];
 
     return mainSession ? [mainSession, ...activeSubagents] : activeSubagents;
-  }, [session, sessions]);
+  }, [liveSession, sessions]);
 
   return (
-      <div className={`${styles.root} ${session ? styles.open : ""}`}>
-        {session && (
+      <div className={`${styles.root} ${liveSession ? styles.open : ""}`}>
+        {liveSession && (
           <>
           {/* Header */}
           <div className={styles.header}>
             <div className={styles.header_row}>
               <div className={styles.header_left}>
-                <span className={styles.workspace}>{session.workspaceName}</span>
-                {session.isSubagent ? (
+                <span className={styles.workspace}>{liveSession.workspaceName}</span>
+                {liveSession.isSubagent ? (
                   <span className={styles.tag_subagent}>
-                    ⎇ {session.agentType ?? t("subagent")}
+                    ⎇ {liveSession.agentType ?? t("subagent")}
                   </span>
                 ) : (
                   <span className={styles.tag_main}>◈ {t("main")}</span>
                 )}
-                {session.slug && (
-                  <span className={styles.slug}>{session.slug}</span>
+                {liveSession.slug && (
+                  <span className={styles.slug}>{liveSession.slug}</span>
                 )}
               </div>
               <div className={styles.header_right}>
-                {session.ideName && (
-                  <span className={styles.ide}>{session.ideName}</span>
+                {liveSession.ideName && (
+                  <span className={styles.ide}>{liveSession.ideName}</span>
                 )}
                 <span className={styles.tokens}>
-                  {session.totalOutputTokens.toLocaleString()} {t("tokens_out")}
+                  {liveSession.totalOutputTokens.toLocaleString()} {t("tokens_out")}
                 </span>
-                {session.contextPercent != null && (
+                {liveSession.contextPercent != null && (
                   <span
-                    className={`${styles.context} ${session.contextPercent >= 0.8 ? styles.context_high : ""}`}
-                    title={t("card.tip_context", { percent: Math.round(session.contextPercent * 100) })}
+                    className={`${styles.context} ${liveSession.contextPercent >= 0.8 ? styles.context_high : ""}`}
+                    title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
                   >
-                    ctx {Math.round(session.contextPercent * 100)}%
+                    ctx {Math.round(liveSession.contextPercent * 100)}%
                   </span>
                 )}
                 <button className={styles.close_btn} onClick={close}>
@@ -110,8 +114,8 @@ export function SessionDetail() {
                 </button>
               </div>
             </div>
-            {session.aiTitle && (
-              <div className={styles.ai_title}>{session.aiTitle}</div>
+            {liveSession.aiTitle && (
+              <div className={styles.ai_title}>{liveSession.aiTitle}</div>
             )}
           </div>
 
@@ -121,8 +125,8 @@ export function SessionDetail() {
               {tabs.map((tab) => (
                 <button
                   key={tab.id}
-                  className={`${styles.tab} ${tab.id === session.id ? styles.tab_active : ""}`}
-                  onClick={() => { if (tab.id !== session.id) open(tab); }}
+                  className={`${styles.tab} ${tab.id === liveSession.id ? styles.tab_active : ""}`}
+                  onClick={() => { if (tab.id !== liveSession.id) open(tab); }}
                 >
                   <span
                     className={styles.tab_dot}
@@ -137,10 +141,10 @@ export function SessionDetail() {
           )}
 
           {/* Path */}
-          <div className={styles.path}>{session.workspacePath}</div>
+          <div className={styles.path}>{liveSession.workspacePath}</div>
 
           {/* Skill history */}
-          <SkillHistory jsonlPath={session.jsonlPath} />
+          <SkillHistory jsonlPath={liveSession.jsonlPath} />
 
           {/* Messages */}
           <div ref={scrollRef} className={styles.scroll_area}>

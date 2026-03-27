@@ -11,6 +11,7 @@ pub mod memory;
 pub mod openclaw_source;
 pub mod remote;
 pub mod session;
+pub mod skills;
 
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -713,6 +714,18 @@ fn get_claude_md_content(workspace_path: String) -> Result<String, String> {
     memory::read_claude_md(&workspace_path)
 }
 
+// ── Skills ────────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_skills(state: tauri::State<AppState>) -> Vec<skills::SkillItem> {
+    state.backend.lock().unwrap().list_skills()
+}
+
+#[tauri::command]
+fn get_skill_content(path: String, state: tauri::State<AppState>) -> Result<String, String> {
+    state.backend.lock().unwrap().get_skill_content(&path)
+}
+
 // ── Agent sources config ─────────────────────────────────────────────────────
 
 /// Return the current sources config merged with availability info.
@@ -1208,6 +1221,8 @@ pub fn run() {
             get_memory_content,
             get_memory_history,
             get_claude_md_content,
+            list_skills,
+            get_skill_content,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,

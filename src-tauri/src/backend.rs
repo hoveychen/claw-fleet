@@ -12,6 +12,7 @@ use serde_json::Value;
 use crate::account::AccountInfo;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::SessionInfo;
+use crate::skills::SkillItem;
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -235,6 +236,10 @@ pub trait Backend: Send + Sync {
     fn get_memory_content(&self, path: &str) -> Result<String, String>;
     fn get_memory_history(&self, path: &str) -> Vec<MemoryHistoryEntry>;
 
+    // ── Skills ────────────────────────────────────────────────────────────────
+    fn list_skills(&self) -> Vec<SkillItem>;
+    fn get_skill_content(&self, path: &str) -> Result<String, String>;
+
     // ── Waiting alerts ────────────────────────────────────────────────────────
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert>;
 
@@ -334,6 +339,12 @@ impl Backend for NullBackend {
     }
     fn get_memory_history(&self, _: &str) -> Vec<MemoryHistoryEntry> {
         vec![]
+    }
+    fn list_skills(&self) -> Vec<SkillItem> {
+        vec![]
+    }
+    fn get_skill_content(&self, _: &str) -> Result<String, String> {
+        Err("backend not ready".into())
     }
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         vec![]

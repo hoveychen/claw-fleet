@@ -60,6 +60,22 @@ pub trait AgentSource: Send + Sync {
         vec![]
     }
 
+    /// Additional filesystem directories to watch for memory file changes
+    /// (`.md` files under `*/memory/` subdirectories).
+    ///
+    /// Return paths that contain memory files but are **not** already covered
+    /// by `watch_paths()`.  For sources whose session dirs and memory dirs
+    /// overlap (e.g. Claude Code stores everything under `~/.claude/`), this
+    /// can return an empty vec — the session watcher already receives the
+    /// events and `LocalBackend` filters them by path.
+    ///
+    /// Sources that keep memory in a separate location (e.g. a different tool
+    /// storing memory outside its session dir) should return those dirs here
+    /// so they are added to the notify watcher.
+    fn memory_watch_paths(&self) -> Vec<PathBuf> {
+        vec![]
+    }
+
     /// Whether a given file path belongs to this source's watch domain.
     fn owns_path(&self, path: &str) -> bool {
         let prefix = self.uri_prefix();
