@@ -185,13 +185,30 @@ export function playAlertSound(summary: string) {
   processAlertQueue();
 }
 
+/** Fallback summaries from the backend that carry no real information — skip TTS for these. */
+const FALLBACK_SUMMARIES = new Set([
+  "Status update",
+  "Bug fixed",
+  "Feature added",
+  "Agent is stuck",
+  "Agent ran into an issue",
+  "Task completed",
+  "Potential issues detected",
+  "Agent is confused",
+  "Task completed successfully",
+  "Quick fix applied",
+  "Extensive changes made",
+  "Planning next steps",
+  "Waiting for input",
+]);
+
 async function playAlertSoundImpl(summary: string) {
   const mode = (getItem("tts-mode") as TtsMode) || "off";
   const chime = (getItem("chime-sound") as ChimePreset) || "ding_dong";
   console.debug("[audio] playing chime:", chime, "mode:", mode);
   await playChime(chime);
 
-  if (mode === "chime_and_speech") {
+  if (mode === "chime_and_speech" && !FALLBACK_SUMMARIES.has(summary)) {
     const voiceURI = getItem("tts-voice") || undefined;
     await speakText(summary, voiceURI);
   }
