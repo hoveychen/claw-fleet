@@ -125,7 +125,7 @@ jobs:
             fixed_suffix: macos-arm64
 
           - name: macOS (Intel)
-            runner: macos-latest
+            runner: macos-15-intel
             rust_target: x86_64-apple-darwin
             args: --target x86_64-apple-darwin
             fleet_bin: fleet-cli
