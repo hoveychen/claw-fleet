@@ -933,6 +933,7 @@ fn connect_remote_start_probe(
     if let Ok(s) = probe.get::<Vec<SessionInfo>>("/sessions") {
         *sessions.lock().unwrap() = s.clone();
         let _ = app.emit("sessions-updated", &s);
+        let _ = app.emit("scan-ready", true);
         crate::update_tray(app, &s);
     }
 

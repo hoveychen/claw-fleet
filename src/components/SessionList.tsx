@@ -31,7 +31,7 @@ function getSavedWidth(): number {
 
 export function SessionList() {
   const { t } = useTranslation();
-  const { sessions, refresh, setSessions } = useSessionsStore();
+  const { sessions, refresh, setSessions, scanReady, setScanReady } = useSessionsStore();
   const { session: viewedSession, open } = useDetailStore();
   const { viewMode, setViewMode } = useUIStore();
   const { connection } = useConnectionStore();
@@ -49,8 +49,12 @@ export function SessionList() {
     const unlistenPromise = listen<SessionInfo[]>("sessions-updated", (e) => {
       setSessions(e.payload);
     });
+    const unlistenScanReady = listen<boolean>("scan-ready", () => {
+      setScanReady(true);
+    });
     return () => {
       unlistenPromise.then((u) => u());
+      unlistenScanReady.then((u) => u());
     };
   }, []);
 
@@ -292,14 +296,14 @@ export function SessionList() {
                   </section>
                 )}
                 {promoted.length === 0 && (
-                  <p className={styles.empty}>{t("no_sessions")}</p>
+                  <p className={styles.empty}>{scanReady ? t("no_sessions") : t("scanning")}</p>
                 )}
               </>
             ) : (
               <>
                 {active.length > 0 && renderGroup(active)}
                 {active.length === 0 && (
-                  <p className={styles.empty}>{t("no_sessions")}</p>
+                  <p className={styles.empty}>{scanReady ? t("no_sessions") : t("scanning")}</p>
                 )}
               </>
             )}

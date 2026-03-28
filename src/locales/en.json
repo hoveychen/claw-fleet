@@ -4,6 +4,7 @@
   "active": "Active",
   "recent": "Recent",
   "no_sessions": "No sessions found.",
+  "scanning": "Scanning sessions…",
   "select_session": "Select a session to inspect",
   "tokens_out": "tokens out",
   "tokens": "tokens",

@@ -23,6 +23,7 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   setConnection: (conn) => set({ connection: conn }),
   disconnect: async () => {
     await invoke("disconnect_remote").catch(() => {});
+    useSessionsStore.getState().setScanReady(false);
     set({ connection: null });
   },
 }));
@@ -71,7 +72,9 @@ export interface SpeedSample {
 interface SessionsState {
   sessions: SessionInfo[];
   speedHistory: SpeedSample[];
+  scanReady: boolean;
   setSessions: (sessions: SessionInfo[]) => void;
+  setScanReady: (ready: boolean) => void;
   refresh: () => Promise<void>;
 }
 
@@ -80,6 +83,7 @@ const MAX_SPEED_HISTORY = 60;
 export const useSessionsStore = create<SessionsState>((set) => ({
   sessions: [],
   speedHistory: [],
+  scanReady: false,
   setSessions: (sessions) =>
     set((state) => {
       const totalSpeed = sessions.reduce((sum, s) => sum + s.tokenSpeed, 0);
@@ -87,6 +91,7 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       const speedHistory = [...state.speedHistory, newSample].slice(-MAX_SPEED_HISTORY);
       return { sessions, speedHistory };
     }),
+  setScanReady: (ready) => set({ scanReady: ready }),
   refresh: async () => {
     const sessions = await invoke<SessionInfo[]>("list_sessions");
     useSessionsStore.getState().setSessions(sessions);

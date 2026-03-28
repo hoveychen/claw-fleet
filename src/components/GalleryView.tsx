@@ -233,6 +233,7 @@ function buildRows(
 export function GalleryView() {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
+  const scanReady = useSessionsStore((s) => s.scanReady);
   const { open, close, session: openSession } = useDetailStore();
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -315,7 +316,7 @@ export function GalleryView() {
               </div>
             )}
             {filteredMains.length === 0 && (
-              <p className={styles.empty}>{t("no_sessions")}</p>
+              <p className={styles.empty}>{scanReady ? t("no_sessions") : t("scanning")}</p>
             )}
           </>
         ) : (
@@ -324,7 +325,7 @@ export function GalleryView() {
               {buildRows(filteredActiveMains, sessions, handleSelect)}
             </div>
             {filteredActiveMains.length === 0 && (
-              <p className={styles.empty}>{t("no_sessions")}</p>
+              <p className={styles.empty}>{scanReady ? t("no_sessions") : t("scanning")}</p>
             )}
           </>
         )}

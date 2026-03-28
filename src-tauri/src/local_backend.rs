@@ -61,6 +61,7 @@ impl LocalBackend {
                 let initial = crate::session::scan_all_sources(&sources_bg);
                 *sess_bg.lock().unwrap() = initial.clone();
                 let _ = app_bg.emit("sessions-updated", &initial);
+                let _ = app_bg.emit("scan-ready", true);
                 crate::update_tray(&app_bg, &initial);
             });
         }

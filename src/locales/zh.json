@@ -4,6 +4,7 @@
   "active": "活跃",
   "recent": "最近",
   "no_sessions": "未找到会话。",
+  "scanning": "正在扫描会话…",
   "select_session": "选择一个会话以查看详情",
   "tokens_out": "tokens 输出",
   "tokens": "tokens",

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Connection } from "../store";
+import { useSessionsStore, type Connection } from "../store";
 import styles from "./ConnectionDialog.module.css";
 
 // ── Types mirroring Rust structs ─────────────────────────────────────────────
@@ -177,6 +177,7 @@ export function ConnectionDialog({ onConnected }: Props) {
     }
 
     try {
+      useSessionsStore.getState().setScanReady(false);
       await invoke("connect_remote", { conn });
       // Success is signaled by the progress event with done:true
     } catch (e: unknown) {
