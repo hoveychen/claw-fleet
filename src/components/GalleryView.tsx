@@ -267,7 +267,9 @@ export function GalleryView() {
   const filteredMains = filtered.filter((s) => !s.isSubagent);
 
   const filteredActiveMains = showAll ? filteredMains.filter(isActive) : filteredMains;
-  const filteredRecentMains = showAll ? filteredMains.filter((s) => !isActive(s)) : [];
+  const filteredRecentMains = showAll
+    ? filteredMains.filter((s) => !isActive(s)).sort((a, b) => b.lastActivityMs - a.lastActivityMs)
+    : [];
 
   return (
     <div className={styles.root}>

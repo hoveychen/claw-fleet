@@ -114,7 +114,9 @@ export function SessionList() {
   const active = promoted.filter((s) =>
     ["thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating"].includes(s.status)
   );
-  const idle = promoted.filter((s) => s.status === "idle");
+  const idle = promoted
+    .filter((s) => s.status === "idle")
+    .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
 
   function buildTree(list: SessionInfo[]) {
     const mains = list.filter((s) => !s.isSubagent);
