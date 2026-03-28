@@ -105,6 +105,10 @@ impl LocalBackend {
             }
         }
 
+        // Shared analyzing set — prevents duplicate analysis when both the
+        // filesystem watcher and the polling thread detect the same transition.
+        let analyzing: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+
         // Clone Arcs for the watcher thread.
         let app2 = app.clone();
         let sess2 = sessions.clone();
@@ -113,12 +117,13 @@ impl LocalBackend {
         let so2 = session_outcomes.clone();
         let locale2 = locale.clone();
         let watch2 = watch.clone();
+        let analyzing2 = analyzing.clone();
 
         // Filesystem watcher thread — batches events so we rescan at most once
         // every 2 seconds, while still tailing the viewed session immediately.
         std::thread::spawn(move || {
             let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
-            let analyzing: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+            let analyzing = analyzing2;
             let mut last_rescan = Instant::now();
             let mut last_memory_rescan = Instant::now();
             let rescan_interval = Duration::from_secs(2);
@@ -220,10 +225,11 @@ impl LocalBackend {
             let wa3 = waiting_alerts.clone();
             let so3 = session_outcomes.clone();
             let locale3 = locale.clone();
+            let analyzing3 = analyzing.clone();
 
             std::thread::spawn(move || {
                 let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
-                let analyzing: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+                let analyzing = analyzing3;
 
                 // Use the shortest poll interval among all polling sources.
                 let interval = sources3

@@ -1,0 +1,294 @@
+/* ── Tray panel container ─────────────────────────────────────────────────── */
+.panel {
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--color-bg-sidebar) 72%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
+  border-radius: 12px;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 12px;
+  color: var(--color-text);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.25), 0 2px 8px rgba(0, 0, 0, 0.15);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+}
+
+/* ── Header ──────────────────────────────────────────────────────────────── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--color-border);
+  user-select: none;
+}
+
+.title {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.header_actions {
+  display: flex;
+  gap: 6px;
+}
+
+.header_btn {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+
+.header_btn:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+/* ── Scrollable session list ─────────────────────────────────────────────── */
+.session_list {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+  max-height: 340px;
+}
+
+.session_list::-webkit-scrollbar {
+  width: 4px;
+}
+.session_list::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 2px;
+}
+
+/* ── Session group (main + its subagents) ────────────────────────────────── */
+.session_group {
+  border-bottom: 1px solid var(--color-border);
+}
+
+.session_group:last-child {
+  border-bottom: none;
+}
+
+/* ── Session item ────────────────────────────────────────────────────────── */
+.session_item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 14px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.session_item:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.session_item.is_subagent {
+  padding-left: 28px;
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.session_row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.session_name {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  min-width: 0;
+}
+
+.session_subagent_prefix {
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+  font-size: 11px;
+}
+
+.session_badge {
+  flex-shrink: 0;
+}
+
+.session_ai_title {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.session_meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.session_model {
+  color: var(--color-text-dim);
+  font-size: 10px;
+}
+
+.session_time {
+  color: var(--color-text-dim);
+  font-size: 10px;
+  margin-left: auto;
+}
+
+.session_speed {
+  color: var(--color-speed);
+  font-size: 10px;
+}
+
+/* ── Context progress bar ────────────────────────────────────────────────── */
+.context_bar_wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.context_bar_track {
+  flex: 1;
+  height: 3px;
+  background: var(--color-bg-secondary);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.context_bar_fill {
+  height: 100%;
+  border-radius: 2px;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.context_bar_fill.high {
+  background: var(--color-warning);
+}
+
+.context_bar_fill.critical {
+  background: var(--color-error-fg);
+}
+
+.context_bar_label {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ── Usage section (bottom) ──────────────────────────────────────────────── */
+.usage_section {
+  border-top: 1px solid var(--color-border);
+  padding: 8px 14px;
+}
+
+.usage_header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+
+.usage_row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.usage_row:last-child {
+  margin-bottom: 0;
+}
+
+.usage_source {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  min-width: 50px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.usage_bar_track {
+  flex: 1;
+  height: 3px;
+  background: var(--color-bg-secondary);
+  border-radius: 1.5px;
+  overflow: hidden;
+}
+
+.usage_bar_fill {
+  height: 100%;
+  border-radius: 1.5px;
+  background: var(--color-accent);
+  transition: width 0.3s ease;
+}
+
+.usage_bar_fill.usage_warn {
+  background: var(--color-warning);
+}
+
+.usage_bar_fill.usage_crit {
+  background: var(--color-error-fg);
+}
+
+.usage_pct {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  min-width: 28px;
+  text-align: right;
+}
+
+/* ── Footer actions ──────────────────────────────────────────────────────── */
+.footer {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--color-border);
+  padding: 6px 8px;
+  gap: 2px;
+}
+
+.footer_btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  text-align: center;
+}
+
+.footer_btn:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.footer_btn_quit {
+  color: var(--color-error-fg);
+}
+
+.footer_btn_quit:hover {
+  background: var(--color-error-bg);
+}

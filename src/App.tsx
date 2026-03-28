@@ -72,6 +72,14 @@ function App() {
     invoke("set_locale", { locale: i18n.language }).catch(() => {});
   }, []);
 
+  // Sync notification mode to Rust backend on startup (backend defaults to "user_action").
+  useEffect(() => {
+    const mode = getItem("notification-mode");
+    if (mode) {
+      invoke("set_notification_mode", { mode }).catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     const apply = () => {
       document.documentElement.setAttribute("data-theme", resolveTheme(theme));

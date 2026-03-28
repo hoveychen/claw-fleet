@@ -69,11 +69,12 @@ function OverlayApp() {
     return () => clearInterval(id);
   }, []);
 
-  // Listen for waiting alerts
+  // Listen for waiting alerts (audio is played by WaitingAlerts in the main window)
   useEffect(() => {
     const { refresh, setAlerts } = useWaitingAlertsStore.getState();
-    refresh();
+    refresh().catch((e) => console.warn("[overlay] initial alert refresh failed:", e));
     const unlisten = listen<WaitingAlert[]>("waiting-alerts-updated", (e) => {
+      console.debug("[overlay] waiting-alerts-updated:", e.payload.length, "alerts");
       setAlerts(e.payload);
     });
     return () => { unlisten.then((fn) => fn()); };

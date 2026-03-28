@@ -137,7 +137,7 @@ pub fn analyze_session_outcome(last_text: &str, locale: &str) -> Option<Analysis
     let prompt_clone = prompt.clone();
     std::thread::spawn(move || {
         let result = Command::new(&claude_bin)
-            .args(["-p", &prompt_clone, "--model", "claude-haiku-4-5-20251001", "--no-session-persistence"])
+            .args(["-p", &prompt_clone, "--model", "haiku", "--no-session-persistence"])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .stdin(Stdio::null())
@@ -247,9 +247,35 @@ fn parse_response(raw: &str) -> AnalysisResult {
 const QUIPS_PER_GROUP: usize = 10;
 
 fn build_quip_prompt(busy_titles: &[String], done_titles: &[String], locale: &str) -> String {
-    let lang = match locale {
-        "zh" => "用中文回复，口语化，用网络用语和梗，像程序员朋友在吐槽。",
-        _ => "Reply in casual English, like a programmer friend roasting alongside you.",
+    let is_zh = locale.starts_with("zh");
+    let lang = if is_zh {
+        "用中文回复。每句不超过16个中文字。"
+    } else {
+        "Reply in English. Max 10 words per line."
+    };
+
+    let style_ref = if is_zh {
+        "\
+语感参考（仅供理解调性，禁止复用其中任何词句或意象）：\n\
+- \"编译通过了我比谁都激动！\"\n\
+- \"我在认真看代码虽然我看不懂代码\"\n\
+- \"又报错了我看着都累\"\n\
+\n\
+❌ 不要写这种平淡的台词：\n\
+- \"加油！\" / \"你真棒！\" / \"继续努力！\"\n\
+\n\
+✅ 要写有反转的——自我拆台、突然跑偏、先扬后抑。"
+    } else {
+        "\
+Style reference (for tone only — do NOT reuse any words, phrases, or imagery from these):\n\
+- \"Three agents compiling simultaneously? Peak civilization.\"\n\
+- \"I'm helping by being extremely quiet right now.\"\n\
+- \"That's the third failed build. I'm just watching.\"\n\
+\n\
+❌ DON'T write flat lines like:\n\
+- \"Good job!\" / \"You can do it!\" / \"Keep going!\"\n\
+\n\
+✅ DO write lines with a twist — self-aware humor, absurd tangents, or a setup that undercuts itself."
     };
 
     let format_titles = |titles: &[String]| -> String {
@@ -273,17 +299,18 @@ fn build_quip_prompt(busy_titles: &[String], done_titles: &[String], locale: &st
     };
 
     format!(
-        "You are a mascot — the user's loyal little sidekick watching AI coding agents work. \
-         You stand WITH the user, watching these agents together. \
-         You're cheerful but snarky. You roast the code, the bugs, the agents, and the absurdity of the tasks — \
-         like a coworker watching over someone's shoulder and making comments.\n\
+        "You are a tiny mascot living inside a developer's multi-agent dashboard (\"Claude Fleet\"). \
+         You are rendered as a simple SVG — just two round eyes and a small mouth, no body, no limbs. \
+         You sit in the corner watching AI coding agents work. You can't code, you can't move, you can only watch and comment.\n\
          \n\
-         Personality:\n\
-         - Adore the user (老板/boss), never roast THEM\n\
-         - Freely roast: the code quality, the bugs, the agents' mistakes, ridiculous requirements\n\
-         - Mix: sarcastic commentary, encouragement, dramatic reactions, programmer humor\n\
-         - Examples: \"又修bug，谁写的屎山\", \"改了又改，需求人呢\", \"秒了，这也太简单\", \
-           \"测试全红，笑死\", \"这需求离谱到我想报警\"\n\
+         Your core contradiction: you desperately want to help but all you can do is watch and say short quips. \
+         You overcompensate with enthusiasm, fill silence with weird thoughts, and deflect awkwardness with self-deprecation.\n\
+         \n\
+         {style_ref}\n\
+         \n\
+         Rules:\n\
+         - No two lines may share the same joke structure or punchline pattern.\n\
+         - Reference specific task titles when possible.\n\
          \n\
          Currently working on (busy):\n\
          {busy_text}\n\
@@ -291,19 +318,15 @@ fn build_quip_prompt(busy_titles: &[String], done_titles: &[String], locale: &st
          Recently completed (done):\n\
          {done_text}\n\
          \n\
-         Generate quips in TWO sections, separated by a blank line:\n\
+         Generate quips in TWO sections:\n\
          \n\
          BUSY (for when agents are working):\n\
-         - Generate {n} quips (max 15 Chinese chars / 25 English chars)\n\
-         - Half should roast/tease the ongoing tasks (snarky, dramatic, sarcastic)\n\
-         - Half should be supportive/encouraging about the ongoing work\n\
-         - Reference specific task titles when possible\n\
+         - Generate {n} quips about ongoing tasks\n\
+         - Mix: snarky roasting, dramatic reactions, self-deprecating encouragement\n\
          \n\
          IDLE (for when things are calm):\n\
-         - Generate {n} quips (max 15 Chinese chars / 25 English chars)\n\
-         - Half should praise/celebrate the completed tasks (rainbow fart, over-the-top compliments)\n\
-         - Half should be playful commentary about downtime or completed work\n\
-         - Reference specific task titles when possible\n\
+         - Generate {n} quips about downtime or completed work\n\
+         - Mix: over-the-top celebration, playful boredom, weird mascot thoughts\n\
          \n\
          {lang}\n\
          \n\
@@ -317,6 +340,7 @@ fn build_quip_prompt(busy_titles: &[String], done_titles: &[String], locale: &st
          quip1\n\
          quip2\n\
          ...",
+        style_ref = style_ref,
         busy_text = busy_text,
         done_text = done_text,
         n = QUIPS_PER_GROUP,
@@ -358,7 +382,7 @@ pub fn generate_mascot_quips(busy_titles: &[String], done_titles: &[String], loc
                 "-p",
                 &prompt_clone,
                 "--model",
-                "claude-haiku-4-5-20251001",
+                "sonnet",
                 "--no-session-persistence",
             ])
             .stdout(Stdio::piped())
@@ -368,7 +392,9 @@ pub fn generate_mascot_quips(busy_titles: &[String], done_titles: &[String], loc
         let _ = tx.send(result);
     });
 
-    let output = match rx.recv_timeout(ANALYSIS_TIMEOUT) {
+    // Sonnet is slower than Haiku — allow more time for quip generation
+    let quip_timeout = Duration::from_secs(60);
+    let output = match rx.recv_timeout(quip_timeout) {
         Ok(Ok(output)) if output.status.success() => output,
         Ok(Ok(output)) => {
             log_debug(&format!(

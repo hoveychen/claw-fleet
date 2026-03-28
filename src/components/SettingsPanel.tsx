@@ -459,7 +459,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                         <option value="">{t("settings.tts_voice_default")}</option>
                         {voices.map((v) => (
                           <option key={v.name} value={v.name}>
-                            {v.name} ({v.lang})
+                            {v.display_name} ({v.gender}, {v.lang})
                           </option>
                         ))}
                       </select>

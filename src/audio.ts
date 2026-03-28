@@ -104,16 +104,18 @@ export async function playChime(preset: ChimePreset): Promise<void> {
   }
 }
 
-// ── TTS (via Rust backend `say` command) ─────────────────────────────────────
+// ── TTS (via Microsoft Edge TTS) ─────────────────────────────────────────────
 
 export type TtsMode = "chime_and_speech" | "chime_only" | "off";
 
 export interface TtsVoice {
   name: string;
   lang: string;
+  display_name: string;
+  gender: string;
 }
 
-/** Get available TTS voices from the system via Tauri backend. */
+/** Get available TTS voices from Microsoft Edge TTS via Tauri backend. */
 export async function getVoices(): Promise<TtsVoice[]> {
   const { invoke } = await import("@tauri-apps/api/core");
   const locale = i18n.language === "zh" ? "zh" : "en";
@@ -124,14 +126,28 @@ export async function getVoices(): Promise<TtsVoice[]> {
   }
 }
 
-/** Speak text using the system `say` command via Tauri backend. */
+/** Synthesize and play text using Microsoft Edge TTS via Tauri backend. */
 export async function speakText(text: string, voice?: string) {
   const { invoke } = await import("@tauri-apps/api/core");
   const locale = i18n.language === "zh" ? "zh" : "en";
   try {
-    await invoke("speak_text", { text, voice: voice || null, locale });
-  } catch {
-    // silently ignore if backend unavailable
+    const result = await invoke<{ audio_base64: string }>("speak_text", {
+      text,
+      voice: voice || null,
+      locale,
+    });
+    if (result.audio_base64) {
+      const audio = new Audio(`data:audio/mpeg;base64,${result.audio_base64}`);
+      await audio.play();
+    }
+  } catch (err) {
+    console.warn("[audio] speakText (msedge-tts) failed, trying macOS say fallback:", err);
+    // Fallback to macOS `say` command for offline / connectivity issues
+    try {
+      await invoke("speak_text_say", { text, voice: voice || null, locale });
+    } catch {
+      console.warn("[audio] speakText (say fallback) also failed");
+    }
   }
 }
 

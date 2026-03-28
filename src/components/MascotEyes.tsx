@@ -111,34 +111,41 @@ function pickOutcomeMood(sessions: SessionInfo[]): MascotMood | null {
 
 // ── Quip keys ────────────────────────────────────────────────────────────────
 
+const QUIP_COUNT = 15;
+const CLICK_QUIP_COUNT = 30;
+
+function makeKeys(prefix: string, count: number): string[] {
+  return Array.from({ length: count }, (_, i) => `mascot.${prefix}_${i + 1}`);
+}
+
 const QUIP_KEYS: Record<MascotMood, string[]> = {
-  excited:     ["mascot.excited_1", "mascot.excited_2", "mascot.excited_3"],
-  focused:     ["mascot.focused_1", "mascot.focused_2", "mascot.focused_3"],
-  anxious:     ["mascot.anxious_1", "mascot.anxious_2", "mascot.anxious_3"],
-  satisfied:   ["mascot.satisfied_1", "mascot.satisfied_2", "mascot.satisfied_3"],
-  bored:       ["mascot.bored_1", "mascot.bored_2", "mascot.bored_3"],
-  lonely:      ["mascot.lonely_1", "mascot.lonely_2", "mascot.lonely_3"],
-  sleepy:      ["mascot.sleepy_1", "mascot.sleepy_2", "mascot.sleepy_3"],
-  attentive:   ["mascot.attentive_1", "mascot.attentive_2", "mascot.attentive_3"],
-  proud:       ["mascot.proud_1", "mascot.proud_2", "mascot.proud_3"],
-  frustrated:  ["mascot.frustrated_1", "mascot.frustrated_2", "mascot.frustrated_3"],
-  embarrassed: ["mascot.embarrassed_1", "mascot.embarrassed_2", "mascot.embarrassed_3"],
+  excited:     makeKeys("excited", QUIP_COUNT),
+  focused:     makeKeys("focused", QUIP_COUNT),
+  anxious:     makeKeys("anxious", QUIP_COUNT),
+  satisfied:   makeKeys("satisfied", QUIP_COUNT),
+  bored:       makeKeys("bored", QUIP_COUNT),
+  lonely:      makeKeys("lonely", QUIP_COUNT),
+  sleepy:      makeKeys("sleepy", QUIP_COUNT),
+  attentive:   makeKeys("attentive", QUIP_COUNT),
+  proud:       makeKeys("proud", QUIP_COUNT),
+  frustrated:  makeKeys("frustrated", QUIP_COUNT),
+  embarrassed: makeKeys("embarrassed", QUIP_COUNT),
 };
 
 // ── Click response quips ─────────────────────────────────────────────────────
 
 const CLICK_QUIP_KEYS: Record<MascotMood, string[]> = {
-  excited:     ["mascot.click_excited_1", "mascot.click_excited_2", "mascot.click_excited_3", "mascot.click_excited_4", "mascot.click_excited_5", "mascot.click_excited_6"],
-  focused:     ["mascot.click_focused_1", "mascot.click_focused_2", "mascot.click_focused_3", "mascot.click_focused_4", "mascot.click_focused_5", "mascot.click_focused_6"],
-  anxious:     ["mascot.click_anxious_1", "mascot.click_anxious_2", "mascot.click_anxious_3", "mascot.click_anxious_4", "mascot.click_anxious_5", "mascot.click_anxious_6"],
-  satisfied:   ["mascot.click_satisfied_1", "mascot.click_satisfied_2", "mascot.click_satisfied_3", "mascot.click_satisfied_4", "mascot.click_satisfied_5", "mascot.click_satisfied_6"],
-  bored:       ["mascot.click_bored_1", "mascot.click_bored_2", "mascot.click_bored_3", "mascot.click_bored_4", "mascot.click_bored_5", "mascot.click_bored_6"],
-  lonely:      ["mascot.click_lonely_1", "mascot.click_lonely_2", "mascot.click_lonely_3", "mascot.click_lonely_4", "mascot.click_lonely_5", "mascot.click_lonely_6"],
-  sleepy:      ["mascot.click_sleepy_1", "mascot.click_sleepy_2", "mascot.click_sleepy_3", "mascot.click_sleepy_4", "mascot.click_sleepy_5", "mascot.click_sleepy_6"],
-  attentive:   ["mascot.click_attentive_1", "mascot.click_attentive_2", "mascot.click_attentive_3", "mascot.click_attentive_4", "mascot.click_attentive_5", "mascot.click_attentive_6"],
-  proud:       ["mascot.click_proud_1", "mascot.click_proud_2", "mascot.click_proud_3", "mascot.click_proud_4", "mascot.click_proud_5", "mascot.click_proud_6"],
-  frustrated:  ["mascot.click_frustrated_1", "mascot.click_frustrated_2", "mascot.click_frustrated_3", "mascot.click_frustrated_4", "mascot.click_frustrated_5", "mascot.click_frustrated_6"],
-  embarrassed: ["mascot.click_embarrassed_1", "mascot.click_embarrassed_2", "mascot.click_embarrassed_3", "mascot.click_embarrassed_4", "mascot.click_embarrassed_5", "mascot.click_embarrassed_6"],
+  excited:     makeKeys("click_excited", CLICK_QUIP_COUNT),
+  focused:     makeKeys("click_focused", CLICK_QUIP_COUNT),
+  anxious:     makeKeys("click_anxious", CLICK_QUIP_COUNT),
+  satisfied:   makeKeys("click_satisfied", CLICK_QUIP_COUNT),
+  bored:       makeKeys("click_bored", CLICK_QUIP_COUNT),
+  lonely:      makeKeys("click_lonely", CLICK_QUIP_COUNT),
+  sleepy:      makeKeys("click_sleepy", CLICK_QUIP_COUNT),
+  attentive:   makeKeys("click_attentive", CLICK_QUIP_COUNT),
+  proud:       makeKeys("click_proud", CLICK_QUIP_COUNT),
+  frustrated:  makeKeys("click_frustrated", CLICK_QUIP_COUNT),
+  embarrassed: makeKeys("click_embarrassed", CLICK_QUIP_COUNT),
 };
 
 // ── Eye shape: just solid circle + eyelid positions ──────────────────────────
@@ -377,10 +384,10 @@ export function MascotEyes({ embedded, onQuip }: { embedded?: boolean; onQuip?: 
 
   // ── Quip rotation ──────────────────────────────────────────────────────────
   useEffect(() => {
-    setQuipIndex(Math.floor(Math.random() * 3));
+    setQuipIndex(Math.floor(Math.random() * QUIP_COUNT));
     function rotateQuip() {
       quipTimer.current = setTimeout(() => {
-        setQuipIndex((i) => (i + 1) % 3);
+        setQuipIndex((i) => (i + 1) % QUIP_COUNT);
         rotateQuip();
       }, 8000 + Math.random() * 4000);
     }
@@ -523,7 +530,8 @@ export function MascotEyes({ embedded, onQuip }: { embedded?: boolean; onQuip?: 
       return t(clickQuipKey);
     }
     // Normal quip rotation: alternate between i18n and generated
-    const i18nText = t(QUIP_KEYS[mood][quipIndex % 3]);
+    const keys = QUIP_KEYS[mood];
+    const i18nText = t(keys[quipIndex % keys.length]);
     if (generatedQuips.length > 0 && quipIndex % 2 === 1) {
       return generatedQuips[Math.floor(quipIndex / 2) % generatedQuips.length];
     }

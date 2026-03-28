@@ -10,16 +10,30 @@
  * - ResizeObserver for accurate window sizing
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
+import { getCurrentWindow, LogicalPosition, LogicalSize } from "@tauri-apps/api/window";
 import { emit } from "@tauri-apps/api/event";
 import { useSessionsStore, useWaitingAlertsStore } from "../store";
 import type { WaitingAlert } from "../types";
 import { getItem, setItem } from "../storage";
 import { MascotEyesCore } from "./MascotEyesCore";
 import styles from "./OverlayMascot.module.css";
+
+/** Error boundary so MascotEyes crashes don't kill the entire overlay (including alert cards). */
+class MascotErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean }
+> {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(err: unknown) { console.error("[overlay] MascotEyes crashed:", err); }
+  render() {
+    if (this.state.hasError) return null;
+    return this.props.children;
+  }
+}
 
 function timeAgo(ms: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
   const secs = Math.floor((Date.now() - ms) / 1000);
@@ -29,6 +43,8 @@ function timeAgo(ms: number, t: (key: string, opts?: Record<string, unknown>) =>
   const hours = Math.floor(mins / 60);
   return t("h_ago", { n: hours });
 }
+
+const ALERT_DISMISS_MS = 15_000; // auto-dismiss after 15s
 
 function OverlayAlertCard({
   alert,
@@ -41,6 +57,42 @@ function OverlayAlertCard({
 }) {
   const { t } = useTranslation();
   const [leaving, setLeaving] = useState(false);
+  const [progress, setProgress] = useState(1); // 1 = full, 0 = expired
+  const [paused, setPaused] = useState(false);
+  const progressRef = useRef(1);
+  const pausedRef = useRef(false);
+  const onDismissRef = useRef(onDismiss);
+  useEffect(() => { onDismissRef.current = onDismiss; }, [onDismiss]);
+
+  // Keep refs in sync
+  useEffect(() => { pausedRef.current = paused; }, [paused]);
+
+  // Countdown timer using requestAnimationFrame for smooth ring animation
+  useEffect(() => {
+    let raf: number;
+    let lastTime = performance.now();
+    progressRef.current = 1;
+    setProgress(1);
+
+    const tick = (now: number) => {
+      const dt = now - lastTime;
+      lastTime = now;
+      if (!pausedRef.current) {
+        progressRef.current -= dt / ALERT_DISMISS_MS;
+        if (progressRef.current <= 0) {
+          progressRef.current = 0;
+          setProgress(0);
+          setLeaving(true);
+          setTimeout(() => onDismissRef.current(), 280);
+          return;
+        }
+        setProgress(progressRef.current);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   const handleDismiss = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -48,10 +100,18 @@ function OverlayAlertCard({
     setTimeout(onDismiss, 280);
   };
 
+  // SVG stamina ring params
+  const ringSize = 18;
+  const ringR = 7;
+  const ringCirc = 2 * Math.PI * ringR;
+  const ringOffset = ringCirc * (1 - progress);
+
   return (
     <div
       className={`${styles.alertCard} ${leaving ? styles.alertCard_leaving : ""}`}
       onClick={onClick}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
     >
       <div className={styles.alertDot} />
       <div className={styles.alertContent}>
@@ -60,7 +120,29 @@ function OverlayAlertCard({
         <div className={styles.alertTime}>{timeAgo(alert.detectedAtMs, t)}</div>
       </div>
       <button className={styles.alertClose} onClick={handleDismiss} aria-label="Dismiss">
-        ✕
+        <svg className={styles.countdownRing} width={ringSize} height={ringSize} viewBox={`0 0 ${ringSize} ${ringSize}`}>
+          {/* Background track */}
+          <circle
+            cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            opacity="0.15"
+          />
+          {/* Depleting arc */}
+          <circle
+            cx={ringSize / 2} cy={ringSize / 2} r={ringR}
+            fill="none"
+            stroke={progress < 0.25 ? "#ef4444" : progress < 0.5 ? "#fbbf24" : "#4ade80"}
+            strokeWidth="1.5"
+            strokeDasharray={ringCirc}
+            strokeDashoffset={ringOffset}
+            strokeLinecap="round"
+            transform={`rotate(-90 ${ringSize / 2} ${ringSize / 2})`}
+            style={{ transition: paused ? "stroke 0.3s" : "none" }}
+          />
+        </svg>
+        <span className={styles.countdownX}>✕</span>
       </button>
     </div>
   );
@@ -98,14 +180,27 @@ export function OverlayMascot() {
   const waitingCount = mainSessions.filter((s) => s.status === "waitingInput").length;
   const totalSpeed = sessions.reduce((sum, s) => sum + s.tokenSpeed, 0);
 
-  // Resize window to fit content via ResizeObserver
+  // Resize window to fit content via ResizeObserver, anchoring the bottom edge
   const rootRef = useRef<HTMLDivElement>(null);
+  const prevHeightRef = useRef<number>(0);
   useEffect(() => {
     const el = rootRef.current;
     if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const height = Math.ceil(el.scrollHeight) + 4; // small padding to prevent clipping
-      getCurrentWindow().setSize(new LogicalSize(280, height)).catch(() => {});
+    const win = getCurrentWindow();
+    const ro = new ResizeObserver(async () => {
+      const newHeight = Math.ceil(el.scrollHeight) + 4; // small padding to prevent clipping
+      const oldHeight = prevHeightRef.current;
+      prevHeightRef.current = newHeight;
+      try {
+        if (oldHeight > 0 && oldHeight !== newHeight) {
+          // Shift window position so the bottom edge stays in place
+          const pos = await win.outerPosition();
+          const scaleFactor = await win.scaleFactor();
+          const deltaLogical = newHeight - oldHeight;
+          await win.setPosition(new LogicalPosition(pos.x / scaleFactor, pos.y / scaleFactor - deltaLogical));
+        }
+        await win.setSize(new LogicalSize(280, newHeight));
+      } catch { /* ignore */ }
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -171,7 +266,9 @@ export function OverlayMascot() {
         {/* Screen area with mascot eyes — hidden when faceHidden */}
         {!faceHidden && (
           <div className={styles.screen}>
-            <MascotEyesCore onQuip={setQuipText} />
+            <MascotErrorBoundary>
+              <MascotEyesCore onQuip={setQuipText} />
+            </MascotErrorBoundary>
           </div>
         )}
 

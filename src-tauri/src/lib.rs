@@ -16,7 +16,7 @@ pub mod skills;
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -61,69 +61,216 @@ fn log_debug(msg: &str) {
     }
 }
 
-// ── TTS via system `say` command (macOS) ─────────────────────────────────────
+// ── TTS via Microsoft Edge TTS ───────────────────────────────────────────────
 
 #[derive(serde::Serialize, Clone)]
 struct TtsVoice {
     name: String,
     lang: String,
+    display_name: String,
+    gender: String,
 }
 
-#[tauri::command]
-fn get_tts_voices(locale: String) -> Vec<TtsVoice> {
-    let output = match std::process::Command::new("say")
-        .args(["--voice", "?"])
-        .output()
-    {
-        Ok(o) if o.status.success() => o,
-        _ => return vec![],
+static VOICES_CACHE: OnceLock<Vec<msedge_tts::voice::Voice>> = OnceLock::new();
+
+fn cached_voices() -> &'static Vec<msedge_tts::voice::Voice> {
+    VOICES_CACHE.get_or_init(|| {
+        msedge_tts::voice::get_voices_list().unwrap_or_default()
+    })
+}
+
+struct VoiceMeta {
+    zh_name: &'static str,
+    en_name: &'static str,
+    gender_zh: &'static str,
+    gender_en: &'static str,
+}
+
+fn voice_display_map() -> &'static std::collections::HashMap<&'static str, VoiceMeta> {
+    static MAP: OnceLock<std::collections::HashMap<&str, VoiceMeta>> = OnceLock::new();
+    MAP.get_or_init(|| {
+        let mut m = std::collections::HashMap::new();
+        // zh-CN
+        m.insert("zh-CN-XiaoxiaoNeural", VoiceMeta { zh_name: "晓晓", en_name: "Xiaoxiao", gender_zh: "女", gender_en: "Female" });
+        m.insert("zh-CN-XiaoyiNeural", VoiceMeta { zh_name: "晓伊", en_name: "Xiaoyi", gender_zh: "女", gender_en: "Female" });
+        m.insert("zh-CN-YunjianNeural", VoiceMeta { zh_name: "云健", en_name: "Yunjian", gender_zh: "男", gender_en: "Male" });
+        m.insert("zh-CN-YunxiNeural", VoiceMeta { zh_name: "云希", en_name: "Yunxi", gender_zh: "男", gender_en: "Male" });
+        m.insert("zh-CN-YunxiaNeural", VoiceMeta { zh_name: "云夏", en_name: "Yunxia", gender_zh: "男", gender_en: "Male" });
+        m.insert("zh-CN-YunyangNeural", VoiceMeta { zh_name: "云扬", en_name: "Yunyang", gender_zh: "男", gender_en: "Male" });
+        m.insert("zh-CN-liaoning-XiaobeiNeural", VoiceMeta { zh_name: "晓北 (东北话)", en_name: "Xiaobei (Northeastern)", gender_zh: "女", gender_en: "Female" });
+        m.insert("zh-CN-shaanxi-XiaoniNeural", VoiceMeta { zh_name: "晓妮 (陕西话)", en_name: "Xiaoni (Shaanxi)", gender_zh: "女", gender_en: "Female" });
+        // zh-HK
+        m.insert("zh-HK-HiuGaaiNeural", VoiceMeta { zh_name: "曉佳", en_name: "HiuGaai", gender_zh: "女", gender_en: "Female" });
+        m.insert("zh-HK-HiuMaanNeural", VoiceMeta { zh_name: "曉曼", en_name: "HiuMaan", gender_zh: "女", gender_en: "Female" });
+        m.insert("zh-HK-WanLungNeural", VoiceMeta { zh_name: "雲龍", en_name: "WanLung", gender_zh: "男", gender_en: "Male" });
+        // zh-TW
+        m.insert("zh-TW-HsiaoChenNeural", VoiceMeta { zh_name: "曉臻", en_name: "HsiaoChen", gender_zh: "女", gender_en: "Female" });
+        m.insert("zh-TW-YunJheNeural", VoiceMeta { zh_name: "雲哲", en_name: "YunJhe", gender_zh: "男", gender_en: "Male" });
+        m.insert("zh-TW-HsiaoYuNeural", VoiceMeta { zh_name: "曉雨", en_name: "HsiaoYu", gender_zh: "女", gender_en: "Female" });
+        // en-US
+        m.insert("en-US-AvaNeural", VoiceMeta { zh_name: "Ava", en_name: "Ava", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-US-AndrewNeural", VoiceMeta { zh_name: "Andrew", en_name: "Andrew", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-EmmaNeural", VoiceMeta { zh_name: "Emma", en_name: "Emma", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-US-BrianNeural", VoiceMeta { zh_name: "Brian", en_name: "Brian", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-AnaNeural", VoiceMeta { zh_name: "Ana", en_name: "Ana", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-US-AriaNeural", VoiceMeta { zh_name: "Aria", en_name: "Aria", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-US-ChristopherNeural", VoiceMeta { zh_name: "Christopher", en_name: "Christopher", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-EricNeural", VoiceMeta { zh_name: "Eric", en_name: "Eric", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-GuyNeural", VoiceMeta { zh_name: "Guy", en_name: "Guy", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-JennyNeural", VoiceMeta { zh_name: "Jenny", en_name: "Jenny", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-US-MichelleNeural", VoiceMeta { zh_name: "Michelle", en_name: "Michelle", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-US-RogerNeural", VoiceMeta { zh_name: "Roger", en_name: "Roger", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-SteffanNeural", VoiceMeta { zh_name: "Steffan", en_name: "Steffan", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-AndrewMultilingualNeural", VoiceMeta { zh_name: "Andrew (多语言)", en_name: "Andrew (Multilingual)", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-AvaMultilingualNeural", VoiceMeta { zh_name: "Ava (多语言)", en_name: "Ava (Multilingual)", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-US-BrianMultilingualNeural", VoiceMeta { zh_name: "Brian (多语言)", en_name: "Brian (Multilingual)", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-US-EmmaMultilingualNeural", VoiceMeta { zh_name: "Emma (多语言)", en_name: "Emma (Multilingual)", gender_zh: "女", gender_en: "Female" });
+        // en-GB
+        m.insert("en-GB-LibbyNeural", VoiceMeta { zh_name: "Libby", en_name: "Libby", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-GB-MaisieNeural", VoiceMeta { zh_name: "Maisie", en_name: "Maisie", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-GB-RyanNeural", VoiceMeta { zh_name: "Ryan", en_name: "Ryan", gender_zh: "男", gender_en: "Male" });
+        m.insert("en-GB-SoniaNeural", VoiceMeta { zh_name: "Sonia", en_name: "Sonia", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-GB-ThomasNeural", VoiceMeta { zh_name: "Thomas", en_name: "Thomas", gender_zh: "男", gender_en: "Male" });
+        // en-AU
+        m.insert("en-AU-NatashaNeural", VoiceMeta { zh_name: "Natasha", en_name: "Natasha", gender_zh: "女", gender_en: "Female" });
+        m.insert("en-AU-WilliamMultilingualNeural", VoiceMeta { zh_name: "William (多语言)", en_name: "William (Multilingual)", gender_zh: "男", gender_en: "Male" });
+        m
+    })
+}
+
+fn make_tts_voice(v: &msedge_tts::voice::Voice, locale: &str) -> TtsVoice {
+    let short = v.short_name.clone().unwrap_or_else(|| v.name.clone());
+    let map = voice_display_map();
+    let is_zh = locale == "zh";
+
+    let (display_name, gender) = if let Some(meta) = map.get(short.as_str()) {
+        let name = if is_zh { meta.zh_name } else { meta.en_name };
+        let g = if is_zh { meta.gender_zh } else { meta.gender_en };
+        (name.to_string(), g.to_string())
+    } else {
+        // Fallback: extract name from ShortName (e.g. "en-IN-NeerjaNeural" → "Neerja")
+        let fallback_name = short
+            .rsplit('-')
+            .next()
+            .unwrap_or(&short)
+            .trim_end_matches("Neural")
+            .to_string();
+        let g = v.gender.clone().unwrap_or_default();
+        let gender = if is_zh {
+            match g.as_str() { "Female" => "女".to_string(), "Male" => "男".to_string(), _ => g }
+        } else {
+            g
+        };
+        (fallback_name, gender)
     };
-    let raw = String::from_utf8_lossy(&output.stdout);
-    let lang_prefix = if locale == "zh" { "zh" } else { "en" };
-    let mut voices = Vec::new();
-    for line in raw.lines() {
-        // Format: "Name               lang_REGION    # description"
-        let parts: Vec<&str> = line.splitn(2, '#').collect();
-        let before_hash = parts[0];
-        let tokens: Vec<&str> = before_hash.split_whitespace().collect();
-        if tokens.len() >= 2 {
-            let lang = tokens[tokens.len() - 1];
-            let name = tokens[..tokens.len() - 1].join(" ");
-            if lang.to_lowercase().starts_with(lang_prefix) {
-                voices.push(TtsVoice {
-                    name,
-                    lang: lang.to_string(),
-                });
-            }
-        }
+
+    TtsVoice {
+        name: short,
+        lang: v.locale.clone().unwrap_or_default(),
+        display_name,
+        gender,
     }
-    if voices.is_empty() {
-        // Fallback: return all voices
-        for line in raw.lines() {
-            let parts: Vec<&str> = line.splitn(2, '#').collect();
-            let before_hash = parts[0];
-            let tokens: Vec<&str> = before_hash.split_whitespace().collect();
-            if tokens.len() >= 2 {
-                let lang = tokens[tokens.len() - 1];
-                let name = tokens[..tokens.len() - 1].join(" ");
-                voices.push(TtsVoice {
-                    name,
-                    lang: lang.to_string(),
-                });
-            }
-        }
-    }
-    voices
 }
 
 #[tauri::command]
-fn speak_text(text: String, voice: Option<String>, locale: Option<String>) {
+async fn get_tts_voices(locale: String) -> Vec<TtsVoice> {
+    let ui_locale = locale.clone();
+    let voices = match tokio::task::spawn_blocking(|| cached_voices().clone()).await {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+
+    let lang_prefix = if locale == "zh" { "zh" } else { "en" };
+
+    let mut filtered: Vec<TtsVoice> = voices
+        .iter()
+        .filter(|v| {
+            v.locale
+                .as_deref()
+                .map(|l| l.to_lowercase().starts_with(lang_prefix))
+                .unwrap_or(false)
+        })
+        .map(|v| make_tts_voice(v, &ui_locale))
+        .collect();
+
+    if filtered.is_empty() {
+        filtered = voices.iter().map(|v| make_tts_voice(v, &ui_locale)).collect();
+    }
+
+    filtered
+}
+
+#[derive(serde::Serialize)]
+struct SynthesizedResult {
+    audio_base64: String,
+}
+
+#[tauri::command]
+async fn speak_text(
+    text: String,
+    voice: Option<String>,
+    locale: Option<String>,
+) -> Result<SynthesizedResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let voices = cached_voices();
+
+        // Resolve voice: use provided name, or pick first matching locale
+        let voice_name = voice.unwrap_or_else(|| {
+            let lang_prefix = match locale.as_deref() {
+                Some("zh") => "zh-CN",
+                _ => "en-US",
+            };
+            voices
+                .iter()
+                .find(|v| {
+                    v.locale
+                        .as_deref()
+                        .map(|l| l.starts_with(lang_prefix))
+                        .unwrap_or(false)
+                })
+                .and_then(|v| v.short_name.clone())
+                .unwrap_or_else(|| "en-US-AriaNeural".to_string())
+        });
+
+        // Build SpeechConfig from the matching Voice, or construct manually
+        let speech_config = voices
+            .iter()
+            .find(|v| v.short_name.as_deref() == Some(&voice_name))
+            .map(|v| msedge_tts::tts::SpeechConfig::from(v))
+            .unwrap_or_else(|| msedge_tts::tts::SpeechConfig {
+                voice_name: voice_name.clone(),
+                audio_format: "audio-24khz-48kbitrate-mono-mp3".to_string(),
+                pitch: 0,
+                rate: 0,
+                volume: 0,
+            });
+
+        let mut client =
+            msedge_tts::tts::client::connect().map_err(|e| format!("TTS connect: {e}"))?;
+        let audio = client
+            .synthesize(&text, &speech_config)
+            .map_err(|e| format!("TTS synthesize: {e}"))?;
+
+        use base64::Engine as _;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(&audio.audio_bytes);
+
+        Ok(SynthesizedResult {
+            audio_base64: encoded,
+        })
+    })
+    .await
+    .map_err(|e| format!("TTS task failed: {e}"))?
+}
+
+// ── Fallback TTS via macOS `say` command ─────────────────────────────────────
+
+#[tauri::command]
+fn speak_text_say(text: String, voice: Option<String>, locale: Option<String>) {
     std::thread::spawn(move || {
         let mut cmd = std::process::Command::new("say");
         if let Some(v) = &voice {
             cmd.args(["--voice", v]);
         } else {
-            // Pick a default voice that matches the locale
             let default_voice = match locale.as_deref() {
                 Some("zh") => "Tingting",
                 _ => "Samantha",
@@ -424,6 +571,9 @@ pub struct AppState {
     pub tray_last_click: Arc<Mutex<std::time::Instant>>,
     /// Whether a deferred tray rebuild is pending.
     pub tray_rebuild_pending: Arc<Mutex<bool>>,
+    /// Timestamp when the tray panel was last shown.  Used to ignore the
+    /// spurious focus-lost event that macOS fires when a tray click finishes.
+    pub tray_panel_shown_at: Arc<Mutex<std::time::Instant>>,
 }
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -831,6 +981,86 @@ fn open_session_from_overlay(app: tauri::AppHandle, jsonl_path: String) {
     let _ = app.emit("open-session", jsonl_path);
 }
 
+// ── Tray panel window commands ─────────────────────────────────────────────
+
+/// Show the tray panel at the given physical click position.
+fn show_tray_panel_at(app: &tauri::AppHandle, click_x: f64, click_y: f64) {
+    let Some(w) = app.get_webview_window("tray_panel") else { return };
+
+    // Find the monitor that contains the click point so we use the
+    // correct scale factor (each display can have a different DPI).
+    let scale = app.available_monitors()
+        .ok()
+        .and_then(|monitors| {
+            monitors.into_iter().find(|m| {
+                let pos = m.position();
+                let size = m.size();
+                let (mx, my) = (pos.x as f64, pos.y as f64);
+                let (mw, mh) = (size.width as f64, size.height as f64);
+                click_x >= mx && click_x < mx + mw
+                    && click_y >= my && click_y < my + mh
+            })
+        })
+        .map(|m| m.scale_factor())
+        .unwrap_or(2.0);
+
+    // The click position is in physical pixels (global screen coords).
+    // Convert panel width to physical pixels for centering.
+    let panel_w_phys = 360.0 * scale;
+    let x = click_x - panel_w_phys / 2.0;
+
+    // macOS: menu bar at top → panel below click.
+    // Windows/Linux: taskbar usually at bottom → panel above click.
+    #[cfg(target_os = "macos")]
+    let y = click_y;
+    #[cfg(not(target_os = "macos"))]
+    let y = click_y - 520.0 * scale;
+
+    let _ = w.set_position(tauri::Position::Physical(
+        tauri::PhysicalPosition::new(x as i32, y as i32),
+    ));
+    // Record show timestamp *before* showing, so the window-event
+    // listener can see it immediately — no IPC delay.
+    let state = app.state::<AppState>();
+    *state.tray_panel_shown_at.lock().unwrap() = std::time::Instant::now();
+
+    let _ = w.show();
+    let _ = w.set_focus();
+
+    // Emit cached usage summaries so the panel can show them immediately.
+    let summaries = state.cached_usage.lock().unwrap().clone();
+    let _ = app.emit_to("tray_panel", "tray-usage-updated", &summaries);
+}
+
+fn hide_tray_panel(app: &tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("tray_panel") {
+        let _ = w.set_position(tauri::Position::Logical(
+            tauri::LogicalPosition::new(-9999.0, -9999.0),
+        ));
+    }
+}
+
+fn is_tray_panel_visible(app: &tauri::AppHandle) -> bool {
+    app.get_webview_window("tray_panel")
+        .and_then(|w| w.outer_position().ok())
+        .map(|pos| pos.x > -5000 && pos.y > -5000)
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+fn toggle_tray_panel(app: tauri::AppHandle, visible: bool) {
+    if visible {
+        show_tray_panel_at(&app, 500.0, 30.0);
+    } else {
+        hide_tray_panel(&app);
+    }
+}
+
+#[tauri::command]
+fn quit_app(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 // ── Tray helpers ─────────────────────────────────────────────────────────────
 
 fn status_label(s: &session::SessionStatus) -> &'static str {
@@ -870,6 +1100,8 @@ pub fn update_tray(app: &tauri::AppHandle, sessions: &[SessionInfo]) {
 }
 
 pub fn update_tray_usage(app: &tauri::AppHandle, summaries: Vec<backend::SourceUsageSummary>) {
+    // Also emit to the tray panel window so it can show live usage
+    let _ = app.emit_to("tray_panel", "tray-usage-updated", &summaries);
     let state = app.state::<AppState>();
     *state.cached_usage.lock().unwrap() = summaries;
     let handle = app.clone();
@@ -1076,6 +1308,7 @@ pub fn run() {
             tray_fingerprint: Arc::new(Mutex::new(0)),
             tray_last_click: Arc::new(Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(600))),
             tray_rebuild_pending: Arc::new(Mutex::new(false)),
+            tray_panel_shown_at: Arc::new(Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(600))),
         })
         .setup(move |app| {
             // Replace NullBackend with the real LocalBackend now that AppHandle
@@ -1137,14 +1370,26 @@ pub fn run() {
 
             tray_builder
                 .menu(&tray_menu)
+                .show_menu_on_left_click(false)
                 .tooltip("Claude Fleet")
                 .on_tray_icon_event(|tray, event| {
-                    // Record click time so rebuild_tray() can defer set_menu()
-                    // while the user is interacting with the menu.
-                    if let tauri::tray::TrayIconEvent::Click { .. } = event {
+                    if let tauri::tray::TrayIconEvent::Click { position, button, button_state, .. } = &event {
+                        if !matches!(button, tauri::tray::MouseButton::Left) {
+                            return;
+                        }
+                        if !matches!(button_state, tauri::tray::MouseButtonState::Up) {
+                            return;
+                        }
+
                         let app = tray.app_handle();
                         let state = app.state::<AppState>();
                         *state.tray_last_click.lock().unwrap() = std::time::Instant::now();
+
+                        if is_tray_panel_visible(app) {
+                            hide_tray_panel(app);
+                        } else {
+                            show_tray_panel_at(app, position.x, position.y);
+                        }
                     }
                 })
                 .on_menu_event(|app, event| {
@@ -1187,6 +1432,35 @@ pub fn run() {
                     loop {
                         std::thread::sleep(std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
                         flush_pending_tray_rebuild(&app_handle);
+                    }
+                });
+            }
+
+            // ── Tray panel: auto-hide on focus loss ─────────────────────────
+            // Handled entirely in Rust to avoid IPC timing issues.
+            if let Some(panel) = app.get_webview_window("tray_panel") {
+                let app_handle = app.handle().clone();
+                panel.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(false) = event {
+                        let state = app_handle.state::<AppState>();
+                        let elapsed = state.tray_panel_shown_at.lock().unwrap().elapsed();
+                        if elapsed < std::time::Duration::from_millis(600) {
+                            // macOS steals focus when the status-bar click
+                            // finishes.  Re-focus the panel after a short
+                            // delay so that subsequent outside-clicks will
+                            // trigger a proper blur → hide.
+                            let handle = app_handle.clone();
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(200));
+                                if is_tray_panel_visible(&handle) {
+                                    if let Some(w) = handle.get_webview_window("tray_panel") {
+                                        let _ = w.set_focus();
+                                    }
+                                }
+                            });
+                            return;
+                        }
+                        hide_tray_panel(&app_handle);
                     }
                 });
             }
@@ -1239,8 +1513,11 @@ pub fn run() {
             center_overlay,
             show_main_window,
             open_session_from_overlay,
+            toggle_tray_panel,
+            quit_app,
             get_tts_voices,
             speak_text,
+            speak_text_say,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
