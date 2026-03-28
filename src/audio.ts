@@ -80,20 +80,28 @@ const CHIME_FNS: Record<ChimePreset, (ctx: AudioContext) => void> = {
   drop: chimeDrop,
 };
 
+/** Shared AudioContext — reused across chime calls to avoid autoplay-policy issues. */
+let sharedCtx: AudioContext | null = null;
+
+function getAudioContext(): AudioContext {
+  if (!sharedCtx || sharedCtx.state === "closed") {
+    sharedCtx = new AudioContext();
+  }
+  return sharedCtx;
+}
+
 /** Play a chime preset. Returns a promise that resolves after the chime finishes. */
-export function playChime(preset: ChimePreset): Promise<void> {
-  return new Promise((resolve) => {
-    try {
-      const ctx = new AudioContext();
-      CHIME_FNS[preset](ctx);
-      setTimeout(() => {
-        ctx.close();
-        resolve();
-      }, CHIME_DURATIONS[preset]);
-    } catch {
-      resolve();
+export async function playChime(preset: ChimePreset): Promise<void> {
+  try {
+    const ctx = getAudioContext();
+    if (ctx.state === "suspended") {
+      await ctx.resume();
     }
-  });
+    CHIME_FNS[preset](ctx);
+    await new Promise((r) => setTimeout(r, CHIME_DURATIONS[preset]));
+  } catch (err) {
+    console.warn("[audio] playChime failed:", err);
+  }
 }
 
 // ── TTS (via Rust backend `say` command) ─────────────────────────────────────
@@ -129,11 +137,18 @@ export async function speakText(text: string, voice?: string) {
 
 /** Play alert: chime (optional) → speech (optional), based on current settings. */
 export async function playAlertSound(summary: string) {
-  if (getItem("overlay-muted") === "true") return;
+  if (getItem("overlay-muted") === "true") {
+    console.debug("[audio] alert skipped: overlay muted");
+    return;
+  }
   const mode = (getItem("tts-mode") as TtsMode) || "off";
-  if (mode === "off") return;
+  if (mode === "off") {
+    console.debug("[audio] alert skipped: tts mode off");
+    return;
+  }
 
   const chime = (getItem("chime-sound") as ChimePreset) || "ding_dong";
+  console.debug("[audio] playing chime:", chime, "mode:", mode);
   await playChime(chime);
 
   if (mode === "chime_and_speech") {
