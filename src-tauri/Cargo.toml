@@ -44,8 +44,6 @@ tauri-plugin-clipboard-manager = "2.3.2"
 zstd = "0.13"
 msedge-tts = "0.3"
 base64 = "0.22"
-tauri-plugin-updater = "2"
-tauri-plugin-process = "2"
 
 [target.'cfg(not(windows))'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }
