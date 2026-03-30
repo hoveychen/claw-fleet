@@ -71,6 +71,7 @@ export function MemoryPanel() {
     name: string;
     path: string;
     workspaceName: string;
+    workspacePath: string;
   } | null>(null);
 
   // CLAUDE.md modal state
@@ -132,7 +133,9 @@ export function MemoryPanel() {
             <div key={ws.projectKey} className={styles.workspace_group}>
               <div className={styles.workspace_header}>
                 <span className={styles.workspace_name}>
-                  {ws.workspaceName}
+                  {ws.projectKey === "__global__"
+                    ? t("memory.global_label")
+                    : ws.workspaceName}
                 </span>
                 {ws.hasClaudeMd && (
                   <span
@@ -159,6 +162,7 @@ export function MemoryPanel() {
                         name: f.name,
                         path: f.path,
                         workspaceName: ws.workspaceName,
+                        workspacePath: ws.workspacePath,
                       })
                     }
                   >
@@ -185,6 +189,10 @@ export function MemoryPanel() {
         <MemoryDetailModal
           file={selectedFile}
           onClose={() => setSelectedFile(null)}
+          onPromoted={() => {
+            setSelectedFile(null);
+            load();
+          }}
         />
       )}
 
@@ -204,9 +212,11 @@ export function MemoryPanel() {
 function MemoryDetailModal({
   file,
   onClose,
+  onPromoted,
 }: {
-  file: { name: string; path: string; workspaceName: string };
+  file: { name: string; path: string; workspaceName: string; workspacePath: string };
   onClose: () => void;
+  onPromoted: () => void;
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<"content" | "history">("content");
@@ -214,6 +224,8 @@ function MemoryDetailModal({
   const [history, setHistory] = useState<MemoryHistoryEntry[] | null>(null);
   const [loadingContent, setLoadingContent] = useState(false);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [promoting, setPromoting] = useState(false);
+  const [showPromoteMenu, setShowPromoteMenu] = useState(false);
 
   useEffect(() => {
     setLoadingContent(true);
@@ -232,6 +244,24 @@ function MemoryDetailModal({
         .finally(() => setLoadingHistory(false));
     }
   }, [tab, file.path, history]);
+
+  const handlePromote = async (target: "project" | "global") => {
+    setPromoting(true);
+    setShowPromoteMenu(false);
+    try {
+      await invoke("promote_memory", {
+        memoryPath: file.path,
+        target,
+        workspacePath: file.workspacePath,
+      });
+      onPromoted();
+    } catch (e) {
+      console.error("promote_memory failed:", e);
+      setPromoting(false);
+    }
+  };
+
+  const isIndex = file.name === "MEMORY.md";
 
   return (
     <ModalShell title={`${file.workspaceName} / ${file.name}`} onClose={onClose}>
@@ -254,6 +284,35 @@ function MemoryDetailModal({
             {t("memory.tab_history")}
             {history && ` (${history.length})`}
           </button>
+
+          {/* Promote button — not for MEMORY.md index */}
+          {!isIndex && (
+            <div className={styles.promote_wrapper}>
+              <button
+                className={styles.promote_btn}
+                disabled={promoting}
+                onClick={() => setShowPromoteMenu((v) => !v)}
+              >
+                {promoting ? t("memory.promoting") : t("memory.promote")}
+              </button>
+              {showPromoteMenu && (
+                <div className={styles.promote_menu}>
+                  <button
+                    className={styles.promote_menu_item}
+                    onClick={() => handlePromote("project")}
+                  >
+                    {t("memory.promote_project")}
+                  </button>
+                  <button
+                    className={styles.promote_menu_item}
+                    onClick={() => handlePromote("global")}
+                  >
+                    {t("memory.promote_global")}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Body */}

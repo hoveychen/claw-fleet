@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useSessionsStore, type Connection } from "../store";
 import styles from "./ConnectionDialog.module.css";
 
@@ -51,11 +52,12 @@ interface Props {
   onConnected: (conn: Connection) => void;
 }
 
-type Mode = "local" | "remote";
+type View = "welcome" | "remote";
 type ConnType = "manual" | "profile";
 
 export function ConnectionDialog({ onConnected }: Props) {
-  const [mode, setMode] = useState<Mode>("local");
+  const { t } = useTranslation();
+  const [view, setView] = useState<View>("welcome");
   const [savedConns, setSavedConns] = useState<RemoteConnection[]>([]);
   const [selectedSavedId, setSelectedSavedId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -76,18 +78,9 @@ export function ConnectionDialog({ onConnected }: Props) {
   const unlistenRef = useRef<(() => void) | null>(null);
 
   // Load saved connections and SSH profiles on mount.
-  // If local AI tools are detected, prefer local mode even when saved remotes exist.
   useEffect(() => {
-    Promise.all([
-      invoke<RemoteConnection[]>("list_saved_connections"),
-      invoke<{ cli_installed: boolean; claude_dir_exists: boolean; has_sessions: boolean }>("check_setup_status").catch(() => null),
-    ]).then(([conns, status]) => {
+    invoke<RemoteConnection[]>("list_saved_connections").then((conns) => {
       setSavedConns(conns);
-      const hasLocalAI = status && (status.cli_installed || status.claude_dir_exists || status.has_sessions);
-      if (conns.length > 0 && !hasLocalAI) {
-        setMode("remote");
-        setSelectedSavedId(conns[0].id);
-      }
     });
     invoke<string[]>("list_ssh_profiles").then(setSshProfiles).catch(() => {});
   }, []);
@@ -133,23 +126,22 @@ export function ConnectionDialog({ onConnected }: Props) {
 
   const handleBrowseKey = useCallback(async () => {
     const selected = await invoke<string | null>("pick_file", {
-      title: "Select SSH Identity File",
+      title: t("connect_dialog.select_identity_file"),
     });
     if (selected) {
       setForm((f) => ({ ...f, identityFile: selected }));
     }
-  }, []);
+  }, [t]);
 
-  const handleConnect = useCallback(async () => {
+  const handleConnectLocal = useCallback(() => {
+    onConnected({ type: "local" });
+  }, [onConnected]);
+
+  const handleConnectRemote = useCallback(async () => {
     setProgressSteps([]);
     setConnectError(null);
     setConnectDone(false);
     setConnecting(true);
-
-    if (mode === "local") {
-      onConnected({ type: "local" });
-      return;
-    }
 
     // Determine which connection to use
     let conn: RemoteConnection;
@@ -161,14 +153,14 @@ export function ConnectionDialog({ onConnected }: Props) {
     } else {
       if (connType === "profile") {
         if (!form.sshProfile?.trim()) {
-          setConnectError("SSH profile name is required.");
+          setConnectError(t("connect_dialog.error_profile_required"));
           setConnecting(false);
           return;
         }
         conn = { ...form, host: "", username: "", port: 22 };
       } else {
         if (!form.host || !form.username) {
-          setConnectError("Host and Username are required.");
+          setConnectError(t("connect_dialog.error_host_user_required"));
           setConnecting(false);
           return;
         }
@@ -185,7 +177,7 @@ export function ConnectionDialog({ onConnected }: Props) {
       setConnectError(msg);
       setConnecting(false);
     }
-  }, [mode, selectedSavedId, showForm, savedConns, form, connType, onConnected]);
+  }, [selectedSavedId, showForm, savedConns, form, connType, onConnected, t]);
 
   // When connectDone fires, close after a short delay
   useEffect(() => {
@@ -213,259 +205,303 @@ export function ConnectionDialog({ onConnected }: Props) {
 
   const isConnectDisabled =
     connecting ||
-    (mode === "remote" && !selectedSavedId && !formVisible) ||
-    (mode === "remote" && formVisible && !selectedSavedId && !formValid);
+    (!selectedSavedId && !formVisible) ||
+    (formVisible && !selectedSavedId && !formValid);
+
+  // ── Welcome view (local hero + remote link) ──────────────────────────────
+
+  if (view === "welcome") {
+    return (
+      <div className={styles.overlay}>
+        <div className={styles.dialog}>
+          <div className={styles.welcomeHeader}>
+            <div className={styles.logoMark}>
+              <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+                <rect width="40" height="40" rx="10" fill="var(--color-accent)" opacity="0.12" />
+                <path d="M12 28V16l8-6 8 6v12l-8 4-8-4z" stroke="var(--color-accent)" strokeWidth="2" fill="none" />
+                <circle cx="20" cy="20" r="3" fill="var(--color-accent)" />
+              </svg>
+            </div>
+            <h1 className={styles.welcomeTitle}>{t("connect_dialog.title")}</h1>
+            <p className={styles.welcomeSubtitle}>{t("connect_dialog.subtitle")}</p>
+          </div>
+
+          <button className={styles.heroCard} onClick={handleConnectLocal}>
+            <div className={styles.heroIconWrap}>
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                <rect x="4" y="6" width="24" height="16" rx="2" stroke="currentColor" strokeWidth="1.8" />
+                <path d="M12 26h8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <path d="M16 22v4" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+                <circle cx="16" cy="14" r="2.5" stroke="currentColor" strokeWidth="1.5" fill="none" />
+                <path d="M11 18.5a5.5 5.5 0 0 1 10 0" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+              </svg>
+            </div>
+            <div className={styles.heroText}>
+              <span className={styles.heroTitle}>{t("connect_dialog.local_title")}</span>
+              <span className={styles.heroDesc}>{t("connect_dialog.local_desc")}</span>
+            </div>
+            <span className={styles.heroAction}>{t("connect_dialog.connect_local")}</span>
+          </button>
+
+          <div className={styles.dividerRow}>
+            <span className={styles.dividerLine} />
+          </div>
+
+          <button
+            className={styles.remoteLink}
+            onClick={() => {
+              setView("remote");
+              if (savedConns.length > 0) {
+                setSelectedSavedId(savedConns[0].id);
+              }
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" className={styles.remoteLinkIcon}>
+              <circle cx="4" cy="8" r="2" stroke="currentColor" strokeWidth="1.2" />
+              <circle cx="12" cy="8" r="2" stroke="currentColor" strokeWidth="1.2" />
+              <path d="M6 8h4" stroke="currentColor" strokeWidth="1.2" />
+            </svg>
+            {t("connect_dialog.or_remote")}
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" className={styles.remoteLinkArrow}>
+              <path d="M5 3l4 4-4 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Remote view ──────────────────────────────────────────────────────────
 
   return (
     <div className={styles.overlay}>
       <div className={styles.dialog}>
-        {/* Header */}
-        <div className={styles.header}>
-          <span className={styles.icon}>⚓</span>
-          <span className={styles.title}>Connect to Claude Fleet</span>
-        </div>
-
-        {/* Mode selector */}
-        <div className={styles.modeTabs}>
+        {/* Header with back button */}
+        <div className={styles.remoteHeader}>
           <button
-            className={`${styles.modeTab} ${mode === "local" ? styles.active : ""}`}
+            className={styles.backBtn}
             onClick={() => {
-              setMode("local");
+              setView("welcome");
               setConnectError(null);
               setProgressSteps([]);
+              setConnecting(false);
             }}
           >
-            <span className={styles.modeIcon}>💻</span>
-            Local
+            {t("connect_dialog.back")}
           </button>
-          <button
-            className={`${styles.modeTab} ${mode === "remote" ? styles.active : ""}`}
-            onClick={() => {
-              setMode("remote");
-              setConnectError(null);
-              setProgressSteps([]);
-            }}
-          >
-            <span className={styles.modeIcon}>🌐</span>
-            Remote (SSH)
-          </button>
+          <span className={styles.remoteTitle}>{t("connect_dialog.remote_title")}</span>
         </div>
 
-        {/* Remote section */}
-        {mode === "remote" && (
-          <>
-            {/* Saved connections */}
-            {savedConns.length > 0 && !showForm && (
-              <div className={styles.savedSection}>
-                <span className={styles.sectionLabel}>Saved Connections</span>
-                <div className={styles.savedList}>
-                  {savedConns.map((c) => (
-                    <div
-                      key={c.id}
-                      className={`${styles.savedItem} ${
-                        selectedSavedId === c.id ? styles.selectedSaved : ""
-                      }`}
-                      onClick={() => setSelectedSavedId(c.id)}
-                    >
-                      <div className={styles.savedItemInfo}>
-                        <div className={styles.savedItemLabel}>
-                          {c.label || (c.sshProfile ? `profile: ${c.sshProfile}` : c.host)}
-                        </div>
-                        <div className={styles.savedItemHost}>
-                          {c.sshProfile
-                            ? `ssh ${c.sshProfile}`
-                            : `${c.username}@${c.host}:${c.port}`}
-                        </div>
-                      </div>
-                      <button
-                        className={styles.deleteBtn}
-                        onClick={(e) => handleDeleteSaved(e, c.id)}
-                        title="Remove saved connection"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <button
-                  className={styles.addNewBtn}
-                  onClick={() => {
-                    setShowForm(true);
-                    setSelectedSavedId(null);
-                    setForm(emptyConn());
-                    setConnType("manual");
-                  }}
+        {/* Saved connections */}
+        {savedConns.length > 0 && !showForm && (
+          <div className={styles.savedSection}>
+            <span className={styles.sectionLabel}>{t("connect_dialog.saved_connections")}</span>
+            <div className={styles.savedList}>
+              {savedConns.map((c) => (
+                <div
+                  key={c.id}
+                  className={`${styles.savedItem} ${
+                    selectedSavedId === c.id ? styles.selectedSaved : ""
+                  }`}
+                  onClick={() => setSelectedSavedId(c.id)}
                 >
-                  + Add New Remote
-                </button>
+                  <div className={styles.savedItemInfo}>
+                    <div className={styles.savedItemLabel}>
+                      {c.label || (c.sshProfile ? `profile: ${c.sshProfile}` : c.host)}
+                    </div>
+                    <div className={styles.savedItemHost}>
+                      {c.sshProfile
+                        ? `ssh ${c.sshProfile}`
+                        : `${c.username}@${c.host}:${c.port}`}
+                    </div>
+                  </div>
+                  <button
+                    className={styles.deleteBtn}
+                    onClick={(e) => handleDeleteSaved(e, c.id)}
+                    title={t("connect_dialog.remove_saved")}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button
+              className={styles.addNewBtn}
+              onClick={() => {
+                setShowForm(true);
+                setSelectedSavedId(null);
+                setForm(emptyConn());
+                setConnType("manual");
+              }}
+            >
+              {t("connect_dialog.add_new_remote")}
+            </button>
+          </div>
+        )}
+
+        {/* New connection form */}
+        {formVisible && (
+          <div className={styles.form}>
+            <span className={styles.sectionLabel}>
+              {savedConns.length > 0 ? t("connect_dialog.new_connection") : t("connect_dialog.remote_connection")}
+            </span>
+
+            {/* Connection type toggle */}
+            <div className={styles.connTypeTabs}>
+              <button
+                className={`${styles.connTypeTab} ${connType === "manual" ? styles.connTypeActive : ""}`}
+                onClick={() => setConnType("manual")}
+              >
+                {t("connect_dialog.manual")}
+              </button>
+              <button
+                className={`${styles.connTypeTab} ${connType === "profile" ? styles.connTypeActive : ""}`}
+                onClick={() => setConnType("profile")}
+              >
+                {t("connect_dialog.ssh_config_profile")}
+              </button>
+            </div>
+
+            <div className={styles.fieldGroup}>
+              <label className={styles.fieldLabel}>{t("connect_dialog.label_optional")}</label>
+              <input
+                className={styles.fieldInput}
+                placeholder={t("connect_dialog.label_placeholder")}
+                value={form.label}
+                onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
+              />
+            </div>
+
+            {connType === "profile" ? (
+              /* ── SSH Config Profile mode ── */
+              <div className={styles.fieldGroup}>
+                <label className={styles.fieldLabel}>{t("connect_dialog.profile_name")}</label>
+                <input
+                  className={styles.fieldInput}
+                  list="ssh-profiles-list"
+                  placeholder="my-server"
+                  value={form.sshProfile ?? ""}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, sshProfile: e.target.value || null }))
+                  }
+                />
+                {sshProfiles.length > 0 && (
+                  <datalist id="ssh-profiles-list">
+                    {sshProfiles.map((p) => (
+                      <option key={p} value={p} />
+                    ))}
+                  </datalist>
+                )}
               </div>
-            )}
-
-            {/* New connection form */}
-            {formVisible && (
-              <div className={styles.form}>
-                <span className={styles.sectionLabel}>
-                  {savedConns.length > 0 ? "New Connection" : "Remote Connection"}
-                </span>
-
-                {/* Connection type toggle */}
-                <div className={styles.connTypeTabs}>
-                  <button
-                    className={`${styles.connTypeTab} ${connType === "manual" ? styles.connTypeActive : ""}`}
-                    onClick={() => setConnType("manual")}
-                  >
-                    Manual
-                  </button>
-                  <button
-                    className={`${styles.connTypeTab} ${connType === "profile" ? styles.connTypeActive : ""}`}
-                    onClick={() => setConnType("profile")}
-                  >
-                    SSH Config Profile
-                  </button>
-                </div>
-
-                <div className={styles.fieldGroup}>
-                  <label className={styles.fieldLabel}>Label (optional)</label>
-                  <input
-                    className={styles.fieldInput}
-                    placeholder="e.g. My Dev Server"
-                    value={form.label}
-                    onChange={(e) => setForm((f) => ({ ...f, label: e.target.value }))}
-                  />
-                </div>
-
-                {connType === "profile" ? (
-                  /* ── SSH Config Profile mode ── */
-                  <div className={styles.fieldGroup}>
-                    <label className={styles.fieldLabel}>Profile Name</label>
+            ) : (
+              /* ── Manual mode ── */
+              <>
+                <div className={styles.formRow}>
+                  <div className={styles.fieldGroup} style={{ flex: 3 }}>
+                    <label className={styles.fieldLabel}>{t("connect_dialog.host_ip")}</label>
                     <input
                       className={styles.fieldInput}
-                      list="ssh-profiles-list"
-                      placeholder="my-server"
-                      value={form.sshProfile ?? ""}
-                      onChange={(e) =>
-                        setForm((f) => ({ ...f, sshProfile: e.target.value || null }))
-                      }
+                      placeholder="192.168.1.100"
+                      value={form.host}
+                      onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
                     />
-                    {sshProfiles.length > 0 && (
-                      <datalist id="ssh-profiles-list">
-                        {sshProfiles.map((p) => (
-                          <option key={p} value={p} />
-                        ))}
-                      </datalist>
-                    )}
                   </div>
-                ) : (
-                  /* ── Manual mode ── */
-                  <>
-                    <div className={styles.formRow}>
-                      <div className={styles.fieldGroup} style={{ flex: 3 }}>
-                        <label className={styles.fieldLabel}>Host / IP</label>
-                        <input
-                          className={styles.fieldInput}
-                          placeholder="192.168.1.100"
-                          value={form.host}
-                          onChange={(e) => setForm((f) => ({ ...f, host: e.target.value }))}
-                        />
-                      </div>
-                      <div className={styles.fieldGroup} style={{ flex: 1 }}>
-                        <label className={styles.fieldLabel}>SSH Port</label>
-                        <input
-                          className={styles.fieldInput}
-                          type="number"
-                          placeholder="22"
-                          value={form.port}
-                          onChange={(e) =>
-                            setForm((f) => ({ ...f, port: parseInt(e.target.value) || 22 }))
-                          }
-                        />
-                      </div>
-                    </div>
-
-                    <div className={styles.fieldGroup}>
-                      <label className={styles.fieldLabel}>Username</label>
-                      <input
-                        className={styles.fieldInput}
-                        placeholder="ubuntu"
-                        value={form.username}
-                        onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
-                      />
-                    </div>
-
-                    <div className={styles.fieldGroup}>
-                      <label className={styles.fieldLabel}>
-                        Identity File (optional)
-                      </label>
-                      <div className={styles.fileRow}>
-                        <input
-                          className={styles.fieldInput}
-                          placeholder="~/.ssh/id_rsa"
-                          value={form.identityFile ?? ""}
-                          onChange={(e) =>
-                            setForm((f) => ({
-                              ...f,
-                              identityFile: e.target.value || null,
-                            }))
-                          }
-                        />
-                        <button className={styles.browseBtn} onClick={handleBrowseKey}>
-                          Browse…
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className={styles.fieldGroup}>
-                      <label className={styles.fieldLabel}>
-                        Jump Host (optional)
-                      </label>
-                      <input
-                        className={styles.fieldInput}
-                        placeholder="user@bastion.example.com"
-                        value={form.jumpHost ?? ""}
-                        onChange={(e) =>
-                          setForm((f) => ({
-                            ...f,
-                            jumpHost: e.target.value || null,
-                          }))
-                        }
-                      />
-                    </div>
-                  </>
-                )}
-
-                <div className={styles.formRow}>
-                  <div className={styles.fieldGroup}>
-                    <label className={styles.fieldLabel}>Probe Port</label>
+                  <div className={styles.fieldGroup} style={{ flex: 1 }}>
+                    <label className={styles.fieldLabel}>{t("connect_dialog.ssh_port")}</label>
                     <input
                       className={styles.fieldInput}
                       type="number"
-                      placeholder="7007"
-                      value={form.probePort}
+                      placeholder="22"
+                      value={form.port}
                       onChange={(e) =>
-                        setForm((f) => ({
-                          ...f,
-                          probePort: parseInt(e.target.value) || 7007,
-                        }))
+                        setForm((f) => ({ ...f, port: parseInt(e.target.value) || 22 }))
                       }
                     />
                   </div>
                 </div>
 
-                {savedConns.length > 0 && (
-                  <button
-                    className={styles.btnSecondary}
-                    style={{ alignSelf: "flex-start" }}
-                    onClick={() => {
-                      setShowForm(false);
-                      setSelectedSavedId(savedConns[0].id);
-                    }}
-                  >
-                    ← Back to saved
-                  </button>
-                )}
-              </div>
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>{t("connect_dialog.username")}</label>
+                  <input
+                    className={styles.fieldInput}
+                    placeholder="ubuntu"
+                    value={form.username}
+                    onChange={(e) => setForm((f) => ({ ...f, username: e.target.value }))}
+                  />
+                </div>
+
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>
+                    {t("connect_dialog.identity_file")}
+                  </label>
+                  <div className={styles.fileRow}>
+                    <input
+                      className={styles.fieldInput}
+                      placeholder="~/.ssh/id_rsa"
+                      value={form.identityFile ?? ""}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          identityFile: e.target.value || null,
+                        }))
+                      }
+                    />
+                    <button className={styles.browseBtn} onClick={handleBrowseKey}>
+                      {t("connect_dialog.browse")}
+                    </button>
+                  </div>
+                </div>
+
+                <div className={styles.fieldGroup}>
+                  <label className={styles.fieldLabel}>
+                    {t("connect_dialog.jump_host")}
+                  </label>
+                  <input
+                    className={styles.fieldInput}
+                    placeholder="user@bastion.example.com"
+                    value={form.jumpHost ?? ""}
+                    onChange={(e) =>
+                      setForm((f) => ({
+                        ...f,
+                        jumpHost: e.target.value || null,
+                      }))
+                    }
+                  />
+                </div>
+              </>
             )}
-          </>
+
+            <div className={styles.formRow}>
+              <div className={styles.fieldGroup}>
+                <label className={styles.fieldLabel}>{t("connect_dialog.probe_port")}</label>
+                <input
+                  className={styles.fieldInput}
+                  type="number"
+                  placeholder="7007"
+                  value={form.probePort}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      probePort: parseInt(e.target.value) || 7007,
+                    }))
+                  }
+                />
+              </div>
+            </div>
+
+            {savedConns.length > 0 && (
+              <button
+                className={styles.btnSecondary}
+                style={{ alignSelf: "flex-start" }}
+                onClick={() => {
+                  setShowForm(false);
+                  setSelectedSavedId(savedConns[0].id);
+                }}
+              >
+                {t("connect_dialog.back_to_saved")}
+              </button>
+            )}
+          </div>
         )}
 
         {/* Progress area */}
@@ -496,33 +532,25 @@ export function ConnectionDialog({ onConnected }: Props) {
 
         {/* Actions */}
         <div className={styles.actions}>
-          {mode === "local" ? (
-            <button className={styles.btnPrimary} onClick={handleConnect}>
-              Connect Locally
+          {connectError && (
+            <button
+              className={styles.btnSecondary}
+              onClick={() => {
+                setConnectError(null);
+                setProgressSteps([]);
+                setConnecting(false);
+              }}
+            >
+              {t("connect_dialog.retry")}
             </button>
-          ) : (
-            <>
-              {connectError && (
-                <button
-                  className={styles.btnSecondary}
-                  onClick={() => {
-                    setConnectError(null);
-                    setProgressSteps([]);
-                    setConnecting(false);
-                  }}
-                >
-                  Retry
-                </button>
-              )}
-              <button
-                className={styles.btnPrimary}
-                disabled={isConnectDisabled}
-                onClick={handleConnect}
-              >
-                {connecting ? "Connecting…" : "Connect"}
-              </button>
-            </>
           )}
+          <button
+            className={styles.btnPrimary}
+            disabled={isConnectDisabled}
+            onClick={handleConnectRemote}
+          >
+            {connecting ? t("connect_dialog.connecting") : t("connect_dialog.connect")}
+          </button>
         </div>
       </div>
     </div>

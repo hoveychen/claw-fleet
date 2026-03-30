@@ -192,6 +192,18 @@ input, button {
   outline: none;
 }
 
+/* ── Drag region for custom title bar (macOS) ────────────────────────────── */
+.drag_bar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 38px;
+  z-index: 999;
+  -webkit-app-region: drag;
+  pointer-events: none;
+}
+
 /* ── Layout ───────────────────────────────────────────────────────────────── */
 .app {
   display: flex;

@@ -119,7 +119,7 @@
   flex-direction: column;
   align-items: center;
   user-select: none;
-  background: var(--mascot-bg);
+  background: transparent;
   border-radius: 0;
   cursor: pointer;
 }
@@ -128,6 +128,9 @@
   width: 100%;
   max-width: 100%;
   height: auto;
+  /* Barrel distortion — subtle CRT convex bulge */
+  transform: perspective(300px) translateZ(10px);
+  transform-origin: center;
 }
 
 /* ── Background frame ─────────────────────────────────────────────────────── */

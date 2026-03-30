@@ -126,32 +126,16 @@ export async function getVoices(): Promise<TtsVoice[]> {
   }
 }
 
-/** Synthesize and play text using Microsoft Edge TTS via Tauri backend. */
+/** Synthesize and play text using Microsoft Edge TTS via Tauri backend.
+ *  Audio playback happens on the Rust side (rodio) with automatic fallback to macOS `say`.
+ */
 export async function speakText(text: string, voice?: string) {
   const { invoke } = await import("@tauri-apps/api/core");
   const locale = i18n.language === "zh" ? "zh" : "en";
   try {
-    const result = await invoke<{ audio_base64: string }>("speak_text", {
-      text,
-      voice: voice || null,
-      locale,
-    });
-    if (result.audio_base64) {
-      const audio = new Audio(`data:audio/mpeg;base64,${result.audio_base64}`);
-      await new Promise<void>((resolve, reject) => {
-        audio.onended = () => resolve();
-        audio.onerror = () => reject(new Error("audio playback error"));
-        audio.play().catch(reject);
-      });
-    }
+    await invoke("speak_text", { text, voice: voice || null, locale });
   } catch (err) {
-    console.warn("[audio] speakText (msedge-tts) failed, trying macOS say fallback:", err);
-    // Fallback to macOS `say` command for offline / connectivity issues
-    try {
-      await invoke("speak_text_say", { text, voice: voice || null, locale });
-    } catch {
-      console.warn("[audio] speakText (say fallback) also failed");
-    }
+    console.warn("[audio] speakText failed:", err);
   }
 }
 
@@ -185,31 +169,9 @@ export function playAlertSound(summary: string) {
   processAlertQueue();
 }
 
-/** Fallback summaries from the backend that carry no real information — skip TTS for these. */
-const FALLBACK_SUMMARIES = new Set([
-  "Status update",
-  "Bug fixed",
-  "Feature added",
-  "Agent is stuck",
-  "Agent ran into an issue",
-  "Task completed",
-  "Potential issues detected",
-  "Agent is confused",
-  "Task completed successfully",
-  "Quick fix applied",
-  "Extensive changes made",
-  "Planning next steps",
-  "Waiting for input",
-]);
-
-async function playAlertSoundImpl(summary: string) {
-  const mode = (getItem("tts-mode") as TtsMode) || "off";
+async function playAlertSoundImpl(_summary: string) {
   const chime = (getItem("chime-sound") as ChimePreset) || "ding_dong";
-  console.debug("[audio] playing chime:", chime, "mode:", mode);
+  console.debug("[audio] playing chime:", chime);
   await playChime(chime);
-
-  if (mode === "chime_and_speech" && !FALLBACK_SUMMARIES.has(summary)) {
-    const voiceURI = getItem("tts-voice") || undefined;
-    await speakText(summary, voiceURI);
-  }
+  // TTS is now handled by the Rust backend after sending the notification.
 }

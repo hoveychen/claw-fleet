@@ -31,7 +31,7 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery";
+export type ViewMode = "list" | "gallery" | "audit";
 
 interface UIState {
   theme: Theme;

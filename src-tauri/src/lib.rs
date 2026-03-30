@@ -1,5 +1,6 @@
 pub mod account;
 pub mod agent_source;
+pub mod audit;
 pub mod backend;
 pub mod claude_analyze;
 pub mod claude_source;
@@ -10,6 +11,7 @@ pub mod local_backend;
 pub mod memory;
 pub mod openclaw_source;
 pub mod remote;
+pub mod search_index;
 pub mod session;
 pub mod skills;
 
@@ -200,23 +202,14 @@ async fn get_tts_voices(locale: String) -> Vec<TtsVoice> {
     filtered
 }
 
-#[derive(serde::Serialize)]
-struct SynthesizedResult {
-    audio_base64: String,
-}
+/// Synthesize text via Edge TTS and return raw MP3 bytes.
+fn synthesize_tts(text: &str, voice: Option<&str>, locale: Option<&str>) -> Result<Vec<u8>, String> {
+    let voices = cached_voices();
 
-#[tauri::command]
-async fn speak_text(
-    text: String,
-    voice: Option<String>,
-    locale: Option<String>,
-) -> Result<SynthesizedResult, String> {
-    tokio::task::spawn_blocking(move || {
-        let voices = cached_voices();
-
-        // Resolve voice: use provided name, or pick first matching locale
-        let voice_name = voice.unwrap_or_else(|| {
-            let lang_prefix = match locale.as_deref() {
+    let voice_name = match voice {
+        Some(v) if !v.is_empty() => v.to_string(),
+        _ => {
+            let lang_prefix = match locale {
                 Some("zh") => "zh-CN",
                 _ => "en-US",
             };
@@ -230,56 +223,192 @@ async fn speak_text(
                 })
                 .and_then(|v| v.short_name.clone())
                 .unwrap_or_else(|| "en-US-AriaNeural".to_string())
+        }
+    };
+
+    let speech_config = voices
+        .iter()
+        .find(|v| v.short_name.as_deref() == Some(&voice_name))
+        .map(|v| msedge_tts::tts::SpeechConfig::from(v))
+        .unwrap_or_else(|| msedge_tts::tts::SpeechConfig {
+            voice_name: voice_name.clone(),
+            audio_format: "audio-24khz-48kbitrate-mono-mp3".to_string(),
+            pitch: 0,
+            rate: 0,
+            volume: 0,
         });
 
-        // Build SpeechConfig from the matching Voice, or construct manually
-        let speech_config = voices
-            .iter()
-            .find(|v| v.short_name.as_deref() == Some(&voice_name))
-            .map(|v| msedge_tts::tts::SpeechConfig::from(v))
-            .unwrap_or_else(|| msedge_tts::tts::SpeechConfig {
-                voice_name: voice_name.clone(),
-                audio_format: "audio-24khz-48kbitrate-mono-mp3".to_string(),
-                pitch: 0,
-                rate: 0,
-                volume: 0,
-            });
+    log_debug(&format!("[tts] synthesizing with voice={voice_name}, text={:?}", truncate_for_log(text, 80)));
 
-        let mut client =
-            msedge_tts::tts::client::connect().map_err(|e| format!("TTS connect: {e}"))?;
-        let audio = client
-            .synthesize(&text, &speech_config)
-            .map_err(|e| format!("TTS synthesize: {e}"))?;
+    let mut client =
+        msedge_tts::tts::client::connect().map_err(|e| {
+            let msg = format!("TTS connect error: {e}");
+            log_debug(&format!("[tts] {msg}"));
+            msg
+        })?;
+    let audio = client
+        .synthesize(text, &speech_config)
+        .map_err(|e| {
+            let msg = format!("TTS synthesize error: {e}");
+            log_debug(&format!("[tts] {msg}"));
+            msg
+        })?;
 
-        use base64::Engine as _;
-        let encoded = base64::engine::general_purpose::STANDARD.encode(&audio.audio_bytes);
-
-        Ok(SynthesizedResult {
-            audio_base64: encoded,
-        })
-    })
-    .await
-    .map_err(|e| format!("TTS task failed: {e}"))?
+    log_debug(&format!("[tts] synthesized {} bytes of audio", audio.audio_bytes.len()));
+    Ok(audio.audio_bytes)
 }
 
-// ── Fallback TTS via macOS `say` command ─────────────────────────────────────
+/// Play raw MP3 bytes through the system audio output using rodio.
+fn play_mp3_bytes(bytes: &[u8]) -> Result<(), String> {
+    use rodio::{Decoder, OutputStream, Sink};
+    use std::io::Cursor;
+
+    let (_stream, stream_handle) = OutputStream::try_default()
+        .map_err(|e| {
+            let msg = format!("audio output error: {e}");
+            log_debug(&format!("[tts] {msg}"));
+            msg
+        })?;
+    let source = Decoder::new(Cursor::new(bytes.to_vec()))
+        .map_err(|e| {
+            let msg = format!("MP3 decode error: {e}");
+            log_debug(&format!("[tts] {msg}"));
+            msg
+        })?;
+    let sink = Sink::try_new(&stream_handle)
+        .map_err(|e| {
+            let msg = format!("audio sink error: {e}");
+            log_debug(&format!("[tts] {msg}"));
+            msg
+        })?;
+    sink.append(source);
+    sink.sleep_until_end();
+    Ok(())
+}
+
+/// Fallback TTS via macOS `say` command.
+fn speak_with_say(text: &str, voice: Option<&str>, locale: Option<&str>) {
+    log_debug(&format!("[tts] falling back to macOS say command"));
+    let mut cmd = std::process::Command::new("say");
+    if let Some(v) = voice.filter(|v| !v.is_empty()) {
+        cmd.args(["--voice", v]);
+    } else {
+        let default_voice = match locale {
+            Some("zh") => "Tingting",
+            _ => "Samantha",
+        };
+        cmd.args(["--voice", default_voice]);
+    }
+    cmd.arg(text);
+    match cmd.output() {
+        Ok(o) if o.status.success() => log_debug("[tts] macOS say succeeded"),
+        Ok(o) => log_debug(&format!("[tts] macOS say exited with status {}", o.status)),
+        Err(e) => log_debug(&format!("[tts] macOS say failed: {e}")),
+    }
+}
+
+/// Global lock to serialize TTS playback — prevents overlapping audio when
+/// multiple notifications arrive at the same time.
+static TTS_PLAYBACK_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Synthesize and play text, with automatic fallback to macOS `say`.
+/// This is the core function used by both the Tauri command and backend notifications.
+/// Acquires a global lock so that concurrent calls are queued, not overlapped.
+pub(crate) fn speak_text_blocking(text: &str, voice: Option<&str>, locale: Option<&str>) {
+    let _guard = TTS_PLAYBACK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    match synthesize_tts(text, voice, locale) {
+        Ok(bytes) => {
+            if let Err(e) = play_mp3_bytes(&bytes) {
+                log_debug(&format!("[tts] playback failed ({e}), falling back to say"));
+                speak_with_say(text, voice, locale);
+            }
+        }
+        Err(e) => {
+            log_debug(&format!("[tts] Edge TTS failed ({e}), falling back to say"));
+            speak_with_say(text, voice, locale);
+        }
+    }
+}
+
+#[tauri::command]
+async fn speak_text(
+    text: String,
+    voice: Option<String>,
+    locale: Option<String>,
+) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || {
+        speak_text_blocking(&text, voice.as_deref(), locale.as_deref());
+    })
+    .await
+    .map_err(|e| format!("TTS task failed: {e}"))
+}
 
 #[tauri::command]
 fn speak_text_say(text: String, voice: Option<String>, locale: Option<String>) {
     std::thread::spawn(move || {
-        let mut cmd = std::process::Command::new("say");
-        if let Some(v) = &voice {
-            cmd.args(["--voice", v]);
-        } else {
-            let default_voice = match locale.as_deref() {
-                Some("zh") => "Tingting",
-                _ => "Samantha",
-            };
-            cmd.args(["--voice", default_voice]);
-        }
-        cmd.arg(&text);
-        let _ = cmd.output();
+        speak_with_say(&text, voice.as_deref(), locale.as_deref());
     });
+}
+
+fn truncate_for_log(s: &str, max_chars: usize) -> String {
+    let mut chars = s.chars();
+    let truncated: String = chars.by_ref().take(max_chars).collect();
+    if chars.next().is_some() {
+        format!("{truncated}…")
+    } else {
+        truncated
+    }
+}
+
+/// Read TTS settings from the Tauri store and play TTS for a notification summary.
+/// Should be called from a background thread (blocks until playback finishes).
+pub(crate) fn play_tts_for_notification(app: &tauri::AppHandle, summary: &str) {
+    use tauri_plugin_store::StoreExt;
+
+    let store = match app.store("settings.json") {
+        Ok(s) => s,
+        Err(e) => {
+            log_debug(&format!("[tts] failed to open settings store: {e}"));
+            return;
+        }
+    };
+
+    let tts_mode = store.get("tts-mode")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "off".to_string());
+
+    if tts_mode != "chime_and_speech" {
+        return;
+    }
+
+    let muted = store.get("overlay-muted")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "false".to_string());
+
+    if muted == "true" {
+        log_debug("[tts] skipping notification TTS: overlay muted");
+        return;
+    }
+
+    // Skip fallback/generic summaries
+    const FALLBACK_SUMMARIES: &[&str] = &[
+        "Status update", "Bug fixed", "Feature added", "Agent is stuck",
+        "Agent ran into an issue", "Task completed", "Potential issues detected",
+        "Agent is confused", "Task completed successfully", "Quick fix applied",
+        "Extensive changes made", "Planning next steps", "Waiting for input",
+    ];
+    if FALLBACK_SUMMARIES.contains(&summary) {
+        return;
+    }
+
+    let voice = store.get("tts-voice")
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    let locale = store.get("lang")
+        .and_then(|v| v.as_str().map(|s| s.to_string()));
+    let locale_ref = locale.as_deref().map(|l| if l.starts_with("zh") { "zh" } else { "en" });
+
+    log_debug(&format!("[tts] playing notification TTS for: {:?}", truncate_for_log(summary, 80)));
+    speak_text_blocking(summary, voice.as_deref(), locale_ref);
 }
 
 // ── Notification mode ────────────────────────────────────────────────────────
@@ -584,6 +713,19 @@ fn list_sessions(state: tauri::State<AppState>) -> Vec<SessionInfo> {
 }
 
 #[tauri::command]
+fn search_sessions(
+    query: String,
+    limit: Option<usize>,
+    state: tauri::State<AppState>,
+) -> Vec<search_index::SearchHit> {
+    let limit = limit.unwrap_or(50);
+    if query.trim().is_empty() {
+        return vec![];
+    }
+    state.backend.lock().unwrap().search_sessions(&query, limit)
+}
+
+#[tauri::command]
 fn get_messages(
     jsonl_path: String,
     state: tauri::State<AppState>,
@@ -647,6 +789,13 @@ fn extract_skill_history(messages: &[Value]) -> Vec<SkillInvocation> {
         }
     }
     history
+}
+
+// ── Security audit ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_audit_events(state: tauri::State<AppState>) -> audit::AuditSummary {
+    state.backend.lock().unwrap().get_audit_events()
 }
 
 #[tauri::command]
@@ -862,6 +1011,11 @@ fn get_memory_history(path: String, state: tauri::State<AppState>) -> Vec<memory
 #[tauri::command]
 fn get_claude_md_content(workspace_path: String) -> Result<String, String> {
     memory::read_claude_md(&workspace_path)
+}
+
+#[tauri::command]
+fn promote_memory(memory_path: String, target: String, workspace_path: String) -> Result<(), String> {
+    memory::promote_memory(&memory_path, &target, &workspace_path)
 }
 
 // ── Skills ────────────────────────────────────────────────────────────────────
@@ -1469,8 +1623,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_sessions,
+            search_sessions,
             get_messages,
             get_skill_history,
+            get_audit_events,
             start_watching_session,
             stop_watching_session,
             get_account_info,
@@ -1495,6 +1651,7 @@ pub fn run() {
             get_memory_content,
             get_memory_history,
             get_claude_md_content,
+            promote_memory,
             list_skills,
             get_skill_content,
             get_waiting_alerts,

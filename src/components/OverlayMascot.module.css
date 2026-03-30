@@ -8,42 +8,10 @@
   background: transparent;
 }
 
-/* ── Robot frame ─────────────────────────────────────────────────────────── */
-.frame {
+/* ── Overlay frame width override ────────────────────────────────────────── */
+.overlayFrame {
   width: 260px;
-  background: rgba(20, 20, 28, 0.92);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 20px;
-  overflow: hidden;
-  flex-shrink: 0;
-  transition: border-color 0.2s ease;
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.frame:hover {
-  border-color: rgba(255, 255, 255, 0.15);
-}
-
-[data-theme="light"] .frame {
-  background: rgba(238, 238, 245, 0.95);
-  border-color: rgba(0, 0, 0, 0.1);
-}
-
-[data-theme="light"] .frame:hover {
-  border-color: rgba(0, 0, 0, 0.2);
-}
-
-/* ── Screen area (mascot eyes) ───────────────────────────────────────────── */
-.screen {
-  padding: 4px 8px 0;
-  border-radius: 16px 16px 0 0;
-  overflow: hidden;
-  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.3);
-}
-
-[data-theme="light"] .screen {
-  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.08);
+  cursor: grab;
 }
 
 /* ── Quip bubble (above frame, outside it) ───────────────────────────────── */
@@ -102,11 +70,10 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
+  gap: 8px;
   padding: 4px 12px 7px;
+  min-height: 24px;
   position: relative;
-  -webkit-app-region: drag;
-  cursor: grab;
 }
 
 .ledGroup {
@@ -140,6 +107,34 @@
 
 .ledIdle {
   background: #5a5a78;
+}
+
+/* ── Status LED icons ────────────────────────────────────────────────────── */
+.ledIcon {
+  flex-shrink: 0;
+  opacity: 0.85;
+}
+
+.ledIconBusy {
+  color: #4ade80;
+  filter: drop-shadow(0 0 3px rgba(74, 222, 128, 0.5));
+  animation: gearSpin 3s linear infinite;
+}
+
+.ledIconSub {
+  color: #60a5fa;
+  filter: drop-shadow(0 0 3px rgba(96, 165, 250, 0.5));
+}
+
+.ledIconWaiting {
+  color: #fbbf24;
+  filter: drop-shadow(0 0 3px rgba(251, 191, 36, 0.5));
+  animation: ledPulse 2s ease-in-out infinite;
+}
+
+@keyframes gearSpin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
 }
 
 .ledLabel {
@@ -180,7 +175,6 @@
   color: rgba(200, 200, 220, 0.35);
   cursor: pointer;
   transition: color 0.15s, background 0.15s;
-  -webkit-app-region: no-drag;
 }
 
 .controlBtn:hover {
@@ -213,19 +207,37 @@
   color: rgba(200, 120, 50, 1);
 }
 
-/* ── Drag handle (bottom-right of status bar) ────────────────────────────── */
-.dragHandle {
+/* ── Collapse button (bottom-right of status bar) ────────────────────────── */
+.collapseBtn {
   position: absolute;
-  right: 6px;
-  bottom: 4px;
-  padding: 4px;
-  color: rgba(200, 200, 220, 0.4);
+  right: 4px;
+  bottom: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: none;
+  border: none;
   border-radius: 4px;
-  pointer-events: none;
+  color: rgba(200, 200, 220, 0.35);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
 }
 
-[data-theme="light"] .dragHandle {
+.collapseBtn:hover {
+  color: rgba(200, 200, 220, 0.8);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] .collapseBtn {
   color: rgba(80, 80, 100, 0.3);
+}
+
+[data-theme="light"] .collapseBtn:hover {
+  color: rgba(80, 80, 100, 0.7);
+  background: rgba(0, 0, 0, 0.04);
 }
 
 /* ── Alert stack (above the frame) ───────────────────────────────────────── */

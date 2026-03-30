@@ -34,6 +34,7 @@
   "switch_connection": "Switch Connection",
   "view_list": "List",
   "view_gallery": "Gallery",
+  "view_audit": "Audit",
   "gallery_show_all": "Show All",
   "gallery_show_active": "Active Only",
   "gallery": {
@@ -109,13 +110,32 @@
     "loading": "Loading…",
     "no_skills": "No skill files found."
   },
+  "audit": {
+    "panel_title": "Security Audit",
+    "scanning": "Scanning sessions…",
+    "no_events": "No non-trivial operations found.",
+    "all": "All",
+    "refresh": "Refresh",
+    "scanned": "Scanned {{count}} sessions",
+    "workspace": "Workspace",
+    "source": "Source",
+    "time": "Time",
+    "tags": "Tags",
+    "full_command": "Full Command",
+    "go_to_session": "Go to Session"
+  },
   "memory": {
     "panel_title": "Memory",
     "loading": "Loading\u2026",
     "no_memories": "No auto-memory files found.",
     "tab_content": "Content",
     "tab_history": "History",
-    "no_history": "No edit history found in session logs."
+    "no_history": "No edit history found in session logs.",
+    "global_label": "(Global)",
+    "promote": "Move to CLAUDE.md",
+    "promoting": "Moving\u2026",
+    "promote_project": "Project CLAUDE.md",
+    "promote_global": "Global CLAUDE.md (~/.claude)"
   },
   "chart": {
     "title": "Token Speed",
@@ -243,6 +263,16 @@
     "all_good": {
       "title": "All set!",
       "description": "Claude Code is installed, you're logged in, and sessions are being monitored."
+    },
+    "settings_notif": {
+      "title": "Notifications & Assistant",
+      "description": "Configure how you get notified when agents are waiting, and set your floating assistant preferences. You can change these later in Settings.",
+      "mascot_title": "Assistant"
+    },
+    "hooks_setup": {
+      "title": "Recommended: Install Fleet Hooks",
+      "description": "Claude Code detected — installing Fleet Hooks enables more accurate agent status detection (tool execution, waiting for input, etc.). Hooks run asynchronously in the background and won't affect agent performance.",
+      "disabled_warning": "Note: disableAllHooks is set to true in your settings. Hooks won't work until this is changed."
     },
     "copy_hint": "Click to copy"
   },
@@ -843,6 +873,40 @@
     "notification_open_settings": "Open Notification Settings",
     "overlay": "Floating assistant",
     "overlay_desc": "Show the assistant as a floating overlay on top of all windows"
+  },
+  "connect_dialog": {
+    "title": "Claude Fleet",
+    "subtitle": "Your AI coding fleet command center",
+    "local_title": "Local Mode",
+    "local_desc": "Monitor Claude Code sessions running on this machine",
+    "connect_local": "Get Started",
+    "or_remote": "or connect to a remote server via SSH",
+    "remote_title": "Remote Connection",
+    "saved_connections": "Saved Connections",
+    "add_new_remote": "+ Add New Remote",
+    "new_connection": "New Connection",
+    "remote_connection": "Remote Connection",
+    "manual": "Manual",
+    "ssh_config_profile": "SSH Config Profile",
+    "label_optional": "Label (optional)",
+    "label_placeholder": "e.g. My Dev Server",
+    "profile_name": "Profile Name",
+    "host_ip": "Host / IP",
+    "ssh_port": "SSH Port",
+    "username": "Username",
+    "identity_file": "Identity File (optional)",
+    "jump_host": "Jump Host (optional)",
+    "probe_port": "Probe Port",
+    "browse": "Browse\u2026",
+    "back_to_saved": "\u2190 Back to saved",
+    "back": "\u2190 Back",
+    "connecting": "Connecting\u2026",
+    "connect": "Connect",
+    "retry": "Retry",
+    "error_profile_required": "SSH profile name is required.",
+    "error_host_user_required": "Host and Username are required.",
+    "select_identity_file": "Select SSH Identity File",
+    "remove_saved": "Remove saved connection"
   },
   "hooks": {
     "banner": "Install Fleet hooks for more accurate status detection",

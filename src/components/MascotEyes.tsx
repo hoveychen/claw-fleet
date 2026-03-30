@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useOverlayStore, useSessionsStore } from "../store";
 import { getItem } from "../storage";
 import type { SessionInfo, SessionOutcome } from "../types";
+import { RobotFrame } from "./RobotFrame";
 import styles from "./MascotEyes.module.css";
 
 // ── Dynamic quip generation ─────────────────────────────────────────────────
@@ -277,8 +278,8 @@ const GAZE_WANDER: Record<MascotMood, { range: number; interval: [number, number
 
 // ── Geometry ─────────────────────────────────────────────────────────────────
 
-const EYE_LEFT_CX = 75;
-const EYE_RIGHT_CX = 125;
+const EYE_LEFT_CX = 65;
+const EYE_RIGHT_CX = 135;
 const EYE_CY = 40;
 const EYE_COLOR = "var(--color-accent)";   // brand accent color
 
@@ -1055,28 +1056,32 @@ export function MascotEyes({ embedded, onQuip }: { embedded?: boolean; onQuip?: 
         </button>
       </div>
       {expanded && (
-        <div className={mascotClasses} onClick={handleMascotClick}>
+        <>
           {quipText && (
             <div className={styles.quipBubble} key={`${mood}-${quipIndex}-${clickReaction}`}>
               <div className={quipClasses}>{quipText}</div>
             </div>
           )}
-          <svg viewBox="0 -14 200 114" className={styles.svg}>
-            <defs>
-              <linearGradient id="grad-special" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="rgba(255,255,255,0.3)" />
-                <stop offset="100%" stopColor="rgba(0,0,0,0.2)" />
-              </linearGradient>
-            </defs>
-            <rect x="0" y="-14" width="200" height="128" fill="var(--mascot-bg)" className={styles.bg} />
-            <g style={{ transform: `translateY(${bodyTranslateY}px)` }} className={styles.bodyGroup}>
-              {renderEye(EYE_LEFT_CX, false)}
-              {renderEye(EYE_RIGHT_CX, true)}
-              {renderMouth()}
-            </g>
-            {renderEmojis()}
-          </svg>
-        </div>
+          <RobotFrame onClick={handleMascotClick}>
+            <div className={mascotClasses}>
+              <svg viewBox="0 -14 200 114" className={styles.svg}>
+                <defs>
+                  <linearGradient id="grad-special" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="rgba(255,255,255,0.3)" />
+                    <stop offset="100%" stopColor="rgba(0,0,0,0.2)" />
+                  </linearGradient>
+                </defs>
+                <rect x="0" y="-14" width="200" height="128" fill="var(--mascot-bg)" className={styles.bg} />
+                <g style={{ transform: `translateY(${bodyTranslateY}px)` }} className={styles.bodyGroup}>
+                  {renderEye(EYE_LEFT_CX, false)}
+                  {renderEye(EYE_RIGHT_CX, true)}
+                  {renderMouth()}
+                </g>
+                {renderEmojis()}
+              </svg>
+            </div>
+          </RobotFrame>
+        </>
       )}
     </div>
   );

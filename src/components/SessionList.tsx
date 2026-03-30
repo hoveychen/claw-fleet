@@ -7,13 +7,16 @@ import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
 import { MemoryPanel } from "./MemoryPanel";
+import { AuditView } from "./AuditView";
 import { SkillsPanel } from "./SkillsPanel";
 import { SessionCard } from "./SessionCard";
+import { SessionToolbar } from "./SessionToolbar";
 import { SettingsPanel } from "./SettingsPanel";
 import styles from "./SessionList.module.css";
 import { TokenSpeedChart } from "./TokenSpeedChart";
 import { UsagePanel } from "./UsagePanel";
 import { AlertBadge } from "./WaitingAlerts";
+import { useSessionSearch } from "../hooks/useSessionSearch";
 import { getItem, setItem } from "../storage";
 
 const MIN_WIDTH = 200;
@@ -85,15 +88,17 @@ export function SessionList() {
     document.addEventListener("mouseup", onMouseUp);
   }, [sidebarWidth]);
 
+  const { searching, ftsMatchPaths } = useSessionSearch(filter);
+
   const filtered = sessions.filter((s) => {
     if (!filter) return true;
     const q = filter.toLowerCase();
-    return (
+    const clientMatch =
       s.workspaceName.toLowerCase().includes(q) ||
       s.slug?.toLowerCase().includes(q) ||
       s.agentDescription?.toLowerCase().includes(q) ||
-      s.ideName?.toLowerCase().includes(q)
-    );
+      s.ideName?.toLowerCase().includes(q);
+    return clientMatch || ftsMatchPaths.has(s.jsonlPath);
   });
 
   // Promote idle main sessions that have active subagents → delegating
@@ -202,6 +207,13 @@ export function SessionList() {
             <span className={styles.nav_icon}>⊞</span>
             <span className={styles.nav_label}>{t("view_gallery")}</span>
           </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("audit")}
+          >
+            <span className={styles.nav_icon}>⛨</span>
+            <span className={styles.nav_label}>{t("view_audit")}</span>
+          </button>
         </nav>
 
         <div className={styles.separator} />
@@ -260,25 +272,15 @@ export function SessionList() {
       {/* Main content area */}
       {viewMode === "list" ? (
         <div className={styles.main_area}>
-          <div className={styles.toolbar}>
-            <input
-              className={styles.search}
-              type="text"
-              placeholder={t("filter_placeholder")}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-            <span className={styles.active_count}>
-              {active.length} {t("active")}
-            </span>
-            <button
-              className={`${styles.toggle_btn} ${showAll ? styles.toggle_btn_active : ""}`}
-              onClick={() => setShowAll((v) => !v)}
-              title={showAll ? t("gallery_show_active") : t("gallery_show_all")}
-            >
-              {showAll ? t("gallery_show_active") : t("gallery_show_all")}
-            </button>
-          </div>
+          <SessionToolbar
+            filter={filter}
+            onFilterChange={setFilter}
+            activeCount={active.length}
+            showAll={showAll}
+            onToggleShowAll={() => setShowAll((v) => !v)}
+            ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
+            searching={searching}
+          />
 
           <div className={styles.list}>
             {showAll ? (
@@ -309,8 +311,10 @@ export function SessionList() {
             )}
           </div>
         </div>
-      ) : (
+      ) : viewMode === "gallery" ? (
         <GalleryView />
+      ) : (
+        <AuditView />
       )}
     </>
   );

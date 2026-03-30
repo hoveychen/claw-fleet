@@ -1,0 +1,99 @@
+/* ── Robot frame — shared CRT-style container for mascot eyes ────────────── */
+
+.frame {
+  background: rgba(20, 20, 28, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 20px;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition: border-color 0.2s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.frame:hover {
+  border-color: rgba(255, 255, 255, 0.15);
+}
+
+[data-theme="light"] .frame {
+  background: rgba(238, 238, 245, 0.95);
+  border-color: rgba(0, 0, 0, 0.1);
+}
+
+[data-theme="light"] .frame:hover {
+  border-color: rgba(0, 0, 0, 0.2);
+}
+
+/* ── Screen area (mascot eyes) ───────────────────────────────────────────── */
+.screen {
+  margin: 6px 6px 0;
+  padding: 4px 8px;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.3);
+  position: relative;
+  background: var(--mascot-bg);
+}
+
+/* When no footer, add bottom margin so frame shell is visible all around */
+.screen:last-child {
+  margin-bottom: 6px;
+}
+
+[data-theme="light"] .screen {
+  box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.08);
+}
+
+/* CRT scanline overlay */
+.screen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.12) 2px,
+    rgba(0, 0, 0, 0.12) 4px
+  );
+  z-index: 1;
+}
+
+[data-theme="light"] .screen::after {
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0px,
+    transparent 2px,
+    rgba(0, 0, 0, 0.05) 2px,
+    rgba(0, 0, 0, 0.05) 4px
+  );
+}
+
+/* CRT vignette — fully blacks out corners */
+.screen::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  pointer-events: none;
+  z-index: 2;
+  background: radial-gradient(
+    ellipse 70% 65% at center,
+    transparent 45%,
+    rgba(0, 0, 0, 0.15) 58%,
+    rgba(0, 0, 0, 0.5) 70%,
+    rgba(0, 0, 0, 0.85) 82%,
+    #000 92%
+  );
+}
+
+[data-theme="light"] .screen::before {
+  background: radial-gradient(
+    ellipse 70% 65% at center,
+    transparent 50%,
+    rgba(80, 70, 120, 0.08) 62%,
+    rgba(80, 70, 120, 0.2) 74%,
+    rgba(60, 50, 100, 0.4) 86%,
+    rgba(50, 40, 90, 0.55) 96%
+  );
+}

@@ -1,0 +1,81 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  padding-top: 16px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-sidebar);
+  flex-shrink: 0;
+}
+
+.search_wrap {
+  flex: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search {
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-size: 12px;
+  outline: none;
+}
+
+.search:focus {
+  border-color: var(--color-accent);
+}
+
+.spinner {
+  position: absolute;
+  right: 8px;
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.count {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.fts_count {
+  color: var(--color-accent);
+  font-weight: 500;
+}
+
+.toggle_btn {
+  padding: 3px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.1s, color 0.1s;
+}
+
+.toggle_btn:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.toggle_btn_active {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}

@@ -159,36 +159,41 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
 
     // Scan global memory (~/.claude/memory/)
     let global_memory_dir = claude_dir.join("memory");
-    if global_memory_dir.is_dir() {
-        let mut files = Vec::new();
-        if let Ok(mem_entries) = fs::read_dir(&global_memory_dir) {
-            for mem_entry in mem_entries.flatten() {
-                let mem_path = mem_entry.path();
-                if !mem_path.is_file() {
-                    continue;
-                }
-                if let Some(metadata) = fs::metadata(&mem_path).ok() {
-                    let modified_ms = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
+    let global_has_claude_md = claude_dir.join("CLAUDE.md").is_file();
 
-                    files.push(MemoryFile {
-                        name: mem_path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        path: mem_path.to_string_lossy().to_string(),
-                        size_bytes: metadata.len(),
-                        modified_ms,
-                    });
+    // Show global entry if it has memory files OR a CLAUDE.md
+    if global_memory_dir.is_dir() || global_has_claude_md {
+        let mut files = Vec::new();
+        if global_memory_dir.is_dir() {
+            if let Ok(mem_entries) = fs::read_dir(&global_memory_dir) {
+                for mem_entry in mem_entries.flatten() {
+                    let mem_path = mem_entry.path();
+                    if !mem_path.is_file() {
+                        continue;
+                    }
+                    if let Some(metadata) = fs::metadata(&mem_path).ok() {
+                        let modified_ms = metadata
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis() as u64)
+                            .unwrap_or(0);
+
+                        files.push(MemoryFile {
+                            name: mem_path
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or_default()
+                                .to_string(),
+                            path: mem_path.to_string_lossy().to_string(),
+                            size_bytes: metadata.len(),
+                            modified_ms,
+                        });
+                    }
                 }
             }
         }
-        if !files.is_empty() {
+        if !files.is_empty() || global_has_claude_md {
             files.sort_by(|a, b| {
                 let a_is_index = a.name == "MEMORY.md";
                 let b_is_index = b.name == "MEMORY.md";
@@ -198,9 +203,10 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
                 0,
                 WorkspaceMemory {
                     workspace_name: "(Global)".to_string(),
-                    workspace_path: global_memory_dir.to_string_lossy().to_string(),
+                    // Point to ~/.claude/ so read_claude_md finds ~/.claude/CLAUDE.md
+                    workspace_path: claude_dir.to_string_lossy().to_string(),
                     project_key: "__global__".to_string(),
-                    has_claude_md: false,
+                    has_claude_md: global_has_claude_md,
                     files,
                 },
             );
@@ -262,6 +268,102 @@ pub fn read_claude_md(workspace_path: &str) -> Result<String, String> {
         }
     }
     Err("CLAUDE.md not found".into())
+}
+
+// ── Promote a memory file into a CLAUDE.md ──────────────────────────────────
+
+/// Move a memory file's content into a CLAUDE.md file.
+///
+/// `target` must be `"project"` or `"global"`.
+///   - project → appends to `<workspace_path>/CLAUDE.md`
+///   - global  → appends to `~/.claude/CLAUDE.md`
+///
+/// After appending, the memory file is deleted and MEMORY.md is updated.
+pub fn promote_memory(
+    memory_path: &str,
+    target: &str,
+    workspace_path: &str,
+) -> Result<(), String> {
+    let mem_pb = PathBuf::from(memory_path);
+    if !mem_pb.is_file() {
+        return Err("memory file not found".into());
+    }
+
+    // Read and strip frontmatter
+    let raw = fs::read_to_string(&mem_pb).map_err(|e| e.to_string())?;
+    let content = strip_frontmatter(&raw);
+    if content.trim().is_empty() {
+        return Err("memory file has no content after frontmatter".into());
+    }
+
+    // Determine target CLAUDE.md path
+    let claude_md_path = match target {
+        "project" => PathBuf::from(workspace_path).join("CLAUDE.md"),
+        "global" => {
+            let claude_dir = get_claude_dir().ok_or("cannot determine home dir")?;
+            claude_dir.join("CLAUDE.md")
+        }
+        _ => return Err(format!("invalid target: {}", target)),
+    };
+
+    // Append to CLAUDE.md (create if it doesn't exist)
+    let existing = if claude_md_path.is_file() {
+        fs::read_to_string(&claude_md_path).map_err(|e| e.to_string())?
+    } else {
+        String::new()
+    };
+
+    let separator = if existing.is_empty() || existing.ends_with('\n') {
+        "\n"
+    } else {
+        "\n\n"
+    };
+
+    let new_content = format!("{}{}{}\n", existing, separator, content.trim());
+    fs::write(&claude_md_path, new_content).map_err(|e| e.to_string())?;
+
+    // Delete the memory file
+    let mem_name = mem_pb
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or_default()
+        .to_string();
+    fs::remove_file(&mem_pb).map_err(|e| e.to_string())?;
+
+    // Update MEMORY.md: remove the line referencing this file
+    let memory_dir = mem_pb.parent().unwrap_or(Path::new(""));
+    let memory_md = memory_dir.join("MEMORY.md");
+    if memory_md.is_file() {
+        if let Ok(index_content) = fs::read_to_string(&memory_md) {
+            let updated: Vec<&str> = index_content
+                .lines()
+                .filter(|line| !line.contains(&format!("({})", mem_name)))
+                .collect();
+            let _ = fs::write(&memory_md, updated.join("\n") + "\n");
+        }
+    }
+
+    Ok(())
+}
+
+/// Strip YAML frontmatter (--- ... ---) from the beginning of a markdown string.
+fn strip_frontmatter(s: &str) -> &str {
+    let trimmed = s.trim_start();
+    if !trimmed.starts_with("---") {
+        return s;
+    }
+    // Find the closing ---
+    if let Some(end) = trimmed[3..].find("\n---") {
+        let after = &trimmed[3 + end + 4..]; // skip past \n---
+        // Skip the newline after closing ---
+        if after.starts_with('\n') {
+            &after[1..]
+        } else {
+            after
+        }
+    } else {
+        s // no closing ---, return as-is
+    }
 }
 
 // ── Trace history of a memory file ───────────────────────────────────────────

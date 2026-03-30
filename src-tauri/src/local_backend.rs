@@ -18,9 +18,13 @@ use tauri::{AppHandle, Emitter};
 use crate::agent_source::{AgentSource, WatchStrategy};
 use crate::backend::{Backend, WaitingAlert};
 use crate::log_debug;
+use crate::search_index::SearchIndex;
 use crate::session::{SessionInfo, SessionStatus};
 
 // ── Struct ────────────────────────────────────────────────────────────────────
+
+/// Message sent to the dedicated indexer thread.
+type IndexRequest = Vec<(String, String)>; // Vec<(jsonl_path, session_id)>
 
 pub struct LocalBackend {
     app: AppHandle,
@@ -33,6 +37,15 @@ pub struct LocalBackend {
     /// Semantic outcome tags per session, set by background analysis.
     /// Cleared when a session transitions away from WaitingInput/Idle.
     session_outcomes: Arc<Mutex<HashMap<String, Vec<String>>>>,
+    /// Audit cache: maps session ID → (last-scanned byte offset, cached events).
+    /// Cleared when a session disappears from the active list.
+    audit_cache: Arc<Mutex<HashMap<String, (u64, Vec<crate::audit::AuditEvent>)>>>,
+    /// Full-text search index — used for read-only queries from the main thread.
+    search_index: Arc<Mutex<SearchIndex>>,
+    /// Channel to send indexing requests to the dedicated indexer thread.
+    /// Kept alive so the indexer thread doesn't exit (dropping closes the channel).
+    #[allow(dead_code)]
+    index_tx: std::sync::mpsc::Sender<IndexRequest>,
     /// Kept alive so the watcher thread keeps running.
     /// Dropping this field closes the event channel and the thread exits.
     _watcher: RecommendedWatcher,
@@ -51,18 +64,49 @@ impl LocalBackend {
             Arc::new(Mutex::new(HashMap::new()));
         let session_outcomes: Arc<Mutex<HashMap<String, Vec<String>>>> =
             Arc::new(Mutex::new(HashMap::new()));
+        let audit_cache: Arc<Mutex<HashMap<String, (u64, Vec<crate::audit::AuditEvent>)>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
+        // Open (or create) the full-text search index.
+        let search_index = Arc::new(Mutex::new(
+            SearchIndex::open().unwrap_or_else(|e| {
+                log_debug(&format!("search index open failed, retrying fresh: {e}"));
+                // If the DB is corrupt, delete and retry.
+                if let Some(home) = dirs::home_dir() {
+                    let _ = fs::remove_file(home.join(".claude").join("fleet-search.db"));
+                }
+                SearchIndex::open().expect("search index open failed twice")
+            }),
+        ));
+
+        // Dedicated indexer thread — receives session lists via channel,
+        // coalesces rapid requests, and runs indexing off the scan threads.
+        let (index_tx, index_rx) = std::sync::mpsc::channel::<IndexRequest>();
+        {
+            let idx = search_index.clone();
+            std::thread::Builder::new()
+                .name("fleet-search-indexer".into())
+                .spawn(move || {
+                    indexer_thread(idx, index_rx);
+                })
+                .expect("failed to spawn indexer thread");
+        }
 
         // Initial scan — run in a background thread so the UI appears immediately.
         {
             let app_bg = app.clone();
             let sess_bg = sessions.clone();
             let sources_bg = sources.clone();
+            let idx_tx = index_tx.clone();
             std::thread::spawn(move || {
                 let initial = crate::session::scan_all_sources(&sources_bg);
                 *sess_bg.lock().unwrap() = initial.clone();
                 let _ = app_bg.emit("sessions-updated", &initial);
                 let _ = app_bg.emit("scan-ready", true);
                 crate::update_tray(&app_bg, &initial);
+
+                // Send to indexer thread (non-blocking).
+                let _ = idx_tx.send(sessions_to_index_request(&initial));
             });
         }
 
@@ -119,6 +163,7 @@ impl LocalBackend {
         let locale2 = locale.clone();
         let watch2 = watch.clone();
         let analyzing2 = analyzing.clone();
+        let idx_tx2 = index_tx.clone();
 
         // Filesystem watcher thread — batches events so we rescan at most once
         // every 2 seconds, while still tailing the viewed session immediately.
@@ -203,6 +248,8 @@ impl LocalBackend {
                         &app2,
                         &locale2,
                     );
+                    // Send to indexer thread (non-blocking).
+                    let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
                     last_rescan = Instant::now();
                     pending_rescan = false;
                 }
@@ -227,6 +274,7 @@ impl LocalBackend {
             let so3 = session_outcomes.clone();
             let locale3 = locale.clone();
             let analyzing3 = analyzing.clone();
+            let idx_tx3 = index_tx.clone();
 
             std::thread::spawn(move || {
                 let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
@@ -254,6 +302,8 @@ impl LocalBackend {
                         &app3,
                         &locale3,
                     );
+                    // Send to indexer thread (non-blocking).
+                    let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
                 }
             });
         }
@@ -265,12 +315,52 @@ impl LocalBackend {
             watch,
             waiting_alerts,
             session_outcomes,
+            audit_cache,
+            search_index,
+            index_tx,
             _watcher: watcher,
         }
     }
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
+
+/// Convert a session list into an index request (list of (path, id) pairs).
+fn sessions_to_index_request(sessions: &[SessionInfo]) -> IndexRequest {
+    sessions.iter().map(|s| (s.jsonl_path.clone(), s.id.clone())).collect()
+}
+
+/// Dedicated indexer thread. Receives session lists via channel, coalesces
+/// rapid-fire requests, and runs incremental indexing without blocking scan threads.
+fn indexer_thread(
+    search_index: Arc<Mutex<SearchIndex>>,
+    rx: std::sync::mpsc::Receiver<IndexRequest>,
+) {
+    loop {
+        // Block until the first request arrives.
+        let first = match rx.recv() {
+            Ok(req) => req,
+            Err(_) => break, // channel closed, exit
+        };
+
+        // Drain any additional pending requests (coalescing).
+        // Only keep the latest one since it has the most up-to-date session list.
+        let mut latest = first;
+        while let Ok(newer) = rx.try_recv() {
+            latest = newer;
+        }
+
+        // Now do the actual indexing work.
+        if let Ok(idx) = search_index.lock() {
+            idx.index_batch(&latest);
+
+            let live: HashSet<String> = latest.iter().map(|(path, _)| path.clone()).collect();
+            if let Err(e) = idx.cleanup_stale(&live) {
+                log_debug(&format!("search index cleanup error: {e}"));
+            }
+        }
+    }
+}
 
 /// Rescan all sources and emit updated sessions (with outcome tags injected).
 fn rescan_and_emit(
@@ -630,6 +720,100 @@ impl Backend for LocalBackend {
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
         crate::agent_source::set_source_enabled_local(name, enabled)
     }
+
+    fn get_audit_events(&self) -> crate::audit::AuditSummary {
+        let all_sessions = self.sessions.lock().unwrap().clone();
+        let active_ids: HashSet<String> = all_sessions
+            .iter()
+            .filter(|s| s.status != SessionStatus::Idle)
+            .map(|s| s.id.clone())
+            .collect();
+        let sessions: Vec<_> = all_sessions
+            .into_iter()
+            .filter(|s| active_ids.contains(&s.id))
+            .collect();
+        let total = sessions.len();
+
+        let mut cache = self.audit_cache.lock().unwrap();
+
+        // Evict sessions that are no longer active.
+        cache.retain(|id, _| active_ids.contains(id));
+
+        let mut all_events = Vec::new();
+        for session in &sessions {
+            let path = &session.jsonl_path;
+            let is_plain_path = !path.contains("://");
+
+            if is_plain_path {
+                // Incremental scan: only read bytes added since last scan.
+                let file_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+                let (prev_offset, prev_events) = cache
+                    .get(&session.id)
+                    .cloned()
+                    .unwrap_or((0, Vec::new()));
+
+                if file_size <= prev_offset {
+                    // File unchanged (or truncated) — reuse cached events.
+                    all_events.extend(prev_events);
+                    continue;
+                }
+
+                // Read only the new bytes from prev_offset → EOF.
+                let new_messages = match fs::File::open(path) {
+                    Ok(mut file) => {
+                        if file.seek(SeekFrom::Start(prev_offset)).is_err() {
+                            all_events.extend(prev_events);
+                            continue;
+                        }
+                        let mut buf = String::new();
+                        if file.read_to_string(&mut buf).is_err() {
+                            all_events.extend(prev_events);
+                            continue;
+                        }
+                        buf.lines()
+                            .filter(|l| !l.trim().is_empty())
+                            .filter_map(|l| serde_json::from_str(l).ok())
+                            .collect::<Vec<Value>>()
+                    }
+                    Err(_) => {
+                        all_events.extend(prev_events);
+                        continue;
+                    }
+                };
+
+                let new_events = crate::audit::extract_audit_events(&new_messages, session);
+                let mut combined = prev_events;
+                combined.extend(new_events);
+                cache.insert(session.id.clone(), (file_size, combined.clone()));
+                all_events.extend(combined);
+            } else {
+                // URI-prefixed path (cursor://, etc.) — full re-read via source.
+                let source = self.sources.iter().find(|s| {
+                    let prefix = s.uri_prefix();
+                    !prefix.is_empty() && path.starts_with(prefix)
+                });
+                if let Some(src) = source {
+                    if let Ok(messages) = src.get_messages(path) {
+                        let events = crate::audit::extract_audit_events(&messages, session);
+                        all_events.extend(events);
+                    }
+                }
+            }
+        }
+
+        all_events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+        crate::audit::AuditSummary {
+            events: all_events,
+            total_sessions_scanned: total,
+        }
+    }
+
+    fn search_sessions(&self, query: &str, limit: usize) -> Vec<crate::search_index::SearchHit> {
+        match self.search_index.lock() {
+            Ok(idx) => idx.search(query, limit).unwrap_or_default(),
+            Err(_) => vec![],
+        }
+    }
 }
 
 /// Fetch usage summaries from all available sources via trait dispatch.
@@ -696,7 +880,7 @@ fn detect_waiting_transitions(
                 let analysis_text = extract_last_assistant_text(&jsonl_path, 1000)
                     .unwrap_or(last_text);
 
-                let result = crate::claude_analyze::analyze_session_outcome(&analysis_text, &lang);
+                let result = crate::claude_analyze::analyze_session_outcome(&analysis_text, &lang, &session_id);
                 an.lock().unwrap().remove(&session_id);
 
                 // Always store outcome tags for the mascot.
@@ -734,6 +918,9 @@ fn detect_waiting_transitions(
                     if should_os_notify {
                         send_os_notification(&app_bg, &display_name, &summary);
                     }
+
+                    // Play TTS from backend (blocks until done).
+                    crate::play_tts_for_notification(&app_bg, &summary);
                 }
             });
         } else if !is_waiting && was_waiting {

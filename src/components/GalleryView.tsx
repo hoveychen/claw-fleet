@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore } from "../store";
+import { useSessionSearch } from "../hooks/useSessionSearch";
 import type { SessionInfo, SessionStatus } from "../types";
 import { SessionCard, StatusBadge, StatusIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
+import { SessionToolbar } from "./SessionToolbar";
 import styles from "./GalleryView.module.css";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -248,6 +250,7 @@ export function GalleryView() {
   };
 
   const activeSessions = sessions.filter(isActive);
+  const { searching, ftsMatchPaths } = useSessionSearch(filter);
 
   // Filter source: active only or all sessions
   const filterSource = showAll ? sessions : activeSessions;
@@ -255,12 +258,12 @@ export function GalleryView() {
   const filtered = filter
     ? filterSource.filter((s) => {
         const q = filter.toLowerCase();
-        return (
+        const clientMatch =
           s.workspaceName.toLowerCase().includes(q) ||
           s.slug?.toLowerCase().includes(q) ||
           s.agentDescription?.toLowerCase().includes(q) ||
-          s.ideName?.toLowerCase().includes(q)
-        );
+          s.ideName?.toLowerCase().includes(q);
+        return clientMatch || ftsMatchPaths.has(s.jsonlPath);
       })
     : filterSource;
 
@@ -274,26 +277,15 @@ export function GalleryView() {
 
   return (
     <div className={styles.root}>
-      {/* Toolbar */}
-      <div className={styles.toolbar}>
-        <input
-          className={styles.search}
-          type="text"
-          placeholder={t("filter_placeholder")}
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-        />
-        <span className={styles.count}>
-          {activeSessions.filter((s) => !s.isSubagent).length} {t("active")}
-        </span>
-        <button
-          className={`${styles.toggle_btn} ${showAll ? styles.toggle_btn_active : ""}`}
-          onClick={() => setShowAll((v) => !v)}
-          title={showAll ? t("gallery_show_active") : t("gallery_show_all")}
-        >
-          {showAll ? t("gallery_show_active") : t("gallery_show_all")}
-        </button>
-      </div>
+      <SessionToolbar
+        filter={filter}
+        onFilterChange={setFilter}
+        activeCount={activeSessions.filter((s) => !s.isSubagent).length}
+        showAll={showAll}
+        onToggleShowAll={() => setShowAll((v) => !v)}
+        ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
+        searching={searching}
+      />
 
       {/* Grid */}
       <div className={styles.grid} onClick={handleGridClick}>

@@ -10,7 +10,9 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::account::AccountInfo;
+use crate::audit::AuditSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
+use crate::search_index::SearchHit;
 use crate::session::SessionInfo;
 use crate::skills::SkillItem;
 
@@ -251,6 +253,12 @@ pub trait Backend: Send + Sync {
     // ── Agent sources config ─────────────────────────────────────────────────
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo>;
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String>;
+
+    // ── Full-text search ─────────────────────────────────────────────────────
+    fn search_sessions(&self, query: &str, limit: usize) -> Vec<SearchHit>;
+
+    // ── Security audit ──────────────────────────────────────────────────────
+    fn get_audit_events(&self) -> AuditSummary;
 }
 
 // ── Shared watch state ───────────────────────────────────────────────────────
@@ -367,6 +375,12 @@ impl Backend for NullBackend {
     }
     fn set_source_enabled(&self, _: &str, _: bool) -> Result<(), String> {
         Err("backend not ready".into())
+    }
+    fn search_sessions(&self, _: &str, _: usize) -> Vec<SearchHit> {
+        vec![]
+    }
+    fn get_audit_events(&self) -> AuditSummary {
+        AuditSummary { events: vec![], total_sessions_scanned: 0 }
     }
 }
 

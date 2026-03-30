@@ -19,6 +19,7 @@ import { useSessionsStore, useWaitingAlertsStore } from "../store";
 import type { WaitingAlert } from "../types";
 import { getItem, setItem } from "../storage";
 import { MascotEyesCore } from "./MascotEyesCore";
+import { RobotFrame } from "./RobotFrame";
 import styles from "./OverlayMascot.module.css";
 
 /** Error boundary so MascotEyes crashes don't kill the entire overlay (including alert cards). */
@@ -258,116 +259,122 @@ export function OverlayMascot() {
       )}
 
       {/* Robot frame */}
-      <div
-        className={styles.frame}
+      <RobotFrame
+        className={styles.overlayFrame}
+        tauriDrag
         onDoubleClick={handleDoubleClick}
         onContextMenu={handleContextMenu}
-      >
-        {/* Screen area with mascot eyes — hidden when faceHidden */}
-        {!faceHidden && (
-          <div className={styles.screen}>
-            <MascotErrorBoundary>
-              <MascotEyesCore onQuip={setQuipText} />
-            </MascotErrorBoundary>
-          </div>
-        )}
+        footer={
+          <div className={styles.statusBar}>
+            <div className={styles.controlButtons}>
+              <button
+                className={`${styles.controlBtn} ${muted ? styles.controlBtnActive : ""}`}
+                onClick={toggleMute}
+                title={muted ? t("overlay.unmute") : t("overlay.mute")}
+                aria-label={muted ? t("overlay.unmute") : t("overlay.mute")}
+              >
+                {muted ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                    <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                    <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.12 1.5-.34 2.18" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" y1="19" x2="12" y2="23" />
+                    <line x1="8" y1="23" x2="16" y2="23" />
+                  </svg>
+                )}
+              </button>
+              <button
+                className={`${styles.controlBtn} ${faceHidden ? styles.controlBtnActive : ""}`}
+                onClick={toggleFace}
+                title={faceHidden ? t("overlay.show_face") : t("overlay.hide_face")}
+                aria-label={faceHidden ? t("overlay.show_face") : t("overlay.hide_face")}
+              >
+                {faceHidden ? (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                    <line x1="1" y1="1" x2="23" y2="23" />
+                  </svg>
+                ) : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                )}
+              </button>
+            </div>
 
-        {/* Status LED bar with labels */}
-        <div className={styles.statusBar} data-tauri-drag-region>
-          {/* Control buttons — bottom left */}
-          <div className={styles.controlButtons}>
-            <button
-              className={`${styles.controlBtn} ${muted ? styles.controlBtnActive : ""}`}
-              onClick={toggleMute}
-              title={muted ? t("overlay.unmute") : t("overlay.mute")}
-              aria-label={muted ? t("overlay.unmute") : t("overlay.mute")}
-            >
-              {muted ? (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                  <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-                  <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.12 1.5-.34 2.18" />
-                  <line x1="12" y1="19" x2="12" y2="23" />
-                  <line x1="8" y1="23" x2="16" y2="23" />
-                </svg>
-              ) : (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                  <line x1="12" y1="19" x2="12" y2="23" />
-                  <line x1="8" y1="23" x2="16" y2="23" />
-                </svg>
-              )}
-            </button>
-            <button
-              className={`${styles.controlBtn} ${faceHidden ? styles.controlBtnActive : ""}`}
-              onClick={toggleFace}
-              title={faceHidden ? t("overlay.show_face") : t("overlay.hide_face")}
-              aria-label={faceHidden ? t("overlay.show_face") : t("overlay.hide_face")}
-            >
-              {faceHidden ? (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
-                  <line x1="1" y1="1" x2="23" y2="23" />
-                </svg>
-              ) : (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+            {mainBusyCount > 0 && (
+              <div className={styles.ledGroup} title={t("overlay.led_busy")}>
+                {/* Gear icon — spinning when active */}
+                <svg className={`${styles.ledIcon} ${styles.ledIconBusy}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                   <circle cx="12" cy="12" r="3" />
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
                 </svg>
-              )}
+                <span className={styles.ledLabel}>{mainBusyCount}</span>
+              </div>
+            )}
+            {subBusyCount > 0 && (
+              <div className={styles.ledGroup} title={t("overlay.led_sub")}>
+                {/* Git-branch icon — forked sub-tasks */}
+                <svg className={`${styles.ledIcon} ${styles.ledIconSub}`} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="6" y1="3" x2="6" y2="15" />
+                  <circle cx="18" cy="6" r="3" />
+                  <circle cx="6" cy="18" r="3" />
+                  <path d="M18 9a9 9 0 0 1-9 9" />
+                </svg>
+                <span className={styles.ledLabel}>{subBusyCount}</span>
+              </div>
+            )}
+            {waitingCount > 0 && (
+              <div className={styles.ledGroup} title={t("overlay.led_waiting")}>
+                {/* Pause icon — waiting for input */}
+                <svg className={`${styles.ledIcon} ${styles.ledIconWaiting}`} width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+                  <rect x="5" y="3" width="5" height="18" rx="1" />
+                  <rect x="14" y="3" width="5" height="18" rx="1" />
+                </svg>
+                <span className={styles.ledLabel}>{waitingCount}</span>
+              </div>
+            )}
+            {totalSpeed > 0 && (
+              <div className={styles.ledGroup}>
+                <span className={styles.ledLabel}>
+                  {Math.round(totalSpeed)} {t("tok_s")}
+                </span>
+              </div>
+            )}
+            {sessions.length === 0 && (
+              <span className={styles.ledLabel}>{t("overlay.no_agents")}</span>
+            )}
+
+            {/* Collapse button — hides the overlay */}
+            <button
+              className={styles.collapseBtn}
+              onClick={handleContextMenu}
+              title={t("overlay.recall")}
+              aria-label={t("overlay.recall")}
+            >
+              <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4" />
+                <path d="M9 7L2 14" />
+                <path d="M2 10v4h4" />
+              </svg>
             </button>
           </div>
-
-          {mainBusyCount > 0 && (
-            <div className={styles.ledGroup}>
-              <span className={`${styles.led} ${styles.ledActive}`} />
-              <span className={styles.ledLabel}>
-                {mainBusyCount} {t("overlay.led_busy")}
-              </span>
-            </div>
-          )}
-          {subBusyCount > 0 && (
-            <div className={styles.ledGroup}>
-              <span className={`${styles.led} ${styles.ledSub}`} />
-              <span className={styles.ledLabel}>
-                {subBusyCount} {t("overlay.led_sub")}
-              </span>
-            </div>
-          )}
-          {waitingCount > 0 && (
-            <div className={styles.ledGroup}>
-              <span className={`${styles.led} ${styles.ledWaiting}`} />
-              <span className={styles.ledLabel}>
-                {waitingCount} {t("overlay.led_waiting")}
-              </span>
-            </div>
-          )}
-          {totalSpeed > 0 && (
-            <div className={styles.ledGroup}>
-              <span className={styles.ledLabel}>
-                {Math.round(totalSpeed)} {t("tok_s")}
-              </span>
-            </div>
-          )}
-          {sessions.length === 0 && (
-            <span className={styles.ledLabel}>{t("overlay.no_agents")}</span>
-          )}
-
-          {/* Drag handle icon — bottom right (visual indicator only, whole bar is draggable) */}
-          <div className={styles.dragHandle}>
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor" opacity="0.4">
-              <circle cx="6" cy="2" r="1" />
-              <circle cx="9" cy="2" r="1" />
-              <circle cx="3" cy="5" r="1" />
-              <circle cx="6" cy="5" r="1" />
-              <circle cx="9" cy="5" r="1" />
-              <circle cx="6" cy="8" r="1" />
-              <circle cx="9" cy="8" r="1" />
-            </svg>
-          </div>
-        </div>
-      </div>
+        }
+      >
+        {!faceHidden && (
+          <MascotErrorBoundary>
+            <MascotEyesCore onQuip={setQuipText} />
+          </MascotErrorBoundary>
+        )}
+      </RobotFrame>
     </div>
   );
 }

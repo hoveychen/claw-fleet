@@ -87,15 +87,34 @@ export function WaitingAlerts() {
 
   if (visible.length === 0) return null;
 
+  const MAX_STACK = 5;
+  const shown = visible.slice(0, MAX_STACK);
+  const overflowCount = visible.length - MAX_STACK;
+
   return (
     <div className={styles.overlay}>
-      {visible.map((alert) => (
-        <AlertCard
-          key={alert.sessionId}
-          alert={alert}
-          onDismiss={() => dismiss(alert.sessionId)}
-        />
-      ))}
+      <div className={styles.stack}>
+        {shown.map((alert, i) => (
+          <div
+            key={alert.sessionId}
+            className={styles.stack_layer}
+            style={{
+              zIndex: MAX_STACK - i,
+              transform: `translateY(${-i * 6}px) scale(${1 - i * 0.03})`,
+              opacity: i === 0 ? 1 : Math.max(0.4, 1 - i * 0.15),
+              pointerEvents: i === 0 ? "auto" : "none",
+            }}
+          >
+            <AlertCard
+              alert={alert}
+              onDismiss={() => dismiss(alert.sessionId)}
+            />
+          </div>
+        ))}
+        {overflowCount > 0 && (
+          <div className={styles.overflow_badge}>+{overflowCount}</div>
+        )}
+      </div>
     </div>
   );
 }

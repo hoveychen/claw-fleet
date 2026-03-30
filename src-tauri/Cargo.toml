@@ -1,6 +1,6 @@
 [package]
 name = "claude-fleet"
-version = "26.3.28-dev.1774688608"
+version = "26.3.30-dev.1774871787"
 description = "Claude Fleet - Monitor all Claude sessions"
 authors = ["hoveychen"]
 license = "AGPL-3.0-only"
@@ -43,7 +43,7 @@ tauri-plugin-store = "2.4.2"
 tauri-plugin-clipboard-manager = "2.3.2"
 zstd = "0.13"
 msedge-tts = "0.3"
-base64 = "0.22"
+rodio = { version = "0.19", default-features = false, features = ["mp3"] }
 
 [target.'cfg(not(windows))'.dependencies]
 openssl = { version = "0.10", features = ["vendored"] }

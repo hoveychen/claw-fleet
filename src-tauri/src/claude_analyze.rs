@@ -22,7 +22,7 @@ fn truncate_str(s: &str, max: usize) -> &str {
 
 use crate::log_debug;
 
-const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(30);
+const ANALYSIS_TIMEOUT: Duration = Duration::from_secs(60);
 const MAX_INPUT_CHARS: usize = 1000;
 
 /// All recognised outcome tags.  Keep in sync with the prompt and the
@@ -127,11 +127,12 @@ fn resolve_claude_path() -> Option<String> {
 ///
 /// This function blocks for up to [`ANALYSIS_TIMEOUT`] and should be called
 /// from a background thread.
-pub fn analyze_session_outcome(last_text: &str, locale: &str) -> Option<AnalysisResult> {
+pub fn analyze_session_outcome(last_text: &str, locale: &str, session_id: &str) -> Option<AnalysisResult> {
+    let sid = &session_id[..session_id.len().min(12)]; // short id for logs
     let claude_bin = match resolve_claude_path() {
         Some(p) => p,
         None => {
-            log_debug("[claude_analyze] claude CLI not found on PATH or common locations");
+            log_debug(&format!("[claude_analyze] [{sid}] claude CLI not found on PATH or common locations"));
             return None;
         }
     };
@@ -139,16 +140,24 @@ pub fn analyze_session_outcome(last_text: &str, locale: &str) -> Option<Analysis
     let truncated: String = last_text.chars().take(MAX_INPUT_CHARS).collect();
     let prompt = build_prompt(&truncated, locale);
 
-    let (tx, rx) = mpsc::channel();
+    let child = match Command::new(&claude_bin)
+        .args(["-p", &prompt, "--model", "haiku", "--no-session-persistence"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log_debug(&format!("[claude_analyze] [{sid}] failed to spawn claude: {e}"));
+            return None;
+        }
+    };
 
-    let prompt_clone = prompt.clone();
+    let (tx, rx) = mpsc::channel();
+    let child_id = child.id();
     std::thread::spawn(move || {
-        let result = Command::new(&claude_bin)
-            .args(["-p", &prompt_clone, "--model", "haiku", "--no-session-persistence"])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .stdin(Stdio::null())
-            .output();
+        let result = child.wait_with_output();
         let _ = tx.send(result);
     });
 
@@ -156,30 +165,34 @@ pub fn analyze_session_outcome(last_text: &str, locale: &str) -> Option<Analysis
         Ok(Ok(output)) if output.status.success() => output,
         Ok(Ok(output)) => {
             log_debug(&format!(
-                "[claude_analyze] claude -p exited with status {}",
+                "[claude_analyze] [{sid}] claude -p exited with status {}",
                 output.status
             ));
             return None;
         }
         Ok(Err(e)) => {
-            log_debug(&format!("[claude_analyze] failed to spawn claude: {e}"));
+            log_debug(&format!("[claude_analyze] [{sid}] wait error: {e}"));
             return None;
         }
         Err(_) => {
-            log_debug("[claude_analyze] timed out waiting for claude -p");
+            log_debug(&format!("[claude_analyze] [{sid}] timed out after {}s, killing child process (pid={})",
+                ANALYSIS_TIMEOUT.as_secs(), child_id));
+            unsafe {
+                libc::kill(child_id as i32, libc::SIGKILL);
+            }
             return None;
         }
     };
 
     let raw = String::from_utf8_lossy(&output.stdout).trim().to_string();
     log_debug(&format!(
-        "[claude_analyze] raw response (len={}): {:?}",
+        "[claude_analyze] [{sid}] raw response (len={}): {:?}",
         raw.len(),
         truncate_str(&raw, 200)
     ));
 
     if raw.is_empty() {
-        log_debug("[claude_analyze] empty response, returning None");
+        log_debug(&format!("[claude_analyze] [{sid}] empty response, returning None"));
         return None;
     }
 
@@ -188,8 +201,8 @@ pub fn analyze_session_outcome(last_text: &str, locale: &str) -> Option<Analysis
 
 /// Keep the old function signature as a thin wrapper for backward-compat
 /// callers (if any).
-pub fn analyze_waiting_input(last_text: &str, locale: &str) -> Option<String> {
-    let result = analyze_session_outcome(last_text, locale)?;
+pub fn analyze_waiting_input(last_text: &str, locale: &str, session_id: &str) -> Option<String> {
+    let result = analyze_session_outcome(last_text, locale, session_id)?;
     if result.tags.contains(&"needs_input".to_string()) {
         Some(result.summary.unwrap_or_else(|| "Waiting for input".to_string()))
     } else {
@@ -403,26 +416,36 @@ pub fn generate_mascot_quips(busy_titles: &[String], done_titles: &[String], loc
 
     let prompt = build_quip_prompt(busy_titles, done_titles, locale);
 
+    let child = match Command::new(&claude_bin)
+        .args([
+            "-p",
+            &prompt,
+            "--model",
+            "sonnet",
+            "--no-session-persistence",
+        ])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .stdin(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            log_debug(&format!("[mascot_quips] failed to spawn claude: {e}"));
+            return MascotQuips::default();
+        }
+    };
+
     let (tx, rx) = mpsc::channel();
-    let prompt_clone = prompt.clone();
+    let child_id = child.id();
     std::thread::spawn(move || {
-        let result = Command::new(&claude_bin)
-            .args([
-                "-p",
-                &prompt_clone,
-                "--model",
-                "sonnet",
-                "--no-session-persistence",
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .stdin(Stdio::null())
-            .output();
+        let result = child.wait_with_output();
         let _ = tx.send(result);
     });
 
-    // Sonnet is slower than Haiku — allow more time for quip generation
-    let quip_timeout = Duration::from_secs(60);
+    // Allow up to just under the frontend refresh interval (5 min) so the
+    // request has the best chance of completing before the next one fires.
+    let quip_timeout = Duration::from_secs(270);
     let output = match rx.recv_timeout(quip_timeout) {
         Ok(Ok(output)) if output.status.success() => output,
         Ok(Ok(output)) => {
@@ -433,11 +456,15 @@ pub fn generate_mascot_quips(busy_titles: &[String], done_titles: &[String], loc
             return MascotQuips::default();
         }
         Ok(Err(e)) => {
-            log_debug(&format!("[mascot_quips] failed to spawn claude: {e}"));
+            log_debug(&format!("[mascot_quips] wait error: {e}"));
             return MascotQuips::default();
         }
         Err(_) => {
-            log_debug("[mascot_quips] timed out");
+            log_debug("[mascot_quips] timed out, killing child process");
+            // Kill the child process to avoid leaking resources
+            unsafe {
+                libc::kill(child_id as i32, libc::SIGKILL);
+            }
             return MascotQuips::default();
         }
     };

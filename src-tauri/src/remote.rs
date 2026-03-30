@@ -321,6 +321,22 @@ impl crate::backend::Backend for RemoteBackend {
             name, enabled
         ))
     }
+
+    fn search_sessions(&self, query: &str, limit: usize) -> Vec<crate::search_index::SearchHit> {
+        let encoded_q = percent_encoding::utf8_percent_encode(query, percent_encoding::NON_ALPHANUMERIC).to_string();
+        self.probe
+            .get(&format!("/search?q={}&limit={}", encoded_q, limit))
+            .unwrap_or_default()
+    }
+
+    fn get_audit_events(&self) -> crate::audit::AuditSummary {
+        self.probe
+            .get("/audit")
+            .unwrap_or_else(|_| crate::audit::AuditSummary {
+                events: vec![],
+                total_sessions_scanned: 0,
+            })
+    }
 }
 
 // ── Progress event emitted to the frontend during connect ────────────────────
@@ -1019,7 +1035,7 @@ fn connect_remote_start_probe(
 
                         std::thread::spawn(move || {
                             let result = crate::claude_analyze::analyze_session_outcome(
-                                &last_text, &lang,
+                                &last_text, &lang, &session_id,
                             );
                             an.lock().unwrap().remove(&session_id);
 
@@ -1058,6 +1074,9 @@ fn connect_remote_start_probe(
                                         &app_bg, &display_name, &summary,
                                     );
                                 }
+
+                                // Play TTS from backend (blocks until done).
+                                crate::play_tts_for_notification(&app_bg, &summary);
                             }
                         });
                     } else if !is_waiting && was_waiting {

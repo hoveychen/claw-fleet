@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
+import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSessionsStore } from "../store";
+import { useSessionsStore, useOverlayStore } from "../store";
+import { getItem, setItem } from "../storage";
 import styles from "./Onboarding.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -33,6 +35,14 @@ type Issue =
   | "no_claude_at_all"
   | "not_logged_in"
   | "credentials_invalid";
+
+interface HookSetupPlan {
+  toAdd: string[];
+  hooksGloballyDisabled: boolean;
+  alreadyInstalled: boolean;
+}
+
+type NotificationMode = "all" | "user_action" | "none";
 
 // ── Confetti ─────────────────────────────────────────────────────────────────
 
@@ -370,6 +380,135 @@ function SourceSelectionCard({
   );
 }
 
+// ── Notification & mascot settings card ──────────────────────────────────
+
+function NotificationSettingsCard({
+  notifMode,
+  onNotifModeChange,
+  personalizedMascot,
+  onTogglePersonalizedMascot,
+  overlayEnabled,
+  onToggleOverlay,
+}: {
+  notifMode: NotificationMode;
+  onNotifModeChange: (mode: NotificationMode) => void;
+  personalizedMascot: boolean;
+  onTogglePersonalizedMascot: (enabled: boolean) => void;
+  overlayEnabled: boolean;
+  onToggleOverlay: (enabled: boolean) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className={`${styles.card} ${styles.card_info}`}>
+      <div className={styles.card_header}>
+        <span className={styles.card_icon}>&#x1F514;</span>
+        <span className={styles.card_title}>{t("onboarding.settings_notif.title")}</span>
+      </div>
+      <p className={styles.card_description}>{t("onboarding.settings_notif.description")}</p>
+
+      {/* Notification mode */}
+      <div className={styles.settings_group}>
+        <span className={styles.settings_label}>{t("settings.notification_mode")}</span>
+        {(["all", "user_action", "none"] as const).map((mode) => (
+          <label className={styles.radio_item} key={mode}>
+            <input
+              type="radio"
+              name="onboard-notif-mode"
+              checked={notifMode === mode}
+              onChange={() => onNotifModeChange(mode)}
+            />
+            <div>
+              <span className={styles.radio_title}>{t(`settings.notify_${mode}`)}</span>
+              <span className={styles.hint}>{t(`settings.notify_${mode}_desc`)}</span>
+            </div>
+          </label>
+        ))}
+      </div>
+
+      {/* Mascot & overlay */}
+      <div className={styles.settings_group}>
+        <span className={styles.settings_label}>{t("onboarding.settings_notif.mascot_title")}</span>
+        <label className={styles.toggle_item}>
+          <span>{t("settings.personalized_mascot")}</span>
+          <input
+            type="checkbox"
+            checked={personalizedMascot}
+            onChange={(e) => onTogglePersonalizedMascot(e.target.checked)}
+            className={styles.source_checkbox}
+          />
+        </label>
+        <span className={styles.hint}>{t("settings.personalized_mascot_desc")}</span>
+        <label className={styles.toggle_item}>
+          <span>{t("settings.overlay")}</span>
+          <input
+            type="checkbox"
+            checked={overlayEnabled}
+            onChange={(e) => onToggleOverlay(e.target.checked)}
+            className={styles.source_checkbox}
+          />
+        </label>
+        <span className={styles.hint}>{t("settings.overlay_desc")}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Hooks setup card ────────────────────────────────────────────────────
+
+function HooksSetupCard({
+  hooksPlan,
+  onInstall,
+  status,
+  errorMsg,
+}: {
+  hooksPlan: HookSetupPlan;
+  onInstall: () => void;
+  status: "idle" | "installing" | "success" | "error";
+  errorMsg: string;
+}) {
+  const { t } = useTranslation();
+
+  if (hooksPlan.alreadyInstalled || status === "success") {
+    return (
+      <div className={`${styles.card} ${styles.card_ok}`}>
+        <div className={styles.card_header}>
+          <span className={styles.card_icon}>&#x2705;</span>
+          <span className={styles.card_title}>{t("hooks.installed")}</span>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`${styles.card} ${styles.card_warn}`}>
+      <div className={styles.card_header}>
+        <span className={styles.card_icon}>&#x1FA9D;</span>
+        <span className={styles.card_title}>{t("onboarding.hooks_setup.title")}</span>
+      </div>
+      <p className={styles.card_description}>{t("onboarding.hooks_setup.description")}</p>
+      <div className={styles.hooks_actions}>
+        <button
+          className={styles.btn_primary}
+          onClick={onInstall}
+          disabled={status === "installing"}
+          style={{ padding: "8px 20px", fontSize: 12 }}
+        >
+          {status === "installing" ? t("account.loading") : t("hooks.install")}
+        </button>
+      </div>
+      {hooksPlan.hooksGloballyDisabled && (
+        <p className={styles.hint}>{t("onboarding.hooks_setup.disabled_warning")}</p>
+      )}
+      {status === "error" && (
+        <p className={styles.hint} style={{ color: "var(--color-error-fg)" }}>
+          {t("hooks.install_error", { error: errorMsg })}
+        </p>
+      )}
+    </div>
+  );
+}
+
 // ── Main Onboarding component ────────────────────────────────────────────────
 
 export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
@@ -397,6 +536,57 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
     } catch {
       // ignore
     }
+  }, []);
+
+  // ── Hooks state ────────────────────────────────────────────────────────
+  const [hooksPlan, setHooksPlan] = useState<HookSetupPlan | null>(null);
+  const [hooksStatus, setHooksStatus] = useState<"idle" | "installing" | "success" | "error">("idle");
+  const [hooksError, setHooksError] = useState("");
+
+  useEffect(() => {
+    invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+  }, []);
+
+  const handleInstallHooks = useCallback(async () => {
+    setHooksStatus("installing");
+    try {
+      await invoke("apply_hooks_setup");
+      setHooksStatus("success");
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      setHooksStatus("error");
+      setHooksError(String(e));
+    }
+  }, []);
+
+  // ── Notification state ──────────────────────────────────────────────────
+  const [notifMode, setNotifMode] = useState<NotificationMode>(
+    () => (getItem("notification-mode") as NotificationMode) || "user_action",
+  );
+
+  const handleNotifModeChange = useCallback((mode: NotificationMode) => {
+    setNotifMode(mode);
+    setItem("notification-mode", mode);
+    invoke("set_notification_mode", { mode }).catch(() => {});
+  }, []);
+
+  // Request notification permission on mount if not granted
+  useEffect(() => {
+    isPermissionGranted().then((granted) => {
+      if (!granted) requestPermission().catch(() => {});
+    }).catch(() => {});
+  }, []);
+
+  // ── Mascot & overlay state ──────────────────────────────────────────────
+  const [personalizedMascot, setPersonalizedMascot] = useState(
+    () => getItem("personalized-mascot") !== "false",
+  );
+  const overlayEnabled = useOverlayStore((s) => s.enabled);
+  const setOverlayEnabled = useOverlayStore((s) => s.setEnabled);
+
+  const handleTogglePersonalizedMascot = useCallback((enabled: boolean) => {
+    setPersonalizedMascot(enabled);
+    setItem("personalized-mascot", enabled ? "true" : "false");
   }, []);
 
   // Show source selection only when there are multiple source types detected
@@ -489,6 +679,12 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
   const noIssues = status && issues.length === 0;
   const showWaiting = noIssues && !status?.has_sessions && !celebrating;
 
+  // Show hooks setup when Claude Code is among the detected tools and hooks are not installed
+  const hasClaudeCode = status && (
+    status.cli_installed || status.detected_tools.cli || status.detected_tools.vscode || status.detected_tools.jetbrains
+  );
+  const showHooksSetup = hasClaudeCode && hooksPlan && !hooksPlan.alreadyInstalled && hooksStatus !== "success";
+
   return (
     <div className={styles.overlay}>
       <div className={styles.container}>
@@ -522,6 +718,27 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
                 {hasMultipleSources && sources.length > 0 && (
                   <div className={styles.cards}>
                     <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
+                  </div>
+                )}
+
+                {noIssues && (
+                  <div className={styles.cards}>
+                    <NotificationSettingsCard
+                      notifMode={notifMode}
+                      onNotifModeChange={handleNotifModeChange}
+                      personalizedMascot={personalizedMascot}
+                      onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
+                      overlayEnabled={overlayEnabled}
+                      onToggleOverlay={setOverlayEnabled}
+                    />
+                    {showHooksSetup && hooksPlan && (
+                      <HooksSetupCard
+                        hooksPlan={hooksPlan}
+                        onInstall={handleInstallHooks}
+                        status={hooksStatus}
+                        errorMsg={hooksError}
+                      />
+                    )}
                   </div>
                 )}
 

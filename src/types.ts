@@ -53,6 +53,13 @@ export type SessionOutcome =
   | "scheming"
   | "reporting";
 
+export interface SearchHit {
+  sessionId: string;
+  jsonlPath: string;
+  snippet: string;
+  rank: number;
+}
+
 export interface WaitingAlert {
   sessionId: string;
   workspaceName: string;
@@ -146,4 +153,26 @@ export interface RawMessage {
     stop_reason?: string | null;
     usage?: MessageUsage;
   };
+}
+
+// ── Security audit types ────────────────────────────────────────────────────
+
+export type AuditRiskLevel = "medium" | "high" | "critical";
+
+export interface AuditEvent {
+  sessionId: string;
+  workspaceName: string;
+  agentSource: string;
+  toolName: string;
+  commandSummary: string;
+  fullCommand: string;
+  riskLevel: AuditRiskLevel;
+  riskTags: string[];
+  timestamp: string;
+  jsonlPath: string;
+}
+
+export interface AuditSummary {
+  events: AuditEvent[];
+  totalSessionsScanned: number;
 }

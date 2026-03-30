@@ -206,6 +206,29 @@ enum Commands {
         #[arg(long)]
         token: String,
     },
+    /// Search session content (full-text search across all sessions)
+    Search {
+        /// Search query (supports multiple terms for AND matching)
+        query: Vec<String>,
+        /// Maximum number of results
+        #[arg(short, long, default_value = "20")]
+        limit: usize,
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Audit agent sessions for risky commands (network, file mutations, etc.)
+    Audit {
+        /// Filter by minimum risk level: medium, high, critical
+        #[arg(short = 'l', long, default_value = "medium")]
+        level: String,
+        /// Only show events for sessions matching this ID prefix or workspace name
+        #[arg(short, long)]
+        filter: Option<String>,
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage Fleet skill for AI coding tools
     Skill {
         #[command(subcommand)]
@@ -247,6 +270,8 @@ fn main() {
         Commands::Account { json } => cmd_account(json),
         Commands::Speed { json } => cmd_speed(json),
         Commands::Memory { file, json } => cmd_memory(file, json),
+        Commands::Search { query, limit, json } => cmd_search(&query.join(" "), limit, json),
+        Commands::Audit { level, filter, json } => cmd_audit(&level, filter.as_deref(), json),
         Commands::Serve { port, token } => cmd_serve(port, token),
         Commands::Skill { action } => match action {
             SkillCommands::Install => cmd_skill_install(),
@@ -911,13 +936,215 @@ fn cmd_memory(file: Option<String>, as_json: bool) {
     }
 }
 
+// ── fleet search ──────────────────────────────────────────────────────────────
+
+fn cmd_search(query: &str, limit: usize, as_json: bool) {
+    use claude_fleet_lib::search_index::SearchIndex;
+
+    if query.trim().is_empty() {
+        eprintln!("Error: search query cannot be empty");
+        std::process::exit(1);
+    }
+
+    // Ensure the search index is up-to-date with all current sessions.
+    let index = SearchIndex::open().unwrap_or_else(|e| {
+        eprintln!("Error: cannot open search index: {e}");
+        std::process::exit(1);
+    });
+
+    let sessions = load_sessions();
+    let pairs: Vec<(String, String)> = sessions
+        .iter()
+        .map(|s| (s.jsonl_path.clone(), s.id.clone()))
+        .collect();
+    index.index_batch(&pairs);
+
+    let hits = index.search(query, limit).unwrap_or_default();
+
+    if as_json {
+        println!("{}", serde_json::to_string_pretty(&hits).unwrap_or_default());
+        return;
+    }
+
+    if hits.is_empty() {
+        println!("No results for '{}'.", query);
+        return;
+    }
+
+    // Enrich hits with workspace name from sessions
+    let session_map: std::collections::HashMap<&str, &str> = sessions
+        .iter()
+        .map(|s| (s.id.as_str(), s.workspace_name.as_str()))
+        .collect();
+
+    let b = c_bold();
+    let r = c_reset();
+    let d = c_dim();
+
+    println!("{b}Search results for '{query}'{r} — {} hit(s)\n", hits.len());
+
+    for (i, hit) in hits.iter().enumerate() {
+        let ws = session_map
+            .get(hit.session_id.as_str())
+            .copied()
+            .unwrap_or("?");
+        let snippet = hit
+            .snippet
+            .replace("<mark>", &format!("{b}"))
+            .replace("</mark>", r);
+        println!(
+            "  {d}{}){r}  {b}{}{r}  {d}({}){r}",
+            i + 1,
+            ws,
+            short_id(&hit.session_id),
+        );
+        // Show first 2 lines of snippet, trimmed
+        for line in snippet.lines().take(2) {
+            let trimmed = line.trim();
+            if !trimmed.is_empty() {
+                println!("     {}", truncate(trimmed, 100));
+            }
+        }
+        println!();
+    }
+}
+
+// ── fleet audit ───────────────────────────────────────────────────────────────
+
+fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
+    use claude_fleet_lib::audit::{extract_audit_events, AuditRiskLevel};
+
+    let min = match min_level.to_lowercase().as_str() {
+        "medium" => AuditRiskLevel::Medium,
+        "high" => AuditRiskLevel::High,
+        "critical" => AuditRiskLevel::Critical,
+        other => {
+            eprintln!("Error: unknown risk level '{}'. Use: medium, high, critical", other);
+            std::process::exit(1);
+        }
+    };
+
+    let sessions = load_sessions();
+    let sources = build_sources();
+
+    // Optionally filter sessions
+    let filtered: Vec<&SessionInfo> = if let Some(needle) = filter {
+        let n = needle.to_lowercase();
+        sessions
+            .iter()
+            .filter(|s| {
+                s.id.starts_with(needle)
+                    || s.workspace_name.to_lowercase().contains(&n)
+            })
+            .collect()
+    } else {
+        // Default: non-idle sessions
+        sessions
+            .iter()
+            .filter(|s| !matches!(s.status, SessionStatus::Idle))
+            .collect()
+    };
+
+    let total = filtered.len();
+    let mut all_events = Vec::new();
+
+    for session in &filtered {
+        let path = &session.jsonl_path;
+        if let Some(source) = find_source_for_path(&sources, path) {
+            if let Ok(messages) = source.get_messages(path) {
+                let events = extract_audit_events(&messages, session);
+                all_events.extend(events);
+            }
+        }
+    }
+
+    // Filter by minimum risk level
+    all_events.retain(|e| e.risk_level >= min);
+    all_events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+
+    if as_json {
+        let summary = serde_json::json!({
+            "events": all_events,
+            "totalSessionsScanned": total,
+        });
+        println!("{}", serde_json::to_string_pretty(&summary).unwrap_or_default());
+        return;
+    }
+
+    if all_events.is_empty() {
+        println!(
+            "No risky commands found across {} session(s) (min level: {}).",
+            total, min_level
+        );
+        return;
+    }
+
+    let b = c_bold();
+    let r = c_reset();
+    let d = c_dim();
+
+    println!(
+        "{b}Audit{r} — {} event(s) across {} session(s)  {d}(min: {}){r}\n",
+        all_events.len(),
+        total,
+        min_level,
+    );
+
+    let risk_color = |level: &AuditRiskLevel| -> &'static str {
+        if !use_color() { return ""; }
+        match level {
+            AuditRiskLevel::Critical => "\x1b[31m", // red
+            AuditRiskLevel::High => "\x1b[33m",     // yellow
+            AuditRiskLevel::Medium => "\x1b[36m",   // cyan
+        }
+    };
+
+    let risk_label = |level: &AuditRiskLevel| -> &'static str {
+        match level {
+            AuditRiskLevel::Critical => "CRITICAL",
+            AuditRiskLevel::High => "HIGH",
+            AuditRiskLevel::Medium => "MEDIUM",
+        }
+    };
+
+    for event in &all_events {
+        let rc = risk_color(&event.risk_level);
+        let rl = risk_label(&event.risk_level);
+        let tags = event.risk_tags.join(", ");
+
+        println!(
+            "  {rc}{:<8}{r}  {b}{}{r}  {d}({}){r}  {d}[{}]{r}",
+            rl,
+            event.workspace_name,
+            short_id(&event.session_id),
+            tags,
+        );
+        println!("           {}", truncate(&event.command_summary, 90));
+        println!();
+    }
+}
+
 // ── fleet serve ────────────────────────────────────────────────────────────────
 
 fn cmd_serve(port: u16, token: String) {
     use std::io::{Read, Seek, SeekFrom};
     use percent_encoding::percent_decode_str;
+    use claude_fleet_lib::search_index::SearchIndex;
 
     let sources = build_sources();
+
+    // Open the full-text search index (stored on the remote host).
+    let search_index = {
+        let db_path = dirs::home_dir()
+            .expect("cannot determine home dir")
+            .join(".claude")
+            .join("fleet-search.db");
+        SearchIndex::open_at(&db_path).unwrap_or_else(|e| {
+            eprintln!("[fleet serve] search index open failed, retrying fresh: {e}");
+            let _ = std::fs::remove_file(&db_path);
+            SearchIndex::open_at(&db_path).expect("search index open failed twice")
+        })
+    };
 
     let addr = format!("127.0.0.1:{}", port);
     let server = tiny_http::Server::http(&addr).unwrap_or_else(|e| {
@@ -964,6 +1191,12 @@ fn cmd_serve(port: u16, token: String) {
 
             "/sessions" => {
                 let sessions = scan_all_sources(&sources);
+                // Incrementally update the search index with the latest session list.
+                let pairs: Vec<(String, String)> = sessions
+                    .iter()
+                    .map(|s| (s.jsonl_path.clone(), s.id.clone()))
+                    .collect();
+                search_index.index_batch(&pairs);
                 let body = serde_json::to_string(&sessions).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -1361,6 +1594,48 @@ fn cmd_serve(port: u16, token: String) {
                         );
                     }
                 }
+            }
+
+            "/search" => {
+                let q = query.get("q").cloned().unwrap_or_default();
+                let limit: usize = query
+                    .get("limit")
+                    .and_then(|s| s.parse().ok())
+                    .unwrap_or(50);
+                let hits = search_index.search(&q, limit).unwrap_or_default();
+                let body = serde_json::to_string(&hits).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/audit" => {
+                use claude_fleet_lib::audit::extract_audit_events;
+                let sessions = scan_all_sources(&sources);
+                let active: Vec<&SessionInfo> = sessions
+                    .iter()
+                    .filter(|s| !matches!(s.status, SessionStatus::Idle))
+                    .collect();
+                let total = active.len();
+                let mut all_events = Vec::new();
+                for session in &active {
+                    let path = &session.jsonl_path;
+                    if let Some(src) = find_source_for_path(&sources, path) {
+                        if let Ok(messages) = src.get_messages(path) {
+                            let events = extract_audit_events(&messages, session);
+                            all_events.extend(events);
+                        }
+                    }
+                }
+                all_events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
+                let summary = claude_fleet_lib::audit::AuditSummary {
+                    events: all_events,
+                    total_sessions_scanned: total,
+                };
+                let body = serde_json::to_string(&summary).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
             }
 
             _ => {

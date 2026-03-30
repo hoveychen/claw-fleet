@@ -1,5 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useState } from "react";
 import "./App.css";
 import { ConnectionDialog } from "./components/ConnectionDialog";
@@ -19,10 +20,21 @@ function App() {
   const { theme } = useUIStore();
   const { connection, setConnection, disconnect } = useConnectionStore();
 
+  const [isMacOS, setIsMacOS] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(() => {
     return !getItem(ONBOARDING_DISMISSED_KEY);
   });
   const [showWizard, setShowWizard] = useState(false);
+
+  useEffect(() => {
+    invoke<string>("get_platform").then((p) => {
+      if (p === "macos") {
+        setIsMacOS(true);
+        getCurrentWindow().setTitle("").catch(() => {});
+        document.documentElement.setAttribute("data-platform", "macos");
+      }
+    });
+  }, []);
 
   useEffect(() => {
     const unlisten = listen("switch-connection", () => {
@@ -82,7 +94,9 @@ function App() {
 
   useEffect(() => {
     const apply = () => {
-      document.documentElement.setAttribute("data-theme", resolveTheme(theme));
+      const resolved = resolveTheme(theme);
+      document.documentElement.setAttribute("data-theme", resolved);
+      getCurrentWindow().setTheme(resolved === "dark" ? "dark" : "light").catch(() => {});
     };
     apply();
 
@@ -117,6 +131,7 @@ function App() {
   if (!connection) {
     return (
       <div className="app">
+        {isMacOS && <div className="drag_bar" data-tauri-drag-region />}
         <ConnectionDialog onConnected={handleConnected} />
       </div>
     );
@@ -124,6 +139,7 @@ function App() {
 
   return (
     <div className="app">
+      {isMacOS && <div className="drag_bar" data-tauri-drag-region />}
       {showOnboarding && <Onboarding onDismiss={finishOnboarding} />}
       {showWizard && <Wizard onDone={dismissWizard} />}
       <SessionList />

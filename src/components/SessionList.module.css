@@ -21,6 +21,10 @@
   flex-shrink: 0;
 }
 
+:global([data-platform="macos"]) .header {
+  padding-top: 42px;
+}
+
 .app_icon {
   width: 22px;
   height: 22px;
@@ -212,58 +216,6 @@
   overflow: hidden;
   background: var(--color-bg);
   min-width: 0;
-}
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 10px 8px;
-  flex-shrink: 0;
-}
-
-.search {
-  flex: 1;
-  padding: 6px 10px;
-  border-radius: 6px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-input);
-  color: var(--color-text);
-  font-size: 12px;
-  outline: none;
-}
-
-.search:focus {
-  border-color: var(--color-accent);
-}
-
-.active_count {
-  font-size: 11px;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-}
-
-.toggle_btn {
-  padding: 3px 8px;
-  border-radius: 5px;
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
-  color: var(--color-text-dim);
-  font-size: 11px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.1s, color 0.1s;
-}
-
-.toggle_btn:hover {
-  background: var(--color-bg-card-hover);
-  color: var(--color-text);
-}
-
-.toggle_btn_active {
-  background: var(--color-accent);
-  color: #fff;
-  border-color: var(--color-accent);
 }
 
 .list {

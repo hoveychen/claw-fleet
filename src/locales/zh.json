@@ -34,6 +34,7 @@
   "switch_connection": "切换连接",
   "view_list": "列表",
   "view_gallery": "画廊",
+  "view_audit": "审计",
   "gallery_show_all": "全部显示",
   "gallery_show_active": "仅活跃",
   "gallery": {
@@ -109,13 +110,32 @@
     "loading": "加载中…",
     "no_skills": "未找到 Skill 文件。"
   },
+  "audit": {
+    "panel_title": "安全审计",
+    "scanning": "正在扫描会话…",
+    "no_events": "未发现非平凡操作。",
+    "all": "全部",
+    "refresh": "刷新",
+    "scanned": "已扫描 {{count}} 个会话",
+    "workspace": "工作区",
+    "source": "来源",
+    "time": "时间",
+    "tags": "标签",
+    "full_command": "完整命令",
+    "go_to_session": "跳转到会话"
+  },
   "memory": {
     "panel_title": "Memory",
     "loading": "\u52a0\u8f7d\u4e2d\u2026",
     "no_memories": "\u672a\u627e\u5230\u81ea\u52a8 Memory \u6587\u4ef6\u3002",
     "tab_content": "\u5185\u5bb9",
     "tab_history": "\u5386\u53f2",
-    "no_history": "\u672a\u5728\u4f1a\u8bdd\u65e5\u5fd7\u4e2d\u627e\u5230\u7f16\u8f91\u5386\u53f2\u3002"
+    "no_history": "\u672a\u5728\u4f1a\u8bdd\u65e5\u5fd7\u4e2d\u627e\u5230\u7f16\u8f91\u5386\u53f2\u3002",
+    "global_label": "(\u5168\u5c40)",
+    "promote": "\u79fb\u52a8\u5230 CLAUDE.md",
+    "promoting": "\u79fb\u52a8\u4e2d\u2026",
+    "promote_project": "\u9879\u76ee CLAUDE.md",
+    "promote_global": "\u5168\u5c40 CLAUDE.md (~/.claude)"
   },
   "chart": {
     "title": "Token 速度",
@@ -243,6 +263,16 @@
     "all_good": {
       "title": "一切就绪！",
       "description": "Claude Code 已安装，你已登录，会话正在被监控。"
+    },
+    "settings_notif": {
+      "title": "通知与小助手",
+      "description": "设置 Agent 等待时的通知方式，以及悬浮小助手偏好。你可以稍后在设置中修改。",
+      "mascot_title": "小助手"
+    },
+    "hooks_setup": {
+      "title": "推荐：安装 Fleet Hooks",
+      "description": "检测到你使用了 Claude Code，安装 Fleet Hooks 可以更准确地检测 Agent 状态（如工具执行、等待输入等）。Hooks 在后台异步运行，不会影响 Agent 性能。",
+      "disabled_warning": "注意：你的设置中 disableAllHooks 为 true，hooks 安装后不会生效。"
     },
     "copy_hint": "点击复制"
   },
@@ -843,6 +873,40 @@
     "notification_open_settings": "打开通知设置",
     "overlay": "悬浮小助手",
     "overlay_desc": "将小助手作为悬浮窗显示在所有窗口之上"
+  },
+  "connect_dialog": {
+    "title": "Claude Fleet",
+    "subtitle": "你的 AI 编程舰队指挥中心",
+    "local_title": "本地模式",
+    "local_desc": "监控本机上运行的 Claude Code 会话",
+    "connect_local": "开始使用",
+    "or_remote": "或通过 SSH 连接远程服务器",
+    "remote_title": "远程连接",
+    "saved_connections": "已保存的连接",
+    "add_new_remote": "+ 添加新的远程连接",
+    "new_connection": "新建连接",
+    "remote_connection": "远程连接",
+    "manual": "手动配置",
+    "ssh_config_profile": "SSH 配置文件",
+    "label_optional": "标签（可选）",
+    "label_placeholder": "例如：我的开发服务器",
+    "profile_name": "配置名称",
+    "host_ip": "主机 / IP",
+    "ssh_port": "SSH 端口",
+    "username": "用户名",
+    "identity_file": "密钥文件（可选）",
+    "jump_host": "跳板机（可选）",
+    "probe_port": "探测端口",
+    "browse": "浏览…",
+    "back_to_saved": "← 返回已保存",
+    "back": "← 返回",
+    "connecting": "连接中…",
+    "connect": "连接",
+    "retry": "重试",
+    "error_profile_required": "请输入 SSH 配置名称。",
+    "error_host_user_required": "主机和用户名为必填项。",
+    "select_identity_file": "选择 SSH 密钥文件",
+    "remove_saved": "删除已保存的连接"
   },
   "hooks": {
     "banner": "安装 Fleet Hooks 以获得更准确的状态检测",
