@@ -1,6 +1,6 @@
 [package]
 name = "claude-fleet"
-version = "26.3.31-dev.1774933095"
+version = "26.3.28-dev.1774688608"
 description = "Claude Fleet - Monitor all Claude sessions"
 authors = ["hoveychen"]
 license = "AGPL-3.0-only"

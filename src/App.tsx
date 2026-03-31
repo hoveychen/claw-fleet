@@ -92,6 +92,14 @@ function App() {
     }
   }, []);
 
+  // Sync user title to Rust backend on startup.
+  useEffect(() => {
+    const title = getItem("user-title");
+    if (title) {
+      invoke("set_user_title", { title }).catch(() => {});
+    }
+  }, []);
+
   useEffect(() => {
     const apply = () => {
       const resolved = resolveTheme(theme);

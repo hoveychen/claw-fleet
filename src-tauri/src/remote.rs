@@ -924,11 +924,12 @@ fn connect_remote_start_probe(
                         let an = analyzing.clone();
                         let app_bg = app2.clone();
                         let lang = locale.clone();
+                        let title = crate::local_backend::get_user_title(&app_bg);
                         let jsonl_path = sess.jsonl_path.clone();
 
                         std::thread::spawn(move || {
                             let result = crate::claude_analyze::analyze_session_outcome(
-                                &last_text, &lang, &session_id,
+                                &last_text, &lang, &session_id, &title,
                             );
                             an.lock().unwrap().remove(&session_id);
 

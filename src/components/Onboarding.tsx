@@ -389,6 +389,8 @@ function NotificationSettingsCard({
   onTogglePersonalizedMascot,
   overlayEnabled,
   onToggleOverlay,
+  userTitle,
+  onUserTitleChange,
 }: {
   notifMode: NotificationMode;
   onNotifModeChange: (mode: NotificationMode) => void;
@@ -396,6 +398,8 @@ function NotificationSettingsCard({
   onTogglePersonalizedMascot: (enabled: boolean) => void;
   overlayEnabled: boolean;
   onToggleOverlay: (enabled: boolean) => void;
+  userTitle: string;
+  onUserTitleChange: (title: string) => void;
 }) {
   const { t } = useTranslation();
 
@@ -424,6 +428,27 @@ function NotificationSettingsCard({
             </div>
           </label>
         ))}
+      </div>
+
+      {/* User title */}
+      <div className={styles.settings_group}>
+        <span className={styles.settings_label}>{t("settings.user_title")}</span>
+        <span className={styles.hint}>{t("settings.user_title_desc")}</span>
+        <input
+          type="text"
+          value={userTitle}
+          placeholder={t("settings.user_title_placeholder")}
+          onChange={(e) => onUserTitleChange(e.target.value)}
+          style={{
+            padding: "6px 10px",
+            borderRadius: 6,
+            border: "1px solid var(--color-border)",
+            background: "var(--color-bg-input, var(--color-bg))",
+            color: "var(--color-text)",
+            fontSize: 13,
+            width: 160,
+          }}
+        />
       </div>
 
       {/* Mascot & overlay */}
@@ -575,6 +600,15 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
     isPermissionGranted().then((granted) => {
       if (!granted) requestPermission().catch(() => {});
     }).catch(() => {});
+  }, []);
+
+  // ── User title state ────────────────────────────────────────────────────
+  const [userTitle, setUserTitle] = useState(() => getItem("user-title") || "");
+
+  const handleUserTitleChange = useCallback((title: string) => {
+    setUserTitle(title);
+    setItem("user-title", title);
+    invoke("set_user_title", { title }).catch(() => {});
   }, []);
 
   // ── Mascot & overlay state ──────────────────────────────────────────────
@@ -730,6 +764,8 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
                       onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
                       overlayEnabled={overlayEnabled}
                       onToggleOverlay={setOverlayEnabled}
+                      userTitle={userTitle}
+                      onUserTitleChange={handleUserTitleChange}
                     />
                     {showHooksSetup && hooksPlan && (
                       <HooksSetupCard

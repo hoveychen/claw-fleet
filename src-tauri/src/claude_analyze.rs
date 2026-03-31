@@ -71,12 +71,19 @@ pub struct AnalysisResult {
 
 // ── Prompt ──────────────────────────────────────────────────────────────────
 
-fn build_prompt(last_text: &str, locale: &str) -> String {
+fn build_prompt(last_text: &str, locale: &str, user_title: &str) -> String {
     let lang_instruction = match locale {
         "zh" => "Summary 部分用中文回复。",
         "ja" => "Summary 部分は日本語で回答してください。",
         "ko" => "Summary 부분은 한국어로 답변해 주세요.",
         _ => "Write the summary in English.",
+    };
+
+    // Determine the title to use in the prompt and examples.
+    let (title_en, title_zh) = if user_title.is_empty() {
+        ("Boss".to_string(), "老板".to_string())
+    } else {
+        (user_title.to_string(), user_title.to_string())
     };
 
     format!(
@@ -111,21 +118,23 @@ fn build_prompt(last_text: &str, locale: &str) -> String {
          Response format (exactly one line):\n\
          TAGS: tag1[,tag2] | SUMMARY: <one sentence under 80 chars>\n\
          \n\
-         The SUMMARY is ALWAYS required. Write it as if YOU are a loyal little fan reporting to your beloved boss (the user). \
-         Address the user directly — use \"你\" (Chinese) or \"you\" (English), NEVER refer to the user in third person. \
-         Tone: enthusiastic, slightly sycophantic, like an eager junior dev who adores their boss. \
-         Be brief, direct, and focused on what was done or what is needed from the boss. \
+         The SUMMARY is ALWAYS required. Write it as if YOU are a loyal little fan reporting to your beloved {title_en} (the user). \
+         Address the user as \"{title_zh}\" — NEVER refer to the user in third person. \
+         Tone: enthusiastic, slightly sycophantic, like an eager junior dev who adores their {title_en}. \
+         Be brief, direct, and focused on what was done or what is needed from {title_en}. \
          Describe what the assistant actually DID or what STATE it is in — do NOT let the tag choice influence the summary. \
          Read the text carefully: if the assistant says it already implemented something, say so. \
          Do NOT say \"asking\" or \"proposing\" when the work is already done.\n\
-         Examples: \"Login bug squashed, tests all green!\", \"Boss, need you to pick a database\", \
-         \"老板，登录bug搞定了，测试全过！\", \"老板，等你定一下用哪个数据库\", \
-         \"老板，原油价格概率分析搞定了！\", \"Boss, NCAA bracket predictions are ready!\"\n\
+         Examples: \"Login bug squashed, tests all green!\", \"{title_en}, need you to pick a database\", \
+         \"{title_zh}，登录bug搞定了，测试全过！\", \"{title_zh}，等你定一下用哪个数据库\", \
+         \"{title_zh}，原油价格概率分析搞定了！\", \"{title_en}, NCAA bracket predictions are ready!\"\n\
          \n\
          {lang_instruction}\n\
          \n\
          ---\n\
          {text}",
+        title_en = title_en,
+        title_zh = title_zh,
         lang_instruction = lang_instruction,
         text = last_text,
     )
@@ -144,7 +153,7 @@ fn resolve_claude_path() -> Option<String> {
 ///
 /// This function blocks for up to [`ANALYSIS_TIMEOUT`] and should be called
 /// from a background thread.
-pub fn analyze_session_outcome(last_text: &str, locale: &str, session_id: &str) -> Option<AnalysisResult> {
+pub fn analyze_session_outcome(last_text: &str, locale: &str, session_id: &str, user_title: &str) -> Option<AnalysisResult> {
     let sid = &session_id[..session_id.len().min(12)]; // short id for logs
     let claude_bin = match resolve_claude_path() {
         Some(p) => p,
@@ -155,7 +164,7 @@ pub fn analyze_session_outcome(last_text: &str, locale: &str, session_id: &str) 
     };
 
     let truncated: String = last_text.chars().take(MAX_INPUT_CHARS).collect();
-    let prompt = build_prompt(&truncated, locale);
+    let prompt = build_prompt(&truncated, locale, user_title);
 
     let child = match Command::new(&claude_bin)
         .args(["-p", &prompt, "--model", "haiku", "--no-session-persistence"])
@@ -216,8 +225,8 @@ pub fn analyze_session_outcome(last_text: &str, locale: &str, session_id: &str) 
 
 /// Keep the old function signature as a thin wrapper for backward-compat
 /// callers (if any).
-pub fn analyze_waiting_input(last_text: &str, locale: &str, session_id: &str) -> Option<String> {
-    let result = analyze_session_outcome(last_text, locale, session_id)?;
+pub fn analyze_waiting_input(last_text: &str, locale: &str, session_id: &str, user_title: &str) -> Option<String> {
+    let result = analyze_session_outcome(last_text, locale, session_id, user_title)?;
     if result.tags.contains(&"needs_input".to_string()) {
         Some(result.summary.unwrap_or_else(|| "Waiting for input".to_string()))
     } else {
@@ -644,23 +653,34 @@ mod tests {
 
     #[test]
     fn build_prompt_english() {
-        let p = build_prompt("some code output", "en");
+        let p = build_prompt("some code output", "en", "");
         assert!(p.contains("Write the summary in English"));
         assert!(p.contains("some code output"));
         assert!(p.contains("needs_input"));
+        // Default title when empty
+        assert!(p.contains("Boss"));
     }
 
     #[test]
     fn build_prompt_chinese() {
-        let p = build_prompt("代码输出", "zh");
+        let p = build_prompt("代码输出", "zh", "");
         assert!(p.contains("用中文回复"));
         assert!(p.contains("代码输出"));
+        assert!(p.contains("老板"));
     }
 
     #[test]
     fn build_prompt_japanese() {
-        let p = build_prompt("output", "ja");
+        let p = build_prompt("output", "ja", "");
         assert!(p.contains("日本語で"));
+    }
+
+    #[test]
+    fn build_prompt_custom_title() {
+        let p = build_prompt("some output", "zh", "大佬");
+        assert!(p.contains("大佬"));
+        assert!(!p.contains("老板"));
+        assert!(!p.contains("Boss"));
     }
 
     // ── build_quip_prompt tests ─────────────────────────────────────────────

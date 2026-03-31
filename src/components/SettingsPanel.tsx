@@ -177,6 +177,15 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     invoke("set_notification_mode", { mode: notifMode }).catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── User title state ───────────────────────────────────────────────────
+  const [userTitle, setUserTitle] = useState(() => getItem("user-title") || "");
+
+  const handleUserTitleChange = useCallback((title: string) => {
+    setUserTitle(title);
+    setItem("user-title", title);
+    invoke("set_user_title", { title }).catch(() => {});
+  }, []);
+
   // ── Personalized mascot state ──────────────────────────────────────────
   const [personalizedMascot, setPersonalizedMascot] = useState(
     () => getItem("personalized-mascot") !== "false",
@@ -246,6 +255,22 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.language")}</span>
                   <LanguageSwitcher />
+                </div>
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.user_title")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.user_title_desc")}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    className={styles.select}
+                    value={userTitle}
+                    placeholder={t("settings.user_title_placeholder")}
+                    onChange={(e) => handleUserTitleChange(e.target.value)}
+                    style={{ width: 120, textAlign: "center" }}
+                  />
                 </div>
                 <div className={styles.row}>
                   <div>

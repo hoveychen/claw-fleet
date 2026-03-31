@@ -60,27 +60,27 @@ Claude Fleet can monitor sessions from multiple AI coding agents:
 <table>
 <tr>
 <td width="50%"><strong>Gallery View</strong> — multi-agent dashboard</td>
-<td width="50%"><strong>List View</strong> — active & idle sessions</td>
+<td width="50%"><strong>Session Detail</strong> — multi-subagent hierarchy</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/01_gallery_view.png" alt="Gallery View" /></td>
-<td><img src="docs/screenshots/02_list_view.png" alt="List View" /></td>
+<td><img src="docs/screenshots/01_gallery.png" alt="Gallery View" /></td>
+<td><img src="docs/screenshots/02_session_detail.png" alt="Session Detail" /></td>
 </tr>
 <tr>
-<td><strong>Session Detail</strong> — conversation, thinking blocks & code</td>
-<td><strong>Settings</strong> — sources, hooks, appearance</td>
+<td><strong>Security Audit</strong> — tool-use risk scanning</td>
+<td><strong>Captain Octo</strong> — your AI fleet assistant</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/03_session_detail.png" alt="Session Detail" /></td>
-<td><img src="docs/screenshots/05_settings.png" alt="Settings" /></td>
+<td><img src="docs/screenshots/03_audit.png" alt="Audit View" /></td>
+<td><img src="docs/screenshots/04_mascot.png" alt="Mascot Assistant" /></td>
 </tr>
 <tr>
-<td><strong>Gallery + Detail Panel</strong></td>
-<td><strong>Light Theme</strong></td>
+<td><strong>Memory</strong> — cross-session knowledge</td>
+<td><strong>Notifications</strong> — waiting & audit alerts</td>
 </tr>
 <tr>
-<td><img src="docs/screenshots/04_gallery_with_detail.png" alt="Gallery with Detail" /></td>
-<td><img src="docs/screenshots/06_light_theme.png" alt="Light Theme" /></td>
+<td><img src="docs/screenshots/05_memory.png" alt="Memory Panel" /></td>
+<td><img src="docs/screenshots/06_notifications.png" alt="Notifications" /></td>
 </tr>
 </table>
 

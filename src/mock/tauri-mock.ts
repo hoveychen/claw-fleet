@@ -24,6 +24,7 @@ import {
   MOCK_DETECTED_TOOLS,
   MOCK_WAITING_ALERTS,
   MOCK_SKILL_HISTORY,
+  MOCK_AUDIT_SUMMARY,
   getMessagesForSession,
 } from "./data";
 
@@ -72,6 +73,8 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "connect_remote":
       return null;
 
+    case "list_skills":
+      return [];
     case "get_platform":
       return "macos";
     case "get_waiting_alerts":
@@ -111,6 +114,8 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       const sess = currentSessions.find((s) => s.jsonlPath === jp);
       return MOCK_SKILL_HISTORY[sess?.id ?? ""] ?? [];
     }
+    case "get_audit_events":
+      return MOCK_AUDIT_SUMMARY;
     case "detect_ai_tools":
       return MOCK_DETECTED_TOOLS;
     case "get_log_path":
@@ -138,6 +143,11 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
           "Nice work on that last task!",
         ],
       };
+
+    // Window plugin
+    case "plugin:window|set_theme":
+    case "plugin:window|set_title":
+      return null;
 
     // Store plugin — must match expected return types
     case "plugin:store|load":

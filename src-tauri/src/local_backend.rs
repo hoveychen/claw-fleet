@@ -892,12 +892,13 @@ fn detect_waiting_transitions(
             let an = analyzing.clone();
             let app_bg = app.clone();
             let lang = locale.lock().unwrap().clone();
+            let title = get_user_title(&app_bg);
 
             std::thread::spawn(move || {
                 let analysis_text = extract_last_assistant_text(&jsonl_path, 1000)
                     .unwrap_or(last_text);
 
-                let result = crate::claude_analyze::analyze_session_outcome(&analysis_text, &lang, &session_id);
+                let result = crate::claude_analyze::analyze_session_outcome(&analysis_text, &lang, &session_id, &title);
                 an.lock().unwrap().remove(&session_id);
 
                 // Always store outcome tags for the mascot.
@@ -1033,6 +1034,14 @@ pub(crate) fn get_notification_mode(app: &AppHandle) -> String {
     app.try_state::<crate::AppState>()
         .map(|s| s.notification_mode.lock().unwrap().clone())
         .unwrap_or_else(|| "user_action".to_string())
+}
+
+/// Read the current user title from AppState (empty string = default "老板"/"Boss").
+pub(crate) fn get_user_title(app: &AppHandle) -> String {
+    use tauri::Manager;
+    app.try_state::<crate::AppState>()
+        .map(|s| s.user_title.lock().unwrap().clone())
+        .unwrap_or_default()
 }
 
 pub(crate) fn send_os_notification(app: &AppHandle, title: &str, body: &str) {

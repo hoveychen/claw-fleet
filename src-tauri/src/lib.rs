@@ -459,6 +459,16 @@ fn set_notification_mode(mode: String, state: tauri::State<AppState>) {
 }
 
 #[tauri::command]
+fn get_user_title(state: tauri::State<AppState>) -> String {
+    state.user_title.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn set_user_title(title: String, state: tauri::State<AppState>) {
+    *state.user_title.lock().unwrap() = title;
+}
+
+#[tauri::command]
 fn open_notification_settings() {
     #[cfg(target_os = "macos")]
     {
@@ -719,6 +729,8 @@ pub struct AppState {
     pub locale: Arc<Mutex<String>>,
     /// Notification mode: "all" | "user_action" | "none".
     pub notification_mode: Arc<Mutex<String>>,
+    /// How the assistant addresses the user (default "老板" / "Boss").
+    pub user_title: Arc<Mutex<String>>,
     /// Cached sessions for tray menu rebuilds.
     pub cached_sessions: Arc<Mutex<Vec<SessionInfo>>>,
     /// Cached per-source usage summaries for tray menu display.
@@ -1489,6 +1501,7 @@ pub fn run() {
             backend: Arc::new(Mutex::new(Box::new(backend::NullBackend) as Box<dyn Backend>)),
             locale: Arc::new(Mutex::new("en".to_string())),
             notification_mode: Arc::new(Mutex::new("user_action".to_string())),
+            user_title: Arc::new(Mutex::new(String::new())),
             cached_sessions: Arc::new(Mutex::new(Vec::new())),
             cached_usage: Arc::new(Mutex::new(Vec::new())),
             tray_fingerprint: Arc::new(Mutex::new(0)),
@@ -1697,6 +1710,8 @@ pub fn run() {
             restart_app,
             get_notification_mode,
             set_notification_mode,
+            get_user_title,
+            set_user_title,
             open_notification_settings,
             toggle_overlay,
             center_overlay,
