@@ -583,8 +583,8 @@ fn path_matches_memory(file_path: &str, target_path: &str, target_name: &str) ->
 ///
 /// The encoding replaces `/` with `-`, but directory names themselves may
 /// contain `-`.  We greedily match the longest existing directory at each
-/// level so that e.g. `-Users-hoveychen-workspace-claude-fleet` correctly
-/// resolves to `/Users/hoveychen/workspace/claude-fleet` instead of the
+/// level so that e.g. `-Users-hoveychen-workspace-claw-fleet` correctly
+/// resolves to `/Users/hoveychen/workspace/claw-fleet` instead of the
 /// incorrect `/Users/hoveychen/workspace/claude/fleet`.
 fn decode_project_key(encoded: &str) -> String {
     let stripped = encoded.trim_start_matches('-');

@@ -1,5 +1,5 @@
 {
-  "title": "Claude Fleet",
+  "title": "Claw Fleet",
   "filter_placeholder": "Filter sessions…",
   "active": "Active",
   "recent": "Recent",
@@ -86,7 +86,7 @@
     "cli_installed": "Installed at {{path}}",
     "ai_btn": "Let AI Use Fleet",
     "ai_btn_hint": "Teach your AI assistant to use Fleet CLI to monitor Claude Code agents",
-    "ai_modal_title": "Let AI Use Claude Fleet",
+    "ai_modal_title": "Let AI Use Claw Fleet",
     "ai_modal_desc": "Two steps to let your AI assistant (Claude Code, Cursor, etc.) monitor and manage Claude Code agents using Fleet.",
     "ai_step1_title": "Make fleet available in PATH",
     "ai_step1_desc": "The fleet CLI must be in PATH so AI can run it in the terminal.",
@@ -167,6 +167,11 @@
   "stop_session_imprecise": "Stop all sessions in this workspace (imprecise PID match — multiple claude processes share this workspace)",
   "cancel": "Cancel",
   "confirm": "Confirm",
+  "update": {
+    "available": "New version {{version}} is available!",
+    "update_now": "Update Now",
+    "later": "Later"
+  },
   "stop_confirm": "Stop session in {{name}}?",
   "stop_imprecise_confirm": "Multiple Claude processes share workspace \"{{workspace}}\" and cannot be individually targeted.\n\nThis will stop ALL Claude agents in this workspace. Continue?",
   "card": {
@@ -183,15 +188,15 @@
     "tip_context": "Context window usage: {{percent}}%"
   },
   "onboarding": {
-    "welcome": "Welcome to Claude Fleet",
-    "subtitle": "Monitor all your Claude Code sessions in one place",
+    "welcome": "Welcome to Claw Fleet",
+    "subtitle": "Monitor your AI coding agents, get daily AI summaries, and turn mistakes into knowledge",
     "checking": "Checking setup...",
     "skip": "Skip",
     "dismiss": "Got it, let's go",
     "recheck": "Re-check",
     "no_claude_at_all": {
       "title": "Claude Code not detected",
-      "description": "Claude Fleet monitors Claude Code sessions. No CLI, IDE extension, or prior sessions were found on this machine.",
+      "description": "Claw Fleet monitors Claude Code sessions. No CLI, IDE extension, or prior sessions were found on this machine.",
       "install_vscode": "Install VS Code extension",
       "install_vscode_hint": "Search for \"Claude Code\" in the VS Code Extensions marketplace, or install via the Anthropic website."
     },
@@ -200,7 +205,7 @@
       "install_npm_cmd": "npm install -g @anthropic-ai/claude-code",
       "install_brew": "Install CLI via Homebrew (macOS)",
       "install_brew_cmd": "brew install claude-code",
-      "after_install": "After installation, restart Claude Fleet or click Re-check."
+      "after_install": "After installation, restart Claw Fleet or click Re-check."
     },
     "cli_not_in_path": {
       "title": "CLI not in PATH (optional)",
@@ -209,7 +214,7 @@
     },
     "not_logged_in": {
       "title": "Not logged in to Claude",
-      "description": "Claude Fleet needs your Claude credentials to display account info and usage. Choose your tool below for login instructions.",
+      "description": "Claw Fleet needs your Claude credentials to display account info and usage. Choose your tool below for login instructions.",
       "api_key": "Using an API key?",
       "api_key_hint": "If you use an API key instead of OAuth, account info won't be available, but session monitoring still works."
     },
@@ -253,7 +258,7 @@
     },
     "celebration": {
       "title": "First session detected!",
-      "description": "Congratulations! Claude Fleet is now monitoring your sessions. Enjoy the dashboard!"
+      "description": "Congratulations! Claw Fleet is now monitoring your sessions. Enjoy the dashboard!"
     },
     "sources": {
       "title": "Agent Sources",
@@ -265,10 +270,29 @@
       "title": "All set!",
       "description": "Claude Code is installed, you're logged in, and sessions are being monitored."
     },
+    "features": {
+      "title": "What you can do",
+      "description": "Claw Fleet is more than a session monitor — here's what's waiting for you.",
+      "ai_summary_title": "AI Daily Summaries",
+      "ai_summary_desc": "Auto-generated narrative of what your agents accomplished each day. Copy as Markdown for standups.",
+      "lessons_title": "Lessons Learned",
+      "lessons_desc": "AI extracts mistakes from session logs and turns them into CLAUDE.md rules — your fleet gets smarter over time.",
+      "live_status_title": "Live Status Dashboard",
+      "live_status_desc": "8 real-time statuses with parent-child agent hierarchies. Kill stuck agents from the dashboard.",
+      "audit_title": "Security Audit",
+      "audit_desc": "Every shell command scanned and risk-classified. Catch dangerous operations before they become incidents.",
+      "memory_title": "Memory Browser",
+      "memory_desc": "All CLAUDE.md files and memory entries across projects, browsable in one place."
+    },
+    "settings_appearance": {
+      "title": "Appearance",
+      "description": "Choose your preferred theme and language. You can change these later in Settings."
+    },
     "settings_notif": {
       "title": "Notifications & Assistant",
       "description": "Configure how you get notified when agents are waiting, and set your floating assistant preferences. You can change these later in Settings.",
-      "mascot_title": "Assistant"
+      "mascot_title": "Assistant",
+      "sound_title": "Alert Sound"
     },
     "hooks_setup": {
       "title": "Recommended: Install Fleet Hooks",
@@ -814,7 +838,10 @@
   "settings": {
     "title": "Settings",
     "close": "Close",
+    "general": "General",
     "appearance": "Appearance",
+    "profile": "Profile",
+    "sound": "Sound",
     "theme": "Theme",
     "language": "Language",
     "connection": "Connection",
@@ -876,10 +903,12 @@
     "notification_denied": "Disabled — notifications will not be shown",
     "notification_open_settings": "Open Notification Settings",
     "overlay": "Floating assistant",
-    "overlay_desc": "Show the assistant as a floating overlay on top of all windows"
+    "overlay_desc": "Show the assistant as a floating overlay on top of all windows",
+    "auto_update_check": "Automatic update check",
+    "auto_update_check_desc": "Check for new versions once a day and show a notification when an update is available"
   },
   "connect_dialog": {
-    "title": "Claude Fleet",
+    "title": "Claw Fleet",
     "subtitle": "Your AI coding fleet command center",
     "local_title": "Local Mode",
     "local_desc": "Monitor Claude Code sessions running on this machine",
@@ -921,5 +950,42 @@
     "confirm_body_disabled_warning": "\n\nNote: \"disableAllHooks\" is currently set to true in your settings. Hooks will not work until this is changed.",
     "installed": "Fleet hooks installed successfully",
     "install_error": "Failed to install hooks: {{error}}"
+  },
+  "view_report": "Report",
+  "report": {
+    "loading": "Loading report...",
+    "no_report": "No report for this date.",
+    "generate": "Generate Report",
+    "total_tokens": "Total Tokens",
+    "sessions": "Sessions",
+    "subagents": "subagents",
+    "tool_calls": "Tool Calls",
+    "tool_types": "types",
+    "projects": "Projects",
+    "sources": "sources",
+    "contributions": "Contributions",
+    "tokens": "Tokens",
+    "sessions_label": "Sessions",
+    "less": "Less",
+    "more": "More",
+    "no_data": "No data",
+    "tool_breakdown": "Tool Call Distribution",
+    "hourly_activity": "Hourly Activity",
+    "project_breakdown": "Projects",
+    "ai_summary": "AI Summary",
+    "no_summary": "AI summary not yet generated.",
+    "generate_summary": "Generate AI Summary",
+    "generating": "Generating...",
+    "copy_markdown": "Copy as Markdown",
+    "share": "Copy Markdown",
+    "lessons": "Lessons Learned",
+    "no_lessons": "Lessons not yet generated.",
+    "no_lessons_found": "No AI mistakes found in this day's sessions.",
+    "generate_lessons": "Generate Lessons",
+    "add_to_claude_md": "Add to CLAUDE.md",
+    "lesson_added": "Added",
+    "tab_insights": "Insights",
+    "tab_daily": "Daily Report",
+    "no_insights": "No insights yet. Reports will appear here as data is collected."
   }
 }

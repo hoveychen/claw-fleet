@@ -11,6 +11,7 @@ use serde_json::Value;
 
 use crate::account::AccountInfo;
 use crate::audit::AuditSummary;
+use crate::daily_report::{DailyReport, DailyReportStats, Lesson};
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::search_index::SearchHit;
 use crate::session::SessionInfo;
@@ -259,6 +260,14 @@ pub trait Backend: Send + Sync {
 
     // ── Security audit ──────────────────────────────────────────────────────
     fn get_audit_events(&self) -> AuditSummary;
+
+    // ── Daily reports ────────────────────────────────────────────────────────
+    fn get_daily_report(&self, date: &str) -> Result<Option<DailyReport>, String>;
+    fn list_daily_report_stats(&self, from: &str, to: &str) -> Vec<DailyReportStats>;
+    fn generate_daily_report(&self, date: &str) -> Result<DailyReport, String>;
+    fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String>;
+    fn generate_daily_report_lessons(&self, date: &str) -> Result<Vec<Lesson>, String>;
+    fn append_lesson_to_claude_md(&self, lesson: &Lesson) -> Result<(), String>;
 }
 
 // ── Shared watch state ───────────────────────────────────────────────────────
@@ -381,6 +390,24 @@ impl Backend for NullBackend {
     }
     fn get_audit_events(&self) -> AuditSummary {
         AuditSummary { events: vec![], total_sessions_scanned: 0 }
+    }
+    fn get_daily_report(&self, _: &str) -> Result<Option<DailyReport>, String> {
+        Err("backend not ready".into())
+    }
+    fn list_daily_report_stats(&self, _: &str, _: &str) -> Vec<DailyReportStats> {
+        vec![]
+    }
+    fn generate_daily_report(&self, _: &str) -> Result<DailyReport, String> {
+        Err("backend not ready".into())
+    }
+    fn generate_daily_report_ai_summary(&self, _: &str) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
+    fn generate_daily_report_lessons(&self, _: &str) -> Result<Vec<Lesson>, String> {
+        Err("backend not ready".into())
+    }
+    fn append_lesson_to_claude_md(&self, _: &Lesson) -> Result<(), String> {
+        Err("backend not ready".into())
     }
 }
 

@@ -4,20 +4,21 @@
  * statuses, and workspaces to showcase all core features.
  */
 
-import type { AuditEvent, AuditSummary, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
+import type { AuditEvent, AuditSummary, DailyReport, DailyReportStats, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
 
 const NOW = Date.now();
 const MIN = 60_000;
 const HOUR = 3_600_000;
+const DAY = 24 * HOUR;
 
 // ── Sessions ────────────────────────────────────────────────────────────────
 
 export const MOCK_SESSIONS: SessionInfo[] = [
-  // ── 1. Active main session: "claude-fleet" (this project) — thinking ──
+  // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
   {
     id: "sess-fleet-main",
-    workspacePath: "/Users/demo/workspace/claude-fleet",
-    workspaceName: "claude-fleet",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
     ideName: "VS Code",
     isSubagent: false,
     parentSessionId: null,
@@ -31,7 +32,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastMessagePreview: "Creating mock data module with realistic sessions...",
     lastActivityMs: NOW - 5000,
     createdAtMs: NOW - 25 * MIN,
-    jsonlPath: "/Users/demo/.claude/projects/claude-fleet/sess-fleet-main.jsonl",
+    jsonlPath: "/Users/demo/.claude/projects/claw-fleet/sess-fleet-main.jsonl",
     model: "claude-opus-4-20250805",
     thinkingLevel: null,
     pid: 12345,
@@ -41,11 +42,11 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     agentSource: "claude-code",
     lastOutcome: ["feature_added"],
   },
-  // Subagent: Explore agent for claude-fleet
+  // Subagent: Explore agent for claw-fleet
   {
     id: "sess-fleet-explore",
-    workspacePath: "/Users/demo/workspace/claude-fleet",
-    workspaceName: "claude-fleet",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
     ideName: "VS Code",
     isSubagent: true,
     parentSessionId: "sess-fleet-main",
@@ -59,7 +60,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastMessagePreview: "Searching for component files...",
     lastActivityMs: NOW - 2000,
     createdAtMs: NOW - 10 * MIN,
-    jsonlPath: "/Users/demo/.claude/projects/claude-fleet/sess-fleet-explore.jsonl",
+    jsonlPath: "/Users/demo/.claude/projects/claw-fleet/sess-fleet-explore.jsonl",
     model: "claude-sonnet-4-20250514",
     thinkingLevel: "medium",
     pid: 12346,
@@ -69,11 +70,11 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     agentSource: "claude-code",
     lastOutcome: null,
   },
-  // Subagent: General-purpose agent for claude-fleet
+  // Subagent: General-purpose agent for claw-fleet
   {
     id: "sess-fleet-gp",
-    workspacePath: "/Users/demo/workspace/claude-fleet",
-    workspaceName: "claude-fleet",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
     ideName: "VS Code",
     isSubagent: true,
     parentSessionId: "sess-fleet-main",
@@ -87,7 +88,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastMessagePreview: "Writing src/mock/data.ts...",
     lastActivityMs: NOW - 1000,
     createdAtMs: NOW - 8 * MIN,
-    jsonlPath: "/Users/demo/.claude/projects/claude-fleet/sess-fleet-gp.jsonl",
+    jsonlPath: "/Users/demo/.claude/projects/claw-fleet/sess-fleet-gp.jsonl",
     model: "claude-opus-4-20250805",
     thinkingLevel: null,
     pid: 12347,
@@ -98,11 +99,11 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastOutcome: null,
   },
 
-  // Subagent: Test runner for claude-fleet
+  // Subagent: Test runner for claw-fleet
   {
     id: "sess-fleet-test",
-    workspacePath: "/Users/demo/workspace/claude-fleet",
-    workspaceName: "claude-fleet",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
     ideName: "VS Code",
     isSubagent: true,
     parentSessionId: "sess-fleet-main",
@@ -116,7 +117,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastMessagePreview: "Running vitest suite...",
     lastActivityMs: NOW - 800,
     createdAtMs: NOW - 6 * MIN,
-    jsonlPath: "/Users/demo/.claude/projects/claude-fleet/sess-fleet-test.jsonl",
+    jsonlPath: "/Users/demo/.claude/projects/claw-fleet/sess-fleet-test.jsonl",
     model: "claude-sonnet-4-20250514",
     thinkingLevel: null,
     pid: 12348,
@@ -126,11 +127,11 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     agentSource: "claude-code",
     lastOutcome: null,
   },
-  // Subagent: Code reviewer for claude-fleet
+  // Subagent: Code reviewer for claw-fleet
   {
     id: "sess-fleet-review",
-    workspacePath: "/Users/demo/workspace/claude-fleet",
-    workspaceName: "claude-fleet",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
     ideName: "VS Code",
     isSubagent: true,
     parentSessionId: "sess-fleet-main",
@@ -144,7 +145,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     lastMessagePreview: "Analyzing diff for potential issues...",
     lastActivityMs: NOW - 1500,
     createdAtMs: NOW - 5 * MIN,
-    jsonlPath: "/Users/demo/.claude/projects/claude-fleet/sess-fleet-review.jsonl",
+    jsonlPath: "/Users/demo/.claude/projects/claw-fleet/sess-fleet-review.jsonl",
     model: "claude-opus-4-20250805",
     thinkingLevel: null,
     pid: 12349,
@@ -476,7 +477,7 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
             type: "tool_use",
             id: "tool-2",
             name: "Write",
-            input: { file_path: "/Users/demo/workspace/claude-fleet/src/mock/data.ts", content: "// Mock data..." },
+            input: { file_path: "/Users/demo/workspace/claw-fleet/src/mock/data.ts", content: "// Mock data..." },
           },
         ],
         stop_reason: "tool_use",
@@ -741,13 +742,13 @@ export const MOCK_OPENCLAW_ACCOUNT = {
 
 export const MOCK_MEMORIES = [
   {
-    workspaceName: "claude-fleet",
-    workspacePath: "/Users/demo/workspace/claude-fleet",
-    projectKey: "claude-fleet-key",
+    workspaceName: "claw-fleet",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    projectKey: "claw-fleet-key",
     hasClaudeMd: true,
     files: [
-      { name: "MEMORY.md", path: "/Users/demo/.claude/projects/claude-fleet/memory/MEMORY.md", sizeBytes: 1240, modifiedMs: NOW - 2 * HOUR },
-      { name: "feedback_backend_sync.md", path: "/Users/demo/.claude/projects/claude-fleet/memory/feedback_backend_sync.md", sizeBytes: 890, modifiedMs: NOW - 24 * HOUR },
+      { name: "MEMORY.md", path: "/Users/demo/.claude/projects/claw-fleet/memory/MEMORY.md", sizeBytes: 1240, modifiedMs: NOW - 2 * HOUR },
+      { name: "feedback_backend_sync.md", path: "/Users/demo/.claude/projects/claw-fleet/memory/feedback_backend_sync.md", sizeBytes: 890, modifiedMs: NOW - 24 * HOUR },
     ],
   },
   {
@@ -796,7 +797,7 @@ All new features must implement both LocalBackend and RemoteBackend (plus fleet 
 export const MOCK_MEMORY_HISTORY = [
   {
     sessionId: "sess-fleet-main",
-    workspaceName: "claude-fleet",
+    workspaceName: "claw-fleet",
     timestamp: new Date(NOW - 24 * HOUR).toISOString(),
     tool: "Write",
     detail: {
@@ -861,7 +862,7 @@ export const MOCK_AUDIT_EVENTS: AuditEvent[] = [
   },
   {
     sessionId: "sess-fleet-main",
-    workspaceName: "claude-fleet",
+    workspaceName: "claw-fleet",
     agentSource: "claude-code",
     toolName: "Bash",
     commandSummary: "git push --force origin main",
@@ -869,7 +870,7 @@ export const MOCK_AUDIT_EVENTS: AuditEvent[] = [
     riskLevel: "high",
     riskTags: ["force-push", "main-branch", "destructive"],
     timestamp: new Date(NOW - 18 * MIN).toISOString(),
-    jsonlPath: "/Users/demo/.claude/projects/claude-fleet/sess-fleet-main.jsonl",
+    jsonlPath: "/Users/demo/.claude/projects/claw-fleet/sess-fleet-main.jsonl",
   },
   {
     sessionId: "sess-web-waiting",
@@ -885,15 +886,15 @@ export const MOCK_AUDIT_EVENTS: AuditEvent[] = [
   },
   {
     sessionId: "sess-fleet-main",
-    workspaceName: "claude-fleet",
+    workspaceName: "claw-fleet",
     agentSource: "claude-code",
     toolName: "Write",
     commandSummary: "Write .env with API keys",
-    fullCommand: "Write to /Users/demo/workspace/claude-fleet/.env\nANTHROPIC_API_KEY=sk-ant-***\nSTRIPE_SECRET=sk_live_***",
+    fullCommand: "Write to /Users/demo/workspace/claw-fleet/.env\nANTHROPIC_API_KEY=sk-ant-***\nSTRIPE_SECRET=sk_live_***",
     riskLevel: "critical",
     riskTags: ["secrets", "env-file", "api-keys"],
     timestamp: new Date(NOW - 5 * MIN).toISOString(),
-    jsonlPath: "/Users/demo/.claude/projects/claude-fleet/sess-fleet-main.jsonl",
+    jsonlPath: "/Users/demo/.claude/projects/claw-fleet/sess-fleet-main.jsonl",
   },
   {
     sessionId: "sess-codex-pipeline",
@@ -970,3 +971,319 @@ export const MOCK_DETECTED_TOOLS = [
   { name: "OpenClaw", path: "/usr/local/bin/openclaw", version: "0.4.2" },
   { name: "Codex", path: "/usr/local/bin/codex", version: "0.1.5" },
 ];
+
+// ── Daily Report ───────────────────────────────────────────────────────────
+
+function dateStr(daysAgo: number): string {
+  const d = new Date(NOW - daysAgo * DAY);
+  return d.toISOString().slice(0, 10);
+}
+
+const YESTERDAY = dateStr(1);
+
+export const MOCK_DAILY_REPORT: DailyReport = {
+  date: YESTERDAY,
+  timezone: "America/Los_Angeles",
+  generatedAt: NOW - 2 * HOUR,
+  sessionIds: [
+    "sess-fleet-main", "sess-fleet-explore", "sess-fleet-gp", "sess-fleet-test", "sess-fleet-review",
+    "sess-api-main", "sess-api-plan", "sess-mobile-cursor", "sess-codex-pipeline",
+    "sess-web-waiting", "sess-openclaw-ml", "sess-docs-idle", "sess-infra-idle",
+  ],
+  aiSummary: `## Daily Summary
+
+**Productive day across 6 projects** with a focus on the Claw Fleet mock mode and an auth middleware bugfix.
+
+### Highlights
+- **claw-fleet**: Built the full mock/demo mode — mock data module, Tauri IPC interception, and automated screenshot pipeline. Delegated explore, test, and review tasks to subagents for parallel execution.
+- **api-server**: Diagnosed and fixed a JWT issuer mismatch that was causing 401 errors after the v2 migration. Root cause: hardcoded issuer string wasn't updated.
+- **mobile-app** (Cursor): Dark mode toggle implementation progressing via Cursor agent.
+- **data-pipeline** (Codex): Spark job partitioning analysis underway with o3 reasoning model.
+
+### Observations
+- Subagent delegation in claw-fleet was highly effective — 5 parallel agents reduced wall-clock time by ~60%.
+- The auth bug could have been caught by a migration checklist. Consider adding one to the CI pipeline.`,
+  aiSummaryGeneratedAt: NOW - HOUR,
+  lessons: [
+    {
+      content: "When changing auth token claims (issuer, audience), always accept both old and new values during the migration window to avoid breaking existing sessions.",
+      reason: "JWT issuer was changed from 'api-server' to 'api-server-v2' without a transition period, causing all existing tokens to be rejected.",
+      workspaceName: "api-server",
+      sessionId: "sess-api-main",
+    },
+    {
+      content: "Parallel subagent delegation works well for independent tasks (explore, test, review) but requires the main agent to synthesize results — don't delegate tasks with interdependencies.",
+      reason: "The claw-fleet session successfully ran 5 subagents in parallel, but earlier attempts at dependent subtasks caused conflicts.",
+      workspaceName: "claw-fleet",
+      sessionId: "sess-fleet-main",
+    },
+    {
+      content: "Mock data should cover edge cases (empty states, error states) not just happy paths. The initial mock only showed active sessions.",
+      reason: "Screenshots missed the 'no sessions' and 'connection error' states which are important for documentation.",
+      workspaceName: "claw-fleet",
+      sessionId: "sess-fleet-gp",
+    },
+  ],
+  lessonsGeneratedAt: NOW - HOUR,
+  metrics: {
+    totalInputTokens: 892_450,
+    totalOutputTokens: 345_120,
+    totalSessions: 13,
+    totalSubagents: 7,
+    totalToolCalls: 287,
+    toolCallBreakdown: {
+      Read: 68,
+      Write: 42,
+      Edit: 35,
+      Bash: 31,
+      Grep: 28,
+      Glob: 24,
+      Agent: 18,
+      TodoWrite: 14,
+      WebSearch: 9,
+      WebFetch: 8,
+      Skill: 6,
+      NotebookEdit: 4,
+    },
+    modelBreakdown: {
+      "claude-opus-4-20250805": { inputTokens: 612_300, outputTokens: 234_800 },
+      "claude-sonnet-4-20250514": { inputTokens: 198_150, outputTokens: 87_320 },
+      "o3": { inputTokens: 82_000, outputTokens: 23_000 },
+    },
+    projects: [
+      {
+        workspacePath: "/Users/demo/workspace/claw-fleet",
+        workspaceName: "claw-fleet",
+        sessionCount: 5,
+        subagentCount: 4,
+        totalInputTokens: 312_400,
+        totalOutputTokens: 128_600,
+        toolCalls: 112,
+        sessions: [
+          { id: "sess-fleet-main", title: "Implement mock mode for demo screenshots", lastMessage: "Creating mock data module with realistic sessions...", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 48720, agentSource: "claude-code" },
+          { id: "sess-fleet-explore", title: null, lastMessage: "Searching for component files...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 12340, agentSource: "claude-code" },
+          { id: "sess-fleet-gp", title: null, lastMessage: "Writing src/mock/data.ts...", model: "claude-opus-4-20250805", isSubagent: true, outputTokens: 8930, agentSource: "claude-code" },
+          { id: "sess-fleet-test", title: null, lastMessage: "Running vitest suite...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 6240, agentSource: "claude-code" },
+          { id: "sess-fleet-review", title: null, lastMessage: "Analyzing diff for potential issues...", model: "claude-opus-4-20250805", isSubagent: true, outputTokens: 3180, agentSource: "claude-code" },
+        ],
+      },
+      {
+        workspacePath: "/Users/demo/workspace/api-server",
+        workspaceName: "api-server",
+        sessionCount: 2,
+        subagentCount: 1,
+        totalInputTokens: 218_500,
+        totalOutputTokens: 100_860,
+        toolCalls: 64,
+        sessions: [
+          { id: "sess-api-main", title: "Fix JWT token validation in auth middleware", lastMessage: "Running test suite after applying the fix...", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 95240, agentSource: "claude-code" },
+          { id: "sess-api-plan", title: null, lastMessage: "Plan complete. Recommended approach: ...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 5620, agentSource: "claude-code" },
+        ],
+      },
+      {
+        workspacePath: "/Users/demo/workspace/mobile-app",
+        workspaceName: "mobile-app",
+        sessionCount: 1,
+        subagentCount: 0,
+        totalInputTokens: 124_000,
+        totalOutputTokens: 67_890,
+        toolCalls: 38,
+        sessions: [
+          { id: "sess-mobile-cursor", title: "Add dark mode toggle to settings screen", lastMessage: "Implementing the ThemeProvider wrapper...", model: "claude-sonnet-4-20250514", isSubagent: false, outputTokens: 67890, agentSource: "cursor" },
+        ],
+      },
+      {
+        workspacePath: "/Users/demo/workspace/data-pipeline",
+        workspaceName: "data-pipeline",
+        sessionCount: 1,
+        subagentCount: 0,
+        totalInputTokens: 82_000,
+        totalOutputTokens: 34_560,
+        toolCalls: 22,
+        sessions: [
+          { id: "sess-codex-pipeline", title: "Optimize Spark job partitioning strategy", lastMessage: "Analyzing current partition distribution...", model: "o3", isSubagent: false, outputTokens: 34560, agentSource: "codex" },
+        ],
+      },
+      {
+        workspacePath: "/Users/demo/workspace/web-frontend",
+        workspaceName: "web-frontend",
+        sessionCount: 1,
+        subagentCount: 0,
+        totalInputTokens: 89_200,
+        totalOutputTokens: 123_400,
+        toolCalls: 31,
+        sessions: [
+          { id: "sess-web-waiting", title: "Refactor shared components into design system", lastMessage: "Should I proceed with breaking changes to the Button component API?", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 123400, agentSource: "claude-code" },
+        ],
+      },
+      {
+        workspacePath: "/Users/demo/workspace/ml-training",
+        workspaceName: "ml-training",
+        sessionCount: 1,
+        subagentCount: 0,
+        totalInputTokens: 66_350,
+        totalOutputTokens: 41_200,
+        toolCalls: 20,
+        sessions: [
+          { id: "sess-openclaw-ml", title: "Fine-tune classification model hyperparameters", lastMessage: "Evaluating learning rate schedules...", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 41200, agentSource: "openclaw" },
+        ],
+      },
+    ],
+    sourceBreakdown: {
+      "claude-code": 9,
+      "cursor": 1,
+      "codex": 1,
+      "openclaw": 1,
+    },
+    hourlyActivity: [
+      0, 0, 0, 0, 0, 0, 0, 0,  // 00:00–07:00
+      1, 2, 3, 4, 4, 3, 3, 2,  // 08:00–15:00
+      2, 1, 1, 0, 1, 1, 0, 0,  // 16:00–23:00
+    ],
+  },
+};
+
+/** Generate heatmap stats for the past year with realistic patterns */
+function generateHeatmapStats(): DailyReportStats[] {
+  const stats: DailyReportStats[] = [];
+  for (let i = 1; i <= 365; i++) {
+    const d = new Date(NOW - i * DAY);
+    const day = d.getDay();
+    // Weekdays are busier; weekends are lighter
+    const isWeekday = day >= 1 && day <= 5;
+    // Skip ~30% of days randomly (days off)
+    const seed = (i * 7 + 13) % 100;
+    if (seed < (isWeekday ? 15 : 60)) continue;
+
+    const baseTokens = isWeekday ? 180_000 : 60_000;
+    const jitter = ((i * 31 + 17) % 100) / 100;
+    const totalTokens = Math.round(baseTokens * (0.4 + jitter * 1.2));
+    const totalSessions = Math.round((isWeekday ? 8 : 3) * (0.5 + jitter));
+    const totalToolCalls = Math.round(totalSessions * 22 * (0.6 + jitter * 0.8));
+    const totalProjects = Math.min(totalSessions, Math.round(1 + jitter * 5));
+
+    stats.push({
+      date: d.toISOString().slice(0, 10),
+      totalTokens,
+      totalSessions,
+      totalToolCalls,
+      totalProjects,
+    });
+  }
+  // Always include yesterday with data matching MOCK_DAILY_REPORT
+  stats.push({
+    date: YESTERDAY,
+    totalTokens: 892_450 + 345_120,
+    totalSessions: 13,
+    totalToolCalls: 287,
+    totalProjects: 6,
+  });
+  return stats;
+}
+
+export const MOCK_HEATMAP_STATS: DailyReportStats[] = generateHeatmapStats();
+
+export const MOCK_LESSONS: Lesson[] = MOCK_DAILY_REPORT.lessons!;
+
+// ── Additional mock reports for timeline demo ──────────────────────────────
+
+const TIMELINE_SUMMARIES: { daysAgo: number; summary: string; sessions: number; input: number; output: number; tools: number; projects: number; subagents: number; lessons: Lesson[] }[] = [
+  {
+    daysAgo: 2,
+    summary: `## Daily Summary
+
+**Focused session on API server performance tuning.** Identified and resolved N+1 query patterns in the user endpoints.
+
+### Highlights
+- **api-server**: Rewrote the user list endpoint to use eager loading, reducing average response time from 1.2s to 45ms.
+- **claw-fleet**: Minor CSS polish on the gallery view card layout.
+
+### Observations
+- Database query logging should be enabled by default in dev to catch N+1 issues earlier.`,
+    sessions: 5, input: 420_000, output: 180_000, tools: 134, projects: 2, subagents: 2,
+    lessons: [
+      { content: "Always enable SQL query logging in development. N+1 queries are invisible without it.", reason: "The user list endpoint was making 200+ queries per request. This was only noticed after a user reported slowness.", workspaceName: "api-server", sessionId: "sess-api-perf" },
+    ],
+  },
+  {
+    daysAgo: 3,
+    summary: `## Daily Summary
+
+**Documentation sprint** — updated onboarding docs and added architecture diagrams.
+
+### Highlights
+- **docs**: Rewrote the Getting Started guide with step-by-step screenshots. Added architecture overview diagram using Mermaid.
+- **claw-fleet**: Fixed a timezone bug in the daily report date picker.
+
+### Observations
+- Mermaid diagrams render well in GitHub but need manual testing for dark mode contrast.`,
+    sessions: 4, input: 310_000, output: 95_000, tools: 78, projects: 2, subagents: 1,
+    lessons: [
+      { content: "Test Mermaid diagrams in both light and dark mode before committing. GitHub's dark mode can make certain colors invisible.", reason: "A flowchart node with green text was unreadable on GitHub dark mode.", workspaceName: "docs", sessionId: "sess-docs-mermaid" },
+    ],
+  },
+  {
+    daysAgo: 4,
+    summary: `## Daily Summary
+
+**Auth middleware refactor complete.** Migrated from custom JWT validation to the shared auth library.
+
+### Highlights
+- **api-server**: Replaced 400 lines of custom JWT code with the shared \`@company/auth\` package. All 42 tests passing.
+- **mobile-app**: Fixed crash on deep link handling when user is not authenticated.
+
+### Observations
+- The shared auth library's error messages are much better than our custom ones — users now see actionable error descriptions.`,
+    sessions: 8, input: 650_000, output: 290_000, tools: 215, projects: 3, subagents: 4,
+    lessons: [
+      { content: "When replacing auth infrastructure, keep the old code path available behind a feature flag for at least one release cycle.", reason: "We had to emergency rollback once because a third-party integration was still using the old token format.", workspaceName: "api-server", sessionId: "sess-api-auth" },
+      { content: "Deep link handlers must check authentication state before navigating. Unauthenticated deep links should be queued and replayed after login.", reason: "The app crashed when a push notification deep link arrived while the user was logged out.", workspaceName: "mobile-app", sessionId: "sess-mobile-deeplink" },
+    ],
+  },
+  {
+    daysAgo: 6,
+    summary: `## Daily Summary
+
+**CI/CD pipeline hardening.** Added build caching, parallel test execution, and artifact signing.
+
+### Highlights
+- **infra**: Reduced CI build time from 12 min to 4 min by adding Turborepo caching and splitting test suites across 4 runners.
+- **claw-fleet**: Added code signing to the macOS release workflow.
+
+### Observations
+- Build caching saves ~70% of CI minutes. Should be a standard practice for all repos.`,
+    sessions: 6, input: 380_000, output: 150_000, tools: 165, projects: 2, subagents: 3,
+    lessons: [],
+  },
+];
+
+function buildMockReport(entry: typeof TIMELINE_SUMMARIES[0]): DailyReport {
+  const date = dateStr(entry.daysAgo);
+  return {
+    date,
+    timezone: "America/Los_Angeles",
+    generatedAt: NOW - entry.daysAgo * DAY,
+    sessionIds: Array.from({ length: entry.sessions }, (_, i) => `sess-tl-${entry.daysAgo}-${i}`),
+    aiSummary: entry.summary,
+    aiSummaryGeneratedAt: NOW - entry.daysAgo * DAY + HOUR,
+    lessons: entry.lessons,
+    lessonsGeneratedAt: NOW - entry.daysAgo * DAY + HOUR,
+    metrics: {
+      totalInputTokens: entry.input,
+      totalOutputTokens: entry.output,
+      totalSessions: entry.sessions,
+      totalSubagents: entry.subagents,
+      totalToolCalls: entry.tools,
+      toolCallBreakdown: { Read: Math.round(entry.tools * 0.3), Edit: Math.round(entry.tools * 0.25), Bash: Math.round(entry.tools * 0.2), Grep: Math.round(entry.tools * 0.15), Write: Math.round(entry.tools * 0.1) },
+      modelBreakdown: { "claude-sonnet-4-5-20250514": { inputTokens: entry.input, outputTokens: entry.output } },
+      projects: [{ workspacePath: "/Users/demo/workspace/project", workspaceName: "project", sessionCount: entry.sessions, subagentCount: entry.subagents, totalInputTokens: entry.input, totalOutputTokens: entry.output, toolCalls: entry.tools, sessions: [] }],
+      sourceBreakdown: { "claude-code": entry.sessions },
+      hourlyActivity: Array.from({ length: 24 }, (_, h) => h >= 9 && h <= 18 ? Math.round(Math.random() * 5) : 0),
+    },
+  };
+}
+
+export const MOCK_TIMELINE_REPORTS: Map<string, DailyReport> = new Map([
+  [MOCK_DAILY_REPORT.date, MOCK_DAILY_REPORT],
+  ...TIMELINE_SUMMARIES.map((e) => [dateStr(e.daysAgo), buildMockReport(e)] as [string, DailyReport]),
+]);

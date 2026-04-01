@@ -39,7 +39,7 @@ struct SnapshotEntry {
 }
 
 fn snapshot_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|h| h.join(".claude").join("claude-fleet-usage-history.json"))
+    dirs::home_dir().map(|h| h.join(".claude").join("claw-fleet-usage-history.json"))
 }
 
 fn normalize_snap(snap: MetricSnap) -> MetricSnap {

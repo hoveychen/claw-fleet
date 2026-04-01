@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 /**
- * Take screenshots of Claude Fleet running in mock mode.
+ * Take screenshots of Claw Fleet running in mock mode.
  * Usage: node scripts/take-screenshots.mjs
  *
- * Captures 6 views:
+ * Captures 8 views:
  *   01_gallery.png          — Gallery view with multi-agent groups
  *   02_session_detail.png   — Session detail with subagent tabs
  *   03_audit.png            — Security audit event list
  *   04_mascot.png           — Sidebar mascot assistant
  *   05_memory.png           — Memory panel expanded
  *   06_notifications.png    — Floating alert notifications
+ *   07_report.png           — Insights timeline with AI summaries feed
+ *   08_daily_report.png     — Daily report with metrics and AI summary
  */
 
 import { chromium } from "playwright";
@@ -87,12 +89,12 @@ async function main() {
   console.log("✓ 01_gallery.png — Gallery view");
 
   // ── 02. Session Detail (multi-subagent) ───────────────────────────────
-  // Click the claude-fleet group (has the most subagents) to open detail
+  // Click the claw-fleet group (has the most subagents) to open detail
   await page.evaluate(() => {
-    // Find a group header that mentions "claude-fleet"
+    // Find a group header that mentions "claw-fleet"
     const allEls = document.querySelectorAll("*");
     for (const el of allEls) {
-      if (el.textContent?.includes("claude-fleet") &&
+      if (el.textContent?.includes("claw-fleet") &&
           el.className && typeof el.className === "string" &&
           (el.className.includes("group_header") || el.className.includes("group_body"))) {
         el.click();
@@ -109,7 +111,7 @@ async function main() {
       if (el.className && typeof el.className === "string" &&
           el.className.includes("card") && !el.className.includes("footer") &&
           !el.className.includes("nav") &&
-          el.textContent?.includes("claude-fleet")) {
+          el.textContent?.includes("claw-fleet")) {
         el.click();
         break;
       }
@@ -310,6 +312,58 @@ async function main() {
     });
   }
   console.log("✓ 06_notifications.png — Notification alerts (cropped)");
+
+  // ── 07. Insights Timeline ──────────────────────────────────────────────
+  // Click the report nav button (calendar SVG icon)
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll("button");
+    for (const b of buttons) {
+      const svg = b.querySelector("svg");
+      if (svg && svg.querySelector("rect") && svg.querySelectorAll("line").length >= 3) {
+        if (b.className && typeof b.className === "string" && b.className.includes("nav_item")) {
+          b.click();
+          break;
+        }
+      }
+    }
+  });
+  await page.waitForTimeout(3000);
+
+  await page.screenshot({ path: `${OUT_DIR}/07_report.png` });
+  console.log("✓ 07_report.png — Insights timeline view");
+
+  // ── 08. Daily Report Detail ────────────────────────────────────────────
+  // Click the "Daily Report" tab to switch to daily view
+  await page.evaluate(() => {
+    const buttons = document.querySelectorAll("button");
+    for (const b of buttons) {
+      if (b.textContent?.includes("Daily Report") || b.textContent?.includes("日报")) {
+        b.click();
+        break;
+      }
+    }
+  });
+  await page.waitForTimeout(1000);
+
+  // Set date to yesterday
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  await page.evaluate((dateVal) => {
+    const input = document.querySelector('input[type="date"]');
+    if (input) {
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+        window.HTMLInputElement.prototype, "value"
+      )?.set;
+      if (nativeInputValueSetter) {
+        nativeInputValueSetter.call(input, dateVal);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    }
+  }, yesterday);
+  await page.waitForTimeout(2000);
+
+  await page.screenshot({ path: `${OUT_DIR}/08_daily_report.png` });
+  console.log("✓ 08_daily_report.png — Daily report detail view");
 
   // ── Done ──────────────────────────────────────────────────────────────
   await browser.close();

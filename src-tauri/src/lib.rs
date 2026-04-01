@@ -6,14 +6,17 @@ pub mod claude_analyze;
 pub mod claude_source;
 pub mod codex_source;
 pub mod cursor;
+pub mod daily_report;
 pub mod hooks;
 pub mod local_backend;
 pub mod memory;
 pub mod openclaw_source;
+pub mod pattern_update;
 pub mod remote;
 pub mod search_index;
 pub mod session;
 pub mod skills;
+pub mod version_check;
 
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
@@ -43,7 +46,7 @@ fn load_png_as_tray_icon(bytes: &[u8]) -> tauri::image::Image<'static> {
 #[tauri::command]
 fn get_log_path() -> String {
     dirs::home_dir()
-        .map(|h| h.join(".claude").join("claude-fleet-debug.log").to_string_lossy().to_string())
+        .map(|h| h.join(".claude").join("claw-fleet-debug.log").to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -52,9 +55,14 @@ fn get_platform() -> String {
     std::env::consts::OS.to_string()
 }
 
+#[tauri::command]
+fn check_app_version() -> version_check::VersionCheckResult {
+    version_check::check_app_version()
+}
+
 fn log_debug(msg: &str) {
     if let Some(home) = dirs::home_dir() {
-        let log_path = home.join(".claude").join("claude-fleet-debug.log");
+        let log_path = home.join(".claude").join("claw-fleet-debug.log");
         let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
         let line = format!("[{timestamp}] {msg}\n");
         let _ = std::fs::OpenOptions::new()
@@ -843,6 +851,85 @@ fn get_audit_events(state: tauri::State<AppState>) -> audit::AuditSummary {
 }
 
 #[tauri::command]
+fn get_daily_report(
+    date: String,
+    state: tauri::State<AppState>,
+) -> Result<Option<daily_report::DailyReport>, String> {
+    state.backend.lock().unwrap().get_daily_report(&date)
+}
+
+#[tauri::command]
+fn list_daily_report_stats(
+    from: String,
+    to: String,
+    state: tauri::State<AppState>,
+) -> Vec<daily_report::DailyReportStats> {
+    state.backend.lock().unwrap().list_daily_report_stats(&from, &to)
+}
+
+#[tauri::command]
+async fn generate_daily_report(
+    date: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<daily_report::DailyReport, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend.lock().unwrap().generate_daily_report(&date)
+    }).await.map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+async fn generate_daily_report_ai_summary(
+    date: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<String, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend.lock().unwrap().generate_daily_report_ai_summary(&date)
+    }).await.map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+async fn generate_daily_report_lessons(
+    date: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::daily_report::Lesson>, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend.lock().unwrap().generate_daily_report_lessons(&date)
+    }).await.map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+async fn append_lesson_to_claude_md(
+    lesson: crate::daily_report::Lesson,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || {
+        backend.lock().unwrap().append_lesson_to_claude_md(&lesson)
+    }).await.map_err(|e| format!("join: {e}"))?
+}
+
+#[tauri::command]
+fn check_pattern_update() -> String {
+    pattern_update::check_update_now()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PatternInfo {
+    version: u32,
+    path: String,
+}
+
+#[tauri::command]
+fn get_pattern_info() -> PatternInfo {
+    let (version, path) = pattern_update::get_patterns_info();
+    PatternInfo { version, path }
+}
+
+#[tauri::command]
 fn start_watching_session(
     jsonl_path: String,
     state: tauri::State<AppState>,
@@ -1354,10 +1441,10 @@ fn rebuild_tray(app: &tauri::AppHandle) {
 
     // Update tooltip & title (cheap, won't close menu)
     let tooltip = if total == 0 {
-        "Claude Fleet".to_string()
+        "Claw Fleet".to_string()
     } else {
         format!(
-            "Claude Fleet — {} active  (Main: {}  Sub: {})",
+            "Claw Fleet — {} active  (Main: {}  Sub: {})",
             total, active_main.len(), sub_count
         )
     };
@@ -1530,6 +1617,12 @@ pub fn run() {
             // Truncate the hook events file if it has grown too large.
             hooks::maybe_truncate_events_file();
 
+            // ── Audit pattern updates ───────────────────────────────────────
+            // Seed local patterns from bundled resource (first run or app
+            // upgrade), then start the daily background updater.
+            pattern_update::bootstrap_patterns(app.handle());
+            pattern_update::start_background_updater();
+
             // Background usage refresh removed — the frontend's periodic
             // `get_source_usage` / `get_account_info` calls now update the
             // cached tray summaries as a side-effect, avoiding duplicate
@@ -1570,7 +1663,7 @@ pub fn run() {
             tray_builder
                 .menu(&tray_menu)
                 .show_menu_on_left_click(false)
-                .tooltip("Claude Fleet")
+                .tooltip("Claw Fleet")
                 .on_tray_icon_event(|tray, event| {
                     if let tauri::tray::TrayIconEvent::Click { position, button, button_state, .. } = &event {
                         if !matches!(button, tauri::tray::MouseButton::Left) {
@@ -1672,11 +1765,14 @@ pub fn run() {
             get_messages,
             get_skill_history,
             get_audit_events,
+            check_pattern_update,
+            get_pattern_info,
             start_watching_session,
             stop_watching_session,
             get_account_info,
             get_log_path,
             get_platform,
+            check_app_version,
             kill_session,
             kill_workspace_sessions,
             check_setup_status,
@@ -1722,6 +1818,12 @@ pub fn run() {
             get_tts_voices,
             speak_text,
             speak_text_say,
+            get_daily_report,
+            list_daily_report_stats,
+            generate_daily_report,
+            generate_daily_report_ai_summary,
+            generate_daily_report_lessons,
+            append_lesson_to_claude_md,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

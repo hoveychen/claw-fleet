@@ -5,7 +5,6 @@
   background: var(--color-bg);
   z-index: 1000;
   display: flex;
-  align-items: center;
   justify-content: center;
   overflow-y: auto;
 }
@@ -14,6 +13,7 @@
   max-width: 560px;
   width: 100%;
   padding: 40px 32px;
+  margin: auto 0;
   display: flex;
   flex-direction: column;
   gap: 28px;
@@ -251,6 +251,43 @@
   padding-top: 4px;
 }
 
+/* ── Feature highlights ─────────────────────────────────────────────────── */
+.feature_list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.feature_item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.feature_icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 22px;
+  text-align: center;
+  margin-top: 1px;
+}
+
+.feature_text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.feature_title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
 /* ── Source selection ────────────────────────────────────────────────────── */
 .source_list {
   display: flex;
@@ -375,6 +412,39 @@
 .hooks_actions {
   display: flex;
   gap: 8px;
+}
+
+/* ── Chime selector row ────────────────────────────────────────────────── */
+.chime_row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.chime_select {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  font-size: 12px;
+}
+
+.preview_btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.preview_btn:hover {
+  background: var(--color-bg-card-hover);
 }
 
 /* ── Footer actions ──────────────────────────────────────────────────────── */

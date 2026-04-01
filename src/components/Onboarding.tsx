@@ -5,6 +5,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionsStore, useOverlayStore } from "../store";
 import { getItem, setItem } from "../storage";
+import { type ChimePreset, CHIME_PRESETS, playChime } from "../audio";
+import { ThemeToggle } from "./ThemeToggle";
+import { LanguageSwitcher } from "./LanguageSwitcher";
 import styles from "./Onboarding.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -332,6 +335,47 @@ function CelebrationView({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
+// ── Feature highlights card ──────────────────────────────────────────────
+
+interface FeatureItem {
+  icon: string;
+  titleKey: string;
+  descKey: string;
+}
+
+const FEATURES: FeatureItem[] = [
+  { icon: "\u{1F4CA}", titleKey: "onboarding.features.ai_summary_title", descKey: "onboarding.features.ai_summary_desc" },
+  { icon: "\u{1F9E0}", titleKey: "onboarding.features.lessons_title", descKey: "onboarding.features.lessons_desc" },
+  { icon: "\u{1F6A6}", titleKey: "onboarding.features.live_status_title", descKey: "onboarding.features.live_status_desc" },
+  { icon: "\u{1F6E1}", titleKey: "onboarding.features.audit_title", descKey: "onboarding.features.audit_desc" },
+  { icon: "\u{1F4DD}", titleKey: "onboarding.features.memory_title", descKey: "onboarding.features.memory_desc" },
+];
+
+function FeaturesCard() {
+  const { t } = useTranslation();
+
+  return (
+    <div className={`${styles.card} ${styles.card_info}`}>
+      <div className={styles.card_header}>
+        <span className={styles.card_icon}>&#x2728;</span>
+        <span className={styles.card_title}>{t("onboarding.features.title")}</span>
+      </div>
+      <p className={styles.card_description}>{t("onboarding.features.description")}</p>
+      <div className={styles.feature_list}>
+        {FEATURES.map((f, i) => (
+          <div key={i} className={styles.feature_item}>
+            <span className={styles.feature_icon}>{f.icon}</span>
+            <div className={styles.feature_text}>
+              <span className={styles.feature_title}>{t(f.titleKey)}</span>
+              <span className={styles.hint}>{t(f.descKey)}</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Source selection card ─────────────────────────────────────────────────────
 
 interface SourceInfo {
@@ -380,11 +424,43 @@ function SourceSelectionCard({
   );
 }
 
+// ── Appearance card (theme + language) ───────────────────────────────────
+
+function AppearanceCard() {
+  const { t } = useTranslation();
+
+  return (
+    <div className={`${styles.card} ${styles.card_info}`}>
+      <div className={styles.card_header}>
+        <span className={styles.card_icon}>&#x1F3A8;</span>
+        <span className={styles.card_title}>{t("onboarding.settings_appearance.title")}</span>
+      </div>
+      <p className={styles.card_description}>{t("onboarding.settings_appearance.description")}</p>
+
+      <div className={styles.settings_group}>
+        <span className={styles.settings_label}>{t("settings.theme")}</span>
+        <ThemeToggle />
+      </div>
+
+      <div className={styles.settings_group}>
+        <span className={styles.settings_label}>{t("settings.language")}</span>
+        <LanguageSwitcher />
+      </div>
+    </div>
+  );
+}
+
 // ── Notification & mascot settings card ──────────────────────────────────
+
+type TtsMode = "chime_and_speech" | "chime_only" | "off";
 
 function NotificationSettingsCard({
   notifMode,
   onNotifModeChange,
+  ttsMode,
+  onTtsModeChange,
+  chimePreset,
+  onChimeChange,
   personalizedMascot,
   onTogglePersonalizedMascot,
   overlayEnabled,
@@ -394,6 +470,10 @@ function NotificationSettingsCard({
 }: {
   notifMode: NotificationMode;
   onNotifModeChange: (mode: NotificationMode) => void;
+  ttsMode: TtsMode;
+  onTtsModeChange: (mode: TtsMode) => void;
+  chimePreset: ChimePreset;
+  onChimeChange: (preset: ChimePreset) => void;
   personalizedMascot: boolean;
   onTogglePersonalizedMascot: (enabled: boolean) => void;
   overlayEnabled: boolean;
@@ -428,6 +508,46 @@ function NotificationSettingsCard({
             </div>
           </label>
         ))}
+      </div>
+
+      {/* Alert sound */}
+      <div className={styles.settings_group}>
+        <span className={styles.settings_label}>{t("onboarding.settings_notif.sound_title")}</span>
+        {(["chime_and_speech", "chime_only", "off"] as const).map((mode) => (
+          <label className={styles.radio_item} key={mode}>
+            <input
+              type="radio"
+              name="onboard-tts-mode"
+              checked={ttsMode === mode}
+              onChange={() => onTtsModeChange(mode)}
+            />
+            <div>
+              <span className={styles.radio_title}>{t(`settings.tts_${mode}`)}</span>
+              <span className={styles.hint}>{t(`settings.tts_${mode}_desc`)}</span>
+            </div>
+          </label>
+        ))}
+        {ttsMode !== "off" && (
+          <div className={styles.chime_row}>
+            <span className={styles.hint}>{t("settings.chime_sound")}</span>
+            <select
+              className={styles.chime_select}
+              value={chimePreset}
+              onChange={(e) => onChimeChange(e.target.value as ChimePreset)}
+            >
+              {CHIME_PRESETS.map((p) => (
+                <option key={p} value={p}>{t(`settings.chime_${p}`)}</option>
+              ))}
+            </select>
+            <button
+              className={styles.preview_btn}
+              onClick={() => playChime(chimePreset)}
+              type="button"
+            >
+              &#x25B6;
+            </button>
+          </div>
+        )}
       </div>
 
       {/* User title */}
@@ -602,6 +722,26 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
     }).catch(() => {});
   }, []);
 
+  // ── TTS / chime state ──────────────────────────────────────────────────
+  const [ttsMode, setTtsMode] = useState<TtsMode>(
+    () => (getItem("tts-mode") as TtsMode) || "off",
+  );
+
+  const handleTtsModeChange = useCallback((mode: TtsMode) => {
+    setTtsMode(mode);
+    setItem("tts-mode", mode);
+  }, []);
+
+  const [chimePreset, setChimePreset] = useState<ChimePreset>(
+    () => (getItem("chime-sound") as ChimePreset) || "ding_dong",
+  );
+
+  const handleChimeChange = useCallback((preset: ChimePreset) => {
+    setChimePreset(preset);
+    setItem("chime-sound", preset);
+    playChime(preset);
+  }, []);
+
   // ── User title state ────────────────────────────────────────────────────
   const [userTitle, setUserTitle] = useState(() => getItem("user-title") || "");
 
@@ -727,7 +867,7 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
         ) : (
           <>
             <div className={styles.header}>
-              <img src="/app-icon.png" className={styles.logo} alt="Claude Fleet" />
+              <img src="/app-icon.png" className={styles.logo} alt="Claw Fleet" />
               <h1 className={styles.title}>{t("onboarding.welcome")}</h1>
               <p className={styles.subtitle}>{t("onboarding.subtitle")}</p>
             </div>
@@ -749,6 +889,14 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
                   </div>
                 )}
 
+                <div className={styles.cards}>
+                  <FeaturesCard />
+                </div>
+
+                <div className={styles.cards}>
+                  <AppearanceCard />
+                </div>
+
                 {hasMultipleSources && sources.length > 0 && (
                   <div className={styles.cards}>
                     <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
@@ -760,6 +908,10 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
                     <NotificationSettingsCard
                       notifMode={notifMode}
                       onNotifModeChange={handleNotifModeChange}
+                      ttsMode={ttsMode}
+                      onTtsModeChange={handleTtsModeChange}
+                      chimePreset={chimePreset}
+                      onChimeChange={handleChimeChange}
                       personalizedMascot={personalizedMascot}
                       onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
                       overlayEnabled={overlayEnabled}

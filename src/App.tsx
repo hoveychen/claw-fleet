@@ -8,6 +8,7 @@ import { Onboarding } from "./components/Onboarding";
 import { SessionDetail } from "./components/SessionDetail";
 import { SessionList } from "./components/SessionList";
 import { WaitingAlerts } from "./components/WaitingAlerts";
+import { UpdateNotice } from "./components/UpdateNotice";
 import { Wizard } from "./components/Wizard";
 import { type Connection, resolveTheme, useConnectionStore, useDetailStore, useOverlayStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem } from "./storage";
@@ -153,6 +154,7 @@ function App() {
       <SessionList />
       <SessionDetail />
       <WaitingAlerts />
+      <UpdateNotice />
     </div>
   );
 }

@@ -365,7 +365,7 @@ Style reference (for tone only — do NOT reuse any words, phrases, or imagery f
     };
 
     format!(
-        "You are a tiny mascot living inside a developer's multi-agent dashboard (\"Claude Fleet\"). \
+        "You are a tiny mascot living inside a developer's multi-agent dashboard (\"Claw Fleet\"). \
          You are rendered as a simple SVG — just two round eyes and a small mouth, no body, no limbs. \
          You sit in the corner watching AI coding agents work. You can't code, you can't move, you can only watch and comment.\n\
          \n\

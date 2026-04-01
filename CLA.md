@@ -1,6 +1,6 @@
 # Contributor License Agreement
 
-Thank you for your interest in contributing to Claude Fleet ("Project"), maintained by hoveychen ("Project Owner").
+Thank you for your interest in contributing to Claw Fleet ("Project"), maintained by hoveychen ("Project Owner").
 
 By submitting a contribution (including but not limited to code, documentation, bug reports, feature suggestions, and other materials) to this Project, you agree to the following terms:
 
@@ -59,4 +59,4 @@ For corporate contributors, please have an authorized representative of your org
 
 ## 8. Contact
 
-For questions about this CLA, please open an issue in the [GitHub repository](https://github.com/hoveychen/claude-fleet).
+For questions about this CLA, please open an issue in the [GitHub repository](https://github.com/hoveychen/claw-fleet).

@@ -11,6 +11,12 @@ html, body, #root {
 /* ── CSS variables (dark theme) ───────────────────────────────────────────── */
 :root,
 [data-theme="dark"] {
+  --heatmap-0: #161b22;
+  --heatmap-1: #0e4429;
+  --heatmap-2: #006d32;
+  --heatmap-3: #26a641;
+  --heatmap-4: #39d353;
+
   --color-bg: #0f0f13;
   --color-bg-sidebar: #13131a;
   --color-bg-secondary: #1a1a24;
@@ -96,6 +102,12 @@ html, body, #root {
 
 /* ── Light theme ──────────────────────────────────────────────────────────── */
 [data-theme="light"] {
+  --heatmap-0: #ebedf0;
+  --heatmap-1: #9be9a8;
+  --heatmap-2: #40c463;
+  --heatmap-3: #30a14e;
+  --heatmap-4: #216e39;
+
   --color-bg: #f5f5fa;
   --color-bg-sidebar: #eeeef5;
   --color-bg-secondary: #e0e0ea;

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build Claude Fleet locally (GUI app + fleet CLI sidecar).
+# Build Claw Fleet locally (GUI app + fleet CLI sidecar).
 # Usage: ./scripts/build-local.sh [--debug]
 set -euo pipefail
 

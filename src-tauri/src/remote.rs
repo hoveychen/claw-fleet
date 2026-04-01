@@ -120,6 +120,26 @@ impl ProbeClient {
         Ok(())
     }
 
+    /// POST endpoint with a JSON body, only check that the status is 2xx.
+    fn post_json_ok<B: serde::Serialize>(&self, endpoint: &str, body: &B) -> Result<(), String> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", &self.auth_header)
+            .json(body)
+            .send()
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            let body_text = resp.text().unwrap_or_default();
+            let err = serde_json::from_str::<serde_json::Value>(&body_text)
+                .ok()
+                .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+                .unwrap_or(body_text);
+            return Err(err);
+        }
+        Ok(())
+    }
+
     /// GET endpoint and return the raw `serde_json::Value`.
     fn get_value(&self, endpoint: &str) -> Result<serde_json::Value, String> {
         self.get::<serde_json::Value>(endpoint)
@@ -339,6 +359,35 @@ impl crate::backend::Backend for RemoteBackend {
                 events: vec![],
                 total_sessions_scanned: 0,
             })
+    }
+
+    fn get_daily_report(&self, date: &str) -> Result<Option<crate::daily_report::DailyReport>, String> {
+        let encoded = encode_path(date);
+        self.probe.get(&format!("/daily_report?date={}", encoded))
+    }
+
+    fn list_daily_report_stats(&self, from: &str, to: &str) -> Vec<crate::daily_report::DailyReportStats> {
+        let encoded_from = encode_path(from);
+        let encoded_to = encode_path(to);
+        self.probe
+            .get(&format!("/daily_report_stats?from={}&to={}", encoded_from, encoded_to))
+            .unwrap_or_default()
+    }
+
+    fn generate_daily_report(&self, date: &str) -> Result<crate::daily_report::DailyReport, String> {
+        self.probe.get(&format!("/daily_report/generate?date={}", encode_path(date)))
+    }
+
+    fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String> {
+        self.probe.get(&format!("/daily_report/ai_summary?date={}", encode_path(date)))
+    }
+
+    fn generate_daily_report_lessons(&self, date: &str) -> Result<Vec<crate::daily_report::Lesson>, String> {
+        self.probe.get(&format!("/daily_report/lessons?date={}", encode_path(date)))
+    }
+
+    fn append_lesson_to_claude_md(&self, lesson: &crate::daily_report::Lesson) -> Result<(), String> {
+        self.probe.post_json_ok("/daily_report/append_lesson", lesson)
     }
 }
 

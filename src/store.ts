@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { AuditAlert, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { AuditAlert, DailyReport, DailyReportStats, Lesson, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 
 // ── Connection store ──────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery" | "audit";
+export type ViewMode = "list" | "gallery" | "audit" | "report";
 
 interface UIState {
   theme: Theme;
@@ -280,5 +280,156 @@ export const useOverlayStore = create<OverlayState>((set) => ({
     setItem("overlay-enabled", enabled ? "true" : "false");
     invoke("toggle_overlay", { visible: enabled }).catch(() => {});
     set({ enabled });
+  },
+}));
+
+// ── Report store ────────────────────────────────────────────────────────────
+
+type ReportTab = "insights" | "daily";
+
+interface ReportState {
+  currentReport: DailyReport | null;
+  heatmapData: DailyReportStats[];
+  selectedDate: string;
+  loading: boolean;
+  generatingSummary: boolean;
+  generatingLessons: boolean;
+  reportTab: ReportTab;
+
+  // Timeline (insights feed)
+  timelineReports: DailyReport[];
+  timelineLoading: boolean;
+  timelineHasMore: boolean;
+  timelineCursor: number; // index into sorted dates with data
+
+  loadReport: (date: string) => Promise<void>;
+  loadHeatmap: (from: string, to: string) => Promise<void>;
+  generateReport: (date: string) => Promise<void>;
+  generateSummary: (date: string) => Promise<void>;
+  generateLessons: (date: string) => Promise<void>;
+  appendLessonToClaudeMd: (lesson: Lesson) => Promise<void>;
+  setReportTab: (tab: ReportTab) => void;
+  loadTimelinePage: () => Promise<void>;
+  resetTimeline: () => void;
+}
+
+function yesterday(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
+const TIMELINE_PAGE_SIZE = 7;
+
+export const useReportStore = create<ReportState>((set, get) => ({
+  currentReport: null,
+  heatmapData: [],
+  selectedDate: yesterday(),
+  loading: false,
+  generatingSummary: false,
+  generatingLessons: false,
+  reportTab: "insights",
+
+  timelineReports: [],
+  timelineLoading: false,
+  timelineHasMore: true,
+  timelineCursor: 0,
+
+  loadReport: async (date: string) => {
+    set({ loading: true, selectedDate: date, reportTab: "daily" });
+    try {
+      const report = await invoke<DailyReport | null>("get_daily_report", { date });
+      set({ currentReport: report, loading: false });
+    } catch {
+      set({ currentReport: null, loading: false });
+    }
+  },
+
+  loadHeatmap: async (from: string, to: string) => {
+    try {
+      const stats = await invoke<DailyReportStats[]>("list_daily_report_stats", { from, to });
+      set({ heatmapData: stats });
+    } catch {
+      set({ heatmapData: [] });
+    }
+  },
+
+  generateReport: async (date: string) => {
+    set({ loading: true });
+    try {
+      const report = await invoke<DailyReport>("generate_daily_report", { date });
+      set({ currentReport: report, loading: false, selectedDate: date });
+    } catch {
+      set({ loading: false });
+    }
+  },
+
+  generateSummary: async (date: string) => {
+    set({ generatingSummary: true });
+    try {
+      const summary = await invoke<string>("generate_daily_report_ai_summary", { date });
+      set((s) => ({
+        generatingSummary: false,
+        currentReport: s.currentReport ? { ...s.currentReport, aiSummary: summary } : null,
+      }));
+    } catch {
+      set({ generatingSummary: false });
+    }
+  },
+
+  generateLessons: async (date: string) => {
+    set({ generatingLessons: true });
+    try {
+      const lessons = await invoke<Lesson[]>("generate_daily_report_lessons", { date });
+      set((s) => ({
+        generatingLessons: false,
+        currentReport: s.currentReport
+          ? { ...s.currentReport, lessons, lessonsGeneratedAt: Date.now() }
+          : null,
+      }));
+    } catch {
+      set({ generatingLessons: false });
+    }
+  },
+
+  appendLessonToClaudeMd: async (lesson: Lesson) => {
+    await invoke<void>("append_lesson_to_claude_md", { lesson });
+  },
+
+  setReportTab: (tab) => set({ reportTab: tab }),
+
+  resetTimeline: () => set({ timelineReports: [], timelineCursor: 0, timelineHasMore: true }),
+
+  loadTimelinePage: async () => {
+    const { heatmapData, timelineCursor, timelineLoading, timelineHasMore } = get();
+    if (timelineLoading || !timelineHasMore) return;
+
+    // Get dates with data, sorted descending (most recent first)
+    const sortedDates = [...heatmapData]
+      .filter((s) => s.totalTokens > 0 || s.totalSessions > 0)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .map((s) => s.date);
+
+    const pageDates = sortedDates.slice(timelineCursor, timelineCursor + TIMELINE_PAGE_SIZE);
+    if (pageDates.length === 0) {
+      set({ timelineHasMore: false });
+      return;
+    }
+
+    set({ timelineLoading: true });
+    try {
+      const reports = await Promise.all(
+        pageDates.map((date) => invoke<DailyReport | null>("get_daily_report", { date }))
+      );
+      const valid = reports.filter((r): r is DailyReport => r !== null);
+      set((s) => ({
+        timelineReports: [...s.timelineReports, ...valid],
+        timelineCursor: s.timelineCursor + TIMELINE_PAGE_SIZE,
+        timelineHasMore: timelineCursor + TIMELINE_PAGE_SIZE < sortedDates.length,
+        timelineLoading: false,
+      }));
+    } catch {
+      set({ timelineLoading: false });
+    }
   },
 }));

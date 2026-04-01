@@ -970,7 +970,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
 
         // Find associated IDE session by encoding the lock file paths and comparing to the
         // directory name directly.  This avoids the lossy decode round-trip: a workspace named
-        // "claude-fleet" encodes to "-Users-…-claude-fleet" but decodes to "/Users/…/claude/fleet".
+        // "claw-fleet" encodes to "-Users-…-claw-fleet" but decodes to "/Users/…/claw/fleet".
         let ide = ide_sessions.iter().find(|ide| {
             ide.workspace_folders
                 .iter()

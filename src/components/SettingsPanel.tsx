@@ -25,13 +25,25 @@ interface SourceInfo {
 
 type NotificationMode = "all" | "user_action" | "none";
 type TtsMode = "chime_and_speech" | "chime_only" | "off";
-type SettingsTab = "appearance" | "connection" | "hooks" | "sources" | "notifications" | "account";
+type SettingsTab = "general" | "appearance" | "profile" | "connection" | "notifications" | "sound";
 
 const tabIcons: Record<SettingsTab, React.ReactNode> = {
+  general: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="8" cy="8" r="1.5" />
+      <path d="M6.7 1.2l-.4 1.6a5 5 0 0 0-1.5.9L3.3 3.2 1.9 5.6l1.2 1.1a5 5 0 0 0 0 1.7l-1.2 1.1 1.4 2.4 1.5-.5a5 5 0 0 0 1.5.9l.4 1.6h2.6l.4-1.6a5 5 0 0 0 1.5-.9l1.5.5 1.4-2.4-1.2-1.1a5 5 0 0 0 0-1.7l1.2-1.1-1.4-2.4-1.5.5a5 5 0 0 0-1.5-.9L9.3 1.2z" />
+    </svg>
+  ),
   appearance: (
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="8" cy="8" r="3" />
       <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" />
+    </svg>
+  ),
+  profile: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="8" cy="5" r="3" />
+      <path d="M2.5 14a5.5 5.5 0 0 1 11 0" />
     </svg>
   ),
   connection: (
@@ -40,30 +52,16 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
       <path d="M9.5 3.5l1-1a2.12 2.12 0 0 1 3 3l-1 1M6.5 12.5l-1 1a2.12 2.12 0 0 1-3-3l1-1" />
     </svg>
   ),
-  hooks: (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M5 2v6a3 3 0 0 0 6 0V5" />
-      <path d="M8 14v-2" />
-      <path d="M5 14h6" />
-    </svg>
-  ),
-  sources: (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <ellipse cx="8" cy="4" rx="5" ry="2" />
-      <path d="M3 4v4c0 1.1 2.24 2 5 2s5-.9 5-2V4" />
-      <path d="M3 8v4c0 1.1 2.24 2 5 2s5-.9 5-2V8" />
-    </svg>
-  ),
   notifications: (
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M6 13a2 2 0 0 0 4 0" />
       <path d="M12 7c0-2.76-1.79-5-4-5S4 4.24 4 7c0 3-1.5 4.5-2 5h12c-.5-.5-2-2-2-5z" />
     </svg>
   ),
-  account: (
+  sound: (
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="8" cy="5" r="3" />
-      <path d="M2.5 14a5.5 5.5 0 0 1 11 0" />
+      <path d="M8 2L4 6H1v4h3l4 4V2z" />
+      <path d="M11 5.5a3.5 3.5 0 0 1 0 5M13 3.5a6.5 6.5 0 0 1 0 9" />
     </svg>
   ),
 };
@@ -71,7 +69,7 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const { connection, disconnect } = useConnectionStore();
-  const [activeTab, setActiveTab] = useState<SettingsTab>("appearance");
+  const [activeTab, setActiveTab] = useState<SettingsTab>("general");
 
   // ── Sources state ────────────────────────────────────────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
@@ -196,6 +194,16 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     setItem("personalized-mascot", enabled ? "true" : "false");
   }, []);
 
+  // ── Auto update check state ────────────────────────────────────────────
+  const [autoUpdateCheck, setAutoUpdateCheck] = useState(
+    () => getItem("auto-update-check") !== "false",
+  );
+
+  const handleToggleAutoUpdateCheck = useCallback((enabled: boolean) => {
+    setAutoUpdateCheck(enabled);
+    setItem("auto-update-check", enabled ? "true" : "false");
+  }, []);
+
   // ── Overlay state (shared via store) ─────────────────────────────────────
   const overlayEnabled = useOverlayStore((s) => s.enabled);
   const setOverlayEnabled = useOverlayStore((s) => s.setEnabled);
@@ -209,12 +217,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const hooksInstalled = hooksPlan?.alreadyInstalled || hooksStatus === "success";
 
   const tabs: { key: SettingsTab; label: string }[] = [
+    { key: "general", label: t("settings.general") },
     { key: "appearance", label: t("settings.appearance") },
+    { key: "profile", label: t("settings.profile") },
     { key: "connection", label: t("settings.connection") },
-    { key: "hooks", label: t("settings.hooks") },
-    { key: "sources", label: t("settings.sources") },
     { key: "notifications", label: t("settings.notifications") },
-    { key: "account", label: t("account.panel_title") },
+    { key: "sound", label: t("settings.sound") },
   ];
 
   return (
@@ -245,48 +253,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
           {/* ── Right: content ── */}
           <div className={styles.content}>
-            {activeTab === "appearance" && (
+            {/* ── General ── */}
+            {activeTab === "general" && (
               <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.appearance")}</div>
-                <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.theme")}</span>
-                  <ThemeToggle />
-                </div>
+                <div className={styles.section_title}>{t("settings.general")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.language")}</span>
                   <LanguageSwitcher />
-                </div>
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.user_title")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.user_title_desc")}
-                    </span>
-                  </div>
-                  <input
-                    type="text"
-                    className={styles.select}
-                    value={userTitle}
-                    placeholder={t("settings.user_title_placeholder")}
-                    onChange={(e) => handleUserTitleChange(e.target.value)}
-                    style={{ width: 120, textAlign: "center" }}
-                  />
-                </div>
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.personalized_mascot")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.personalized_mascot_desc")}
-                    </span>
-                  </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={personalizedMascot}
-                      onChange={(e) => handleTogglePersonalizedMascot(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
                 </div>
                 <div className={styles.row}>
                   <div>
@@ -304,9 +277,80 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <span className={styles.toggle_slider} />
                   </label>
                 </div>
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.auto_update_check")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.auto_update_check_desc")}
+                    </span>
+                  </div>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={autoUpdateCheck}
+                      onChange={(e) => handleToggleAutoUpdateCheck(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
               </div>
             )}
 
+            {/* ── Appearance ── */}
+            {activeTab === "appearance" && (
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.appearance")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.theme")}</span>
+                  <ThemeToggle />
+                </div>
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.personalized_mascot")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.personalized_mascot_desc")}
+                    </span>
+                  </div>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={personalizedMascot}
+                      onChange={(e) => handleTogglePersonalizedMascot(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+              </div>
+            )}
+
+            {/* ── Profile ── */}
+            {activeTab === "profile" && (
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.profile")}</div>
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.user_title")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.user_title_desc")}
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    className={styles.select}
+                    value={userTitle}
+                    placeholder={t("settings.user_title_placeholder")}
+                    onChange={(e) => handleUserTitleChange(e.target.value)}
+                    style={{ width: 120, textAlign: "center" }}
+                  />
+                </div>
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("account.panel_title")}</div>
+                <div className={styles.account_embed}>
+                  <AccountInfo embedded />
+                </div>
+              </div>
+            )}
+
+            {/* ── Connection (merged: connection + hooks + sources) ── */}
             {activeTab === "connection" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.connection")}</div>
@@ -321,12 +365,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     {t("switch_connection")}
                   </button>
                 </div>
-              </div>
-            )}
 
-            {activeTab === "hooks" && (
-              <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.hooks")}</div>
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.hooks")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.hooks_desc")}</span>
                 </div>
@@ -351,12 +391,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 {hooksStatus === "error" && (
                   <p className={styles.hooks_error}>{t("hooks.install_error", { error: hooksError })}</p>
                 )}
-              </div>
-            )}
 
-            {activeTab === "sources" && (
-              <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.sources")}</div>
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.sources")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                     {t("settings.sources_desc")}
@@ -399,6 +435,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               </div>
             )}
 
+            {/* ── Notifications ── */}
             {activeTab === "notifications" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.notification_mode")}</div>
@@ -423,8 +460,40 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 ))}
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>
-                  {t("settings.tts")}
+                  {t("settings.notification_permission")}
                 </div>
+                <div className={styles.row}>
+                  {notifPermission === true && (
+                    <span className={styles.hooks_ok}>
+                      {t("settings.notification_granted")}
+                    </span>
+                  )}
+                  {notifPermission === false && (
+                    <div className={styles.notif_denied_row}>
+                      <span className={styles.notif_denied_text}>
+                        {t("settings.notification_denied")}
+                      </span>
+                      <button
+                        className={styles.hooks_install_btn}
+                        onClick={handleRequestPermission}
+                      >
+                        {t("settings.notification_open_settings")}
+                      </button>
+                    </div>
+                  )}
+                  {notifPermission === null && (
+                    <span className={styles.row_label} style={{ color: "var(--color-text-dim)" }}>
+                      {t("account.loading")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* ── Sound ── */}
+            {activeTab === "sound" && (
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.tts")}</div>
                 {(["chime_and_speech", "chime_only", "off"] as const).map((mode) => (
                   <label className={styles.radio_row} key={mode}>
                     <input
@@ -497,44 +566,6 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     </div>
                   </>
                 )}
-
-                <div className={styles.section_title} style={{ marginTop: 18 }}>
-                  {t("settings.notification_permission")}
-                </div>
-                <div className={styles.row}>
-                  {notifPermission === true && (
-                    <span className={styles.hooks_ok}>
-                      {t("settings.notification_granted")}
-                    </span>
-                  )}
-                  {notifPermission === false && (
-                    <div className={styles.notif_denied_row}>
-                      <span className={styles.notif_denied_text}>
-                        {t("settings.notification_denied")}
-                      </span>
-                      <button
-                        className={styles.hooks_install_btn}
-                        onClick={handleRequestPermission}
-                      >
-                        {t("settings.notification_open_settings")}
-                      </button>
-                    </div>
-                  )}
-                  {notifPermission === null && (
-                    <span className={styles.row_label} style={{ color: "var(--color-text-dim)" }}>
-                      {t("account.loading")}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {activeTab === "account" && (
-              <div className={styles.section}>
-                <div className={styles.section_title}>{t("account.panel_title")}</div>
-                <div className={styles.account_embed}>
-                  <AccountInfo embedded />
-                </div>
               </div>
             )}
           </div>

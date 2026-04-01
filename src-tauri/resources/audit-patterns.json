@@ -1,0 +1,252 @@
+{
+  "version": 1,
+  "patterns": [
+    {
+      "level": "critical",
+      "tag": "sudo",
+      "match_mode": "command_start",
+      "patterns": ["sudo "]
+    },
+    {
+      "level": "critical",
+      "tag": "eval-exec",
+      "match_mode": "contains",
+      "patterns": ["| bash", "| sh", "| zsh", "eval ", "$(curl", "$(wget"]
+    },
+    {
+      "level": "critical",
+      "tag": "chmod-dangerous",
+      "match_mode": "contains",
+      "patterns": ["chmod 777", "chmod -R 777"]
+    },
+    {
+      "level": "critical",
+      "tag": "curl-upload",
+      "match_mode": "contains",
+      "patterns": [
+        "curl -X POST", "curl -X PUT", "curl -X PATCH",
+        "curl -d ", "curl --data", "curl -F ", "curl --form",
+        "curl --upload", "curl -T "
+      ]
+    },
+    {
+      "level": "critical",
+      "tag": "code-push",
+      "match_mode": "contains",
+      "patterns": ["git push"]
+    },
+    {
+      "level": "critical",
+      "tag": "package-publish",
+      "match_mode": "contains",
+      "patterns": ["npm publish", "cargo publish", "twine upload", "docker push "]
+    },
+    {
+      "level": "critical",
+      "tag": "network-exfil",
+      "match_mode": "command_start",
+      "patterns": ["nc ", "ncat ", "netcat "]
+    },
+    {
+      "level": "critical",
+      "tag": "scp-upload",
+      "match_mode": "command_start",
+      "patterns": ["scp ", "rsync "]
+    },
+    {
+      "level": "high",
+      "tag": "network-download",
+      "match_mode": "command_start",
+      "patterns": ["curl ", "wget ", "curl\t"]
+    },
+    {
+      "level": "high",
+      "tag": "ssh-remote",
+      "match_mode": "command_start",
+      "patterns": ["ssh "]
+    },
+    {
+      "level": "high",
+      "tag": "network-scan",
+      "match_mode": "command_start",
+      "patterns": ["nmap "]
+    },
+    {
+      "level": "high",
+      "tag": "git-clone",
+      "match_mode": "contains",
+      "patterns": ["git clone "]
+    },
+    {
+      "level": "high",
+      "tag": "git-reset-hard",
+      "match_mode": "contains",
+      "patterns": ["git reset --hard"]
+    },
+    {
+      "level": "high",
+      "tag": "file-deletion",
+      "match_mode": "contains",
+      "patterns": ["rm -rf ", "rm -r ", "rm -fr "]
+    },
+    {
+      "level": "high",
+      "tag": "docker-exec",
+      "match_mode": "contains",
+      "patterns": ["docker run ", "docker exec ", "docker build "]
+    },
+    {
+      "level": "high",
+      "tag": "k8s-mutate",
+      "match_mode": "contains",
+      "patterns": ["kubectl apply ", "kubectl delete ", "kubectl exec "]
+    },
+    {
+      "level": "high",
+      "tag": "process-kill",
+      "match_mode": "command_start",
+      "patterns": ["kill ", "killall ", "pkill "]
+    },
+    {
+      "level": "medium",
+      "tag": "git-fetch",
+      "match_mode": "contains",
+      "patterns": ["git fetch", "git pull"]
+    },
+    {
+      "level": "medium",
+      "tag": "git-local-destructive",
+      "match_mode": "contains",
+      "patterns": [
+        "git clean ",
+        "git branch -D ", "git branch -d ",
+        "git stash drop", "git stash clear",
+        "git checkout -- ", "git restore .",
+        "git reset "
+      ]
+    },
+    {
+      "level": "medium",
+      "tag": "package-install",
+      "match_mode": "contains",
+      "patterns": [
+        "npm install", "npm i ", "npm ci",
+        "yarn add ", "yarn install", "pnpm add ", "pnpm install",
+        "pip install", "pip3 install",
+        "cargo install ",
+        "brew install ", "brew upgrade ",
+        "apt install ", "apt-get install ",
+        "go install "
+      ]
+    },
+    {
+      "level": "medium",
+      "tag": "npx-exec",
+      "match_mode": "command_start",
+      "patterns": ["npx "]
+    },
+    {
+      "level": "medium",
+      "tag": "cloud-cli",
+      "match_mode": "command_start",
+      "patterns": ["aws ", "gcloud ", "az ", "terraform ", "pulumi "]
+    },
+    {
+      "level": "medium",
+      "tag": "open-external",
+      "match_mode": "command_start",
+      "patterns": ["open http", "open https", "xdg-open "]
+    },
+    {
+      "level": "medium",
+      "tag": "scheduled-task",
+      "match_mode": "command_start",
+      "patterns": ["crontab ", "launchctl "]
+    },
+    {
+      "level": "medium",
+      "tag": "permission-change",
+      "match_mode": "command_start",
+      "patterns": ["chmod ", "chown "]
+    }
+  ],
+  "python_patterns": [
+    {
+      "level": "critical",
+      "tag": "py-http-upload",
+      "match_mode": "contains",
+      "patterns": [
+        "requests.post", "requests.put", "requests.patch",
+        "http.client.HTTPSConnection", "http.client.HTTPConnection"
+      ]
+    },
+    {
+      "level": "critical",
+      "tag": "py-socket",
+      "match_mode": "contains",
+      "patterns": ["import socket", "from socket "]
+    },
+    {
+      "level": "critical",
+      "tag": "py-email",
+      "match_mode": "contains",
+      "patterns": ["smtplib.SMTP", "smtplib.sendmail"]
+    },
+    {
+      "level": "critical",
+      "tag": "py-dynamic-exec",
+      "match_mode": "contains",
+      "patterns": ["exec(", "compile("]
+    },
+    {
+      "level": "high",
+      "tag": "py-http-download",
+      "match_mode": "contains",
+      "patterns": [
+        "requests.get", "requests.head",
+        "urllib.request", "urlretrieve(",
+        "httpx.get", "httpx.AsyncClient"
+      ]
+    },
+    {
+      "level": "high",
+      "tag": "py-subprocess",
+      "match_mode": "contains",
+      "patterns": [
+        "subprocess.run", "subprocess.Popen", "subprocess.call",
+        "subprocess.check_output", "subprocess.check_call",
+        "os.system(", "os.popen(", "os.exec"
+      ]
+    },
+    {
+      "level": "high",
+      "tag": "py-file-delete",
+      "match_mode": "contains",
+      "patterns": [
+        "os.remove(", "os.unlink(",
+        "shutil.rmtree(", "pathlib.Path.unlink"
+      ]
+    },
+    {
+      "level": "high",
+      "tag": "py-ssh",
+      "match_mode": "contains",
+      "patterns": ["paramiko.", "fabric."]
+    },
+    {
+      "level": "medium",
+      "tag": "py-file-write",
+      "match_mode": "contains",
+      "patterns": [
+        "shutil.copy", "shutil.move",
+        "shutil.copytree", "os.rename("
+      ]
+    },
+    {
+      "level": "medium",
+      "tag": "py-pkg-install",
+      "match_mode": "contains",
+      "patterns": ["pip.main(", "importlib.import_module(", "__import__("]
+    }
+  ]
+}

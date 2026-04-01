@@ -1,16 +1,16 @@
 <div align="center">
 
-<img src="docs/hero.png" width="640" alt="Claude Fleet — Mission control for your Claude Code agents" />
+<img src="docs/hero.png" width="640" alt="Claw Fleet — Mission control for your Claude Code agents" />
 
-# Claude Fleet
+# Claw Fleet
 
 **Mission control for your AI coding agents.**
-Monitor every session, track token throughput, and inspect full conversation histories — all from one place.
+Monitor every session, track token throughput, get AI-generated daily summaries and lessons learned — all from one place.
 Supports **Claude Code**, **Cursor**, **OpenClaw**, and **Codex**.
 
-[![Release](https://img.shields.io/github/v/release/hoveychen/claude-fleet?style=flat-square&logo=github&color=d97757)](https://github.com/hoveychen/claude-fleet/releases/latest)
-[![License](https://img.shields.io/github/license/hoveychen/claude-fleet?style=flat-square&color=4a9eff)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](https://github.com/hoveychen/claude-fleet/releases/latest)
+[![Release](https://img.shields.io/github/v/release/hoveychen/claw-fleet?style=flat-square&logo=github&color=d97757)](https://github.com/hoveychen/claw-fleet/releases/latest)
+[![License](https://img.shields.io/github/license/hoveychen/claw-fleet?style=flat-square&color=4a9eff)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey?style=flat-square)](https://github.com/hoveychen/claw-fleet/releases/latest)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB?style=flat-square&logo=tauri)](https://tauri.app)
 [![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
@@ -20,19 +20,19 @@ Supports **Claude Code**, **Cursor**, **OpenClaw**, and **Codex**.
 ---
 
 
-## What is Claude Fleet?
+## What is Claw Fleet?
 
-When you run Claude Code across multiple projects simultaneously — or lean on its multi-agent delegation feature — it's easy to lose track of what each agent is doing, how fast it's working, or whether it's stuck waiting for your input.
+When you run Claude Code across multiple projects simultaneously — or lean on its multi-agent delegation feature — it's easy to lose track of what each agent is doing, how fast it's working, or whether it's stuck waiting for your input. At the end of the day, you want to know: what actually got done? And what mistakes should your agents avoid next time?
 
-**Claude Fleet** solves this by watching Claude Code's local session files in real time and presenting everything in a clean dashboard. No server required, no API key needed beyond what Claude Code already uses.
+**Claw Fleet** solves both. It watches session files in real time and presents everything in a clean dashboard. At the end of each day, it generates **AI-powered summaries** of what your agents accomplished and extracts **lessons learned** from their mistakes — turning raw session logs into actionable standup reports and persistent knowledge. No server required, no API key needed beyond what Claude Code already uses.
 
-> **Meet Captain Octo** 🐙 — our mascot. Eight tentacles for eight agents running in parallel. He keeps the fleet in order.
+> **Meet Captain Claw** 🦀 — our mascot. A battle-hardened crab commander who keeps every agent in formation.
 
 ---
 
 ## Supported Agents
 
-Claude Fleet can monitor sessions from multiple AI coding agents:
+Claw Fleet can monitor sessions from multiple AI coding agents:
 
 | | Agent | Status |
 |---|---|---|
@@ -41,16 +41,14 @@ Claude Fleet can monitor sessions from multiple AI coding agents:
 | <picture><source media="(prefers-color-scheme: dark)" srcset="src/assets/icons/openclaw.svg"><source media="(prefers-color-scheme: light)" srcset="src/assets/icons/openclaw-dark.svg"><img src="src/assets/icons/openclaw-dark.svg" width="24" height="24"></picture> | **OpenClaw** | Fully supported |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="src/assets/icons/codex.svg"><source media="(prefers-color-scheme: light)" srcset="src/assets/icons/codex-dark.svg"><img src="src/assets/icons/codex-dark.svg" width="24" height="24"></picture> | **Codex** | Fully supported |
 
-> Toggle agent sources on or off in the app's Settings panel. Claude Fleet auto-detects which tools are installed on your system.
+> Toggle agent sources on or off in the app's Settings panel. Claw Fleet auto-detects which tools are installed on your system.
 
 ---
 
-## Why Claude Fleet?
+## Why Claw Fleet?
 
 <div align="center">
-<img src="docs/comic_status.png" width="720" alt="Comic: 8-State Intelligence" />
-<img src="docs/comic_stop.png" width="720" alt="Comic: Stop Runaway Agents" />
-<img src="docs/comic_skill.png" width="720" alt="Comic: AI Managing AI" />
+<img src="docs/features_grid.png" width="720" alt="Claw Fleet — Key Features" />
 </div>
 
 ---
@@ -68,7 +66,7 @@ Claude Fleet can monitor sessions from multiple AI coding agents:
 </tr>
 <tr>
 <td><strong>Security Audit</strong> — tool-use risk scanning</td>
-<td><strong>Captain Octo</strong> — your AI fleet assistant</td>
+<td><strong>Captain Claw</strong> — your AI fleet assistant</td>
 </tr>
 <tr>
 <td><img src="docs/screenshots/03_audit.png" alt="Audit View" /></td>
@@ -82,44 +80,56 @@ Claude Fleet can monitor sessions from multiple AI coding agents:
 <td><img src="docs/screenshots/05_memory.png" alt="Memory Panel" /></td>
 <td><img src="docs/screenshots/06_notifications.png" alt="Notifications" /></td>
 </tr>
+<tr>
+<td><strong>Insights Timeline</strong> — AI summaries & lessons feed</td>
+<td><strong>Daily Report</strong> — metrics, charts & AI summary</td>
+</tr>
+<tr>
+<td><img src="docs/screenshots/07_report.png" alt="Insights Timeline" /></td>
+<td><img src="docs/screenshots/08_daily_report.png" alt="Daily Report" /></td>
+</tr>
 </table>
 
 ---
 
 ## Features
 
-**Zero configuration.** Claude Fleet reads Claude Code's local session files directly — no server, no extra API key, no setup beyond installing the app.
+**AI daily summaries — the standup update you never write.** Each day's sessions are distilled into a narrative: what your agents built, which tasks completed, where they got stuck. Token usage, activity heatmap, tool call breakdown — all generated automatically. Copy as Markdown and paste straight into Slack or your standup thread.
 
-| | Feature | Details |
-|---|---|---|
-| 🧠 | **8-State Intelligent Status** | Distinguishes `thinking` · `executing` · `streaming` · `processing` · `waiting input` · `active` · `delegating` · `idle` — inferred from content blocks and file modification time, not just polling |
-| 🌲 | **Multi-Agent Hierarchy** | Gallery view groups parent sessions with their spawned subagents; idle parents auto-promote to `delegating` when children are still running |
-| ⚡ | **Real-Time Token Speed** | Scrolling area chart of aggregate tokens/s across all active agents; per-agent speeds shown on each card |
-| 🔍 | **Full Conversation Inspection** | Browse complete message history with rendered Markdown, syntax-highlighted code, collapsible thinking blocks, and tool use/result pairs |
-| 🛑 | **Stop Agents** | Kill any running session directly from the dashboard — sends SIGTERM then SIGKILL to the full process tree |
-| 📊 | **Rate-Limit Dashboard** | Live utilization bars for the 5-hour and 7-day usage windows, with trend comparison to the previous cycle so you know before you hit the wall |
-| 💻 | **`fleet` CLI** | Standalone binary for terminal use: `fleet agents`, `fleet stop <id>`, `fleet account`, `fleet speed` — all with `--json` output for scripting |
-| 🤖 | **Fleet Skill** | One-click install of a Claude Code / Cursor / Copilot skill that lets your AI assistant monitor and stop other agents autonomously |
-| 🔔 | **System Tray** | Lives in your menu bar with a live agent-count badge; never clutters your taskbar |
+**Lessons learned — AI mistakes become team knowledge.** Claw Fleet scans session logs for missteps — wrong assumptions, failed approaches, repeated retries — and extracts concise lessons. One click adds them to your `CLAUDE.md`, so agents never repeat the same mistakes. This is how your fleet gets smarter over time.
+
+**8 live statuses, not just "running".** Your agents are thinking, executing, streaming, delegating, or waiting for you — Claw Fleet tells you which, with parent-child hierarchies grouped automatically. Stuck agent? Kill it from the dashboard.
+
+**Security audit built in.** Every Bash command your agents run gets scanned and classified by risk. `sudo`, `git push --force`, `rm -rf` — you'll catch the dangerous ones before they become incidents.
+
+**Your agents' memory, finally visible.** `CLAUDE.md` files and memory entries scattered across dozens of projects, indexed in one place. Browse, diff, promote to global scope.
+
+**Remote agents, local dashboard.** SSH into your cloud box and monitor remote agents alongside local ones. Auto-bootstraps itself on the remote side. No port forwarding, no VPN.
+
+**Agents that manage agents.** Install the Fleet Skill and your AI coding agent can check on — and stop — other running agents on its own.
+
+**A CLI for everything.** `fleet agents`, `fleet stop`, `fleet audit`, `fleet search` — all with `--json`. Stay in the terminal if that's your thing.
+
+**Zero config.** Download. Open. It reads local session files directly — no server, no API key. macOS, Windows, Linux.
 
 ---
 
 ## Installation
 
-Download the latest pre-built binary for your platform from the [Releases page](https://github.com/hoveychen/claude-fleet/releases/latest):
+Download the latest pre-built binary for your platform from the [Releases page](https://github.com/hoveychen/claw-fleet/releases/latest):
 
 | | Platform | Architecture | Download |
 |---|---|---|---|
-| <img src="docs/icon-apple.svg" width="24"> | macOS | Apple Silicon (M1/M2/M3/M4) | [claude-fleet-macos-arm64.dmg](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-macos-arm64.dmg) |
-| <img src="docs/icon-apple.svg" width="24"> | macOS | Intel | [claude-fleet-macos-x64.dmg](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-macos-x64.dmg) |
-| <img src="docs/icon-windows.svg" width="24"> | Windows | x64 | [claude-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-windows-x64-setup.exe) |
-| <img src="docs/icon-windows.svg" width="24"> | Windows | ARM64 | [claude-fleet-windows-arm64-setup.exe](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-windows-arm64-setup.exe) |
-| <img src="docs/icon-linux.svg" width="24"> | Linux | x86\_64 | [claude-fleet-linux-x64.deb](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-x64.deb) · [claude-fleet-linux-x64.AppImage](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-x64.AppImage) |
-| <img src="docs/icon-linux.svg" width="24"> | Linux | ARM64 | [claude-fleet-linux-arm64.deb](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-arm64.deb) · [claude-fleet-linux-arm64.AppImage](https://github.com/hoveychen/claude-fleet/releases/latest/download/claude-fleet-linux-arm64.AppImage) |
+| <img src="docs/icon-apple.svg" width="24"> | macOS | Apple Silicon (M1/M2/M3/M4) | [claw-fleet-macos-arm64.dmg](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-macos-arm64.dmg) |
+| <img src="docs/icon-apple.svg" width="24"> | macOS | Intel | [claw-fleet-macos-x64.dmg](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-macos-x64.dmg) |
+| <img src="docs/icon-windows.svg" width="24"> | Windows | x64 | [claw-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-x64-setup.exe) |
+| <img src="docs/icon-windows.svg" width="24"> | Windows | ARM64 | [claw-fleet-windows-arm64-setup.exe](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-arm64-setup.exe) |
+| <img src="docs/icon-linux.svg" width="24"> | Linux | x86\_64 | [claw-fleet-linux-x64.deb](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.deb) · [claw-fleet-linux-x64.AppImage](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.AppImage) |
+| <img src="docs/icon-linux.svg" width="24"> | Linux | ARM64 | [claw-fleet-linux-arm64.deb](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-arm64.deb) · [claw-fleet-linux-arm64.AppImage](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-arm64.AppImage) |
 
 ### Prerequisites
 
-Claude Fleet reads session data written by **Claude Code** (`claude` CLI). You need Claude Code installed and have run at least one session before anything shows up.
+Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You need Claude Code installed and have run at least one session before anything shows up.
 
 ---
 
@@ -134,8 +144,8 @@ Claude Fleet reads session data written by **Claude Code** (`claude` CLI). You n
 ### Steps
 
 ```bash
-git clone https://github.com/hoveychen/claude-fleet.git
-cd claude-fleet
+git clone https://github.com/hoveychen/claw-fleet.git
+cd claw-fleet
 
 npm install
 
@@ -152,7 +162,7 @@ The output binary and installer are placed under `src-tauri/target/release/bundl
 
 ## How It Works
 
-Claude Fleet reads directly from Claude Code's local data directory (`~/.claude/`) — no network calls, no background services, nothing you need to configure.
+Claw Fleet reads directly from Claude Code's local data directory (`~/.claude/`) — no network calls, no background services, nothing you need to configure.
 
 ```
 ~/.claude/

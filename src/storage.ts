@@ -28,6 +28,7 @@ const ALL_KEYS = [
   "tts-voice",
   "overlay-muted",
   "user-title",
+  "auto-update-check",
 ] as const;
 
 /**

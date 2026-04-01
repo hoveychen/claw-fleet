@@ -1,13 +1,13 @@
 use clap::{Parser, Subcommand};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use claude_fleet_lib::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
-use claude_fleet_lib::agent_source::{self, build_sources, find_source_for_path};
-use claude_fleet_lib::hooks;
-use claude_fleet_lib::memory;
-use claude_fleet_lib::skills;
-use claude_fleet_lib::session::{get_claude_dir, scan_all_sources, SessionInfo, SessionStatus};
-use claude_fleet_lib::{FLEET_SKILL_MD, SKILL_TARGETS};
+use claw_fleet_lib::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
+use claw_fleet_lib::agent_source::{self, build_sources, find_source_for_path};
+use claw_fleet_lib::hooks;
+use claw_fleet_lib::memory;
+use claw_fleet_lib::skills;
+use claw_fleet_lib::session::{get_claude_dir, scan_all_sources, SessionInfo, SessionStatus};
+use claw_fleet_lib::{FLEET_SKILL_MD, SKILL_TARGETS};
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@ fn truncate(s: &str, max: usize) -> String {
 #[command(
     name = "fleet",
     version,
-    about = "Claude Fleet CLI — monitor Claude Code agents",
+    about = "Claw Fleet CLI — monitor Claude Code agents",
     long_about = None
 )]
 struct Cli {
@@ -229,6 +229,30 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// View or generate daily reports
+    Report {
+        /// Date to view (YYYY-MM-DD, default: yesterday)
+        #[arg(short, long)]
+        date: Option<String>,
+        /// Backfill all missing reports for the last 90 days
+        #[arg(long)]
+        backfill: bool,
+        /// Regenerate a specific date's report (metrics only)
+        #[arg(long)]
+        regenerate: bool,
+        /// Generate lessons from sessions (requires claude CLI)
+        #[arg(long)]
+        lessons: bool,
+        /// Force regenerate AI summary (requires claude CLI)
+        #[arg(long)]
+        summary: bool,
+        /// Output as JSON
+        #[arg(long)]
+        json: bool,
+        /// Language for AI-generated content (en, zh, etc. Default: en)
+        #[arg(long, default_value = "en")]
+        lang: String,
+    },
     /// Manage Fleet skill for AI coding tools
     Skill {
         #[command(subcommand)]
@@ -272,6 +296,7 @@ fn main() {
         Commands::Memory { file, json } => cmd_memory(file, json),
         Commands::Search { query, limit, json } => cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => cmd_audit(&level, filter.as_deref(), json),
+        Commands::Report { date, backfill, regenerate, lessons, summary, json, lang } => cmd_report(date, backfill, regenerate, lessons, summary, json, &lang),
         Commands::Serve { port, token } => cmd_serve(port, token),
         Commands::Skill { action } => match action {
             SkillCommands::Install => cmd_skill_install(),
@@ -403,7 +428,7 @@ fn ensure_remote_fleet(host: &str) -> String {
     };
 
     let dl_url = format!(
-        "https://github.com/hoveychen/claude-fleet/releases/latest/download/fleet-{release_suffix}"
+        "https://github.com/hoveychen/claw-fleet/releases/latest/download/fleet-{release_suffix}"
     );
     let dl_cmd = format!(
         "curl -fsSL '{dl_url}' -o {install_bin}.tmp && mv {install_bin}.tmp {install_bin} && chmod +x {install_bin} && echo OK"
@@ -939,7 +964,7 @@ fn cmd_memory(file: Option<String>, as_json: bool) {
 // ── fleet search ──────────────────────────────────────────────────────────────
 
 fn cmd_search(query: &str, limit: usize, as_json: bool) {
-    use claude_fleet_lib::search_index::SearchIndex;
+    use claw_fleet_lib::search_index::SearchIndex;
 
     if query.trim().is_empty() {
         eprintln!("Error: search query cannot be empty");
@@ -1012,7 +1037,7 @@ fn cmd_search(query: &str, limit: usize, as_json: bool) {
 // ── fleet audit ───────────────────────────────────────────────────────────────
 
 fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
-    use claude_fleet_lib::audit::{extract_audit_events, AuditRiskLevel};
+    use claw_fleet_lib::audit::{extract_audit_events, AuditRiskLevel};
 
     let min = match min_level.to_lowercase().as_str() {
         "medium" => AuditRiskLevel::Medium,
@@ -1129,9 +1154,20 @@ fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
 fn cmd_serve(port: u16, token: String) {
     use std::io::{Read, Seek, SeekFrom};
     use percent_encoding::percent_decode_str;
-    use claude_fleet_lib::search_index::SearchIndex;
+    use claw_fleet_lib::search_index::SearchIndex;
+
+    use std::sync::{Arc, Mutex};
+    use claw_fleet_lib::daily_report::{
+        ReportStore, generate_report_from_sessions, scan_sessions_for_date, generate_ai_summary,
+        generate_lessons, append_lesson_to_claude_md, Lesson,
+    };
 
     let sources = build_sources();
+
+    // Open the daily report store.
+    let report_store = Arc::new(Mutex::new(
+        ReportStore::open().expect("report store open"),
+    ));
 
     // Open the full-text search index (stored on the remote host).
     let search_index = {
@@ -1155,7 +1191,7 @@ fn cmd_serve(port: u16, token: String) {
 
     let expected_auth = format!("Bearer {}", token);
 
-    for request in server.incoming_requests() {
+    for mut request in server.incoming_requests() {
         // Auth check
         let auth_ok = request
             .headers()
@@ -1245,7 +1281,7 @@ fn cmd_serve(port: u16, token: String) {
                 }
                 #[cfg(unix)]
                 {
-                    use claude_fleet_lib::session::scan_cli_processes;
+                    use claw_fleet_lib::session::scan_cli_processes;
                     let procs = scan_cli_processes();
                     let pids: Vec<u32> = procs.iter()
                         .filter(|p| p.cwd == workspace)
@@ -1274,7 +1310,7 @@ fn cmd_serve(port: u16, token: String) {
                     let kind = parts[2];
 
                     // Check sources config before serving
-                    let config = claude_fleet_lib::agent_source::SourcesConfig::load();
+                    let config = claw_fleet_lib::agent_source::SourcesConfig::load();
                     if !config.is_source_enabled(source_name) {
                         let body = format!(r#"{{"error":"Source '{}' is disabled"}}"#, source_name);
                         let _ = request.respond(
@@ -1322,13 +1358,13 @@ fn cmd_serve(port: u16, token: String) {
 
             "/setup-status" => {
                 let sessions = scan_all_sources(&sources);
-                let detected_tools = claude_fleet_lib::detect_installed_tools(&sessions);
-                let (cli_installed, cli_path) = claude_fleet_lib::check_cli_installed();
+                let detected_tools = claw_fleet_lib::detect_installed_tools(&sessions);
+                let (cli_installed, cli_path) = claw_fleet_lib::check_cli_installed();
                 let claude_dir_exists = get_claude_dir().map_or(false, |d| d.is_dir());
-                let logged_in = claude_fleet_lib::account::read_keychain_credentials().is_ok();
+                let logged_in = claw_fleet_lib::account::read_keychain_credentials().is_ok();
                 let has_sessions = !sessions.is_empty();
 
-                let status = claude_fleet_lib::backend::SetupStatus {
+                let status = claw_fleet_lib::backend::SetupStatus {
                     cli_installed,
                     cli_path,
                     claude_dir_exists,
@@ -1344,7 +1380,7 @@ fn cmd_serve(port: u16, token: String) {
             }
 
             "/usage_summaries" => {
-                let summaries = claude_fleet_lib::local_backend::fetch_usage_summaries_from_sources(&sources);
+                let summaries = claw_fleet_lib::local_backend::fetch_usage_summaries_from_sources(&sources);
                 let body = serde_json::to_string(&summaries).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -1610,7 +1646,7 @@ fn cmd_serve(port: u16, token: String) {
             }
 
             "/audit" => {
-                use claude_fleet_lib::audit::extract_audit_events;
+                use claw_fleet_lib::audit::extract_audit_events;
                 let sessions = scan_all_sources(&sources);
                 let active: Vec<&SessionInfo> = sessions
                     .iter()
@@ -1628,7 +1664,7 @@ fn cmd_serve(port: u16, token: String) {
                     }
                 }
                 all_events.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                let summary = claude_fleet_lib::audit::AuditSummary {
+                let summary = claw_fleet_lib::audit::AuditSummary {
                     events: all_events,
                     total_sessions_scanned: total,
                 };
@@ -1636,6 +1672,192 @@ fn cmd_serve(port: u16, token: String) {
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
+            }
+
+            "/audit/pattern-info" => {
+                let (version, path) = claw_fleet_lib::pattern_update::get_patterns_info();
+                let body = serde_json::json!({
+                    "version": version,
+                    "path": path,
+                }).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/audit/check-update" => {
+                let msg = claw_fleet_lib::pattern_update::check_update_now();
+                let body = serde_json::json!({ "message": msg }).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/daily_report" => {
+                let date = query.get("date").cloned().unwrap_or_default();
+                let store = report_store.lock().unwrap();
+                match store.get_report(&date) {
+                    Ok(report) => {
+                        let body = serde_json::to_string(&report).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = format!("{{\"error\":\"{}\"}}", e);
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/daily_report_stats" => {
+                let from = query.get("from").cloned().unwrap_or_default();
+                let to = query.get("to").cloned().unwrap_or_default();
+                let store = report_store.lock().unwrap();
+                let stats = store.list_stats(&from, &to).unwrap_or_default();
+                let body = serde_json::to_string(&stats).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/daily_report/generate" => {
+                let date = query.get("date").cloned().unwrap_or_default();
+                let sessions = scan_sessions_for_date(&date);
+                if sessions.is_empty() {
+                    let body = r#"{"error":"no sessions found for date"}"#;
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(404)
+                            .with_header(json_header),
+                    );
+                } else {
+                    let session_refs: Vec<&SessionInfo> = sessions.iter().collect();
+                    let tz = chrono::Local::now().format("%Z").to_string();
+                    let report = generate_report_from_sessions(&date, &tz, &session_refs);
+                    report_store.lock().unwrap().save_report(&report).ok();
+                    let body = serde_json::to_string(&report).unwrap_or_default();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body).with_header(json_header),
+                    );
+                }
+            }
+
+            "/daily_report/ai_summary" => {
+                let date = query.get("date").cloned().unwrap_or_default();
+                let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
+                let store = report_store.lock().unwrap();
+                match store.get_report(&date) {
+                    Ok(Some(report)) => {
+                        drop(store);
+                        match generate_ai_summary(&report, lang) {
+                            Some(summary) => {
+                                report_store
+                                    .lock()
+                                    .unwrap()
+                                    .update_ai_summary(&date, &summary)
+                                    .ok();
+                                let body = serde_json::to_string(&summary).unwrap_or_default();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_header(json_header),
+                                );
+                            }
+                            None => {
+                                let body = r#"{"error":"AI summary generation failed"}"#;
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        let body = r#"{"error":"report not found"}"#;
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(404)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/daily_report/lessons" => {
+                let date = query.get("date").cloned().unwrap_or_default();
+                let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
+                let store = report_store.lock().unwrap();
+                match store.get_report(&date) {
+                    Ok(Some(report)) => {
+                        drop(store);
+                        match generate_lessons(&report, lang) {
+                            Some(lessons) => {
+                                report_store
+                                    .lock()
+                                    .unwrap()
+                                    .update_lessons(&date, &lessons)
+                                    .ok();
+                                let body = serde_json::to_string(&lessons).unwrap_or_default();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_header(json_header),
+                                );
+                            }
+                            None => {
+                                let body = r#"{"error":"Lessons generation failed"}"#;
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    _ => {
+                        let body = r#"{"error":"report not found"}"#;
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(404)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/daily_report/append_lesson" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<Lesson>(&body_bytes) {
+                    Ok(lesson) => match append_lesson_to_claude_md(&lesson) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string("{}")
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"invalid lesson: {}"}}"#, e.to_string().replace('"', "'"));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
             }
 
             _ => {
@@ -1774,5 +1996,215 @@ fn cmd_skill_install() {
     if !any {
         eprintln!("No supported AI tools detected. Install Claude Code, GitHub Copilot, or Gemini CLI first.");
         std::process::exit(1);
+    }
+}
+
+// ── Daily report CLI ────────────────────────────────────────────────────────
+
+fn cmd_report(date: Option<String>, backfill: bool, regenerate: bool, gen_lessons: bool, gen_summary: bool, as_json: bool, lang: &str) {
+    use claw_fleet_lib::daily_report::{
+        ReportStore, generate_report_from_sessions, scan_sessions_for_date,
+        generate_lessons, generate_ai_summary,
+    };
+
+    let store = ReportStore::open().expect("cannot open report store");
+
+    if backfill {
+        let today = chrono::Local::now();
+        for days_ago in 1..=90 {
+            let date = (today - chrono::Duration::days(days_ago))
+                .format("%Y-%m-%d")
+                .to_string();
+            if store.get_report(&date).ok().flatten().is_some() {
+                continue;
+            }
+            let sessions = scan_sessions_for_date(&date);
+            if sessions.is_empty() {
+                continue;
+            }
+            let session_refs: Vec<_> = sessions.iter().collect();
+            let tz = chrono::Local::now().format("%Z").to_string();
+            let report = generate_report_from_sessions(&date, &tz, &session_refs);
+            store.save_report(&report).ok();
+            println!(
+                "Generated report for {}: {} sessions, {} tokens",
+                date,
+                report.metrics.total_sessions,
+                report.metrics.total_input_tokens + report.metrics.total_output_tokens
+            );
+        }
+        println!("Backfill complete.");
+        return;
+    }
+
+    let target_date = date.unwrap_or_else(|| {
+        (chrono::Local::now() - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string()
+    });
+
+    if regenerate {
+        let sessions = scan_sessions_for_date(&target_date);
+        if sessions.is_empty() {
+            eprintln!("No sessions found for {}", target_date);
+            std::process::exit(1);
+        }
+        let session_refs: Vec<_> = sessions.iter().collect();
+        let tz = chrono::Local::now().format("%Z").to_string();
+        let report = generate_report_from_sessions(&target_date, &tz, &session_refs);
+        store.save_report(&report).ok();
+        println!("Regenerated report for {}", target_date);
+    }
+
+    if gen_summary {
+        match store.get_report(&target_date) {
+            Ok(Some(report)) => {
+                eprint!("Generating AI summary (may take up to 2 minutes)...");
+                match generate_ai_summary(&report, lang) {
+                    Some(summary) => {
+                        eprintln!(" done");
+                        store.update_ai_summary(&target_date, &summary).ok();
+                        if as_json {
+                            println!("{}", serde_json::to_string_pretty(&summary).unwrap());
+                        } else {
+                            println!("{summary}");
+                        }
+                    }
+                    None => {
+                        eprintln!(" failed (claude CLI unavailable or timed out)");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Ok(None) => {
+                eprintln!("No report for {}. Use --regenerate first.", target_date);
+                std::process::exit(1);
+            }
+            Err(e) => { eprintln!("Error: {}", e); std::process::exit(1); }
+        }
+        if !gen_lessons { return; }
+    }
+
+    if gen_lessons {
+        match store.get_report(&target_date) {
+            Ok(Some(report)) => {
+                eprint!("Generating lessons (may take up to 3 minutes)...");
+                match generate_lessons(&report, lang) {
+                    Some(lessons) => {
+                        eprintln!(" done ({} lessons found)", lessons.len());
+                        store.update_lessons(&target_date, &lessons).ok();
+                        if as_json {
+                            println!("{}", serde_json::to_string_pretty(&lessons).unwrap());
+                            return;
+                        }
+                        print_lessons(&lessons);
+                    }
+                    None => {
+                        eprintln!(" failed (claude CLI unavailable or timed out)");
+                        std::process::exit(1);
+                    }
+                }
+            }
+            Ok(None) => {
+                eprintln!("No report for {}. Use --regenerate first.", target_date);
+                std::process::exit(1);
+            }
+            Err(e) => { eprintln!("Error: {}", e); std::process::exit(1); }
+        }
+        return;
+    }
+
+    match store.get_report(&target_date) {
+        Ok(Some(report)) => {
+            if as_json {
+                println!("{}", serde_json::to_string_pretty(&report).unwrap());
+            } else {
+                print_report(&report);
+            }
+        }
+        Ok(None) => {
+            eprintln!(
+                "No report for {}. Use --regenerate to generate.",
+                target_date
+            );
+            std::process::exit(1);
+        }
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
+
+fn print_lessons(lessons: &[claw_fleet_lib::daily_report::Lesson]) {
+    let b = c_bold();
+    let d = c_dim();
+    let r = c_reset();
+
+    if lessons.is_empty() {
+        println!("No AI mistakes found in this day's sessions.");
+        return;
+    }
+    println!("{b}Lessons Learned{r}\n");
+    for (i, lesson) in lessons.iter().enumerate() {
+        println!("{}. {b}{}{r}", i + 1, lesson.content);
+        println!("   {d}Why:{r} {}", lesson.reason);
+        println!("   {d}From:{r} {} / {}", lesson.workspace_name, lesson.session_id);
+        println!();
+    }
+}
+
+fn print_report(report: &claw_fleet_lib::daily_report::DailyReport) {
+    let b = c_bold();
+    let d = c_dim();
+    let r = c_reset();
+
+    println!("{b}Daily Report \u{2014} {}{r}", report.date);
+    println!();
+    println!("  Sessions:    {}", report.metrics.total_sessions);
+    println!("  Subagents:   {}", report.metrics.total_subagents);
+    println!(
+        "  Tokens:      {} in / {} out",
+        format_tokens(report.metrics.total_input_tokens),
+        format_tokens(report.metrics.total_output_tokens)
+    );
+    println!("  Tool calls:  {}", report.metrics.total_tool_calls);
+    println!();
+
+    if !report.metrics.tool_call_breakdown.is_empty() {
+        println!("{b}Tool Calls{r}");
+        let mut tools: Vec<_> = report.metrics.tool_call_breakdown.iter().collect();
+        tools.sort_by(|a, b| b.1.cmp(a.1));
+        for (tool, count) in tools {
+            println!("  {tool:<20} {count}");
+        }
+        println!();
+    }
+
+    for proj in &report.metrics.projects {
+        println!(
+            "{b}{}{r} {d}({}){r}",
+            proj.workspace_name, proj.workspace_path
+        );
+        println!(
+            "  {} sessions, {} tool calls, {} tokens",
+            proj.session_count,
+            proj.tool_calls,
+            format_tokens(proj.total_input_tokens + proj.total_output_tokens)
+        );
+        for s in &proj.sessions {
+            let title = s.title.as_deref().unwrap_or("(untitled)");
+            let sub = if s.is_subagent { " [sub]" } else { "" };
+            println!(
+                "  {d}\u{2022}{r} {title}{sub} {d}({}){r}",
+                format_tokens(s.output_tokens)
+            );
+        }
+        println!();
+    }
+
+    if let Some(ref summary) = report.ai_summary {
+        println!("{b}AI Summary{r}");
+        println!("{}", summary);
     }
 }

@@ -50,6 +50,10 @@ pub struct LocalBackend {
     /// Kept alive so the indexer thread doesn't exit (dropping closes the channel).
     #[allow(dead_code)]
     index_tx: std::sync::mpsc::Sender<IndexRequest>,
+    /// Daily report store — SQLite-backed, shared with the scheduler thread.
+    report_store: Arc<Mutex<crate::daily_report::ReportStore>>,
+    /// User's UI locale (e.g. "en", "zh").
+    locale: Arc<Mutex<String>>,
     /// Kept alive so the watcher thread keeps running.
     /// Dropping this field closes the event channel and the thread exits.
     _watcher: RecommendedWatcher,
@@ -82,6 +86,17 @@ impl LocalBackend {
                     let _ = fs::remove_file(home.join(".claude").join("fleet-search.db"));
                 }
                 SearchIndex::open().expect("search index open failed twice")
+            }),
+        ));
+
+        // Open (or create) the daily report store.
+        let report_store = Arc::new(Mutex::new(
+            crate::daily_report::ReportStore::open().unwrap_or_else(|e| {
+                log_debug(&format!("report store open failed, retrying fresh: {e}"));
+                if let Some(home) = dirs::home_dir() {
+                    let _ = fs::remove_file(home.join(".claude").join("fleet-reports.db"));
+                }
+                crate::daily_report::ReportStore::open().expect("report store open failed twice")
             }),
         ));
 
@@ -324,6 +339,9 @@ impl LocalBackend {
             });
         }
 
+        // Start the daily report scheduler (backfills missing reports in background).
+        crate::daily_report::start_report_scheduler(report_store.clone(), locale.clone());
+
         LocalBackend {
             app,
             sources,
@@ -335,6 +353,8 @@ impl LocalBackend {
             notified_audit_keys,
             search_index,
             index_tx,
+            report_store,
+            locale,
             _watcher: watcher,
         }
     }
@@ -830,6 +850,114 @@ impl Backend for LocalBackend {
             Ok(idx) => idx.search(query, limit).unwrap_or_default(),
             Err(_) => vec![],
         }
+    }
+
+    fn get_daily_report(&self, date: &str) -> Result<Option<crate::daily_report::DailyReport>, String> {
+        self.report_store.lock().unwrap().get_report(date)
+    }
+
+    fn list_daily_report_stats(&self, from: &str, to: &str) -> Vec<crate::daily_report::DailyReportStats> {
+        self.report_store
+            .lock()
+            .unwrap()
+            .list_stats(from, to)
+            .unwrap_or_default()
+    }
+
+    fn generate_daily_report(&self, date: &str) -> Result<crate::daily_report::DailyReport, String> {
+        // Try in-memory session cache first (covers last 7 days)
+        let cached: Vec<SessionInfo> = {
+            let all = self.sessions.lock().unwrap();
+            all.iter()
+                .filter(|s| {
+                    if s.created_at_ms == 0 {
+                        return false;
+                    }
+                    let secs = (s.created_at_ms / 1000) as i64;
+                    chrono::DateTime::from_timestamp(secs, 0)
+                        .map(|dt| {
+                            dt.with_timezone(&chrono::Local)
+                                .format("%Y-%m-%d")
+                                .to_string()
+                                == date
+                        })
+                        .unwrap_or(false)
+                })
+                .cloned()
+                .collect()
+        };
+
+        let sessions = if cached.is_empty() {
+            // Fallback: scan from disk (for older dates / backfill)
+            crate::daily_report::scan_sessions_for_date(date)
+        } else {
+            cached
+        };
+
+        if sessions.is_empty() {
+            return Err(format!("No sessions found for {date}"));
+        }
+
+        let session_refs: Vec<&SessionInfo> = sessions.iter().collect();
+        let tz = chrono::Local::now().format("%Z").to_string();
+        let report =
+            crate::daily_report::generate_report_from_sessions(date, &tz, &session_refs);
+
+        self.report_store
+            .lock()
+            .unwrap()
+            .save_report(&report)
+            .map_err(|e| format!("save report: {e}"))?;
+
+        Ok(report)
+    }
+
+    fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String> {
+        let report = self
+            .report_store
+            .lock()
+            .unwrap()
+            .get_report(date)
+            .map_err(|e| format!("load report: {e}"))?
+            .ok_or_else(|| format!("No report found for {date}"))?;
+
+        let lang = self.locale.lock().unwrap().clone();
+        let summary = crate::daily_report::generate_ai_summary(&report, &lang)
+            .ok_or_else(|| "AI summary generation failed".to_string())?;
+
+        self.report_store
+            .lock()
+            .unwrap()
+            .update_ai_summary(date, &summary)
+            .map_err(|e| format!("save summary: {e}"))?;
+
+        Ok(summary)
+    }
+
+    fn generate_daily_report_lessons(&self, date: &str) -> Result<Vec<crate::daily_report::Lesson>, String> {
+        let report = self
+            .report_store
+            .lock()
+            .unwrap()
+            .get_report(date)
+            .map_err(|e| format!("load report: {e}"))?
+            .ok_or_else(|| format!("No report found for {date}"))?;
+
+        let lang = self.locale.lock().unwrap().clone();
+        let lessons = crate::daily_report::generate_lessons(&report, &lang)
+            .ok_or_else(|| "Lessons generation failed".to_string())?;
+
+        self.report_store
+            .lock()
+            .unwrap()
+            .update_lessons(date, &lessons)
+            .map_err(|e| format!("save lessons: {e}"))?;
+
+        Ok(lessons)
+    }
+
+    fn append_lesson_to_claude_md(&self, lesson: &crate::daily_report::Lesson) -> Result<(), String> {
+        crate::daily_report::append_lesson_to_claude_md(lesson)
     }
 }
 

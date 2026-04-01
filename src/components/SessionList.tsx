@@ -8,6 +8,7 @@ import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
 import { MemoryPanel } from "./MemoryPanel";
 import { AuditView } from "./AuditView";
+import { ReportView } from "./report/ReportView";
 import { SkillsPanel } from "./SkillsPanel";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
@@ -215,6 +216,13 @@ export function SessionList() {
               <span className={styles.nav_badge}>{unreadCriticalCount}</span>
             )}
           </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("report")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
+            <span className={styles.nav_label}>{t("view_report")}</span>
+          </button>
         </nav>
 
         <div className={styles.separator} />
@@ -315,8 +323,10 @@ export function SessionList() {
         </div>
       ) : viewMode === "gallery" ? (
         <GalleryView />
-      ) : (
+      ) : viewMode === "audit" ? (
         <AuditView />
+      ) : (
+        <ReportView />
       )}
     </>
   );

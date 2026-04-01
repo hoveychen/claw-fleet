@@ -25,6 +25,10 @@ import {
   MOCK_WAITING_ALERTS,
   MOCK_SKILL_HISTORY,
   MOCK_AUDIT_SUMMARY,
+  MOCK_DAILY_REPORT,
+  MOCK_HEATMAP_STATS,
+  MOCK_LESSONS,
+  MOCK_TIMELINE_REPORTS,
   getMessagesForSession,
 } from "./data";
 
@@ -119,7 +123,7 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "detect_ai_tools":
       return MOCK_DETECTED_TOOLS;
     case "get_log_path":
-      return "/tmp/claude-fleet.log";
+      return "/tmp/claw-fleet.log";
     case "list_saved_connections":
       return [];
     case "list_ssh_profiles":
@@ -132,6 +136,22 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return "/Users/demo/.claude/skills/fleet.md";
     case "install_fleet_skill":
       return { success: true, path: "/Users/demo/.claude/skills/fleet.md" };
+    // ── Daily Report ──
+    case "get_daily_report": {
+      const date = args.date as string;
+      return MOCK_TIMELINE_REPORTS.get(date) ?? null;
+    }
+    case "list_daily_report_stats":
+      return MOCK_HEATMAP_STATS;
+    case "generate_daily_report":
+      return MOCK_DAILY_REPORT;
+    case "generate_daily_report_ai_summary":
+      return MOCK_DAILY_REPORT.aiSummary;
+    case "generate_daily_report_lessons":
+      return MOCK_LESSONS;
+    case "append_lesson_to_claude_md":
+      return null;
+
     case "generate_mascot_quips":
       return {
         busy: [

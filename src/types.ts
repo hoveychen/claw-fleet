@@ -186,3 +186,66 @@ export interface AuditAlert {
   detectedAtMs: number;
   jsonlPath: string;
 }
+
+// ── Daily Report types ────────────────────────────────────────────────────────
+
+export interface Lesson {
+  content: string;
+  reason: string;
+  workspaceName: string;
+  sessionId: string;
+}
+
+export interface DailyReport {
+  date: string;
+  timezone: string;
+  generatedAt: number;
+  metrics: DailyMetrics;
+  aiSummary: string | null;
+  aiSummaryGeneratedAt: number | null;
+  sessionIds: string[];
+  lessons: Lesson[] | null;
+  lessonsGeneratedAt: number | null;
+}
+
+export interface DailyMetrics {
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  totalSessions: number;
+  totalSubagents: number;
+  totalToolCalls: number;
+  toolCallBreakdown: Record<string, number>;
+  modelBreakdown: Record<string, { inputTokens: number; outputTokens: number }>;
+  projects: ProjectMetrics[];
+  sourceBreakdown: Record<string, number>;
+  hourlyActivity: number[];
+}
+
+export interface ProjectMetrics {
+  workspacePath: string;
+  workspaceName: string;
+  sessionCount: number;
+  subagentCount: number;
+  totalInputTokens: number;
+  totalOutputTokens: number;
+  toolCalls: number;
+  sessions: ReportSessionSummary[];
+}
+
+export interface ReportSessionSummary {
+  id: string;
+  title: string | null;
+  lastMessage: string | null;
+  model: string | null;
+  isSubagent: boolean;
+  outputTokens: number;
+  agentSource: string;
+}
+
+export interface DailyReportStats {
+  date: string;
+  totalTokens: number;
+  totalSessions: number;
+  totalToolCalls: number;
+  totalProjects: number;
+}

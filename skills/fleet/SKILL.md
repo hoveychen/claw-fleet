@@ -4,9 +4,9 @@ description: Monitor, search, and audit multiple Claude Code agents using the Fl
 allowed-tools: Bash
 ---
 
-# Claude Fleet
+# Claw Fleet
 
-Claude Fleet monitors all your running Claude Code sessions in real time via a desktop app and CLI.
+Claw Fleet monitors all your running Claude Code sessions in real time via a desktop app and CLI.
 
 ## Prerequisites
 
@@ -16,9 +16,9 @@ Check if `fleet` is installed:
 which fleet
 ```
 
-If not found, install via the Claude Fleet app: open the app → **Account & Usage** panel → **Let AI Use Fleet** → install CLI.
+If not found, install via the Claw Fleet app: open the app → **Account & Usage** panel → **Let AI Use Fleet** → install CLI.
 
-Or download manually from: https://github.com/hoveychen/claude-fleet/releases
+Or download manually from: https://github.com/hoveychen/claw-fleet/releases
 
 ## Commands
 

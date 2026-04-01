@@ -291,7 +291,7 @@ jobs:
           mkdir -p dist-artifacts
           # App bundle (DMG) — rename to fixed filename
           find src-tauri/target/${{ matrix.rust_target }}/release/bundle/dmg \
-            -name "*.dmg" | head -1 | xargs -I{} cp {} dist-artifacts/claude-fleet-${{ matrix.fixed_suffix }}.dmg
+            -name "*.dmg" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.dmg
           # Standalone fleet binary (for users who want it without the app)
           cp src-tauri/target/${{ matrix.rust_target }}/release/fleet-cli \
              dist-artifacts/fleet-${{ matrix.fixed_suffix }}
@@ -303,7 +303,7 @@ jobs:
           mkdir -p dist-artifacts
           # App installer (NSIS) — rename to fixed filename
           find src-tauri/target/${{ matrix.rust_target }}/release/bundle/nsis \
-            -name "*.exe" | head -1 | xargs -I{} cp {} dist-artifacts/claude-fleet-${{ matrix.fixed_suffix }}-setup.exe
+            -name "*.exe" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}-setup.exe
           # Standalone fleet binary
           cp src-tauri/target/${{ matrix.rust_target }}/release/fleet-cli.exe \
              dist-artifacts/fleet-${{ matrix.fixed_suffix }}.exe
@@ -315,10 +315,10 @@ jobs:
           mkdir -p dist-artifacts
           # .deb — rename to fixed filename
           find src-tauri/target/${{ matrix.rust_target }}/release/bundle/deb \
-            -name "*.deb" | head -1 | xargs -I{} cp {} dist-artifacts/claude-fleet-${{ matrix.fixed_suffix }}.deb 2>/dev/null || true
+            -name "*.deb" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.deb 2>/dev/null || true
           # AppImage — rename to fixed filename
           find src-tauri/target/${{ matrix.rust_target }}/release/bundle/appimage \
-            -name "*.AppImage" | head -1 | xargs -I{} cp {} dist-artifacts/claude-fleet-${{ matrix.fixed_suffix }}.AppImage 2>/dev/null || true
+            -name "*.AppImage" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.AppImage 2>/dev/null || true
           # Standalone fleet binary
           cp src-tauri/target/${{ matrix.rust_target }}/release/fleet-cli \
              dist-artifacts/fleet-${{ matrix.fixed_suffix }}
@@ -365,23 +365,23 @@ jobs:
 
           | | Platform | Architecture | File |
           |---|---|---|---|
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon (M1/M2/M3/M4) | `claude-fleet-macos-arm64.dmg` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | `claude-fleet-macos-x64.dmg` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | `claude-fleet-windows-x64-setup.exe` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | `claude-fleet-windows-arm64-setup.exe` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | `claude-fleet-linux-x64.deb` / `claude-fleet-linux-x64.AppImage` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | `claude-fleet-linux-arm64.deb` / `claude-fleet-linux-arm64.AppImage` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon (M1/M2/M3/M4) | `claw-fleet-macos-arm64.dmg` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | `claw-fleet-macos-x64.dmg` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | `claw-fleet-windows-x64-setup.exe` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | `claw-fleet-windows-arm64-setup.exe` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | `claw-fleet-linux-x64.deb` / `claw-fleet-linux-x64.AppImage` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | `claw-fleet-linux-arm64.deb` / `claw-fleet-linux-arm64.AppImage` |
 
           ### `fleet` CLI (standalone binaries)
 
           | | Platform | Architecture | File |
           |---|---|---|---|
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon | `fleet-macos-arm64` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | `fleet-macos-x64` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | `fleet-windows-x64.exe` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | `fleet-windows-arm64.exe` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | `fleet-linux-x64` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claude-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | `fleet-linux-arm64` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon | `fleet-macos-arm64` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | `fleet-macos-x64` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | `fleet-windows-x64.exe` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | `fleet-windows-arm64.exe` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | `fleet-linux-x64` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | `fleet-linux-arm64` |
 
           ## Installing the `fleet` CLI
 
@@ -389,7 +389,7 @@ jobs:
 
           **macOS** — after installing the app:
           ```sh
-          sudo ln -sf "/Applications/Claude Fleet.app/Contents/MacOS/fleet" /usr/local/bin/fleet
+          sudo ln -sf "/Applications/Claw Fleet.app/Contents/MacOS/fleet" /usr/local/bin/fleet
           ```
 
           **Linux** — the `.deb` package installs `fleet` to `/usr/bin/fleet` automatically.
@@ -401,7 +401,7 @@ jobs:
           **Windows** — `fleet.exe` is installed to the app directory. Add it to `PATH`:
           ```powershell
           # In PowerShell (adjust path if installed per-machine)
-          $dir = "$env:LOCALAPPDATA\Programs\Claude Fleet"
+          $dir = "$env:LOCALAPPDATA\Programs\Claw Fleet"
           [Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$dir", "User")
           ```
           Or download the standalone binary and place it wherever you prefer.
@@ -414,7 +414,7 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: Claude Fleet v${{ steps.version.outputs.version }}
+          name: Claw Fleet v${{ steps.version.outputs.version }}
           body_path: release_notes.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
