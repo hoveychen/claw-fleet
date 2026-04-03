@@ -634,7 +634,7 @@ pub fn connect_remote(
                 // Swap backend outside the lock so Drop (which may do SSH) doesn't
                 // block other commands.
                 let old = {
-                    let mut guard = backend_arc.lock().unwrap();
+                    let mut guard = backend_arc.write().unwrap();
                     std::mem::replace(
                         &mut *guard,
                         Box::new(remote_backend) as Box<dyn crate::backend::Backend>,
@@ -1139,7 +1139,7 @@ pub fn disconnect_remote(
     // Swap: drop old backend (RemoteBackend::Drop kills tunnel + remote probe)
     // outside the lock so the SSH cleanup doesn't block other commands.
     let old = {
-        let mut guard = state.backend.lock().unwrap();
+        let mut guard = state.backend.write().unwrap();
         std::mem::replace(
             &mut *guard,
             Box::new(new_backend) as Box<dyn crate::backend::Backend>,

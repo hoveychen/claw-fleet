@@ -6,7 +6,7 @@
  * - Status LED bar with labels
  * - Drag handle in bottom-right corner
  * - Double-click on frame opens main window
- * - Right-click hides overlay
+ * - Right-click opens context menu (open main, active agent, mute, hide, recall)
  * - ResizeObserver for accurate window sizing
  */
 
@@ -159,6 +159,8 @@ export function OverlayMascot() {
   const [quipText, setQuipText] = useState<string | null>(null);
   const [muted, setMuted] = useState(() => getItem("overlay-muted") === "true");
   const [faceHidden, setFaceHidden] = useState(false);
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const ctxRef = useRef<HTMLDivElement>(null);
 
   const toggleMute = useCallback(() => {
     setMuted((prev) => {
@@ -171,6 +173,25 @@ export function OverlayMascot() {
   const toggleFace = useCallback(() => {
     setFaceHidden((prev) => !prev);
   }, []);
+
+  // Close context menu on outside click or escape
+  useEffect(() => {
+    if (!ctxMenu) return;
+    const handleClick = (e: globalThis.MouseEvent) => {
+      if (ctxRef.current && !ctxRef.current.contains(e.target as Node)) {
+        setCtxMenu(null);
+      }
+    };
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setCtxMenu(null);
+    };
+    window.addEventListener("mousedown", handleClick);
+    window.addEventListener("keydown", handleKey);
+    return () => {
+      window.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("keydown", handleKey);
+    };
+  }, [ctxMenu]);
 
   // Derive status counts — distinguish main vs sub-agent
   const busyStatuses = ["thinking", "executing", "streaming", "processing", "active", "delegating"];
@@ -216,8 +237,45 @@ export function OverlayMascot() {
     invoke("open_session_from_overlay", { jsonlPath: alert.jsonlPath }).catch(() => {});
   };
 
+  // Find the most recently active main agent
+  const busyMainAgent = mainSessions
+    .filter((s) => busyStatuses.includes(s.status))
+    .sort((a, b) => b.lastActivityMs - a.lastActivityMs)[0] ?? null;
+
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
+    // Clamp so menu stays within the overlay window
+    const menuW = 190;
+    const menuH = 200;
+    const x = Math.min(e.clientX, window.innerWidth - menuW);
+    const y = Math.max(0, Math.min(e.clientY, window.innerHeight - menuH));
+    setCtxMenu({ x, y });
+  }, []);
+
+  const handleCtxOpenMain = useCallback(() => {
+    setCtxMenu(null);
+    invoke("show_main_window").catch(() => {});
+  }, []);
+
+  const handleCtxOpenAgent = useCallback(() => {
+    if (!busyMainAgent) return;
+    setCtxMenu(null);
+    invoke("show_main_window").catch(() => {});
+    invoke("open_session_from_overlay", { jsonlPath: busyMainAgent.jsonlPath }).catch(() => {});
+  }, [busyMainAgent]);
+
+  const handleCtxMute = useCallback(() => {
+    setCtxMenu(null);
+    toggleMute();
+  }, [toggleMute]);
+
+  const handleCtxHide = useCallback(() => {
+    setCtxMenu(null);
+    invoke("toggle_overlay", { visible: false }).catch(() => {});
+  }, []);
+
+  const handleCtxRecall = useCallback(() => {
+    setCtxMenu(null);
     invoke("toggle_overlay", { visible: false }).catch(() => {});
     emit("overlay-disabled").catch(() => {});
   }, []);
@@ -356,7 +414,7 @@ export function OverlayMascot() {
             {/* Collapse button — hides the overlay */}
             <button
               className={styles.collapseBtn}
-              onClick={handleContextMenu}
+              onClick={handleCtxRecall}
               title={t("overlay.recall")}
               aria-label={t("overlay.recall")}
             >
@@ -375,6 +433,85 @@ export function OverlayMascot() {
           </MascotErrorBoundary>
         )}
       </RobotFrame>
+
+      {/* Context menu */}
+      {ctxMenu && (
+        <div
+          ref={ctxRef}
+          className={styles.ctxMenu}
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+        >
+          {/* Open main window */}
+          <button className={styles.ctxItem} onClick={handleCtxOpenMain}>
+            <svg className={styles.ctxItemIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+              <line x1="3" y1="9" x2="21" y2="9" />
+            </svg>
+            {t("overlay.ctx_open_main")}
+          </button>
+
+          {/* Active main agent */}
+          <button
+            className={`${styles.ctxItem} ${!busyMainAgent ? styles.ctxItemDisabled : ""}`}
+            onClick={handleCtxOpenAgent}
+            disabled={!busyMainAgent}
+          >
+            <svg className={styles.ctxItemIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+            <span className={styles.ctxActiveLabel}>
+              {busyMainAgent
+                ? t("overlay.ctx_active_agent", { name: busyMainAgent.workspaceName })
+                : t("overlay.ctx_no_active")}
+            </span>
+          </button>
+
+          <div className={styles.ctxSeparator} />
+
+          {/* Mute toggle */}
+          <button className={styles.ctxItem} onClick={handleCtxMute}>
+            <svg className={styles.ctxItemIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              {muted ? (
+                <>
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                  <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
+                  <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2c0 .76-.12 1.5-.34 2.18" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </>
+              ) : (
+                <>
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </>
+              )}
+            </svg>
+            {muted ? t("overlay.unmute") : t("overlay.mute")}
+          </button>
+
+          {/* Hide overlay */}
+          <button className={styles.ctxItem} onClick={handleCtxHide}>
+            <svg className={styles.ctxItemIcon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+              <line x1="1" y1="1" x2="23" y2="23" />
+            </svg>
+            {t("overlay.ctx_hide")}
+          </button>
+
+          {/* Recall to sidebar */}
+          <button className={styles.ctxItem} onClick={handleCtxRecall}>
+            <svg className={styles.ctxItemIcon} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4" />
+              <path d="M9 7L2 14" />
+              <path d="M2 10v4h4" />
+            </svg>
+            {t("overlay.ctx_recall")}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

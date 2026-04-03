@@ -892,6 +892,10 @@ fn collect_existing_rules(workspace_paths: &[String]) -> String {
         if !seen.insert(wp.clone()) {
             continue;
         }
+        // Skip TCC-protected workspaces (e.g. ~/Downloads) to avoid macOS permission dialogs.
+        if crate::tcc::is_tcc_protected(std::path::Path::new(wp)) {
+            continue;
+        }
         let p = std::path::Path::new(wp).join("CLAUDE.md");
         if let Ok(content) = std::fs::read_to_string(&p) {
             if !content.trim().is_empty() {
@@ -1312,16 +1316,54 @@ pub fn start_report_scheduler(
     std::thread::Builder::new()
         .name("report-scheduler".into())
         .spawn(move || {
-            // Initial delay to let the app fully start
-            std::thread::sleep(Duration::from_secs(60));
+            // Short initial delay to let the app start, then generate immediately
+            std::thread::sleep(Duration::from_secs(10));
 
             loop {
                 let lang = locale.lock().unwrap().clone();
-                run_backfill_check(&report_store, &lang);
-                std::thread::sleep(Duration::from_secs(30 * 60)); // 30 minutes
+                let rs = report_store.clone();
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    run_backfill_check(&rs, &lang);
+                })) {
+                    Ok(()) => {}
+                    Err(e) => {
+                        let msg = if let Some(s) = e.downcast_ref::<&str>() {
+                            s.to_string()
+                        } else if let Some(s) = e.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "unknown panic".to_string()
+                        };
+                        log_debug(&format!(
+                            "[report-scheduler] PANIC in backfill: {msg}"
+                        ));
+                    }
+                }
+                // Check every 10 minutes so today's report stays fresh
+                std::thread::sleep(Duration::from_secs(10 * 60));
             }
         })
         .expect("spawn report-scheduler");
+}
+
+/// Tracks AI generation failures to avoid retrying on every scheduler pass.
+/// Key = date string, value = timestamp of last failed attempt.
+static AI_FAILURE_COOLDOWN: std::sync::LazyLock<
+    std::sync::Mutex<std::collections::HashMap<String, std::time::Instant>>,
+> = std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+/// Cooldown before retrying failed AI generation for a given date.
+const AI_RETRY_COOLDOWN: Duration = Duration::from_secs(2 * 3600); // 2 hours
+
+/// Helper to lock report_store, recovering from poison (a prior panic while
+/// the lock was held).
+fn lock_store(
+    store: &std::sync::Arc<std::sync::Mutex<ReportStore>>,
+) -> std::sync::MutexGuard<'_, ReportStore> {
+    store.lock().unwrap_or_else(|poisoned| {
+        log_debug("[report-scheduler] recovering from poisoned report_store mutex");
+        poisoned.into_inner()
+    })
 }
 
 fn run_backfill_check(
@@ -1329,65 +1371,121 @@ fn run_backfill_check(
     locale: &str,
 ) {
     let today = chrono::Local::now();
+    log_debug("[report-scheduler] backfill pass started");
 
-    // Check last 90 days for missing reports
-    for days_ago in 1..=90 {
+    // ── Pass 1: Generate basic metrics reports (fast) ────────────────────────
+    // This pass MUST complete quickly so that reports are always available
+    // when the user opens the UI.
+    for days_ago in 0..=90 {
         let date = (today - chrono::Duration::days(days_ago))
             .format("%Y-%m-%d")
             .to_string();
 
-        // Check if report already exists
         let existing = {
-            let store = report_store.lock().unwrap();
+            let store = lock_store(report_store);
             store.get_report(&date).ok().flatten()
         };
 
-        let report = if let Some(r) = existing {
-            r
-        } else {
-            // Generate metrics report
-            let sessions = scan_sessions_for_date(&date);
-            if sessions.is_empty() {
-                continue;
-            }
-            let session_refs: Vec<&crate::session::SessionInfo> = sessions.iter().collect();
-            let tz = chrono::Local::now().format("%Z").to_string();
-            let r = generate_report_from_sessions(&date, &tz, &session_refs);
-            let store = report_store.lock().unwrap();
+        // For today, always regenerate (new sessions keep arriving).
+        // For past days, skip if report already exists.
+        if days_ago > 0 && existing.is_some() {
+            continue;
+        }
+
+        let sessions = scan_sessions_for_date(&date);
+        if sessions.is_empty() {
+            continue;
+        }
+        let session_refs: Vec<&crate::session::SessionInfo> = sessions.iter().collect();
+        let tz = chrono::Local::now().format("%Z").to_string();
+        let r = generate_report_from_sessions(&date, &tz, &session_refs);
+        {
+            let store = lock_store(report_store);
             if let Err(e) = store.save_report(&r) {
                 log_debug(&format!("[report-scheduler] save report for {date} failed: {e}"));
                 continue;
             }
+        }
+        if days_ago == 0 {
+            log_debug(&format!(
+                "[report-scheduler] refreshed today's report: {} sessions",
+                r.metrics.total_sessions
+            ));
+        } else {
             log_debug(&format!(
                 "[report-scheduler] generated report for {}: {} sessions",
                 date, r.metrics.total_sessions
             ));
-            r
-        };
+        }
+    }
 
-        // For recent days, also generate AI summary + lessons if missing
-        if days_ago <= 7 {
-            if report.ai_summary.is_none() {
-                log_debug(&format!("[report-scheduler] generating AI summary for {date}..."));
-                if let Some(summary) = generate_ai_summary(&report, locale) {
-                    let store = report_store.lock().unwrap();
-                    store.update_ai_summary(&date, &summary).ok();
-                    log_debug(&format!("[report-scheduler] AI summary for {date} done"));
-                }
-            }
-            if report.lessons.is_none() {
-                log_debug(&format!("[report-scheduler] generating lessons for {date}..."));
-                if let Some(lessons) = generate_lessons(&report, locale) {
-                    let store = report_store.lock().unwrap();
-                    store.update_lessons(&date, &lessons).ok();
-                    log_debug(&format!(
-                        "[report-scheduler] lessons for {date} done ({} found)",
-                        lessons.len()
-                    ));
+    // ── Pass 2: Generate AI summary + lessons for recent days (slow) ─────────
+    // This is separated so that slow/failing AI generation never blocks
+    // basic report availability.  Starts at 1 (yesterday) because today's
+    // data is incomplete — AI summary would be based on partial sessions.
+    for days_ago in 1..=7 {
+        let date = (today - chrono::Duration::days(days_ago))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        let report = {
+            let store = lock_store(report_store);
+            store.get_report(&date).ok().flatten()
+        };
+        let Some(report) = report else { continue };
+
+        // Skip if both AI summary and lessons already exist
+        if report.ai_summary.is_some() && report.lessons.is_some() {
+            continue;
+        }
+
+        // Check cooldown: don't retry if we failed recently
+        {
+            let cooldowns = AI_FAILURE_COOLDOWN.lock().unwrap_or_else(|p| p.into_inner());
+            if let Some(last_failure) = cooldowns.get(&date) {
+                if last_failure.elapsed() < AI_RETRY_COOLDOWN {
+                    continue;
                 }
             }
         }
+
+        let mut any_failed = false;
+
+        if report.ai_summary.is_none() {
+            log_debug(&format!("[report-scheduler] generating AI summary for {date}..."));
+            if let Some(summary) = generate_ai_summary(&report, locale) {
+                let store = lock_store(report_store);
+                store.update_ai_summary(&date, &summary).ok();
+                log_debug(&format!("[report-scheduler] AI summary for {date} done"));
+            } else {
+                log_debug(&format!("[report-scheduler] AI summary for {date} failed"));
+                any_failed = true;
+            }
+        }
+        if report.lessons.is_none() {
+            log_debug(&format!("[report-scheduler] generating lessons for {date}..."));
+            if let Some(lessons) = generate_lessons(&report, locale) {
+                let store = lock_store(report_store);
+                store.update_lessons(&date, &lessons).ok();
+                log_debug(&format!(
+                    "[report-scheduler] lessons for {date} done ({} found)",
+                    lessons.len()
+                ));
+            } else {
+                log_debug(&format!("[report-scheduler] lessons for {date} failed"));
+                any_failed = true;
+            }
+        }
+
+        if any_failed {
+            AI_FAILURE_COOLDOWN
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .insert(date, std::time::Instant::now());
+        }
     }
+
+    log_debug("[report-scheduler] backfill pass finished");
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

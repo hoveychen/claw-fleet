@@ -16,12 +16,13 @@ pub mod remote;
 pub mod search_index;
 pub mod session;
 pub mod skills;
+pub mod tcc;
 pub mod version_check;
 
 use std::collections::hash_map::DefaultHasher;
 use std::fs;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 #[cfg(feature = "tts")]
 use std::sync::OnceLock;
 
@@ -506,7 +507,7 @@ async fn check_setup_status(state: tauri::State<'_, AppState>) -> Result<backend
     // Only hold the backend lock briefly to get the cached session list,
     // then run the (potentially slow) subprocess checks outside the lock.
     let sessions = {
-        let b = state.backend.lock().unwrap();
+        let b = state.backend.read().unwrap();
         b.list_sessions()
     };
     let (cli_installed, cli_path) = check_cli_installed();
@@ -654,7 +655,7 @@ async fn get_account_info(
     app: tauri::AppHandle,
 ) -> Result<AccountInfo, String> {
     log_debug("get_account_info: start");
-    let fut = state.backend.lock().unwrap().account_info();
+    let fut = state.backend.read().unwrap().account_info();
     let info = fut.await.map_err(|e| {
         log_debug(&format!("get_account_info: error: {e}"));
         e
@@ -680,7 +681,7 @@ async fn get_source_account(
     source: String,
     state: tauri::State<'_, AppState>,
 ) -> Result<Value, String> {
-    let fut = state.backend.lock().unwrap().source_account(&source);
+    let fut = state.backend.read().unwrap().source_account(&source);
     fut.await
 }
 
@@ -690,7 +691,7 @@ async fn get_source_usage(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
 ) -> Result<Value, String> {
-    let fut = state.backend.lock().unwrap().source_usage(&source);
+    let fut = state.backend.read().unwrap().source_usage(&source);
     let val = fut.await?;
     // Update the cached usage summary for the tray menu so that the
     // background refresh thread is no longer needed.
@@ -720,19 +721,22 @@ async fn get_source_usage(
 
 #[tauri::command]
 fn kill_session(pid: u32, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.lock().unwrap().kill_pid(pid)
+    state.backend.read().unwrap().kill_pid(pid)
 }
 
 #[tauri::command]
 fn kill_workspace_sessions(workspace_path: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.backend.lock().unwrap().kill_workspace(workspace_path)
+    state.backend.read().unwrap().kill_workspace(workspace_path)
 }
 
 // ── App state ────────────────────────────────────────────────────────────────
 
 pub struct AppState {
     /// The active backend (local or remote).  Swapped on connect/disconnect.
-    pub backend: Arc<Mutex<Box<dyn Backend>>>,
+    /// Uses RwLock so read-only operations don't block each other (all Backend
+    /// trait methods take &self).  Only the connect/disconnect swap needs a
+    /// write lock.
+    pub backend: Arc<RwLock<Box<dyn Backend>>>,
     /// User's current UI locale (e.g. "en", "zh"), shared with backend threads.
     pub locale: Arc<Mutex<String>>,
     /// Notification mode: "all" | "user_action" | "none".
@@ -761,7 +765,7 @@ pub struct AppState {
 
 #[tauri::command]
 fn list_sessions(state: tauri::State<AppState>) -> Vec<SessionInfo> {
-    state.backend.lock().unwrap().list_sessions()
+    state.backend.read().unwrap().list_sessions()
 }
 
 #[tauri::command]
@@ -774,7 +778,7 @@ fn search_sessions(
     if query.trim().is_empty() {
         return vec![];
     }
-    state.backend.lock().unwrap().search_sessions(&query, limit)
+    state.backend.read().unwrap().search_sessions(&query, limit)
 }
 
 #[tauri::command]
@@ -782,7 +786,7 @@ fn get_messages(
     jsonl_path: String,
     state: tauri::State<AppState>,
 ) -> Result<Vec<Value>, String> {
-    state.backend.lock().unwrap().get_messages(&jsonl_path)
+    state.backend.read().unwrap().get_messages(&jsonl_path)
 }
 
 #[derive(Serialize, Clone)]
@@ -795,7 +799,7 @@ struct SkillInvocation {
 
 #[tauri::command]
 fn get_skill_history(jsonl_path: String, state: tauri::State<AppState>) -> Result<Vec<SkillInvocation>, String> {
-    let messages = state.backend.lock().unwrap().get_messages(&jsonl_path)?;
+    let messages = state.backend.read().unwrap().get_messages(&jsonl_path)?;
     Ok(extract_skill_history(&messages))
 }
 
@@ -847,7 +851,7 @@ fn extract_skill_history(messages: &[Value]) -> Vec<SkillInvocation> {
 
 #[tauri::command]
 fn get_audit_events(state: tauri::State<AppState>) -> audit::AuditSummary {
-    state.backend.lock().unwrap().get_audit_events()
+    state.backend.read().unwrap().get_audit_events()
 }
 
 #[tauri::command]
@@ -855,7 +859,7 @@ fn get_daily_report(
     date: String,
     state: tauri::State<AppState>,
 ) -> Result<Option<daily_report::DailyReport>, String> {
-    state.backend.lock().unwrap().get_daily_report(&date)
+    state.backend.read().unwrap().get_daily_report(&date)
 }
 
 #[tauri::command]
@@ -864,7 +868,7 @@ fn list_daily_report_stats(
     to: String,
     state: tauri::State<AppState>,
 ) -> Vec<daily_report::DailyReportStats> {
-    state.backend.lock().unwrap().list_daily_report_stats(&from, &to)
+    state.backend.read().unwrap().list_daily_report_stats(&from, &to)
 }
 
 #[tauri::command]
@@ -874,7 +878,7 @@ async fn generate_daily_report(
 ) -> Result<daily_report::DailyReport, String> {
     let backend = state.backend.clone();
     tokio::task::spawn_blocking(move || {
-        backend.lock().unwrap().generate_daily_report(&date)
+        backend.read().unwrap().generate_daily_report(&date)
     }).await.map_err(|e| format!("join: {e}"))?
 }
 
@@ -885,7 +889,7 @@ async fn generate_daily_report_ai_summary(
 ) -> Result<String, String> {
     let backend = state.backend.clone();
     tokio::task::spawn_blocking(move || {
-        backend.lock().unwrap().generate_daily_report_ai_summary(&date)
+        backend.read().unwrap().generate_daily_report_ai_summary(&date)
     }).await.map_err(|e| format!("join: {e}"))?
 }
 
@@ -896,7 +900,7 @@ async fn generate_daily_report_lessons(
 ) -> Result<Vec<crate::daily_report::Lesson>, String> {
     let backend = state.backend.clone();
     tokio::task::spawn_blocking(move || {
-        backend.lock().unwrap().generate_daily_report_lessons(&date)
+        backend.read().unwrap().generate_daily_report_lessons(&date)
     }).await.map_err(|e| format!("join: {e}"))?
 }
 
@@ -907,7 +911,7 @@ async fn append_lesson_to_claude_md(
 ) -> Result<(), String> {
     let backend = state.backend.clone();
     tokio::task::spawn_blocking(move || {
-        backend.lock().unwrap().append_lesson_to_claude_md(&lesson)
+        backend.read().unwrap().append_lesson_to_claude_md(&lesson)
     }).await.map_err(|e| format!("join: {e}"))?
 }
 
@@ -934,29 +938,29 @@ fn start_watching_session(
     jsonl_path: String,
     state: tauri::State<AppState>,
 ) -> Result<u64, String> {
-    state.backend.lock().unwrap().start_watch(jsonl_path)
+    state.backend.read().unwrap().start_watch(jsonl_path)
 }
 
 #[tauri::command]
 fn stop_watching_session(state: tauri::State<AppState>) {
-    state.backend.lock().unwrap().stop_watch();
+    state.backend.read().unwrap().stop_watch();
 }
 
 // ── Hooks setup ──────────────────────────────────────────────────────────────
 
 #[tauri::command]
 fn get_hooks_setup_plan(state: tauri::State<AppState>) -> hooks::HookSetupPlan {
-    state.backend.lock().unwrap().get_hooks_plan()
+    state.backend.read().unwrap().get_hooks_plan()
 }
 
 #[tauri::command]
 fn apply_hooks_setup(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.lock().unwrap().apply_hooks()
+    state.backend.read().unwrap().apply_hooks()
 }
 
 #[tauri::command]
 fn remove_hooks(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.lock().unwrap().remove_hooks()
+    state.backend.read().unwrap().remove_hooks()
 }
 
 // ── CLI installer (macOS only) ───────────────────────────────────────────────
@@ -1122,21 +1126,65 @@ fn install_fleet_skill() -> Result<SkillInstallResult, String> {
     Ok(SkillInstallResult { installed, errors })
 }
 
+// ── TCC diagnostics ─────────────────────────────────────────────────────────
+
+/// Run macOS TCC diagnostics to identify what triggers permission dialogs.
+#[tauri::command]
+fn diagnose_tcc() -> tcc::TccDiagnostic {
+    let diag = tcc::diagnose();
+    // Also write findings to the debug log.
+    if diag.findings.is_empty() {
+        log_debug("[TCC-DIAG] No TCC-triggering code paths detected.");
+    } else {
+        log_debug(&format!(
+            "[TCC-DIAG] Found {} potential TCC triggers:",
+            diag.findings.len()
+        ));
+        for f in &diag.findings {
+            log_debug(&format!(
+                "[TCC-DIAG]   [{}/{}] {} — {}",
+                f.component, f.tcc_category, f.path, f.reason,
+            ));
+        }
+    }
+    log_debug(&format!(
+        "[TCC-DIAG] sysinfo: {} processes scanned, {} matched, phase1_safe={}",
+        diag.sysinfo_process_count,
+        diag.sysinfo_matched_processes.len(),
+        diag.sysinfo_phase1_safe,
+    ));
+    if !diag.tcc_triggering_workspaces.is_empty() {
+        log_debug(&format!(
+            "[TCC-DIAG] {} workspace dirs would trigger TCC during decode:",
+            diag.tcc_triggering_workspaces.len(),
+        ));
+        for ws in &diag.tcc_triggering_workspaces {
+            for tp in &ws.tcc_paths {
+                log_debug(&format!(
+                    "[TCC-DIAG]   '{}' → probes {} ({})",
+                    ws.encoded, tp.path, tp.tcc_category,
+                ));
+            }
+        }
+    }
+    diag
+}
+
 // ── Memory commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
 fn list_memories(state: tauri::State<AppState>) -> Vec<memory::WorkspaceMemory> {
-    state.backend.lock().unwrap().list_memories()
+    state.backend.read().unwrap().list_memories()
 }
 
 #[tauri::command]
 fn get_memory_content(path: String, state: tauri::State<AppState>) -> Result<String, String> {
-    state.backend.lock().unwrap().get_memory_content(&path)
+    state.backend.read().unwrap().get_memory_content(&path)
 }
 
 #[tauri::command]
 fn get_memory_history(path: String, state: tauri::State<AppState>) -> Vec<memory::MemoryHistoryEntry> {
-    state.backend.lock().unwrap().get_memory_history(&path)
+    state.backend.read().unwrap().get_memory_history(&path)
 }
 
 #[tauri::command]
@@ -1153,12 +1201,12 @@ fn promote_memory(memory_path: String, target: String, workspace_path: String) -
 
 #[tauri::command]
 fn list_skills(state: tauri::State<AppState>) -> Vec<skills::SkillItem> {
-    state.backend.lock().unwrap().list_skills()
+    state.backend.read().unwrap().list_skills()
 }
 
 #[tauri::command]
 fn get_skill_content(path: String, state: tauri::State<AppState>) -> Result<String, String> {
-    state.backend.lock().unwrap().get_skill_content(&path)
+    state.backend.read().unwrap().get_skill_content(&path)
 }
 
 // ── Agent sources config ─────────────────────────────────────────────────────
@@ -1166,13 +1214,13 @@ fn get_skill_content(path: String, state: tauri::State<AppState>) -> Result<Stri
 /// Return the current sources config merged with availability info.
 #[tauri::command]
 fn get_sources_config(state: tauri::State<AppState>) -> Vec<agent_source::SourceInfo> {
-    state.backend.lock().unwrap().get_sources_config()
+    state.backend.read().unwrap().get_sources_config()
 }
 
 /// Toggle a source on/off and persist to disk (local or remote).
 #[tauri::command]
 fn set_source_enabled(name: String, enabled: bool, state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.lock().unwrap().set_source_enabled(&name, enabled)
+    state.backend.read().unwrap().set_source_enabled(&name, enabled)
 }
 
 // ── App restart ─────────────────────────────────────────────────────────────
@@ -1193,7 +1241,7 @@ fn set_locale(locale: String, state: tauri::State<AppState>) {
 
 #[tauri::command]
 fn get_waiting_alerts(state: tauri::State<AppState>) -> Vec<backend::WaitingAlert> {
-    state.backend.lock().unwrap().get_waiting_alerts()
+    state.backend.read().unwrap().get_waiting_alerts()
 }
 
 // ── Mascot quip generation ──────────────────────────────────────────────────
@@ -1585,7 +1633,7 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(AppState {
             // NullBackend is a placeholder; replaced with LocalBackend in setup().
-            backend: Arc::new(Mutex::new(Box::new(backend::NullBackend) as Box<dyn Backend>)),
+            backend: Arc::new(RwLock::new(Box::new(backend::NullBackend) as Box<dyn Backend>)),
             locale: Arc::new(Mutex::new("en".to_string())),
             notification_mode: Arc::new(Mutex::new("user_action".to_string())),
             user_title: Arc::new(Mutex::new(String::new())),
@@ -1597,6 +1645,9 @@ pub fn run() {
             tray_panel_shown_at: Arc::new(Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(600))),
         })
         .setup(move |app| {
+            log_debug("[TCC-SETUP] App setup starting — querying TCC before backend init");
+            tcc::log_recent_tcc_events();
+
             // Replace NullBackend with the real LocalBackend now that AppHandle
             // is available.
             {
@@ -1611,8 +1662,11 @@ pub fn run() {
                     locale,
                     sources,
                 );
-                *state.backend.lock().unwrap() = Box::new(local);
+                *state.backend.write().unwrap() = Box::new(local);
             }
+
+            log_debug("[TCC-SETUP] Backend initialized — querying TCC after backend init");
+            tcc::log_recent_tcc_events();
 
             // Truncate the hook events file if it has grown too large.
             hooks::maybe_truncate_events_file();
@@ -1734,23 +1788,25 @@ pub fn run() {
                 let app_handle = app.handle().clone();
                 panel.on_window_event(move |event| {
                     if let tauri::WindowEvent::Focused(false) = event {
-                        let state = app_handle.state::<AppState>();
-                        let elapsed = state.tray_panel_shown_at.lock().unwrap().elapsed();
-                        if elapsed < std::time::Duration::from_millis(600) {
-                            // macOS steals focus when the status-bar click
-                            // finishes.  Re-focus the panel after a short
-                            // delay so that subsequent outside-clicks will
-                            // trigger a proper blur → hide.
-                            let handle = app_handle.clone();
-                            std::thread::spawn(move || {
-                                std::thread::sleep(std::time::Duration::from_millis(200));
-                                if is_tray_panel_visible(&handle) {
-                                    if let Some(w) = handle.get_webview_window("tray_panel") {
-                                        let _ = w.set_focus();
+                        if cfg!(target_os = "macos") {
+                            let state = app_handle.state::<AppState>();
+                            let elapsed = state.tray_panel_shown_at.lock().unwrap().elapsed();
+                            if elapsed < std::time::Duration::from_millis(600) {
+                                // macOS steals focus when the status-bar click
+                                // finishes.  Re-focus the panel after a short
+                                // delay so that subsequent outside-clicks will
+                                // trigger a proper blur → hide.
+                                let handle = app_handle.clone();
+                                std::thread::spawn(move || {
+                                    std::thread::sleep(std::time::Duration::from_millis(200));
+                                    if is_tray_panel_visible(&handle) {
+                                        if let Some(w) = handle.get_webview_window("tray_panel") {
+                                            let _ = w.set_focus();
+                                        }
                                     }
-                                }
-                            });
-                            return;
+                                });
+                                return;
+                            }
                         }
                         hide_tray_panel(&app_handle);
                     }
@@ -1786,6 +1842,7 @@ pub fn run() {
             remote::connect_remote,
             remote::disconnect_remote,
             pick_file,
+            diagnose_tcc,
             get_source_account,
             get_source_usage,
             list_memories,

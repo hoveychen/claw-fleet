@@ -833,7 +833,12 @@
     "mute": "Mute notifications",
     "unmute": "Unmute notifications",
     "hide_face": "Hide expression",
-    "show_face": "Show expression"
+    "show_face": "Show expression",
+    "ctx_open_main": "Open main window",
+    "ctx_active_agent": "Active: {{name}}",
+    "ctx_no_active": "No active agent",
+    "ctx_hide": "Hide",
+    "ctx_recall": "Back to sidebar"
   },
   "settings": {
     "title": "Settings",

@@ -201,6 +201,45 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
   }
 }
 
+// ── Screenplay driver (for video recording pipeline) ────────────────────────
+
+function installScreenplayDriver() {
+  // Listen for session updates from Playwright recorder
+  window.addEventListener("screenplay:update-session", ((e: CustomEvent) => {
+    const { sessionId, updates } = e.detail as {
+      sessionId: string;
+      updates: Partial<SessionInfo>;
+    };
+    currentSessions = currentSessions.map((s) =>
+      s.id === sessionId ? { ...s, ...updates } : s
+    );
+    emit("sessions-updated", currentSessions);
+  }) as EventListener);
+
+  // Expose API for Playwright to call directly
+  (window as any).__screenplay_updateSession = (
+    sessionId: string,
+    updates: Partial<SessionInfo>,
+  ) => {
+    window.dispatchEvent(
+      new CustomEvent("screenplay:update-session", {
+        detail: { sessionId, updates },
+      }),
+    );
+  };
+
+  // Expose API to replace all sessions at once
+  (window as any).__screenplay_setSessions = (sessions: SessionInfo[]) => {
+    currentSessions = sessions;
+    emit("sessions-updated", currentSessions);
+  };
+
+  // Expose API to get current sessions (for debugging)
+  (window as any).__screenplay_getSessions = () => currentSessions;
+
+  console.log("[mock] Screenplay driver installed");
+}
+
 // ── Install ─────────────────────────────────────────────────────────────────
 
 export function installMocks() {
@@ -214,6 +253,9 @@ export function installMocks() {
 
   // Start ticking sessions every 2s
   setInterval(tickSessions, 2000);
+
+  // Install screenplay driver for video pipeline
+  installScreenplayDriver();
 
   console.log("[mock] Tauri mock layer installed — running in demo mode");
 }

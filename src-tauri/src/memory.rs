@@ -104,12 +104,15 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
             None => continue, // skip degenerate keys that decode to "/"
         };
 
-        // Check for CLAUDE.md
-        let has_claude_md = Path::new(&workspace_path).join("CLAUDE.md").exists()
-            || Path::new(&workspace_path)
-                .join(".claude")
-                .join("CLAUDE.md")
-                .exists();
+        // Check for CLAUDE.md — skip if workspace resolves into a TCC-protected
+        // directory (e.g. ~/Downloads) to avoid triggering macOS permission dialogs.
+        let ws_root = Path::new(&workspace_path);
+        let has_claude_md = if crate::tcc::is_tcc_protected(ws_root) {
+            false
+        } else {
+            ws_root.join("CLAUDE.md").exists()
+                || ws_root.join(".claude").join("CLAUDE.md").exists()
+        };
 
         // Scan memory files
         let mut files = Vec::new();
@@ -257,6 +260,10 @@ pub fn read_memory_file(path: &str) -> Result<String, String> {
 
 pub fn read_claude_md(workspace_path: &str) -> Result<String, String> {
     let root = Path::new(workspace_path);
+    // Skip TCC-protected paths to avoid macOS permission dialogs.
+    if crate::tcc::is_tcc_protected(root) {
+        return Err("CLAUDE.md not found (TCC-protected workspace)".into());
+    }
     // Try <workspace>/CLAUDE.md first, then <workspace>/.claude/CLAUDE.md
     let candidates = [
         root.join("CLAUDE.md"),

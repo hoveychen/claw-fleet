@@ -59,7 +59,22 @@ impl AgentSource for ClaudeCodeSource {
     }
 
     fn watch_paths(&self) -> Vec<PathBuf> {
-        get_claude_dir().into_iter().collect()
+        // Only watch the subdirectories we actually care about, instead of the
+        // entire ~/.claude tree (which contains caches, configs, etc. that
+        // generate noise and trigger unnecessary rescans).
+        let Some(dir) = get_claude_dir() else {
+            return vec![];
+        };
+        let mut paths = Vec::new();
+        let projects = dir.join("projects");
+        if projects.is_dir() {
+            paths.push(projects);
+        }
+        let ide = dir.join("ide");
+        if ide.is_dir() {
+            paths.push(ide);
+        }
+        paths
     }
 
     fn trigger_extensions(&self) -> Vec<&'static str> {

@@ -401,3 +401,88 @@
     box-shadow: 0 0 8px rgba(239, 68, 68, 0.8);
   }
 }
+
+/* ── Context menu ──────────────────────────────────────────────────────────── */
+.ctxMenu {
+  position: fixed;
+  z-index: 9999;
+  min-width: 180px;
+  padding: 4px 0;
+  background: rgba(30, 30, 40, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(12px);
+  animation: ctxFadeIn 0.12s ease;
+}
+
+[data-theme="light"] .ctxMenu {
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgba(0, 0, 0, 0.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+
+.ctxItem {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: rgba(220, 220, 240, 0.9);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.ctxItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="light"] .ctxItem {
+  color: rgba(40, 40, 60, 0.9);
+}
+
+[data-theme="light"] .ctxItem:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.ctxItemDisabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.ctxItemDisabled:hover {
+  background: none;
+}
+
+.ctxItemIcon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.ctxSeparator {
+  height: 1px;
+  margin: 4px 8px;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="light"] .ctxSeparator {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.ctxActiveLabel {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes ctxFadeIn {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}

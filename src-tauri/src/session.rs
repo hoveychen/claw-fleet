@@ -130,7 +130,9 @@ pub fn decode_workspace_path_with_parts(parts: &[&str]) -> String {
         for end in (i + 1..=parts.len()).rev() {
             let candidate_segment = parts[i..end].join("-");
             let candidate_path = format!("{}/{}", current, candidate_segment);
-            if std::path::Path::new(&candidate_path).exists() {
+            // Use TCC-safe exists check to avoid triggering macOS permission
+            // dialogs for protected directories (~/Music, ~/Pictures, etc.).
+            if crate::tcc::safe_exists(std::path::Path::new(&candidate_path)) {
                 current = candidate_path;
                 i = end;
                 matched = true;
@@ -449,7 +451,9 @@ fn determine_status(
             }
 
             match stop_reason {
-                Some("end_turn") if file_age_secs < 300.0 => return SessionStatus::WaitingInput,
+                Some("end_turn" | "max_tokens" | "stop_sequence") if file_age_secs < 300.0 => {
+                    return SessionStatus::WaitingInput;
+                }
                 // Last write was a tool_use — the tool is still executing.
                 Some("tool_use") if file_age_secs < 60.0 => return SessionStatus::Executing,
                 _ => {}
@@ -875,7 +879,7 @@ impl ScanCache {
 
 /// Downgrade a cached session's status when the file hasn't been touched
 /// and enough wall-clock time has elapsed.
-fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
+pub(crate) fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
     let idle = match info.status {
         SessionStatus::Streaming if age_secs >= 8.0 => true,
         SessionStatus::Thinking if age_secs >= 120.0 => true,
@@ -936,9 +940,13 @@ struct SubagentMeta {
 
 pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
+
+    let t_ide = Instant::now();
     let ide_sessions = scan_ide_sessions(claude_dir);
+    let ide_ms = t_ide.elapsed().as_millis();
 
     // Reuse cached process list if fresh (< 10 s).
+    let t_proc = Instant::now();
     let cli_processes = {
         let mut guard = scan_cache.process_cache.lock().unwrap();
         if guard.0.elapsed() > Duration::from_secs(10) {
@@ -947,6 +955,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         }
         guard.1.clone()
     };
+    let proc_ms = t_proc.elapsed().as_millis();
 
     let hook_states = crate::hooks::read_hook_states();
     let session_cache_snapshot = scan_cache.session_cache.lock().unwrap().clone();
@@ -955,6 +964,13 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     let Ok(workspace_entries) = fs::read_dir(&projects_dir) else {
         return sessions;
     };
+
+    if ide_ms > 500 || proc_ms > 500 {
+        crate::log_debug(&format!(
+            "[TCC-DETAIL] scan_ide_sessions={}ms, scan_cli_processes={}ms",
+            ide_ms, proc_ms,
+        ));
+    }
 
     for workspace_entry in workspace_entries.flatten() {
         let workspace_dir = workspace_entry.path();
@@ -978,6 +994,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         });
 
         // Use the exact path from the lock file when available; fall back to lossy decode.
+        let t_decode = Instant::now();
         let workspace_path = ide
             .and_then(|s| {
                 s.workspace_folders
@@ -986,6 +1003,13 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             })
             .cloned()
             .unwrap_or_else(|| decode_workspace_path(&encoded));
+        let decode_ms = t_decode.elapsed().as_millis();
+        if decode_ms > 500 {
+            crate::log_debug(&format!(
+                "[TCC-DETAIL] decode '{}' took {}ms",
+                encoded, decode_ms,
+            ));
+        }
 
         let ws_name = workspace_name(&workspace_path);
         let ide_name = ide.map(|s| s.ide_name.clone());
@@ -1142,7 +1166,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             && active_parent_ids.contains(&session.id)
             && matches!(
                 session.status,
-                SessionStatus::Active | SessionStatus::Idle | SessionStatus::WaitingInput | SessionStatus::Processing
+                SessionStatus::Active | SessionStatus::Idle | SessionStatus::Processing
             )
         {
             session.status = SessionStatus::Delegating;
@@ -1221,12 +1245,68 @@ pub fn scan_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionIn
 pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
     for source in sources {
-        if source.is_available() {
-            sessions.extend(source.scan_sessions());
+        let name = source.name();
+        let t0 = Instant::now();
+        let available = source.is_available();
+        let avail_ms = t0.elapsed().as_millis();
+        if avail_ms > 2000 {
+            crate::log_debug(&format!(
+                "[TCC-STALL] {}.is_available() took {}ms — likely TCC dialog",
+                name, avail_ms,
+            ));
+        }
+        if available {
+            let t1 = Instant::now();
+            let src_sessions = source.scan_sessions();
+            let scan_ms = t1.elapsed().as_millis();
+            if scan_ms > 2000 {
+                crate::log_debug(&format!(
+                    "[TCC-STALL] {}.scan_sessions() took {}ms — likely TCC dialog",
+                    name, scan_ms,
+                ));
+            }
+            sessions.extend(src_sessions);
         }
     }
     sort_sessions(&mut sessions);
+
+    // Always check for TCC PROMPTING events after each scan.
+    // Use a separate thread to avoid blocking the scan.
+    std::thread::spawn(|| {
+        check_tcc_prompting();
+    });
+
     sessions
+}
+
+/// Check macOS TCC log for PROMPTING events targeting our app in the last 30 seconds.
+/// Only logs if new prompting events are found.
+fn check_tcc_prompting() {
+    #[cfg(target_os = "macos")]
+    {
+        let pid = std::process::id();
+        let predicate = format!(
+            "process == \"tccd\" AND eventMessage CONTAINS \"AUTHREQ_PROMPTING\" AND \
+             (eventMessage CONTAINS \"claw-fleet\" OR eventMessage CONTAINS \"com.hoveychen\")",
+        );
+        let Ok(output) = std::process::Command::new("log")
+            .args(["show", "--last", "30s", "--predicate", &predicate, "--info", "--style", "compact"])
+            .output()
+        else { return };
+        let text = String::from_utf8_lossy(&output.stdout);
+        let lines: Vec<&str> = text.lines()
+            .filter(|l| l.contains("AUTHREQ_PROMPTING"))
+            .collect();
+        if !lines.is_empty() {
+            crate::log_debug(&format!(
+                "[TCC-PROMPT] {} TCC prompting events detected (PID {}):",
+                lines.len(), pid,
+            ));
+            for line in &lines {
+                crate::log_debug(&format!("[TCC-PROMPT]   {}", line));
+            }
+        }
+    }
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────
@@ -1765,5 +1845,73 @@ mod tests {
         s.token_speed = 0.0;
         age_out_status(&mut s, 9999.0);
         assert_eq!(s.status, SessionStatus::Idle);
+    }
+
+    // ── Bug fix: max_tokens should be WaitingInput ─────────────────────────
+
+    #[test]
+    fn status_max_tokens_waiting_input() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![text_block("I ran out of tokens")], Some("max_tokens")),
+        ];
+        assert_eq!(determine_status(&lines, 10.0, None), SessionStatus::WaitingInput);
+    }
+
+    // ── Bug fix: WaitingInput must not be promoted to Delegating ───────────
+
+    #[test]
+    fn delegating_does_not_override_waiting_input() {
+        // Simulate: main session is WaitingInput, has an active subagent.
+        // The main session should stay WaitingInput so notification fires.
+        let mut sessions = vec![
+            {
+                let mut s = make_session(SessionStatus::WaitingInput);
+                s.id = "main-session".into();
+                s.is_subagent = false;
+                s.parent_session_id = None;
+                s
+            },
+            {
+                let mut s = make_session(SessionStatus::Executing);
+                s.id = "sub-agent-1".into();
+                s.is_subagent = true;
+                s.parent_session_id = Some("main-session".into());
+                s
+            },
+        ];
+
+        // Apply the same Delegating promotion logic from scan_claude_sessions
+        let active_parent_ids: std::collections::HashSet<String> = sessions
+            .iter()
+            .filter(|s| {
+                s.is_subagent
+                    && matches!(
+                        s.status,
+                        SessionStatus::Thinking
+                            | SessionStatus::Executing
+                            | SessionStatus::Streaming
+                            | SessionStatus::Delegating
+                            | SessionStatus::Processing
+                    )
+            })
+            .filter_map(|s| s.parent_session_id.clone())
+            .collect();
+
+        for session in &mut sessions {
+            if !session.is_subagent
+                && session.parent_session_id.is_none()
+                && active_parent_ids.contains(&session.id)
+                && matches!(
+                    session.status,
+                    SessionStatus::Active | SessionStatus::Idle | SessionStatus::Processing
+                )
+            {
+                session.status = SessionStatus::Delegating;
+            }
+        }
+
+        // WaitingInput must NOT be overridden to Delegating — notifications depend on it.
+        assert_eq!(sessions[0].status, SessionStatus::WaitingInput);
     }
 }

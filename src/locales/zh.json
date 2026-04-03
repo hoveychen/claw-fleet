@@ -833,7 +833,12 @@
     "mute": "静音通知",
     "unmute": "取消静音",
     "hide_face": "隐藏表情",
-    "show_face": "显示表情"
+    "show_face": "显示表情",
+    "ctx_open_main": "打开主窗口",
+    "ctx_active_agent": "活跃: {{name}}",
+    "ctx_no_active": "无活跃 Agent",
+    "ctx_hide": "隐藏",
+    "ctx_recall": "收回侧边栏"
   },
   "settings": {
     "title": "设置",

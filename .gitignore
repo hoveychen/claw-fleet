@@ -16,6 +16,10 @@ dist-ssr
 src-tauri/target/
 src-tauri/binaries/
 
+# Video pipeline output
+promo/video/output/
+promo/video/node_modules/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -26,3 +30,4 @@ src-tauri/binaries/
 *.njsproj
 *.sln
 *.sw?
+promo/

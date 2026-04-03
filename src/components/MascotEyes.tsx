@@ -10,7 +10,7 @@ import styles from "./MascotEyes.module.css";
 
 // ── Dynamic quip generation ─────────────────────────────────────────────────
 
-const QUIP_REGEN_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const QUIP_REGEN_INTERVAL = 30 * 60 * 1000; // 30 minutes
 const MIN_TITLES_FOR_GENERATION = 1;
 
 // ── Mood types ───────────────────────────────────────────────────────────────
@@ -382,23 +382,26 @@ export function MascotEyes({ embedded, onQuip }: { embedded?: boolean; onQuip?: 
   const lastGenTime = useRef(0);
 
   useEffect(() => {
+    const busyStatuses = ["thinking", "executing", "streaming", "processing", "active", "delegating"];
+    const hasActiveSessions = sessions.some((s) => busyStatuses.includes(s.status));
+    if (!hasActiveSessions) return;
+
     const now = Date.now();
     const sessionCount = sessions.length;
     const countChanged = Math.abs(sessionCount - lastSessionCount.current) >= 2;
     const timeExpired = now - lastGenTime.current > QUIP_REGEN_INTERVAL;
 
-    if ((countChanged || timeExpired) && sessions.length > 0) {
+    if (countChanged || timeExpired) {
       lastSessionCount.current = sessionCount;
       lastGenTime.current = now;
       fetchQuips(sessions);
     }
 
-    // Also set up a periodic timer
+    // Also set up a periodic timer (only while active sessions exist)
     const interval = setInterval(() => {
-      if (sessions.length > 0) {
-        lastGenTime.current = Date.now();
-        fetchQuips(sessions);
-      }
+      if (document.visibilityState === "hidden") return;
+      lastGenTime.current = Date.now();
+      fetchQuips(sessions);
     }, QUIP_REGEN_INTERVAL);
 
     return () => clearInterval(interval);

@@ -339,7 +339,17 @@ export const useReportStore = create<ReportState>((set, get) => ({
     set({ loading: true, selectedDate: date, reportTab: "daily" });
     try {
       const report = await invoke<DailyReport | null>("get_daily_report", { date });
-      set({ currentReport: report, loading: false });
+      if (report) {
+        set({ currentReport: report, loading: false });
+      } else {
+        // No cached report — generate in background automatically
+        try {
+          const generated = await invoke<DailyReport>("generate_daily_report", { date });
+          set({ currentReport: generated, loading: false });
+        } catch {
+          set({ currentReport: null, loading: false });
+        }
+      }
     } catch {
       set({ currentReport: null, loading: false });
     }

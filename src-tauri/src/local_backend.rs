@@ -120,7 +120,16 @@ impl LocalBackend {
             let sources_bg = sources.clone();
             let idx_tx = index_tx.clone();
             std::thread::spawn(move || {
+                let scan_start = std::time::Instant::now();
                 let initial = crate::session::scan_all_sources(&sources_bg);
+                let total_ms = scan_start.elapsed().as_millis();
+                if total_ms > 2000 {
+                    crate::log_debug(&format!(
+                        "[TCC-STALL] Full initial scan took {}ms", total_ms,
+                    ));
+                    // Query macOS TCC system log for recent prompts about our app.
+                    crate::tcc::log_recent_tcc_events();
+                }
                 *sess_bg.lock().unwrap() = initial.clone();
                 let _ = app_bg.emit("sessions-updated", &initial);
                 let _ = app_bg.emit("scan-ready", true);
@@ -188,8 +197,17 @@ impl LocalBackend {
         let ac2 = audit_cache.clone();
         let nak2 = notified_audit_keys.clone();
 
+        // Pre-compute each filesystem source's watch dirs for fast path matching.
+        let source_watch_dirs: Vec<(usize, Vec<std::path::PathBuf>)> = sources
+            .iter()
+            .enumerate()
+            .filter(|(_, s)| matches!(s.watch_strategy(), WatchStrategy::Filesystem))
+            .map(|(i, s)| (i, s.watch_paths()))
+            .collect();
+
         // Filesystem watcher thread — batches events so we rescan at most once
         // every 2 seconds, while still tailing the viewed session immediately.
+        // Only rescans sources whose watch directories contain changed paths.
         std::thread::spawn(move || {
             let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
             let analyzing = analyzing2;
@@ -197,14 +215,16 @@ impl LocalBackend {
             let mut last_memory_rescan = Instant::now();
             let rescan_interval = Duration::from_secs(2);
             let memory_rescan_interval = Duration::from_secs(1);
-            let mut pending_rescan = false;
+            // Track which source indices have pending changes (replaces boolean flag).
+            let mut dirty_sources: HashSet<usize> = HashSet::new();
             let mut pending_memory_rescan = false;
 
             loop {
                 // Wait for events; use a short timeout when a rescan is pending
                 // so we flush it promptly after the coalescing window.
-                let timeout = if pending_rescan || pending_memory_rescan {
-                    let remaining_session = if pending_rescan {
+                let has_pending = !dirty_sources.is_empty();
+                let timeout = if has_pending || pending_memory_rescan {
+                    let remaining_session = if has_pending {
                         rescan_interval.saturating_sub(last_rescan.elapsed())
                     } else {
                         Duration::from_secs(60)
@@ -240,7 +260,12 @@ impl LocalBackend {
                                 continue;
                             }
 
-                            pending_rescan = true;
+                            // Mark only the source(s) whose watch dirs contain this path.
+                            for (idx, dirs) in &source_watch_dirs {
+                                if dirs.iter().any(|d| path.starts_with(d)) {
+                                    dirty_sources.insert(*idx);
+                                }
+                            }
 
                             // Tail the currently-viewed session immediately (keeps
                             // the detail view responsive even while rescans are batched).
@@ -260,8 +285,10 @@ impl LocalBackend {
                 }
 
                 // Flush the batched session rescan once the coalescing window has elapsed.
-                if pending_rescan && last_rescan.elapsed() >= rescan_interval {
-                    rescan_and_emit(&sources2, &app2, &sess2, &so2);
+                if !dirty_sources.is_empty() && last_rescan.elapsed() >= rescan_interval {
+                    incremental_rescan_and_emit(
+                        &sources2, &app2, &sess2, &so2, &dirty_sources,
+                    );
                     detect_waiting_transitions(
                         &sess2,
                         &mut prev_statuses,
@@ -277,7 +304,7 @@ impl LocalBackend {
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
                     last_rescan = Instant::now();
-                    pending_rescan = false;
+                    dirty_sources.clear();
                 }
 
                 // Flush the batched memory rescan — just emit the event; the
@@ -304,6 +331,14 @@ impl LocalBackend {
             let ac3 = audit_cache.clone();
             let nak3 = notified_audit_keys.clone();
 
+            // Indices of polling sources — only these need rescanning on each tick.
+            let poll_source_indices: HashSet<usize> = sources
+                .iter()
+                .enumerate()
+                .filter(|(_, s)| matches!(s.watch_strategy(), WatchStrategy::Poll(_)))
+                .map(|(i, _)| i)
+                .collect();
+
             std::thread::spawn(move || {
                 let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
                 let analyzing = analyzing3;
@@ -320,7 +355,9 @@ impl LocalBackend {
 
                 loop {
                     std::thread::sleep(interval);
-                    rescan_and_emit(&sources3, &app3, &sess3, &so3);
+                    incremental_rescan_and_emit(
+                        &sources3, &app3, &sess3, &so3, &poll_source_indices,
+                    );
                     detect_waiting_transitions(
                         &sess3,
                         &mut prev_statuses,
@@ -407,6 +444,89 @@ fn rescan_and_emit(
     outcomes: &Arc<Mutex<HashMap<String, Vec<String>>>>,
 ) {
     let mut s = crate::session::scan_all_sources(sources);
+
+    // Inject cached outcome tags into each session.
+    {
+        let oc = outcomes.lock().unwrap();
+        for sess in &mut s {
+            if let Some(tags) = oc.get(&sess.id) {
+                sess.last_outcome = Some(tags.clone());
+            }
+        }
+    }
+
+    *sessions.lock().unwrap() = s.clone();
+    let _ = app.emit("sessions-updated", &s);
+    crate::update_tray(app, &s);
+}
+
+/// Incremental rescan: only rescan sources whose indices appear in `dirty`.
+/// Sessions from clean sources are kept as-is, avoiding expensive readdir/stat
+/// calls for directories that haven't changed.
+fn incremental_rescan_and_emit(
+    sources: &[Box<dyn AgentSource>],
+    app: &AppHandle,
+    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
+    outcomes: &Arc<Mutex<HashMap<String, Vec<String>>>>,
+    dirty: &HashSet<usize>,
+) {
+    // Collect the source names of dirty sources so we can partition existing sessions.
+    // Must use `name()` (e.g. "claude-code") not `api_name()` (e.g. "claude")
+    // because `SessionInfo::agent_source` stores the full source name.
+    let dirty_names: HashSet<&str> = dirty
+        .iter()
+        .filter_map(|&i| sources.get(i).map(|s| s.name()))
+        .collect();
+
+    // Keep sessions from clean sources, rescan only dirty ones.
+    // Re-apply age_out_status to retained sessions so their status still
+    // transitions to Idle when the underlying file hasn't been touched.
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut s: Vec<SessionInfo> = {
+        let existing = sessions.lock().unwrap();
+        existing
+            .iter()
+            .filter(|sess| !dirty_names.contains(sess.agent_source.as_str()))
+            .cloned()
+            .collect()
+    };
+    for sess in &mut s {
+        let age_secs = now_ms.saturating_sub(sess.last_activity_ms) as f64 / 1000.0;
+        crate::session::age_out_status(sess, age_secs);
+    }
+
+    for &idx in dirty {
+        if let Some(source) = sources.get(idx) {
+            let name = source.name();
+            let t0 = std::time::Instant::now();
+            let avail = source.is_available();
+            let avail_ms = t0.elapsed().as_millis();
+            if avail_ms > 2000 {
+                crate::log_debug(&format!(
+                    "[TCC-STALL] incremental {}.is_available() took {}ms",
+                    name, avail_ms,
+                ));
+            }
+            if avail {
+                let t1 = std::time::Instant::now();
+                let src_sessions = source.scan_sessions();
+                let scan_ms = t1.elapsed().as_millis();
+                if scan_ms > 2000 {
+                    crate::log_debug(&format!(
+                        "[TCC-STALL] incremental {}.scan_sessions() took {}ms",
+                        name, scan_ms,
+                    ));
+                    crate::tcc::log_recent_tcc_events();
+                }
+                s.extend(src_sessions);
+            }
+        }
+    }
+
+    crate::session::sort_sessions(&mut s);
 
     // Inject cached outcome tags into each session.
     {
