@@ -35,27 +35,6 @@ use tauri::{Emitter, Listener, Manager};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 
-#[cfg(target_os = "macos")]
-use tauri_nspanel::{ManagerExt, WebviewWindowExt};
-
-// ── macOS NSPanel types for the tray popup ──────────────────────────────────
-// On macOS, the tray panel must be an NSPanel (not NSWindow) so that:
-//  1. Showing it doesn't steal focus from other apps (NonActivatingPanel).
-//  2. Clicking outside reliably fires `windowDidResignKey` for auto-hide.
-#[cfg(target_os = "macos")]
-tauri_nspanel::tauri_panel! {
-    panel!(TrayNSPanel {
-        config: {
-            can_become_key_window: true,
-            can_become_main_window: false,
-        }
-    })
-
-    panel_event!(TrayPanelHandler {
-        window_did_resign_key(notification: &NSNotification) -> (),
-    })
-}
-
 use account::AccountInfo;
 use backend::Backend;
 use session::SessionInfo;
@@ -1290,10 +1269,16 @@ fn set_llm_config(state: tauri::State<AppState>, config: llm_provider::LlmConfig
 
 #[tauri::command]
 fn toggle_overlay(app: tauri::AppHandle, visible: bool) {
+    // Overlay is disabled on macOS (no transparent floating window support
+    // without private APIs).
+    #[cfg(target_os = "macos")]
+    { let _ = (&app, visible); return; }
+
+    #[cfg(not(target_os = "macos"))]
     if let Some(w) = app.get_webview_window("overlay") {
         if visible {
             // Move on-screen (bottom-right). Using position instead of
-            // show/hide avoids the transparent-window white-flash bug on macOS.
+            // show/hide avoids the transparent-window white-flash bug.
             let _ = w.show();
             if let Ok(Some(monitor)) = w.current_monitor() {
                 let size = monitor.size();
@@ -1345,100 +1330,9 @@ fn open_session_from_overlay(app: tauri::AppHandle, jsonl_path: String) {
     let _ = app.emit("open-session", jsonl_path);
 }
 
-// ── Tray panel window commands ─────────────────────────────────────────────
-
-/// Show the tray panel at the given physical click position.
-fn show_tray_panel_at(app: &tauri::AppHandle, click_x: f64, click_y: f64) {
-    let Some(w) = app.get_webview_window("tray_panel") else { return };
-
-    // Find the monitor that contains the click point so we use the
-    // correct scale factor (each display can have a different DPI).
-    let scale = app.available_monitors()
-        .ok()
-        .and_then(|monitors| {
-            monitors.into_iter().find(|m| {
-                let pos = m.position();
-                let size = m.size();
-                let (mx, my) = (pos.x as f64, pos.y as f64);
-                let (mw, mh) = (size.width as f64, size.height as f64);
-                click_x >= mx && click_x < mx + mw
-                    && click_y >= my && click_y < my + mh
-            })
-        })
-        .map(|m| m.scale_factor())
-        .unwrap_or(2.0);
-
-    // The click position is in physical pixels (global screen coords).
-    // Convert panel width to physical pixels for centering.
-    let panel_w_phys = 360.0 * scale;
-    let x = click_x - panel_w_phys / 2.0;
-
-    // macOS: menu bar at top → panel below click.
-    // Windows/Linux: taskbar usually at bottom → panel above click.
-    #[cfg(target_os = "macos")]
-    let y = click_y;
-    #[cfg(not(target_os = "macos"))]
-    let y = click_y - 520.0 * scale;
-
-    let _ = w.set_position(tauri::Position::Physical(
-        tauri::PhysicalPosition::new(x as i32, y as i32),
-    ));
-
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(panel) = app.get_webview_panel("tray_panel") {
-            panel.show();
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = w.show();
-        let _ = w.set_focus();
-    }
-
-    // Emit cached usage summaries so the panel can show them immediately.
-    let state = app.state::<AppState>();
-    let summaries = state.cached_usage.lock().unwrap().clone();
-    let _ = app.emit_to("tray_panel", "tray-usage-updated", &summaries);
-}
-
-fn hide_tray_panel(app: &tauri::AppHandle) {
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(panel) = app.get_webview_panel("tray_panel") {
-            panel.hide();
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        if let Some(w) = app.get_webview_window("tray_panel") {
-            let _ = w.hide();
-        }
-    }
-}
-
-fn is_tray_panel_visible(app: &tauri::AppHandle) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        app.get_webview_panel("tray_panel")
-            .map(|p| p.is_visible())
-            .unwrap_or(false)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        app.get_webview_window("tray_panel")
-            .and_then(|w| w.is_visible().ok())
-            .unwrap_or(false)
-    }
-}
-
 #[tauri::command]
-fn toggle_tray_panel(app: tauri::AppHandle, visible: bool) {
-    if visible {
-        show_tray_panel_at(&app, 500.0, 30.0);
-    } else {
-        hide_tray_panel(&app);
-    }
+fn toggle_tray_panel(_app: tauri::AppHandle, _visible: bool) {
+    // No-op: custom tray panel removed; kept for frontend compat.
 }
 
 #[tauri::command]
@@ -1485,8 +1379,6 @@ pub fn update_tray(app: &tauri::AppHandle, sessions: &[SessionInfo]) {
 }
 
 pub fn update_tray_usage(app: &tauri::AppHandle, summaries: Vec<backend::SourceUsageSummary>) {
-    // Also emit to the tray panel window so it can show live usage
-    let _ = app.emit_to("tray_panel", "tray-usage-updated", &summaries);
     let state = app.state::<AppState>();
     *state.cached_usage.lock().unwrap() = summaries;
     let handle = app.clone();
@@ -1872,7 +1764,7 @@ fn get_mobile_qr_data(state: tauri::State<'_, AppState>) -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let mut builder = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.show();
@@ -1884,11 +1776,6 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_dialog::init());
-
-    #[cfg(target_os = "macos")]
-    {
-        builder = builder.plugin(tauri_nspanel::init());
-    }
 
     builder.manage(AppState {
             // NullBackend is a placeholder; replaced with LocalBackend in setup().
@@ -2009,25 +1896,23 @@ pub fn run() {
 
             tray_builder
                 .menu(&tray_menu)
-                .show_menu_on_left_click(false)
                 .tooltip("Claw Fleet")
                 .on_tray_icon_event(|tray, event| {
-                    if let tauri::tray::TrayIconEvent::Click { position, button, button_state, .. } = &event {
-                        if !matches!(button, tauri::tray::MouseButton::Left) {
-                            return;
-                        }
-                        if !matches!(button_state, tauri::tray::MouseButtonState::Up) {
-                            return;
-                        }
+                    // Record click timestamp so we can defer tray menu rebuilds
+                    // while the menu is open.
+                    if let tauri::tray::TrayIconEvent::Click { button, button_state, .. } = &event {
+                        if matches!(button_state, tauri::tray::MouseButtonState::Up) {
+                            let app = tray.app_handle();
+                            let state = app.state::<AppState>();
+                            *state.tray_last_click.lock().unwrap() = std::time::Instant::now();
 
-                        let app = tray.app_handle();
-                        let state = app.state::<AppState>();
-                        *state.tray_last_click.lock().unwrap() = std::time::Instant::now();
-
-                        if is_tray_panel_visible(app) {
-                            hide_tray_panel(app);
-                        } else {
-                            show_tray_panel_at(app, position.x, position.y);
+                            // Left-click: show main window
+                            if matches!(button, tauri::tray::MouseButton::Left) {
+                                if let Some(w) = app.get_webview_window("main") {
+                                    let _ = w.show();
+                                    let _ = w.set_focus();
+                                }
+                            }
                         }
                     }
                 })
@@ -2075,62 +1960,6 @@ pub fn run() {
                 });
             }
 
-            // ── Tray panel: auto-hide ────────────────────────────────────────
-            #[cfg(target_os = "macos")]
-            {
-                // Swizzle the Tauri NSWindow → NSPanel so that:
-                //  • showing the panel doesn't steal focus (NonActivatingPanel)
-                //  • windowDidResignKey fires reliably for auto-hide
-                if let Some(panel_window) = app.get_webview_window("tray_panel") {
-                    let panel = panel_window.to_panel::<TrayNSPanel>()
-                        .expect("failed to swizzle tray_panel to NSPanel");
-
-                    use tauri_nspanel::{PanelLevel, CollectionBehavior, StyleMask};
-                    panel.set_level(PanelLevel::MainMenu.value() + 1);
-                    panel.set_collection_behavior(
-                        CollectionBehavior::new()
-                            .can_join_all_spaces()
-                            .stationary()
-                            .full_screen_auxiliary()
-                            .value(),
-                    );
-                    panel.set_style_mask(
-                        StyleMask::empty().nonactivating_panel().value(),
-                    );
-                    panel.set_hides_on_deactivate(false);
-
-                    // Auto-hide when the panel loses key-window status
-                    // (user clicked outside the panel).
-                    let handler = TrayPanelHandler::new();
-                    let handle = app.handle().clone();
-                    handler.window_did_resign_key(move |_| {
-                        // If a tray icon click just happened, skip — the tray
-                        // click handler will toggle visibility itself.
-                        let state = handle.state::<AppState>();
-                        let since_click = state.tray_last_click.lock().unwrap().elapsed();
-                        if since_click < std::time::Duration::from_millis(500) {
-                            return;
-                        }
-                        hide_tray_panel(&handle);
-                    });
-                    panel.set_event_handler(Some(handler.as_ref()));
-                    // Keep handler alive for the app's lifetime.
-                    std::mem::forget(handler);
-                }
-            }
-            #[cfg(not(target_os = "macos"))]
-            {
-                // Windows/Linux: hide on focus loss via window event.
-                if let Some(panel) = app.get_webview_window("tray_panel") {
-                    let app_handle = app.handle().clone();
-                    panel.on_window_event(move |event| {
-                        if let tauri::WindowEvent::Focused(false) = event {
-                            hide_tray_panel(&app_handle);
-                        }
-                    });
-                }
-            }
-
             // ── macOS vibrancy (frosted glass) ────────────────────────────
             #[cfg(target_os = "macos")]
             {
@@ -2147,10 +1976,6 @@ pub fn run() {
 
                 if let Some(overlay_win) = app.get_webview_window("overlay") {
                     let _ = overlay_win.set_background_color(Some(Color(0, 0, 0, 0)));
-                }
-
-                if let Some(tray_win) = app.get_webview_window("tray_panel") {
-                    let _ = tray_win.set_background_color(Some(Color(0, 0, 0, 0)));
                 }
             }
 

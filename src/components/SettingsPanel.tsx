@@ -284,6 +284,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   // ── Overlay state (shared via store) ─────────────────────────────────────
   const overlayEnabled = useOverlayStore((s) => s.enabled);
   const setOverlayEnabled = useOverlayStore((s) => s.setEnabled);
+  const isMacOS = document.documentElement.getAttribute("data-platform") === "macos";
 
   // ── Mobile access state ──────────────────────────────────────────────
   const [mobileAccess, setMobileAccess] = useState<MobileAccessInfo | null>(null);
@@ -372,6 +373,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <span className={styles.row_label}>{t("settings.language")}</span>
                   <LanguageSwitcher />
                 </div>
+                {!isMacOS && (
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.overlay")}</span>
@@ -388,6 +390,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <span className={styles.toggle_slider} />
                   </label>
                 </div>
+                )}
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.auto_update_check")}</span>
