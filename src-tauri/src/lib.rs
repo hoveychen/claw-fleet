@@ -1974,8 +1974,10 @@ pub fn run() {
                     let _ = main_win.set_effects(effects);
                 }
 
+                // Overlay is not supported on macOS (requires private APIs
+                // for transparent floating windows). Destroy it immediately.
                 if let Some(overlay_win) = app.get_webview_window("overlay") {
-                    let _ = overlay_win.set_background_color(Some(Color(0, 0, 0, 0)));
+                    let _ = overlay_win.destroy();
                 }
             }
 

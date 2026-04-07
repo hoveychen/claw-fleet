@@ -818,7 +818,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claw-fleet"
-version = "26.4.7-dev.1775560292"
+version = "26.4.7-dev.1775565354"
 dependencies = [
  "chrono",
  "clap",
