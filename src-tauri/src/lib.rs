@@ -2131,18 +2131,26 @@ pub fn run() {
                 }
             }
 
-            // ── macOS vibrancy (frosted glass sidebar) ────────────────────
+            // ── macOS vibrancy (frosted glass) ────────────────────────────
             #[cfg(target_os = "macos")]
             {
                 use tauri::window::{Color, Effect, EffectState, EffectsBuilder};
+
                 if let Some(main_win) = app.get_webview_window("main") {
-                    // Transparent webview background so native vibrancy shows through
                     let _ = main_win.set_background_color(Some(Color(0, 0, 0, 0)));
                     let effects = EffectsBuilder::new()
                         .effect(Effect::Sidebar)
                         .state(EffectState::Active)
                         .build();
                     let _ = main_win.set_effects(effects);
+                }
+
+                if let Some(overlay_win) = app.get_webview_window("overlay") {
+                    let _ = overlay_win.set_background_color(Some(Color(0, 0, 0, 0)));
+                }
+
+                if let Some(tray_win) = app.get_webview_window("tray_panel") {
+                    let _ = tray_win.set_background_color(Some(Color(0, 0, 0, 0)));
                 }
             }
 

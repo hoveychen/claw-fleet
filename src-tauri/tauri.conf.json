@@ -17,8 +17,7 @@
         "minWidth": 900,
         "minHeight": 600,
         "center": true,
-        "titleBarStyle": "Overlay",
-        "transparent": true
+        "titleBarStyle": "Overlay"
       },
       {
         "label": "overlay",
@@ -30,7 +29,6 @@
         "y": -9999,
         "resizable": false,
         "decorations": false,
-        "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "shadow": false,
@@ -45,7 +43,6 @@
         "height": 520,
         "resizable": false,
         "decorations": false,
-        "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "shadow": false,
@@ -56,7 +53,7 @@
     "security": {
       "csp": null
     },
-    "macOSPrivateApi": true
+    "macOSPrivateApi": false
   },
   "bundle": {
     "active": true,
