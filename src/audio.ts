@@ -83,20 +83,40 @@ const CHIME_FNS: Record<ChimePreset, (ctx: AudioContext) => void> = {
 /** Shared AudioContext — reused across chime calls to avoid autoplay-policy issues. */
 let sharedCtx: AudioContext | null = null;
 
-function getAudioContext(): AudioContext {
+/** Get or create a running AudioContext.  If the existing context is stuck in
+ *  "suspended" state (e.g. it was created outside a user-gesture on WKWebView),
+ *  close it and create a fresh one so a subsequent resume() from a click handler
+ *  can succeed. */
+async function ensureAudioContext(): Promise<AudioContext> {
   if (!sharedCtx || sharedCtx.state === "closed") {
     sharedCtx = new AudioContext();
   }
+
+  if (sharedCtx.state === "suspended") {
+    // Race resume() against a short timeout — on WKWebView, resume() may
+    // hang indefinitely when called outside a user gesture.
+    const resumed = await Promise.race([
+      sharedCtx.resume().then(() => true),
+      new Promise<false>((r) => setTimeout(() => r(false), 300)),
+    ]);
+    if (!resumed || sharedCtx.state === "suspended") {
+      // Context is stuck — tear it down and create a new one.
+      console.debug("[audio] AudioContext stuck in suspended state, recreating");
+      sharedCtx.close().catch(() => {});
+      sharedCtx = new AudioContext();
+      // This new context is created within the current (user-gesture) call
+      // stack, so resume should succeed immediately.
+      await sharedCtx.resume().catch(() => {});
+    }
+  }
+
   return sharedCtx;
 }
 
 /** Play a chime preset. Returns a promise that resolves after the chime finishes. */
 export async function playChime(preset: ChimePreset): Promise<void> {
   try {
-    const ctx = getAudioContext();
-    if (ctx.state === "suspended") {
-      await ctx.resume();
-    }
+    const ctx = await ensureAudioContext();
     CHIME_FNS[preset](ctx);
     await new Promise((r) => setTimeout(r, CHIME_DURATIONS[preset]));
   } catch (err) {
