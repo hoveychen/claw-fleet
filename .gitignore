@@ -31,3 +31,4 @@ promo/video/node_modules/
 *.sln
 *.sw?
 promo/
+Cargo.toml.bak
