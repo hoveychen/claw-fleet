@@ -413,59 +413,42 @@ jobs:
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Find latest mobile release
+        id: mobile
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MOBILE_TAG=$(gh release list -L 50 --json tagName -q '[.[] | select(.tagName | startswith("mobile-v"))][0].tagName' 2>/dev/null || echo "")
+          if [ -n "$MOBILE_TAG" ]; then
+            ASSET_URL=$(gh release view "$MOBILE_TAG" --json assets -q '.assets[0].browserDownloadUrl' 2>/dev/null || echo "")
+            echo "tag=$MOBILE_TAG" >> "$GITHUB_OUTPUT"
+            echo "url=$ASSET_URL" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Generate release notes
         run: |
-          cat >> release_notes.md << 'EOF'
+          DL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+          cat >> release_notes.md << EOF
           ## Downloads
 
           ### App Installers
 
-          | | Platform | Architecture | File |
+          | | Platform | Architecture | Download |
           |---|---|---|---|
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon (M1/M2/M3/M4) | `claw-fleet-macos-arm64.pkg` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | `claw-fleet-macos-x64.pkg` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | `claw-fleet-windows-x64-setup.exe` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | `claw-fleet-windows-arm64-setup.exe` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | `claw-fleet-linux-x64.deb` / `claw-fleet-linux-x64.AppImage` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | `claw-fleet-linux-arm64.deb` / `claw-fleet-linux-arm64.AppImage` |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon (M1/M2/M3/M4) | [claw-fleet-macos-arm64.pkg](${DL}/claw-fleet-macos-arm64.pkg) |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | [claw-fleet-macos-x64.pkg](${DL}/claw-fleet-macos-x64.pkg) |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | [claw-fleet-windows-x64-setup.exe](${DL}/claw-fleet-windows-x64-setup.exe) |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | [claw-fleet-windows-arm64-setup.exe](${DL}/claw-fleet-windows-arm64-setup.exe) |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | [claw-fleet-linux-x64.deb](${DL}/claw-fleet-linux-x64.deb) / [claw-fleet-linux-x64.AppImage](${DL}/claw-fleet-linux-x64.AppImage) |
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | [claw-fleet-linux-arm64.deb](${DL}/claw-fleet-linux-arm64.deb) / [claw-fleet-linux-arm64.AppImage](${DL}/claw-fleet-linux-arm64.AppImage) |
 
           ### Mobile Companion
 
-          The Android companion app is released separately via `mobile-v*` tags. See the latest [mobile release](https://github.com/hoveychen/claw-fleet/releases?q=mobile) for the APK download. Scan the QR code in Desktop → Settings → Mobile to connect.
+          | | Platform | Download |
+          |---|---|---|
+          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-android.svg" width="24"> | Android | [Download APK](${{ steps.mobile.outputs.url }}) |
 
-          ### `fleet` CLI (standalone binaries)
-
-          | | Platform | Architecture | File |
-          |---|---|---|---|
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Apple Silicon | `fleet-macos-arm64` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-apple.svg" width="24"> | macOS | Intel | `fleet-macos-x64` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | x64 | `fleet-windows-x64.exe` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows | ARM64 | `fleet-windows-arm64.exe` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | x86_64 | `fleet-linux-x64` |
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux | ARM64 | `fleet-linux-arm64` |
-
-          ## Installing the `fleet` CLI
-
-          The `fleet` CLI is bundled inside the app installer and also available as a standalone binary.
-
-          **macOS** — after installing the app:
-          ```sh
-          sudo ln -sf "/Applications/Claw Fleet.app/Contents/MacOS/fleet" /usr/local/bin/fleet
-          ```
-
-          **Linux** — the `.deb` package installs `fleet` to `/usr/bin/fleet` automatically.
-          For AppImage users, download the standalone binary and place it in your `$PATH`:
-          ```sh
-          chmod +x fleet-*-linux-* && sudo mv fleet-*-linux-* /usr/local/bin/fleet
-          ```
-
-          **Windows** — `fleet.exe` is installed to the app directory. Add it to `PATH`:
-          ```powershell
-          # In PowerShell (adjust path if installed per-machine)
-          $dir = "$env:LOCALAPPDATA\Programs\Claw Fleet"
-          [Environment]::SetEnvironmentVariable("PATH", "$env:PATH;$dir", "User")
-          ```
-          Or download the standalone binary and place it wherever you prefer.
+          Scan the QR code in Desktop → Settings → Mobile to connect.
 
           ## What's Changed
 

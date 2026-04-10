@@ -65,5 +65,15 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+          name: Claw Fleet Mobile ${{ github.ref_name }}
+          body: |
+            ## Android Companion App
+
+            Download the APK and install it on your Android device.
+            Scan the QR code in Desktop → Settings → Mobile to connect.
+
+            ## What's Changed
+
+            See [CHANGELOG](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}) for full commit history.
           files: claw-fleet-mobile/android/app/build/outputs/apk/release/*.apk
 
