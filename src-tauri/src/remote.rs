@@ -491,6 +491,15 @@ pub fn delete_connection(id: String) -> Result<(), String> {
 
 // ── SSH helpers ───────────────────────────────────────────────────────────────
 
+/// Apply the real HOME environment to an SSH/SCP `Command` so that the child
+/// process finds `~/.ssh/config` at the true user home, not inside the macOS
+/// sandbox container (`~/Library/Containers/<id>/Data/`).
+fn apply_real_home(cmd: &mut std::process::Command) {
+    if let Some(home) = crate::session::real_home_dir() {
+        cmd.env("HOME", home);
+    }
+}
+
 /// Build common SSH CLI arguments (no command, no target host yet).
 fn base_ssh_args(conn: &RemoteConnection) -> Vec<String> {
     let mut args = vec![
@@ -552,36 +561,124 @@ fn scp_target(conn: &RemoteConnection) -> String {
     }
 }
 
-/// List SSH config profile (Host) names from ~/.ssh/config.
+/// List SSH config profile (Host) names from ~/.ssh/config, following Include directives.
 #[tauri::command]
 pub fn list_ssh_profiles() -> Vec<String> {
-    let Some(config_path) = crate::session::real_home_dir().map(|h| h.join(".ssh").join("config")) else {
+    let Some(home) = crate::session::real_home_dir() else {
         return vec![];
     };
-    let Ok(content) = std::fs::read_to_string(&config_path) else {
-        return vec![];
-    };
+    let config_path = home.join(".ssh").join("config");
     let mut profiles = vec![];
+    let mut visited = std::collections::HashSet::new();
+    collect_ssh_hosts(&config_path, &home, &mut profiles, &mut visited);
+    profiles
+}
+
+/// Recursively collect Host names from an SSH config file, resolving Include directives.
+fn collect_ssh_hosts(
+    path: &std::path::Path,
+    home: &std::path::Path,
+    profiles: &mut Vec<String>,
+    visited: &mut std::collections::HashSet<PathBuf>,
+) {
+    let canonical = match std::fs::canonicalize(path) {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    if !visited.insert(canonical) {
+        return; // avoid cycles
+    }
+
+    let content = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+
+    let ssh_dir = home.join(".ssh");
+
     for line in content.lines() {
-        // Strip inline comments first, then trim whitespace
         let bare = line.splitn(2, '#').next().unwrap_or("").trim();
         if bare.is_empty() {
             continue;
         }
-        // Case-insensitive "Host" keyword (SSH config is case-insensitive for keywords)
         let lower = bare.to_ascii_lowercase();
+
         if let Some(_) = lower.strip_prefix("host ") {
-            // Use original (non-lowercased) chars for the actual host names
             let offset = "host ".len();
             for host in bare[offset..].split_whitespace() {
-                // Skip wildcard patterns — they are not selectable profiles
                 if !host.contains('*') && !host.contains('?') {
                     profiles.push(host.to_string());
                 }
             }
+        } else if let Some(_) = lower.strip_prefix("include ") {
+            let offset = "include ".len();
+            let pattern = bare[offset..].trim();
+            // Resolve ~ and relative paths per OpenSSH rules:
+            //   ~/ → user home;  relative (no /) → relative to ~/.ssh/
+            let resolved = if let Some(rest) = pattern.strip_prefix("~/") {
+                home.join(rest).to_string_lossy().into_owned()
+            } else if !pattern.starts_with('/') {
+                ssh_dir.join(pattern).to_string_lossy().into_owned()
+            } else {
+                pattern.to_string()
+            };
+
+            // Expand globs (e.g. "config.d/*").  We handle the common case
+            // where the glob is in the filename component only.
+            let resolved_path = std::path::Path::new(&resolved);
+            if let Some(fname) = resolved_path.file_name().and_then(|f| f.to_str()) {
+                if fname.contains('*') || fname.contains('?') {
+                    // Read directory and match entries against the pattern
+                    if let Some(parent) = resolved_path.parent() {
+                        if let Ok(entries) = std::fs::read_dir(parent) {
+                            for entry in entries.flatten() {
+                                let name = entry.file_name();
+                                let name_str = name.to_string_lossy();
+                                if glob_match(fname, &name_str) {
+                                    collect_ssh_hosts(&entry.path(), home, profiles, visited);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // No glob characters — literal path
+                    collect_ssh_hosts(resolved_path, home, profiles, visited);
+                }
+            }
         }
     }
-    profiles
+}
+
+/// Simple glob matching supporting `*` (any chars) and `?` (single char).
+fn glob_match(pattern: &str, text: &str) -> bool {
+    let p: Vec<char> = pattern.chars().collect();
+    let t: Vec<char> = text.chars().collect();
+    glob_match_inner(&p, &t)
+}
+
+fn glob_match_inner(pattern: &[char], text: &[char]) -> bool {
+    let (mut pi, mut ti) = (0, 0);
+    let (mut star_pi, mut star_ti) = (usize::MAX, 0);
+    while ti < text.len() {
+        if pi < pattern.len() && (pattern[pi] == '?' || pattern[pi] == text[ti]) {
+            pi += 1;
+            ti += 1;
+        } else if pi < pattern.len() && pattern[pi] == '*' {
+            star_pi = pi;
+            star_ti = ti;
+            pi += 1;
+        } else if star_pi != usize::MAX {
+            pi = star_pi + 1;
+            star_ti += 1;
+            ti = star_ti;
+        } else {
+            return false;
+        }
+    }
+    while pi < pattern.len() && pattern[pi] == '*' {
+        pi += 1;
+    }
+    pi == pattern.len()
 }
 
 /// Run a download command via SSH, streaming progress lines `"<current_bytes> <total_bytes>"`.
@@ -591,9 +688,10 @@ fn ssh_exec(conn: &RemoteConnection, remote_cmd: &str) -> Result<String, String>
     let mut args = base_ssh_args(conn);
     args.push(remote_cmd.to_string());
 
-    let output = std::process::Command::new("ssh")
-        .args(&args)
-        .output()
+    let mut cmd = std::process::Command::new("ssh");
+    cmd.args(&args);
+    apply_real_home(&mut cmd);
+    let output = cmd.output()
         .map_err(|e| format!("ssh exec failed: {e}"))?;
 
     if output.status.success() {
@@ -606,8 +704,13 @@ fn ssh_exec(conn: &RemoteConnection, remote_cmd: &str) -> Result<String, String>
 
 /// Find a platform-specific binary bundled as a Tauri resource, e.g. "fleet-linux-x64".
 fn find_bundled_fleet_binary(app: &AppHandle, suffix: &str) -> Option<PathBuf> {
-    let resource_dir = app.path().resource_dir().ok()?;
-    let path = resource_dir.join(format!("fleet-{suffix}"));
+    let path = app
+        .path()
+        .resolve(
+            format!("resources/fleet-{suffix}"),
+            tauri::path::BaseDirectory::Resource,
+        )
+        .ok()?;
     if path.exists() { Some(path) } else { None }
 }
 
@@ -778,9 +881,10 @@ fn connect_remote_impl(
             scp_args.push(bin.to_string_lossy().to_string());
             scp_args.push(format!("{}:{}", scp_target(&conn), remote_fleet_path()));
 
-            let scp_out = std::process::Command::new("scp")
-                .args(&scp_args)
-                .output()
+            let mut scp_cmd = std::process::Command::new("scp");
+            scp_cmd.args(&scp_args);
+            apply_real_home(&mut scp_cmd);
+            let scp_out = scp_cmd.output()
                 .map_err(|e| format!("scp failed: {e}"))?;
 
             if !scp_out.status.success() {
@@ -872,11 +976,13 @@ fn connect_remote_start_probe(
         tunnel_args.push(format!("{}@{}", conn.username, conn.host));
     }
 
-    let tunnel_child = std::process::Command::new("ssh")
+    let mut tunnel_cmd = std::process::Command::new("ssh");
+    tunnel_cmd
         .args(&tunnel_args)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+        .stderr(std::process::Stdio::null());
+    apply_real_home(&mut tunnel_cmd);
+    let tunnel_child = tunnel_cmd.spawn()
         .map_err(|e| format!("Failed to start SSH tunnel: {e}"))?;
 
     // ── Step 6: wait for probe to be ready ───────────────────────────────────
