@@ -229,11 +229,16 @@ jobs:
             cargo build --release --bin fleet-cli \
               --manifest-path src-tauri/Cargo.toml \
               --target x86_64-apple-darwin
+            # Merge into universal sidecar for Tauri externalBin
             lipo -create \
               src-tauri/target/aarch64-apple-darwin/release/fleet-cli \
               src-tauri/target/x86_64-apple-darwin/release/fleet-cli \
               -output src-tauri/binaries/fleet-universal-apple-darwin
             chmod +x src-tauri/binaries/fleet-universal-apple-darwin
+            # Tauri bundler also looks for [[bin]] targets at the universal target dir
+            mkdir -p src-tauri/target/universal-apple-darwin/release
+            cp src-tauri/binaries/fleet-universal-apple-darwin \
+               src-tauri/target/universal-apple-darwin/release/fleet-cli
           else
             # Build the CLI binary (named fleet-cli to avoid collision with tauri externalBin "fleet")
             cargo build --release --bin fleet-cli \
