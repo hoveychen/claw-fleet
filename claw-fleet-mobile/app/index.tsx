@@ -174,11 +174,7 @@ export default function ConnectScreen() {
         <CameraView
           style={styles.camera}
           barcodeScannerSettings={{ barcodeTypes: ["qr"] }}
-          onBarcodeScanned={
-            scanProcessed.current
-              ? undefined
-              : (result) => handleQrScanned(result.data)
-          }
+          onBarcodeScanned={(result) => handleQrScanned(result.data)}
         />
         <View style={styles.scanOverlay}>
           <View style={styles.scanFrame} />
