@@ -1142,6 +1142,44 @@ pub fn fetch_usage_summaries_from_sources(sources: &[Box<dyn AgentSource>]) -> V
 
 // ── Waiting-input detection & outcome analysis ──────────────────────────────
 
+/// Statuses that represent the agent actively working. A transition from any
+/// of these into `WaitingInput` is a genuine "task completed" signal worth
+/// notifying the user about.
+///
+/// Note: `Delegating` belongs here — a main session in `Delegating` is waiting
+/// on its subagents and is genuinely busy. A `Delegating → WaitingInput`
+/// transition (subagents finish, main session returns to prompt) must notify.
+const BUSY_STATUSES: &[SessionStatus] = &[
+    SessionStatus::Thinking,
+    SessionStatus::Executing,
+    SessionStatus::Streaming,
+    SessionStatus::Processing,
+    SessionStatus::Delegating,
+    SessionStatus::Active,
+];
+
+/// Decide whether a status change should fire a "task completed" notification.
+///
+/// Requires a genuine busy→WaitingInput transition: the previous observation
+/// must have been one of `BUSY_STATUSES`. This intentionally suppresses:
+/// - Cold start (prev is None) — Fleet just saw this session for the first time.
+/// - `--resume` of an old session (prev is None or Idle) — opening a past
+///   session re-touches the JSONL and makes it look WaitingInput, but no task
+///   was actually completed just now.
+/// - WaitingInput → WaitingInput (already waiting, no new transition).
+pub(crate) fn should_notify_waiting_transition(
+    prev: Option<&SessionStatus>,
+    current: &SessionStatus,
+) -> bool {
+    if current != &SessionStatus::WaitingInput {
+        return false;
+    }
+    match prev {
+        Some(p) => BUSY_STATUSES.contains(p),
+        None => false,
+    }
+}
+
 fn detect_waiting_transitions(
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     prev_statuses: &mut HashMap<String, SessionStatus>,
@@ -1154,13 +1192,6 @@ fn detect_waiting_transitions(
 ) {
     let current = sessions.lock().unwrap().clone();
     let mut alerts_changed = false;
-    let busy_statuses = [
-        SessionStatus::Thinking,
-        SessionStatus::Executing,
-        SessionStatus::Streaming,
-        SessionStatus::Processing,
-        SessionStatus::Active,
-    ];
 
     for sess in &current {
         if sess.is_subagent {
@@ -1170,10 +1201,13 @@ fn detect_waiting_transitions(
         let prev = prev_statuses.get(&sess.id);
         let is_waiting = sess.status == SessionStatus::WaitingInput;
         let was_waiting = prev == Some(&SessionStatus::WaitingInput);
-        let was_busy = prev.map_or(false, |p| busy_statuses.contains(p));
+        let was_busy = prev.map_or(false, |p| BUSY_STATUSES.contains(p));
+        let should_notify = should_notify_waiting_transition(prev, &sess.status);
 
-        // Session just transitioned to WaitingInput → run semantic analysis.
-        if is_waiting && !was_waiting {
+        // Session just transitioned from a busy state into WaitingInput →
+        // run semantic analysis. Cold start / --resume (prev == None) is
+        // deliberately suppressed by should_notify_waiting_transition.
+        if should_notify {
             let mut guard = analyzing.lock().unwrap();
             if guard.contains(&sess.id) {
                 continue;
@@ -1253,7 +1287,7 @@ fn detect_waiting_transitions(
         }
 
         // Session became busy again → clear stale outcome tags.
-        if busy_statuses.contains(&sess.status) && !was_busy {
+        if BUSY_STATUSES.contains(&sess.status) && !was_busy {
             session_outcomes.lock().unwrap().remove(&sess.id);
         }
     }
@@ -1649,5 +1683,59 @@ mod tests {
 
         // Unknown source
         assert!(crate::agent_source::find_source_by_api_name(&sources, "unknown").is_none());
+    }
+
+    // ── should_notify_waiting_transition ───────────────────────────────────
+
+    use SessionStatus::*;
+
+    #[test]
+    fn notify_busy_to_waiting_fires_for_all_busy_statuses() {
+        // Canonical "task just completed" transitions — all must notify.
+        for busy in &[Thinking, Executing, Streaming, Processing, Delegating, Active] {
+            assert!(
+                should_notify_waiting_transition(Some(busy), &WaitingInput),
+                "{:?} → WaitingInput should notify",
+                busy
+            );
+        }
+    }
+
+    #[test]
+    fn notify_cold_start_waiting_does_not_fire() {
+        // Fleet just started / session was previously absent. We have no
+        // evidence the agent was busy, so we must NOT claim "task completed".
+        assert!(!should_notify_waiting_transition(None, &WaitingInput));
+    }
+
+    #[test]
+    fn notify_resume_from_idle_does_not_fire() {
+        // `--resume` of a session that had aged out to Idle: opening it can
+        // re-touch the JSONL and flip it to WaitingInput, but no task was
+        // actually completed right now — suppress the notification.
+        assert!(!should_notify_waiting_transition(Some(&Idle), &WaitingInput));
+    }
+
+    #[test]
+    fn notify_waiting_to_waiting_does_not_fire() {
+        // Already in WaitingInput — the user hasn't done anything new.
+        assert!(!should_notify_waiting_transition(Some(&WaitingInput), &WaitingInput));
+    }
+
+    #[test]
+    fn notify_non_waiting_target_never_fires() {
+        // Only transitions *to* WaitingInput are notification triggers.
+        for target in &[Thinking, Executing, Streaming, Processing, Delegating, Active, Idle] {
+            assert!(
+                !should_notify_waiting_transition(Some(&Streaming), target),
+                "Streaming → {:?} should not notify",
+                target
+            );
+            assert!(
+                !should_notify_waiting_transition(None, target),
+                "None → {:?} should not notify",
+                target
+            );
+        }
     }
 }

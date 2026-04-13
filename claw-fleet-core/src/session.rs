@@ -909,8 +909,15 @@ impl ScanCache {
 /// Downgrade a cached session's status when the file hasn't been touched
 /// and enough wall-clock time has elapsed.
 pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
+    // Thresholds must mirror `determine_status` so the cache-hit path (which
+    // reuses a stale SessionInfo and only calls this function) agrees with
+    // the cache-miss path (which re-parses the JSONL). Specifically,
+    // `determine_status` keeps a session classified as Streaming when the
+    // last assistant message's stop_reason is still null and file_age < 120s;
+    // aging out earlier here caused live-streaming sessions to flicker into
+    // Idle between JSONL flush batches.
     let idle = match info.status {
-        SessionStatus::Streaming if age_secs >= 8.0 => true,
+        SessionStatus::Streaming if age_secs >= 120.0 => true,
         SessionStatus::Thinking if age_secs >= 120.0 => true,
         SessionStatus::Executing if age_secs >= 60.0 => true,
         SessionStatus::Processing if age_secs >= 60.0 => true,
@@ -1757,10 +1764,15 @@ mod tests {
 
     #[test]
     fn age_out_streaming() {
+        // Must mirror determine_status' 120s window for a null stop_reason.
+        // Aging out earlier (previously 8s) caused live-streaming sessions to
+        // flicker into Idle between JSONL flush batches.
         let mut s = make_session(SessionStatus::Streaming);
-        age_out_status(&mut s, 7.0);
+        age_out_status(&mut s, 50.0);
         assert_eq!(s.status, SessionStatus::Streaming);
-        age_out_status(&mut s, 8.0);
+        age_out_status(&mut s, 119.0);
+        assert_eq!(s.status, SessionStatus::Streaming);
+        age_out_status(&mut s, 120.0);
         assert_eq!(s.status, SessionStatus::Idle);
         assert_eq!(s.token_speed, 0.0);
     }
