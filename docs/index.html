@@ -15,17 +15,18 @@
     /* ── Reset & Variables ─────────────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg-primary: #0a0a0a;
-      --bg-secondary: #111111;
-      --bg-card: #1c1c1c;
-      --bg-card-hover: #242424;
-      --bg-elevated: #191919;
-      --text-primary: #e5e5e5;
-      --text-secondary: #a8a8a8;
-      --text-dim: #6e6e6e;
-      --border: #2e2e2e;
-      --accent: #d97757;
-      --accent-bright: #f0a070;
+      --bg-primary: #070b16;
+      --bg-secondary: #0c1222;
+      --bg-card: #121a2e;
+      --bg-card-hover: #1a2340;
+      --bg-elevated: #0f1628;
+      --text-primary: #e8ecf5;
+      --text-secondary: #9da8bf;
+      --text-dim: #5f6a82;
+      --border: rgba(130, 160, 210, 0.14);
+      --accent: #e8743a;
+      --accent-bright: #ff9a5e;
+      --accent-rgb: 232, 116, 58;
       --purple: #c084fc;
       --purple-bg: #2a1a4a;
       --cyan: #22d3ee;
@@ -55,16 +56,35 @@
       line-height: 1.6;
       overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
+      position: relative;
     }
+    /* Subtle starfield — fixed, behind content, outside hero */
+    body::before {
+      content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+      background-image:
+        radial-gradient(1.2px 1.2px at 13% 22%, rgba(255,255,255,0.55), transparent 50%),
+        radial-gradient(1px 1px at 27% 68%, rgba(255,255,255,0.4), transparent 50%),
+        radial-gradient(1.4px 1.4px at 42% 15%, rgba(200,220,255,0.5), transparent 50%),
+        radial-gradient(1px 1px at 58% 82%, rgba(255,255,255,0.35), transparent 50%),
+        radial-gradient(1.6px 1.6px at 71% 38%, rgba(255,230,200,0.45), transparent 50%),
+        radial-gradient(1px 1px at 84% 12%, rgba(255,255,255,0.4), transparent 50%),
+        radial-gradient(1px 1px at 91% 74%, rgba(200,220,255,0.35), transparent 50%),
+        radial-gradient(1.2px 1.2px at 6% 55%, rgba(255,255,255,0.3), transparent 50%),
+        radial-gradient(1px 1px at 35% 91%, rgba(255,255,255,0.35), transparent 50%),
+        radial-gradient(1.4px 1.4px at 64% 6%, rgba(255,255,255,0.4), transparent 50%);
+      background-size: 100% 100%;
+    }
+    /* Content layers sit above starfield */
+    .hero, .section, .footer { position: relative; z-index: 1; }
     a { color: var(--accent-bright); text-decoration: none; }
     a:hover { text-decoration: underline; }
 
     /* ── Navigation ────────────────────────────────────────────────── */
     .nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(10, 10, 10, 0.8);
+      background: rgba(7, 11, 22, 0.72);
       backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-      border-bottom: 1px solid rgba(46, 46, 46, 0.5);
+      border-bottom: 1px solid rgba(130, 160, 210, 0.12);
       transition: background 0.3s;
     }
     .nav-inner {
@@ -86,29 +106,45 @@
 
     /* ── Hero ──────────────────────────────────────────────────────── */
     .hero {
-      min-height: 100vh; display: flex; align-items: center; justify-content: center;
-      padding: 120px 24px 80px; position: relative; overflow: hidden;
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-start;
+      padding: 62vh 24px 80px; position: relative; overflow: hidden;
+      isolation: isolate;
     }
+    /* Full-bleed mascot cockpit — constrained to viewport height so content below can breathe */
     .hero::before {
-      content: ''; position: absolute; top: -40%; left: 50%; transform: translateX(-50%);
-      width: 800px; height: 800px;
-      background: radial-gradient(circle, rgba(217, 119, 87, 0.12) 0%, transparent 70%);
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 100vh;
+      background-image: url('mascot.png');
+      background-size: cover;
+      background-position: center center;
+      background-repeat: no-repeat;
+      z-index: -2;
       pointer-events: none;
     }
-    .hero-content { max-width: var(--max-width); text-align: center; position: relative; z-index: 1; }
-    .hero-mascot {
-      width: 160px; height: 160px; margin: 0 auto 32px;
-      animation: mascot-bob 3s ease-in-out infinite;
-      filter: drop-shadow(0 20px 40px rgba(217, 119, 87, 0.3));
+    /* Vignette + bottom fade to page bg, matching the mascot layer */
+    .hero::after {
+      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 100vh;
+      background:
+        linear-gradient(180deg,
+          var(--bg-primary) 0%,
+          rgba(7, 11, 22, 0.2) 6%,
+          transparent 18%,
+          transparent 42%,
+          rgba(7, 11, 22, 0.85) 72%,
+          var(--bg-primary) 100%),
+        radial-gradient(ellipse 85% 60% at 50% 40%,
+          transparent 0%, transparent 50%,
+          rgba(7, 11, 22, 0.55) 85%,
+          var(--bg-primary) 100%);
+      z-index: -1;
+      pointer-events: none;
     }
-    .hero-mascot img { width: 100%; height: 100%; object-fit: contain; }
-    @keyframes mascot-bob {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-12px); }
+    .hero-content {
+      max-width: var(--max-width); text-align: center; position: relative;
     }
     .hero-badge {
       display: inline-flex; align-items: center; gap: 8px;
-      background: rgba(217, 119, 87, 0.12); border: 1px solid rgba(217, 119, 87, 0.25);
+      background: rgba(232, 116, 58, 0.12); border: 1px solid rgba(232, 116, 58, 0.25);
       border-radius: 100px; padding: 6px 16px; font-size: 13px; color: var(--accent-bright);
       margin-bottom: 24px;
     }
@@ -131,9 +167,9 @@
       background: var(--accent); color: #fff; padding: 14px 32px;
       border-radius: 12px; font-size: 16px; font-weight: 600;
       text-decoration: none !important; transition: all 0.2s;
-      box-shadow: 0 4px 24px rgba(217, 119, 87, 0.3);
+      box-shadow: 0 4px 24px rgba(232, 116, 58, 0.3);
     }
-    .btn-primary:hover { background: var(--accent-bright); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(217, 119, 87, 0.4); text-decoration: none !important; }
+    .btn-primary:hover { background: var(--accent-bright); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(232, 116, 58, 0.4); text-decoration: none !important; }
     .btn-secondary {
       display: inline-flex; align-items: center; gap: 10px;
       background: rgba(255, 255, 255, 0.06); color: var(--text-primary); padding: 14px 32px;
@@ -200,7 +236,7 @@
     }
     .demo-titlebar {
       display: flex; align-items: center; gap: 8px;
-      padding: 12px 16px; background: #161616;
+      padding: 12px 16px; background: #0d1422;
       border-bottom: 1px solid var(--border);
     }
     .demo-dot { width: 12px; height: 12px; border-radius: 50%; }
@@ -371,20 +407,20 @@
     .chat-text { font-size: 14px; line-height: 1.7; color: var(--text-secondary); }
 
     .thinking-block {
-      background: #121212; border: 1px solid #333; border-radius: var(--radius-sm);
+      background: #0b1120; border: 1px solid #1e2942; border-radius: var(--radius-sm);
       overflow: hidden;
     }
     .thinking-toggle {
       display: flex; align-items: center; gap: 8px;
       padding: 8px 12px; font-size: 12px; color: #a78bfa;
-      background: #1a1a1a; cursor: pointer; border: none; width: 100%;
+      background: #101a30; cursor: pointer; border: none; width: 100%;
       text-align: left; font-family: inherit;
     }
-    .thinking-toggle:hover { background: #222; }
+    .thinking-toggle:hover { background: #152238; }
     .thinking-content {
       padding: 12px; font-size: 13px; color: var(--text-dim);
       line-height: 1.7; font-family: var(--font-mono);
-      border-top: 1px solid #333; display: none;
+      border-top: 1px solid #1e2942; display: none;
     }
     .thinking-block.open .thinking-content { display: block; }
     .thinking-block.open .thinking-arrow { transform: rotate(90deg); }
@@ -511,7 +547,6 @@
   <!-- ═══ Hero ═══ -->
   <section class="hero" id="hero">
     <div class="hero-content">
-      <div class="hero-mascot"><img src="mascot.png" alt="Captain Claw"></div>
       <div class="hero-badge">
         <span class="hero-badge-dot"></span>
         Free &amp; Open Source (AGPL)
@@ -571,7 +606,7 @@
             <li><span class="feature-bullet-icon">→</span> Live token speed (tok/s) <em>and</em> cost rate ($/min) — cache-aware, per model</li>
             <li><span class="feature-bullet-icon">→</span> Per-session USD spend rolls up across delegated subagents</li>
             <li><span class="feature-bullet-icon">→</span> Context window meter shows remaining capacity</li>
-            <li><span class="feature-bullet-icon">→</span> Zero-config — reads from <code style="color:var(--accent);background:rgba(217,119,87,0.1);padding:1px 5px;border-radius:3px;">~/.claude/</code> automatically</li>
+            <li><span class="feature-bullet-icon">→</span> Zero-config — reads from <code style="color:var(--accent);background:rgba(232,116,58,0.12);padding:1px 5px;border-radius:3px;">~/.claude/</code> automatically</li>
           </ul>
         </div>
         <div class="feature-demo">
@@ -971,7 +1006,7 @@ I need to look at the token rotation implementation.</div>
               <!-- Assistant fix -->
               <div class="chat-msg">
                 <span class="chat-role chat-role-assistant">Claude Opus 4</span>
-                <div class="chat-text">Found it. The <code style="color:var(--accent);background:rgba(217,119,87,0.1);padding:1px 4px;border-radius:3px;">validate_refresh_token</code> function immediately revokes the old token with no grace period. When concurrent requests arrive during rotation, the second request sees the token as revoked.</div>
+                <div class="chat-text">Found it. The <code style="color:var(--accent);background:rgba(232,116,58,0.12);padding:1px 4px;border-radius:3px;">validate_refresh_token</code> function immediately revokes the old token with no grace period. When concurrent requests arrive during rotation, the second request sees the token as revoked.</div>
               </div>
               <!-- Tool use: Edit -->
               <div class="chat-msg">
