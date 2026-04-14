@@ -506,7 +506,8 @@ fn extract_context_percent(lines: &[Value], model: Option<&str>) -> Option<f64> 
             }
         }
 
-        return compute_context_percent(total_input, model);
+        // Codex/GPT models — no 1M-Claude inference applies, pass 0.
+        return compute_context_percent(total_input, model, 0);
     }
 
     None

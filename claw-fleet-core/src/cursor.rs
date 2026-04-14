@@ -524,7 +524,7 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
             context_percent: token_stats
                 .get(&c.composer_id)
                 .and_then(|s| s.2)
-                .and_then(|input| compute_context_percent(input, c.model.as_deref())),
+                .and_then(|input| compute_context_percent(input, c.model.as_deref(), input)),
             agent_source: "cursor".to_string(),
             last_outcome: None,
         });

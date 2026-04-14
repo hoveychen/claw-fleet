@@ -33,6 +33,14 @@ pub struct DailyReport {
 pub struct DailyMetrics {
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
+    #[serde(default)]
+    pub total_cache_creation_tokens: u64,
+    #[serde(default)]
+    pub total_cache_read_tokens: u64,
+    #[serde(default)]
+    pub total_web_search_requests: u64,
+    #[serde(default)]
+    pub total_cost_usd: f64,
     pub total_sessions: u32,
     pub total_subagents: u32,
     pub total_tool_calls: u32,
@@ -48,6 +56,12 @@ pub struct DailyMetrics {
 pub struct ModelTokens {
     pub input_tokens: u64,
     pub output_tokens: u64,
+    #[serde(default)]
+    pub cache_creation_tokens: u64,
+    #[serde(default)]
+    pub cache_read_tokens: u64,
+    #[serde(default)]
+    pub cost_usd: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -59,6 +73,14 @@ pub struct ProjectMetrics {
     pub subagent_count: u32,
     pub total_input_tokens: u64,
     pub total_output_tokens: u64,
+    #[serde(default)]
+    pub total_cache_creation_tokens: u64,
+    #[serde(default)]
+    pub total_cache_read_tokens: u64,
+    #[serde(default)]
+    pub total_web_search_requests: u64,
+    #[serde(default)]
+    pub total_cost_usd: f64,
     pub tool_calls: u32,
     pub sessions: Vec<SessionSummary>,
 }
@@ -72,6 +94,8 @@ pub struct SessionSummary {
     pub model: Option<String>,
     pub is_subagent: bool,
     pub output_tokens: u64,
+    #[serde(default)]
+    pub cost_usd: f64,
     pub agent_source: String,
 }
 
@@ -109,8 +133,21 @@ pub struct ConversationPair {
 // ── Raw metrics from a single session's JSONL ────────────────────────────────
 
 pub struct SessionMetricsRaw {
+    /// Last assistant turn's "context window size" estimate
+    /// (input + cache_creation + cache_read at the final turn). Kept for
+    /// backward compatibility with the existing "input tokens" display.
     pub input_tokens: u64,
+    /// Summed output tokens across all unique assistant turns.
     pub output_tokens: u64,
+    /// Summed cache-creation tokens (for billing).
+    pub cache_creation_tokens: u64,
+    /// Summed cache-read tokens (for billing).
+    pub cache_read_tokens: u64,
+    /// Summed web-search requests (for billing).
+    pub web_search_requests: u64,
+    /// Summed USD cost across all turns, computed per-turn with the model
+    /// reported on each turn (matches Claude Code's own `total_cost_usd`).
+    pub cost_usd: f64,
     pub tool_calls: HashMap<String, u32>,
     pub model: Option<String>,
 }
@@ -377,8 +414,14 @@ impl ReportStore {
 
 /// Extract metrics for a single session from its JSONL content.
 pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
+    use crate::model_cost::{turn_cost_usd, TurnUsage};
+
     let mut total_output: u64 = 0;
     let mut last_input: u64 = 0;
+    let mut sum_cache_create: u64 = 0;
+    let mut sum_cache_read: u64 = 0;
+    let mut sum_web_search: u64 = 0;
+    let mut sum_cost: f64 = 0.0;
     let mut tool_calls: HashMap<String, u32> = HashMap::new();
     let mut model: Option<String> = None;
     let mut seen_msg_ids: HashSet<String> = HashSet::new();
@@ -411,18 +454,13 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
             seen_msg_ids.insert(msg_id);
         }
 
-        // Output tokens: sum across all unique messages
-        let output_tokens = msg
-            .get("usage")
-            .and_then(|u| u.get("output_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        total_output += output_tokens;
-
-        // Input tokens: keep last message's value (cumulative context-window)
         let usage = msg.get("usage");
         let input = usage
             .and_then(|u| u.get("input_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+        let output_tokens = usage
+            .and_then(|u| u.get("output_tokens"))
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
         let cache_create = usage
@@ -433,15 +471,40 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
             .and_then(|u| u.get("cache_read_input_tokens"))
             .and_then(|t| t.as_u64())
             .unwrap_or(0);
+        let web_search = usage
+            .and_then(|u| u.get("server_tool_use"))
+            .and_then(|s| s.get("web_search_requests"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0);
+
+        total_output += output_tokens;
+        sum_cache_create += cache_create;
+        sum_cache_read += cache_read;
+        sum_web_search += web_search;
+
+        // Back-compat "input_tokens" field = last turn's full context window.
         let total_input = input + cache_create + cache_read;
         if total_input > 0 {
             last_input = total_input;
         }
 
-        // Model: keep last
-        if let Some(m) = msg.get("model").and_then(|m| m.as_str()) {
+        // Per-turn cost uses this turn's own model (falls back to the
+        // most recently seen model if this line omits it).
+        let turn_model = msg.get("model").and_then(|m| m.as_str());
+        if let Some(m) = turn_model {
             model = Some(m.to_string());
         }
+        let cost_model = turn_model.or(model.as_deref()).unwrap_or("");
+        sum_cost += turn_cost_usd(
+            cost_model,
+            &TurnUsage {
+                input_tokens: input,
+                output_tokens,
+                cache_creation_tokens: cache_create,
+                cache_read_tokens: cache_read,
+                web_search_requests: web_search,
+            },
+        );
 
         // Tool calls: count tool_use blocks in content
         if let Some(content) = msg.get("content").and_then(|c| c.as_array()) {
@@ -458,6 +521,10 @@ pub fn extract_session_metrics(jsonl_content: &str) -> SessionMetricsRaw {
     SessionMetricsRaw {
         input_tokens: last_input,
         output_tokens: total_output,
+        cache_creation_tokens: sum_cache_create,
+        cache_read_tokens: sum_cache_read,
+        web_search_requests: sum_web_search,
+        cost_usd: sum_cost,
         tool_calls,
         model,
     }
@@ -503,6 +570,10 @@ pub fn generate_report_from_sessions(
     let mut projects: Vec<ProjectMetrics> = Vec::new();
     let mut total_input_tokens: u64 = 0;
     let mut total_output_tokens: u64 = 0;
+    let mut total_cache_creation_tokens: u64 = 0;
+    let mut total_cache_read_tokens: u64 = 0;
+    let mut total_web_search_requests: u64 = 0;
+    let mut total_cost_usd: f64 = 0.0;
     let mut total_tool_calls: u32 = 0;
     let mut total_subagents: u32 = 0;
     let mut tool_call_breakdown: HashMap<String, u32> = HashMap::new();
@@ -518,6 +589,10 @@ pub fn generate_report_from_sessions(
             subagent_count: 0,
             total_input_tokens: 0,
             total_output_tokens: 0,
+            total_cache_creation_tokens: 0,
+            total_cache_read_tokens: 0,
+            total_web_search_requests: 0,
+            total_cost_usd: 0.0,
             tool_calls: 0,
             sessions: Vec::new(),
         };
@@ -538,6 +613,10 @@ pub fn generate_report_from_sessions(
 
             proj.total_input_tokens += sd.metrics.input_tokens;
             proj.total_output_tokens += sd.metrics.output_tokens;
+            proj.total_cache_creation_tokens += sd.metrics.cache_creation_tokens;
+            proj.total_cache_read_tokens += sd.metrics.cache_read_tokens;
+            proj.total_web_search_requests += sd.metrics.web_search_requests;
+            proj.total_cost_usd += sd.metrics.cost_usd;
 
             let session_tool_total: u32 = sd.metrics.tool_calls.values().sum();
             proj.tool_calls += session_tool_total;
@@ -558,12 +637,17 @@ pub fn generate_report_from_sessions(
                 model: Some(effective_model.clone()),
                 is_subagent: si.is_subagent,
                 output_tokens: sd.metrics.output_tokens,
+                cost_usd: sd.metrics.cost_usd,
                 agent_source: si.agent_source.clone(),
             });
 
             // Aggregate into totals
             total_input_tokens += sd.metrics.input_tokens;
             total_output_tokens += sd.metrics.output_tokens;
+            total_cache_creation_tokens += sd.metrics.cache_creation_tokens;
+            total_cache_read_tokens += sd.metrics.cache_read_tokens;
+            total_web_search_requests += sd.metrics.web_search_requests;
+            total_cost_usd += sd.metrics.cost_usd;
             total_tool_calls += session_tool_total;
 
             for (tool, count) in &sd.metrics.tool_calls {
@@ -575,9 +659,15 @@ pub fn generate_report_from_sessions(
                 .or_insert(ModelTokens {
                     input_tokens: 0,
                     output_tokens: 0,
+                    cache_creation_tokens: 0,
+                    cache_read_tokens: 0,
+                    cost_usd: 0.0,
                 });
             entry.input_tokens += sd.metrics.input_tokens;
             entry.output_tokens += sd.metrics.output_tokens;
+            entry.cache_creation_tokens += sd.metrics.cache_creation_tokens;
+            entry.cache_read_tokens += sd.metrics.cache_read_tokens;
+            entry.cost_usd += sd.metrics.cost_usd;
 
             *source_breakdown
                 .entry(si.agent_source.clone())
@@ -611,6 +701,10 @@ pub fn generate_report_from_sessions(
         metrics: DailyMetrics {
             total_input_tokens,
             total_output_tokens,
+            total_cache_creation_tokens,
+            total_cache_read_tokens,
+            total_web_search_requests,
+            total_cost_usd,
             total_sessions: sessions.len() as u32,
             total_subagents,
             total_tool_calls,
@@ -1411,6 +1505,10 @@ mod tests {
             metrics: DailyMetrics {
                 total_input_tokens: 5000,
                 total_output_tokens: 3000,
+                total_cache_creation_tokens: 0,
+                total_cache_read_tokens: 0,
+                total_web_search_requests: 0,
+                total_cost_usd: 0.0,
                 total_sessions: 2,
                 total_subagents: 1,
                 total_tool_calls: 10,
@@ -1427,6 +1525,9 @@ mod tests {
                         ModelTokens {
                             input_tokens: 5000,
                             output_tokens: 3000,
+                            cache_creation_tokens: 0,
+                            cache_read_tokens: 0,
+                            cost_usd: 0.0,
                         },
                     );
                     m
@@ -1438,6 +1539,10 @@ mod tests {
                     subagent_count: 1,
                     total_input_tokens: 5000,
                     total_output_tokens: 3000,
+                    total_cache_creation_tokens: 0,
+                    total_cache_read_tokens: 0,
+                    total_web_search_requests: 0,
+                    total_cost_usd: 0.0,
                     tool_calls: 10,
                     sessions: vec![SessionSummary {
                         id: "sess-1".to_string(),
@@ -1446,6 +1551,7 @@ mod tests {
                         model: Some("claude-sonnet-4-20250514".to_string()),
                         is_subagent: false,
                         output_tokens: 2000,
+                        cost_usd: 0.0,
                         agent_source: "claude-code".to_string(),
                     }],
                 }],

@@ -399,7 +399,7 @@ fn parse_openclaw_session(
         pid_precise: pid.is_some(),
         last_skill: None,
         context_percent: extract_last_context_usage(&all_lines)
-            .and_then(|(used, m)| compute_context_percent(used, Some(&m))),
+            .and_then(|(used, m, max)| compute_context_percent(used, Some(&m), max)),
         agent_source: "openclaw".to_string(),
         last_outcome: None,
     })

@@ -78,7 +78,7 @@ interface SessionsState {
   refresh: () => Promise<void>;
 }
 
-const MAX_SPEED_HISTORY = 60;
+const SPEED_WINDOW_MS = 5 * 60 * 1000;
 
 export const useSessionsStore = create<SessionsState>((set) => ({
   sessions: [],
@@ -87,8 +87,12 @@ export const useSessionsStore = create<SessionsState>((set) => ({
   setSessions: (sessions) =>
     set((state) => {
       const totalSpeed = sessions.reduce((sum, s) => sum + s.tokenSpeed, 0);
-      const newSample: SpeedSample = { time: Date.now(), speed: totalSpeed };
-      const speedHistory = [...state.speedHistory, newSample].slice(-MAX_SPEED_HISTORY);
+      const now = Date.now();
+      const newSample: SpeedSample = { time: now, speed: totalSpeed };
+      const windowStart = now - SPEED_WINDOW_MS;
+      const speedHistory = [...state.speedHistory, newSample].filter(
+        (s) => s.time >= windowStart,
+      );
       return { sessions, speedHistory };
     }),
   setScanReady: (ready) => set({ scanReady: ready }),

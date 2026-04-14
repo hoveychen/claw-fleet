@@ -114,11 +114,15 @@ export interface DailyReport {
 export interface DailyMetrics {
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheCreationTokens?: number;
+  totalCacheReadTokens?: number;
+  totalWebSearchRequests?: number;
+  totalCostUsd?: number;
   totalSessions: number;
   totalSubagents: number;
   totalToolCalls: number;
   toolCallBreakdown: Record<string, number>;
-  modelBreakdown: Record<string, { inputTokens: number; outputTokens: number }>;
+  modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; costUsd?: number }>;
   projects: ProjectMetrics[];
   hourlyActivity: number[];
 }
@@ -130,6 +134,10 @@ export interface ProjectMetrics {
   subagentCount: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheCreationTokens?: number;
+  totalCacheReadTokens?: number;
+  totalWebSearchRequests?: number;
+  totalCostUsd?: number;
   toolCalls: number;
 }
 

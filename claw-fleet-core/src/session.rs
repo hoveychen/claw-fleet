@@ -336,9 +336,32 @@ pub fn scan_ide_sessions(claude_dir: &Path) -> Vec<IdeSession> {
 
 // ── JSONL parsing ────────────────────────────────────────────────────────────
 
+/// Compute seconds between now and the most recent `user` or `assistant`
+/// entry's `timestamp` field. Returns `None` if no such entry exists or the
+/// timestamp can't be parsed — callers should fall back to file mtime.
+///
+/// This is the key signal for distinguishing "session is fresh because the
+/// user just replied" from "session is stale but mtime got bumped by
+/// `claude --resume` appending `last-prompt` / `file-history-snapshot`
+/// housekeeping records".
+fn last_real_message_age_secs(last_lines: &[Value]) -> Option<f64> {
+    let ts_str = last_lines.iter().rev().find_map(|v| {
+        let t = v.get("type").and_then(|t| t.as_str())?;
+        if t != "user" && t != "assistant" {
+            return None;
+        }
+        v.get("timestamp").and_then(|t| t.as_str())
+    })?;
+    let ts = chrono::DateTime::parse_from_rfc3339(ts_str).ok()?;
+    let now = chrono::Utc::now();
+    let delta = (now - ts.with_timezone(&chrono::Utc)).num_milliseconds() as f64 / 1000.0;
+    if delta < 0.0 { Some(0.0) } else { Some(delta) }
+}
+
 fn determine_status(
     last_lines: &[Value],
     file_age_secs: f64,
+    content_age_secs: f64,
     hook_state: Option<&HookState>,
 ) -> SessionStatus {
     // Phase 0: Hook-based overrides for stale JSONL scenarios.
@@ -349,10 +372,12 @@ fn determine_status(
         match hook_state {
             Some(HookState::ToolExecuting) => return SessionStatus::Executing,
             Some(HookState::ModelProcessing) => return SessionStatus::Thinking,
-            // Only trust the Stopped hook when the JSONL was recently written.
-            // A `--resume` of an old session fires Stop without new model output;
-            // if the file is stale (>300s), fall through to the normal Idle path.
-            Some(HookState::Stopped) if file_age_secs < 300.0 => {
+            // Only trust the Stopped hook when a real turn completed recently.
+            // A `--resume` of an old session fires Stop and appends housekeeping
+            // records (last-prompt, file-history-snapshot) that bump mtime
+            // without being a new turn, so `content_age` (time since last
+            // real user/assistant message) is the correct freshness signal.
+            Some(HookState::Stopped) if content_age_secs < 300.0 => {
                 return SessionStatus::WaitingInput;
             }
             _ => {}
@@ -443,7 +468,8 @@ fn determine_status(
             // Last write was a user message — the model is thinking about it.
             // This covers both: tool_result received (model thinking after tool execution)
             // and fresh user message (model doing initial/extended thinking before first write).
-            if file_age_secs < 120.0 {
+            // Use content_age so a --resume touching mtime doesn't fake thinking.
+            if content_age_secs < 120.0 {
                 return SessionStatus::Thinking;
             }
         }
@@ -480,17 +506,20 @@ fn determine_status(
             }
 
             match stop_reason {
-                Some("end_turn" | "max_tokens" | "stop_sequence") if file_age_secs < 300.0 => {
+                // Content-age (not file mtime) governs WaitingInput so a
+                // `claude --resume` that only touches mtime cannot flip an
+                // old dormant session into "waiting for user input".
+                Some("end_turn" | "max_tokens" | "stop_sequence") if content_age_secs < 300.0 => {
                     return SessionStatus::WaitingInput;
                 }
                 // Last write was a tool_use — the tool is still executing.
-                Some("tool_use") if file_age_secs < 60.0 => return SessionStatus::Executing,
+                Some("tool_use") if content_age_secs < 60.0 => return SessionStatus::Executing,
                 _ => {}
             }
         }
     }
 
-    if file_age_secs < 30.0 {
+    if content_age_secs < 30.0 {
         SessionStatus::Active
     } else {
         SessionStatus::Idle
@@ -499,15 +528,47 @@ fn determine_status(
 
 // ── Context window helpers ────────────────────────────────────────────────────
 
+/// Whether a Claude model belongs to the family that can be opted in to a
+/// 1M-token context window (Sonnet 4.x and Opus 4.6, per
+/// [`modelSupports1M`](../claude-code-fork/src/utils/context.ts) in
+/// Claude Code). Other Claude families are always 200K.
+fn claude_model_supports_1m(model_lower: &str) -> bool {
+    model_lower.contains("sonnet-4") || model_lower.contains("opus-4-6")
+}
+
 /// Best-effort lookup of a model's input-context-window size (in tokens).
+///
+/// `observed_max_input_tokens` is the max `input + cache_creation + cache_read`
+/// seen across all assistant turns in the session. We use it as a fallback
+/// signal because Claude Code **never writes the `[1m]` flag to the on-disk
+/// transcript** — it lives only in the running process. So if a session has
+/// any turn whose total input clearly exceeds the 200K window AND the model
+/// is from a 1M-capable family, we know it must be a 1M session.
+///
+/// Pass `0` if you don't have this information; you'll get the conservative
+/// 200K window.
+///
 /// Returns `None` when the model family is unrecognised so the caller can
 /// decide whether to fall back to a default or skip the computation entirely.
-pub fn context_window_for_model(model: &str) -> Option<u64> {
+pub fn context_window_for_model(model: &str, observed_max_input_tokens: u64) -> Option<u64> {
     let m = model.to_lowercase();
 
     // ── Anthropic / Claude ──────────────────────────────────────────────
-    // All Claude 3 / 3.5 / 4.x models: 200 000 input tokens.
-    if m.starts_with("claude-") {
+    if m.starts_with("claude-") || m == "opus" || m == "sonnet" || m == "haiku" {
+        // Explicit `[1m]` suffix — the canonical Claude Code marker.
+        // Doesn't appear in JSONL today, but kept for correctness if that
+        // ever changes.
+        if m.contains("[1m]") {
+            return Some(1_000_000);
+        }
+        // Inferred 1M: a turn's total input exceeds the 200K window. Only
+        // valid for families that actually support 1M; others stay at 200K
+        // (and the over-200K reading would itself indicate a bug elsewhere).
+        // Threshold is a hair under 200K to absorb tokenizer rounding.
+        if observed_max_input_tokens > 195_000 && claude_model_supports_1m(&m) {
+            return Some(1_000_000);
+        }
+        // All other Claude 3 / 3.5 / 4.x models: 200 000 input tokens.
         return Some(200_000);
     }
 
@@ -542,9 +603,19 @@ pub fn context_window_for_model(model: &str) -> Option<u64> {
 }
 
 /// Compute context-window utilisation (0.0 – 1.0) from raw token counts.
+///
+/// `observed_max_input_tokens` is the largest single-turn total input
+/// (`input + cache_creation + cache_read`) seen across the session. It feeds
+/// the 1M-context inference in [`context_window_for_model`]. Pass `0` if
+/// unknown; the result will use the conservative 200K window for Claude.
+///
 /// Returns `None` when the model is unrecognised.
-pub fn compute_context_percent(input_tokens: u64, model: Option<&str>) -> Option<f64> {
-    let window = context_window_for_model(model?)?;
+pub fn compute_context_percent(
+    input_tokens: u64,
+    model: Option<&str>,
+    observed_max_input_tokens: u64,
+) -> Option<f64> {
+    let window = context_window_for_model(model?, observed_max_input_tokens)?;
     if window == 0 {
         return None;
     }
@@ -630,36 +701,84 @@ fn compute_token_stats(lines: &[&str]) -> (f64, u64) {
     (speed, total_output)
 }
 
-/// Extract context-window usage from the last finalized assistant message in
-/// a Claude-Code JSONL session.  Returns `(input_tokens_used, model_name)`.
-pub fn extract_last_context_usage(lines: &[&str]) -> Option<(u64, String)> {
-    let mut last: Option<(u64, String)> = None;
-    let mut seen_msg_ids: HashSet<String> = HashSet::new();
+/// Extract context-window usage from a Claude-Code JSONL session.
+///
+/// Returns `(input_tokens_used, model_name, session_max_input_tokens)` for
+/// the **most recent assistant turn** — scanning backward, matching Claude
+/// Code's own `getCurrentUsage()` in `claude-code-fork/src/utils/tokens.ts`.
+///
+/// `session_max_input_tokens` is the largest single-turn total input ever
+/// seen in the session (across all turns, not just the latest). It feeds
+/// 1M-context inference downstream because the JSONL never records the
+/// `[1m]` flag — see [`context_window_for_model`].
+///
+/// Key behaviors (by intent, not accident):
+///
+/// 1. **Backward scan.** Walk lines from the end. This is what Claude Code
+///    does; forward-scan "last non-zero wins" gives the same answer only
+///    when sidechain/compact complications are absent.
+///
+/// 2. **Compact boundary reset.** If we see a `user` entry with
+///    `isCompactSummary: true` *before* finding any assistant usage, the
+///    conversation has just been compacted and no post-compact assistant
+///    turn exists yet. Pre-compact assistants' `input_tokens` values are
+///    stale (Claude Code strips them at load time via `stripStaleUsage`),
+///    so we return `None` — the context should be shown as "fresh".
+///
+/// 3. **Sidechain skip.** Entries with `isSidechain: true` belong to a
+///    subagent conversation and their `input_tokens` are for an isolated
+///    context window, not the parent session's. They must not pollute the
+///    parent's context-usage number.
+///
+/// 4. **No `stop_reason` filter.** Claude Code includes in-progress
+///    assistant turns in the context calculation; so do we. This makes
+///    the displayed percentage update live while the model is streaming.
+///
+/// 5. **Forward pass for `session_max_input_tokens`.** The max is computed
+///    over the post-compact segment only — pre-compact turns are dropped
+///    because their `input_tokens` are stale (Claude Code zeroes them at
+///    load time via `stripStaleUsage`). Sidechain turns are also excluded.
+pub fn extract_last_context_usage(lines: &[&str]) -> Option<(u64, String, u64)> {
+    // First, find the latest "compact boundary" cutoff. Anything before the
+    // most recent compact summary is stale and must be ignored.
+    let mut compact_cutoff: usize = 0; // inclusive lower bound for "live" entries
+    for (idx, line) in lines.iter().enumerate() {
+        if let Ok(v) = serde_json::from_str::<Value>(line) {
+            if v.get("type").and_then(|t| t.as_str()) == Some("user")
+                && v.get("isCompactSummary")
+                    .and_then(|b| b.as_bool())
+                    .unwrap_or(false)
+            {
+                compact_cutoff = idx + 1;
+            }
+        }
+    }
 
-    for line in lines {
+    // Walk forward from the cutoff to (a) find session_max and (b) remember
+    // the latest live assistant usage. Forward scan is fine here because we
+    // already trimmed pre-compact stale data.
+    let mut last: Option<(u64, String)> = None;
+    let mut session_max: u64 = 0;
+
+    for line in &lines[compact_cutoff..] {
         let Ok(v): Result<Value, _> = serde_json::from_str(line) else {
             continue;
         };
+
+        // Skip subagent/sidechain entries — they have their own context window.
+        if v.get("isSidechain")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+
         if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
             continue;
         }
         let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
             continue;
         };
-        if msg.get("stop_reason").map_or(true, |s| s.is_null()) {
-            continue;
-        }
-        let msg_id = msg
-            .get("id")
-            .and_then(|i| i.as_str())
-            .unwrap_or_default()
-            .to_string();
-        if !msg_id.is_empty() {
-            if seen_msg_ids.contains(&msg_id) {
-                continue;
-            }
-            seen_msg_ids.insert(msg_id);
-        }
 
         let usage = msg.get("usage");
         let input = usage
@@ -676,17 +795,22 @@ pub fn extract_last_context_usage(lines: &[&str]) -> Option<(u64, String)> {
             .unwrap_or(0);
         let total_input = input + cache_create + cache_read;
 
-        if total_input > 0 {
-            let model = msg
-                .get("model")
-                .and_then(|m| m.as_str())
-                .unwrap_or("")
-                .to_string();
-            last = Some((total_input, model));
+        if total_input == 0 {
+            continue;
         }
+        if total_input > session_max {
+            session_max = total_input;
+        }
+
+        let model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
+        last = Some((total_input, model));
     }
 
-    last
+    last.map(|(used, model)| (used, model, session_max))
 }
 
 fn extract_model(last_lines: &[Value]) -> Option<String> {
@@ -827,10 +951,17 @@ pub fn parse_session_info(
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect();
 
-    let status = determine_status(&last_n, age.as_secs_f64(), hook_state);
+    let file_age_secs = age.as_secs_f64();
+    // content_age = time since the last real user/assistant message, NOT since
+    // last file-mtime touch. `claude --resume` appends housekeeping records
+    // (last-prompt, file-history-snapshot) that bump mtime without being a
+    // new turn; using file mtime alone would falsely mark resumed old sessions
+    // as WaitingInput. Fall back to file mtime when no real message is found.
+    let content_age_secs = last_real_message_age_secs(&last_n).unwrap_or(file_age_secs);
+    let status = determine_status(&last_n, file_age_secs, content_age_secs, hook_state);
     let (token_speed, total_output_tokens) = compute_token_stats(&all_lines);
     let context_percent = extract_last_context_usage(&all_lines)
-        .and_then(|(used, model)| compute_context_percent(used, Some(&model)));
+        .and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
     let last_message_preview = extract_last_text(&last_n);
 
     let slug = last_n
@@ -1359,13 +1490,21 @@ mod tests {
 
     // ── determine_status tests ──────────────────────────────────────────────
 
+    /// Test wrapper that preserves pre-content-age semantics by passing the
+    /// same value for both `file_age_secs` and `content_age_secs`. Tests that
+    /// specifically care about the file-vs-content age distinction call
+    /// `determine_status` directly with distinct values.
+    fn ds(lines: &[Value], age: f64, hook: Option<&HookState>) -> SessionStatus {
+        determine_status(lines, age, age, hook)
+    }
+
     #[test]
     fn status_streaming_thinking_blocks() {
         let lines = vec![
             user_msg(),
             assistant_msg(vec![thinking_block()], None), // stop_reason=null → streaming
         ];
-        assert_eq!(determine_status(&lines, 2.0, None), SessionStatus::Thinking);
+        assert_eq!(ds(&lines, 2.0, None), SessionStatus::Thinking);
     }
 
     #[test]
@@ -1374,7 +1513,7 @@ mod tests {
             user_msg(),
             assistant_msg(vec![text_block("let me check"), tool_use_block("Read")], None),
         ];
-        assert_eq!(determine_status(&lines, 1.0, None), SessionStatus::Executing);
+        assert_eq!(ds(&lines, 1.0, None), SessionStatus::Executing);
     }
 
     #[test]
@@ -1383,7 +1522,7 @@ mod tests {
             user_msg(),
             assistant_msg(vec![text_block("Hello world")], None),
         ];
-        assert_eq!(determine_status(&lines, 3.0, None), SessionStatus::Streaming);
+        assert_eq!(ds(&lines, 3.0, None), SessionStatus::Streaming);
     }
 
     #[test]
@@ -1392,7 +1531,7 @@ mod tests {
             user_msg(),
             assistant_msg(vec![text_block("Done!")], Some("end_turn")),
         ];
-        assert_eq!(determine_status(&lines, 10.0, None), SessionStatus::WaitingInput);
+        assert_eq!(ds(&lines, 10.0, None), SessionStatus::WaitingInput);
     }
 
     #[test]
@@ -1400,7 +1539,7 @@ mod tests {
         let lines = vec![
             assistant_msg(vec![text_block("Done!")], Some("end_turn")),
         ];
-        assert_eq!(determine_status(&lines, 500.0, None), SessionStatus::Idle);
+        assert_eq!(ds(&lines, 500.0, None), SessionStatus::Idle);
     }
 
     #[test]
@@ -1408,7 +1547,7 @@ mod tests {
         let lines = vec![
             assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
         ];
-        assert_eq!(determine_status(&lines, 15.0, None), SessionStatus::Executing);
+        assert_eq!(ds(&lines, 15.0, None), SessionStatus::Executing);
     }
 
     #[test]
@@ -1416,31 +1555,31 @@ mod tests {
         let lines = vec![
             assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
         ];
-        assert_eq!(determine_status(&lines, 120.0, None), SessionStatus::Idle);
+        assert_eq!(ds(&lines, 120.0, None), SessionStatus::Idle);
     }
 
     #[test]
     fn status_user_message_last_thinking() {
         let lines = vec![user_msg()];
-        assert_eq!(determine_status(&lines, 5.0, None), SessionStatus::Thinking);
+        assert_eq!(ds(&lines, 5.0, None), SessionStatus::Thinking);
     }
 
     #[test]
     fn status_user_message_too_old() {
         let lines = vec![user_msg()];
-        assert_eq!(determine_status(&lines, 200.0, None), SessionStatus::Idle);
+        assert_eq!(ds(&lines, 200.0, None), SessionStatus::Idle);
     }
 
     #[test]
     fn status_no_meaningful_lines_recent() {
         let lines: Vec<Value> = vec![];
-        assert_eq!(determine_status(&lines, 10.0, None), SessionStatus::Active);
+        assert_eq!(ds(&lines, 10.0, None), SessionStatus::Active);
     }
 
     #[test]
     fn status_no_meaningful_lines_old() {
         let lines: Vec<Value> = vec![];
-        assert_eq!(determine_status(&lines, 60.0, None), SessionStatus::Idle);
+        assert_eq!(ds(&lines, 60.0, None), SessionStatus::Idle);
     }
 
     #[test]
@@ -1449,7 +1588,7 @@ mod tests {
             assistant_msg(vec![text_block("old text")], Some("end_turn")),
         ];
         assert_eq!(
-            determine_status(&lines, 20.0, Some(&HookState::ToolExecuting)),
+            ds(&lines, 20.0, Some(&HookState::ToolExecuting)),
             SessionStatus::Executing,
         );
     }
@@ -1460,7 +1599,7 @@ mod tests {
             assistant_msg(vec![text_block("old")], Some("end_turn")),
         ];
         assert_eq!(
-            determine_status(&lines, 20.0, Some(&HookState::ModelProcessing)),
+            ds(&lines, 20.0, Some(&HookState::ModelProcessing)),
             SessionStatus::Thinking,
         );
     }
@@ -1469,8 +1608,49 @@ mod tests {
     fn status_hook_stopped_overrides() {
         let lines = vec![user_msg()];
         assert_eq!(
-            determine_status(&lines, 20.0, Some(&HookState::Stopped)),
+            ds(&lines, 20.0, Some(&HookState::Stopped)),
             SessionStatus::WaitingInput,
+        );
+    }
+
+    #[test]
+    fn status_resumed_old_session_stays_idle() {
+        // Regression: `claude --resume` on a 3-day-old session appends
+        // `last-prompt` + `file-history-snapshot` housekeeping records. These
+        // bump the JSONL mtime but are NOT new turns. Previously the fresh
+        // mtime + trailing `end_turn` stop_reason caused the session to flip
+        // to WaitingInput. With content-age separated from file-age, it must
+        // stay Idle.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![text_block("Done!")], Some("end_turn")),
+            // resume-appended housekeeping (no timestamp field)
+            json!({"type": "last-prompt", "lastPrompt": "", "sessionId": "x"}),
+            json!({"type": "file-history-snapshot", "messageId": "m", "snapshot": {}, "isSnapshotUpdate": true}),
+            json!({"type": "file-history-snapshot", "messageId": "m", "snapshot": {}, "isSnapshotUpdate": true}),
+        ];
+        // file_age=5s (mtime just got touched by resume), content_age=3 days
+        let content_age = 3.0 * 24.0 * 3600.0;
+        assert_eq!(
+            determine_status(&lines, 5.0, content_age, None),
+            SessionStatus::Idle,
+        );
+    }
+
+    #[test]
+    fn status_resumed_old_session_ignores_stale_stopped_hook() {
+        // Same regression but via the hook path: a stale `Stopped` hook plus
+        // a mtime-touching resume must not produce WaitingInput when the real
+        // content is old.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![text_block("Done!")], Some("end_turn")),
+            json!({"type": "last-prompt", "lastPrompt": "", "sessionId": "x"}),
+        ];
+        let content_age = 3.0 * 24.0 * 3600.0;
+        assert_eq!(
+            determine_status(&lines, 20.0, content_age, Some(&HookState::Stopped)),
+            SessionStatus::Idle,
         );
     }
 
@@ -1481,7 +1661,7 @@ mod tests {
             assistant_msg(vec![thinking_block()], None),
         ];
         assert_eq!(
-            determine_status(&lines, 2.0, Some(&HookState::Stopped)),
+            ds(&lines, 2.0, Some(&HookState::Stopped)),
             SessionStatus::Thinking,
         );
     }
@@ -1820,7 +2000,7 @@ mod tests {
             user_msg(),
             assistant_msg(vec![text_block("I ran out of tokens")], Some("max_tokens")),
         ];
-        assert_eq!(determine_status(&lines, 10.0, None), SessionStatus::WaitingInput);
+        assert_eq!(ds(&lines, 10.0, None), SessionStatus::WaitingInput);
     }
 
     // ── Bug fix: WaitingInput must not be promoted to Delegating ───────────
@@ -1878,6 +2058,169 @@ mod tests {
 
         // WaitingInput must NOT be overridden to Delegating — notifications depend on it.
         assert_eq!(sessions[0].status, SessionStatus::WaitingInput);
+    }
+
+    // ── extract_last_context_usage ───────────────────────────────────────────
+
+    fn asst_usage_line(input: u64, cache_create: u64, cache_read: u64, sidechain: bool) -> String {
+        json!({
+            "type": "assistant",
+            "isSidechain": sidechain,
+            "message": {
+                "id": format!("msg-{input}-{cache_create}-{cache_read}"),
+                "role": "assistant",
+                "model": "claude-sonnet-4-20250514",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": input,
+                    "output_tokens": 10,
+                    "cache_creation_input_tokens": cache_create,
+                    "cache_read_input_tokens": cache_read
+                }
+            }
+        }).to_string()
+    }
+
+    fn compact_summary_line() -> String {
+        json!({
+            "type": "user",
+            "isCompactSummary": true,
+            "isVisibleInTranscriptOnly": true,
+            "message": {
+                "role": "user",
+                "content": "This session is being continued..."
+            }
+        }).to_string()
+    }
+
+    #[test]
+    fn context_usage_picks_latest_assistant_turn() {
+        // Three turns: latest is also the largest. (We test "max ≠ latest"
+        // separately below.)
+        let lines = vec![
+            asst_usage_line(100, 0, 0, false),
+            asst_usage_line(500, 100, 1000, false),
+            asst_usage_line(200, 0, 5000, false),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let (used, _model, max) = extract_last_context_usage(&refs).unwrap();
+        assert_eq!(used, 200 + 5000);
+        assert_eq!(max, 200 + 5000);
+    }
+
+    #[test]
+    fn context_usage_max_can_exceed_latest() {
+        // Latest turn can be smaller than an earlier peak (e.g. context shed
+        // via tool-result cleanup or a /clear-style mid-session reset).
+        let lines = vec![
+            asst_usage_line(0, 0, 800_000, false), // big peak
+            asst_usage_line(200, 0, 50_000, false), // smaller current
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let (used, _, max) = extract_last_context_usage(&refs).unwrap();
+        assert_eq!(used, 50_200);
+        assert_eq!(max, 800_000);
+    }
+
+    #[test]
+    fn context_usage_skips_sidechain() {
+        let lines = vec![
+            asst_usage_line(500, 0, 10_000, false),
+            asst_usage_line(999_999, 0, 0, true), // subagent — must be ignored
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let (used, _, max) = extract_last_context_usage(&refs).unwrap();
+        assert_eq!(used, 500 + 10_000);
+        assert_eq!(max, 500 + 10_000);
+    }
+
+    #[test]
+    fn context_usage_resets_at_compact_boundary_when_no_post_compact_assistant() {
+        // Old assistant turn, then a compact summary, then no new assistant yet.
+        let lines = vec![
+            asst_usage_line(1000, 0, 180_000, false),
+            compact_summary_line(),
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        // Pre-compact data is stale, no live data yet → None.
+        assert!(extract_last_context_usage(&refs).is_none());
+    }
+
+    #[test]
+    fn context_usage_uses_post_compact_assistant() {
+        let lines = vec![
+            asst_usage_line(1000, 0, 180_000, false), // pre-compact, stale
+            compact_summary_line(),
+            asst_usage_line(200, 0, 8_000, false),    // fresh post-compact turn
+        ];
+        let refs: Vec<&str> = lines.iter().map(|s| s.as_str()).collect();
+        let (used, _, max) = extract_last_context_usage(&refs).unwrap();
+        assert_eq!(used, 200 + 8_000);
+        // Session max must NOT include the stale pre-compact turn.
+        assert_eq!(max, 200 + 8_000);
+    }
+
+    #[test]
+    fn context_window_explicit_1m_suffix() {
+        assert_eq!(
+            context_window_for_model("claude-sonnet-4-6[1m]", 0),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            context_window_for_model("claude-sonnet-4-5", 0),
+            Some(200_000)
+        );
+    }
+
+    #[test]
+    fn context_window_inferred_1m_for_opus_4_6() {
+        // Observed a 530K cache_read turn → must be a 1M session.
+        assert_eq!(
+            context_window_for_model("claude-opus-4-6", 530_000),
+            Some(1_000_000)
+        );
+        // Same model but only 50K observed → conservative 200K.
+        assert_eq!(
+            context_window_for_model("claude-opus-4-6", 50_000),
+            Some(200_000)
+        );
+    }
+
+    #[test]
+    fn context_window_inferred_1m_for_sonnet_4_x() {
+        assert_eq!(
+            context_window_for_model("claude-sonnet-4-6", 250_000),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            context_window_for_model("claude-sonnet-4-5", 250_000),
+            Some(1_000_000)
+        );
+    }
+
+    #[test]
+    fn context_window_no_1m_inference_for_unsupported_families() {
+        // Opus 4 / 4.1 don't support 1M — even if max>200K, stay at 200K
+        // (which would clamp the percentage to 100, but at least won't lie
+        // about the denominator).
+        assert_eq!(
+            context_window_for_model("claude-opus-4-1", 500_000),
+            Some(200_000)
+        );
+        // Haiku 4.5 doesn't support 1M either.
+        assert_eq!(
+            context_window_for_model("claude-haiku-4-5", 500_000),
+            Some(200_000)
+        );
+    }
+
+    #[test]
+    fn percent_uses_inferred_window() {
+        // 250K used on Opus 4.6 with a session max of 530K → 25%, not capped.
+        let pct =
+            compute_context_percent(250_000, Some("claude-opus-4-6"), 530_000).unwrap();
+        assert!((pct - 0.25).abs() < 1e-6);
     }
 }
 

@@ -10,6 +10,7 @@ pub mod daily_report;
 pub mod hooks;
 pub mod llm_provider;
 pub mod memory;
+pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
 pub mod search_index;

@@ -211,11 +211,24 @@ export interface DailyReport {
 export interface DailyMetrics {
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheCreationTokens?: number;
+  totalCacheReadTokens?: number;
+  totalWebSearchRequests?: number;
+  totalCostUsd?: number;
   totalSessions: number;
   totalSubagents: number;
   totalToolCalls: number;
   toolCallBreakdown: Record<string, number>;
-  modelBreakdown: Record<string, { inputTokens: number; outputTokens: number }>;
+  modelBreakdown: Record<
+    string,
+    {
+      inputTokens: number;
+      outputTokens: number;
+      cacheCreationTokens?: number;
+      cacheReadTokens?: number;
+      costUsd?: number;
+    }
+  >;
   projects: ProjectMetrics[];
   sourceBreakdown: Record<string, number>;
   hourlyActivity: number[];
@@ -228,6 +241,10 @@ export interface ProjectMetrics {
   subagentCount: number;
   totalInputTokens: number;
   totalOutputTokens: number;
+  totalCacheCreationTokens?: number;
+  totalCacheReadTokens?: number;
+  totalWebSearchRequests?: number;
+  totalCostUsd?: number;
   toolCalls: number;
   sessions: ReportSessionSummary[];
 }
@@ -239,6 +256,7 @@ export interface ReportSessionSummary {
   model: string | null;
   isSubagent: boolean;
   outputTokens: number;
+  costUsd?: number;
   agentSource: string;
 }
 

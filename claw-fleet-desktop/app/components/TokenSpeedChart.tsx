@@ -15,12 +15,19 @@ function formatTime(ms: number): string {
   return `${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}:${d.getSeconds().toString().padStart(2, "0")}`;
 }
 
+const WINDOW_MS = 5 * 60 * 1000;
+
 export function TokenSpeedChart() {
   const { t } = useTranslation();
   const speedHistory = useSessionsStore((s) => s.speedHistory);
 
   const currentSpeed =
     speedHistory.length > 0 ? speedHistory[speedHistory.length - 1].speed : 0;
+  const domainEnd =
+    speedHistory.length > 0
+      ? speedHistory[speedHistory.length - 1].time
+      : Date.now();
+  const domainStart = domainEnd - WINDOW_MS;
 
   return (
     <div className={styles.panel}>
@@ -48,6 +55,9 @@ export function TokenSpeedChart() {
             </defs>
             <XAxis
               dataKey="time"
+              type="number"
+              scale="time"
+              domain={[domainStart, domainEnd]}
               tickFormatter={formatTime}
               tick={{ fontSize: 9, fill: "var(--color-text-dim)" }}
               tickLine={false}
