@@ -1,6 +1,7 @@
 pub mod account;
 pub mod agent_source;
 pub mod audit;
+pub mod auto_resume;
 pub mod backend;
 pub mod claude_analyze;
 pub mod claude_source;
@@ -13,6 +14,7 @@ pub mod memory;
 pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
+pub mod rate_limit_parser;
 pub mod search_index;
 pub mod session;
 pub mod skills;

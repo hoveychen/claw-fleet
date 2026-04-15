@@ -24,6 +24,7 @@ fn status_color(status: &SessionStatus) -> &'static str {
         SessionStatus::WaitingInput => "\x1b[34m",
         SessionStatus::Active => "\x1b[36m",
         SessionStatus::Idle => "\x1b[2m",
+        SessionStatus::RateLimited => "\x1b[31m",
     }
 }
 
@@ -78,6 +79,7 @@ fn format_status(status: &SessionStatus) -> &'static str {
         SessionStatus::WaitingInput => "WaitInput",
         SessionStatus::Active => "Active",
         SessionStatus::Idle => "Idle",
+        SessionStatus::RateLimited => "RateLimit",
     }
 }
 
@@ -1308,6 +1310,78 @@ fn cmd_serve(port: u16, token: String) {
                 #[cfg(not(unix))]
                 {
                     let _ = request.respond(tiny_http::Response::empty(400));
+                }
+            }
+
+            "/resume_session" => {
+                let session_id = query.get("session_id")
+                    .map(|s| s.replace("%2F", "/"))
+                    .unwrap_or_default();
+                let workspace_path = query.get("workspace_path")
+                    .map(|s| s.replace("%2F", "/"))
+                    .unwrap_or_default();
+                if session_id.is_empty() || workspace_path.is_empty() {
+                    let body = r#"{"error":"missing session_id or workspace_path"}"#;
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(400)
+                            .with_header(json_header),
+                    );
+                    continue;
+                }
+                match claw_fleet_core::auto_resume::spawn_resume(&session_id, &workspace_path) {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/auto_resume_config" if request.method() == &tiny_http::Method::Get => {
+                let cfg = claw_fleet_core::auto_resume::AutoResumeConfig::load();
+                let body = serde_json::to_string(&cfg).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/auto_resume_config" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<claw_fleet_core::auto_resume::AutoResumeConfig>(&body_bytes) {
+                    Ok(cfg) => match cfg.save() {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string("{}").with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"invalid config: {}"}}"#, e.to_string().replace('"', "'"));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
                 }
             }
 

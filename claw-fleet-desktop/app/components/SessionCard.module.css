@@ -80,6 +80,35 @@
 .badge_active      { background: var(--badge-active-bg);      color: var(--badge-active-fg); }
 .badge_delegating  { background: var(--badge-delegating-bg);  color: var(--badge-delegating-fg); }
 .badge_idle        { background: var(--color-bg-secondary);   color: var(--color-text-dim); }
+.badge_rateLimited { background: #fee2e2;                     color: #b91c1c; }
+
+.rate_limit_countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: #b91c1c;
+  font-variant-numeric: tabular-nums;
+}
+
+.resume_btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 1px solid #fecaca;
+  border-radius: 4px;
+  background: #fee2e2;
+  color: #b91c1c;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  margin-left: auto;
+}
+.resume_btn:hover:not(:disabled) { background: #fecaca; }
+.resume_btn:disabled { opacity: 0.5; cursor: default; }
 
 /* ── Status icons ─────────────────────────────────────────────────────────── */
 

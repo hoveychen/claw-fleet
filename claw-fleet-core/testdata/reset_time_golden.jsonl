@@ -1,0 +1,96 @@
+{"label":"b_same_day_round","tz":"America/Los_Angeles","now_unix":1776247200,"resets_at_unix":1776276000,"output":"11am (America/Los_Angeles)"}
+{"label":"b_same_day_minutes","tz":"America/Los_Angeles","now_unix":1776247200,"resets_at_unix":1776277800,"output":"11:30am (America/Los_Angeles)"}
+{"label":"b_next_day_round","tz":"America/Los_Angeles","now_unix":1776283200,"resets_at_unix":1776319200,"output":"11pm (America/Los_Angeles)"}
+{"label":"b_midnight_12am_utc","tz":"America/Los_Angeles","now_unix":1776196800,"resets_at_unix":1776211200,"output":"5pm (America/Los_Angeles)"}
+{"label":"b_noon_12pm_utc","tz":"America/Los_Angeles","now_unix":1776229200,"resets_at_unix":1776254400,"output":"5am (America/Los_Angeles)"}
+{"label":"b_one_am","tz":"America/Los_Angeles","now_unix":1776229200,"resets_at_unix":1776243600,"output":"2am (America/Los_Angeles)"}
+{"label":"b_boundary_exact_24h","tz":"America/Los_Angeles","now_unix":1776247200,"resets_at_unix":1776333600,"output":"3am (America/Los_Angeles)"}
+{"label":"a_25h_round","tz":"America/Los_Angeles","now_unix":1776247200,"resets_at_unix":1776340800,"output":"Apr 16, 5am (America/Los_Angeles)"}
+{"label":"a_30h_minutes","tz":"America/Los_Angeles","now_unix":1776247200,"resets_at_unix":1776356100,"output":"Apr 16, 9:15am (America/Los_Angeles)"}
+{"label":"a_7d_round","tz":"America/Los_Angeles","now_unix":1776247200,"resets_at_unix":1776852000,"output":"Apr 22, 3am (America/Los_Angeles)"}
+{"label":"a_cross_year","tz":"America/Los_Angeles","now_unix":1798624800,"resets_at_unix":1798916400,"output":"Jan 2, 2027, 11am (America/Los_Angeles)"}
+{"label":"a_cross_year_minutes","tz":"America/Los_Angeles","now_unix":1798624800,"resets_at_unix":1798917300,"output":"Jan 2, 2027, 11:15am (America/Los_Angeles)"}
+{"label":"a_jan","tz":"America/Los_Angeles","now_unix":1767225600,"resets_at_unix":1768057200,"output":"Jan 10, 2026, 7am (America/Los_Angeles)"}
+{"label":"a_feb","tz":"America/Los_Angeles","now_unix":1769904000,"resets_at_unix":1770735600,"output":"Feb 10, 7am (America/Los_Angeles)"}
+{"label":"a_mar","tz":"America/Los_Angeles","now_unix":1772323200,"resets_at_unix":1773154800,"output":"Mar 10, 8am (America/Los_Angeles)"}
+{"label":"a_apr","tz":"America/Los_Angeles","now_unix":1775001600,"resets_at_unix":1775833200,"output":"Apr 10, 8am (America/Los_Angeles)"}
+{"label":"a_may","tz":"America/Los_Angeles","now_unix":1777593600,"resets_at_unix":1778425200,"output":"May 10, 8am (America/Los_Angeles)"}
+{"label":"a_jun","tz":"America/Los_Angeles","now_unix":1780272000,"resets_at_unix":1781103600,"output":"Jun 10, 8am (America/Los_Angeles)"}
+{"label":"a_jul","tz":"America/Los_Angeles","now_unix":1782864000,"resets_at_unix":1783695600,"output":"Jul 10, 8am (America/Los_Angeles)"}
+{"label":"a_aug","tz":"America/Los_Angeles","now_unix":1785542400,"resets_at_unix":1786374000,"output":"Aug 10, 8am (America/Los_Angeles)"}
+{"label":"a_sep","tz":"America/Los_Angeles","now_unix":1788220800,"resets_at_unix":1789052400,"output":"Sep 10, 8am (America/Los_Angeles)"}
+{"label":"a_oct","tz":"America/Los_Angeles","now_unix":1790812800,"resets_at_unix":1791644400,"output":"Oct 10, 8am (America/Los_Angeles)"}
+{"label":"a_nov","tz":"America/Los_Angeles","now_unix":1793491200,"resets_at_unix":1794322800,"output":"Nov 10, 7am (America/Los_Angeles)"}
+{"label":"a_dec","tz":"America/Los_Angeles","now_unix":1796083200,"resets_at_unix":1796914800,"output":"Dec 10, 7am (America/Los_Angeles)"}
+{"label":"b_same_day_round","tz":"Asia/Shanghai","now_unix":1776247200,"resets_at_unix":1776276000,"output":"2am (Asia/Shanghai)"}
+{"label":"b_same_day_minutes","tz":"Asia/Shanghai","now_unix":1776247200,"resets_at_unix":1776277800,"output":"2:30am (Asia/Shanghai)"}
+{"label":"b_next_day_round","tz":"Asia/Shanghai","now_unix":1776283200,"resets_at_unix":1776319200,"output":"2pm (Asia/Shanghai)"}
+{"label":"b_midnight_12am_utc","tz":"Asia/Shanghai","now_unix":1776196800,"resets_at_unix":1776211200,"output":"8am (Asia/Shanghai)"}
+{"label":"b_noon_12pm_utc","tz":"Asia/Shanghai","now_unix":1776229200,"resets_at_unix":1776254400,"output":"8pm (Asia/Shanghai)"}
+{"label":"b_one_am","tz":"Asia/Shanghai","now_unix":1776229200,"resets_at_unix":1776243600,"output":"5pm (Asia/Shanghai)"}
+{"label":"b_boundary_exact_24h","tz":"Asia/Shanghai","now_unix":1776247200,"resets_at_unix":1776333600,"output":"6pm (Asia/Shanghai)"}
+{"label":"a_25h_round","tz":"Asia/Shanghai","now_unix":1776247200,"resets_at_unix":1776340800,"output":"Apr 16, 8pm (Asia/Shanghai)"}
+{"label":"a_30h_minutes","tz":"Asia/Shanghai","now_unix":1776247200,"resets_at_unix":1776356100,"output":"Apr 17, 12:15am (Asia/Shanghai)"}
+{"label":"a_7d_round","tz":"Asia/Shanghai","now_unix":1776247200,"resets_at_unix":1776852000,"output":"Apr 22, 6pm (Asia/Shanghai)"}
+{"label":"a_cross_year","tz":"Asia/Shanghai","now_unix":1798624800,"resets_at_unix":1798916400,"output":"Jan 3, 2027, 3am (Asia/Shanghai)"}
+{"label":"a_cross_year_minutes","tz":"Asia/Shanghai","now_unix":1798624800,"resets_at_unix":1798917300,"output":"Jan 3, 2027, 3:15am (Asia/Shanghai)"}
+{"label":"a_jan","tz":"Asia/Shanghai","now_unix":1767225600,"resets_at_unix":1768057200,"output":"Jan 10, 11pm (Asia/Shanghai)"}
+{"label":"a_feb","tz":"Asia/Shanghai","now_unix":1769904000,"resets_at_unix":1770735600,"output":"Feb 10, 11pm (Asia/Shanghai)"}
+{"label":"a_mar","tz":"Asia/Shanghai","now_unix":1772323200,"resets_at_unix":1773154800,"output":"Mar 10, 11pm (Asia/Shanghai)"}
+{"label":"a_apr","tz":"Asia/Shanghai","now_unix":1775001600,"resets_at_unix":1775833200,"output":"Apr 10, 11pm (Asia/Shanghai)"}
+{"label":"a_may","tz":"Asia/Shanghai","now_unix":1777593600,"resets_at_unix":1778425200,"output":"May 10, 11pm (Asia/Shanghai)"}
+{"label":"a_jun","tz":"Asia/Shanghai","now_unix":1780272000,"resets_at_unix":1781103600,"output":"Jun 10, 11pm (Asia/Shanghai)"}
+{"label":"a_jul","tz":"Asia/Shanghai","now_unix":1782864000,"resets_at_unix":1783695600,"output":"Jul 10, 11pm (Asia/Shanghai)"}
+{"label":"a_aug","tz":"Asia/Shanghai","now_unix":1785542400,"resets_at_unix":1786374000,"output":"Aug 10, 11pm (Asia/Shanghai)"}
+{"label":"a_sep","tz":"Asia/Shanghai","now_unix":1788220800,"resets_at_unix":1789052400,"output":"Sep 10, 11pm (Asia/Shanghai)"}
+{"label":"a_oct","tz":"Asia/Shanghai","now_unix":1790812800,"resets_at_unix":1791644400,"output":"Oct 10, 11pm (Asia/Shanghai)"}
+{"label":"a_nov","tz":"Asia/Shanghai","now_unix":1793491200,"resets_at_unix":1794322800,"output":"Nov 10, 11pm (Asia/Shanghai)"}
+{"label":"a_dec","tz":"Asia/Shanghai","now_unix":1796083200,"resets_at_unix":1796914800,"output":"Dec 10, 11pm (Asia/Shanghai)"}
+{"label":"b_same_day_round","tz":"Europe/London","now_unix":1776247200,"resets_at_unix":1776276000,"output":"7pm (Europe/London)"}
+{"label":"b_same_day_minutes","tz":"Europe/London","now_unix":1776247200,"resets_at_unix":1776277800,"output":"7:30pm (Europe/London)"}
+{"label":"b_next_day_round","tz":"Europe/London","now_unix":1776283200,"resets_at_unix":1776319200,"output":"7am (Europe/London)"}
+{"label":"b_midnight_12am_utc","tz":"Europe/London","now_unix":1776196800,"resets_at_unix":1776211200,"output":"1am (Europe/London)"}
+{"label":"b_noon_12pm_utc","tz":"Europe/London","now_unix":1776229200,"resets_at_unix":1776254400,"output":"1pm (Europe/London)"}
+{"label":"b_one_am","tz":"Europe/London","now_unix":1776229200,"resets_at_unix":1776243600,"output":"10am (Europe/London)"}
+{"label":"b_boundary_exact_24h","tz":"Europe/London","now_unix":1776247200,"resets_at_unix":1776333600,"output":"11am (Europe/London)"}
+{"label":"a_25h_round","tz":"Europe/London","now_unix":1776247200,"resets_at_unix":1776340800,"output":"Apr 16, 1pm (Europe/London)"}
+{"label":"a_30h_minutes","tz":"Europe/London","now_unix":1776247200,"resets_at_unix":1776356100,"output":"Apr 16, 5:15pm (Europe/London)"}
+{"label":"a_7d_round","tz":"Europe/London","now_unix":1776247200,"resets_at_unix":1776852000,"output":"Apr 22, 11am (Europe/London)"}
+{"label":"a_cross_year","tz":"Europe/London","now_unix":1798624800,"resets_at_unix":1798916400,"output":"Jan 2, 2027, 7pm (Europe/London)"}
+{"label":"a_cross_year_minutes","tz":"Europe/London","now_unix":1798624800,"resets_at_unix":1798917300,"output":"Jan 2, 2027, 7:15pm (Europe/London)"}
+{"label":"a_jan","tz":"Europe/London","now_unix":1767225600,"resets_at_unix":1768057200,"output":"Jan 10, 3pm (Europe/London)"}
+{"label":"a_feb","tz":"Europe/London","now_unix":1769904000,"resets_at_unix":1770735600,"output":"Feb 10, 3pm (Europe/London)"}
+{"label":"a_mar","tz":"Europe/London","now_unix":1772323200,"resets_at_unix":1773154800,"output":"Mar 10, 3pm (Europe/London)"}
+{"label":"a_apr","tz":"Europe/London","now_unix":1775001600,"resets_at_unix":1775833200,"output":"Apr 10, 4pm (Europe/London)"}
+{"label":"a_may","tz":"Europe/London","now_unix":1777593600,"resets_at_unix":1778425200,"output":"May 10, 4pm (Europe/London)"}
+{"label":"a_jun","tz":"Europe/London","now_unix":1780272000,"resets_at_unix":1781103600,"output":"Jun 10, 4pm (Europe/London)"}
+{"label":"a_jul","tz":"Europe/London","now_unix":1782864000,"resets_at_unix":1783695600,"output":"Jul 10, 4pm (Europe/London)"}
+{"label":"a_aug","tz":"Europe/London","now_unix":1785542400,"resets_at_unix":1786374000,"output":"Aug 10, 4pm (Europe/London)"}
+{"label":"a_sep","tz":"Europe/London","now_unix":1788220800,"resets_at_unix":1789052400,"output":"Sep 10, 4pm (Europe/London)"}
+{"label":"a_oct","tz":"Europe/London","now_unix":1790812800,"resets_at_unix":1791644400,"output":"Oct 10, 4pm (Europe/London)"}
+{"label":"a_nov","tz":"Europe/London","now_unix":1793491200,"resets_at_unix":1794322800,"output":"Nov 10, 3pm (Europe/London)"}
+{"label":"a_dec","tz":"Europe/London","now_unix":1796083200,"resets_at_unix":1796914800,"output":"Dec 10, 3pm (Europe/London)"}
+{"label":"b_same_day_round","tz":"UTC","now_unix":1776247200,"resets_at_unix":1776276000,"output":"6pm (UTC)"}
+{"label":"b_same_day_minutes","tz":"UTC","now_unix":1776247200,"resets_at_unix":1776277800,"output":"6:30pm (UTC)"}
+{"label":"b_next_day_round","tz":"UTC","now_unix":1776283200,"resets_at_unix":1776319200,"output":"6am (UTC)"}
+{"label":"b_midnight_12am_utc","tz":"UTC","now_unix":1776196800,"resets_at_unix":1776211200,"output":"12am (UTC)"}
+{"label":"b_noon_12pm_utc","tz":"UTC","now_unix":1776229200,"resets_at_unix":1776254400,"output":"12pm (UTC)"}
+{"label":"b_one_am","tz":"UTC","now_unix":1776229200,"resets_at_unix":1776243600,"output":"9am (UTC)"}
+{"label":"b_boundary_exact_24h","tz":"UTC","now_unix":1776247200,"resets_at_unix":1776333600,"output":"10am (UTC)"}
+{"label":"a_25h_round","tz":"UTC","now_unix":1776247200,"resets_at_unix":1776340800,"output":"Apr 16, 12pm (UTC)"}
+{"label":"a_30h_minutes","tz":"UTC","now_unix":1776247200,"resets_at_unix":1776356100,"output":"Apr 16, 4:15pm (UTC)"}
+{"label":"a_7d_round","tz":"UTC","now_unix":1776247200,"resets_at_unix":1776852000,"output":"Apr 22, 10am (UTC)"}
+{"label":"a_cross_year","tz":"UTC","now_unix":1798624800,"resets_at_unix":1798916400,"output":"Jan 2, 2027, 7pm (UTC)"}
+{"label":"a_cross_year_minutes","tz":"UTC","now_unix":1798624800,"resets_at_unix":1798917300,"output":"Jan 2, 2027, 7:15pm (UTC)"}
+{"label":"a_jan","tz":"UTC","now_unix":1767225600,"resets_at_unix":1768057200,"output":"Jan 10, 3pm (UTC)"}
+{"label":"a_feb","tz":"UTC","now_unix":1769904000,"resets_at_unix":1770735600,"output":"Feb 10, 3pm (UTC)"}
+{"label":"a_mar","tz":"UTC","now_unix":1772323200,"resets_at_unix":1773154800,"output":"Mar 10, 3pm (UTC)"}
+{"label":"a_apr","tz":"UTC","now_unix":1775001600,"resets_at_unix":1775833200,"output":"Apr 10, 3pm (UTC)"}
+{"label":"a_may","tz":"UTC","now_unix":1777593600,"resets_at_unix":1778425200,"output":"May 10, 3pm (UTC)"}
+{"label":"a_jun","tz":"UTC","now_unix":1780272000,"resets_at_unix":1781103600,"output":"Jun 10, 3pm (UTC)"}
+{"label":"a_jul","tz":"UTC","now_unix":1782864000,"resets_at_unix":1783695600,"output":"Jul 10, 3pm (UTC)"}
+{"label":"a_aug","tz":"UTC","now_unix":1785542400,"resets_at_unix":1786374000,"output":"Aug 10, 3pm (UTC)"}
+{"label":"a_sep","tz":"UTC","now_unix":1788220800,"resets_at_unix":1789052400,"output":"Sep 10, 3pm (UTC)"}
+{"label":"a_oct","tz":"UTC","now_unix":1790812800,"resets_at_unix":1791644400,"output":"Oct 10, 3pm (UTC)"}
+{"label":"a_nov","tz":"UTC","now_unix":1793491200,"resets_at_unix":1794322800,"output":"Nov 10, 3pm (UTC)"}
+{"label":"a_dec","tz":"UTC","now_unix":1796083200,"resets_at_unix":1796914800,"output":"Dec 10, 3pm (UTC)"}

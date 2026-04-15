@@ -376,6 +376,24 @@ fn handle_api_request(
             }
         }
 
+        "/resume_session" => {
+            let session_id = query
+                .get("session_id")
+                .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                .unwrap_or_default();
+            let workspace = query
+                .get("workspace_path")
+                .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                .unwrap_or_default();
+            if session_id.is_empty() || workspace.is_empty() {
+                return json_error(400, "missing session_id or workspace_path");
+            }
+            match backend.resume_session(session_id, workspace) {
+                Ok(()) => json_ok(&serde_json::json!({"ok": true})),
+                Err(e) => json_error(500, &e),
+            }
+        }
+
         "/setup-status" => json_ok(&backend.check_setup()),
 
         "/usage_summaries" => json_ok(&backend.usage_summaries()),
@@ -523,6 +541,23 @@ fn handle_api_request(
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<LlmConfig>(&body_bytes) {
                     Ok(cfg) => match backend.set_llm_config(cfg) {
+                        Ok(()) => json_ok(&serde_json::json!({})),
+                        Err(e) => json_error(500, &e),
+                    },
+                    Err(e) => json_error(400, &format!("invalid config: {e}")),
+                }
+            }
+        }
+
+        // ── Auto-resume config ──────────────────────────────────────────
+        "/auto_resume_config" => {
+            if request.method() == &tiny_http::Method::Get {
+                json_ok(&backend.get_auto_resume_config())
+            } else {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<claw_fleet_core::auto_resume::AutoResumeConfig>(&body_bytes) {
+                    Ok(cfg) => match backend.set_auto_resume_config(cfg) {
                         Ok(()) => json_ok(&serde_json::json!({})),
                         Err(e) => json_error(500, &e),
                     },

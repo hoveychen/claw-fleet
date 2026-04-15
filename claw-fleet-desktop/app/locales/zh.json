@@ -23,7 +23,14 @@
     "waitingInput": "等待输入",
     "active": "活跃",
     "delegating": "委托中",
-    "idle": "空闲"
+    "idle": "空闲",
+    "rateLimited": "速率限制"
+  },
+  "rateLimit": {
+    "resetsIn": "{{time}} 后恢复",
+    "resetsNow": "已到恢复时间",
+    "estimated": "~",
+    "resumeNow": "立即恢复 (claude --resume -p continue)"
   },
   "theme": {
     "light": "浅色",
@@ -922,6 +929,10 @@
     "overlay_desc": "将小助手作为悬浮窗显示在所有窗口之上",
     "auto_update_check": "自动检查更新",
     "auto_update_check_desc": "每天自动检查一次新版本，有更新时显示通知",
+    "auto_resume": "限流后自动恢复",
+    "auto_resume_desc": "当会话因速率限制停止时，在重置时间过后自动恢复",
+    "auto_resume_max_wait": "最长等待窗口（小时）",
+    "auto_resume_max_wait_desc": "当配置的等待时间超过此值时跳过自动恢复——避免周限额导致的长时间延后恢复",
     "llm_provider": "LLM 分析引擎",
     "llm_provider_select": "引擎",
     "llm_fast_model": "快速模型",

@@ -1,10 +1,44 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { useSessionsStore } from "../store";
-import type { SessionInfo, SessionStatus } from "../types";
+import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import styles from "./SessionCard.module.css";
+
+// ── Rate-limit countdown ──────────────────────────────────────────────────────
+
+function formatDuration(ms: number): string {
+  if (ms <= 0) return "0s";
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h${m.toString().padStart(2, "0")}m`;
+  if (m > 0) return `${m}m${s.toString().padStart(2, "0")}s`;
+  return `${s}s`;
+}
+
+export function RateLimitCountdown({ state }: { state: RateLimitState }) {
+  const { t } = useTranslation();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const resetMs = new Date(state.resetsAt).getTime();
+  const remaining = resetMs - now;
+  const label =
+    remaining <= 0
+      ? t("rateLimit.resetsNow")
+      : t("rateLimit.resetsIn", { time: formatDuration(remaining) });
+  return (
+    <span className={styles.rate_limit_countdown} title={new Date(resetMs).toLocaleString()}>
+      {!state.parsed && t("rateLimit.estimated")}
+      {label}
+    </span>
+  );
+}
 
 // ── Subagent type icon ────────────────────────────────────────────────────────
 
@@ -209,6 +243,14 @@ export function StatusIcon({ status }: { status: SessionStatus }) {
           <path className={styles.z3} d="M8 2 L11 2 L8 4 L11 4"            strokeWidth="1.2" />
         </svg>
       );
+    case "rateLimited":
+      // Hourglass — waiting for quota reset.
+      return (
+        <svg className={styles.sicon} viewBox="0 0 10 12"
+             fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" aria-hidden>
+          <path d="M1.5 1 L8.5 1 L8.5 3 L5 6 L8.5 9 L8.5 11 L1.5 11 L1.5 9 L5 6 L1.5 3 Z" />
+        </svg>
+      );
   }
 }
 
@@ -317,6 +359,23 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
     session.status
   );
   const [killing, setKilling] = useState(false);
+  const [resuming, setResuming] = useState(false);
+
+  const handleResume = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (resuming) return;
+    setResuming(true);
+    try {
+      await invoke("resume_rate_limited_session", {
+        sessionId: session.id,
+        workspacePath: session.workspacePath,
+      });
+    } catch (err) {
+      console.error("resume failed", err);
+    } finally {
+      setResuming(false);
+    }
+  };
 
   const handleStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -358,6 +417,19 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
       <div className={`${styles.header} ${hideHeader ? styles.header_compact : ""}`}>
         {!hideHeader && <span className={styles.workspace}>{session.workspaceName}</span>}
         {!hideHeader && <StatusBadge status={session.status} />}
+        {session.status === "rateLimited" && session.rateLimit && (
+          <RateLimitCountdown state={session.rateLimit} />
+        )}
+        {session.status === "rateLimited" && !session.isSubagent && (
+          <button
+            className={styles.resume_btn}
+            onClick={handleResume}
+            disabled={resuming}
+            title={t("rateLimit.resumeNow")}
+          >
+            {resuming ? "…" : "▶"}
+          </button>
+        )}
         {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
           <button
             className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}

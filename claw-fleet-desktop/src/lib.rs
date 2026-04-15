@@ -82,6 +82,18 @@ impl Backend for NullBackend {
     fn kill_workspace(&self, _: String) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn resume_session(&self, _: String, _: String) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
+        claw_fleet_core::auto_resume::AutoResumeConfig::default()
+    }
+    fn set_auto_resume_config(
+        &self,
+        _: claw_fleet_core::auto_resume::AutoResumeConfig,
+    ) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn account_info(&self) -> AccountInfoFuture {
         Box::pin(async { Err("backend not ready".into()) })
     }

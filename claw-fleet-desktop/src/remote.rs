@@ -244,6 +244,28 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get_ok(&format!("/stop_workspace?path={}", encoded))
     }
 
+    fn resume_session(&self, session_id: String, workspace_path: String) -> Result<(), String> {
+        let sid = session_id.replace('/', "%2F");
+        let wp = workspace_path.replace('/', "%2F");
+        self.probe.get_ok(&format!(
+            "/resume_session?session_id={}&workspace_path={}",
+            sid, wp
+        ))
+    }
+
+    fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
+        self.probe
+            .get::<claw_fleet_core::auto_resume::AutoResumeConfig>("/auto_resume_config")
+            .unwrap_or_default()
+    }
+
+    fn set_auto_resume_config(
+        &self,
+        config: claw_fleet_core::auto_resume::AutoResumeConfig,
+    ) -> Result<(), String> {
+        self.probe.post_json_ok("/auto_resume_config", &config)
+    }
+
     fn account_info(&self) -> crate::backend::AccountInfoFuture {
         let probe = self.probe.clone();
         Box::pin(async move {

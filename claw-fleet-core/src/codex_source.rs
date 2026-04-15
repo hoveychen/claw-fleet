@@ -902,6 +902,7 @@ fn build_session_from_sqlite(
         context_percent,
         agent_source: "codex".to_string(),
         last_outcome: None,
+        rate_limit: None,
     })
 }
 
@@ -1170,6 +1171,7 @@ fn parse_codex_session(
         context_percent,
         agent_source: "codex".to_string(),
         last_outcome: None,
+        rate_limit: None,
     })
 }
 

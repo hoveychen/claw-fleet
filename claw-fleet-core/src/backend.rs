@@ -221,6 +221,17 @@ pub trait Backend: Send + Sync {
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String>;
     fn kill_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String>;
+    /// Headlessly resume a rate-limited session: spawns
+    /// `claude --resume <session_id> -p "continue"` in the given workspace
+    /// directory so the previous task can run to completion. Detached.
+    fn resume_session(&self, session_id: String, workspace_path: String) -> Result<(), String>;
+    /// Read the auto-resume scheduler config.
+    fn get_auto_resume_config(&self) -> crate::auto_resume::AutoResumeConfig;
+    /// Persist the auto-resume scheduler config.
+    fn set_auto_resume_config(
+        &self,
+        config: crate::auto_resume::AutoResumeConfig,
+    ) -> Result<(), String>;
     fn account_info(&self) -> AccountInfoFuture;
     /// Fetch account/profile info for the given source (e.g. "claude", "cursor", "openclaw").
     fn source_account(&self, source: &str) -> SourceDataFuture;

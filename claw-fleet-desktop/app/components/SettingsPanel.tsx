@@ -281,6 +281,29 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   const currentProviderInfo = llmProviders.find((p) => p.name === llmConfig.provider);
 
+  // ── Auto-resume config ──────────────────────────────────────────────────
+  const [autoResume, setAutoResume] = useState<{ enabled: boolean; maxWaitHours: number }>({
+    enabled: true,
+    maxWaitHours: 12,
+  });
+
+  useEffect(() => {
+    invoke<{ enabled: boolean; maxWaitHours: number }>("get_auto_resume_config")
+      .then(setAutoResume)
+      .catch(() => {});
+  }, []);
+
+  const handleAutoResumeChange = useCallback(
+    (patch: Partial<{ enabled: boolean; maxWaitHours: number }>) => {
+      setAutoResume((prev) => {
+        const next = { ...prev, ...patch };
+        invoke("set_auto_resume_config", { config: next }).catch(() => {});
+        return next;
+      });
+    },
+    [],
+  );
+
   // ── Overlay state (shared via store) ─────────────────────────────────────
   const overlayEnabled = useOverlayStore((s) => s.enabled);
   const setOverlayEnabled = useOverlayStore((s) => s.setEnabled);
@@ -407,6 +430,44 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                     <span className={styles.toggle_slider} />
                   </label>
                 </div>
+
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.auto_resume")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.auto_resume_desc")}
+                    </span>
+                  </div>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={autoResume.enabled}
+                      onChange={(e) => handleAutoResumeChange({ enabled: e.target.checked })}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+                {autoResume.enabled && (
+                  <div className={styles.row}>
+                    <div>
+                      <span className={styles.row_label}>{t("settings.auto_resume_max_wait")}</span>
+                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                        {t("settings.auto_resume_max_wait_desc")}
+                      </span>
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      max={168}
+                      value={autoResume.maxWaitHours}
+                      onChange={(e) => {
+                        const n = parseInt(e.target.value, 10);
+                        if (!isNaN(n) && n > 0) handleAutoResumeChange({ maxWaitHours: n });
+                      }}
+                      style={{ width: 72 }}
+                    />
+                  </div>
+                )}
 
                 {/* ── LLM Provider ── */}
                 <div className={styles.section_title} style={{ marginTop: 18 }}>

@@ -578,6 +578,34 @@ fn kill_workspace_sessions(workspace_path: String, state: tauri::State<'_, AppSt
     state.backend.read().unwrap().kill_workspace(workspace_path)
 }
 
+#[tauri::command]
+fn resume_rate_limited_session(
+    session_id: String,
+    workspace_path: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .resume_session(session_id, workspace_path)
+}
+
+#[tauri::command]
+fn get_auto_resume_config(
+    state: tauri::State<'_, AppState>,
+) -> claw_fleet_core::auto_resume::AutoResumeConfig {
+    state.backend.read().unwrap().get_auto_resume_config()
+}
+
+#[tauri::command]
+fn set_auto_resume_config(
+    config: claw_fleet_core::auto_resume::AutoResumeConfig,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.read().unwrap().set_auto_resume_config(config)
+}
+
 // ── App state ────────────────────────────────────────────────────────────────
 
 pub struct AppState {
@@ -1174,6 +1202,7 @@ fn status_label(s: &session::SessionStatus) -> &'static str {
         Active => "active",
         Delegating => "delegating",
         Idle => "idle",
+        RateLimited => "rate limited",
     }
 }
 
@@ -1820,6 +1849,9 @@ pub fn run() {
             check_app_version,
             kill_session,
             kill_workspace_sessions,
+            resume_rate_limited_session,
+            get_auto_resume_config,
+            set_auto_resume_config,
             check_setup_status,
             install_fleet_cli,
             detect_ai_tools,

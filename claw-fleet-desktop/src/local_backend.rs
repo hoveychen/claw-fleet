@@ -59,6 +59,9 @@ pub struct LocalBackend {
     locale: Arc<Mutex<String>>,
     /// LLM provider configuration (which CLI + models to use for analysis).
     llm_config: Arc<Mutex<crate::llm_provider::LlmConfig>>,
+    /// Tracks the last wall-clock time we spawned an auto-resume for a given
+    /// session, keyed by session id. Prevents the scheduler from firing twice
+    /// within a short debounce window if two rescans land back-to-back.
     /// Kept alive so the watcher thread keeps running.
     /// Dropping this field closes the event channel and the thread exits.
     _watcher: RecommendedWatcher,
@@ -135,6 +138,10 @@ impl LocalBackend {
         }
 
         step!("indexer spawned");
+
+        // Auto-resume scheduler dedup map — cloned into watcher/poll threads.
+        let auto_resume_last_fire: Arc<Mutex<HashMap<String, Instant>>> =
+            Arc::new(Mutex::new(HashMap::new()));
 
         // Initial scan — run in a background thread so the UI appears immediately.
         {
@@ -217,6 +224,7 @@ impl LocalBackend {
         let idx_tx2 = index_tx.clone();
         let ac2 = audit_cache.clone();
         let nak2 = notified_audit_keys.clone();
+        let ar2 = auto_resume_last_fire.clone();
 
         // Pre-compute each filesystem source's watch dirs for fast path matching.
         let source_watch_dirs: Vec<(usize, Vec<std::path::PathBuf>)> = sources
@@ -323,6 +331,7 @@ impl LocalBackend {
                     detect_audit_critical_notifications(
                         &sess2, &sources2, &ac2, &nak2, &app2,
                     );
+                    maybe_fire_auto_resume(&sess2, &ar2);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
                     last_rescan = Instant::now();
@@ -353,6 +362,7 @@ impl LocalBackend {
             let idx_tx3 = index_tx.clone();
             let ac3 = audit_cache.clone();
             let nak3 = notified_audit_keys.clone();
+            let ar3 = auto_resume_last_fire.clone();
 
             // Indices of polling sources — only these need rescanning on each tick.
             let poll_source_indices: HashSet<usize> = sources
@@ -394,6 +404,7 @@ impl LocalBackend {
                     detect_audit_critical_notifications(
                         &sess3, &sources3, &ac3, &nak3, &app3,
                     );
+                    maybe_fire_auto_resume(&sess3, &ar3);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
                 }
@@ -630,6 +641,61 @@ pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
     }
 }
 
+/// Headlessly resume a rate-limited session by spawning
+/// `claude --resume <session_id> -p "continue"` detached in the given workspace.
+///
+/// Returns as soon as the child is spawned; the process's stdout/stderr are
+/// discarded (the session's own JSONL will capture the new turn for the
+/// scanner to pick up).
+pub fn resume_session_impl(session_id: &str, workspace_path: &str) -> Result<(), String> {
+    claw_fleet_core::auto_resume::spawn_resume(session_id, workspace_path)
+}
+
+/// Scan the current session list for auto-resume candidates and fire them.
+///
+/// Debounces so a given session can't be auto-resumed twice within 120s —
+/// if the spawned `claude --resume` hasn't appended a new turn to the JSONL
+/// yet on the next rescan tick, we won't spam duplicates.
+fn maybe_fire_auto_resume(
+    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
+    last_fire: &Arc<Mutex<HashMap<String, Instant>>>,
+) {
+    let config = claw_fleet_core::auto_resume::AutoResumeConfig::load();
+    if !config.enabled {
+        return;
+    }
+    let now = chrono::Utc::now();
+    let debounce = Duration::from_secs(120);
+    let candidates: Vec<(String, String)> = {
+        let sess = sessions.lock().unwrap();
+        let mut fire_map = last_fire.lock().unwrap();
+        // Drop entries older than the debounce window so the map doesn't grow
+        // unboundedly for sessions that come and go.
+        fire_map.retain(|_, t| t.elapsed() < debounce * 10);
+        sess.iter()
+            .filter(|s| claw_fleet_core::auto_resume::should_auto_resume(s, &config, now))
+            .filter_map(|s| {
+                if let Some(t) = fire_map.get(&s.id) {
+                    if t.elapsed() < debounce {
+                        return None;
+                    }
+                }
+                fire_map.insert(s.id.clone(), Instant::now());
+                Some((s.id.clone(), s.workspace_path.clone()))
+            })
+            .collect()
+    };
+    for (session_id, workspace_path) in candidates {
+        log_debug(&format!(
+            "auto_resume: firing for session {} in {}",
+            session_id, workspace_path
+        ));
+        if let Err(e) = resume_session_impl(&session_id, &workspace_path) {
+            log_debug(&format!("auto_resume: failed for {}: {}", session_id, e));
+        }
+    }
+}
+
 /// Kill all processes in a workspace.
 pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
     #[cfg(unix)]
@@ -734,6 +800,32 @@ impl Backend for LocalBackend {
             rescan_and_emit(&sources, &app, &sessions, &outcomes);
         });
         Ok(())
+    }
+
+    fn resume_session(&self, session_id: String, workspace_path: String) -> Result<(), String> {
+        resume_session_impl(&session_id, &workspace_path)?;
+        // Trigger a rescan after a delay so the UI picks up the new turn
+        // (which will also clear the RateLimited badge via detect_rate_limit).
+        let app = self.app.clone();
+        let sessions = self.sessions.clone();
+        let sources = self.sources.clone();
+        let outcomes = self.session_outcomes.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            rescan_and_emit(&sources, &app, &sessions, &outcomes);
+        });
+        Ok(())
+    }
+
+    fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
+        claw_fleet_core::auto_resume::AutoResumeConfig::load()
+    }
+
+    fn set_auto_resume_config(
+        &self,
+        config: claw_fleet_core::auto_resume::AutoResumeConfig,
+    ) -> Result<(), String> {
+        config.save()
     }
 
     fn account_info(&self) -> crate::backend::AccountInfoFuture {

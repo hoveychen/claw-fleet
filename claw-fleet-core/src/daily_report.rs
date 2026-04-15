@@ -1297,6 +1297,7 @@ fn make_session_info_for_date(
         context_percent: None,
         agent_source: "claude-code".to_string(),
         last_outcome: None,
+        rate_limit: None,
     })
 }
 
@@ -1802,6 +1803,7 @@ mod tests {
             context_percent: None,
             agent_source: "claude-code".to_string(),
             last_outcome: None,
+            rate_limit: None,
         };
 
         let s2 = crate::session::SessionInfo {
@@ -1833,6 +1835,7 @@ mod tests {
             context_percent: None,
             agent_source: "claude-code".to_string(),
             last_outcome: None,
+            rate_limit: None,
         };
 
         let sessions: Vec<&crate::session::SessionInfo> = vec![&s1, &s2];

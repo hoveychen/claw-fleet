@@ -530,6 +530,7 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
                 .and_then(|input| compute_context_percent(input, c.model.as_deref(), input)),
             agent_source: "cursor".to_string(),
             last_outcome: None,
+            rate_limit: None,
         });
     }
 

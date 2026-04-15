@@ -8,7 +8,24 @@ export type SessionStatus =
   | "waitingInput"
   | "active"
   | "delegating"
-  | "idle";
+  | "idle"
+  | "rateLimited";
+
+export type RateLimitType =
+  | "sessionLimit"
+  | "weeklyLimit"
+  | "opusLimit"
+  | "sonnetLimit"
+  | "usageLimit"
+  | "outOfExtraUsage"
+  | "unknown";
+
+export interface RateLimitState {
+  resetsAt: string; // ISO-8601 UTC
+  limitType: RateLimitType;
+  parsed: boolean;
+  errorTimestamp: string; // ISO-8601 UTC
+}
 
 export interface SessionInfo {
   id: string;
@@ -39,6 +56,7 @@ export interface SessionInfo {
   contextPercent: number | null;
   agentSource: "claude-code" | "cursor" | "openclaw" | "codex";
   lastOutcome: SessionOutcome[] | null;
+  rateLimit?: RateLimitState | null;
 }
 
 export type SessionOutcome =

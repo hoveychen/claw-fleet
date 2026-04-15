@@ -405,6 +405,7 @@ fn parse_openclaw_session(
             .and_then(|(used, m, max)| compute_context_percent(used, Some(&m), max)),
         agent_source: "openclaw".to_string(),
         last_outcome: None,
+        rate_limit: None,
     })
 }
 

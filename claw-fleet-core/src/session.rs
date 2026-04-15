@@ -39,6 +39,20 @@ pub enum SessionStatus {
     WaitingInput, // last stop_reason = end_turn
     Active,       // file written < 30s ago
     Idle,         // no recent activity
+    RateLimited,  // last assistant message was isApiErrorMessage + error=rate_limit;
+                  // details (resets_at, limit_type) live on SessionInfo.rate_limit
+}
+
+/// Populated when `SessionStatus::RateLimited`. Carries the information needed
+/// for the UI countdown and the auto-resume scheduler. `parsed` is `false` when
+/// `resets_at` is an estimate derived from `error_timestamp + fallback_duration`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RateLimitState {
+    pub resets_at: chrono::DateTime<chrono::Utc>,
+    pub limit_type: crate::rate_limit_parser::RateLimitType,
+    pub parsed: bool,
+    pub error_timestamp: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -88,6 +102,10 @@ pub struct SessionInfo {
     /// starts.  `None` means no analysis has run yet or the session is busy.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_outcome: Option<Vec<String>>,
+    /// Populated when `status == RateLimited`. Carries reset time and limit
+    /// type for the UI countdown and the auto-resume scheduler.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub rate_limit: Option<RateLimitState>,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -363,6 +381,59 @@ fn last_real_message_age_secs(last_lines: &[Value]) -> Option<f64> {
     let now = chrono::Utc::now();
     let delta = (now - ts.with_timezone(&chrono::Utc)).num_milliseconds() as f64 / 1000.0;
     if delta < 0.0 { Some(0.0) } else { Some(delta) }
+}
+
+/// Detect a terminal `error: "rate_limit"` entry in the last assistant messages.
+///
+/// Claude Code persists API errors as synthetic assistant messages with
+/// `isApiErrorMessage: true` and an `error` enum. When `rate_limit` is the
+/// last such entry AND no subsequent real user/assistant turn has started,
+/// the session is stuck waiting for quota reset. Returns `None` otherwise.
+fn detect_rate_limit(last_lines: &[Value]) -> Option<RateLimitState> {
+    // Walk from the end; stop at the first real (non-API-error) user/assistant
+    // line — that means the user already resumed past the error.
+    for v in last_lines.iter().rev() {
+        let t = v.get("type").and_then(|t| t.as_str());
+        if t != Some("assistant") && t != Some("user") {
+            continue;
+        }
+        let is_api_err = v
+            .get("isApiErrorMessage")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false);
+        if !is_api_err {
+            // First real turn we hit going backwards is fresh activity —
+            // any earlier rate_limit is stale.
+            return None;
+        }
+        let err = v.get("error").and_then(|e| e.as_str());
+        if err != Some("rate_limit") {
+            // A different API error (auth, unknown, …) — not our concern.
+            return None;
+        }
+        let text = v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+            .and_then(|blocks| {
+                blocks
+                    .iter()
+                    .find_map(|b| b.get("text").and_then(|t| t.as_str()))
+            })
+            .unwrap_or("");
+        let ts_str = v.get("timestamp").and_then(|t| t.as_str())?;
+        let error_timestamp = chrono::DateTime::parse_from_rfc3339(ts_str)
+            .ok()?
+            .with_timezone(&chrono::Utc);
+        let parsed = crate::rate_limit_parser::parse_rate_limit_content(text, error_timestamp);
+        return Some(RateLimitState {
+            resets_at: parsed.resets_at,
+            limit_type: parsed.limit_type,
+            parsed: parsed.parsed,
+            error_timestamp,
+        });
+    }
+    None
 }
 
 fn determine_status(
@@ -1025,7 +1096,15 @@ pub fn parse_session_info(
     // new turn; using file mtime alone would falsely mark resumed old sessions
     // as WaitingInput. Fall back to file mtime when no real message is found.
     let content_age_secs = last_real_message_age_secs(&last_n).unwrap_or(file_age_secs);
-    let status = determine_status(&last_n, file_age_secs, content_age_secs, hook_state);
+    // Rate-limit detection has priority over everything else: if the last
+    // real turn is a rate_limit API error, the session is stuck regardless
+    // of mtime / streaming heuristics.
+    let rate_limit = detect_rate_limit(&last_n);
+    let status = if rate_limit.is_some() {
+        SessionStatus::RateLimited
+    } else {
+        determine_status(&last_n, file_age_secs, content_age_secs, hook_state)
+    };
     let stats = compute_session_stats(&all_lines);
     let context_percent = extract_last_context_usage(&all_lines)
         .and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
@@ -1084,6 +1163,7 @@ pub fn parse_session_info(
         last_skill,
         agent_source: "claude-code".to_string(),
         last_outcome: None,
+        rate_limit,
     })
 }
 
@@ -1548,6 +1628,104 @@ mod tests {
         json!({"type": "tool_use", "name": "Skill", "input": {"skill": skill}})
     }
 
+    fn api_error_msg(error: &str, text: &str, timestamp: &str) -> Value {
+        json!({
+            "type": "assistant",
+            "timestamp": timestamp,
+            "isApiErrorMessage": true,
+            "error": error,
+            "message": {
+                "role": "assistant",
+                "stop_reason": "stop_sequence",
+                "content": [{"type": "text", "text": text}],
+            },
+        })
+    }
+
+    // ── detect_rate_limit tests ────────────────────────────────────────────
+
+    #[test]
+    fn rate_limit_detect_basic() {
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "rate_limit",
+                "You've hit your weekly limit · resets Apr 20, 10am (Asia/Shanghai)",
+                "2026-04-15T10:00:00.000Z",
+            ),
+        ];
+        let state = detect_rate_limit(&lines).expect("should detect rate_limit");
+        assert!(state.parsed);
+        assert_eq!(
+            state.limit_type,
+            crate::rate_limit_parser::RateLimitType::WeeklyLimit
+        );
+    }
+
+    #[test]
+    fn rate_limit_detect_unparseable_still_some() {
+        // Production legacy form with no limit-type keyword.
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "rate_limit",
+                "You've hit your limit · resets 7pm (Asia/Shanghai)",
+                "2026-03-17T08:10:04.234Z",
+            ),
+        ];
+        let state = detect_rate_limit(&lines).expect("legacy form still yields state");
+        assert_eq!(
+            state.limit_type,
+            crate::rate_limit_parser::RateLimitType::Unknown
+        );
+    }
+
+    #[test]
+    fn rate_limit_ignored_when_different_error() {
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "authentication_failed",
+                "Failed to authenticate. API Error: 403",
+                "2026-04-15T10:00:00.000Z",
+            ),
+        ];
+        assert!(detect_rate_limit(&lines).is_none());
+    }
+
+    #[test]
+    fn rate_limit_stale_when_real_turn_follows() {
+        // User already resumed: a real assistant message exists after the error.
+        let lines = vec![
+            user_msg(),
+            api_error_msg(
+                "rate_limit",
+                "You've hit your session limit · resets 7pm (Asia/Shanghai)",
+                "2026-04-15T10:00:00.000Z",
+            ),
+            user_msg(),
+            assistant_msg(vec![text_block("back in action")], Some("end_turn")),
+        ];
+        assert!(
+            detect_rate_limit(&lines).is_none(),
+            "a real turn after the error must clear rate_limit"
+        );
+    }
+
+    #[test]
+    fn rate_limit_ignored_when_no_api_error_flag() {
+        // A plain assistant message that happens to contain the phrase but
+        // lacks isApiErrorMessage must not trigger detection.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![text_block("You've hit your weekly limit (in testing)")],
+                Some("end_turn"),
+            ),
+        ];
+        assert!(detect_rate_limit(&lines).is_none());
+    }
+
     fn make_session(status: SessionStatus) -> SessionInfo {
         SessionInfo {
             id: "test-session".into(),
@@ -1578,6 +1756,7 @@ mod tests {
             context_percent: None,
             agent_source: "claude-code".into(),
             last_outcome: None,
+            rate_limit: None,
         }
     }
 

@@ -23,7 +23,14 @@
     "waitingInput": "Waiting",
     "active": "Active",
     "delegating": "Delegating",
-    "idle": "Idle"
+    "idle": "Idle",
+    "rateLimited": "Rate Limited"
+  },
+  "rateLimit": {
+    "resetsIn": "resets in {{time}}",
+    "resetsNow": "reset due",
+    "estimated": "~",
+    "resumeNow": "Resume now (claude --resume -p continue)"
   },
   "theme": {
     "light": "Light",
@@ -922,6 +929,10 @@
     "overlay_desc": "Show the assistant as a floating overlay on top of all windows",
     "auto_update_check": "Automatic update check",
     "auto_update_check_desc": "Check for new versions once a day and show a notification when an update is available",
+    "auto_resume": "Auto-resume after rate limit",
+    "auto_resume_desc": "When a session is stopped by a rate limit, resume it automatically once the reset time has passed",
+    "auto_resume_max_wait": "Max wait window (hours)",
+    "auto_resume_max_wait_desc": "Skip auto-resume when the configured wait is longer than this — prevents surprise resumes after a week-long weekly limit",
     "llm_provider": "LLM Provider",
     "llm_provider_select": "Provider",
     "llm_fast_model": "Fast model",
