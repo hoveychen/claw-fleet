@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import type { AuditAlert, WaitingAlert } from "../types";
-import { useAuditAlertsStore, useAuditStore, useDetailStore, useSessionsStore, useUIStore, useWaitingAlertsStore } from "../store";
+import type { WaitingAlert } from "../types";
+import { useDetailStore, useSessionsStore, useUIStore, useWaitingAlertsStore } from "../store";
 import { getItem } from "../storage";
 import { playAlertSound, type TtsMode } from "../audio";
 import styles from "./WaitingAlerts.module.css";
@@ -73,62 +73,8 @@ function AlertCard({
   );
 }
 
-/** A notification card for critical audit events */
-function AuditAlertCard({
-  alert,
-  onDismiss,
-}: {
-  alert: AuditAlert;
-  onDismiss: () => void;
-}) {
-  const { t } = useTranslation();
-  const [leaving, setLeaving] = useState(false);
-
-  const handleDismiss = () => {
-    setLeaving(true);
-    setTimeout(onDismiss, 280);
-  };
-
-  const handleNavigate = () => {
-    handleDismiss();
-    // Navigate to audit view for audit alerts
-    useUIStore.getState().setViewMode("audit");
-    navigateToSession(alert.jsonlPath);
-  };
-
-  return (
-    <div
-      className={`${styles.card} ${styles.card_audit} ${leaving ? styles.card_leaving : ""}`}
-      onClick={handleNavigate}
-      title={t("waiting_alerts.dismiss_tip")}
-    >
-      <div className={styles.card_dot_critical} />
-      <div className={styles.card_content}>
-        <div className={styles.card_workspace}>
-          <span className={styles.card_audit_badge}>CRITICAL</span>
-          {alert.workspaceName}
-        </div>
-        <div className={styles.card_summary_audit}>{alert.commandSummary}</div>
-        <div className={styles.card_time}>{timeAgo(alert.detectedAtMs, t)}</div>
-      </div>
-      <button
-        className={styles.card_close}
-        onClick={(e) => {
-          e.stopPropagation();
-          handleDismiss();
-        }}
-        aria-label="Dismiss"
-      >
-        ✕
-      </button>
-    </div>
-  );
-}
-
 export function WaitingAlerts() {
   const { alerts, setAlerts, refresh, dismiss, dismissedIds } = useWaitingAlertsStore();
-  const { alerts: auditAlerts, addAlert: addAuditAlert, dismiss: dismissAudit, dismissedKeys } = useAuditAlertsStore();
-  const { markAsRead } = useAuditStore();
   const spokenIds = useRef(new Set<string>());
 
   useEffect(() => {
@@ -147,72 +93,39 @@ export function WaitingAlerts() {
       }
     });
 
-    // Listen for critical audit alerts
-    const unlistenAudit = listen<AuditAlert>("audit-critical-alert", (e) => {
-      addAuditAlert(e.payload);
-
-      const ttsMode = (getItem("tts-mode") as TtsMode) || "off";
-      if (ttsMode !== "off" && !spokenIds.current.has(e.payload.key)) {
-        spokenIds.current.add(e.payload.key);
-        playAlertSound(e.payload.commandSummary);
-      }
-    });
-
     return () => {
       unlistenPromise.then((u) => u());
-      unlistenAudit.then((u) => u());
     };
   }, []);
 
-  const visibleWaiting = alerts.filter((a) => !dismissedIds.has(a.sessionId));
-  const visibleAudit = auditAlerts.filter((a) => !dismissedKeys.has(a.key));
+  const visible = alerts.filter((a) => !dismissedIds.has(a.sessionId));
 
-  // Merge: audit alerts first, then waiting alerts
-  const allItems: Array<{ type: "waiting"; alert: WaitingAlert } | { type: "audit"; alert: AuditAlert }> = [
-    ...visibleAudit.map((a) => ({ type: "audit" as const, alert: a })),
-    ...visibleWaiting.map((a) => ({ type: "waiting" as const, alert: a })),
-  ];
-
-  if (allItems.length === 0) return null;
+  if (visible.length === 0) return null;
 
   const MAX_STACK = 5;
-  const shown = allItems.slice(0, MAX_STACK);
-  const overflowCount = allItems.length - MAX_STACK;
+  const shown = visible.slice(0, MAX_STACK);
+  const overflowCount = visible.length - MAX_STACK;
 
   return (
     <div className={styles.overlay}>
       <div className={styles.stack}>
-        {shown.map((item, i) => {
-          const key = item.type === "audit" ? item.alert.key : item.alert.sessionId;
-          return (
-            <div
-              key={key}
-              className={styles.stack_layer}
-              style={{
-                zIndex: MAX_STACK - i,
-                transform: `translateY(${-i * 6}px) scale(${1 - i * 0.03})`,
-                opacity: i === 0 ? 1 : Math.max(0.4, 1 - i * 0.15),
-                pointerEvents: i === 0 ? "auto" : "none",
-              }}
-            >
-              {item.type === "audit" ? (
-                <AuditAlertCard
-                  alert={item.alert}
-                  onDismiss={() => {
-                    dismissAudit(item.alert.key);
-                    // Mark as read in audit view — alert.key matches dedup_key format
-                    markAsRead(item.alert.key);
-                  }}
-                />
-              ) : (
-                <AlertCard
-                  alert={item.alert}
-                  onDismiss={() => dismiss(item.alert.sessionId)}
-                />
-              )}
-            </div>
-          );
-        })}
+        {shown.map((alert, i) => (
+          <div
+            key={alert.sessionId}
+            className={styles.stack_layer}
+            style={{
+              zIndex: MAX_STACK - i,
+              transform: `translateY(${-i * 6}px) scale(${1 - i * 0.03})`,
+              opacity: i === 0 ? 1 : Math.max(0.4, 1 - i * 0.15),
+              pointerEvents: i === 0 ? "auto" : "none",
+            }}
+          >
+            <AlertCard
+              alert={alert}
+              onDismiss={() => dismiss(alert.sessionId)}
+            />
+          </div>
+        ))}
         {overflowCount > 0 && (
           <div className={styles.overflow_badge}>+{overflowCount}</div>
         )}

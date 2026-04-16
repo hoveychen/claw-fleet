@@ -90,5 +90,26 @@
   },
   "speed_chart": {
     "title": "Token 速度"
+  },
+  "decision": {
+    "title": "决策",
+    "guard_title": "命令已拦截",
+    "guard_command": "命令",
+    "guard_risk": "风险",
+    "guard_analysis": "AI 分析",
+    "guard_analyzing": "分析中…",
+    "guard_analysis_unavailable": "分析不可用",
+    "allow": "允许",
+    "block": "阻止",
+    "elicitation_title": "代理提问",
+    "step": "第 {{current}} 步，共 {{total}} 步",
+    "other": "其他",
+    "other_placeholder": "输入你的回答…",
+    "back": "上一步",
+    "next": "下一步",
+    "submit": "提交",
+    "decline": "拒绝",
+    "no_pending": "暂无待处理决策",
+    "workspace": "工作区"
   }
 }

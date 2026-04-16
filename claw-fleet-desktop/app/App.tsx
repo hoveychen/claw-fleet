@@ -8,22 +8,34 @@ import { Onboarding } from "./components/Onboarding";
 import { SessionDetail } from "./components/SessionDetail";
 import { SessionList } from "./components/SessionList";
 import { WaitingAlerts } from "./components/WaitingAlerts";
+import { DecisionPanel } from "./components/DecisionPanel";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { Wizard } from "./components/Wizard";
 import { type Connection, resolveTheme, useConnectionStore, useDetailStore, useOverlayStore, useSessionsStore, useUIStore } from "./store";
-import { getItem, setItem } from "./storage";
+import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
+import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
 
 const ONBOARDING_DISMISSED_KEY = "onboarding-dismissed";
 const WIZARD_COMPLETED_KEY = "wizard-completed";
+
+/** Compute which onboarding features the user hasn't seen yet. */
+function computeUnseenFeatures(): OnboardingFeatureId[] {
+  const seen = getSeenFeatures();
+  return ONBOARDING_FEATURES.filter((id) => !seen.has(id));
+}
 
 function App() {
   const { theme } = useUIStore();
   const { connection, setConnection, disconnect } = useConnectionStore();
 
   const [isMacOS, setIsMacOS] = useState(false);
-  const [showOnboarding, setShowOnboarding] = useState(() => {
-    return !getItem(ONBOARDING_DISMISSED_KEY);
+  const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
+    const dismissed = !!getItem(ONBOARDING_DISMISSED_KEY);
+    if (!dismissed) return "full";
+    // Already dismissed — check for new features since last visit
+    const unseen = computeUnseenFeatures();
+    return unseen.length > 0 ? "whats_new" : null;
   });
   const [showWizard, setShowWizard] = useState(false);
 
@@ -124,7 +136,7 @@ function App() {
   );
 
   const finishOnboarding = useCallback(() => {
-    setShowOnboarding(false);
+    setOnboardingMode(null);
     setItem(ONBOARDING_DISMISSED_KEY, "1");
     if (!getItem(WIZARD_COMPLETED_KEY)) {
       setShowWizard(true);
@@ -149,10 +161,13 @@ function App() {
   return (
     <div className="app">
       {isMacOS && <div className="drag_bar" data-tauri-drag-region />}
-      {showOnboarding && <Onboarding onDismiss={finishOnboarding} />}
+      {onboardingMode && <Onboarding mode={onboardingMode} onDismiss={finishOnboarding} />}
       {showWizard && <Wizard onDone={dismissWizard} />}
-      <SessionList />
-      <SessionDetail />
+      <div className="app_main">
+        <SessionList />
+        <SessionDetail />
+      </div>
+      <DecisionPanel />
       <WaitingAlerts />
       <UpdateNotice />
     </div>

@@ -130,7 +130,49 @@
     "tags": "Tags",
     "full_command": "Full Command",
     "go_to_session": "Go to Session",
-    "mark_read": "Mark as Read"
+    "mark_read": "Mark as Read",
+    "tab_events": "Events",
+    "tab_rules": "Rules",
+    "rules_title": "Audit Rules",
+    "cat_privilege_escalation": "Privilege Escalation",
+    "cat_data_exfiltration": "Data Exfiltration",
+    "cat_network": "Network",
+    "cat_git": "Git Operations",
+    "cat_filesystem": "File System",
+    "cat_container": "Containers & K8s",
+    "cat_package": "Package Management",
+    "cat_process": "Process Management",
+    "cat_cloud": "Cloud CLIs",
+    "cat_scheduled_task": "Scheduled Tasks",
+    "cat_python": "Python",
+    "cat_custom": "Custom Rules",
+    "rule_builtin": "Built-in",
+    "rule_custom": "Custom",
+    "rule_patterns": "Patterns",
+    "rule_match_mode": "Match Mode",
+    "rule_delete": "Delete",
+    "rule_delete_confirm": "Delete this custom rule?",
+    "rule_save": "Save",
+    "rule_cancel": "Cancel",
+    "new_rule": "New Rule",
+    "new_rule_manual": "Create Manually",
+    "suggest_placeholder": "Describe your security concern, e.g. \"I worry about agents modifying system config files\"",
+    "suggest_btn": "Generate Suggestions",
+    "suggest_loading": "Generating rule suggestions…",
+    "suggest_empty": "No suggestions generated. Try a different description.",
+    "suggest_add_selected": "Add Selected",
+    "suggest_reasoning": "Reasoning",
+    "suggest_error": "Failed to generate suggestions",
+    "match_contains": "Substring",
+    "match_command_start": "Command Start",
+    "level_critical": "Critical",
+    "level_high": "High",
+    "level_medium": "Medium",
+    "rule_id": "ID",
+    "rule_level": "Level",
+    "rule_category": "Category",
+    "rule_description": "Description",
+    "no_rules": "No rules configured."
   },
   "memory": {
     "panel_title": "Memory",
@@ -280,6 +322,10 @@
       "detected": "detected",
       "not_detected": "not detected"
     },
+    "whats_new": {
+      "title": "What's New",
+      "subtitle": "Claw Fleet has new features since your last visit. Take a moment to configure them."
+    },
     "all_good": {
       "title": "All set!",
       "description": "Claude Code is installed, you're logged in, and sessions are being monitored."
@@ -311,7 +357,12 @@
     "hooks_setup": {
       "title": "Recommended: Install Fleet Hooks",
       "description": "Claude Code detected — installing Fleet Hooks enables more accurate agent status detection (tool execution, waiting for input, etc.). Hooks run asynchronously in the background and won't affect agent performance.",
-      "disabled_warning": "Note: disableAllHooks is set to true in your settings. Hooks won't work until this is changed."
+      "disabled_warning": "Note: disableAllHooks is set to true in your settings. Hooks won't work until this is changed.",
+      "guard_desc": "When an agent is about to run a dangerous command (sudo, git push --force, rm -rf, etc.), Fleet intercepts it and asks for your approval in the app before execution. You stay in control without babysitting the terminal.",
+      "elicitation_desc": "When an agent has a question for you (AskUserQuestion), Fleet routes it to the app so you can answer from anywhere — no need to switch to the terminal window.",
+      "elicitation_mock_q": "Which database should I use for the new auth service?",
+      "elicitation_mock_a1": "PostgreSQL",
+      "elicitation_mock_a2": "SQLite"
     },
     "copy_hint": "Click to copy"
   },
@@ -869,6 +920,13 @@
     "remote": "Remote",
     "hooks": "Fleet Hooks",
     "hooks_desc": "Hooks improve session status detection accuracy",
+    "guard": "Guard (Interception)",
+    "guard_desc": "Intercept critical commands (sudo, git push, etc.) and ask for your approval before execution",
+    "guard_enabled": "Enable guard",
+    "guard_llm_analysis": "AI risk analysis",
+    "elicitation": "Elicitation (Agent Questions)",
+    "elicitation_desc": "Route AskUserQuestion tool calls to Fleet so you can answer from the Fleet app instead of the terminal",
+    "elicitation_enabled": "Enable elicitation",
     "sources": "Agent Sources",
     "sources_desc": "Choose which AI agent backends to monitor",
     "sources_restart": "Restart to apply changes",
@@ -984,6 +1042,28 @@
     "confirm_body_disabled_warning": "\n\nNote: \"disableAllHooks\" is currently set to true in your settings. Hooks will not work until this is changed.",
     "installed": "Fleet hooks installed successfully",
     "install_error": "Failed to install hooks: {{error}}"
+  },
+  "decision": {
+    "pending": "Pending decisions"
+  },
+  "guard": {
+    "title": "Critical Command Detected",
+    "command": "Command",
+    "workspace": "Workspace",
+    "analysis": "AI Analysis",
+    "analyzing": "Analyzing command...",
+    "allow": "Allow",
+    "block": "Block",
+    "queue": "{{count}} more pending"
+  },
+  "elicitation": {
+    "title": "Agent Question",
+    "submit": "Submit",
+    "decline": "Decline",
+    "next": "Next",
+    "back": "Back",
+    "other": "Other",
+    "other_placeholder": "Type your answer…"
   },
   "view_report": "Report",
   "report": {

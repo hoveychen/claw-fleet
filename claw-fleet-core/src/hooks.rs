@@ -15,6 +15,12 @@ use serde_json::{json, Map, Value};
 const FLEET_HOOK_COMMAND: &str =
     r#"sh -c 'cat >> "$HOME/.fleet/hooks.jsonl"'"#;
 
+/// Identity marker for the guard hook group.
+const FLEET_GUARD_MARKER: &str = "fleet guard";
+
+/// Identity marker for the elicitation hook group.
+const FLEET_ELICITATION_MARKER: &str = "fleet elicitation";
+
 /// Event types we need hooks for.
 const FLEET_HOOK_EVENTS: &[&str] = &[
     "PreToolUse",
@@ -36,6 +42,10 @@ pub struct HookSetupPlan {
     pub hooks_globally_disabled: bool,
     /// Whether Fleet hooks are already fully installed.
     pub already_installed: bool,
+    /// Whether the guard (interception) hook is installed.
+    pub guard_installed: bool,
+    /// Whether the elicitation (AskUserQuestion interception) hook is installed.
+    pub elicitation_installed: bool,
 }
 
 /// The "cooked" state derived from the most recent hook events for a session.
@@ -100,10 +110,15 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         }
     }
 
+    let guard_installed = has_guard_hook(&hooks_obj);
+    let elicitation_installed = has_elicitation_hook(&hooks_obj);
+
     HookSetupPlan {
         to_add,
         hooks_globally_disabled: hooks_disabled,
         already_installed: all_present,
+        guard_installed,
+        elicitation_installed,
     }
 }
 
@@ -175,6 +190,224 @@ pub fn remove_fleet_hooks() -> Result<(), String> {
     }
 
     write_settings(&settings)
+}
+
+// ── Guard hook (synchronous interception) ────────────────────────────────────
+
+/// Resolve the `fleet` binary path for use in the guard hook command.
+fn resolve_fleet_binary() -> Option<String> {
+    // 1. Check if this process IS the fleet binary (desktop app has sidecar).
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let fleet_bin = dir.join("fleet");
+            if fleet_bin.exists() {
+                return Some(fleet_bin.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    // 2. Check common install locations.
+    let candidates = [
+        "/usr/local/bin/fleet",
+    ];
+    for c in candidates {
+        if std::path::Path::new(c).exists() {
+            return Some(c.to_string());
+        }
+    }
+
+    // 3. Try PATH.
+    #[cfg(unix)]
+    {
+        if let Ok(output) = std::process::Command::new("which").arg("fleet").output() {
+            if output.status.success() {
+                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Install the guard hook (synchronous PreToolUse for Bash) into settings.json.
+pub fn apply_guard_hook() -> Result<(), String> {
+    let fleet_bin = resolve_fleet_binary()
+        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+
+    if !obj.contains_key("hooks") {
+        obj.insert("hooks".into(), json!({}));
+    }
+    let hooks_obj = obj
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+        .ok_or("hooks is not an object")?;
+
+    if has_guard_hook(hooks_obj) {
+        return Ok(()); // Already installed
+    }
+
+    let guard_group = json!({
+        "matcher": { "tool_name": "Bash" },
+        "hooks": [{
+            "type": "command",
+            "command": fault_tolerant_command(&fleet_bin, "guard"),
+            "timeout": 120000
+        }]
+    });
+
+    if let Some(existing) = hooks_obj.get_mut("PreToolUse") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.push(guard_group);
+        }
+    } else {
+        hooks_obj.insert("PreToolUse".to_string(), json!([guard_group]));
+    }
+
+    write_settings(&settings)
+}
+
+/// Remove the guard hook from settings.json.
+pub fn remove_guard_hook() -> Result<(), String> {
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(());
+    };
+
+    if let Some(arr) = hooks_obj.get_mut("PreToolUse").and_then(|v| v.as_array_mut()) {
+        arr.retain(|group| !is_guard_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("PreToolUse");
+        }
+    }
+
+    if hooks_obj.is_empty() {
+        obj.remove("hooks");
+    }
+
+    write_settings(&settings)
+}
+
+/// Check whether PreToolUse already has a guard hook group.
+fn has_guard_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("PreToolUse")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(|group| is_guard_group(group)))
+        .unwrap_or(false)
+}
+
+/// Check whether a hook group is a guard hook (by matching the command).
+fn is_guard_group(group: &Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains(FLEET_GUARD_MARKER))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+// ── Elicitation hook (AskUserQuestion interception) ─────────────────────
+
+/// Install the elicitation hook (synchronous PreToolUse for AskUserQuestion).
+pub fn apply_elicitation_hook() -> Result<(), String> {
+    let fleet_bin = resolve_fleet_binary()
+        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+
+    if !obj.contains_key("hooks") {
+        obj.insert("hooks".into(), json!({}));
+    }
+    let hooks_obj = obj
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+        .ok_or("hooks is not an object")?;
+
+    if has_elicitation_hook(hooks_obj) {
+        return Ok(());
+    }
+
+    let elicitation_group = json!({
+        "matcher": { "tool_name": "AskUserQuestion" },
+        "hooks": [{
+            "type": "command",
+            "command": fault_tolerant_command(&fleet_bin, "elicitation"),
+            "timeout": 120000
+        }]
+    });
+
+    if let Some(existing) = hooks_obj.get_mut("PreToolUse") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.push(elicitation_group);
+        }
+    } else {
+        hooks_obj.insert("PreToolUse".to_string(), json!([elicitation_group]));
+    }
+
+    write_settings(&settings)
+}
+
+/// Remove the elicitation hook from settings.json.
+pub fn remove_elicitation_hook() -> Result<(), String> {
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(());
+    };
+
+    if let Some(arr) = hooks_obj.get_mut("PreToolUse").and_then(|v| v.as_array_mut()) {
+        arr.retain(|group| !is_elicitation_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("PreToolUse");
+        }
+    }
+
+    if hooks_obj.is_empty() {
+        obj.remove("hooks");
+    }
+
+    write_settings(&settings)
+}
+
+fn has_elicitation_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("PreToolUse")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(|group| is_elicitation_group(group)))
+        .unwrap_or(false)
+}
+
+fn is_elicitation_group(group: &Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains(FLEET_ELICITATION_MARKER))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 // ── Read hook events ─────────────────────────────────────────────────────────
@@ -288,6 +521,20 @@ fn is_fleet_group(group: &Value) -> bool {
             })
         })
         .unwrap_or(false)
+}
+
+/// Build a fault-tolerant shell command that silently exits 0 when the fleet
+/// binary is missing (e.g. after uninstall), so Claude Code is not blocked.
+/// When the binary exists, it `exec`s into it — propagating its exit code and
+/// stdout/stderr as normal.
+fn fault_tolerant_command(fleet_bin: &str, subcommand: &str) -> String {
+    // Use `test -x` so it works even if the binary was removed from PATH but
+    // the absolute path is stale.  `exec` avoids an extra shell process.
+    format!(
+        r#"sh -c 'if [ -x "{bin}" ]; then exec "{bin}" {sub}; else exit 0; fi'"#,
+        bin = fleet_bin,
+        sub = subcommand,
+    )
 }
 
 /// Read the last `max_lines` from the events file and parse them.

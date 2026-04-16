@@ -5,6 +5,8 @@ import type {
   DailyReport,
   DailyReportStats,
   WaitingAlert,
+  GuardRequest,
+  ElicitationRequest,
 } from "../types";
 
 export class FleetApiClient {
@@ -85,8 +87,68 @@ export class FleetApiClient {
     return this.fetch("/search", { q: query, limit: String(limit) });
   }
 
+  // ── Guard / Elicitation ─────────────────────────────────────────────
+
+  async getGuardPending(): Promise<GuardRequest[]> {
+    return this.fetch("/guard/pending");
+  }
+
+  async respondGuard(id: string, allow: boolean): Promise<void> {
+    await this.postJson("/guard/respond", {
+      id,
+      decision: allow ? "Allow" : "Block",
+    });
+  }
+
+  async analyzeGuard(
+    command: string,
+    context: string,
+    lang: string,
+  ): Promise<string | null> {
+    try {
+      const resp: { analysis?: string } = await this.postJson(
+        "/guard/analyze",
+        { command, context, lang },
+      );
+      return resp.analysis ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async getElicitationPending(): Promise<ElicitationRequest[]> {
+    return this.fetch("/elicitation/pending");
+  }
+
+  async respondElicitation(
+    id: string,
+    declined: boolean,
+    answers: Record<string, string>,
+  ): Promise<void> {
+    await this.postJson("/elicitation/respond", { id, declined, answers });
+  }
+
   /** SSE event source URL (use with EventSource or custom SSE) */
   sseUrl(): string {
     return `${this.baseUrl}/events?token=${this.token}`;
+  }
+
+  // ── POST helper ───────────────────────────────────────────────────────
+
+  private async postJson<T>(path: string, body: unknown): Promise<T> {
+    const url = new URL(path, this.baseUrl);
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`API ${res.status}: ${text}`);
+    }
+    return res.json();
   }
 }

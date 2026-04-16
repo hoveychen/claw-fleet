@@ -14,6 +14,29 @@ import {
 } from "./blocks/ToolUseBlock";
 import styles from "./MessageList.module.css";
 
+// ── Search highlight ─────────────────────────────────────────────────────────
+
+function HighlightedText({ text, terms }: { text: string; terms: string[] }) {
+  if (!terms.length) return <>{text}</>;
+  // Build a regex matching any of the search terms (case-insensitive)
+  const escaped = terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+  const parts = text.split(regex);
+  return (
+    <>
+      {parts.map((part, i) =>
+        regex.test(part) ? (
+          <mark key={i} style={{ background: "#fbbf24", color: "#000", borderRadius: "2px" }}>
+            {part}
+          </mark>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      )}
+    </>
+  );
+}
+
 // ── Tool result lookup ────────────────────────────────────────────────────────
 
 function buildResultMap(
@@ -40,9 +63,10 @@ interface BlocksProps {
   content: ContentBlock[];
   resultMap: Map<string, ToolResultBlock>;
   isPartial: boolean;
+  searchTerms?: string[] | null;
 }
 
-const ContentBlocks = memo(function ContentBlocks({ content, resultMap, isPartial }: BlocksProps) {
+const ContentBlocks = memo(function ContentBlocks({ content, resultMap, isPartial, searchTerms }: BlocksProps) {
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -55,6 +79,7 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, isPartia
           key={i}
           text={(block as { type: "text"; text: string }).text}
           isPartial={isPartial && i === content.length - 1}
+          searchTerms={searchTerms}
         />
       );
       i++;
@@ -134,9 +159,11 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, isPartia
 interface MsgProps {
   msg: RawMessage;
   resultMap: Map<string, ToolResultBlock>;
+  searchTerms?: string[] | null;
+  msgIdx?: number;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, searchTerms, msgIdx }: MsgProps) {
   if (!msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
@@ -170,6 +197,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap }: MsgProps) {
   return (
     <div
       className={`${styles.message} ${isAssistant ? styles.assistant : styles.user}`}
+      data-msg-idx={msgIdx}
     >
       {isAssistant && <span className={`${styles.dot} ${dotClass}`} />}
       <div className={styles.content}>
@@ -178,18 +206,23 @@ const MessageRow = memo(function MessageRow({ msg, resultMap }: MsgProps) {
             content={content}
             resultMap={resultMap}
             isPartial={isPartial}
+            searchTerms={searchTerms}
           />
         )}
         {isUser && (
           <div className={styles.user_text}>
             {typeof content === "string"
-              ? content
+              ? (searchTerms ? <HighlightedText text={content} terms={searchTerms} /> : content)
               : Array.isArray(content)
                 ? content
                     .filter((b) => b.type !== "tool_result")
                     .map((b, i) =>
                       b.type === "text" ? (
-                        <span key={i}>{(b as { type: "text"; text: string }).text}</span>
+                        <span key={i}>
+                          {searchTerms
+                            ? <HighlightedText text={(b as { type: "text"; text: string }).text} terms={searchTerms} />
+                            : (b as { type: "text"; text: string }).text}
+                        </span>
                       ) : null
                     )
                 : null}
@@ -224,11 +257,27 @@ function WaitingIndicator() {
 interface Props {
   messages: RawMessage[];
   isLoading: boolean;
+  searchQuery?: string | null;
 }
 
 const PAGE_SIZE = 100;
 
-export function MessageList({ messages, isLoading }: Props) {
+/** Extract plain text from a message for search matching. */
+function messageText(msg: RawMessage): string {
+  if (!msg.message) return "";
+  const content = msg.message.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((b) => {
+      if (b.type === "text") return (b as { type: "text"; text: string }).text;
+      if (b.type === "thinking") return (b as { type: "thinking"; thinking: string }).thinking;
+      return "";
+    })
+    .join(" ");
+}
+
+export function MessageList({ messages, isLoading, searchQuery }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -245,19 +294,44 @@ export function MessageList({ messages, isLoading }: Props) {
     [messages]
   );
 
+  // Parse search terms once for matching and highlighting
+  const searchTerms = useMemo(() => {
+    if (!searchQuery || searchQuery.trim().length < 2) return null;
+    return searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  }, [searchQuery]);
+
+  // Find the index of the first matching message for search navigation
+  const searchMatchIndex = useMemo(() => {
+    if (!searchTerms || displayMsgs.length === 0) return -1;
+    for (let i = 0; i < displayMsgs.length; i++) {
+      const text = messageText(displayMsgs[i]).toLowerCase();
+      if (searchTerms.every((term) => text.includes(term))) return i;
+    }
+    return -1;
+  }, [searchTerms, displayMsgs]);
+
   // Reset window when switching to a new session (total message count drops)
   const prevCountRef = useRef(displayMsgs.length);
   const sessionSwitchedRef = useRef(false);
+  const searchScrolledRef = useRef(false);
   useEffect(() => {
     if (
       displayMsgs.length < prevCountRef.current ||
       (prevCountRef.current === 0 && displayMsgs.length > 0)
     ) {
-      setVisibleStart(-1);
       sessionSwitchedRef.current = true;
+      searchScrolledRef.current = false;
+
+      // If we have a search match, start the view window around that match
+      if (searchMatchIndex >= 0) {
+        const start = Math.max(0, searchMatchIndex - 10); // show some context before match
+        setVisibleStart(start);
+      } else {
+        setVisibleStart(-1);
+      }
     }
     prevCountRef.current = displayMsgs.length;
-  }, [displayMsgs.length]);
+  }, [displayMsgs.length, searchMatchIndex]);
 
   // Compute effective start: -1 means "tail mode" (follow latest messages)
   const tailStart = Math.max(0, displayMsgs.length - PAGE_SIZE);
@@ -306,12 +380,27 @@ export function MessageList({ messages, isLoading }: Props) {
     setVisibleStart(Math.max(0, prevEffectiveStartRef.current - PAGE_SIZE));
   }, [hiddenCount]);
 
-  // Auto-scroll to bottom when session switches or when user is already near the bottom
+  // Auto-scroll to bottom (or to search match) when session switches
   useEffect(() => {
     const scroller = listRef.current?.parentElement;
     if (!scroller) return;
     if (sessionSwitchedRef.current) {
       sessionSwitchedRef.current = false;
+      // If we have a search match, scroll to it instead of the bottom
+      if (searchMatchIndex >= 0 && !searchScrolledRef.current) {
+        searchScrolledRef.current = true;
+        // Find the DOM element for the matching message
+        const matchRelIdx = searchMatchIndex - effectiveStart;
+        if (matchRelIdx >= 0 && listRef.current) {
+          const rows = listRef.current.querySelectorAll("[data-msg-idx]");
+          for (const row of rows) {
+            if (Number(row.getAttribute("data-msg-idx")) === searchMatchIndex) {
+              row.scrollIntoView({ behavior: "instant", block: "center" });
+              return;
+            }
+          }
+        }
+      }
       bottomRef.current?.scrollIntoView({ behavior: "instant" });
       return;
     }
@@ -319,7 +408,7 @@ export function MessageList({ messages, isLoading }: Props) {
     if (distFromBottom < 200) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
-  }, [displayMsgs.length]);
+  }, [displayMsgs.length, searchMatchIndex, effectiveStart]);
 
   const lastAssistant = [...displayMsgs].reverse().find((m: RawMessage) => m.type === "assistant");
   const isWaiting = lastAssistant?.message?.stop_reason === "end_turn";
@@ -336,7 +425,13 @@ export function MessageList({ messages, isLoading }: Props) {
         </button>
       )}
       {visibleMsgs.map((msg, i) => (
-        <MessageRow key={msg.uuid ?? (effectiveStart + i)} msg={msg} resultMap={resultMap} />
+        <MessageRow
+          key={msg.uuid ?? (effectiveStart + i)}
+          msg={msg}
+          resultMap={resultMap}
+          searchTerms={searchTerms}
+          msgIdx={effectiveStart + i}
+        />
       ))}
       {isWaiting && <WaitingIndicator />}
       <div ref={bottomRef} />

@@ -226,7 +226,15 @@ input, button {
 /* ── Layout ───────────────────────────────────────────────────────────────── */
 .app {
   display: flex;
+  flex-direction: column;
   height: 100vh;
+  overflow: hidden;
+}
+
+.app_main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
   overflow: hidden;
 }
 

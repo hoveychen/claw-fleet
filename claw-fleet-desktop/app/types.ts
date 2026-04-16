@@ -198,15 +198,94 @@ export interface AuditSummary {
   totalSessionsScanned: number;
 }
 
-export interface AuditAlert {
-  key: string;
+export interface AuditRuleInfo {
+  id: string;
+  level: AuditRiskLevel;
+  tag: string;
+  matchMode: "contains" | "command_start";
+  patterns: string[];
+  descriptionEn: string;
+  descriptionZh: string;
+  enabled: boolean;
+  builtin: boolean;
+  category: string;
+}
+
+export interface SuggestedRule {
+  id: string;
+  level: AuditRiskLevel;
+  tag: string;
+  matchMode: "contains" | "command_start";
+  patterns: string[];
+  descriptionEn: string;
+  descriptionZh: string;
+  category: string;
+  reasoning: string;
+}
+
+// ── Guard types ─────────────────────────────────────────────────────────────
+
+export interface GuardRequest {
+  id: string;
   sessionId: string;
   workspaceName: string;
+  toolName: string;
+  command: string;
   commandSummary: string;
   riskTags: string[];
-  detectedAtMs: number;
-  jsonlPath: string;
+  timestamp: string;
 }
+
+// ── Decision panel types (abstract, extensible) ────────────────────────────
+
+/** Guard interception decision — user must allow or block a critical command. */
+export interface GuardDecision {
+  kind: "guard";
+  id: string;
+  request: GuardRequest;
+  analysis: string | null;
+  analyzing: boolean;
+  arrivedAt: number; // epoch ms
+}
+
+// ── Elicitation types ──────────────────────────────────────────────────
+
+export interface ElicitationOption {
+  label: string;
+  description: string;
+}
+
+export interface ElicitationQuestion {
+  question: string;
+  header: string;
+  options: ElicitationOption[];
+  multiSelect: boolean;
+}
+
+export interface ElicitationRequest {
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  questions: ElicitationQuestion[];
+  timestamp: string;
+}
+
+/** Agent is asking the user a question via AskUserQuestion. */
+export interface ElicitationDecision {
+  kind: "elicitation";
+  id: string;
+  request: ElicitationRequest;
+  /** Current step index (0-based). */
+  step: number;
+  /** Current selections: question text → selected option label(s). */
+  selections: Record<string, string[]>;
+  /** Custom "Other" text per question: question text → user-typed string. */
+  customAnswers: Record<string, string>;
+  arrivedAt: number;
+}
+
+/** Union of all decision types the panel can display. */
+export type PendingDecision = GuardDecision | ElicitationDecision;
 
 // ── Daily Report types ────────────────────────────────────────────────────────
 

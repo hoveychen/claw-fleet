@@ -10,6 +10,8 @@ import type {
   DailyReport,
   DailyReportStats,
   WaitingAlert,
+  GuardRequest,
+  ElicitationRequest,
 } from "../types";
 
 export class MockApiClient {
@@ -71,6 +73,30 @@ export class MockApiClient {
   ): Promise<Array<{ sessionId: string; snippet: string; rank: number }>> {
     return [];
   }
+
+  async getGuardPending(): Promise<GuardRequest[]> {
+    return [];
+  }
+
+  async respondGuard(_id: string, _allow: boolean): Promise<void> {}
+
+  async analyzeGuard(
+    _command: string,
+    _context: string,
+    _lang: string,
+  ): Promise<string | null> {
+    return null;
+  }
+
+  async getElicitationPending(): Promise<ElicitationRequest[]> {
+    return [];
+  }
+
+  async respondElicitation(
+    _id: string,
+    _declined: boolean,
+    _answers: Record<string, string>,
+  ): Promise<void> {}
 
   sseUrl(): string {
     return "";

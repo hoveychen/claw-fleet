@@ -77,6 +77,64 @@ export interface RawMessage {
   };
 }
 
+// ── Guard types ─────────────────────────────────────────────────────────────
+
+export interface GuardRequest {
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  toolName: string;
+  command: string;
+  commandSummary: string;
+  riskTags: string[];
+  timestamp: string;
+}
+
+export interface GuardDecision {
+  kind: "guard";
+  id: string;
+  request: GuardRequest;
+  analysis: string | null;
+  analyzing: boolean;
+  arrivedAt: number;
+}
+
+// ── Elicitation types ──────────────────────────────────────────────────
+
+export interface ElicitationOption {
+  label: string;
+  description: string;
+}
+
+export interface ElicitationQuestion {
+  question: string;
+  header: string;
+  options: ElicitationOption[];
+  multiSelect: boolean;
+}
+
+export interface ElicitationRequest {
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  questions: ElicitationQuestion[];
+  timestamp: string;
+}
+
+export interface ElicitationDecision {
+  kind: "elicitation";
+  id: string;
+  request: ElicitationRequest;
+  step: number;
+  selections: Record<string, string[]>;
+  customAnswers: Record<string, string>;
+  arrivedAt: number;
+}
+
+export type PendingDecision = GuardDecision | ElicitationDecision;
+
+// ── Audit types ─────────────────────────────────────────────────────────────
+
 export type AuditRiskLevel = "medium" | "high" | "critical";
 
 export interface AuditEvent {

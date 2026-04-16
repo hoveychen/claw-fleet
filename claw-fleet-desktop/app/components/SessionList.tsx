@@ -196,7 +196,10 @@ export function SessionList() {
         <SessionCard
           session={s}
           isSelected={viewedSession?.jsonlPath === s.jsonlPath}
-          onClick={() => open(s)}
+          onClick={() => {
+            const isFtsHit = filter.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
+            open(s, isFtsHit ? filter.trim() : undefined);
+          }}
         />
       </div>
     ));

@@ -17,7 +17,7 @@ function shortId(id: string) {
 
 export function SessionDetail() {
   const { t } = useTranslation();
-  const { session, messages, isLoading, close, open } = useDetailStore();
+  const { session, messages, isLoading, searchQuery, close, open } = useDetailStore();
   const sessions = useSessionsStore((s) => s.sessions);
   const liveSession = useMemo(() => {
     if (!session) return null;
@@ -153,7 +153,7 @@ export function SessionDetail() {
 
           {/* Messages */}
           <div ref={scrollRef} className={styles.scroll_area}>
-            <MessageList messages={messages} isLoading={isLoading} />
+            <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} />
           </div>
 
           {/* Auto-follow indicator */}

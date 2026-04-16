@@ -197,9 +197,6 @@ pub struct RemoteBackend {
     /// Semantic outcome tags per session, set by background analysis.
     #[allow(dead_code)]
     session_outcomes: Arc<Mutex<std::collections::HashMap<String, Vec<String>>>>,
-    /// Keys of critical audit events for which notifications have already been sent.
-    #[allow(dead_code)]
-    notified_audit_keys: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl Drop for RemoteBackend {
@@ -370,6 +367,8 @@ impl crate::backend::Backend for RemoteBackend {
             to_add: vec![],
             hooks_globally_disabled: false,
             already_installed: true,
+            guard_installed: false,
+            elicitation_installed: false,
         })
     }
 
@@ -379,6 +378,54 @@ impl crate::backend::Backend for RemoteBackend {
 
     fn remove_hooks(&self) -> Result<(), String> {
         self.probe.post_ok("/remove_hooks")
+    }
+
+    fn apply_guard_hook(&self) -> Result<(), String> {
+        self.probe.post_ok("/apply_guard_hook")
+    }
+
+    fn remove_guard_hook(&self) -> Result<(), String> {
+        self.probe.post_ok("/remove_guard_hook")
+    }
+
+    fn respond_to_guard(&self, id: &str, allow: bool) -> Result<(), String> {
+        use claw_fleet_core::guard::{GuardDecision, GuardResponse};
+        let resp = GuardResponse {
+            id: id.to_string(),
+            decision: if allow { GuardDecision::Allow } else { GuardDecision::Block },
+        };
+        self.probe.post_json_ok("/guard/respond", &resp)
+    }
+
+    fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { command: &'a str, context: &'a str, lang: &'a str }
+        #[derive(serde::Deserialize)]
+        struct Resp { analysis: String }
+        let resp: Resp = self.probe.post_json("/guard/analyze", &Req { command, context, lang })?;
+        Ok(resp.analysis)
+    }
+
+    fn apply_elicitation_hook(&self) -> Result<(), String> {
+        self.probe.post_ok("/apply_elicitation_hook")
+    }
+
+    fn remove_elicitation_hook(&self) -> Result<(), String> {
+        self.probe.post_ok("/remove_elicitation_hook")
+    }
+
+    fn respond_to_elicitation(
+        &self,
+        id: &str,
+        declined: bool,
+        answers: std::collections::HashMap<String, String>,
+    ) -> Result<(), String> {
+        let resp = claw_fleet_core::elicitation::ElicitationResponse {
+            id: id.to_string(),
+            declined,
+            answers,
+        };
+        self.probe.post_json_ok("/elicitation/respond", &resp)
     }
 
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
@@ -406,6 +453,32 @@ impl crate::backend::Backend for RemoteBackend {
                 events: vec![],
                 total_sessions_scanned: 0,
             })
+    }
+
+    fn get_audit_rules(&self) -> Vec<crate::audit::AuditRuleInfo> {
+        self.probe.get("/audit/rules").unwrap_or_default()
+    }
+
+    fn set_audit_rule_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body { id: String, enabled: bool }
+        self.probe.post_json_ok("/audit/rules/toggle", &Body { id: id.to_string(), enabled })
+    }
+
+    fn save_custom_audit_rule(&self, rule: crate::audit::AuditRuleInfo) -> Result<(), String> {
+        self.probe.post_json_ok("/audit/rules/save", &rule)
+    }
+
+    fn delete_custom_audit_rule(&self, id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body { id: String }
+        self.probe.post_json_ok("/audit/rules/delete", &Body { id: id.to_string() })
+    }
+
+    fn suggest_audit_rules(&self, concern: &str, lang: &str) -> Result<Vec<crate::audit::SuggestedRule>, String> {
+        #[derive(serde::Serialize)]
+        struct Body { concern: String, lang: String }
+        self.probe.post_json("/audit/rules/suggest", &Body { concern: concern.to_string(), lang: lang.to_string() })
     }
 
     fn get_daily_report(&self, date: &str) -> Result<Option<crate::daily_report::DailyReport>, String> {
@@ -1048,9 +1121,6 @@ fn connect_remote_start_probe(
         Arc::new(Mutex::new(std::collections::HashMap::new()));
     let session_outcomes: Arc<Mutex<std::collections::HashMap<String, Vec<String>>>> =
         Arc::new(Mutex::new(std::collections::HashMap::new()));
-    let notified_audit_keys: Arc<Mutex<std::collections::HashSet<String>>> =
-        Arc::new(Mutex::new(std::collections::HashSet::new()));
-
     // Do an initial synchronous fetch so list_sessions() is populated immediately.
     if let Ok(s) = probe.get::<Vec<SessionInfo>>("/sessions") {
         *sessions.lock().unwrap() = s.clone();
@@ -1067,7 +1137,6 @@ fn connect_remote_start_probe(
         let wa2 = waiting_alerts.clone();
         let so2 = session_outcomes.clone();
         let probe2 = probe.clone();
-        let nak2 = notified_audit_keys.clone();
         let locale = app
             .try_state::<crate::AppState>()
             .map(|s| s.locale.lock().unwrap().clone())
@@ -1232,44 +1301,68 @@ fn connect_remote_start_probe(
                     }
                 }
 
-                // ── Audit critical event notifications ─────────────────────
-                {
-                    let mode = crate::local_backend::get_notification_mode(&app2);
-                    if mode != "none" {
-                        if let Ok(summary) = probe2.get::<crate::audit::AuditSummary>("/audit") {
-                            let mut nk = nak2.lock().unwrap();
-                            for event in &summary.events {
-                                if event.risk_level != crate::audit::AuditRiskLevel::Critical {
-                                    continue;
-                                }
-                                let key = event.dedup_key();
-                                if nk.contains(&key) {
-                                    continue;
-                                }
-                                nk.insert(key.clone());
+            }
+        });
+    }
 
-                                let title = format!("⚠ CRITICAL: {}", event.workspace_name);
-                                crate::local_backend::send_os_notification(
-                                    &app2, &title, &event.command_summary,
-                                );
-
-                                let alert = crate::audit::AuditAlert {
-                                    key,
-                                    session_id: event.session_id.clone(),
-                                    workspace_name: event.workspace_name.clone(),
-                                    command_summary: event.command_summary.clone(),
-                                    risk_tags: event.risk_tags.clone(),
-                                    detected_at_ms: SystemTime::now()
-                                        .duration_since(UNIX_EPOCH)
-                                        .unwrap_or_default()
-                                        .as_millis() as u64,
-                                    jsonl_path: event.jsonl_path.clone(),
-                                };
-                                let _ = app2.emit("audit-critical-alert", &alert);
-                            }
-                        }
+    // Guard polling thread — polls remote probe for pending guard requests.
+    {
+        let app_guard = app.clone();
+        let pr_guard = poller_running.clone();
+        let probe_guard = probe.clone();
+        std::thread::spawn(move || {
+            let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                if !*pr_guard.lock().unwrap() {
+                    break;
+                }
+                let Ok(pending) = probe_guard.get::<Vec<claw_fleet_core::guard::GuardRequest>>("/guard/pending") else {
+                    continue;
+                };
+                let pending_ids: std::collections::HashSet<String> =
+                    pending.iter().map(|r| r.id.clone()).collect();
+                for req in &pending {
+                    if known.insert(req.id.clone()) {
+                        claw_fleet_core::log_debug(&format!(
+                            "[remote-guard] new request: {} cmd={}",
+                            req.id, req.command_summary
+                        ));
+                        let _ = app_guard.emit("guard-request", req);
                     }
                 }
+                known.retain(|id| pending_ids.contains(id));
+            }
+        });
+    }
+
+    // Elicitation polling thread — polls remote probe for pending elicitation requests.
+    {
+        let app_elicit = app.clone();
+        let pr_elicit = poller_running.clone();
+        let probe_elicit = probe.clone();
+        std::thread::spawn(move || {
+            let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                if !*pr_elicit.lock().unwrap() {
+                    break;
+                }
+                let Ok(pending) = probe_elicit.get::<Vec<claw_fleet_core::elicitation::ElicitationRequest>>("/elicitation/pending") else {
+                    continue;
+                };
+                let pending_ids: std::collections::HashSet<String> =
+                    pending.iter().map(|r| r.id.clone()).collect();
+                for req in &pending {
+                    if known.insert(req.id.clone()) {
+                        claw_fleet_core::log_debug(&format!(
+                            "[remote-elicitation] new request: {} questions={}",
+                            req.id, req.questions.len()
+                        ));
+                        let _ = app_elicit.emit("elicitation-request", req);
+                    }
+                }
+                known.retain(|id| pending_ids.contains(id));
             }
         });
     }
@@ -1292,7 +1385,6 @@ fn connect_remote_start_probe(
         sessions,
         watch: Arc::new(crate::WatchState::new()),
         waiting_alerts,
-        notified_audit_keys,
         session_outcomes,
     })
 }

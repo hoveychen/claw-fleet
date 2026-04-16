@@ -148,6 +148,55 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     }
   }, []);
 
+  // ── Guard state ────────────────────────────────────────────────────────
+  const [guardEnabled, setGuardEnabled] = useState(
+    () => getItem("guard-enabled") !== "false",
+  );
+  const [guardLlmAnalysis, setGuardLlmAnalysis] = useState(
+    () => getItem("guard-llm-analysis") !== "false",
+  );
+
+  const handleToggleGuard = useCallback(async (enabled: boolean) => {
+    setGuardEnabled(enabled);
+    setItem("guard-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_guard_hook");
+      } else {
+        await invoke("remove_guard_hook");
+      }
+      // Refresh hooks plan to reflect guard_installed state.
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("guard hook toggle failed:", e);
+    }
+  }, []);
+
+  const handleToggleGuardLlm = useCallback((enabled: boolean) => {
+    setGuardLlmAnalysis(enabled);
+    setItem("guard-llm-analysis", enabled ? "true" : "false");
+  }, []);
+
+  // ── Elicitation state ─────────────────────────────────────────────────
+  const [elicitationEnabled, setElicitationEnabled] = useState(
+    () => getItem("elicitation-enabled") !== "false",
+  );
+
+  const handleToggleElicitation = useCallback(async (enabled: boolean) => {
+    setElicitationEnabled(enabled);
+    setItem("elicitation-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_elicitation_hook");
+      } else {
+        await invoke("remove_elicitation_hook");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("elicitation hook toggle failed:", e);
+    }
+  }, []);
+
   // ── Notifications state ─────────────────────────────────────────────────
   const [notifMode, setNotifMode] = useState<NotificationMode>(
     () => (getItem("notification-mode") as NotificationMode) || "user_action",
@@ -633,6 +682,54 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                 {hooksStatus === "error" && (
                   <p className={styles.hooks_error}>{t("hooks.install_error", { error: hooksError })}</p>
                 )}
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.guard")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.guard_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.guard_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={guardEnabled}
+                      onChange={(e) => handleToggleGuard(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.guard_llm_analysis")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={guardLlmAnalysis}
+                      disabled={!guardEnabled}
+                      onChange={(e) => handleToggleGuardLlm(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.elicitation")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.elicitation_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.elicitation_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={elicitationEnabled}
+                      onChange={(e) => handleToggleElicitation(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.sources")}</div>
                 <div className={styles.row}>

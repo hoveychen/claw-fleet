@@ -858,6 +858,7 @@ dependencies = [
  "sysinfo",
  "tiny_http",
  "tokio",
+ "uuid",
  "zstd",
 ]
 

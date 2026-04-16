@@ -32,7 +32,41 @@ const ALL_KEYS = [
   "llm-provider",
   "llm-model-fast",
   "llm-model-standard",
+  "guard-enabled",
+  "guard-llm-analysis",
+  "elicitation-enabled",
+  "onboarding-seen-features",
 ] as const;
+
+// ── Onboarding feature registry ─────────────────────────────────────────────
+// Each ID represents a configurable feature card in onboarding.
+// Adding a new ID here will trigger a "What's New" overlay for existing users.
+export const ONBOARDING_FEATURES = [
+  "appearance",
+  "notifications",
+  "hooks_guard_elicitation",
+] as const;
+
+export type OnboardingFeatureId = (typeof ONBOARDING_FEATURES)[number];
+
+/** Get the set of feature IDs the user has already seen. */
+export function getSeenFeatures(): Set<OnboardingFeatureId> {
+  const raw = getItem("onboarding-seen-features");
+  if (!raw) return new Set();
+  try {
+    const arr = JSON.parse(raw);
+    return new Set(arr as OnboardingFeatureId[]);
+  } catch {
+    return new Set();
+  }
+}
+
+/** Mark a set of feature IDs as seen. Merges with existing. */
+export function markFeaturesSeen(ids: OnboardingFeatureId[]): void {
+  const existing = getSeenFeatures();
+  for (const id of ids) existing.add(id);
+  setItem("onboarding-seen-features", JSON.stringify([...existing]));
+}
 
 /**
  * Must be called (and awaited) once before any get/set.

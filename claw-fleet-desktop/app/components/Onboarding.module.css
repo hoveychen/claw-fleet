@@ -414,6 +414,163 @@
   gap: 8px;
 }
 
+/* ── Hook feature sections (guard / elicitation) ───────────────────────── */
+.hook_feature_section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--color-border);
+}
+
+.hook_feature_header {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.hook_feature_text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.hook_feature_toggle {
+  flex-shrink: 0;
+  margin-top: 2px;
+  cursor: pointer;
+}
+
+/* ── Mock decision card previews ───────────────────────────────────────── */
+.mock_decision {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  opacity: 0.85;
+  pointer-events: none;
+  user-select: none;
+}
+
+.mock_decision_header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mock_icon_warn {
+  width: 14px;
+  height: 14px;
+  color: #e53e3e;
+  flex-shrink: 0;
+}
+
+.mock_icon_question {
+  width: 14px;
+  height: 14px;
+  color: #2b6cb0;
+  flex-shrink: 0;
+}
+
+.mock_decision_title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.mock_command {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--color-text);
+  background: var(--color-bg-tool, var(--color-bg));
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 5px 8px;
+  word-break: break-all;
+}
+
+.mock_tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.mock_tag {
+  font-size: 9px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(229, 62, 62, 0.12);
+  color: #e53e3e;
+}
+
+.mock_question {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.mock_options {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.mock_option {
+  font-size: 10px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tool, var(--color-bg));
+  color: var(--color-text);
+}
+
+.mock_option_selected {
+  border-color: #2b6cb0;
+  background: rgba(43, 108, 176, 0.08);
+}
+
+.mock_actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.mock_btn_allow {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: #2b6cb0;
+  color: #fff;
+}
+
+.mock_btn_block {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: #c53030;
+  color: #fff;
+}
+
+.mock_btn_secondary {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 3px 10px;
+  border-radius: 4px;
+  background: var(--color-bg-card, var(--color-bg));
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
 /* ── Chime selector row ────────────────────────────────────────────────── */
 .chime_row {
   display: flex;

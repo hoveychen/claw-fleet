@@ -144,12 +144,40 @@ impl Backend for NullBackend {
             to_add: vec![],
             hooks_globally_disabled: false,
             already_installed: true,
+            guard_installed: false,
+            elicitation_installed: false,
         }
     }
     fn apply_hooks(&self) -> Result<(), String> {
         Err("backend not ready".into())
     }
     fn remove_hooks(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn apply_guard_hook(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn remove_guard_hook(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn respond_to_guard(&self, _: &str, _: bool) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn analyze_guard_command(&self, _: &str, _: &str, _: &str) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
+    fn apply_elicitation_hook(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn remove_elicitation_hook(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn respond_to_elicitation(
+        &self,
+        _: &str,
+        _: bool,
+        _: std::collections::HashMap<String, String>,
+    ) -> Result<(), String> {
         Err("backend not ready".into())
     }
     fn get_sources_config(&self) -> Vec<agent_source::SourceInfo> {
@@ -163,6 +191,21 @@ impl Backend for NullBackend {
     }
     fn get_audit_events(&self) -> AuditSummary {
         AuditSummary { events: vec![], total_sessions_scanned: 0 }
+    }
+    fn get_audit_rules(&self) -> Vec<audit::AuditRuleInfo> {
+        vec![]
+    }
+    fn set_audit_rule_enabled(&self, _: &str, _: bool) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn save_custom_audit_rule(&self, _: audit::AuditRuleInfo) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn delete_custom_audit_rule(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn suggest_audit_rules(&self, _: &str, _: &str) -> Result<Vec<audit::SuggestedRule>, String> {
+        Err("backend not ready".into())
     }
     fn get_daily_report(&self, _: &str) -> Result<Option<DailyReport>, String> {
         Err("backend not ready".into())

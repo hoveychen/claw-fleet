@@ -43,10 +43,6 @@ pub struct LocalBackend {
     /// Persistent audit history — events from sessions that went idle are saved
     /// here so they survive process restarts.
     audit_history: Arc<Mutex<crate::audit::AuditHistory>>,
-    /// Keys of critical audit events for which OS notifications have already been
-    /// sent.  Prevents duplicate notifications across rescans.
-    #[allow(dead_code)]
-    notified_audit_keys: Arc<Mutex<HashSet<String>>>,
     /// Full-text search index — used for read-only queries from the main thread.
     search_index: Arc<Mutex<SearchIndex>>,
     /// Channel to send indexing requests to the dedicated indexer thread.
@@ -92,8 +88,6 @@ impl LocalBackend {
             Arc::new(Mutex::new(HashMap::new()));
         let audit_cache: Arc<Mutex<HashMap<String, (u64, Vec<crate::audit::AuditEvent>)>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let notified_audit_keys: Arc<Mutex<HashSet<String>>> =
-            Arc::new(Mutex::new(HashSet::new()));
         let audit_history: Arc<Mutex<crate::audit::AuditHistory>> =
             Arc::new(Mutex::new(crate::audit::AuditHistory::load()));
 
@@ -222,8 +216,6 @@ impl LocalBackend {
         let watch2 = watch.clone();
         let analyzing2 = analyzing.clone();
         let idx_tx2 = index_tx.clone();
-        let ac2 = audit_cache.clone();
-        let nak2 = notified_audit_keys.clone();
         let ar2 = auto_resume_last_fire.clone();
 
         // Pre-compute each filesystem source's watch dirs for fast path matching.
@@ -328,9 +320,6 @@ impl LocalBackend {
                         &locale2,
                         &llm_config2,
                     );
-                    detect_audit_critical_notifications(
-                        &sess2, &sources2, &ac2, &nak2, &app2,
-                    );
                     maybe_fire_auto_resume(&sess2, &ar2);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
@@ -360,8 +349,6 @@ impl LocalBackend {
             let llm_config3 = llm_config.clone();
             let analyzing3 = analyzing.clone();
             let idx_tx3 = index_tx.clone();
-            let ac3 = audit_cache.clone();
-            let nak3 = notified_audit_keys.clone();
             let ar3 = auto_resume_last_fire.clone();
 
             // Indices of polling sources — only these need rescanning on each tick.
@@ -401,12 +388,61 @@ impl LocalBackend {
                         &locale3,
                         &llm_config3,
                     );
-                    detect_audit_critical_notifications(
-                        &sess3, &sources3, &ac3, &nak3, &app3,
-                    );
                     maybe_fire_auto_resume(&sess3, &ar3);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
+                }
+            });
+        }
+
+        // Guard directory watcher — polls for new guard requests from `fleet guard`.
+        {
+            let app_guard = app.clone();
+            std::thread::spawn(move || {
+                let mut known: HashSet<String> = HashSet::new();
+                loop {
+                    std::thread::sleep(Duration::from_millis(500));
+                    let pending = crate::guard::list_pending_requests();
+                    for id in &pending {
+                        if known.insert(id.clone()) {
+                            // New request — read it and emit a Tauri event.
+                            if let Some(req) = crate::guard::read_request(id) {
+                                crate::log_debug(&format!(
+                                    "[guard] new request: {} cmd={}",
+                                    id, req.command_summary
+                                ));
+                                let _ = app_guard.emit("guard-request", &req);
+                            }
+                        }
+                    }
+                    // Remove known IDs that no longer have request files
+                    // (already cleaned up by fleet guard).
+                    known.retain(|id| pending.contains(id));
+                }
+            });
+        }
+
+        // Elicitation directory watcher — polls for new elicitation requests from `fleet elicitation`.
+        {
+            let app_elicit = app.clone();
+            std::thread::spawn(move || {
+                let mut known: HashSet<String> = HashSet::new();
+                loop {
+                    std::thread::sleep(Duration::from_millis(500));
+                    let pending = crate::elicitation::list_pending_requests();
+                    for id in &pending {
+                        if known.insert(id.clone()) {
+                            if let Some(req) = crate::elicitation::read_request(id) {
+                                crate::log_debug(&format!(
+                                    "[elicitation] new request: {} questions={}",
+                                    id,
+                                    req.questions.len()
+                                ));
+                                let _ = app_elicit.emit("elicitation-request", &req);
+                            }
+                        }
+                    }
+                    known.retain(|id| pending.contains(id));
                 }
             });
         }
@@ -425,7 +461,6 @@ impl LocalBackend {
             session_outcomes,
             audit_cache,
             audit_history,
-            notified_audit_keys,
             search_index,
             index_tx,
             report_store,
@@ -972,6 +1007,78 @@ impl Backend for LocalBackend {
         crate::hooks::remove_fleet_hooks()
     }
 
+    fn apply_guard_hook(&self) -> Result<(), String> {
+        crate::hooks::apply_guard_hook()
+    }
+
+    fn remove_guard_hook(&self) -> Result<(), String> {
+        crate::hooks::remove_guard_hook()
+    }
+
+    fn respond_to_guard(&self, id: &str, allow: bool) -> Result<(), String> {
+        use crate::guard::{GuardDecision, GuardResponse};
+        let resp = GuardResponse {
+            id: id.to_string(),
+            decision: if allow {
+                GuardDecision::Allow
+            } else {
+                GuardDecision::Block
+            },
+        };
+        crate::guard::write_response(&resp)
+    }
+
+    fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String> {
+        use crate::audit;
+        use crate::guard;
+        use crate::llm_provider;
+
+        let risk_tags = audit::classify_bash_command_pub(command)
+            .map(|(_, tags)| tags)
+            .unwrap_or_default();
+
+        let prompt = guard::build_analysis_prompt(command, &risk_tags, context, lang);
+
+        let llm_cfg = self.get_llm_config();
+        if llm_cfg.provider == "none" {
+            return Err("LLM provider is disabled".to_string());
+        }
+
+        let provider = llm_provider::resolve_provider(&llm_cfg.provider)
+            .ok_or("LLM provider not available")?;
+
+        if !provider.is_available() {
+            return Err(format!("{} CLI not found", provider.display_name()));
+        }
+
+        let timeout = std::time::Duration::from_secs(30);
+        provider
+            .complete(&prompt, &llm_cfg.fast_model, timeout)
+            .ok_or_else(|| "LLM analysis timed out or failed".to_string())
+    }
+
+    fn apply_elicitation_hook(&self) -> Result<(), String> {
+        crate::hooks::apply_elicitation_hook()
+    }
+
+    fn remove_elicitation_hook(&self) -> Result<(), String> {
+        crate::hooks::remove_elicitation_hook()
+    }
+
+    fn respond_to_elicitation(
+        &self,
+        id: &str,
+        declined: bool,
+        answers: std::collections::HashMap<String, String>,
+    ) -> Result<(), String> {
+        let resp = crate::elicitation::ElicitationResponse {
+            id: id.to_string(),
+            declined,
+            answers,
+        };
+        crate::elicitation::write_response(&resp)
+    }
+
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
         crate::agent_source::get_sources_config_local()
     }
@@ -1083,6 +1190,49 @@ impl Backend for LocalBackend {
             events: all_events,
             total_sessions_scanned: total,
         }
+    }
+
+    fn get_audit_rules(&self) -> Vec<crate::audit::AuditRuleInfo> {
+        crate::audit::get_all_rules()
+    }
+
+    fn set_audit_rule_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
+        crate::audit::set_rule_enabled(id, enabled)
+    }
+
+    fn save_custom_audit_rule(&self, rule: crate::audit::AuditRuleInfo) -> Result<(), String> {
+        crate::audit::save_custom_rule(rule)
+    }
+
+    fn delete_custom_audit_rule(&self, id: &str) -> Result<(), String> {
+        crate::audit::delete_custom_rule(id)
+    }
+
+    fn suggest_audit_rules(&self, concern: &str, lang: &str) -> Result<Vec<crate::audit::SuggestedRule>, String> {
+        let existing_tags: Vec<String> = crate::audit::get_all_rules()
+            .iter()
+            .map(|r| r.tag.clone())
+            .collect();
+        let prompt = crate::audit::build_suggest_rules_prompt(concern, lang, &existing_tags);
+
+        let cfg = self.llm_config.lock().unwrap().clone();
+        let provider = crate::llm_provider::resolve_provider(&cfg.provider)
+            .ok_or_else(|| "No LLM provider available".to_string())?;
+
+        let response = provider
+            .complete(&prompt, &cfg.standard_model, std::time::Duration::from_secs(120))
+            .ok_or_else(|| "LLM did not return a response".to_string())?;
+
+        // Extract JSON array from the response (may have markdown fences).
+        let json_str = response.trim();
+        let json_str = json_str
+            .strip_prefix("```json")
+            .or_else(|| json_str.strip_prefix("```"))
+            .unwrap_or(json_str);
+        let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
+
+        serde_json::from_str::<Vec<crate::audit::SuggestedRule>>(json_str)
+            .map_err(|e| format!("Failed to parse LLM response: {e}"))
     }
 
     fn search_sessions(&self, query: &str, limit: usize) -> Vec<crate::search_index::SearchHit> {
@@ -1484,150 +1634,6 @@ pub(crate) fn send_os_notification(app: &AppHandle, title: &str, body: &str) {
         log_debug(&format!("[notify] tauri notification failed: {e}"));
     } else {
         log_debug("[notify] tauri notification sent");
-    }
-}
-
-// ── Audit critical event notifications ───────────────────────────────────────
-
-/// Scans for new critical audit events and emits OS + in-app notifications for
-/// each one that hasn't been notified yet.
-fn detect_audit_critical_notifications(
-    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
-    sources: &Arc<Vec<Box<dyn AgentSource>>>,
-    audit_cache: &Arc<Mutex<HashMap<String, (u64, Vec<crate::audit::AuditEvent>)>>>,
-    notified_keys: &Arc<Mutex<HashSet<String>>>,
-    app: &AppHandle,
-) {
-    let mode = get_notification_mode(app);
-    if mode == "none" {
-        return;
-    }
-
-    // Scan audit events using the same logic as get_audit_events(), sharing the
-    // cache to avoid re-reading unchanged files.
-    let all_sessions = sessions.lock().unwrap().clone();
-    let active: Vec<_> = all_sessions
-        .into_iter()
-        .filter(|s| s.status != SessionStatus::Idle)
-        .collect();
-
-    let mut cache = audit_cache.lock().unwrap();
-    // NOTE: Do NOT evict idle sessions from the shared cache here.
-    // Only get_audit_events() should evict, because it persists events to
-    // audit_history first.  Evicting here would silently drop events that
-    // have not yet been persisted, making them invisible in the audit panel.
-
-    let mut critical_events = Vec::new();
-    for session in &active {
-        let path = &session.jsonl_path;
-        let is_plain_path = !path.contains("://");
-
-        if is_plain_path {
-            let file_size = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
-            let (prev_offset, prev_events) = cache
-                .get(&session.id)
-                .cloned()
-                .unwrap_or((0, Vec::new()));
-
-            if file_size <= prev_offset {
-                // Unchanged — check cached events for critical.
-                for e in &prev_events {
-                    if e.risk_level == crate::audit::AuditRiskLevel::Critical {
-                        critical_events.push(e.clone());
-                    }
-                }
-                continue;
-            }
-
-            let new_messages = match fs::File::open(path) {
-                Ok(mut file) => {
-                    if file.seek(SeekFrom::Start(prev_offset)).is_err() {
-                        for e in &prev_events {
-                            if e.risk_level == crate::audit::AuditRiskLevel::Critical {
-                                critical_events.push(e.clone());
-                            }
-                        }
-                        continue;
-                    }
-                    let mut buf = String::new();
-                    if file.read_to_string(&mut buf).is_err() {
-                        for e in &prev_events {
-                            if e.risk_level == crate::audit::AuditRiskLevel::Critical {
-                                critical_events.push(e.clone());
-                            }
-                        }
-                        continue;
-                    }
-                    buf.lines()
-                        .filter(|l| !l.trim().is_empty())
-                        .filter_map(|l| serde_json::from_str(l).ok())
-                        .collect::<Vec<serde_json::Value>>()
-                }
-                Err(_) => {
-                    for e in &prev_events {
-                        if e.risk_level == crate::audit::AuditRiskLevel::Critical {
-                            critical_events.push(e.clone());
-                        }
-                    }
-                    continue;
-                }
-            };
-
-            let new_events = crate::audit::extract_audit_events(&new_messages, session);
-            let mut combined = prev_events;
-            combined.extend(new_events);
-            cache.insert(session.id.clone(), (file_size, combined.clone()));
-            for e in &combined {
-                if e.risk_level == crate::audit::AuditRiskLevel::Critical {
-                    critical_events.push(e.clone());
-                }
-            }
-        } else {
-            let source = sources.iter().find(|s| {
-                let prefix = s.uri_prefix();
-                !prefix.is_empty() && path.starts_with(prefix)
-            });
-            if let Some(src) = source {
-                if let Ok(messages) = src.get_messages(path) {
-                    let events = crate::audit::extract_audit_events(&messages, session);
-                    for e in &events {
-                        if e.risk_level == crate::audit::AuditRiskLevel::Critical {
-                            critical_events.push(e.clone());
-                        }
-                    }
-                }
-            }
-        }
-    }
-    drop(cache);
-
-    // Find events that haven't been notified yet.
-    let mut nk = notified_keys.lock().unwrap();
-    for event in &critical_events {
-        let key = event.dedup_key();
-        if nk.contains(&key) {
-            continue;
-        }
-        nk.insert(key.clone());
-
-        let title = format!("⚠ CRITICAL: {}", event.workspace_name);
-        let body = event.command_summary.clone();
-        send_os_notification(app, &title, &body);
-
-        let alert = crate::audit::AuditAlert {
-            key,
-            session_id: event.session_id.clone(),
-            workspace_name: event.workspace_name.clone(),
-            command_summary: event.command_summary.clone(),
-            risk_tags: event.risk_tags.clone(),
-            detected_at_ms: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_millis() as u64,
-            jsonl_path: event.jsonl_path.clone(),
-        };
-        let _ = app.emit("audit-critical-alert", &alert);
-        log_debug(&format!("[audit] critical alert emitted: {}", event.command_summary));
     }
 }
 

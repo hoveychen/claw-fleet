@@ -1,0 +1,399 @@
+/* ── Panel: bottom section containing card area + tab bar ─────────────────── */
+
+.panel {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  max-height: 60vh;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-sidebar);
+}
+
+/* ── Card area: scrollable, shows the active decision card ───────────────── */
+
+.card_area {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 10px 14px;
+  animation: cardFadeIn 0.2s ease;
+}
+
+@keyframes cardFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Tab bar: always at the bottom, horizontally scrollable ──────────────── */
+
+.tab_bar {
+  display: flex;
+  gap: 2px;
+  padding: 4px 10px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+  overflow-x: auto;
+  flex-shrink: 0;
+}
+
+/* Hide scrollbar on the tab bar */
+.tab_bar::-webkit-scrollbar { height: 0; }
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
+  animation: tabSlideIn 0.25s ease both;
+}
+
+@keyframes tabSlideIn {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.tab:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.tab_active {
+  background: var(--color-bg-card);
+  border-color: var(--color-border);
+  color: var(--color-text);
+}
+
+.tab_guard .tab_icon {
+  color: #e53e3e;
+}
+
+.tab_elicitation .tab_icon {
+  color: #2b6cb0;
+}
+
+.tab_icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.tab_label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 160px;
+}
+
+.tab_workspace {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+/* ── Individual decision card ───────────────────────────────────────────── */
+
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 12px 14px;
+}
+
+.card_header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.card_icon {
+  width: 18px;
+  height: 18px;
+  color: #e53e3e;
+  flex-shrink: 0;
+}
+
+.card_title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.card_workspace {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+/* Command block */
+.command {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg-tool);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 8px 10px;
+  word-break: break-all;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+/* Risk tags */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.tag {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(229, 62, 62, 0.15);
+  color: #e53e3e;
+}
+
+/* Analysis section */
+.analysis {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--color-text);
+  background: var(--color-bg-tool);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  margin-bottom: 8px;
+}
+
+.analysis_loading {
+  color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+/* Action buttons */
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.btn {
+  padding: 5px 16px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.btn:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.btn_allow {
+  background: #2b6cb0;
+  color: #fff;
+  border-color: #2b6cb0;
+}
+
+.btn_allow:hover {
+  background: #3182ce;
+  border-color: #3182ce;
+}
+
+.btn_block {
+  background: #c53030;
+  color: #fff;
+  border-color: #c53030;
+}
+
+.btn_block:hover {
+  background: #e53e3e;
+  border-color: #e53e3e;
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.btn_secondary {
+  background: var(--color-bg-card);
+  color: var(--color-text-secondary);
+  border-color: var(--color-border);
+}
+
+.btn_secondary:hover {
+  background: var(--color-bg-card-hover);
+}
+
+/* ── Elicitation card styles ──────────────────────────────────────────── */
+
+.card_icon_question {
+  width: 18px;
+  height: 18px;
+  color: #2b6cb0;
+  flex-shrink: 0;
+}
+
+.elicitation_step_badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+/* Step dots */
+.elicitation_dots {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  margin-bottom: 8px;
+}
+
+.elicitation_dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-border);
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.elicitation_dot_active {
+  border-color: #2b6cb0;
+  background: #2b6cb0;
+}
+
+.elicitation_dot_done {
+  border-color: #2b6cb0;
+  background: rgba(43, 108, 176, 0.35);
+}
+
+.elicitation_question {
+  margin-bottom: 10px;
+}
+
+.elicitation_question_text {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+  margin-bottom: 6px;
+  line-height: 1.4;
+}
+
+.elicitation_header {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(43, 108, 176, 0.15);
+  color: #2b6cb0;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.elicitation_options {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.elicitation_option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tool);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  text-align: left;
+}
+
+.elicitation_option:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.elicitation_option_selected {
+  border-color: #2b6cb0;
+  background: rgba(43, 108, 176, 0.08);
+}
+
+.elicitation_option_label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.elicitation_option_desc {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+/* "Other" custom input row */
+.elicitation_other {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 10px;
+  border-radius: 5px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tool);
+  cursor: text;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.elicitation_other:hover,
+.elicitation_other:focus-within {
+  background: var(--color-bg-card-hover);
+}
+
+.elicitation_other_active {
+  border-color: #2b6cb0;
+  background: rgba(43, 108, 176, 0.08);
+}
+
+.elicitation_other_input {
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: 11px;
+  color: var(--color-text);
+  font-family: inherit;
+  padding: 0;
+  width: 100%;
+}
+
+.elicitation_other_input::placeholder {
+  color: var(--color-text-dim);
+}
+
+/* Spacer between left (Decline) and right (Back/Next/Submit) buttons */
+.actions_spacer {
+  flex: 1;
+}

@@ -8,6 +8,8 @@ pub mod claude_source;
 pub mod codex_source;
 pub mod cursor;
 pub mod daily_report;
+pub mod elicitation;
+pub mod guard;
 pub mod hooks;
 pub mod llm_provider;
 pub mod memory;

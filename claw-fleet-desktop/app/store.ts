@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { AuditAlert, DailyReport, DailyReportStats, Lesson, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { DailyReport, DailyReportStats, ElicitationRequest, GuardRequest, Lesson, PendingDecision, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 
 // ── Connection store ──────────────────────────────────────────────────────────
@@ -123,7 +123,8 @@ interface DetailState {
   session: SessionInfo | null;
   messages: RawMessage[];
   isLoading: boolean;
-  open: (session: SessionInfo) => Promise<void>;
+  searchQuery: string | null;
+  open: (session: SessionInfo, searchQuery?: string) => Promise<void>;
   close: () => Promise<void>;
   appendMessages: (msgs: RawMessage[]) => void;
 }
@@ -134,11 +135,12 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   session: null,
   messages: [],
   isLoading: false,
+  searchQuery: null,
 
-  open: async (session) => {
+  open: async (session, searchQuery) => {
     await get().close();
 
-    set({ session, messages: [], isLoading: true });
+    set({ session, messages: [], isLoading: true, searchQuery: searchQuery ?? null });
 
     const rawMessages = await invoke<RawMessage[]>("get_messages", {
       jsonlPath: session.jsonlPath,
@@ -159,7 +161,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       tailUnlisten = null;
     }
     await invoke("stop_watching_session");
-    set({ session: null, messages: [], isLoading: false });
+    set({ session: null, messages: [], isLoading: false, searchQuery: null });
   },
 
   appendMessages: (msgs) => {
@@ -192,31 +194,6 @@ export const useWaitingAlertsStore = create<WaitingAlertsState>((set) => ({
     const alerts = await invoke<WaitingAlert[]>("get_waiting_alerts");
     set({ alerts });
   },
-}));
-
-// ── Audit alerts store (critical event notifications) ───────────────────────
-
-interface AuditAlertsState {
-  alerts: AuditAlert[];
-  dismissedKeys: Set<string>;
-  addAlert: (alert: AuditAlert) => void;
-  dismiss: (key: string) => void;
-}
-
-export const useAuditAlertsStore = create<AuditAlertsState>((set) => ({
-  alerts: [],
-  dismissedKeys: new Set(),
-  addAlert: (alert) =>
-    set((state) => {
-      if (state.alerts.some((a) => a.key === alert.key)) return state;
-      return { alerts: [...state.alerts, alert] };
-    }),
-  dismiss: (key) =>
-    set((state) => {
-      const next = new Set(state.dismissedKeys);
-      next.add(key);
-      return { dismissedKeys: next };
-    }),
 }));
 
 // ── Audit read-state store ──────────────────────────────────────────────────
@@ -462,3 +439,215 @@ export const useReportStore = create<ReportState>((set, get) => ({
     }
   },
 }));
+
+// ── Decision panel store ────────────────────────────────────────────────────
+
+interface DecisionState {
+  decisions: PendingDecision[];
+  /** ID of the decision currently shown in the card area. */
+  activeDecisionId: string | null;
+  /** Add a guard request to the queue and kick off LLM analysis. */
+  addGuardRequest: (req: GuardRequest) => void;
+  /** Add an elicitation request to the queue. */
+  addElicitationRequest: (req: ElicitationRequest) => void;
+  /** Respond to a decision (allow/block for guard). Removes it from the queue. */
+  respond: (id: string, allow: boolean) => Promise<void>;
+  /** Submit elicitation answers. */
+  submitElicitation: (id: string) => Promise<void>;
+  /** Decline an elicitation. */
+  declineElicitation: (id: string) => Promise<void>;
+  /** Toggle an option selection for an elicitation question. */
+  toggleElicitationOption: (id: string, question: string, option: string, multiSelect: boolean) => void;
+  /** Set the "Other" custom text for a question. */
+  setElicitationCustomAnswer: (id: string, question: string, text: string) => void;
+  /** Navigate to a specific step. */
+  setElicitationStep: (id: string, step: number) => void;
+  /** Dismiss a decision without responding (e.g. expired). */
+  dismiss: (id: string) => void;
+  /** Update analysis state for a specific decision. */
+  setAnalysis: (id: string, analysis: string | null, analyzing: boolean) => void;
+  /** Switch the active decision shown in the card area. */
+  setActiveDecision: (id: string) => void;
+}
+
+export const useDecisionStore = create<DecisionState>((set, get) => ({
+  decisions: [],
+  activeDecisionId: null,
+
+  addGuardRequest: (req) => {
+    const decision: PendingDecision = {
+      kind: "guard",
+      id: req.id,
+      request: req,
+      analysis: null,
+      analyzing: false,
+      arrivedAt: Date.now(),
+    };
+    set((s) => ({
+      decisions: [...s.decisions, decision],
+      // Auto-select new decision when it's the first one
+      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
+    }));
+
+    // Kick off LLM analysis if enabled
+    const llmEnabled = getItem("guard-llm-analysis") !== "false";
+    if (llmEnabled) {
+      get().setAnalysis(req.id, null, true);
+
+      (async () => {
+        try {
+          const context = await invoke<string>("get_guard_context", {
+            sessionId: req.sessionId,
+          });
+          const lang = document.documentElement.lang?.startsWith("zh") ? "zh" : "en";
+          const result = await invoke<string>("analyze_guard_command", {
+            command: req.command,
+            context,
+            lang,
+          });
+          get().setAnalysis(req.id, result, false);
+        } catch {
+          get().setAnalysis(req.id, null, false);
+        }
+      })();
+    }
+  },
+
+  addElicitationRequest: (req) => {
+    const decision: PendingDecision = {
+      kind: "elicitation",
+      id: req.id,
+      request: req,
+      step: 0,
+      selections: {},
+      customAnswers: {},
+      arrivedAt: Date.now(),
+    };
+    set((s) => ({
+      decisions: [...s.decisions, decision],
+      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
+    }));
+  },
+
+  toggleElicitationOption: (id, question, option, multiSelect) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "elicitation") return d;
+        const prev = d.selections[question] || [];
+        let next: string[];
+        if (multiSelect) {
+          next = prev.includes(option)
+            ? prev.filter((o) => o !== option)
+            : [...prev, option];
+        } else {
+          next = [option];
+        }
+        // Clear custom answer when a preset option is selected (single-select).
+        const customAnswers = multiSelect
+          ? d.customAnswers
+          : { ...d.customAnswers, [question]: "" };
+        return { ...d, selections: { ...d.selections, [question]: next }, customAnswers };
+      }),
+    }));
+  },
+
+  setElicitationCustomAnswer: (id, question, text) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "elicitation") return d;
+        // When typing a custom answer in single-select mode, clear preset selections.
+        const selections = text
+          ? { ...d.selections, [question]: [] }
+          : d.selections;
+        return {
+          ...d,
+          selections,
+          customAnswers: { ...d.customAnswers, [question]: text },
+        };
+      }),
+    }));
+  },
+
+  setElicitationStep: (id, step) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "elicitation" ? { ...d, step } : d,
+      ),
+    }));
+  },
+
+  submitElicitation: async (id) => {
+    const decision = get().decisions.find(
+      (d) => d.id === id && d.kind === "elicitation",
+    );
+    if (!decision || decision.kind !== "elicitation") return;
+    const answers: Record<string, string> = {};
+    for (const q of decision.request.questions) {
+      const custom = decision.customAnswers[q.question]?.trim();
+      if (custom) {
+        answers[q.question] = custom;
+      } else {
+        const sel = decision.selections[q.question] || [];
+        answers[q.question] = sel.join(", ");
+      }
+    }
+    try {
+      await invoke("respond_to_elicitation", { id, declined: false, answers });
+    } catch (e) {
+      console.error("respond_to_elicitation failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+  },
+
+  declineElicitation: async (id) => {
+    try {
+      await invoke("respond_to_elicitation", {
+        id,
+        declined: true,
+        answers: {},
+      });
+    } catch (e) {
+      console.error("respond_to_elicitation (decline) failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+  },
+
+  respond: async (id, allow) => {
+    try {
+      await invoke("respond_to_guard", { id, allow });
+    } catch (e) {
+      console.error("respond_to_guard failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+  },
+
+  dismiss: (id) => set((s) => removeDecision(s, id)),
+
+  setAnalysis: (id, analysis, analyzing) =>
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "guard"
+          ? { ...d, analysis, analyzing }
+          : d,
+      ),
+    })),
+
+  setActiveDecision: (id) => set({ activeDecisionId: id }),
+}));
+
+/** When a decision is removed, pick the next active: prefer the one after it, else before, else null. */
+function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
+  const idx = s.decisions.findIndex((d) => d.id === id);
+  const next = s.decisions.filter((d) => d.id !== id);
+  let activeDecisionId = s.activeDecisionId;
+  if (activeDecisionId === id) {
+    if (next.length === 0) {
+      activeDecisionId = null;
+    } else {
+      // prefer the item that was after the removed one; clamp to last
+      const nextIdx = Math.min(idx, next.length - 1);
+      activeDecisionId = next[nextIdx].id;
+    }
+  }
+  return { decisions: next, activeDecisionId };
+}

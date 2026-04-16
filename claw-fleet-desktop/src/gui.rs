@@ -739,6 +739,31 @@ fn get_audit_events(state: tauri::State<AppState>) -> audit::AuditSummary {
 }
 
 #[tauri::command]
+fn get_audit_rules(state: tauri::State<AppState>) -> Vec<audit::AuditRuleInfo> {
+    state.backend.read().unwrap().get_audit_rules()
+}
+
+#[tauri::command]
+fn set_audit_rule_enabled(state: tauri::State<AppState>, id: String, enabled: bool) -> Result<(), String> {
+    state.backend.read().unwrap().set_audit_rule_enabled(&id, enabled)
+}
+
+#[tauri::command]
+fn save_custom_audit_rule(state: tauri::State<AppState>, rule: audit::AuditRuleInfo) -> Result<(), String> {
+    state.backend.read().unwrap().save_custom_audit_rule(rule)
+}
+
+#[tauri::command]
+fn delete_custom_audit_rule(state: tauri::State<AppState>, id: String) -> Result<(), String> {
+    state.backend.read().unwrap().delete_custom_audit_rule(&id)
+}
+
+#[tauri::command]
+fn suggest_audit_rules(state: tauri::State<AppState>, concern: String, lang: String) -> Result<Vec<audit::SuggestedRule>, String> {
+    state.backend.read().unwrap().suggest_audit_rules(&concern, &lang)
+}
+
+#[tauri::command]
 fn get_daily_report(
     date: String,
     state: tauri::State<AppState>,
@@ -845,6 +870,112 @@ fn apply_hooks_setup(state: tauri::State<AppState>) -> Result<(), String> {
 #[tauri::command]
 fn remove_hooks(state: tauri::State<AppState>) -> Result<(), String> {
     state.backend.read().unwrap().remove_hooks()
+}
+
+// ── Guard (real-time interception) ───────────────────────────────────────────
+
+#[tauri::command]
+fn apply_guard_hook(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().apply_guard_hook()
+}
+
+#[tauri::command]
+fn remove_guard_hook(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().remove_guard_hook()
+}
+
+#[tauri::command]
+fn respond_to_guard(state: tauri::State<AppState>, id: String, allow: bool) -> Result<(), String> {
+    state.backend.read().unwrap().respond_to_guard(&id, allow)
+}
+
+#[tauri::command]
+fn analyze_guard_command(
+    state: tauri::State<AppState>,
+    command: String,
+    context: String,
+    lang: String,
+) -> Result<String, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .analyze_guard_command(&command, &context, &lang)
+}
+
+// ── Elicitation (AskUserQuestion interception) ──────────────────────────────
+
+#[tauri::command]
+fn apply_elicitation_hook(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().apply_elicitation_hook()
+}
+
+#[tauri::command]
+fn remove_elicitation_hook(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().remove_elicitation_hook()
+}
+
+#[tauri::command]
+fn respond_to_elicitation(
+    state: tauri::State<AppState>,
+    id: String,
+    declined: bool,
+    answers: std::collections::HashMap<String, String>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .respond_to_elicitation(&id, declined, answers)
+}
+
+/// Read the last non-tool-use assistant message from a session, for guard context.
+#[tauri::command]
+fn get_guard_context(state: tauri::State<AppState>, session_id: String) -> String {
+    // Find the session by ID and read its messages.
+    let backend = state.backend.read().unwrap();
+    let sessions = backend.list_sessions();
+    let session = sessions.iter().find(|s| s.id == session_id);
+    let Some(session) = session else {
+        return String::new();
+    };
+    let messages = match backend.get_messages(&session.jsonl_path) {
+        Ok(msgs) => msgs,
+        Err(_) => return String::new(),
+    };
+
+    // Walk backwards to find the last assistant message with text content
+    // (not just tool_use blocks).
+    for msg in messages.iter().rev() {
+        if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+            continue;
+        }
+        let Some(content) = msg
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+        else {
+            continue;
+        };
+
+        // Collect text blocks, skip tool_use blocks.
+        let text_parts: Vec<&str> = content
+            .iter()
+            .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+            .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+            .collect();
+
+        if !text_parts.is_empty() {
+            let combined = text_parts.join("\n");
+            // Truncate to ~2000 chars for the LLM prompt.
+            if combined.len() > 2000 {
+                return format!("{}…", &combined[..2000]);
+            }
+            return combined;
+        }
+    }
+
+    String::new()
 }
 
 // ── CLI installer (macOS only) ───────────────────────────────────────────────
@@ -1839,6 +1970,11 @@ pub fn run() {
             get_messages,
             get_skill_history,
             get_audit_events,
+            get_audit_rules,
+            set_audit_rule_enabled,
+            save_custom_audit_rule,
+            delete_custom_audit_rule,
+            suggest_audit_rules,
             check_pattern_update,
             get_pattern_info,
             start_watching_session,
@@ -1877,6 +2013,14 @@ pub fn run() {
             get_hooks_setup_plan,
             apply_hooks_setup,
             remove_hooks,
+            apply_guard_hook,
+            remove_guard_hook,
+            respond_to_guard,
+            analyze_guard_command,
+            get_guard_context,
+            apply_elicitation_hook,
+            remove_elicitation_hook,
+            respond_to_elicitation,
             generate_mascot_quips,
             list_llm_providers,
             get_llm_config,

@@ -260,6 +260,12 @@ enum Commands {
         #[command(subcommand)]
         action: SkillCommands,
     },
+    /// [internal] Guard hook — intercepts critical commands for user approval
+    #[command(hide = true)]
+    Guard,
+    /// [internal] Elicitation hook — intercepts AskUserQuestion for Fleet UI
+    #[command(hide = true)]
+    Elicitation,
 }
 
 #[derive(Subcommand)]
@@ -273,11 +279,13 @@ fn main() {
 
     if let Some(ref host) = cli.remote {
         match &cli.command {
-            Commands::Serve { .. } | Commands::Skill { .. } => {
+            Commands::Serve { .. } | Commands::Skill { .. } | Commands::Guard | Commands::Elicitation => {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
                     match &cli.command {
                         Commands::Serve { .. } => "serve",
                         Commands::Skill { .. } => "skill",
+                        Commands::Guard => "guard",
+                        Commands::Elicitation => "elicitation",
                         _ => unreachable!(),
                     }
                 );
@@ -303,6 +311,8 @@ fn main() {
         Commands::Skill { action } => match action {
             SkillCommands::Install => cmd_skill_install(),
         },
+        Commands::Guard => cmd_guard(),
+        Commands::Elicitation => cmd_elicitation(),
     }
 }
 
@@ -1153,6 +1163,68 @@ fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
 
 // ── fleet serve ────────────────────────────────────────────────────────────────
 
+// ── SSE broadcaster (shared between fleet serve and background poller) ──────
+
+struct SseClient {
+    stream: Box<dyn std::io::Write + Send>,
+    alive: bool,
+}
+
+impl SseClient {
+    fn send_event(&mut self, event_type: &str, data: &str) {
+        let msg = format!("event: {event_type}\ndata: {data}\n\n");
+        if self.stream.write_all(msg.as_bytes()).is_err() {
+            self.alive = false;
+        }
+        let _ = self.stream.flush();
+    }
+}
+
+#[derive(Clone)]
+struct SseBroadcaster {
+    clients: std::sync::Arc<std::sync::Mutex<Vec<SseClient>>>,
+}
+
+impl SseBroadcaster {
+    fn new() -> Self {
+        Self {
+            clients: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
+        }
+    }
+
+    fn add_client(&self, stream: Box<dyn std::io::Write + Send>) {
+        self.clients.lock().unwrap().push(SseClient {
+            stream,
+            alive: true,
+        });
+    }
+
+    fn broadcast(&self, event_type: &str, data: &str) {
+        let mut clients = self.clients.lock().unwrap();
+        for client in clients.iter_mut() {
+            client.send_event(event_type, data);
+        }
+        clients.retain(|c| c.alive);
+    }
+
+    fn client_count(&self) -> usize {
+        self.clients.lock().unwrap().len()
+    }
+}
+
+fn handle_sse_upgrade(request: tiny_http::Request, sse: &SseBroadcaster) {
+    let response = tiny_http::Response::empty(200)
+        .with_header("Content-Type: text/event-stream".parse::<tiny_http::Header>().unwrap())
+        .with_header("Cache-Control: no-cache".parse::<tiny_http::Header>().unwrap())
+        .with_header("Connection: keep-alive".parse::<tiny_http::Header>().unwrap())
+        .with_header("Access-Control-Allow-Origin: *".parse::<tiny_http::Header>().unwrap());
+
+    let mut stream = request.upgrade("sse", response);
+    let _ = std::io::Write::write_all(&mut stream, b": connected\n\n");
+    let _ = std::io::Write::flush(&mut stream);
+    sse.add_client(Box::new(stream));
+}
+
 fn cmd_serve(port: u16, token: String) {
     use std::io::{Read, Seek, SeekFrom};
     use percent_encoding::percent_decode_str;
@@ -1165,6 +1237,9 @@ fn cmd_serve(port: u16, token: String) {
     };
     use claw_fleet_core::llm_provider::{self, LlmConfig};
     use claw_fleet_core::claude_analyze;
+    use claw_fleet_core::audit;
+    use claw_fleet_core::guard;
+    use claw_fleet_core::elicitation;
 
     let sources = build_sources();
 
@@ -1194,6 +1269,8 @@ fn cmd_serve(port: u16, token: String) {
         })
     };
 
+    let sse = SseBroadcaster::new();
+
     let addr = format!("127.0.0.1:{}", port);
     let server = tiny_http::Server::http(&addr).unwrap_or_else(|e| {
         eprintln!("Error: cannot bind to {}: {}", addr, e);
@@ -1201,21 +1278,95 @@ fn cmd_serve(port: u16, token: String) {
     });
     eprintln!("[fleet serve] listening on {} (version {})", addr, env!("CARGO_PKG_VERSION"));
 
+    // ── Background SSE broadcaster thread ──────────────────────────────────
+    // Polls for session changes, waiting alerts, guard/elicitation requests
+    // and pushes them to connected SSE clients.
+    {
+        let sse_bg = sse.clone();
+        std::thread::spawn(move || {
+            let sources_bg = build_sources();
+            let mut prev_sessions_json = String::new();
+            let mut prev_alert_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut prev_guard_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut prev_elicit_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+            loop {
+                std::thread::sleep(std::time::Duration::from_secs(2));
+
+                if sse_bg.client_count() == 0 {
+                    continue;
+                }
+
+                // Broadcast session updates
+                let sessions = scan_all_sources(&sources_bg);
+                let json = serde_json::to_string(&sessions).unwrap_or_default();
+                if json != prev_sessions_json {
+                    sse_bg.broadcast("sessions-updated", &json);
+                    prev_sessions_json = json;
+                }
+
+                // Broadcast waiting alerts (simple detection from session status)
+                let waiting_ids: std::collections::HashSet<String> = sessions
+                    .iter()
+                    .filter(|s| {
+                        !s.is_subagent
+                            && s.status == claw_fleet_core::session::SessionStatus::WaitingInput
+                    })
+                    .map(|s| s.id.clone())
+                    .collect();
+                for sess in &sessions {
+                    if waiting_ids.contains(&sess.id) && !prev_alert_ids.contains(&sess.id) {
+                        let alert = claw_fleet_core::backend::WaitingAlert {
+                            session_id: sess.id.clone(),
+                            workspace_name: sess.workspace_name.clone(),
+                            summary: sess.last_message_preview.clone().unwrap_or_default(),
+                            detected_at_ms: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis() as u64,
+                            jsonl_path: sess.jsonl_path.clone(),
+                        };
+                        if let Ok(json) = serde_json::to_string(&alert) {
+                            sse_bg.broadcast("waiting-alert", &json);
+                        }
+                    }
+                }
+                prev_alert_ids = waiting_ids;
+
+                // Broadcast new guard requests
+                let guard_ids: std::collections::HashSet<String> =
+                    guard::list_pending_requests().into_iter().collect();
+                for id in &guard_ids {
+                    if prev_guard_ids.insert(id.clone()) {
+                        if let Some(req) = guard::read_request(id) {
+                            if let Ok(json) = serde_json::to_string(&req) {
+                                sse_bg.broadcast("guard-request", &json);
+                            }
+                        }
+                    }
+                }
+                prev_guard_ids.retain(|id| guard_ids.contains(id));
+
+                // Broadcast new elicitation requests
+                let elicit_ids: std::collections::HashSet<String> =
+                    elicitation::list_pending_requests().into_iter().collect();
+                for id in &elicit_ids {
+                    if prev_elicit_ids.insert(id.clone()) {
+                        if let Some(req) = elicitation::read_request(id) {
+                            if let Ok(json) = serde_json::to_string(&req) {
+                                sse_bg.broadcast("elicitation-request", &json);
+                            }
+                        }
+                    }
+                }
+                prev_elicit_ids.retain(|id| elicit_ids.contains(id));
+            }
+        });
+    }
+
     let expected_auth = format!("Bearer {}", token);
 
     for mut request in server.incoming_requests() {
-        // Auth check
-        let auth_ok = request
-            .headers()
-            .iter()
-            .any(|h| h.field.equiv("authorization")
-                && h.value.as_str() == expected_auth.as_str());
-
-        if !auth_ok {
-            let _ = request.respond(tiny_http::Response::empty(401));
-            continue;
-        }
-
         let url = request.url().to_string();
         let (path, query_str) = match url.split_once('?') {
             Some((p, q)) => (p, q),
@@ -1223,6 +1374,26 @@ fn cmd_serve(port: u16, token: String) {
         };
 
         let query = parse_query(query_str);
+
+        // Auth check — support both header and query param (for SSE EventSource)
+        let auth_ok = request
+            .headers()
+            .iter()
+            .any(|h| h.field.equiv("authorization")
+                && h.value.as_str() == expected_auth.as_str());
+
+        if !auth_ok {
+            if query.get("token").map(|t| t.as_str()) != Some(&token) {
+                let _ = request.respond(tiny_http::Response::empty(401));
+                continue;
+            }
+        }
+
+        // Handle SSE endpoint — takes over the connection.
+        if path == "/events" {
+            handle_sse_upgrade(request, &sse);
+            continue;
+        }
 
         let json_header: tiny_http::Header = "Content-Type: application/json".parse().unwrap();
 
@@ -1716,6 +1887,232 @@ fn cmd_serve(port: u16, token: String) {
                 }
             }
 
+            // ── Guard hook endpoints ──────────────────────────────────────
+            "/apply_guard_hook" => {
+                match hooks::apply_guard_hook() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/remove_guard_hook" => {
+                match hooks::remove_guard_hook() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/guard/pending" => {
+                let ids = guard::list_pending_requests();
+                let mut requests = Vec::new();
+                for id in &ids {
+                    if let Some(req) = guard::read_request(id) {
+                        requests.push(req);
+                    }
+                }
+                let body = serde_json::to_string(&requests).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/guard/respond" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<guard::GuardResponse>(&body_bytes) {
+                    Ok(resp) => {
+                        match guard::write_response(&resp) {
+                            Ok(()) => {
+                                // Don't cleanup here — the `fleet guard` CLI polls
+                                // for the response file and does cleanup itself.
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/guard/analyze" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct AnalyzeReq { command: String, context: String, lang: String }
+                match serde_json::from_slice::<AnalyzeReq>(&body_bytes) {
+                    Ok(req) => {
+                        let risk_tags = audit::classify_bash_command_pub(&req.command)
+                            .map(|(_, tags)| tags)
+                            .unwrap_or_default();
+                        let prompt = guard::build_analysis_prompt(
+                            &req.command, &risk_tags, &req.context, &req.lang,
+                        );
+                        let cfg = llm_config.lock().unwrap().clone();
+                        let provider = llm_provider::resolve_provider(&cfg.provider);
+                        let result = provider.as_ref().and_then(|p| {
+                            if !p.is_available() { return None; }
+                            let model = &cfg.fast_model;
+                            let timeout = std::time::Duration::from_secs(30);
+                            p.complete(&prompt, model, timeout)
+                        });
+                        match result {
+                            Some(analysis) => {
+                                let body = serde_json::json!({"analysis": analysis}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_header(json_header),
+                                );
+                            }
+                            None => {
+                                let body = serde_json::json!({"error": "LLM analysis unavailable"}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            // ── Elicitation hook endpoints ───────────────────────────────────
+            "/apply_elicitation_hook" => {
+                match hooks::apply_elicitation_hook() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/remove_elicitation_hook" => {
+                match hooks::remove_elicitation_hook() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/elicitation/pending" => {
+                let ids = elicitation::list_pending_requests();
+                let mut requests = Vec::new();
+                for id in &ids {
+                    if let Some(req) = elicitation::read_request(id) {
+                        requests.push(req);
+                    }
+                }
+                let body = serde_json::to_string(&requests).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/elicitation/respond" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<elicitation::ElicitationResponse>(&body_bytes) {
+                    Ok(resp) => {
+                        match elicitation::write_response(&resp) {
+                            Ok(()) => {
+                                // Don't cleanup here — the `fleet elicitation` CLI
+                                // polls for the response and does cleanup itself.
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/search" => {
                 let q = query.get("q").cloned().unwrap_or_default();
                 let limit: usize = query
@@ -1806,6 +2203,182 @@ fn cmd_serve(port: u16, token: String) {
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
+            }
+
+            "/audit/rules" => {
+                let rules = claw_fleet_core::audit::get_all_rules();
+                let body = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/audit/rules/toggle" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct ToggleReq { id: String, enabled: bool }
+                match serde_json::from_slice::<ToggleReq>(&body_bytes) {
+                    Ok(req) => match claw_fleet_core::audit::set_rule_enabled(&req.id, req.enabled) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string("{}").with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/audit/rules/save" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<claw_fleet_core::audit::AuditRuleInfo>(&body_bytes) {
+                    Ok(rule) => match claw_fleet_core::audit::save_custom_rule(rule) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string("{}").with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/audit/rules/delete" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct DeleteReq { id: String }
+                match serde_json::from_slice::<DeleteReq>(&body_bytes) {
+                    Ok(req) => match claw_fleet_core::audit::delete_custom_rule(&req.id) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string("{}").with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/audit/rules/suggest" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct SuggestReq { concern: String, lang: String }
+                match serde_json::from_slice::<SuggestReq>(&body_bytes) {
+                    Ok(req) => {
+                        let existing_tags: Vec<String> = claw_fleet_core::audit::get_all_rules()
+                            .iter()
+                            .map(|r| r.tag.clone())
+                            .collect();
+                        let prompt = claw_fleet_core::audit::build_suggest_rules_prompt(
+                            &req.concern, &req.lang, &existing_tags,
+                        );
+                        let llm_cfg = llm_config.lock().unwrap().clone();
+                        let provider = claw_fleet_core::llm_provider::resolve_provider(&llm_cfg.provider);
+                        match provider {
+                            Some(p) => {
+                                match p.complete(&prompt, &llm_cfg.standard_model, std::time::Duration::from_secs(120)) {
+                                    Some(resp) => {
+                                        let json_str = resp.trim();
+                                        let json_str = json_str
+                                            .strip_prefix("```json")
+                                            .or_else(|| json_str.strip_prefix("```"))
+                                            .unwrap_or(json_str);
+                                        let json_str = json_str.strip_suffix("```").unwrap_or(json_str).trim();
+                                        match serde_json::from_str::<Vec<claw_fleet_core::audit::SuggestedRule>>(json_str) {
+                                            Ok(suggestions) => {
+                                                let body = serde_json::to_string(&suggestions).unwrap_or_else(|_| "[]".into());
+                                                let _ = request.respond(
+                                                    tiny_http::Response::from_string(body).with_header(json_header),
+                                                );
+                                            }
+                                            Err(e) => {
+                                                let body = format!(r#"{{"error":"Failed to parse LLM response: {}"}}"#, e.to_string().replace('"', "'"));
+                                                let _ = request.respond(
+                                                    tiny_http::Response::from_string(body)
+                                                        .with_status_code(500)
+                                                        .with_header(json_header),
+                                                );
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        let body = r#"{"error":"LLM did not return a response"}"#;
+                                        let _ = request.respond(
+                                            tiny_http::Response::from_string(body)
+                                                .with_status_code(500)
+                                                .with_header(json_header),
+                                        );
+                                    }
+                                }
+                            }
+                            None => {
+                                let body = r#"{"error":"No LLM provider available"}"#;
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
             }
 
             "/daily_report" => {
@@ -2210,6 +2783,219 @@ fn cmd_skill_install() {
     if !any {
         eprintln!("No supported AI tools detected. Install Claude Code, GitHub Copilot, or Gemini CLI first.");
         std::process::exit(1);
+    }
+}
+
+// ── Guard CLI (hook entrypoint) ─────────────────────────────────────────────
+
+fn cmd_guard() {
+    use claw_fleet_core::guard::{
+        self, GuardClassification, GuardDecision, GuardRequest, HookInput,
+    };
+    use std::io::Read;
+    use std::time::Duration;
+
+    // Read hook JSON from stdin.
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        // Can't read stdin — allow silently.
+        return;
+    }
+
+    let hook_input: HookInput = match serde_json::from_str(&input) {
+        Ok(v) => v,
+        Err(_) => return, // Malformed input — allow silently.
+    };
+
+    // Classify the command.
+    match guard::classify_hook_input(&hook_input) {
+        GuardClassification::Allow => {
+            // Not critical — allow.
+            return;
+        }
+        GuardClassification::NeedsConfirmation {
+            command,
+            risk_tags,
+        } => {
+            let session_id = hook_input
+                .session_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string());
+
+            let request_id = guard::new_request_id();
+
+            let req = GuardRequest {
+                id: request_id.clone(),
+                session_id,
+                workspace_name: String::new(), // Desktop app resolves from session_id
+                tool_name: "Bash".to_string(),
+                command: command.clone(),
+                command_summary: guard::truncate_command(&command, 120),
+                risk_tags,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            };
+
+            // Write request for the desktop app to pick up.
+            if let Err(e) = guard::write_request(&req) {
+                eprintln!("guard: failed to write request: {e}");
+                // On error, block by default for Critical commands.
+                let out = serde_json::json!({
+                    "decision": "block",
+                    "reason": "Fleet Guard: failed to communicate with Fleet app"
+                });
+                println!("{}", out);
+                return;
+            }
+
+            // Poll for response (up to 120 seconds).
+            let timeout = Duration::from_secs(120);
+            match guard::poll_response(&request_id, timeout) {
+                Some(resp) => {
+                    guard::cleanup(&request_id);
+                    match resp.decision {
+                        GuardDecision::Allow => {
+                            // Allow — exit without output (or explicit allow).
+                        }
+                        GuardDecision::Block => {
+                            let out = serde_json::json!({
+                                "decision": "block",
+                                "reason": "Fleet Guard: blocked by user"
+                            });
+                            println!("{}", out);
+                        }
+                    }
+                }
+                None => {
+                    // Timeout — clean up and block (Critical commands).
+                    guard::cleanup(&request_id);
+                    let out = serde_json::json!({
+                        "decision": "block",
+                        "reason": "Fleet Guard: no response from Fleet app (timeout)"
+                    });
+                    println!("{}", out);
+                }
+            }
+        }
+    }
+}
+
+// ── Elicitation CLI (hook entrypoint for AskUserQuestion) ───────────────
+
+fn cmd_elicitation() {
+    use claw_fleet_core::elicitation::{self, ElicitationRequest};
+    use claw_fleet_core::guard::{self, HookInput};
+    use std::io::Read;
+    use std::time::Duration;
+
+    // Read hook JSON from stdin.
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+
+    let hook_input: HookInput = match serde_json::from_str(&input) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    // Only handle AskUserQuestion.
+    let tool_name = hook_input.tool_name.as_deref().unwrap_or("");
+    if tool_name != "AskUserQuestion" {
+        return;
+    }
+
+    let tool_input = match &hook_input.tool_input {
+        Some(v) => v.clone(),
+        None => return,
+    };
+
+    // Parse questions from tool_input.
+    let questions_val = match tool_input.get("questions") {
+        Some(q) => q.clone(),
+        None => return,
+    };
+
+    let questions: Vec<elicitation::ElicitationQuestion> =
+        match serde_json::from_value(questions_val.clone()) {
+            Ok(q) => q,
+            Err(_) => return,
+        };
+
+    if questions.is_empty() {
+        return;
+    }
+
+    let session_id = hook_input
+        .session_id
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let request_id = guard::new_request_id();
+
+    let req = ElicitationRequest {
+        id: request_id.clone(),
+        session_id,
+        workspace_name: String::new(),
+        questions,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+
+    if let Err(e) = elicitation::write_request(&req) {
+        eprintln!("elicitation: failed to write request: {e}");
+        // On error, deny so Claude Code falls back to its own UI.
+        let out = serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Fleet: failed to communicate with Fleet app"
+            }
+        });
+        println!("{}", out);
+        return;
+    }
+
+    // Poll for response (up to 120 seconds).
+    let timeout = Duration::from_secs(120);
+    match elicitation::poll_response(&request_id, timeout) {
+        Some(resp) => {
+            elicitation::cleanup(&request_id);
+            if resp.declined {
+                // User declined — deny so Claude Code knows.
+                let out = serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": "Fleet: user declined to answer"
+                    }
+                });
+                println!("{}", out);
+            } else {
+                // Build updatedInput with original questions + user answers.
+                let mut updated_input = tool_input.clone();
+                updated_input["answers"] =
+                    serde_json::to_value(&resp.answers).unwrap_or_default();
+                let out = serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "allow",
+                        "updatedInput": updated_input
+                    }
+                });
+                println!("{}", out);
+            }
+        }
+        None => {
+            elicitation::cleanup(&request_id);
+            // Timeout — deny so Claude Code falls back.
+            let out = serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Fleet: no response from Fleet app (timeout)"
+                }
+            });
+            println!("{}", out);
+        }
     }
 }
 

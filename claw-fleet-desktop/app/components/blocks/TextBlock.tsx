@@ -1,4 +1,4 @@
-import { memo } from "react";
+import { memo, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -7,20 +7,63 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import styles from "./TextBlock.module.css";
 
+/** Recursively walk React children and highlight matching terms in string nodes. */
+function highlightChildren(children: ReactNode, regex: RegExp): ReactNode {
+  if (typeof children === "string") {
+    const parts = children.split(regex);
+    if (parts.length <= 1) return children;
+    return parts.map((part, i) =>
+      regex.test(part) ? (
+        <mark key={i} style={{ background: "#fbbf24", color: "#000", borderRadius: "2px" }}>
+          {part}
+        </mark>
+      ) : (
+        <span key={i}>{part}</span>
+      )
+    );
+  }
+  if (Array.isArray(children)) {
+    return children.map((child, i) => (
+      <span key={i}>{highlightChildren(child, regex)}</span>
+    ));
+  }
+  return children;
+}
+
 interface Props {
   text: string;
   isPartial?: boolean;
+  searchTerms?: string[] | null;
 }
 
-export const TextBlock = memo(function TextBlock({ text, isPartial }: Props) {
+export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms }: Props) {
   // When streaming, strip the last incomplete paragraph to avoid visual flicker
   const content = isPartial ? stripLastParagraph(text) : text;
+
+  const searchRegex = useMemo(() => {
+    if (!searchTerms?.length) return null;
+    const escaped = searchTerms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    return new RegExp(`(${escaped.join("|")})`, "gi");
+  }, [searchTerms]);
+
+  // Build a function that replaces string children with highlighted spans
+  const highlight = useMemo(() => {
+    if (!searchRegex) return null;
+    return (children: ReactNode): ReactNode => highlightChildren(children, searchRegex);
+  }, [searchRegex]);
 
   return (
     <div className={styles.root}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
+          // Search term highlighting in text-bearing elements
+          ...(highlight ? {
+            p: ({ children }) => <p>{highlight(children)}</p>,
+            li: ({ children }) => <li>{highlight(children)}</li>,
+            td: ({ children }) => <td>{highlight(children)}</td>,
+            th: ({ children }) => <th>{highlight(children)}</th>,
+          } : {}),
           // Code blocks with syntax highlighting
           code({ node, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");

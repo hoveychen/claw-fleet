@@ -90,5 +90,26 @@
   },
   "speed_chart": {
     "title": "Token Speed"
+  },
+  "decision": {
+    "title": "Decisions",
+    "guard_title": "Command Blocked",
+    "guard_command": "Command",
+    "guard_risk": "Risk",
+    "guard_analysis": "AI Analysis",
+    "guard_analyzing": "Analyzing…",
+    "guard_analysis_unavailable": "Analysis unavailable",
+    "allow": "Allow",
+    "block": "Block",
+    "elicitation_title": "Agent Question",
+    "step": "Step {{current}} of {{total}}",
+    "other": "Other",
+    "other_placeholder": "Enter your answer…",
+    "back": "Back",
+    "next": "Next",
+    "submit": "Submit",
+    "decline": "Decline",
+    "no_pending": "No pending decisions",
+    "workspace": "Workspace"
   }
 }

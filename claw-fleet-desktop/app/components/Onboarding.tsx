@@ -4,7 +4,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionsStore, useOverlayStore } from "../store";
-import { getItem, setItem } from "../storage";
+import { getItem, setItem, getSeenFeatures, markFeaturesSeen, ONBOARDING_FEATURES, type OnboardingFeatureId } from "../storage";
 import { type ChimePreset, CHIME_PRESETS, playChime } from "../audio";
 import { ThemeToggle } from "./ThemeToggle";
 import { LanguageSwitcher } from "./LanguageSwitcher";
@@ -43,6 +43,8 @@ interface HookSetupPlan {
   toAdd: string[];
   hooksGloballyDisabled: boolean;
   alreadyInstalled: boolean;
+  guardInstalled: boolean;
+  elicitationInstalled: boolean;
 }
 
 type NotificationMode = "all" | "user_action" | "none";
@@ -601,47 +603,105 @@ function NotificationSettingsCard({
 
 // ── Hooks setup card ────────────────────────────────────────────────────
 
+// ── Mock guard card (static preview for onboarding) ──────────────────────
+
+function MockGuardPreview() {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.mock_decision}>
+      <div className={styles.mock_decision_header}>
+        <svg className={styles.mock_icon_warn} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+          <line x1="12" y1="9" x2="12" y2="13" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span className={styles.mock_decision_title}>{t("guard.title")}</span>
+      </div>
+      <div className={styles.mock_command}>sudo rm -rf /tmp/build-cache</div>
+      <div className={styles.mock_tags}>
+        <span className={styles.mock_tag}>privilege_escalation</span>
+        <span className={styles.mock_tag}>recursive_delete</span>
+      </div>
+      <div className={styles.mock_actions}>
+        <span className={styles.mock_btn_allow}>{t("guard.allow")}</span>
+        <span className={styles.mock_btn_block}>{t("guard.block")}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Mock elicitation card (static preview for onboarding) ────────────────
+
+function MockElicitationPreview() {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.mock_decision}>
+      <div className={styles.mock_decision_header}>
+        <svg className={styles.mock_icon_question} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span className={styles.mock_decision_title}>{t("elicitation.title")}</span>
+      </div>
+      <div className={styles.mock_question}>{t("onboarding.hooks_setup.elicitation_mock_q")}</div>
+      <div className={styles.mock_options}>
+        <span className={`${styles.mock_option} ${styles.mock_option_selected}`}>{t("onboarding.hooks_setup.elicitation_mock_a1")}</span>
+        <span className={styles.mock_option}>{t("onboarding.hooks_setup.elicitation_mock_a2")}</span>
+      </div>
+      <div className={styles.mock_actions}>
+        <span className={styles.mock_btn_secondary}>{t("elicitation.decline")}</span>
+        <span className={styles.mock_btn_allow}>{t("elicitation.submit")}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Hooks + Guard + Elicitation setup card ───────────────────────────────
+
 function HooksSetupCard({
   hooksPlan,
   onInstall,
   status,
   errorMsg,
+  guardEnabled,
+  onToggleGuard,
+  elicitationEnabled,
+  onToggleElicitation,
 }: {
   hooksPlan: HookSetupPlan;
   onInstall: () => void;
   status: "idle" | "installing" | "success" | "error";
   errorMsg: string;
+  guardEnabled: boolean;
+  onToggleGuard: (enabled: boolean) => void;
+  elicitationEnabled: boolean;
+  onToggleElicitation: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
-
-  if (hooksPlan.alreadyInstalled || status === "success") {
-    return (
-      <div className={`${styles.card} ${styles.card_ok}`}>
-        <div className={styles.card_header}>
-          <span className={styles.card_icon}>&#x2705;</span>
-          <span className={styles.card_title}>{t("hooks.installed")}</span>
-        </div>
-      </div>
-    );
-  }
+  const hooksReady = hooksPlan.alreadyInstalled || status === "success";
 
   return (
-    <div className={`${styles.card} ${styles.card_warn}`}>
+    <div className={`${styles.card} ${hooksReady ? styles.card_info : styles.card_warn}`}>
+      {/* ── Base hooks section ──────────────────────────────────────── */}
       <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x1FA9D;</span>
+        <span className={styles.card_icon}>{hooksReady ? "\u2705" : "\u{1FA9D}"}</span>
         <span className={styles.card_title}>{t("onboarding.hooks_setup.title")}</span>
       </div>
       <p className={styles.card_description}>{t("onboarding.hooks_setup.description")}</p>
-      <div className={styles.hooks_actions}>
-        <button
-          className={styles.btn_primary}
-          onClick={onInstall}
-          disabled={status === "installing"}
-          style={{ padding: "8px 20px", fontSize: 12 }}
-        >
-          {status === "installing" ? t("account.loading") : t("hooks.install")}
-        </button>
-      </div>
+
+      {!hooksReady && (
+        <div className={styles.hooks_actions}>
+          <button
+            className={styles.btn_primary}
+            onClick={onInstall}
+            disabled={status === "installing"}
+            style={{ padding: "8px 20px", fontSize: 12 }}
+          >
+            {status === "installing" ? t("account.loading") : t("hooks.install")}
+          </button>
+        </div>
+      )}
       {hooksPlan.hooksGloballyDisabled && (
         <p className={styles.hint}>{t("onboarding.hooks_setup.disabled_warning")}</p>
       )}
@@ -650,20 +710,67 @@ function HooksSetupCard({
           {t("hooks.install_error", { error: errorMsg })}
         </p>
       )}
+
+      {/* ── Guard section ──────────────────────────────────────────── */}
+      <div className={styles.hook_feature_section}>
+        <div className={styles.hook_feature_header}>
+          <div className={styles.hook_feature_text}>
+            <span className={styles.settings_label}>{t("settings.guard")}</span>
+            <p className={styles.hint}>{t("onboarding.hooks_setup.guard_desc")}</p>
+          </div>
+          <label className={styles.hook_feature_toggle}>
+            <input
+              type="checkbox"
+              checked={guardEnabled}
+              onChange={(e) => onToggleGuard(e.target.checked)}
+              className={styles.source_checkbox}
+            />
+          </label>
+        </div>
+        <MockGuardPreview />
+      </div>
+
+      {/* ── Elicitation section ────────────────────────────────────── */}
+      <div className={styles.hook_feature_section}>
+        <div className={styles.hook_feature_header}>
+          <div className={styles.hook_feature_text}>
+            <span className={styles.settings_label}>{t("settings.elicitation")}</span>
+            <p className={styles.hint}>{t("onboarding.hooks_setup.elicitation_desc")}</p>
+          </div>
+          <label className={styles.hook_feature_toggle}>
+            <input
+              type="checkbox"
+              checked={elicitationEnabled}
+              onChange={(e) => onToggleElicitation(e.target.checked)}
+              className={styles.source_checkbox}
+            />
+          </label>
+        </div>
+        <MockElicitationPreview />
+      </div>
     </div>
   );
 }
 
 // ── Main Onboarding component ────────────────────────────────────────────────
 
-export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
+export type OnboardingMode = "full" | "whats_new";
+
+export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismiss: () => void }) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(mode === "full");
   const [accountError, setAccountError] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
   const prevSessionCount = useRef(0);
+
+  // Compute which features are unseen (used in whats_new mode to filter cards).
+  const unseenFeatures = useMemo(() => {
+    if (mode === "full") return new Set(ONBOARDING_FEATURES as readonly OnboardingFeatureId[]);
+    const seen = getSeenFeatures();
+    return new Set(ONBOARDING_FEATURES.filter((id) => !seen.has(id)));
+  }, [mode]);
 
   // ── Sources config ───────────────────────────────────────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
@@ -701,6 +808,46 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
     } catch (e) {
       setHooksStatus("error");
       setHooksError(String(e));
+    }
+  }, []);
+
+  // ── Guard state ─────────────────────────────────────────────────────────
+  const [guardEnabled, setGuardEnabled] = useState(
+    () => getItem("guard-enabled") !== "false",
+  );
+
+  const handleToggleGuard = useCallback(async (enabled: boolean) => {
+    setGuardEnabled(enabled);
+    setItem("guard-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_guard_hook");
+      } else {
+        await invoke("remove_guard_hook");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("guard hook toggle failed:", e);
+    }
+  }, []);
+
+  // ── Elicitation state ──────────────────────────────────────────────────
+  const [elicitationEnabled, setElicitationEnabled] = useState(
+    () => getItem("elicitation-enabled") !== "false",
+  );
+
+  const handleToggleElicitation = useCallback(async (enabled: boolean) => {
+    setElicitationEnabled(enabled);
+    setItem("elicitation-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_elicitation_hook");
+      } else {
+        await invoke("remove_elicitation_hook");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("elicitation hook toggle failed:", e);
     }
   }, []);
 
@@ -768,8 +915,9 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
     return sources.filter((s) => s.available).length > 1;
   }, [sources]);
 
-  // Wrap onDismiss: if sources were changed, restart to pick up new config
+  // Wrap onDismiss: mark all features as seen + restart if sources changed
   const handleDismiss = useCallback(() => {
+    markFeaturesSeen([...ONBOARDING_FEATURES]);
     if (sourcesChanged.current) {
       invoke("restart_app");
     } else {
@@ -853,12 +1001,73 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
   const noIssues = status && issues.length === 0;
   const showWaiting = noIssues && !status?.has_sessions && !celebrating;
 
-  // Show hooks setup when Claude Code is among the detected tools and hooks are not installed
+  // Show hooks setup when Claude Code is among the detected tools
   const hasClaudeCode = status && (
     status.cli_installed || status.detected_tools.cli || status.detected_tools.vscode || status.detected_tools.jetbrains
   );
-  const showHooksSetup = hasClaudeCode && hooksPlan && !hooksPlan.alreadyInstalled && hooksStatus !== "success";
 
+  // ── "What's New" mode: lightweight overlay with only unseen features ────
+  if (mode === "whats_new") {
+    return (
+      <div className={styles.overlay}>
+        <div className={styles.container}>
+          <div className={styles.header}>
+            <img src="/app-icon.png" className={styles.logo} alt="Claw Fleet" />
+            <h1 className={styles.title}>{t("onboarding.whats_new.title")}</h1>
+            <p className={styles.subtitle}>{t("onboarding.whats_new.subtitle")}</p>
+          </div>
+
+          {unseenFeatures.has("appearance") && (
+            <div className={styles.cards}>
+              <AppearanceCard />
+            </div>
+          )}
+
+          {unseenFeatures.has("notifications") && (
+            <div className={styles.cards}>
+              <NotificationSettingsCard
+                notifMode={notifMode}
+                onNotifModeChange={handleNotifModeChange}
+                ttsMode={ttsMode}
+                onTtsModeChange={handleTtsModeChange}
+                chimePreset={chimePreset}
+                onChimeChange={handleChimeChange}
+                personalizedMascot={personalizedMascot}
+                onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
+                overlayEnabled={overlayEnabled}
+                onToggleOverlay={setOverlayEnabled}
+                userTitle={userTitle}
+                onUserTitleChange={handleUserTitleChange}
+              />
+            </div>
+          )}
+
+          {unseenFeatures.has("hooks_guard_elicitation") && hooksPlan && (
+            <div className={styles.cards}>
+              <HooksSetupCard
+                hooksPlan={hooksPlan}
+                onInstall={handleInstallHooks}
+                status={hooksStatus}
+                errorMsg={hooksError}
+                guardEnabled={guardEnabled}
+                onToggleGuard={handleToggleGuard}
+                elicitationEnabled={elicitationEnabled}
+                onToggleElicitation={handleToggleElicitation}
+              />
+            </div>
+          )}
+
+          <div className={styles.footer}>
+            <button className={styles.btn_primary} onClick={handleDismiss}>
+              {t("onboarding.dismiss")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Full onboarding mode (first-time users) ──────────────────────────────
   return (
     <div className={styles.overlay}>
       <div className={styles.container}>
@@ -919,12 +1128,16 @@ export function Onboarding({ onDismiss }: { onDismiss: () => void }) {
                       userTitle={userTitle}
                       onUserTitleChange={handleUserTitleChange}
                     />
-                    {showHooksSetup && hooksPlan && (
+                    {hasClaudeCode && hooksPlan && (
                       <HooksSetupCard
                         hooksPlan={hooksPlan}
                         onInstall={handleInstallHooks}
                         status={hooksStatus}
                         errorMsg={hooksError}
+                        guardEnabled={guardEnabled}
+                        onToggleGuard={handleToggleGuard}
+                        elicitationEnabled={elicitationEnabled}
+                        onToggleElicitation={handleToggleElicitation}
                       />
                     )}
                   </div>

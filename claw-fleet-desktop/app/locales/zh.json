@@ -130,7 +130,49 @@
     "tags": "标签",
     "full_command": "完整命令",
     "go_to_session": "跳转到会话",
-    "mark_read": "标记已读"
+    "mark_read": "标记已读",
+    "tab_events": "事件",
+    "tab_rules": "规则",
+    "rules_title": "审计规则",
+    "cat_privilege_escalation": "权限提升",
+    "cat_data_exfiltration": "数据外泄",
+    "cat_network": "网络",
+    "cat_git": "Git 操作",
+    "cat_filesystem": "文件系统",
+    "cat_container": "容器 & K8s",
+    "cat_package": "包管理",
+    "cat_process": "进程管理",
+    "cat_cloud": "云服务 CLI",
+    "cat_scheduled_task": "定时任务",
+    "cat_python": "Python",
+    "cat_custom": "自定义规则",
+    "rule_builtin": "内置",
+    "rule_custom": "自定义",
+    "rule_patterns": "匹配模式",
+    "rule_match_mode": "匹配方式",
+    "rule_delete": "删除",
+    "rule_delete_confirm": "确定删除此自定义规则？",
+    "rule_save": "保存",
+    "rule_cancel": "取消",
+    "new_rule": "新建规则",
+    "new_rule_manual": "手动创建",
+    "suggest_placeholder": "描述你的安全顾虑，例如「我担心代理修改系统配置文件」",
+    "suggest_btn": "生成建议",
+    "suggest_loading": "正在生成规则建议…",
+    "suggest_empty": "未生成建议。请尝试不同的描述。",
+    "suggest_add_selected": "添加已选",
+    "suggest_reasoning": "理由",
+    "suggest_error": "生成建议失败",
+    "match_contains": "子串匹配",
+    "match_command_start": "命令起始位置",
+    "level_critical": "严重",
+    "level_high": "高",
+    "level_medium": "中",
+    "rule_id": "标识",
+    "rule_level": "风险等级",
+    "rule_category": "分类",
+    "rule_description": "说明",
+    "no_rules": "未配置规则。"
   },
   "memory": {
     "panel_title": "Memory",
@@ -280,6 +322,10 @@
       "detected": "已检测",
       "not_detected": "未检测到"
     },
+    "whats_new": {
+      "title": "新功能",
+      "subtitle": "Claw Fleet 自你上次使用以来新增了一些功能，花一点时间来配置它们吧。"
+    },
     "all_good": {
       "title": "一切就绪！",
       "description": "Claude Code 已安装，你已登录，会话正在被监控。"
@@ -311,7 +357,12 @@
     "hooks_setup": {
       "title": "推荐：安装 Fleet Hooks",
       "description": "检测到你使用了 Claude Code，安装 Fleet Hooks 可以更准确地检测 Agent 状态（如工具执行、等待输入等）。Hooks 在后台异步运行，不会影响 Agent 性能。",
-      "disabled_warning": "注意：你的设置中 disableAllHooks 为 true，hooks 安装后不会生效。"
+      "disabled_warning": "注意：你的设置中 disableAllHooks 为 true，hooks 安装后不会生效。",
+      "guard_desc": "当 Agent 即将执行高危命令（sudo、git push --force、rm -rf 等）时，Fleet 会拦截并在应用内征求你的许可，无需守在终端前。",
+      "elicitation_desc": "当 Agent 有问题需要你回答（AskUserQuestion）时，Fleet 会将问题转发到应用中，你随时随地都能回复，无需切回终端窗口。",
+      "elicitation_mock_q": "新的认证服务应该使用哪个数据库？",
+      "elicitation_mock_a1": "PostgreSQL",
+      "elicitation_mock_a2": "SQLite"
     },
     "copy_hint": "点击复制"
   },
@@ -869,6 +920,13 @@
     "remote": "远程",
     "hooks": "Fleet Hooks",
     "hooks_desc": "Hooks 可以提升会话状态检测的准确性",
+    "guard": "拦截防护",
+    "guard_desc": "拦截高危命令（sudo、git push 等），在执行前征求你的许可",
+    "guard_enabled": "启用拦截防护",
+    "guard_llm_analysis": "AI 风险分析",
+    "elicitation": "问答拦截（Agent 提问）",
+    "elicitation_desc": "将 AskUserQuestion 工具调用转发到 Fleet，你可以在 Fleet 应用中回答而不需要在终端操作",
+    "elicitation_enabled": "启用问答拦截",
     "sources": "Agent 源",
     "sources_desc": "选择要监控的 AI Agent 后端",
     "sources_restart": "重启以应用更改",
@@ -984,6 +1042,28 @@
     "confirm_body_disabled_warning": "\n\n注意：你的设置中 \"disableAllHooks\" 当前为 true，hooks 安装后不会生效，需要先修改此设置。",
     "installed": "Fleet Hooks 安装成功",
     "install_error": "安装 hooks 失败：{{error}}"
+  },
+  "decision": {
+    "pending": "待处理决策"
+  },
+  "guard": {
+    "title": "检测到高危命令",
+    "command": "命令",
+    "workspace": "工作区",
+    "analysis": "AI 分析",
+    "analyzing": "正在分析命令...",
+    "allow": "允许",
+    "block": "阻止",
+    "queue": "还有 {{count}} 条待处理"
+  },
+  "elicitation": {
+    "title": "Agent 提问",
+    "submit": "提交",
+    "decline": "拒绝",
+    "next": "下一题",
+    "back": "上一题",
+    "other": "其他",
+    "other_placeholder": "输入自定义答案…"
   },
   "view_report": "日报",
   "report": {

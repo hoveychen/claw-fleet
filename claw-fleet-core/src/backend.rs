@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::account::AccountInfo;
-use crate::audit::AuditSummary;
+use crate::audit::{AuditRuleInfo, AuditSummary, SuggestedRule};
 use crate::daily_report::{DailyReport, DailyReportStats, Lesson};
 use crate::llm_provider::{LlmConfig, LlmProviderInfo};
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
@@ -263,6 +263,22 @@ pub trait Backend: Send + Sync {
     fn apply_hooks(&self) -> Result<(), String>;
     fn remove_hooks(&self) -> Result<(), String>;
 
+    // ── Guard (real-time interception) ───────────────────────────────────────
+    fn apply_guard_hook(&self) -> Result<(), String>;
+    fn remove_guard_hook(&self) -> Result<(), String>;
+    fn respond_to_guard(&self, id: &str, allow: bool) -> Result<(), String>;
+    fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String>;
+
+    // ── Elicitation (AskUserQuestion interception) ──────────────────────
+    fn apply_elicitation_hook(&self) -> Result<(), String>;
+    fn remove_elicitation_hook(&self) -> Result<(), String>;
+    fn respond_to_elicitation(
+        &self,
+        id: &str,
+        declined: bool,
+        answers: std::collections::HashMap<String, String>,
+    ) -> Result<(), String>;
+
     // ── Agent sources config ─────────────────────────────────────────────────
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo>;
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String>;
@@ -272,6 +288,11 @@ pub trait Backend: Send + Sync {
 
     // ── Security audit ──────────────────────────────────────────────────────
     fn get_audit_events(&self) -> AuditSummary;
+    fn get_audit_rules(&self) -> Vec<AuditRuleInfo>;
+    fn set_audit_rule_enabled(&self, id: &str, enabled: bool) -> Result<(), String>;
+    fn save_custom_audit_rule(&self, rule: AuditRuleInfo) -> Result<(), String>;
+    fn delete_custom_audit_rule(&self, id: &str) -> Result<(), String>;
+    fn suggest_audit_rules(&self, concern: &str, lang: &str) -> Result<Vec<SuggestedRule>, String>;
 
     // ── Daily reports ────────────────────────────────────────────────────────
     fn get_daily_report(&self, date: &str) -> Result<Option<DailyReport>, String>;
