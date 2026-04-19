@@ -157,6 +157,55 @@ in this batch and mention the deferred ones at the tail of Q1's report so \
 Standard usage — one question, 2–4 candidate answers. The \"Other\" escape \
 hatch is implicit.\n\
 \n\
+## Speech Summary Divider (TTS)\n\
+\n\
+Fleet's Decision Panel plays a short TTS announcement for every new card. \
+The front-end builds that announcement by splitting the **first question's \
+`question` field** on a single line containing only `---`. To produce a \
+clean two-sentence read-out, every `question` field you emit MUST contain \
+exactly one such divider:\n\
+\n\
+- **Before the divider (1st sentence, spoken):** one crisp sentence saying \
+  *what was done / what the card reports*. Keep it ≤40 Chinese characters \
+  (or ~20 English words) so TTS doesn't drone. No markdown formatting, no \
+  bullets — plain prose that reads naturally out loud.\n\
+- **After the divider (2nd sentence + body):** the full report body \
+  (markdown, tables, lists — arbitrarily long) followed by the concrete \
+  follow-up prompt. The front-end extracts the **last sentence ending in \
+  `？` or `?`** from this region as the 2nd spoken sentence; everything \
+  else is shown visually but not spoken.\n\
+\n\
+Applies to all three cases above:\n\
+- **Case A (pure report):** pre-divider is the one-liner \"what was done\"; \
+  post-divider holds the detailed report and a closing prompt like \
+  \"接下来要不要我做 X？\".\n\
+- **Case B (report + decisions):** pre-divider is the one-liner summary of \
+  the report; post-divider holds the report body + the first decision's \
+  question.\n\
+- **Case C (pure clarifying question):** pre-divider is a one-line summary \
+  of *why you're asking* (e.g. \"需要确认一下日志要写哪里\"); post-divider \
+  holds the question itself.\n\
+\n\
+Example `question` value:\n\
+\n\
+```\n\
+已定位到决策面板的语音播报内容拼装逻辑。\n\
+\n\
+---\n\
+\n\
+拼装规则在 useDecisionEvents.ts 里：guard 用 `workspaceName + aiTitle + toolName` 拼接，elicitation 用 `workspaceName + aiTitle + header`。\n\
+\n\
+接下来要不要我动手改这段拼装？\n\
+```\n\
+\n\
+Hard rules for the pre-divider line:\n\
+- Exactly one line, no newlines within it.\n\
+- No markdown syntax (`**`, `` ` ``, `[]()`, `#`). Read it aloud — if it \
+  sounds awkward, rewrite.\n\
+- Do NOT repeat the workspace name; the front-end prepends it automatically.\n\
+- Never omit the divider. If the entire card is a one-line question, still \
+  emit a summary line, the divider, then the question again.\n\
+\n\
 ## Option Quality Rules\n\
 \n\
 - Each `label` must be a concrete next action or answer, not a meta-choice \
@@ -303,6 +352,23 @@ mod tests {
         let g2 = render_guidance("", "en");
         assert!(g2.contains("Boss"));
         assert!(g2.contains("老板"));
+    }
+
+    #[test]
+    fn render_embeds_speech_summary_divider_rule() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("Speech Summary Divider"),
+            "guidance must contain a 'Speech Summary Divider' section so the front-end TTS split is well-defined"
+        );
+        assert!(
+            g.contains("---"),
+            "guidance must mention the `---` divider literal so agents know what to emit"
+        );
+        assert!(
+            g.contains("Case A") && g.contains("Case B") && g.contains("Case C"),
+            "divider rule must call out that it applies to all three cases"
+        );
     }
 
     #[test]

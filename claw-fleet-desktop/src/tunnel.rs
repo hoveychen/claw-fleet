@@ -71,31 +71,35 @@ impl CloudflareTunnel {
             .spawn()
             .map_err(|e| TunnelError::SpawnFailed(format!("{e} (binary: {binary})")))?;
 
-        // cloudflared prints the tunnel URL to stderr.
+        // cloudflared prints the tunnel URL to stderr. Some Windows AV / wrapper
+        // setups relay lines to stdout instead, so we tail both.
         let stderr = child.stderr.take().unwrap();
+        let stdout = child.stdout.take().unwrap();
         let (url_tx, url_rx) = mpsc::channel();
-        let stderr_lines: Arc<std::sync::Mutex<Vec<String>>> =
+        let log_lines: Arc<std::sync::Mutex<Vec<String>>> =
             Arc::new(std::sync::Mutex::new(Vec::new()));
-        let stderr_lines_clone = stderr_lines.clone();
 
-        std::thread::spawn(move || {
-            let reader = std::io::BufReader::new(stderr);
-            for line in reader.lines() {
-                let line = match line {
-                    Ok(l) => l,
-                    Err(_) => break,
-                };
-                eprintln!("[cloudflared] {line}");
-                stderr_lines_clone.lock().unwrap().push(line.clone());
-                if let Some(url) = extract_tunnel_url(&line) {
-                    let _ = url_tx.send(url);
-                    // Keep reading stderr (don't break) so cloudflared doesn't
-                    // get a broken pipe, but stop collecting lines.
+        let spawn_tail = |stream: Box<dyn std::io::Read + Send>, tag: &'static str| {
+            let tx = url_tx.clone();
+            let buf = log_lines.clone();
+            std::thread::spawn(move || {
+                let reader = std::io::BufReader::new(stream);
+                for line in reader.lines() {
+                    let Ok(line) = line else { break };
+                    eprintln!("[cloudflared {tag}] {line}");
+                    buf.lock().unwrap().push(format!("[{tag}] {line}"));
+                    if let Some(url) = extract_tunnel_url(&line) {
+                        let _ = tx.send(url);
+                    }
                 }
-            }
-        });
+            });
+        };
+        spawn_tail(Box::new(stderr), "stderr");
+        spawn_tail(Box::new(stdout), "stdout");
+        // The closure keeps a clone; drop ours so the channel can close when
+        // both reader threads finish (i.e. child closed both pipes).
+        drop(url_tx);
 
-        // Wait up to 30 seconds for the URL.
         match url_rx.recv_timeout(Duration::from_secs(30)) {
             Ok(public_url) => {
                 eprintln!("[tunnel] public URL: {public_url}");
@@ -105,17 +109,30 @@ impl CloudflareTunnel {
                 })
             }
             Err(_) => {
-                // Collect whatever cloudflared printed for diagnostics.
-                let lines = stderr_lines.lock().unwrap();
-                let output = if lines.is_empty() {
-                    "(no output from cloudflared)".to_string()
-                } else {
-                    lines.iter().rev().take(5).cloned().collect::<Vec<_>>().join("\n")
-                };
-                // Kill the failed process.
+                // Did the child already die? That usually means AV blocked the
+                // binary, MOTW quarantine, missing permissions, or a crash —
+                // much more useful than a generic 30s timeout.
+                let exit = child.try_wait().ok().flatten();
                 let _ = child.kill();
                 let _ = child.wait();
-                Err(TunnelError::UrlParseTimeout(output))
+
+                let lines = log_lines.lock().unwrap();
+                let tail: String = if lines.is_empty() {
+                    "(no output from cloudflared)".to_string()
+                } else {
+                    // Keep the full transcript, but cap to avoid huge payloads.
+                    let slice = if lines.len() > 50 {
+                        &lines[lines.len() - 50..]
+                    } else {
+                        &lines[..]
+                    };
+                    slice.join("\n")
+                };
+                let header = match exit {
+                    Some(status) => format!("cloudflared exited early with {status}\n"),
+                    None => String::new(),
+                };
+                Err(TunnelError::UrlParseTimeout(format!("{header}{tail}")))
             }
         }
     }
@@ -164,36 +181,44 @@ pub fn find_or_download_cloudflared_with_progress(
 
 /// Check if `cloudflared` is already available and return the path.
 fn find_cloudflared() -> Option<String> {
-    // Check PATH first
     #[cfg(unix)]
     let which = "which";
     #[cfg(not(unix))]
     let which = "where";
 
-    if let Ok(output) = Command::new(which).arg("cloudflared").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            if !path.is_empty() {
-                return Some(path);
+    match Command::new(which).arg("cloudflared").output() {
+        Ok(output) if output.status.success() => {
+            // Windows `where` can return multiple lines (one per PATHEXT hit) with CRLF.
+            // Take the first non-empty line.
+            let raw = String::from_utf8_lossy(&output.stdout).to_string();
+            let first = raw.lines().map(str::trim).find(|s| !s.is_empty()).unwrap_or("");
+            if !first.is_empty() {
+                eprintln!("[tunnel] find: {which} -> {first}");
+                return Some(first.to_string());
             }
+            eprintln!("[tunnel] find: {which} succeeded but output was empty");
+        }
+        Ok(output) => {
+            eprintln!("[tunnel] find: {which} exit {:?}", output.status.code());
+        }
+        Err(e) => {
+            eprintln!("[tunnel] find: failed to spawn `{which}`: {e}");
         }
     }
 
-    // Check common install locations
-    let candidates = [
-        "/opt/homebrew/bin/cloudflared",
-        "/usr/local/bin/cloudflared",
-    ];
-    for path in candidates {
+    for path in ["/opt/homebrew/bin/cloudflared", "/usr/local/bin/cloudflared"] {
         if std::path::Path::new(path).exists() {
+            eprintln!("[tunnel] find: {path}");
             return Some(path.to_string());
         }
     }
 
-    // Check ~/.fleet/cloudflared (auto-downloaded binary)
     if let Some(path) = fleet_cloudflared_path() {
         if path.exists() {
+            eprintln!("[tunnel] find: cached {}", path.display());
             return Some(path.to_string_lossy().to_string());
+        } else {
+            eprintln!("[tunnel] find: no cached binary at {}", path.display());
         }
     }
 
@@ -305,6 +330,20 @@ pub fn download_cloudflared(on_progress: Option<ProgressFn>) -> Result<String, T
         // Linux/Windows: raw binary.
         std::fs::write(&dest, &bytes)
             .map_err(|e| TunnelError::DownloadFailed(format!("write failed: {e}")))?;
+    }
+
+    // Post-write verification — on Windows, SmartScreen / AV can quarantine
+    // the exe between write and spawn, making failures opaque.
+    match std::fs::metadata(&dest) {
+        Ok(md) => eprintln!(
+            "[tunnel] post-write: {} exists, {} bytes",
+            dest.display(),
+            md.len()
+        ),
+        Err(e) => eprintln!(
+            "[tunnel] post-write: {} DISAPPEARED ({e})",
+            dest.display()
+        ),
     }
 
     // Make executable on Unix.

@@ -4,6 +4,24 @@ import { playDecisionAlert } from "../audio";
 import { useDecisionStore } from "../store";
 import type { ElicitationRequest, GuardRequest } from "../types";
 
+// Split a `question` field on a line containing only `---` (per Fleet
+// Interaction Mode's "Speech Summary Divider" convention). Returns
+// [preDivider, postDivider]. If no divider is found, returns [body, ""].
+function splitOnDivider(body: string): [string, string] {
+  const match = body.match(/^\s*---\s*$/m);
+  if (!match || match.index === undefined) return [body.trim(), ""];
+  const before = body.slice(0, match.index).trim();
+  const after = body.slice(match.index + match[0].length).trim();
+  return [before, after];
+}
+
+// Pull the last sentence ending with ? or ？ from a markdown blob.
+function lastQuestionSentence(text: string): string {
+  const plain = text.replace(/[`*_#>\[\]()]/g, " ");
+  const match = plain.match(/([^。！？?!\n]{1,80}[？?])\s*$/);
+  return match ? match[1].trim() : "";
+}
+
 /**
  * Subscribe to backend decision events and push them into the decision store.
  *
@@ -42,11 +60,12 @@ export function useDecisionEvents() {
       const r = e.payload;
       if (!announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
-        const header = r.questions[0]?.header?.trim() ?? "";
-        const fallback = r.questions[0]?.question ?? "";
-        const spoken = [r.workspaceName, r.aiTitle, header || fallback]
+        const body = r.questions[0]?.question ?? "";
+        const [intro, after] = splitOnDivider(body);
+        const followup = after ? lastQuestionSentence(after) : "";
+        const spoken = [r.workspaceName, intro, followup]
           .filter((s): s is string => !!s && s.length > 0)
-          .join(" ");
+          .join("。");
         playDecisionAlert("elicitation", spoken);
       }
       addElicitationRequest(r);
