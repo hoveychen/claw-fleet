@@ -56,7 +56,7 @@ export function TokenSpeedChart({ compact = false }: { compact?: boolean } = {})
           <ResponsiveContainer width="100%" height={compact ? 56 : 80}>
             <AreaChart
               data={speedHistory}
-              margin={compact ? { top: 2, right: 2, left: 2, bottom: 0 } : { top: 4, right: 4, left: -20, bottom: 0 }}
+              margin={compact ? { top: 2, right: 2, left: 2, bottom: 0 } : { top: 4, right: 4, left: 0, bottom: 0 }}
             >
               <defs>
                 <linearGradient id="speedGrad" x1="0" y1="0" x2="0" y2="1">
@@ -87,14 +87,12 @@ export function TokenSpeedChart({ compact = false }: { compact?: boolean } = {})
                   hide
                 />
               )}
-              {!compact && (
-                <YAxis
-                  tick={{ fontSize: 9, fill: "var(--color-text-dim)" }}
-                  tickLine={false}
-                  axisLine={false}
-                  width={30}
-                />
-              )}
+              <YAxis
+                tick={{ fontSize: compact ? 8 : 9, fill: "var(--color-text-dim)" }}
+                tickLine={false}
+                axisLine={false}
+                width={compact ? 24 : 30}
+              />
               <Tooltip
                 contentStyle={{
                   background: "var(--color-bg-secondary)",
