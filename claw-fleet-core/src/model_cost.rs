@@ -108,11 +108,28 @@ pub fn get_model_costs(model: &str) -> ModelCosts {
         return COST_TIER_MYTHOS;
     }
 
-    // Opus tiers (order matters — 4.6/4.5 before the generic 4/4.1 prefix).
-    if m.contains("opus-4-6") || m.contains("opus-4-5") {
-        return COST_TIER_5_25;
+    // Opus 4.x tier routing. Substring matching is fragile because
+    // "claude-opus-4-7" contains "opus-4" (legacy) but is actually a modern
+    // tier. Instead, parse the single-digit minor version after `opus-4-`:
+    //   0, 1        -> legacy $15/$75 (Opus 4.0 / 4.1)
+    //   2..=9       -> modern $5/$25  (Opus 4.5, 4.6, 4.7, future minors)
+    // A bare `opus-4` without a version digit (e.g. the dated 4.0 ID
+    // `claude-opus-4-20250514`, where `-2` is the year) falls through to
+    // the legacy branch below.
+    if let Some(start) = m.find("opus-4-") {
+        let rest = &m.as_bytes()[start + "opus-4-".len()..];
+        if let Some((&first, tail)) = rest.split_first() {
+            let is_single_digit = first.is_ascii_digit()
+                && tail.first().map_or(true, |c| !c.is_ascii_digit());
+            if is_single_digit {
+                return match first {
+                    b'0' | b'1' => COST_TIER_15_75,
+                    _ => COST_TIER_5_25,
+                };
+            }
+        }
     }
-    if m.contains("opus-4-1") || m.contains("opus-4") {
+    if m.contains("opus-4") {
         return COST_TIER_15_75;
     }
 
@@ -214,6 +231,44 @@ mod tests {
                 "model {model} priced wrong: {cost}"
             );
         }
+    }
+
+    #[test]
+    fn opus_47_uses_modern_tier() {
+        // Regression: substring match against "opus-4" used to mis-route
+        // Opus 4.7 into the legacy $15/$75 tier, tripling the cost.
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            ..Default::default()
+        };
+        for model in [
+            "claude-opus-4-7",
+            "claude-opus-4-7-20260401",
+            "Claude-Opus-4-7",
+        ] {
+            let cost = turn_cost_usd(model, &usage);
+            assert!(
+                (cost - 30.0).abs() < 1e-9,
+                "model {model} priced wrong: {cost} (expected 30.0 @ $5/$25 tier)"
+            );
+        }
+    }
+
+    #[test]
+    fn opus_4_original_still_legacy() {
+        // The bare Opus 4 ID has no minor version in the string
+        // (e.g. "claude-opus-4-20250514" — the trailing digits are the date).
+        // It must remain on the legacy $15/$75 tier.
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            ..Default::default()
+        };
+        let cost_40 = turn_cost_usd("claude-opus-4-20250514", &usage);
+        assert!((cost_40 - 90.0).abs() < 1e-9, "opus-4.0 priced wrong: {cost_40}");
+        let cost_41 = turn_cost_usd("claude-opus-4-1-20250805", &usage);
+        assert!((cost_41 - 90.0).abs() < 1e-9, "opus-4.1 priced wrong: {cost_41}");
     }
 
     #[test]
