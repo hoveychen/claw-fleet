@@ -549,7 +549,12 @@ impl LocalBackend {
         }
 
         // Start the daily report scheduler (backfills missing reports in background).
-        crate::daily_report::start_report_scheduler(report_store.clone(), locale.clone(), llm_config.clone());
+        crate::daily_report::start_report_scheduler(
+            report_store.clone(),
+            locale.clone(),
+            llm_config.clone(),
+            running.clone(),
+        );
 
         step!("threads spawned, constructing result");
 

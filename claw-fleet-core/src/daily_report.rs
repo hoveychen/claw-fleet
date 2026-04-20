@@ -1305,19 +1305,46 @@ fn make_session_info_for_date(
 // ── Report scheduler ────────────────────────────────────────────────────────
 
 /// Start the background report scheduler thread.
-/// Checks every 30 minutes for missing reports and generates them.
+/// Checks every 10 minutes for missing reports and generates them.
+///
+/// `running` is a shared cancellation flag. The caller flips it to false
+/// (typically from their `Drop` impl) to signal the thread to exit — otherwise
+/// successive backend swaps would stack up zombie scheduler threads.
 pub fn start_report_scheduler(
     report_store: std::sync::Arc<std::sync::Mutex<ReportStore>>,
     locale: std::sync::Arc<std::sync::Mutex<String>>,
     llm_config: std::sync::Arc<std::sync::Mutex<crate::llm_provider::LlmConfig>>,
+    running: std::sync::Arc<std::sync::atomic::AtomicBool>,
 ) {
+    use std::sync::atomic::Ordering;
+
+    // Sleep in 1s chunks so cancellation latency stays bounded.
+    fn sleep_checked(total: Duration, running: &std::sync::atomic::AtomicBool) -> bool {
+        let step = Duration::from_secs(1);
+        let mut remaining = total;
+        while remaining > Duration::ZERO {
+            if !running.load(Ordering::SeqCst) {
+                return false;
+            }
+            let chunk = remaining.min(step);
+            std::thread::sleep(chunk);
+            remaining = remaining.saturating_sub(chunk);
+        }
+        running.load(Ordering::SeqCst)
+    }
+
     std::thread::Builder::new()
         .name("report-scheduler".into())
         .spawn(move || {
             // Short initial delay to let the app start, then generate immediately
-            std::thread::sleep(Duration::from_secs(10));
+            if !sleep_checked(Duration::from_secs(10), &running) {
+                return;
+            }
 
             loop {
+                if !running.load(Ordering::SeqCst) {
+                    break;
+                }
                 let lang = locale.lock().unwrap().clone();
                 let rs = report_store.clone();
                 let cfg = llm_config.lock().unwrap().clone();
@@ -1339,7 +1366,9 @@ pub fn start_report_scheduler(
                     }
                 }
                 // Check every 10 minutes so today's report stays fresh
-                std::thread::sleep(Duration::from_secs(10 * 60));
+                if !sleep_checked(Duration::from_secs(10 * 60), &running) {
+                    break;
+                }
             }
         })
         .expect("spawn report-scheduler");
