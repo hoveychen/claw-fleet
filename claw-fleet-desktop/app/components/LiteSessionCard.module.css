@@ -106,10 +106,38 @@
   white-space: nowrap;
 }
 
-/* Subagent card: indent via padding (not margin) so we don't overflow the list */
+/* Subagent card: indent via margin so the left gutter is free for a timeline thread */
 .card_subagent {
-  padding-left: 22px;
-  border-left: 2px solid rgba(245, 158, 11, 0.35);
+  position: relative;
+  margin-left: 20px;
+}
+
+/* Vertical thread sitting in the left margin, bridging up into the gap above */
+.card_subagent::before {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: -8px;
+  height: calc(50% + 8px);
+  width: 1.5px;
+  background: rgba(245, 158, 11, 0.5);
+  border-radius: 1px;
+}
+
+/* Horizontal elbow branching from the thread into the card */
+.card_subagent::after {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  width: 10px;
+  height: 1.5px;
+  background: rgba(245, 158, 11, 0.5);
+}
+
+/* When another subagent follows, run the thread all the way through */
+.card_subagent:has(+ .card_subagent)::before {
+  height: calc(100% + 16px);
 }
 
 .preview {
