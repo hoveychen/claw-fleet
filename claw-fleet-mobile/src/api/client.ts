@@ -9,6 +9,9 @@ import type {
   ElicitationRequest,
 } from "../types";
 
+/** Mirror of claw_fleet_core::backend::MAX_ATTACHMENT_BYTES (50 MiB). */
+export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+
 export class FleetApiClient {
   constructor(
     private baseUrl: string,
@@ -126,6 +129,45 @@ export class FleetApiClient {
     answers: Record<string, string>,
   ): Promise<void> {
     await this.postJson("/elicitation/respond", { id, declined, answers });
+  }
+
+  /** Upload a file/image attachment, returns the absolute path visible to the agent. */
+  async uploadElicitationAttachment(
+    bytes: ArrayBuffer | Uint8Array,
+    name: string,
+  ): Promise<string> {
+    const url = new URL("/elicitation/upload", this.baseUrl);
+    url.searchParams.set("name", name);
+    const byteLength =
+      bytes instanceof Uint8Array ? bytes.byteLength : bytes.byteLength;
+    if (byteLength > MAX_ATTACHMENT_BYTES) {
+      throw new Error(
+        `attachment too large: ${byteLength} bytes (max ${MAX_ATTACHMENT_BYTES})`,
+      );
+    }
+    let body: ArrayBuffer;
+    if (bytes instanceof Uint8Array) {
+      body = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength,
+      ) as ArrayBuffer;
+    } else {
+      body = bytes;
+    }
+    const res = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`API ${res.status}: ${text}`);
+    }
+    const json: { path: string } = await res.json();
+    return json.path;
   }
 
   /** SSE event source URL (use with EventSource or custom SSE) */

@@ -113,6 +113,12 @@
     "workspace": "工作区",
     "edit_option": "编辑（复制到「其他」）",
     "mode_single": "单选",
-    "mode_multi": "多选"
+    "mode_multi": "多选",
+    "attach_image": "添加图片",
+    "attach_file": "添加文件",
+    "attach_failed": "附件上传失败",
+    "attach_error_dismiss": "关闭",
+    "attachment_pasted": "粘贴",
+    "attachment_remove": "移除"
   }
 }

@@ -99,6 +99,13 @@ export class MockApiClient {
     _answers: Record<string, string>,
   ): Promise<void> {}
 
+  async uploadElicitationAttachment(
+    _bytes: ArrayBuffer | Uint8Array,
+    name: string,
+  ): Promise<string> {
+    return `/tmp/mock-attachments/${name}`;
+  }
+
   sseUrl(): string {
     return "";
   }

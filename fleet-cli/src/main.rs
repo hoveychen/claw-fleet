@@ -2336,6 +2336,87 @@ fn cmd_serve(port: u16, token: String) {
                 }
             }
 
+            "/elicitation/upload" => {
+                let raw_name = query.get("name").map(|s| s.as_str()).unwrap_or("");
+                let decoded = percent_decode_str(raw_name).decode_utf8_lossy().to_string();
+                let safe_name: String = std::path::Path::new(&decoded)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "attachment.bin".to_string());
+
+                const MAX: u64 = claw_fleet_core::backend::MAX_ATTACHMENT_BYTES;
+
+                // Reject early via Content-Length if the client declared one.
+                if let Some(len) = request.body_length() {
+                    if (len as u64) > MAX {
+                        let body = serde_json::json!({
+                            "error": format!("attachment too large: {len} bytes (max {MAX})")
+                        })
+                        .to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(413)
+                                .with_header(json_header),
+                        );
+                        continue;
+                    }
+                }
+
+                // Read at most MAX+1 bytes so we can still detect oversized
+                // streams that lied about (or omitted) Content-Length.
+                let mut body_bytes = Vec::new();
+                let mut limited = std::io::Read::take(request.as_reader(), MAX + 1);
+                let _ = std::io::Read::read_to_end(&mut limited, &mut body_bytes);
+                if (body_bytes.len() as u64) > MAX {
+                    let body = serde_json::json!({
+                        "error": format!("attachment too large: >{MAX} bytes")
+                    })
+                    .to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(413)
+                            .with_header(json_header),
+                    );
+                    continue;
+                }
+
+                let dir = std::env::temp_dir().join("fleet-attachments");
+                if let Err(e) = std::fs::create_dir_all(&dir) {
+                    let body = serde_json::json!({"error": format!("mkdir: {e}")}).to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
+                    continue;
+                }
+
+                let nanos = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos();
+                let pid = std::process::id();
+                let filename = format!("{nanos}-{pid}-{safe_name}");
+                let dest = dir.join(&filename);
+
+                if let Err(e) = std::fs::write(&dest, &body_bytes) {
+                    let body = serde_json::json!({"error": format!("write: {e}")}).to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(500)
+                            .with_header(json_header),
+                    );
+                    continue;
+                }
+
+                let abs = dest.to_string_lossy().into_owned();
+                let body = serde_json::json!({"path": abs}).to_string();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             "/search" => {
                 let q = query.get("q").cloned().unwrap_or_default();
                 let limit: usize = query

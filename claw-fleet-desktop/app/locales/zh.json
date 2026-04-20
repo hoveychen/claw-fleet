@@ -1088,7 +1088,14 @@
     "edit_option": "编辑此选项（复制到「其他」）",
     "mode_single": "单选",
     "mode_multi": "多选",
-    "mode_tooltip": "切换此题的单选 / 多选模式"
+    "mode_tooltip": "切换此题的单选 / 多选模式",
+    "attach_tooltip": "附加文件或图片",
+    "attach_title": "选择文件或图片",
+    "attachment_pasted": "粘贴",
+    "attachment_remove": "移除附件",
+    "attach_failed": "附件上传失败",
+    "attach_too_large": "附件过大（上限 50 MiB）",
+    "attach_error_dismiss": "关闭"
   },
   "planApproval": {
     "title": "计划待批准",

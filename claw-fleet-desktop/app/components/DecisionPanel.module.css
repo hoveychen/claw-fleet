@@ -652,6 +652,136 @@
   color: var(--color-text-dim);
 }
 
+/* + button + textarea row inside the "Other" block */
+.elicitation_other_row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+}
+
+.elicitation_attach_btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin-top: 2px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.elicitation_attach_btn svg {
+  width: 12px;
+  height: 12px;
+}
+
+.elicitation_attach_btn:hover {
+  background: var(--color-bg-card-hover);
+  border-color: #2b6cb0;
+  color: var(--color-text);
+}
+
+/* Attachment chips row above the input */
+.elicitation_attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.elicitation_attachment_chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 220px;
+  padding: 2px 4px 2px 8px;
+  background: var(--color-bg-card-hover);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+.elicitation_attachment_name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 140px;
+}
+
+.elicitation_attachment_badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(43, 108, 176, 0.15);
+  color: #2b6cb0;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.elicitation_attachment_remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.elicitation_attachment_remove:hover {
+  background: rgba(229, 62, 62, 0.15);
+  color: #e53e3e;
+}
+
+.elicitation_attach_error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(229, 62, 62, 0.12);
+  border: 1px solid rgba(229, 62, 62, 0.4);
+  color: #c53030;
+  font-size: 12px;
+}
+
+.elicitation_attach_error_text {
+  flex: 1;
+  word-break: break-word;
+}
+
+.elicitation_attach_error_dismiss {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.elicitation_attach_error_dismiss:hover {
+  background: rgba(229, 62, 62, 0.2);
+}
+
 /* Spacer between left (Decline) and right (Back/Next/Submit) buttons */
 .actions_spacer {
   flex: 1;

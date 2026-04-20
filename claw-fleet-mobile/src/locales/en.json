@@ -113,6 +113,12 @@
     "workspace": "Workspace",
     "edit_option": "Edit (copy to Other)",
     "mode_single": "Single",
-    "mode_multi": "Multi"
+    "mode_multi": "Multi",
+    "attach_image": "Attach image",
+    "attach_file": "Attach file",
+    "attach_failed": "Attachment upload failed",
+    "attach_error_dismiss": "Dismiss",
+    "attachment_pasted": "Pasted",
+    "attachment_remove": "Remove"
   }
 }

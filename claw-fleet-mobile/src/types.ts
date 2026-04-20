@@ -124,6 +124,15 @@ export interface ElicitationRequest {
   timestamp: string;
 }
 
+export interface ElicitationAttachment {
+  /** Absolute path the agent will see (already uploaded to the server). */
+  path: string;
+  /** Display name (basename of the original file). */
+  name: string;
+  /** true when the attachment came from clipboard/paste. */
+  fromClipboard?: boolean;
+}
+
 export interface ElicitationDecision {
   kind: "elicitation";
   id: string;
@@ -133,6 +142,8 @@ export interface ElicitationDecision {
   customAnswers: Record<string, string>;
   /** User-forced multi-select per question (only populated when user flips a single-select to multi). */
   multiSelectOverrides: Record<string, boolean>;
+  /** Per-question attachments (question text → attachments). */
+  attachments: Record<string, ElicitationAttachment[]>;
   arrivedAt: number;
 }
 

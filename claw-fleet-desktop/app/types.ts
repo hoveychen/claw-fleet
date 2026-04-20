@@ -295,6 +295,16 @@ export interface ElicitationRequest {
   timestamp: string;
 }
 
+/** A file/image the user attached to a decision-panel answer. */
+export interface ElicitationAttachment {
+  /** Absolute path the agent will see (already uploaded for RemoteBackend). */
+  path: string;
+  /** Display name (basename of the original file). */
+  name: string;
+  /** true when saved from clipboard paste. */
+  fromClipboard?: boolean;
+}
+
 /** Agent is asking the user a question via AskUserQuestion. */
 export interface ElicitationDecision {
   kind: "elicitation";
@@ -312,6 +322,8 @@ export interface ElicitationDecision {
    * use `question.multiSelect` as-is.
    */
   multiSelectOverrides: Record<string, boolean>;
+  /** Per-question attachment list (question text → attachments). */
+  attachments: Record<string, ElicitationAttachment[]>;
   arrivedAt: number;
 }
 

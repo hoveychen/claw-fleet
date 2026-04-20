@@ -976,6 +976,48 @@ fn respond_to_elicitation(
         .respond_to_elicitation(&id, declined, answers)
 }
 
+#[tauri::command]
+fn upload_elicitation_attachment(
+    state: tauri::State<AppState>,
+    source_path: String,
+) -> Result<String, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .upload_attachment(std::path::Path::new(&source_path))
+}
+
+/// Writes clipboard/drag-drop bytes to the OS temp dir and returns the absolute
+/// path so the caller can feed it to `upload_elicitation_attachment`.
+#[tauri::command]
+fn stage_pasted_attachment(bytes: Vec<u8>, extension: String) -> Result<String, String> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    if (bytes.len() as u64) > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "attachment too large: {} bytes (max {})",
+            bytes.len(),
+            claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
+        ));
+    }
+    let dir = std::env::temp_dir().join("fleet-pasted");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let pid = std::process::id();
+    let ext = extension.trim_start_matches('.');
+    let filename = if ext.is_empty() {
+        format!("paste-{nanos}-{pid}.bin")
+    } else {
+        format!("paste-{nanos}-{pid}.{ext}")
+    };
+    let dest = dir.join(&filename);
+    std::fs::write(&dest, &bytes).map_err(|e| e.to_string())?;
+    Ok(dest.to_string_lossy().into_owned())
+}
+
 // ── Plan approval (ExitPlanMode interception) ───────────────────────────────
 
 #[tauri::command]
@@ -2139,6 +2181,8 @@ pub fn run() {
             apply_interaction_mode,
             remove_interaction_mode,
             respond_to_elicitation,
+            upload_elicitation_attachment,
+            stage_pasted_attachment,
             apply_plan_approval_hook,
             remove_plan_approval_hook,
             list_pending_plan_approvals,

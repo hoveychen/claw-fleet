@@ -2,15 +2,42 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useDecisionStore } from "../store";
 import { safeMarkdownComponents } from "../markdown/safeLinks";
 import type {
+  ElicitationAttachment,
   ElicitationDecision,
   GuardDecision,
   PendingDecision,
   PlanApprovalDecision,
 } from "../types";
 import styles from "./DecisionPanel.module.css";
+
+// Mirror of claw_fleet_core::backend::MAX_ATTACHMENT_BYTES so the UI can
+// reject oversized pastes before burning the full round-trip.
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
+
+// Best-effort mapping from a MIME type to a filename extension. Falls back to
+// "bin" when unknown — the stage command accepts that too.
+function mimeToExtension(mime: string): string {
+  const m = mime.toLowerCase();
+  if (m === "image/png") return "png";
+  if (m === "image/jpeg" || m === "image/jpg") return "jpg";
+  if (m === "image/gif") return "gif";
+  if (m === "image/webp") return "webp";
+  if (m === "image/bmp") return "bmp";
+  if (m === "image/svg+xml") return "svg";
+  const slash = m.indexOf("/");
+  return slash >= 0 ? m.slice(slash + 1).replace(/[^a-z0-9]/g, "") || "bin" : "bin";
+}
+
+function basename(p: string): string {
+  const normalized = p.replace(/\\/g, "/");
+  const slash = normalized.lastIndexOf("/");
+  return slash >= 0 ? normalized.slice(slash + 1) : normalized;
+}
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
@@ -95,10 +122,32 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
     setElicitationCustomAnswer,
     setElicitationMultiSelectOverride,
     setElicitationStep,
+    addElicitationAttachment,
+    removeElicitationAttachment,
   } = useDecisionStore();
   const otherInputRef = useRef<HTMLTextAreaElement>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const errorDismissTimer = useRef<number | null>(null);
+  const showAttachError = useCallback((msg: string) => {
+    setAttachError(msg);
+    if (errorDismissTimer.current) {
+      window.clearTimeout(errorDismissTimer.current);
+    }
+    errorDismissTimer.current = window.setTimeout(() => {
+      setAttachError(null);
+      errorDismissTimer.current = null;
+    }, 6000);
+  }, []);
+  useEffect(
+    () => () => {
+      if (errorDismissTimer.current) {
+        window.clearTimeout(errorDismissTimer.current);
+      }
+    },
+    [],
+  );
 
-  const { step, request, selections, customAnswers, multiSelectOverrides } = decision;
+  const { step, request, selections, customAnswers, multiSelectOverrides, attachments } = decision;
   const total = request.questions.length;
   const q = request.questions[step];
   const isLast = step === total - 1;
@@ -109,12 +158,15 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
 
   const selected = selections[q.question] || [];
   const customText = customAnswers[q.question] || "";
-  const hasAnswer = selected.length > 0 || customText.trim().length > 0;
+  const questionAttachments = attachments[q.question] || [];
+  const hasAnswer =
+    selected.length > 0 || customText.trim().length > 0 || questionAttachments.length > 0;
 
   const allAnswered = request.questions.every((qq) => {
     const sel = selections[qq.question] || [];
     const custom = customAnswers[qq.question]?.trim();
-    return sel.length > 0 || (custom != null && custom.length > 0);
+    const atts = attachments[qq.question] || [];
+    return sel.length > 0 || (custom != null && custom.length > 0) || atts.length > 0;
   });
 
   const handleBack = useCallback(
@@ -190,7 +242,8 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
           {request.questions.map((qq, i) => {
             const answered =
               (selections[qq.question] || []).length > 0 ||
-              (customAnswers[qq.question]?.trim().length ?? 0) > 0;
+              (customAnswers[qq.question]?.trim().length ?? 0) > 0 ||
+              (attachments[qq.question] || []).length > 0;
             return (
               <button
                 key={i}
@@ -218,7 +271,35 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
           otherInputRef={otherInputRef}
           customText={customText}
           onCustomChange={(val) => setElicitationCustomAnswer(decision.id, q.question, val)}
+          attachments={questionAttachments}
+          onAddAttachment={async (path, name, fromClipboard) => {
+            try {
+              await addElicitationAttachment(decision.id, q.question, path, name, fromClipboard);
+            } catch (e) {
+              const detail = e instanceof Error ? e.message : String(e);
+              showAttachError(
+                `${t("elicitation.attach_failed", "Attachment upload failed")}: ${detail}`,
+              );
+            }
+          }}
+          onRemoveAttachment={(path) =>
+            removeElicitationAttachment(decision.id, q.question, path)
+          }
+          onAttachmentError={showAttachError}
         />
+        {attachError && (
+          <div className={styles.elicitation_attach_error} role="alert">
+            <span className={styles.elicitation_attach_error_text}>{attachError}</span>
+            <button
+              type="button"
+              className={styles.elicitation_attach_error_dismiss}
+              onClick={() => setAttachError(null)}
+              aria-label={t("elicitation.attach_error_dismiss", "Dismiss")}
+            >
+              ×
+            </button>
+          </div>
+        )}
       </div>
 
       <div className={styles.actions}>
@@ -270,6 +351,10 @@ function OptionsBlock({
   otherInputRef,
   customText,
   onCustomChange,
+  attachments,
+  onAddAttachment,
+  onRemoveAttachment,
+  onAttachmentError,
 }: {
   decisionId: string;
   question: ElicitationDecision["request"]["questions"][number];
@@ -279,6 +364,10 @@ function OptionsBlock({
   otherInputRef: React.RefObject<HTMLTextAreaElement | null>;
   customText: string;
   onCustomChange: (val: string) => void;
+  attachments: ElicitationAttachment[];
+  onAddAttachment: (path: string, name: string, fromClipboard?: boolean) => void | Promise<void>;
+  onRemoveAttachment: (path: string) => void;
+  onAttachmentError: (msg: string) => void;
 }) {
   const { t } = useTranslation();
   // Preview side-by-side layout only applies when question is single-select per
@@ -304,6 +393,67 @@ function OptionsBlock({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [customText, otherInputRef]);
+
+  const handlePickFiles = useCallback(async () => {
+    try {
+      const result = await openDialog({
+        multiple: true,
+        title: t("elicitation.attach_title", "Choose files or images"),
+      });
+      if (result == null) return;
+      const picked = Array.isArray(result) ? result : [result];
+      for (const p of picked) {
+        const path = typeof p === "string" ? p : String(p);
+        await onAddAttachment(path, basename(path), false);
+      }
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      onAttachmentError(
+        `${t("elicitation.attach_failed", "Attachment upload failed")}: ${detail}`,
+      );
+    }
+  }, [onAddAttachment, onAttachmentError, t]);
+
+  const handlePaste = useCallback(
+    async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      const items = e.clipboardData?.items;
+      if (!items || items.length === 0) return;
+      const files: File[] = [];
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.kind !== "file") continue;
+        const file = it.getAsFile();
+        if (file) files.push(file);
+      }
+      if (files.length === 0) return;
+      e.preventDefault();
+      for (const f of files) {
+        try {
+          if (f.size > MAX_ATTACHMENT_BYTES) {
+            onAttachmentError(
+              t("elicitation.attach_too_large", "Attachment is too large (max 50 MiB)"),
+            );
+            continue;
+          }
+          const buf = await f.arrayBuffer();
+          const bytes = Array.from(new Uint8Array(buf));
+          const ext = mimeToExtension(f.type || "application/octet-stream");
+          const stagedPath = await invoke<string>("stage_pasted_attachment", {
+            bytes,
+            extension: ext,
+          });
+          const displayName = f.name || `pasted.${ext}`;
+          await onAddAttachment(stagedPath, displayName, true);
+        } catch (err) {
+          const detail = err instanceof Error ? err.message : String(err);
+          onAttachmentError(
+            `${t("elicitation.attach_failed", "Attachment upload failed")}: ${detail}`,
+          );
+        }
+      }
+    },
+    [onAddAttachment, onAttachmentError, t],
+  );
 
   const list = (
     <div className={styles.elicitation_options}>
@@ -362,25 +512,69 @@ function OptionsBlock({
       })}
 
       <div
-        className={`${styles.elicitation_other} ${customText ? styles.elicitation_other_active : ""}`}
+        className={`${styles.elicitation_other} ${customText || attachments.length > 0 ? styles.elicitation_other_active : ""}`}
         onClick={() => otherInputRef.current?.focus()}
       >
         <span className={styles.elicitation_option_label}>
           {t("elicitation.other", "Other")}
         </span>
-        <textarea
-          ref={otherInputRef}
-          className={styles.elicitation_other_input}
-          rows={1}
-          placeholder={t("elicitation.other_placeholder", "Type your answer…")}
-          value={customText}
-          onChange={(e) => onCustomChange(e.target.value)}
-          onInput={(e) => {
-            const el = e.currentTarget;
-            el.style.height = "auto";
-            el.style.height = `${el.scrollHeight}px`;
-          }}
-        />
+        {attachments.length > 0 && (
+          <div className={styles.elicitation_attachments} onClick={(e) => e.stopPropagation()}>
+            {attachments.map((a) => (
+              <div key={a.path} className={styles.elicitation_attachment_chip} title={a.path}>
+                <span className={styles.elicitation_attachment_name}>{a.name}</span>
+                {a.fromClipboard && (
+                  <span className={styles.elicitation_attachment_badge}>
+                    {t("elicitation.attachment_pasted", "Pasted")}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  className={styles.elicitation_attachment_remove}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveAttachment(a.path);
+                  }}
+                  title={t("elicitation.attachment_remove", "Remove attachment")}
+                  aria-label={t("elicitation.attachment_remove", "Remove attachment")}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className={styles.elicitation_other_row}>
+          <button
+            type="button"
+            className={styles.elicitation_attach_btn}
+            onClick={(e) => {
+              e.stopPropagation();
+              handlePickFiles();
+            }}
+            title={t("elicitation.attach_tooltip", "Attach file or image")}
+            aria-label={t("elicitation.attach_tooltip", "Attach file or image")}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+          </button>
+          <textarea
+            ref={otherInputRef}
+            className={styles.elicitation_other_input}
+            rows={1}
+            placeholder={t("elicitation.other_placeholder", "Type your answer…")}
+            value={customText}
+            onChange={(e) => onCustomChange(e.target.value)}
+            onPaste={handlePaste}
+            onInput={(e) => {
+              const el = e.currentTarget;
+              el.style.height = "auto";
+              el.style.height = `${el.scrollHeight}px`;
+            }}
+          />
+        </div>
       </div>
     </div>
   );

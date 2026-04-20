@@ -1088,7 +1088,14 @@
     "edit_option": "Edit this option (copy to Other)",
     "mode_single": "Single",
     "mode_multi": "Multi",
-    "mode_tooltip": "Switch this question between single and multi select"
+    "mode_tooltip": "Switch this question between single and multi select",
+    "attach_tooltip": "Attach file or image",
+    "attach_title": "Choose files or images",
+    "attachment_pasted": "Pasted",
+    "attachment_remove": "Remove attachment",
+    "attach_failed": "Attachment upload failed",
+    "attach_too_large": "Attachment is too large (max 50 MiB)",
+    "attach_error_dismiss": "Dismiss"
   },
   "planApproval": {
     "title": "Plan ready for approval",

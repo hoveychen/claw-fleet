@@ -4,6 +4,7 @@ import type {
   GuardDecision,
   ElicitationRequest,
   ElicitationDecision,
+  ElicitationAttachment,
   PendingDecision,
 } from "../types";
 
@@ -28,6 +29,14 @@ interface DecisionsState {
   toggleSelection: (id: string, question: string, label: string, multiSelect: boolean) => void;
   setCustomAnswer: (id: string, question: string, text: string) => void;
   setMultiSelectOverride: (id: string, question: string, override: boolean) => void;
+  addAttachment: (
+    id: string,
+    question: string,
+    path: string,
+    name: string,
+    fromClipboard?: boolean,
+  ) => void;
+  removeAttachment: (id: string, question: string, path: string) => void;
 }
 
 export const useDecisionsStore = create<DecisionsState>((set) => ({
@@ -63,6 +72,7 @@ export const useDecisionsStore = create<DecisionsState>((set) => ({
         selections: {},
         customAnswers: {},
         multiSelectOverrides: {},
+        attachments: {},
         arrivedAt: Date.now(),
       };
       const decisions = [...state.decisions, decision];
@@ -140,6 +150,33 @@ export const useDecisionsStore = create<DecisionsState>((set) => ({
           }
         }
         return { ...d, multiSelectOverrides: nextOverrides, selections: nextSelections };
+      }),
+    })),
+
+  addAttachment: (id, question, path, name, fromClipboard) =>
+    set((state) => ({
+      decisions: state.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "elicitation") return d;
+        const prev = d.attachments[question] ?? [];
+        if (prev.some((a) => a.path === path)) return d;
+        const next: ElicitationAttachment = { path, name, fromClipboard };
+        return {
+          ...d,
+          attachments: { ...d.attachments, [question]: [...prev, next] },
+        };
+      }),
+    })),
+
+  removeAttachment: (id, question, path) =>
+    set((state) => ({
+      decisions: state.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "elicitation") return d;
+        const prev = d.attachments[question] ?? [];
+        const next = prev.filter((a) => a.path !== path);
+        return {
+          ...d,
+          attachments: { ...d.attachments, [question]: next },
+        };
       }),
     })),
 }));

@@ -326,7 +326,21 @@ pub trait Backend: Send + Sync {
     fn list_llm_providers(&self) -> Vec<LlmProviderInfo>;
     fn get_llm_config(&self) -> LlmConfig;
     fn set_llm_config(&self, config: LlmConfig) -> Result<(), String>;
+
+    // ── Decision-panel attachments ──────────────────────────────────────────
+    /// Make a local file available to the agent process as an absolute path.
+    ///
+    /// LocalBackend returns the source path unchanged (agent runs on the same
+    /// machine). RemoteBackend uploads the file bytes to the probe host and
+    /// returns the server-side temp path. UI layers concatenate the returned
+    /// path into the textarea as `@<path>` so Claude Code picks it up.
+    fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String>;
 }
+
+/// Upper bound on a single attachment payload. Enforced by both the uploader
+/// (to fail fast) and `fleet serve` (to reject oversized POSTs). Kept small
+/// enough that a full upload can reasonably live in memory.
+pub const MAX_ATTACHMENT_BYTES: u64 = 50 * 1024 * 1024; // 50 MiB
 
 #[cfg(test)]
 mod tests {

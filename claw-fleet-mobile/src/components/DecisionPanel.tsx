@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useMemo } from "react";
+import { useCallback, useEffect, useRef, useMemo, useState } from "react";
 import {
   FlatList,
   Modal,
@@ -11,10 +11,13 @@ import {
   Button,
   Chip,
   IconButton,
+  Snackbar,
   Text,
   useTheme,
   ActivityIndicator,
 } from "react-native-paper";
+import * as ImagePicker from "expo-image-picker";
+import * as DocumentPicker from "expo-document-picker";
 import { useDecisionsStore } from "../stores/decisions";
 import { useConnectionStore } from "../stores/connection";
 import { brandColors } from "../theme";
@@ -24,6 +27,18 @@ import type {
   ElicitationDecision,
   PendingDecision,
 } from "../types";
+
+function basename(p: string): string {
+  const q = p.split("?")[0].split("#")[0];
+  const slash = Math.max(q.lastIndexOf("/"), q.lastIndexOf("\\"));
+  return slash >= 0 ? q.slice(slash + 1) : q;
+}
+
+async function uriToBytes(uri: string): Promise<Uint8Array> {
+  const res = await fetch(uri);
+  const buf = await res.arrayBuffer();
+  return new Uint8Array(buf);
+}
 
 // ── Guard Card ──────────────────────────────────────────────────────────────
 
@@ -197,17 +212,73 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
   const setMultiSelectOverride = useDecisionsStore(
     (s) => s.setMultiSelectOverride,
   );
-  const { request, step, selections, customAnswers, multiSelectOverrides } = decision;
+  const addAttachment = useDecisionsStore((s) => s.addAttachment);
+  const removeAttachment = useDecisionsStore((s) => s.removeAttachment);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const { request, step, selections, customAnswers, multiSelectOverrides, attachments } = decision;
   const question = request.questions[step];
   const totalSteps = request.questions.length;
   const isLast = step === totalSteps - 1;
 
   const currentSelections = question ? (selections[question.question] ?? []) : [];
   const currentCustom = question ? (customAnswers[question.question] ?? "") : "";
+  const currentAttachments = question ? (attachments[question.question] ?? []) : [];
   const effectiveMulti = question
     ? question.multiSelect || multiSelectOverrides[question.question] === true
     : false;
   const canToggleMode = !!question && !question.multiSelect;
+
+  const uploadAndAttach = useCallback(
+    async (uri: string, name: string) => {
+      if (!client || !question) return;
+      try {
+        const bytes = await uriToBytes(uri);
+        const path = await client.uploadElicitationAttachment(bytes, name);
+        addAttachment(decision.id, question.question, path, name);
+      } catch (err) {
+        const detail = err instanceof Error ? err.message : String(err);
+        setAttachError(`${t("decision.attach_failed")}: ${detail}`);
+      }
+    },
+    [client, decision.id, question, addAttachment, t],
+  );
+
+  const handlePickImage = useCallback(async () => {
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) return;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.All,
+        allowsMultipleSelection: true,
+        quality: 1,
+      });
+      if (result.canceled) return;
+      for (const asset of result.assets ?? []) {
+        const name = asset.fileName || basename(asset.uri) || "image";
+        await uploadAndAttach(asset.uri, name);
+      }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      setAttachError(`${t("decision.attach_failed")}: ${detail}`);
+    }
+  }, [uploadAndAttach, t]);
+
+  const handlePickDocument = useCallback(async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        multiple: true,
+        copyToCacheDirectory: true,
+      });
+      if (result.canceled) return;
+      for (const asset of result.assets ?? []) {
+        const name = asset.name || basename(asset.uri) || "file";
+        await uploadAndAttach(asset.uri, name);
+      }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      setAttachError(`${t("decision.attach_failed")}: ${detail}`);
+    }
+  }, [uploadAndAttach, t]);
 
   const handleDecline = useCallback(() => {
     client?.respondElicitation(request.id, true, {}).catch(() => {});
@@ -230,11 +301,16 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
       if (overridden && answer) {
         answer = `${answer} [用户将此题从单选改为多选 / user switched this question from single-select to multi-select]`;
       }
+      const atts = attachments[q.question] ?? [];
+      if (atts.length > 0) {
+        const mentions = atts.map((a) => `@${a.path}`).join(" ");
+        answer = answer ? `${answer} ${mentions}` : mentions;
+      }
       if (answer) answers[q.question] = answer;
     }
     client?.respondElicitation(request.id, false, answers).catch(() => {});
     remove(decision.id);
-  }, [client, request.id, decision.id, selections, customAnswers, multiSelectOverrides, request.questions]);
+  }, [client, request.id, decision.id, selections, customAnswers, multiSelectOverrides, attachments, request.questions]);
 
   if (!question) return null;
 
@@ -403,23 +479,58 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
         >
           {t("decision.other")}
         </Text>
-        <TextInput
-          value={currentCustom}
-          onChangeText={(text) =>
-            setCustomAnswer(decision.id, question.question, text)
-          }
-          placeholder={t("decision.other_placeholder")}
-          placeholderTextColor={theme.colors.onSurfaceVariant}
-          style={[
-            styles.textInput,
-            {
-              backgroundColor: theme.colors.surfaceVariant,
-              color: theme.colors.onSurface,
-              borderColor: theme.colors.outline,
-            },
-          ]}
-          multiline
-        />
+        {currentAttachments.length > 0 && (
+          <View style={styles.attachmentRow}>
+            {currentAttachments.map((a) => (
+              <Chip
+                key={a.path}
+                compact
+                onClose={() =>
+                  removeAttachment(decision.id, question.question, a.path)
+                }
+                closeIconAccessibilityLabel={t("decision.attachment_remove")}
+                style={styles.attachmentChip}
+              >
+                {a.name}
+                {a.fromClipboard ? ` · ${t("decision.attachment_pasted")}` : ""}
+              </Chip>
+            ))}
+          </View>
+        )}
+        <View style={styles.otherRow}>
+          <IconButton
+            icon="paperclip"
+            size={18}
+            onPress={handlePickDocument}
+            accessibilityLabel={t("decision.attach_file")}
+            style={styles.attachIconBtn}
+          />
+          <IconButton
+            icon="image-outline"
+            size={18}
+            onPress={handlePickImage}
+            accessibilityLabel={t("decision.attach_image")}
+            style={styles.attachIconBtn}
+          />
+          <TextInput
+            value={currentCustom}
+            onChangeText={(text) =>
+              setCustomAnswer(decision.id, question.question, text)
+            }
+            placeholder={t("decision.other_placeholder")}
+            placeholderTextColor={theme.colors.onSurfaceVariant}
+            style={[
+              styles.textInput,
+              styles.textInputFlex,
+              {
+                backgroundColor: theme.colors.surfaceVariant,
+                color: theme.colors.onSurface,
+                borderColor: theme.colors.outline,
+              },
+            ]}
+            multiline
+          />
+        </View>
       </View>
 
       {/* Navigation + action buttons */}
@@ -461,6 +572,17 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
           </Button>
         )}
       </View>
+      <Snackbar
+        visible={attachError !== null}
+        onDismiss={() => setAttachError(null)}
+        duration={5000}
+        action={{
+          label: t("decision.attach_error_dismiss"),
+          onPress: () => setAttachError(null),
+        }}
+      >
+        {attachError ?? ""}
+      </Snackbar>
     </View>
   );
 }
@@ -693,6 +815,27 @@ const styles = StyleSheet.create({
     fontSize: 14,
     minHeight: 44,
     maxHeight: 120,
+  },
+  textInputFlex: {
+    flex: 1,
+  },
+  otherRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 4,
+  },
+  attachIconBtn: {
+    margin: 0,
+    marginTop: 2,
+  },
+  attachmentRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+    marginBottom: 6,
+  },
+  attachmentChip: {
+    maxWidth: 220,
   },
   fab: {
     position: "absolute",

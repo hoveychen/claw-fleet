@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { DailyReport, DailyReportStats, ElicitationRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -482,6 +482,16 @@ interface DecisionState {
   setElicitationCustomAnswer: (id: string, question: string, text: string) => void;
   /** Flip a specific question between single-select and multi-select locally. */
   setElicitationMultiSelectOverride: (id: string, question: string, override: boolean) => void;
+  /** Attach a file/image to the current question. Uploads via backend when remote. */
+  addElicitationAttachment: (
+    id: string,
+    question: string,
+    sourcePath: string,
+    displayName: string,
+    fromClipboard?: boolean,
+  ) => Promise<void>;
+  /** Remove an attachment from a question by path. */
+  removeElicitationAttachment: (id: string, question: string, path: string) => void;
   /** Navigate to a specific step. */
   setElicitationStep: (id: string, step: number) => void;
   /** Dismiss a decision without responding (e.g. expired). */
@@ -547,6 +557,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       selections: {},
       customAnswers: {},
       multiSelectOverrides: {},
+      attachments: {},
       arrivedAt: Date.now(),
     };
     set((s) => ({
@@ -665,6 +676,42 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     }));
   },
 
+  addElicitationAttachment: async (id, question, sourcePath, displayName, fromClipboard) => {
+    const resolvedPath = await invoke<string>("upload_elicitation_attachment", {
+      sourcePath,
+    });
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "elicitation") return d;
+        const prev = d.attachments[question] || [];
+        if (prev.some((a) => a.path === resolvedPath)) return d;
+        const next: ElicitationAttachment = {
+          path: resolvedPath,
+          name: displayName,
+          fromClipboard,
+        };
+        return {
+          ...d,
+          attachments: { ...d.attachments, [question]: [...prev, next] },
+        };
+      }),
+    }));
+  },
+
+  removeElicitationAttachment: (id, question, path) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "elicitation") return d;
+        const prev = d.attachments[question] || [];
+        const next = prev.filter((a) => a.path !== path);
+        return {
+          ...d,
+          attachments: { ...d.attachments, [question]: next },
+        };
+      }),
+    }));
+  },
+
   setElicitationMultiSelectOverride: (id, question, override) => {
     set((s) => ({
       decisions: s.decisions.map((d) => {
@@ -702,6 +749,11 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
         && !q.multiSelect;
       if (overridden && answer) {
         answer = `${answer} [用户将此题从单选改为多选 / user switched this question from single-select to multi-select]`;
+      }
+      const atts = decision.attachments[q.question] || [];
+      if (atts.length > 0) {
+        const mentions = atts.map((a) => `@${a.path}`).join(" ");
+        answer = answer ? `${answer} ${mentions}` : mentions;
       }
       answers[q.question] = answer;
     }

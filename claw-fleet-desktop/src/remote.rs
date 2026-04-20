@@ -169,6 +169,32 @@ impl ProbeClient {
     fn get_value(&self, endpoint: &str) -> Result<serde_json::Value, String> {
         self.get::<serde_json::Value>(endpoint)
     }
+
+    /// POST raw bytes (e.g. a file upload) and deserialize the JSON response.
+    fn post_bytes<T: serde::de::DeserializeOwned>(
+        &self,
+        endpoint: &str,
+        body: Vec<u8>,
+    ) -> Result<T, String> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client
+            .post(&url)
+            .header("Authorization", &self.auth_header)
+            .header("Content-Type", "application/octet-stream")
+            .timeout(Duration::from_secs(120))
+            .body(body)
+            .send()
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            let body_text = resp.text().unwrap_or_default();
+            let err = serde_json::from_str::<serde_json::Value>(&body_text)
+                .ok()
+                .and_then(|v| v["error"].as_str().map(|s| s.to_string()))
+                .unwrap_or(body_text);
+            return Err(err);
+        }
+        resp.json::<T>().map_err(|e| e.to_string())
+    }
 }
 
 // ── RemoteBackend ─────────────────────────────────────────────────────────────
@@ -560,6 +586,30 @@ impl crate::backend::Backend for RemoteBackend {
 
     fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {
         self.probe.post_json_ok("/llm/config", &config)
+    }
+
+    fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String> {
+        let meta = std::fs::metadata(source_path).map_err(|e| e.to_string())?;
+        if meta.len() > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
+            return Err(format!(
+                "attachment too large: {} bytes (max {})",
+                meta.len(),
+                claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
+            ));
+        }
+        let bytes = std::fs::read(source_path).map_err(|e| e.to_string())?;
+        let name = source_path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "attachment.bin".to_string());
+        let encoded = utf8_percent_encode(&name, NON_ALPHANUMERIC).to_string();
+        #[derive(serde::Deserialize)]
+        struct Resp { path: String }
+        let resp: Resp = self.probe.post_bytes(
+            &format!("/elicitation/upload?name={encoded}"),
+            bytes,
+        )?;
+        Ok(resp.path)
     }
 }
 

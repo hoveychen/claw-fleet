@@ -1497,6 +1497,21 @@ impl Backend for LocalBackend {
         *self.llm_config.lock().unwrap() = config;
         Ok(())
     }
+
+    fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String> {
+        // Agent runs on this machine — just hand back the absolute path so the
+        // UI can splice `@<path>` into the textarea.
+        let abs = source_path.canonicalize().map_err(|e| e.to_string())?;
+        let meta = std::fs::metadata(&abs).map_err(|e| e.to_string())?;
+        if meta.len() > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
+            return Err(format!(
+                "attachment too large: {} bytes (max {})",
+                meta.len(),
+                claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
+            ));
+        }
+        Ok(abs.to_string_lossy().into_owned())
+    }
 }
 
 /// Fetch usage summaries from all available sources via trait dispatch.
