@@ -805,7 +805,14 @@ fn compute_session_stats(lines: &[&str]) -> SessionStats {
         }
     }
 
-    // Speed: tokens/s and cost/min over the last 5-minute window
+    // Speed: tokens/s and cost/min over the last 5-minute window.
+    //
+    // Divide by `now - first_ts`, not `last_ts - first_ts`. The inter-turn
+    // gap version makes speed a step function that holds the old rate until
+    // the oldest turn slides out of the window — so a session that finished
+    // a burst 4 minutes ago still reports the burst's speed, inflating
+    // fleet-wide totals while nothing is actually generating. Measuring
+    // against "now" lets speed decay smoothly as the idle tail grows.
     let (token_speed, cost_speed_usd_per_min) = if timed.len() >= 2 {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -819,8 +826,7 @@ fn compute_session_stats(lines: &[&str]) -> SessionStats {
             let total_recent_tokens: u64 = recent.iter().map(|(_, t, _)| t).sum();
             let total_recent_cost: f64 = recent.iter().map(|(_, _, c)| c).sum();
             let first_ts = recent.first().map(|(ts, _, _)| *ts).unwrap_or(0.0);
-            let last_ts = recent.last().map(|(ts, _, _)| *ts).unwrap_or(0.0);
-            let duration = last_ts - first_ts;
+            let duration = now - first_ts;
             if duration > 0.0 {
                 (
                     total_recent_tokens as f64 / duration,
@@ -1197,6 +1203,20 @@ impl ScanCache {
 /// Downgrade a cached session's status when the file hasn't been touched
 /// and enough wall-clock time has elapsed.
 pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
+    // Zero the speed contribution for long-tail waiting states well before
+    // their status downgrades. WaitingInput/Delegating keep a 5-minute status
+    // window so the UI can still distinguish them from Idle, but once the
+    // file has been quiet for 30s the session isn't generating anything —
+    // keeping the cached speed around until 300s inflates fleet totals.
+    if matches!(
+        info.status,
+        SessionStatus::WaitingInput | SessionStatus::Delegating
+    ) && age_secs >= 30.0
+    {
+        info.token_speed = 0.0;
+        info.cost_speed_usd_per_min = 0.0;
+    }
+
     // Thresholds must mirror `determine_status` so the cache-hit path (which
     // reuses a stale SessionInfo and only calls this function) agrees with
     // the cache-miss path (which re-parses the JSONL). Specifically,
@@ -2024,7 +2044,13 @@ mod tests {
         let lines: Vec<&str> = vec![&l1, &l2];
         let stats = compute_session_stats(&lines);
         assert_eq!(stats.total_output_tokens, 100); // 50 + 50
-        assert!(stats.token_speed > 3.0 && stats.token_speed < 4.0, "speed={}", stats.token_speed);
+        // 100 tokens over (now - first_ts) ≈ 60s → ~1.67 tok/s. Allow a small
+        // window for clock jitter between test setup and stats computation.
+        assert!(
+            stats.token_speed > 1.4 && stats.token_speed < 2.0,
+            "speed={}",
+            stats.token_speed
+        );
     }
 
     #[test]
@@ -2049,9 +2075,10 @@ mod tests {
 
     #[test]
     fn session_stats_cost_speed_usd_per_min() {
-        // Two sonnet turns 30s apart, each 100k output tokens.
-        // Per turn cost: 100k output * $15/M = $1.50. Total recent cost = $3.00.
-        // Duration = 30s → cost speed = $3 * 60 / 30 = $6/min.
+        // Two sonnet turns, first at now-60s, second at now-30s, each 100k
+        // output tokens. Per-turn cost: 100k output * $15/M = $1.50, total
+        // recent cost $3.00. Duration (= now - first_ts) ≈ 60s → cost speed
+        // = $3 * 60 / 60 = $3/min.
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -2073,7 +2100,39 @@ mod tests {
         let lines: Vec<&str> = vec![&l1, &l2];
         let stats = compute_session_stats(&lines);
         assert!((stats.total_cost_usd - 3.0).abs() < 1e-6, "cost={}", stats.total_cost_usd);
-        assert!((stats.cost_speed_usd_per_min - 6.0).abs() < 1e-6, "cost_speed={}", stats.cost_speed_usd_per_min);
+        // Tolerance covers sub-second clock drift between test setup and
+        // the `SystemTime::now()` read inside `compute_session_stats`.
+        assert!(
+            (stats.cost_speed_usd_per_min - 3.0).abs() < 0.1,
+            "cost_speed={}",
+            stats.cost_speed_usd_per_min
+        );
+    }
+
+    #[test]
+    fn session_stats_speed_decays_when_idle_tail() {
+        // Two turns 30s apart, but the most recent one is already 240s old
+        // (i.e. the session has been waiting for input ~4 minutes).
+        // Buggy formula: duration = last_ts - first_ts = 30s → speed stays high.
+        // Correct formula: duration = now - first_ts ≈ 270s → speed decays.
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let ts1 = chrono::DateTime::from_timestamp(now as i64 - 270, 0).unwrap().to_rfc3339();
+        let ts2 = chrono::DateTime::from_timestamp(now as i64 - 240, 0).unwrap().to_rfc3339();
+
+        let l1 = assistant_msg_with_id(vec![], Some("end_turn"), "m1", &ts1);
+        let l2 = assistant_msg_with_id(vec![], Some("end_turn"), "m2", &ts2);
+        let lines: Vec<&str> = vec![&l1, &l2];
+        let stats = compute_session_stats(&lines);
+        // 100 tokens / 270s ≈ 0.37 tok/s. Anything above 1.0 means the old
+        // inter-turn-gap formula is still in play.
+        assert!(
+            stats.token_speed < 1.0,
+            "token_speed should decay with idle tail, got {}",
+            stats.token_speed
+        );
     }
 
     // ── extract_model tests ─────────────────────────────────────────────────
@@ -2313,6 +2372,35 @@ mod tests {
         assert_eq!(s.status, SessionStatus::WaitingInput);
         age_out_status(&mut s, 300.0);
         assert_eq!(s.status, SessionStatus::Idle);
+    }
+
+    #[test]
+    fn age_out_waiting_input_zeros_speed_before_status_change() {
+        // Fleet-wide token/cost speed totals should stop counting a waiting
+        // session quickly, even though we keep the WaitingInput *status* for
+        // 5 minutes so the user can still see the session's history context.
+        let mut s = make_session(SessionStatus::WaitingInput);
+        s.token_speed = 12.0;
+        s.cost_speed_usd_per_min = 0.5;
+        age_out_status(&mut s, 30.0);
+        assert_eq!(s.token_speed, 0.0, "speed should zero at 30s idle");
+        assert_eq!(s.cost_speed_usd_per_min, 0.0);
+        assert_eq!(
+            s.status,
+            SessionStatus::WaitingInput,
+            "status must still read WaitingInput until the 300s threshold"
+        );
+    }
+
+    #[test]
+    fn age_out_delegating_zeros_speed_before_status_change() {
+        let mut s = make_session(SessionStatus::Delegating);
+        s.token_speed = 20.0;
+        s.cost_speed_usd_per_min = 1.0;
+        age_out_status(&mut s, 30.0);
+        assert_eq!(s.token_speed, 0.0);
+        assert_eq!(s.cost_speed_usd_per_min, 0.0);
+        assert_eq!(s.status, SessionStatus::Delegating);
     }
 
     #[test]
