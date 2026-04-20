@@ -16,7 +16,6 @@ export interface RemoteConnection {
   identityFile: string | null;
   jumpHost: string | null;
   sshProfile: string | null;
-  probePort: number;
 }
 
 interface ConnectProgress {
@@ -42,7 +41,6 @@ function emptyConn(): RemoteConnection {
     identityFile: null,
     jumpHost: null,
     sshProfile: null,
-    probePort: 7007,
   };
 }
 
@@ -470,24 +468,6 @@ export function ConnectionDialog({ onConnected }: Props) {
                 </div>
               </>
             )}
-
-            <div className={styles.formRow}>
-              <div className={styles.fieldGroup}>
-                <label className={styles.fieldLabel}>{t("connect_dialog.probe_port")}</label>
-                <input
-                  className={styles.fieldInput}
-                  type="number"
-                  placeholder="7007"
-                  value={form.probePort}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      probePort: parseInt(e.target.value) || 7007,
-                    }))
-                  }
-                />
-              </div>
-            </div>
 
             {savedConns.length > 0 && (
               <button

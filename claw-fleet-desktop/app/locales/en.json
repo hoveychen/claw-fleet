@@ -1042,7 +1042,6 @@
     "username": "Username",
     "identity_file": "Identity File (optional)",
     "jump_host": "Jump Host (optional)",
-    "probe_port": "Probe Port",
     "browse": "Browse\u2026",
     "back_to_saved": "\u2190 Back to saved",
     "back": "\u2190 Back",

@@ -1042,7 +1042,6 @@
     "username": "用户名",
     "identity_file": "密钥文件（可选）",
     "jump_host": "跳板机（可选）",
-    "probe_port": "探测端口",
     "browse": "浏览…",
     "back_to_saved": "← 返回已保存",
     "back": "← 返回",

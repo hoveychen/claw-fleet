@@ -202,12 +202,16 @@ enum Commands {
     },
     /// Start the HTTP probe server (used by Fleet app for remote monitoring)
     Serve {
-        /// Port to listen on
+        /// Port to listen on.  Pass 0 to let the OS pick a free ephemeral port;
+        /// use `--port-file` to capture the actual port the server bound to.
         #[arg(short, long, default_value = "7007")]
         port: u16,
         /// Authentication token (required)
         #[arg(long)]
         token: String,
+        /// If set, the actual bound port is written to this file after bind.
+        #[arg(long)]
+        port_file: Option<std::path::PathBuf>,
     },
     /// Search session content (full-text search across all sessions)
     Search {
@@ -316,7 +320,7 @@ fn main() {
         Commands::Search { query, limit, json } => cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => cmd_audit(&level, filter.as_deref(), json),
         Commands::Report { date, backfill, regenerate, lessons, summary, json, lang } => cmd_report(date, backfill, regenerate, lessons, summary, json, &lang),
-        Commands::Serve { port, token } => cmd_serve(port, token),
+        Commands::Serve { port, token, port_file } => cmd_serve(port, token, port_file),
         Commands::Skill { action } => match action {
             SkillCommands::Install => cmd_skill_install(),
         },
@@ -1235,7 +1239,7 @@ fn handle_sse_upgrade(request: tiny_http::Request, sse: &SseBroadcaster) {
     sse.add_client(Box::new(stream));
 }
 
-fn cmd_serve(port: u16, token: String) {
+fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     use std::io::{Read, Seek, SeekFrom};
     use percent_encoding::percent_decode_str;
     use claw_fleet_core::search_index::SearchIndex;
@@ -1287,7 +1291,22 @@ fn cmd_serve(port: u16, token: String) {
         eprintln!("Error: cannot bind to {}: {}", addr, e);
         std::process::exit(1);
     });
-    eprintln!("[fleet serve] listening on {} (version {})", addr, env!("CARGO_PKG_VERSION"));
+    let actual_port = server
+        .server_addr()
+        .to_ip()
+        .map(|a| a.port())
+        .unwrap_or(port);
+    if let Some(pf) = port_file.as_ref() {
+        if let Err(e) = std::fs::write(pf, actual_port.to_string()) {
+            eprintln!("[fleet serve] failed to write port-file {}: {}", pf.display(), e);
+        }
+    }
+    {
+        use std::io::Write as _;
+        println!("FLEET_PROBE_PORT={}", actual_port);
+        let _ = std::io::stdout().flush();
+    }
+    eprintln!("[fleet serve] listening on 127.0.0.1:{} (version {})", actual_port, env!("CARGO_PKG_VERSION"));
 
     // ── Background SSE broadcaster thread ──────────────────────────────────
     // Polls for session changes, waiting alerts, guard/elicitation requests

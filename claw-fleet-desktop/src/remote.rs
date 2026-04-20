@@ -38,13 +38,6 @@ pub struct RemoteConnection {
     pub jump_host: Option<String>,
     /// If set, use this SSH config profile name instead of manual host/user/port/key.
     pub ssh_profile: Option<String>,
-    /// Local port that will be forwarded via the SSH tunnel.
-    #[serde(default = "default_probe_port")]
-    pub probe_port: u16,
-}
-
-fn default_probe_port() -> u16 {
-    7007
 }
 
 // ── ProbeClient ──────────────────────────────────────────────────────────────
@@ -230,17 +223,13 @@ impl Drop for RemoteBackend {
         *self.poller_running.lock().unwrap() = false;
         *self.tail_running.lock().unwrap() = false;
         let _ = self.tunnel_child.kill();
-        // Best-effort: kill the remote fleet-serve process.
+        // Best-effort: kill the remote fleet-serve process by the PID we captured
+        // when we started it.  (We no longer use pkill-by-port because the port is
+        // randomly OS-assigned per session; pkill-by-name would also kill other
+        // users' sessions sharing this host.)
         if let Some(pid) = self.remote_probe_pid {
             let _ = ssh_exec(&self.connection, &format!("kill {} 2>/dev/null", pid));
         }
-        let _ = ssh_exec(
-            &self.connection,
-            &format!(
-                "pkill -f 'fleet serve --port {}' 2>/dev/null",
-                self.connection.probe_port
-            ),
-        );
     }
 }
 
@@ -1015,8 +1004,22 @@ fn connect_remote_impl(
     )
     .unwrap_or_else(|_| "NOT_FOUND".to_string());
 
+    // Capability probe: the remote binary must support `--port-file` (added when
+    // we switched to OS-assigned probe ports).  Without this check, same-version
+    // dev builds would silently keep a stale old binary that can't report its port.
+    let supports_port_file = ssh_exec(
+        &conn,
+        &format!(
+            "{} serve --help 2>/dev/null | grep -q -- '--port-file' && echo OK || echo NO",
+            remote_fleet_path()
+        ),
+    )
+    .map(|s| s.trim() == "OK")
+    .unwrap_or(false);
+
     let needs_install = remote_ver_out.contains("NOT_FOUND")
-        || !remote_ver_out.contains(current_version);
+        || !remote_ver_out.contains(current_version)
+        || !supports_port_file;
 
     // ── Step 3: install probe binary on remote ────────────────────────────────
     if needs_install {
@@ -1109,21 +1112,18 @@ fn connect_remote_start_probe(
     // ── Step 4: start remote probe ───────────────────────────────────────────
     emit_progress(app, "Starting remote fleet probe…", false, None);
     let token = generate_token();
-    let probe_port = conn.probe_port;
+    let remote_port_file = format!("/tmp/fleet-probe-{}.port", token);
+    let remote_log_file = format!("/tmp/fleet-probe-{}.log", token);
 
-    let _ = ssh_exec(
-        &conn,
-        &format!(
-            "pkill -f 'fleet serve --port {}' 2>/dev/null; sleep 0.3",
-            probe_port
-        ),
-    );
-
+    // Launch `fleet serve --port 0` on the remote: the OS picks an ephemeral
+    // port, which the probe writes to `--port-file` so we can read it back.
+    // `rm -f` before launching guarantees we don't read a stale file.
     let start_cmd = format!(
-        r#"( setsid {bin} serve --port {port} --token {tok} >/tmp/fleet-probe.log 2>&1 </dev/null & echo $! ) 2>/dev/null || ( nohup {bin} serve --port {port} --token {tok} >/tmp/fleet-probe.log 2>&1 </dev/null & echo $! )"#,
+        r#"rm -f {pf}; ( setsid {bin} serve --port 0 --token {tok} --port-file {pf} >{log} 2>&1 </dev/null & echo $! ) 2>/dev/null || ( nohup {bin} serve --port 0 --token {tok} --port-file {pf} >{log} 2>&1 </dev/null & echo $! )"#,
         bin = remote_fleet_path(),
-        port = probe_port,
         tok = token,
+        pf = remote_port_file,
+        log = remote_log_file,
     );
     let pid_str = ssh_exec(&conn, &start_cmd).map_err(|e| {
         emit_progress(app, "Failed to start remote probe", false, Some(&e));
@@ -1131,7 +1131,50 @@ fn connect_remote_start_probe(
     })?;
     let remote_probe_pid: Option<u32> = pid_str.trim().parse().ok();
 
-    std::thread::sleep(Duration::from_millis(500));
+    // Poll the remote port-file until the probe has bound and recorded its port.
+    let remote_port: u16 = {
+        let mut port_opt: Option<u16> = None;
+        for _ in 0..30 {
+            std::thread::sleep(Duration::from_millis(200));
+            if let Ok(out) = ssh_exec(&conn, &format!("cat {} 2>/dev/null", remote_port_file)) {
+                if let Ok(p) = out.trim().parse::<u16>() {
+                    if p != 0 {
+                        port_opt = Some(p);
+                        break;
+                    }
+                }
+            }
+        }
+        match port_opt {
+            Some(p) => p,
+            None => {
+                let probe_log = ssh_exec(&conn, &format!("tail -20 {} 2>/dev/null", remote_log_file))
+                    .unwrap_or_else(|_| "(could not read probe log)".to_string());
+                if let Some(pid) = remote_probe_pid {
+                    let _ = ssh_exec(&conn, &format!("kill {} 2>/dev/null", pid));
+                }
+                let err = format!(
+                    "Remote probe never reported its port.\nProbe log:\n{probe_log}"
+                );
+                emit_progress(app, &err, false, Some(&err));
+                return Err(err);
+            }
+        }
+    };
+
+    // Pick a free local TCP port for the tunnel.  There is a tiny race window
+    // between dropping the listener and ssh binding it, but on loopback with a
+    // desktop app it is effectively never triggered; ExitOnForwardFailure=yes
+    // will surface the conflict quickly if it ever does happen.
+    let local_port: u16 = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0")
+            .map_err(|e| format!("Failed to find a free local port: {e}"))?;
+        let p = listener.local_addr()
+            .map_err(|e| format!("Failed to read local addr: {e}"))?
+            .port();
+        drop(listener);
+        p
+    };
 
     // ── Step 5: start local SSH tunnel ───────────────────────────────────────
     emit_progress(app, "Creating SSH tunnel…", false, None);
@@ -1139,7 +1182,7 @@ fn connect_remote_start_probe(
     let mut tunnel_args: Vec<String> = vec![
         "-N".to_string(),
         "-L".to_string(),
-        format!("{}:127.0.0.1:{}", probe_port, probe_port),
+        format!("{}:127.0.0.1:{}", local_port, remote_port),
         "-o".to_string(), "StrictHostKeyChecking=accept-new".to_string(),
         "-o".to_string(), "ConnectTimeout=15".to_string(),
         "-o".to_string(), "ServerAliveInterval=30".to_string(),
@@ -1172,7 +1215,7 @@ fn connect_remote_start_probe(
 
     // ── Step 6: wait for probe to be ready ───────────────────────────────────
     emit_progress(app, "Waiting for probe to be ready…", false, None);
-    let base_url = format!("http://127.0.0.1:{}", probe_port);
+    let base_url = format!("http://127.0.0.1:{}", local_port);
     let probe = ProbeClient::new(base_url, &token);
 
     let ready = (0..20).any(|i| {
@@ -1185,8 +1228,11 @@ fn connect_remote_start_probe(
     if !ready {
         let mut tc = tunnel_child;
         let _ = tc.kill();
-        let probe_log = ssh_exec(&conn, "tail -20 /tmp/fleet-probe.log 2>/dev/null")
+        let probe_log = ssh_exec(&conn, &format!("tail -20 {} 2>/dev/null", remote_log_file))
             .unwrap_or_else(|_| "(could not read probe log)".to_string());
+        if let Some(pid) = remote_probe_pid {
+            let _ = ssh_exec(&conn, &format!("kill {} 2>/dev/null", pid));
+        }
         let err = format!(
             "Probe did not become ready within 10 seconds.\nProbe log:\n{probe_log}"
         );
