@@ -11,6 +11,7 @@ import type { SessionInfo } from "../types";
 import { CostSpeedChart } from "./CostSpeedChart";
 import { DecisionPanel } from "./DecisionPanel";
 import { LiteSessionCard } from "./LiteSessionCard";
+import { MascotAlertBubble } from "./MascotAlertBubble";
 import { MascotEyes } from "./MascotEyes";
 import { SessionDetail } from "./SessionDetail";
 import { TokenSpeedChart } from "./TokenSpeedChart";
@@ -99,6 +100,7 @@ export function LiteApp() {
           </div>
 
           <div className={styles.mascot_slot}>
+            <MascotAlertBubble />
             <MascotEyes />
           </div>
         </div>

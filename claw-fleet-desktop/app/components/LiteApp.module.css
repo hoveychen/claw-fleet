@@ -92,8 +92,10 @@
   padding: 24px 12px;
 }
 
-/* Mascot anchored to the bottom. Constrained so it doesn't steal the list. */
+/* Mascot anchored to the bottom. Constrained so it doesn't steal the list.
+   position: relative so MascotAlertBubble can anchor above it. */
 .mascot_slot {
+  position: relative;
   flex-shrink: 0;
   display: flex;
   justify-content: center;
@@ -101,7 +103,9 @@
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
 }
 
-.mascot_slot > * {
+/* Constrain the MascotEyes (last child) — the alert bubble before it is
+   position: absolute and must span the slot edge-to-edge. */
+.mascot_slot > :last-child {
   max-width: 180px;
 }
 

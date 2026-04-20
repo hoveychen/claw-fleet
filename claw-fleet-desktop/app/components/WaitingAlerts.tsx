@@ -76,6 +76,8 @@ function AlertCard({
 export function WaitingAlerts() {
   const { alerts, setAlerts, refresh, dismiss, dismissedIds } = useWaitingAlertsStore();
   const liteMode = useUIStore((s) => s.liteMode);
+  const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
+  const openedSession = useDetailStore((s) => s.session);
   const spokenIds = useRef(new Set<string>());
 
   useEffect(() => {
@@ -121,6 +123,11 @@ export function WaitingAlerts() {
   const visible = alerts.filter((a) => !dismissedIds.has(a.sessionId));
 
   if (visible.length === 0) return null;
+  // Lite mode body view delegates to MascotAlertBubble (speech bubble on the
+  // mascot). Lite sub-views without the mascot (DecisionPanel, SessionDetail)
+  // fall back to the bottom toast so alerts stay visible there too.
+  const liteBodyView = liteMode && !hasDecision && !openedSession;
+  if (liteBodyView) return null;
 
   const MAX_STACK = 5;
   const shown = visible.slice(0, MAX_STACK);

@@ -9,6 +9,8 @@
   pointer-events: none;
 }
 
+/* Lite sub-views (detail / decision) fall back to this wider bottom strip
+   because they don't have the mascot for MascotAlertBubble to anchor to. */
 .overlay_lite {
   left: 10px;
   right: 10px;
