@@ -46,6 +46,7 @@ interface HookSetupPlan {
   guardInstalled: boolean;
   elicitationInstalled: boolean;
   interactionModeInstalled: boolean;
+  planApprovalInstalled: boolean;
 }
 
 type NotificationMode = "all" | "user_action" | "none";
@@ -736,6 +737,8 @@ function HooksSetupCard({
   onToggleGuard,
   elicitationEnabled,
   onToggleElicitation,
+  planApprovalEnabled,
+  onTogglePlanApproval,
 }: {
   hooksPlan: HookSetupPlan;
   onInstall: () => void;
@@ -745,6 +748,8 @@ function HooksSetupCard({
   onToggleGuard: (enabled: boolean) => void;
   elicitationEnabled: boolean;
   onToggleElicitation: (enabled: boolean) => void;
+  planApprovalEnabled: boolean;
+  onTogglePlanApproval: (enabled: boolean) => void;
 }) {
   const { t } = useTranslation();
   const hooksReady = hooksPlan.alreadyInstalled || status === "success";
@@ -815,6 +820,24 @@ function HooksSetupCard({
           </label>
         </div>
         <MockElicitationPreview />
+      </div>
+
+      {/* ── Plan Approval section ─────────────────────────────────── */}
+      <div className={styles.hook_feature_section}>
+        <div className={styles.hook_feature_header}>
+          <div className={styles.hook_feature_text}>
+            <span className={styles.settings_label}>{t("settings.plan_approval", "Plan 审批拦截")}</span>
+            <p className={styles.hint}>{t("settings.plan_approval_desc", "将 ExitPlanMode 的计划审批转发到 Fleet 的决策面板，可编辑并批准或驳回")}</p>
+          </div>
+          <label className={styles.hook_feature_toggle}>
+            <input
+              type="checkbox"
+              checked={planApprovalEnabled}
+              onChange={(e) => onTogglePlanApproval(e.target.checked)}
+              className={styles.source_checkbox}
+            />
+          </label>
+        </div>
       </div>
     </div>
   );
@@ -921,6 +944,26 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("elicitation hook toggle failed:", e);
+    }
+  }, []);
+
+  // ── Plan approval (ExitPlanMode) state — default off ───────────────────
+  const [planApprovalEnabled, setPlanApprovalEnabled] = useState(
+    () => getItem("plan-approval-enabled") === "true",
+  );
+
+  const handleTogglePlanApproval = useCallback(async (enabled: boolean) => {
+    setPlanApprovalEnabled(enabled);
+    setItem("plan-approval-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_plan_approval_hook");
+      } else {
+        await invoke("remove_plan_approval_hook");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("plan-approval hook toggle failed:", e);
     }
   }, []);
 
@@ -1157,6 +1200,8 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 onToggleGuard={handleToggleGuard}
                 elicitationEnabled={elicitationEnabled}
                 onToggleElicitation={handleToggleElicitation}
+                planApprovalEnabled={planApprovalEnabled}
+                onTogglePlanApproval={handleTogglePlanApproval}
               />
             </div>
           )}
@@ -1252,6 +1297,8 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                         onToggleGuard={handleToggleGuard}
                         elicitationEnabled={elicitationEnabled}
                         onToggleElicitation={handleToggleElicitation}
+                        planApprovalEnabled={planApprovalEnabled}
+                        onTogglePlanApproval={handleTogglePlanApproval}
                       />
                     )}
                     {hasClaudeCode && (

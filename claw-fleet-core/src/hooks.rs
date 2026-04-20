@@ -21,6 +21,7 @@ const FLEET_HOOK_COMMAND: &str =
 // and the subcommand is `"`, not a space.
 const FLEET_GUARD_MARKER: &str = "\" guard;";
 const FLEET_ELICITATION_MARKER: &str = "\" elicitation;";
+const FLEET_PLAN_APPROVAL_MARKER: &str = "\" plan-approval;";
 
 /// Event types we need hooks for.
 const FLEET_HOOK_EVENTS: &[&str] = &[
@@ -47,6 +48,8 @@ pub struct HookSetupPlan {
     pub guard_installed: bool,
     /// Whether the elicitation (AskUserQuestion interception) hook is installed.
     pub elicitation_installed: bool,
+    /// Whether the plan-approval (ExitPlanMode interception) hook is installed.
+    pub plan_approval_installed: bool,
     /// Whether the interaction-mode CLAUDE.md guidance is installed.
     pub interaction_mode_installed: bool,
 }
@@ -115,6 +118,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
 
     let guard_installed = has_guard_hook(&hooks_obj);
     let elicitation_installed = has_elicitation_hook(&hooks_obj);
+    let plan_approval_installed = has_plan_approval_hook(&hooks_obj);
     let interaction_mode_installed = crate::interaction_mode::is_interaction_mode_installed();
 
     HookSetupPlan {
@@ -123,6 +127,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         already_installed: all_present,
         guard_installed,
         elicitation_installed,
+        plan_approval_installed,
         interaction_mode_installed,
     }
 }
@@ -413,6 +418,94 @@ fn is_elicitation_group(group: &Value) -> bool {
         .unwrap_or(false)
 }
 
+// ── Plan-approval hook (ExitPlanMode interception) ──────────────────────
+
+/// Install the plan-approval hook (synchronous PreToolUse for ExitPlanMode).
+pub fn apply_plan_approval_hook() -> Result<(), String> {
+    let fleet_bin = resolve_fleet_binary()
+        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+
+    if !obj.contains_key("hooks") {
+        obj.insert("hooks".into(), json!({}));
+    }
+    let hooks_obj = obj
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+        .ok_or("hooks is not an object")?;
+
+    let plan_approval_group = json!({
+        "matcher": "ExitPlanMode",
+        "hooks": [{
+            "type": "command",
+            "command": fault_tolerant_command(&fleet_bin, "plan-approval"),
+            "timeout": 600000
+        }]
+    });
+
+    // Idempotent: strip any pre-existing fleet plan-approval groups before
+    // appending a fresh one.
+    if let Some(existing) = hooks_obj.get_mut("PreToolUse") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_plan_approval_group(group));
+            arr.push(plan_approval_group);
+        }
+    } else {
+        hooks_obj.insert("PreToolUse".to_string(), json!([plan_approval_group]));
+    }
+
+    write_settings(&settings)
+}
+
+/// Remove the plan-approval hook from settings.json.
+pub fn remove_plan_approval_hook() -> Result<(), String> {
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(());
+    };
+
+    if let Some(arr) = hooks_obj.get_mut("PreToolUse").and_then(|v| v.as_array_mut()) {
+        arr.retain(|group| !is_plan_approval_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("PreToolUse");
+        }
+    }
+
+    if hooks_obj.is_empty() {
+        obj.remove("hooks");
+    }
+
+    write_settings(&settings)
+}
+
+fn has_plan_approval_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("PreToolUse")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(|group| is_plan_approval_group(group)))
+        .unwrap_or(false)
+}
+
+fn is_plan_approval_group(group: &Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains(FLEET_PLAN_APPROVAL_MARKER))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
 // ── Read hook events ─────────────────────────────────────────────────────────
 
 /// Read the hook events file and compute per-session HookState.
@@ -603,6 +696,17 @@ mod tests {
         })
     }
 
+    fn plan_approval_group_for(bin: &str) -> Value {
+        json!({
+            "matcher": "ExitPlanMode",
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "plan-approval"),
+                "timeout": 600000
+            }]
+        })
+    }
+
     #[test]
     fn guard_marker_detects_actual_generated_command() {
         // Reproduces the dedup bug: the marker `"fleet guard"` (with a space)
@@ -628,6 +732,17 @@ mod tests {
     }
 
     #[test]
+    fn plan_approval_marker_detects_actual_generated_command() {
+        let group =
+            plan_approval_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet");
+        assert!(
+            is_plan_approval_group(&group),
+            "is_plan_approval_group must recognise the command actually produced \
+             by fault_tolerant_command"
+        );
+    }
+
+    #[test]
     fn idempotent_retain_removes_stale_groups() {
         // Simulates what apply_*_hook's retain-then-push loop does across
         // multiple binary paths: existing fleet groups must be filtered out
@@ -638,17 +753,26 @@ mod tests {
             guard_group_for("/Users/x/workspace/claude-fleet/target/debug/fleet"),
             elicitation_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet"),
             elicitation_group_for("/Users/x/workspace/claude-fleet/target/debug/fleet"),
+            plan_approval_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet"),
+            plan_approval_group_for("/Users/x/workspace/claude-fleet/target/debug/fleet"),
         ];
-        arr.retain(|g| !is_guard_group(g) && !is_elicitation_group(g));
+        arr.retain(|g| {
+            !is_guard_group(g) && !is_elicitation_group(g) && !is_plan_approval_group(g)
+        });
         assert_eq!(arr.len(), 1, "only the unrelated entry should survive");
     }
 
     #[test]
     fn markers_do_not_cross_match() {
-        // Guard must not match elicitation group and vice versa.
+        // All three markers must be mutually exclusive.
         let g = guard_group_for("/x/fleet");
         let e = elicitation_group_for("/x/fleet");
+        let p = plan_approval_group_for("/x/fleet");
         assert!(!is_elicitation_group(&g));
+        assert!(!is_plan_approval_group(&g));
         assert!(!is_guard_group(&e));
+        assert!(!is_plan_approval_group(&e));
+        assert!(!is_guard_group(&p));
+        assert!(!is_elicitation_group(&p));
     }
 }

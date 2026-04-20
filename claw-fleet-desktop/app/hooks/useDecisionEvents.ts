@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { playDecisionAlert } from "../audio";
 import { useDecisionStore } from "../store";
-import type { ElicitationRequest, GuardRequest } from "../types";
+import type { ElicitationRequest, GuardRequest, PlanApprovalRequest } from "../types";
 
 // Split a `question` field on a line containing only `---` (per Fleet
 // Interaction Mode's "Speech Summary Divider" convention). Returns
@@ -33,6 +33,7 @@ function lastQuestionSentence(text: string): string {
 export function useDecisionEvents() {
   const addGuardRequest = useDecisionStore((s) => s.addGuardRequest);
   const addElicitationRequest = useDecisionStore((s) => s.addElicitationRequest);
+  const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
 
   // Dedup: re-emitted payloads (e.g. after remount / reconnect) shouldn't
   // double-chime.
@@ -74,4 +75,21 @@ export function useDecisionEvents() {
       unlisten.then((fn) => fn());
     };
   }, [addElicitationRequest]);
+
+  useEffect(() => {
+    const unlisten = listen<PlanApprovalRequest>("plan-approval-request", (e) => {
+      const r = e.payload;
+      if (!announcedIds.current.has(r.id)) {
+        announcedIds.current.add(r.id);
+        const spoken = [r.workspaceName, r.aiTitle ?? ""]
+          .filter((s): s is string => !!s && s.length > 0)
+          .join("。");
+        playDecisionAlert("elicitation", spoken);
+      }
+      addPlanApprovalRequest(r);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addPlanApprovalRequest]);
 }

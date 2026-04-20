@@ -60,12 +60,20 @@ be a decision card.\n\
 \n\
 **\"Available\" includes deferred.** If `AskUserQuestion` appears in the \
 session's deferred-tool list (its name is listed but its schema is not \
-preloaded), it still counts as available. The full schema is embedded below \
-so you can call it directly without a `ToolSearch` round-trip. Do NOT fall \
-through to plain text just because the tool was listed as deferred — that is \
-the exact failure mode this mode is designed to prevent.\n\
+preloaded), it still counts as available. Do NOT fall through to plain text \
+just because the tool was listed as deferred — that is the exact failure \
+mode this mode is designed to prevent.\n\
 \n\
-### `AskUserQuestion` schema (use this to construct the call directly)\n\
+**Before the first `AskUserQuestion` call this session, you MUST first load \
+its schema via `ToolSearch` with query `select:AskUserQuestion`.** The \
+schema block below is human-readable reference documentation, not a \
+runtime-registered schema — relying on it alone has caused \
+`InputValidationError: questions expected array but provided as string`, \
+because without the JSONSchema in the runtime tool list the harness cannot \
+coerce the array. One `ToolSearch` load per session is enough; subsequent \
+`AskUserQuestion` calls in the same session reuse the loaded schema.\n\
+\n\
+### `AskUserQuestion` schema (reference — always load via `ToolSearch` before calling)\n\
 \n\
 Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
 \n\
@@ -101,9 +109,10 @@ Minimal example:\n\
 }}\n\
 ```\n\
 \n\
-If `ToolSearch` is available and you prefer to load the live schema as a \
-belt-and-braces check, the query is `select:AskUserQuestion`. But the \
-embedded schema above is authoritative for the shape — use it.\n\
+Reminder: the schema block above is reference only. Before your first \
+`AskUserQuestion` call this session, load the live schema with \
+`ToolSearch select:AskUserQuestion` so the runtime tool list has the \
+JSONSchema needed to encode `questions` as an array.\n\
 \n\
 This is how the user (addressed as \"{title_zh}\" / \"{title_en}\") wants their \
 Fleet app to queue and manage every wait-for-input moment uniformly.\n\
@@ -115,9 +124,13 @@ Fleet app to queue and manage every wait-for-input moment uniformly.\n\
   harnesses), ignore this file entirely and respond normally with text.\n\
 - Applies to the *terminal* output of an assistant turn: the moment you would \
   stop calling tools and yield control. Do NOT wrap mid-turn narration.\n\
-- Does NOT apply to `ExitPlanMode` — plan approval continues to use that \
-  tool. If the user later enables a decision-panel bridge for plans, this \
-  file will be updated.\n\
+- `ExitPlanMode` has its own decision-panel bridge (the \"Plan Approval\" \
+  toggle in Onboarding). When that toggle is on, the tool call is intercepted \
+  by Fleet and the approve / edit / reject surface renders as a decision \
+  card — you do NOT need to wrap plan approval in `AskUserQuestion` yourself. \
+  When the toggle is off, `ExitPlanMode` falls back to Claude Code's native \
+  plan-approval dialog, which also bypasses this mode. Either way, do not \
+  shoehorn plan approvals into `AskUserQuestion`.\n\
 \n\
 ## Tone & Language\n\
 \n\
@@ -377,7 +390,7 @@ mod tests {
         assert!(g.contains("deferred"), "must explain deferred-tool semantics");
         assert!(
             g.contains("\"questions\""),
-            "must embed the AskUserQuestion schema so deferred calls don't need ToolSearch"
+            "must embed the AskUserQuestion schema as reference so agents can verify their call shape"
         );
         assert!(
             g.contains("multiSelect"),
@@ -391,6 +404,23 @@ mod tests {
             g.contains("deferred listing does NOT qualify as absent")
                 || g.contains("deferred-tool list"),
             "absent-section must disambiguate deferred vs absent"
+        );
+    }
+
+    #[test]
+    fn render_requires_toolsearch_preload_before_first_askuserquestion_call() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("select:AskUserQuestion"),
+            "guidance must name the exact ToolSearch query agents should run"
+        );
+        assert!(
+            g.contains("MUST first load") || g.contains("you MUST first load"),
+            "guidance must make ToolSearch preload mandatory (not optional) before the first call"
+        );
+        assert!(
+            g.contains("InputValidationError"),
+            "guidance must cite the concrete failure mode (InputValidationError) so the rule's purpose is clear"
         );
     }
 }

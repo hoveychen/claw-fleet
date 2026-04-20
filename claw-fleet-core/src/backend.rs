@@ -283,6 +283,18 @@ pub trait Backend: Send + Sync {
         answers: std::collections::HashMap<String, String>,
     ) -> Result<(), String>;
 
+    // ── Plan approval (ExitPlanMode interception) ──────────────────────
+    fn apply_plan_approval_hook(&self) -> Result<(), String>;
+    fn remove_plan_approval_hook(&self) -> Result<(), String>;
+    fn list_pending_plan_approvals(&self) -> Vec<crate::plan_approval::PlanApprovalRequest>;
+    fn respond_to_plan_approval(
+        &self,
+        id: &str,
+        decision: &str,
+        edited_plan: Option<String>,
+        feedback: Option<String>,
+    ) -> Result<(), String>;
+
     // ── Interaction mode (global CLAUDE.md guidance) ────────────────────────
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_interaction_mode(&self) -> Result<(), String>;

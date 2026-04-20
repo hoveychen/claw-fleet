@@ -406,6 +406,7 @@ fn parse_openclaw_session(
         agent_source: "openclaw".to_string(),
         last_outcome: None,
         rate_limit: None,
+        todos: None,
     })
 }
 

@@ -57,6 +57,8 @@ export interface SessionInfo {
   agentSource: "claude-code" | "cursor" | "openclaw" | "codex";
   lastOutcome: SessionOutcome[] | null;
   rateLimit?: RateLimitState | null;
+  /** Snapshot of the latest TodoWrite state; absent when the session has never invoked TodoWrite. */
+  todos?: TodoSummary | null;
 }
 
 export type SessionOutcome =
@@ -95,6 +97,22 @@ export interface SkillInvocation {
   skill: string;
   args: string | null;
   timestamp: string;
+}
+
+export type SessionTodoStatus = "pending" | "in_progress" | "completed";
+
+export interface SessionTodo {
+  content: string;
+  activeForm: string;
+  status: SessionTodoStatus;
+}
+
+export interface TodoSummary {
+  completed: number;
+  inProgress: number;
+  pending: number;
+  /** activeForm of the first in-progress todo; absent when nothing is in progress. */
+  currentActive?: string;
 }
 
 // ── Message / content block types ───────────────────────────────────────────
@@ -288,11 +306,45 @@ export interface ElicitationDecision {
   selections: Record<string, string[]>;
   /** Custom "Other" text per question: question text → user-typed string. */
   customAnswers: Record<string, string>;
+  /**
+   * User-forced multi-select per question: question text → true if user
+   * flipped a single-select question into multi-select. Undefined/false means
+   * use `question.multiSelect` as-is.
+   */
+  multiSelectOverrides: Record<string, boolean>;
+  arrivedAt: number;
+}
+
+// ── Plan approval types ────────────────────────────────────────────────
+
+export interface PlanApprovalRequest {
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  /** AI-generated session title (separate from workspaceName). */
+  aiTitle?: string | null;
+  planContent: string;
+  planFilePath?: string | null;
+  timestamp: string;
+}
+
+/** Agent is asking the user to approve/reject an ExitPlanMode plan. */
+export interface PlanApprovalDecision {
+  kind: "plan-approval";
+  id: string;
+  request: PlanApprovalRequest;
+  /** User's edited version of the plan content; null = unchanged. */
+  editedPlan: string | null;
+  /** Optional feedback/edits note to send when rejecting. */
+  feedback: string;
   arrivedAt: number;
 }
 
 /** Union of all decision types the panel can display. */
-export type PendingDecision = GuardDecision | ElicitationDecision;
+export type PendingDecision =
+  | GuardDecision
+  | ElicitationDecision
+  | PlanApprovalDecision;
 
 // ── Daily Report types ────────────────────────────────────────────────────────
 

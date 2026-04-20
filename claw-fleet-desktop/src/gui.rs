@@ -709,6 +709,15 @@ fn get_skill_history(jsonl_path: String, state: tauri::State<AppState>) -> Resul
     Ok(extract_skill_history(&messages))
 }
 
+#[tauri::command]
+fn get_session_todos(
+    jsonl_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::session_todos::TodoItem>, String> {
+    let messages = state.backend.read().unwrap().get_messages(&jsonl_path)?;
+    Ok(claw_fleet_core::session_todos::extract_latest_todos(&messages))
+}
+
 fn extract_skill_history(messages: &[Value]) -> Vec<SkillInvocation> {
     let mut history = Vec::new();
     for msg in messages {
@@ -965,6 +974,40 @@ fn respond_to_elicitation(
         .read()
         .unwrap()
         .respond_to_elicitation(&id, declined, answers)
+}
+
+// ── Plan approval (ExitPlanMode interception) ───────────────────────────────
+
+#[tauri::command]
+fn apply_plan_approval_hook(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().apply_plan_approval_hook()
+}
+
+#[tauri::command]
+fn remove_plan_approval_hook(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().remove_plan_approval_hook()
+}
+
+#[tauri::command]
+fn list_pending_plan_approvals(
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::plan_approval::PlanApprovalRequest> {
+    state.backend.read().unwrap().list_pending_plan_approvals()
+}
+
+#[tauri::command]
+fn respond_to_plan_approval(
+    state: tauri::State<AppState>,
+    id: String,
+    decision: String,
+    edited_plan: Option<String>,
+    feedback: Option<String>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .respond_to_plan_approval(&id, &decision, edited_plan, feedback)
 }
 
 /// Read the last non-tool-use assistant message from a session, for guard context.
@@ -2041,6 +2084,7 @@ pub fn run() {
             search_sessions,
             get_messages,
             get_skill_history,
+            get_session_todos,
             get_audit_events,
             get_audit_rules,
             set_audit_rule_enabled,
@@ -2095,6 +2139,10 @@ pub fn run() {
             apply_interaction_mode,
             remove_interaction_mode,
             respond_to_elicitation,
+            apply_plan_approval_hook,
+            remove_plan_approval_hook,
+            list_pending_plan_approvals,
+            respond_to_plan_approval,
             generate_mascot_quips,
             list_llm_providers,
             get_llm_config,

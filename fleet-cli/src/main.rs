@@ -267,6 +267,9 @@ enum Commands {
     /// [internal] Elicitation hook — intercepts AskUserQuestion for Fleet UI
     #[command(hide = true)]
     Elicitation,
+    /// [internal] Plan-approval hook — intercepts ExitPlanMode for Fleet UI
+    #[command(hide = true)]
+    PlanApproval,
 }
 
 #[derive(Subcommand)]
@@ -280,13 +283,18 @@ fn main() {
 
     if let Some(ref host) = cli.remote {
         match &cli.command {
-            Commands::Serve { .. } | Commands::Skill { .. } | Commands::Guard | Commands::Elicitation => {
+            Commands::Serve { .. }
+            | Commands::Skill { .. }
+            | Commands::Guard
+            | Commands::Elicitation
+            | Commands::PlanApproval => {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
                     match &cli.command {
                         Commands::Serve { .. } => "serve",
                         Commands::Skill { .. } => "skill",
                         Commands::Guard => "guard",
                         Commands::Elicitation => "elicitation",
+                        Commands::PlanApproval => "plan-approval",
                         _ => unreachable!(),
                     }
                 );
@@ -314,6 +322,7 @@ fn main() {
         },
         Commands::Guard => cmd_guard(),
         Commands::Elicitation => cmd_elicitation(),
+        Commands::PlanApproval => cmd_plan_approval(),
     }
 }
 
@@ -1241,6 +1250,7 @@ fn cmd_serve(port: u16, token: String) {
     use claw_fleet_core::audit;
     use claw_fleet_core::guard;
     use claw_fleet_core::elicitation;
+    use claw_fleet_core::plan_approval;
 
     let sources = build_sources();
 
@@ -1290,6 +1300,7 @@ fn cmd_serve(port: u16, token: String) {
             let mut prev_alert_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_guard_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_elicit_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut prev_plan_approval_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -1382,6 +1393,28 @@ fn cmd_serve(port: u16, token: String) {
                     }
                 }
                 prev_elicit_ids.retain(|id| elicit_ids.contains(id));
+
+                // Broadcast new plan-approval requests
+                let plan_approval_ids: std::collections::HashSet<String> =
+                    plan_approval::list_pending_requests().into_iter().collect();
+                for id in &plan_approval_ids {
+                    if prev_plan_approval_ids.insert(id.clone()) {
+                        if let Some(mut req) = plan_approval::read_request(id) {
+                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
+                                if req.workspace_name.is_empty() {
+                                    req.workspace_name = s.workspace_name.clone();
+                                }
+                                if req.ai_title.is_none() {
+                                    req.ai_title = s.ai_title.clone();
+                                }
+                            }
+                            if let Ok(json) = serde_json::to_string(&req) {
+                                sse_bg.broadcast("plan-approval-request", &json);
+                            }
+                        }
+                    }
+                }
+                prev_plan_approval_ids.retain(|id| plan_approval_ids.contains(id));
             }
         });
     }
@@ -2167,6 +2200,101 @@ fn cmd_serve(port: u16, token: String) {
                         let _ = request.respond(
                             tiny_http::Response::from_string(body)
                                 .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            // ── Plan-approval hook endpoints ─────────────────────────────────
+            "/apply_plan_approval_hook" => {
+                match hooks::apply_plan_approval_hook() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/remove_plan_approval_hook" => {
+                match hooks::remove_plan_approval_hook() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/plan-approval/pending" => {
+                let ids = plan_approval::list_pending_requests();
+                let sessions = scan_all_sources(&sources);
+                let mut requests = Vec::new();
+                for id in &ids {
+                    if let Some(mut req) = plan_approval::read_request(id) {
+                        if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
+                            if req.workspace_name.is_empty() {
+                                req.workspace_name = s.workspace_name.clone();
+                            }
+                            if req.ai_title.is_none() {
+                                req.ai_title = s.ai_title.clone();
+                            }
+                        }
+                        requests.push(req);
+                    }
+                }
+                let body = serde_json::to_string(&requests).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/plan-approval/respond" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<plan_approval::PlanApprovalResponse>(&body_bytes) {
+                    Ok(resp) => {
+                        match plan_approval::write_response(&resp) {
+                            Ok(()) => {
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
                                 .with_header(json_header),
                         );
                     }
@@ -3126,6 +3254,154 @@ fn cmd_elicitation() {
         None => {
             elicitation::cleanup(&request_id);
             // Timeout — deny so Claude Code falls back.
+            let out = serde_json::json!({
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": "Fleet: no response from Fleet app (timeout)"
+                }
+            });
+            println!("{}", out);
+        }
+    }
+}
+
+// ── Plan-approval CLI (hook entrypoint for ExitPlanMode) ────────────────
+
+fn cmd_plan_approval() {
+    use claw_fleet_core::consumer_heartbeat;
+    use claw_fleet_core::guard::{self, HookInput};
+    use claw_fleet_core::plan_approval::{self, PlanApprovalRequest};
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    // Read hook JSON from stdin.
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() {
+        return;
+    }
+
+    let hook_input: HookInput = match serde_json::from_str(&input) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+
+    // Only handle ExitPlanMode.
+    let tool_name = hook_input.tool_name.as_deref().unwrap_or("");
+    if tool_name != "ExitPlanMode" {
+        return;
+    }
+
+    let tool_input = match &hook_input.tool_input {
+        Some(v) => v.clone(),
+        None => return,
+    };
+
+    // Pull plan content and file path. Claude Code's `normalizeToolInput`
+    // injects these into the tool_input before hooks fire, so we can display
+    // the plan without having to re-read from disk.
+    let plan_content = tool_input
+        .get("plan")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let plan_file_path = tool_input
+        .get("planFilePath")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    // No live consumer — fall through silently so Claude Code keeps its
+    // native plan-approval UI as a fallback.
+    let liveness_window = Duration::from_secs(5);
+    if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+        return;
+    }
+
+    let session_id = hook_input
+        .session_id
+        .clone()
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let request_id = guard::new_request_id();
+
+    let req = PlanApprovalRequest {
+        id: request_id.clone(),
+        session_id,
+        workspace_name: String::new(),
+        ai_title: None,
+        plan_content,
+        plan_file_path,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+    };
+
+    if let Err(e) = plan_approval::write_request(&req) {
+        eprintln!("plan-approval: failed to write request: {e}");
+        // On error, deny so Claude Code falls back to its own UI.
+        let out = serde_json::json!({
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "Fleet: failed to communicate with Fleet app"
+            }
+        });
+        println!("{}", out);
+        return;
+    }
+
+    // Poll for response (up to 10 minutes), bailing out early if the consumer
+    // dies mid-flight so Claude Code can take over with its native UI.
+    let timeout = Duration::from_secs(600);
+    let poll_interval = Duration::from_millis(200);
+    let start = Instant::now();
+    let resp = loop {
+        if let Some(r) = plan_approval::try_read_response(&request_id) {
+            break Some(r);
+        }
+        if start.elapsed() > timeout {
+            break None;
+        }
+        if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+            plan_approval::cleanup(&request_id);
+            return;
+        }
+        std::thread::sleep(poll_interval);
+    };
+
+    match resp {
+        Some(resp) => {
+            plan_approval::cleanup(&request_id);
+            if resp.decision == "approve" {
+                // Approve — optionally echo back an edited plan via updatedInput.
+                let mut updated_input = tool_input.clone();
+                if let Some(edited) = resp.edited_plan.as_deref() {
+                    updated_input["plan"] = serde_json::Value::String(edited.to_string());
+                }
+                let out = serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "allow",
+                        "updatedInput": updated_input
+                    }
+                });
+                println!("{}", out);
+            } else {
+                // Reject — pass user feedback (if any) back to the model.
+                let reason = resp
+                    .feedback
+                    .filter(|s| !s.trim().is_empty())
+                    .unwrap_or_else(|| "User rejected plan".to_string());
+                let out = serde_json::json!({
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": reason
+                    }
+                });
+                println!("{}", out);
+            }
+        }
+        None => {
+            plan_approval::cleanup(&request_id);
             let out = serde_json::json!({
                 "hookSpecificOutput": {
                     "hookEventName": "PreToolUse",

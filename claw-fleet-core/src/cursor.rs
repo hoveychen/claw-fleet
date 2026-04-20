@@ -531,6 +531,7 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
             agent_source: "cursor".to_string(),
             last_outcome: None,
             rate_limit: None,
+            todos: None,
         });
     }
 

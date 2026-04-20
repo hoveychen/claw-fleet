@@ -106,6 +106,11 @@ pub struct SessionInfo {
     /// type for the UI countdown and the auto-resume scheduler.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub rate_limit: Option<RateLimitState>,
+    /// Snapshot of the most recent TodoWrite invocation (`None` = session has
+    /// never invoked TodoWrite).  Drives the compact progress row on the
+    /// session card.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub todos: Option<crate::session_todos::TodoSummary>,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -1124,6 +1129,7 @@ pub fn parse_session_info(
 
     let model = meta_model.or_else(|| extract_model(&last_n));
     let last_skill = extract_last_skill(&last_n);
+    let todos = crate::session_todos::latest_todo_summary_from_lines(&all_lines);
 
     // Prefer explicit thinking level from meta; fall back to detecting thinking blocks
     let thinking_level = meta_thinking_level.or_else(|| {
@@ -1164,6 +1170,7 @@ pub fn parse_session_info(
         agent_source: "claude-code".to_string(),
         last_outcome: None,
         rate_limit,
+        todos,
     })
 }
 
@@ -1757,6 +1764,7 @@ mod tests {
             agent_source: "claude-code".into(),
             last_outcome: None,
             rate_limit: None,
+            todos: None,
         }
     }
 

@@ -194,13 +194,20 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
   const setStep = useDecisionsStore((s) => s.setElicitationStep);
   const toggleSelection = useDecisionsStore((s) => s.toggleSelection);
   const setCustomAnswer = useDecisionsStore((s) => s.setCustomAnswer);
-  const { request, step, selections, customAnswers } = decision;
+  const setMultiSelectOverride = useDecisionsStore(
+    (s) => s.setMultiSelectOverride,
+  );
+  const { request, step, selections, customAnswers, multiSelectOverrides } = decision;
   const question = request.questions[step];
   const totalSteps = request.questions.length;
   const isLast = step === totalSteps - 1;
 
   const currentSelections = question ? (selections[question.question] ?? []) : [];
   const currentCustom = question ? (customAnswers[question.question] ?? "") : "";
+  const effectiveMulti = question
+    ? question.multiSelect || multiSelectOverrides[question.question] === true
+    : false;
+  const canToggleMode = !!question && !question.multiSelect;
 
   const handleDecline = useCallback(() => {
     client?.respondElicitation(request.id, true, {}).catch(() => {});
@@ -213,15 +220,21 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
     for (const q of request.questions) {
       const sel = selections[q.question] ?? [];
       const custom = customAnswers[q.question] ?? "";
+      let answer = "";
       if (custom) {
-        answers[q.question] = custom;
+        answer = custom;
       } else if (sel.length > 0) {
-        answers[q.question] = sel.join(", ");
+        answer = sel.join(", ");
       }
+      const overridden = multiSelectOverrides[q.question] === true && !q.multiSelect;
+      if (overridden && answer) {
+        answer = `${answer} [用户将此题从单选改为多选 / user switched this question from single-select to multi-select]`;
+      }
+      if (answer) answers[q.question] = answer;
     }
     client?.respondElicitation(request.id, false, answers).catch(() => {});
     remove(decision.id);
-  }, [client, request.id, decision.id, selections, customAnswers]);
+  }, [client, request.id, decision.id, selections, customAnswers, multiSelectOverrides, request.questions]);
 
   if (!question) return null;
 
@@ -247,14 +260,54 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
         </View>
       </View>
 
-      {/* Step indicator */}
-      {totalSteps > 1 && (
-        <Text
-          variant="labelSmall"
-          style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}
-        >
-          {t("decision.step", { current: step + 1, total: totalSteps })}
-        </Text>
+      {/* Step indicator + mode toggle row */}
+      {(totalSteps > 1 || canToggleMode) && (
+        <View style={styles.stepRow}>
+          {totalSteps > 1 && (
+            <Text
+              variant="labelSmall"
+              style={{ color: theme.colors.onSurfaceVariant }}
+            >
+              {t("decision.step", { current: step + 1, total: totalSteps })}
+            </Text>
+          )}
+          {canToggleMode && question && (
+            <Pressable
+              onPress={() =>
+                setMultiSelectOverride(
+                  decision.id,
+                  question.question,
+                  !effectiveMulti,
+                )
+              }
+              style={[
+                styles.modeToggle,
+                {
+                  backgroundColor: effectiveMulti
+                    ? brandColors.primary + "24"
+                    : theme.colors.surfaceVariant,
+                  borderColor: effectiveMulti
+                    ? brandColors.primary
+                    : theme.colors.outline,
+                },
+              ]}
+            >
+              <Text
+                variant="labelSmall"
+                style={{
+                  color: effectiveMulti
+                    ? brandColors.primary
+                    : theme.colors.onSurfaceVariant,
+                  fontWeight: "600",
+                }}
+              >
+                {effectiveMulti
+                  ? t("decision.mode_multi")
+                  : t("decision.mode_single")}
+              </Text>
+            </Pressable>
+          )}
+        </View>
       )}
 
       {/* Question */}
@@ -271,52 +324,72 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
           {question.options.map((opt) => {
             const selected = currentSelections.includes(opt.label);
             return (
-              <Pressable
-                key={opt.label}
-                onPress={() =>
-                  toggleSelection(
-                    decision.id,
-                    question.question,
-                    opt.label,
-                    question.multiSelect,
-                  )
-                }
-                style={[
-                  styles.optionItem,
-                  {
-                    backgroundColor: selected
-                      ? brandColors.primary + "18"
-                      : theme.colors.surfaceVariant,
-                    borderColor: selected
-                      ? brandColors.primary
-                      : theme.colors.outline,
-                  },
-                ]}
-              >
-                <Text
-                  variant="bodySmall"
-                  style={{
-                    color: selected
-                      ? brandColors.primary
-                      : theme.colors.onSurface,
-                    fontWeight: selected ? "600" : "400",
-                  }}
+              <View key={opt.label} style={styles.optionRow}>
+                <Pressable
+                  onPress={() =>
+                    toggleSelection(
+                      decision.id,
+                      question.question,
+                      opt.label,
+                      effectiveMulti,
+                    )
+                  }
+                  style={[
+                    styles.optionItem,
+                    styles.optionItemFlex,
+                    {
+                      backgroundColor: selected
+                        ? brandColors.primary + "18"
+                        : theme.colors.surfaceVariant,
+                      borderColor: selected
+                        ? brandColors.primary
+                        : theme.colors.outline,
+                    },
+                  ]}
                 >
-                  {opt.label}
-                </Text>
-                {opt.description ? (
                   <Text
                     variant="bodySmall"
                     style={{
-                      color: theme.colors.onSurfaceVariant,
-                      fontSize: 11,
-                      marginTop: 2,
+                      color: selected
+                        ? brandColors.primary
+                        : theme.colors.onSurface,
+                      fontWeight: selected ? "600" : "400",
                     }}
                   >
-                    {opt.description}
+                    {opt.label}
                   </Text>
-                ) : null}
-              </Pressable>
+                  {opt.description ? (
+                    <Text
+                      variant="bodySmall"
+                      style={{
+                        color: theme.colors.onSurfaceVariant,
+                        fontSize: 11,
+                        marginTop: 2,
+                      }}
+                    >
+                      {opt.description}
+                    </Text>
+                  ) : null}
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    const seed = opt.description
+                      ? `${opt.label} — ${opt.description}`
+                      : opt.label;
+                    setCustomAnswer(decision.id, question.question, seed);
+                  }}
+                  accessibilityLabel={t("decision.edit_option")}
+                  style={[
+                    styles.editOptionButton,
+                    {
+                      backgroundColor: theme.colors.surfaceVariant,
+                      borderColor: theme.colors.outline,
+                    },
+                  ]}
+                >
+                  <Text style={{ fontSize: 14 }}>✏️</Text>
+                </Pressable>
+              </View>
             );
           })}
         </View>
@@ -580,10 +653,38 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 12,
   },
+  optionRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 6,
+  },
   optionItem: {
     borderRadius: 8,
     borderWidth: 1,
     padding: 10,
+  },
+  optionItemFlex: {
+    flex: 1,
+  },
+  editOptionButton: {
+    width: 40,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  stepRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 8,
+    gap: 8,
+  },
+  modeToggle: {
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    borderRadius: 12,
+    borderWidth: 1,
   },
   textInput: {
     borderRadius: 8,

@@ -241,7 +241,8 @@
     "tip_speed": "Output token generation speed",
     "tip_context": "Context window usage: {{percent}}%",
     "tip_cost": "Session cost (USD)",
-    "tip_cost_agent": "Self: ${{self}} · Agent total (main + subagents): ${{total}}"
+    "tip_cost_agent": "Self: ${{self}} · Agent total (main + subagents): ${{total}}",
+    "tip_todos": "Todos: {{completed}} done · {{inProgress}} in progress · {{pending}} pending"
   },
   "onboarding": {
     "welcome": "Welcome to Claw Fleet",
@@ -940,6 +941,8 @@
     "elicitation": "Elicitation (Agent Questions)",
     "elicitation_desc": "Route AskUserQuestion tool calls to Fleet so you can answer from the Fleet app instead of the terminal",
     "elicitation_enabled": "Enable elicitation",
+    "plan_approval": "Plan Approval (ExitPlanMode)",
+    "plan_approval_desc": "Route ExitPlanMode plan approvals to the Fleet decision panel — preview, edit, then approve or reject (default off)",
     "interaction_mode": "Global AskUserQuestion Mode",
     "interaction_mode_desc": "Injects a guidance block into ~/.claude/CLAUDE.md that tells Claude Code to deliver every final response via AskUserQuestion instead of plain text. All reports, follow-ups, and clarifications appear as Fleet decision cards. Only affects Claude Code — Cursor / Codex / others are unaffected.",
     "interaction_mode_enabled": "Enable global AskUserQuestion mode",
@@ -1080,7 +1083,22 @@
     "next": "Next",
     "back": "Back",
     "other": "Other",
-    "other_placeholder": "Type your answer…"
+    "other_placeholder": "Type your answer…",
+    "edit_option": "Edit this option (copy to Other)",
+    "mode_single": "Single",
+    "mode_multi": "Multi",
+    "mode_tooltip": "Switch this question between single and multi select"
+  },
+  "planApproval": {
+    "title": "Plan ready for approval",
+    "approve": "Approve",
+    "edit": "Edit",
+    "reject": "Reject",
+    "cancelEdit": "Cancel edit",
+    "approveEdited": "Approve edited",
+    "backToPlan": "Back",
+    "rejectConfirm": "Reject plan",
+    "feedbackPlaceholder": "Leave feedback for the agent…"
   },
   "view_report": "Report",
   "report": {

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { DailyReport, DailyReportStats, ElicitationRequest, GuardRequest, Lesson, PendingDecision, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { DailyReport, DailyReportStats, ElicitationRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -460,16 +460,28 @@ interface DecisionState {
   addGuardRequest: (req: GuardRequest) => void;
   /** Add an elicitation request to the queue. */
   addElicitationRequest: (req: ElicitationRequest) => void;
+  /** Add a plan-approval request to the queue. */
+  addPlanApprovalRequest: (req: PlanApprovalRequest) => void;
   /** Respond to a decision (allow/block for guard). Removes it from the queue. */
   respond: (id: string, allow: boolean) => Promise<void>;
   /** Submit elicitation answers. */
   submitElicitation: (id: string) => Promise<void>;
   /** Decline an elicitation. */
   declineElicitation: (id: string) => Promise<void>;
+  /** Approve a plan (optionally with edited plan text). */
+  approvePlan: (id: string, editedPlan?: string | null) => Promise<void>;
+  /** Reject a plan (with optional feedback). */
+  rejectPlan: (id: string, feedback: string) => Promise<void>;
+  /** Update edited plan text for a plan-approval decision. */
+  setPlanEditedText: (id: string, text: string | null) => void;
+  /** Update feedback text for a plan-approval decision. */
+  setPlanFeedback: (id: string, text: string) => void;
   /** Toggle an option selection for an elicitation question. */
   toggleElicitationOption: (id: string, question: string, option: string, multiSelect: boolean) => void;
   /** Set the "Other" custom text for a question. */
   setElicitationCustomAnswer: (id: string, question: string, text: string) => void;
+  /** Flip a specific question between single-select and multi-select locally. */
+  setElicitationMultiSelectOverride: (id: string, question: string, override: boolean) => void;
   /** Navigate to a specific step. */
   setElicitationStep: (id: string, step: number) => void;
   /** Dismiss a decision without responding (e.g. expired). */
@@ -534,6 +546,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       step: 0,
       selections: {},
       customAnswers: {},
+      multiSelectOverrides: {},
       arrivedAt: Date.now(),
     };
     set((s) => ({
@@ -543,6 +556,66 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
 
     // Play chime to alert user that a decision is waiting
     playChime("ding_dong").catch(() => {});
+  },
+
+  addPlanApprovalRequest: (req) => {
+    const decision: PendingDecision = {
+      kind: "plan-approval",
+      id: req.id,
+      request: req,
+      editedPlan: null,
+      feedback: "",
+      arrivedAt: Date.now(),
+    };
+    set((s) => ({
+      decisions: [...s.decisions, decision],
+      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
+    }));
+    playChime("ding_dong").catch(() => {});
+  },
+
+  approvePlan: async (id, editedPlan) => {
+    try {
+      await invoke("respond_to_plan_approval", {
+        id,
+        decision: "approve",
+        editedPlan: editedPlan ?? null,
+        feedback: null,
+      });
+    } catch (e) {
+      console.error("respond_to_plan_approval (approve) failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+  },
+
+  rejectPlan: async (id, feedback) => {
+    try {
+      await invoke("respond_to_plan_approval", {
+        id,
+        decision: "reject",
+        editedPlan: null,
+        feedback: feedback || null,
+      });
+    } catch (e) {
+      console.error("respond_to_plan_approval (reject) failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+  },
+
+  setPlanEditedText: (id, text) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "plan-approval" ? { ...d, editedPlan: text } : d,
+      ),
+    }));
+  },
+
+  setPlanFeedback: (id, text) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "plan-approval" ? { ...d, feedback: text } : d,
+      ),
+    }));
   },
 
   toggleElicitationOption: (id, question, option, multiSelect) => {
@@ -592,6 +665,24 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     }));
   },
 
+  setElicitationMultiSelectOverride: (id, question, override) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "elicitation") return d;
+        const nextOverrides = { ...d.multiSelectOverrides, [question]: override };
+        // When flipping back to single-select, trim selections to at most one.
+        let nextSelections = d.selections;
+        if (!override) {
+          const current = d.selections[question] || [];
+          if (current.length > 1) {
+            nextSelections = { ...d.selections, [question]: [current[0]] };
+          }
+        }
+        return { ...d, multiSelectOverrides: nextOverrides, selections: nextSelections };
+      }),
+    }));
+  },
+
   submitElicitation: async (id) => {
     const decision = get().decisions.find(
       (d) => d.id === id && d.kind === "elicitation",
@@ -600,12 +691,19 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     const answers: Record<string, string> = {};
     for (const q of decision.request.questions) {
       const custom = decision.customAnswers[q.question]?.trim();
+      let answer: string;
       if (custom) {
-        answers[q.question] = custom;
+        answer = custom;
       } else {
         const sel = decision.selections[q.question] || [];
-        answers[q.question] = sel.join(", ");
+        answer = sel.join(", ");
       }
+      const overridden = decision.multiSelectOverrides[q.question] === true
+        && !q.multiSelect;
+      if (overridden && answer) {
+        answer = `${answer} [用户将此题从单选改为多选 / user switched this question from single-select to multi-select]`;
+      }
+      answers[q.question] = answer;
     }
     try {
       await invoke("respond_to_elicitation", { id, declined: false, answers });

@@ -270,6 +270,59 @@
   text-overflow: ellipsis;
 }
 
+/* TODO progress row */
+.todos_row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.todos_bar {
+  position: relative;
+  flex: 0 0 54px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.todos_bar_done {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--color-accent);
+  transition: width 0.2s;
+}
+
+.todos_bar_inprogress {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background: var(--color-accent);
+  opacity: 0.45;
+  transition: width 0.2s, left 0.2s;
+}
+
+.todos_count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
+.todos_current {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-style: italic;
+}
+
 /* Footer */
 .footer {
   display: flex;

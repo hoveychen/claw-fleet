@@ -487,6 +487,32 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
         <p className={styles.preview} title={session.lastMessagePreview}>{session.lastMessagePreview}</p>
       )}
 
+      {/* TODO progress row */}
+      {session.todos && (session.todos.completed + session.todos.inProgress + session.todos.pending) > 0 && (
+        (() => {
+          const total = session.todos.completed + session.todos.inProgress + session.todos.pending;
+          const donePct = (session.todos.completed / total) * 100;
+          const progPct = (session.todos.inProgress / total) * 100;
+          const tip = t("card.tip_todos", {
+            completed: session.todos.completed,
+            inProgress: session.todos.inProgress,
+            pending: session.todos.pending,
+          });
+          return (
+            <div className={styles.todos_row} title={tip}>
+              <div className={styles.todos_bar} role="progressbar" aria-valuenow={session.todos.completed} aria-valuemax={total}>
+                <div className={styles.todos_bar_done} style={{ width: `${donePct}%` }} />
+                <div className={styles.todos_bar_inprogress} style={{ width: `${progPct}%`, left: `${donePct}%` }} />
+              </div>
+              <span className={styles.todos_count}>{session.todos.completed}/{total}</span>
+              {session.todos.currentActive && (
+                <span className={styles.todos_current}>{session.todos.currentActive}</span>
+              )}
+            </div>
+          );
+        })()
+      )}
+
       {/* Footer row */}
       <div className={styles.footer}>
         <TokenSpeed speed={session.tokenSpeed} />

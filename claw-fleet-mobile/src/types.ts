@@ -131,6 +131,8 @@ export interface ElicitationDecision {
   step: number;
   selections: Record<string, string[]>;
   customAnswers: Record<string, string>;
+  /** User-forced multi-select per question (only populated when user flips a single-select to multi). */
+  multiSelectOverrides: Record<string, boolean>;
   arrivedAt: number;
 }
 

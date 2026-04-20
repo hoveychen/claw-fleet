@@ -147,6 +147,7 @@ impl Backend for NullBackend {
             guard_installed: false,
             elicitation_installed: false,
             interaction_mode_installed: false,
+            plan_approval_installed: false,
         }
     }
     fn apply_hooks(&self) -> Result<(), String> {
@@ -178,6 +179,26 @@ impl Backend for NullBackend {
         _: &str,
         _: bool,
         _: std::collections::HashMap<String, String>,
+    ) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn apply_plan_approval_hook(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn remove_plan_approval_hook(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn list_pending_plan_approvals(
+        &self,
+    ) -> Vec<claw_fleet_core::plan_approval::PlanApprovalRequest> {
+        vec![]
+    }
+    fn respond_to_plan_approval(
+        &self,
+        _: &str,
+        _: &str,
+        _: Option<String>,
+        _: Option<String>,
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }

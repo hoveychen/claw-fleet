@@ -110,6 +110,9 @@
     "submit": "Submit",
     "decline": "Decline",
     "no_pending": "No pending decisions",
-    "workspace": "Workspace"
+    "workspace": "Workspace",
+    "edit_option": "Edit (copy to Other)",
+    "mode_single": "Single",
+    "mode_multi": "Multi"
   }
 }

@@ -147,6 +147,7 @@ mod tests {
             agent_source: "claude-code".into(),
             last_outcome: None,
             rate_limit: rl,
+            todos: None,
         }
     }
 

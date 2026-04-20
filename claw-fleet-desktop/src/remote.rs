@@ -370,6 +370,7 @@ impl crate::backend::Backend for RemoteBackend {
             guard_installed: false,
             elicitation_installed: false,
             interaction_mode_installed: false,
+            plan_approval_installed: false,
         })
     }
 
@@ -427,6 +428,34 @@ impl crate::backend::Backend for RemoteBackend {
             answers,
         };
         self.probe.post_json_ok("/elicitation/respond", &resp)
+    }
+
+    fn apply_plan_approval_hook(&self) -> Result<(), String> {
+        self.probe.post_ok("/apply_plan_approval_hook")
+    }
+
+    fn remove_plan_approval_hook(&self) -> Result<(), String> {
+        self.probe.post_ok("/remove_plan_approval_hook")
+    }
+
+    fn list_pending_plan_approvals(&self) -> Vec<claw_fleet_core::plan_approval::PlanApprovalRequest> {
+        self.probe.get("/plan-approval/pending").unwrap_or_default()
+    }
+
+    fn respond_to_plan_approval(
+        &self,
+        id: &str,
+        decision: &str,
+        edited_plan: Option<String>,
+        feedback: Option<String>,
+    ) -> Result<(), String> {
+        let resp = claw_fleet_core::plan_approval::PlanApprovalResponse {
+            id: id.to_string(),
+            decision: decision.to_string(),
+            edited_plan,
+            feedback,
+        };
+        self.probe.post_json_ok("/plan-approval/respond", &resp)
     }
 
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
@@ -1377,6 +1406,38 @@ fn connect_remote_start_probe(
                             req.id, req.questions.len()
                         ));
                         let _ = app_elicit.emit("elicitation-request", req);
+                    }
+                }
+                known.retain(|id| pending_ids.contains(id));
+            }
+        });
+    }
+
+    // Plan-approval polling thread — polls remote probe for pending plan-approval requests.
+    {
+        let app_plan = app.clone();
+        let pr_plan = poller_running.clone();
+        let probe_plan = probe.clone();
+        std::thread::spawn(move || {
+            let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                if !*pr_plan.lock().unwrap() {
+                    break;
+                }
+                let Ok(pending) = probe_plan.get::<Vec<claw_fleet_core::plan_approval::PlanApprovalRequest>>("/plan-approval/pending") else {
+                    continue;
+                };
+                let pending_ids: std::collections::HashSet<String> =
+                    pending.iter().map(|r| r.id.clone()).collect();
+                for req in &pending {
+                    if known.insert(req.id.clone()) {
+                        claw_fleet_core::log_debug(&format!(
+                            "[remote-plan-approval] new request: {} plan_len={}",
+                            req.id,
+                            req.plan_content.len()
+                        ));
+                        let _ = app_plan.emit("plan-approval-request", req);
                     }
                 }
                 known.retain(|id| pending_ids.contains(id));

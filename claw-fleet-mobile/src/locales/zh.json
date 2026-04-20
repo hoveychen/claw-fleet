@@ -110,6 +110,9 @@
     "submit": "提交",
     "decline": "拒绝",
     "no_pending": "暂无待处理决策",
-    "workspace": "工作区"
+    "workspace": "工作区",
+    "edit_option": "编辑（复制到「其他」）",
+    "mode_single": "单选",
+    "mode_multi": "多选"
   }
 }

@@ -18,9 +18,11 @@ pub mod memory;
 pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
+pub mod plan_approval;
 pub mod rate_limit_parser;
 pub mod search_index;
 pub mod session;
+pub mod session_todos;
 pub mod skills;
 pub mod tcc;
 

@@ -473,6 +473,40 @@ impl LocalBackend {
             });
         }
 
+        // Plan-approval directory watcher — polls for new ExitPlanMode requests from `fleet plan-approval`.
+        {
+            let app_plan = app.clone();
+            let sess_plan = sessions.clone();
+            std::thread::spawn(move || {
+                let mut known: HashSet<String> = HashSet::new();
+                loop {
+                    std::thread::sleep(Duration::from_millis(500));
+                    let pending = crate::plan_approval::list_pending_requests();
+                    for id in &pending {
+                        if known.insert(id.clone()) {
+                            if let Some(mut req) = crate::plan_approval::read_request(id) {
+                                let (ws, ai) =
+                                    resolve_session_display(&sess_plan, &req.session_id);
+                                if req.workspace_name.is_empty() {
+                                    req.workspace_name = ws;
+                                }
+                                if req.ai_title.is_none() {
+                                    req.ai_title = ai;
+                                }
+                                crate::log_debug(&format!(
+                                    "[plan-approval] new request: {} plan_len={}",
+                                    id,
+                                    req.plan_content.len()
+                                ));
+                                let _ = app_plan.emit("plan-approval-request", &req);
+                            }
+                        }
+                    }
+                    known.retain(|id| pending.contains(id));
+                }
+            });
+        }
+
         // Start the daily report scheduler (backfills missing reports in background).
         crate::daily_report::start_report_scheduler(report_store.clone(), locale.clone(), llm_config.clone());
 
@@ -1127,6 +1161,49 @@ impl Backend for LocalBackend {
             answers,
         };
         crate::elicitation::write_response(&resp)
+    }
+
+    fn apply_plan_approval_hook(&self) -> Result<(), String> {
+        crate::hooks::apply_plan_approval_hook()
+    }
+
+    fn remove_plan_approval_hook(&self) -> Result<(), String> {
+        crate::hooks::remove_plan_approval_hook()
+    }
+
+    fn list_pending_plan_approvals(&self) -> Vec<crate::plan_approval::PlanApprovalRequest> {
+        let ids = crate::plan_approval::list_pending_requests();
+        let sessions = self.sessions.lock().unwrap().clone();
+        ids.iter()
+            .filter_map(|id| {
+                let mut req = crate::plan_approval::read_request(id)?;
+                if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
+                    if req.workspace_name.is_empty() {
+                        req.workspace_name = s.workspace_name.clone();
+                    }
+                    if req.ai_title.is_none() {
+                        req.ai_title = s.ai_title.clone();
+                    }
+                }
+                Some(req)
+            })
+            .collect()
+    }
+
+    fn respond_to_plan_approval(
+        &self,
+        id: &str,
+        decision: &str,
+        edited_plan: Option<String>,
+        feedback: Option<String>,
+    ) -> Result<(), String> {
+        let resp = crate::plan_approval::PlanApprovalResponse {
+            id: id.to_string(),
+            decision: decision.to_string(),
+            edited_plan,
+            feedback,
+        };
+        crate::plan_approval::write_response(&resp)
     }
 
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {

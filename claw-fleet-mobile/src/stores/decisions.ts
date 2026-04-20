@@ -27,6 +27,7 @@ interface DecisionsState {
   setElicitationStep: (id: string, step: number) => void;
   toggleSelection: (id: string, question: string, label: string, multiSelect: boolean) => void;
   setCustomAnswer: (id: string, question: string, text: string) => void;
+  setMultiSelectOverride: (id: string, question: string, override: boolean) => void;
 }
 
 export const useDecisionsStore = create<DecisionsState>((set) => ({
@@ -61,6 +62,7 @@ export const useDecisionsStore = create<DecisionsState>((set) => ({
         step: 0,
         selections: {},
         customAnswers: {},
+        multiSelectOverrides: {},
         arrivedAt: Date.now(),
       };
       const decisions = [...state.decisions, decision];
@@ -123,5 +125,21 @@ export const useDecisionsStore = create<DecisionsState>((set) => ({
           ? { ...d, customAnswers: { ...d.customAnswers, [question]: text } }
           : d,
       ),
+    })),
+
+  setMultiSelectOverride: (id, question, override) =>
+    set((state) => ({
+      decisions: state.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "elicitation") return d;
+        const nextOverrides = { ...d.multiSelectOverrides, [question]: override };
+        let nextSelections = d.selections;
+        if (!override) {
+          const current = d.selections[question] ?? [];
+          if (current.length > 1) {
+            nextSelections = { ...d.selections, [question]: [current[0]] };
+          }
+        }
+        return { ...d, multiSelectOverrides: nextOverrides, selections: nextSelections };
+      }),
     })),
 }));
