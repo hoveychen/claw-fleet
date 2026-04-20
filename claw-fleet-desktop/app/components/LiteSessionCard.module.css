@@ -106,10 +106,9 @@
   white-space: nowrap;
 }
 
-/* Subagent card: indent + slightly muted background */
+/* Subagent card: indent via padding (not margin) so we don't overflow the list */
 .card_subagent {
-  margin-left: 12px;
-  background: var(--color-bg-card, rgba(255, 255, 255, 0.025));
+  padding-left: 22px;
   border-left: 2px solid rgba(245, 158, 11, 0.35);
 }
 
