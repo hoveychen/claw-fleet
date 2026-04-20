@@ -19,6 +19,7 @@ interface HookSetupPlan {
   guardInstalled: boolean;
   elicitationInstalled: boolean;
   interactionModeInstalled: boolean;
+  planApprovalInstalled: boolean;
 }
 
 interface SourceInfo {
@@ -164,6 +165,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
         "interaction-mode-enabled",
         plan.interactionModeInstalled ? "true" : "false",
       );
+      // Plan approval: opt-in, so disk is the source of truth (same as
+      // interaction mode). No auto-apply on mount.
+      setPlanApprovalEnabled(plan.planApprovalInstalled);
+      setItem(
+        "plan-approval-enabled",
+        plan.planApprovalInstalled ? "true" : "false",
+      );
       // Re-apply on startup if installed, to pick up any title/locale changes
       // made while Fleet was closed.
       if (plan.interactionModeInstalled) {
@@ -258,6 +266,26 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("elicitation hook toggle failed:", e);
+    }
+  }, []);
+
+  // ── Plan approval state (default off) ─────────────────────────────────
+  const [planApprovalEnabled, setPlanApprovalEnabled] = useState(
+    () => getItem("plan-approval-enabled") === "true",
+  );
+
+  const handleTogglePlanApproval = useCallback(async (enabled: boolean) => {
+    setPlanApprovalEnabled(enabled);
+    setItem("plan-approval-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_plan_approval_hook");
+      } else {
+        await invoke("remove_plan_approval_hook");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("plan-approval hook toggle failed:", e);
     }
   }, []);
 
@@ -837,6 +865,24 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
                       type="checkbox"
                       checked={elicitationEnabled}
                       onChange={(e) => handleToggleElicitation(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.plan_approval")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.plan_approval_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.plan_approval_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={planApprovalEnabled}
+                      onChange={(e) => handleTogglePlanApproval(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>

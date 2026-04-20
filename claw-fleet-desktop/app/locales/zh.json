@@ -943,6 +943,7 @@
     "elicitation_enabled": "启用问答拦截",
     "plan_approval": "Plan 审批拦截（ExitPlanMode）",
     "plan_approval_desc": "将 Agent 的 Plan 审批转发到 Fleet 决策面板，可直接预览、编辑并批准或驳回（默认关闭）",
+    "plan_approval_enabled": "启用 Plan 审批拦截",
     "interaction_mode": "全局 AskUserQuestion 模式",
     "interaction_mode_desc": "向 ~/.claude/CLAUDE.md 注入一段引导规则，让 Claude Code 的所有最终输出（结果汇报、追问、澄清）都通过 AskUserQuestion 呈现，统一以 Fleet 决策卡片的形式展示。不再在终端看到 AI 的收尾文本。仅对 Claude Code 生效，不影响 Cursor / Codex 等其他工具。",
     "interaction_mode_enabled": "启用全局 AskUserQuestion 模式",

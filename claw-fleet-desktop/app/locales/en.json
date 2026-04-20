@@ -943,6 +943,7 @@
     "elicitation_enabled": "Enable elicitation",
     "plan_approval": "Plan Approval (ExitPlanMode)",
     "plan_approval_desc": "Route ExitPlanMode plan approvals to the Fleet decision panel — preview, edit, then approve or reject (default off)",
+    "plan_approval_enabled": "Enable plan approval interception",
     "interaction_mode": "Global AskUserQuestion Mode",
     "interaction_mode_desc": "Injects a guidance block into ~/.claude/CLAUDE.md that tells Claude Code to deliver every final response via AskUserQuestion instead of plain text. All reports, follow-ups, and clarifications appear as Fleet decision cards. Only affects Claude Code — Cursor / Codex / others are unaffected.",
     "interaction_mode_enabled": "Enable global AskUserQuestion mode",
