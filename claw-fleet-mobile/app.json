@@ -17,7 +17,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "com.clawfleet.mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "Camera is used to scan QR codes for pairing with Claw Fleet Desktop",
+        "NSCameraUsageDescription": "Camera is used to scan QR codes and capture photos to attach to agent answers",
+        "NSPhotoLibraryUsageDescription": "Access to your photos is required to attach images to agent answers",
         "NSLocalNetworkUsageDescription": "Claw Fleet needs local network access to connect to the desktop app",
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
