@@ -8,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -61,6 +62,20 @@ pub struct LocalBackend {
     /// Kept alive so the watcher thread keeps running.
     /// Dropping this field closes the event channel and the thread exits.
     _watcher: RecommendedWatcher,
+    /// Shared cancellation flag. Long-running threads (poll, heartbeat, guard /
+    /// elicitation / plan-approval directory watchers) check this at the top of
+    /// each loop iteration. `Drop` flips it to false so threads exit when this
+    /// backend is replaced (e.g. during `connect_remote` / `disconnect_remote`).
+    /// Without this, successive remote↔local swaps leave old watcher threads
+    /// running, and every one of them emits the same `elicitation-request` /
+    /// `guard-request` event, producing duplicate decision tabs.
+    running: Arc<AtomicBool>,
+}
+
+impl Drop for LocalBackend {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::SeqCst);
+    }
 }
 
 impl LocalBackend {
@@ -136,6 +151,10 @@ impl LocalBackend {
         // Auto-resume scheduler dedup map — cloned into watcher/poll threads.
         let auto_resume_last_fire: Arc<Mutex<HashMap<String, Instant>>> =
             Arc::new(Mutex::new(HashMap::new()));
+
+        // Cancellation flag for long-running threads. Flipped to false by `Drop`
+        // so old threads exit when the backend is replaced.
+        let running = Arc::new(AtomicBool::new(true));
 
         // Initial scan — run in a background thread so the UI appears immediately.
         {
@@ -359,6 +378,7 @@ impl LocalBackend {
                 .map(|(i, _)| i)
                 .collect();
 
+            let running_poll = running.clone();
             std::thread::spawn(move || {
                 let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
                 let analyzing = analyzing3;
@@ -375,6 +395,9 @@ impl LocalBackend {
 
                 loop {
                     std::thread::sleep(interval);
+                    if !running_poll.load(Ordering::SeqCst) {
+                        break;
+                    }
                     incremental_rescan_and_emit(
                         &sources3, &app3, &sess3, &so3, &poll_source_indices,
                     );
@@ -398,19 +421,29 @@ impl LocalBackend {
         // Consumer heartbeat — tells `fleet guard`/`fleet elicitation` that a
         // head is alive and will consume requests.  Without this they fall
         // through (allow / native UI) instead of blocking Claude for 120s.
-        std::thread::spawn(|| loop {
-            claw_fleet_core::consumer_heartbeat::write_heartbeat();
-            std::thread::sleep(Duration::from_secs(2));
-        });
+        {
+            let running_hb = running.clone();
+            std::thread::spawn(move || loop {
+                if !running_hb.load(Ordering::SeqCst) {
+                    break;
+                }
+                claw_fleet_core::consumer_heartbeat::write_heartbeat();
+                std::thread::sleep(Duration::from_secs(2));
+            });
+        }
 
         // Guard directory watcher — polls for new guard requests from `fleet guard`.
         {
             let app_guard = app.clone();
             let sess_guard = sessions.clone();
+            let running_guard = running.clone();
             std::thread::spawn(move || {
                 let mut known: HashSet<String> = HashSet::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(500));
+                    if !running_guard.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let pending = crate::guard::list_pending_requests();
                     for id in &pending {
                         if known.insert(id.clone()) {
@@ -443,10 +476,14 @@ impl LocalBackend {
         {
             let app_elicit = app.clone();
             let sess_elicit = sessions.clone();
+            let running_elicit = running.clone();
             std::thread::spawn(move || {
                 let mut known: HashSet<String> = HashSet::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(500));
+                    if !running_elicit.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let pending = crate::elicitation::list_pending_requests();
                     for id in &pending {
                         if known.insert(id.clone()) {
@@ -477,10 +514,14 @@ impl LocalBackend {
         {
             let app_plan = app.clone();
             let sess_plan = sessions.clone();
+            let running_plan = running.clone();
             std::thread::spawn(move || {
                 let mut known: HashSet<String> = HashSet::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(500));
+                    if !running_plan.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let pending = crate::plan_approval::list_pending_requests();
                     for id in &pending {
                         if known.insert(id.clone()) {
@@ -527,6 +568,7 @@ impl LocalBackend {
             locale,
             llm_config,
             _watcher: watcher,
+            running,
         };
         step!("LocalBackend::new() complete");
         result
