@@ -37,7 +37,8 @@
   cursor: default;
 }
 
-.exit_btn {
+.icon_btn {
+  position: relative;
   width: 26px;
   height: 26px;
   border: none;
@@ -52,9 +53,24 @@
   transition: background 0.15s ease, color 0.15s ease;
 }
 
-.exit_btn:hover {
+.icon_btn:hover {
   background: rgba(255, 255, 255, 0.08);
   color: var(--color-text);
+}
+
+.icon_btn_active {
+  color: var(--color-accent, #4ade80);
+}
+
+.icon_btn_dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent, #4ade80);
+  box-shadow: 0 0 4px var(--color-accent, #4ade80);
 }
 
 .body {
@@ -92,21 +108,22 @@
   padding: 24px 12px;
 }
 
-/* Mascot anchored to the bottom. Constrained so it doesn't steal the list.
-   position: relative so MascotAlertBubble can anchor above it. */
+/* Mascot anchored to the bottom. The alert bubble (when present) stacks
+   above the mascot in the same column so the tail points down at the face. */
 .mascot_slot {
-  position: relative;
   flex-shrink: 0;
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
   padding: 4px 0 2px;
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
 }
 
-/* Constrain the MascotEyes (last child) — the alert bubble before it is
-   position: absolute and must span the slot edge-to-edge. */
-.mascot_slot > :last-child {
-  max-width: 180px;
+/* Mascot face stays compact; the alert bubble gets a wider cap so
+   multi-line summaries stay readable. */
+.mascot_slot > * {
+  width: 100%;
+  max-width: 240px;
 }
 
 /* Session detail takes over the list + monitor area when a session is open. */

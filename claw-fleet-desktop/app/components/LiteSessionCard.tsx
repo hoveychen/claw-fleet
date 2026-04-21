@@ -6,19 +6,22 @@ import styles from "./LiteSessionCard.module.css";
 export function LiteSessionCard({
   session,
   onClick,
+  nextIsSubagent = false,
 }: {
   session: SessionInfo;
   onClick?: () => void;
+  nextIsSubagent?: boolean;
 }) {
   const { t } = useTranslation();
   const title = session.aiTitle || session.workspaceName;
   const preview = session.lastMessagePreview?.trim() ?? "";
   const speed = session.tokenSpeed;
   const isSub = session.isSubagent;
+  const extendThread = isSub && nextIsSubagent;
 
   return (
     <button
-      className={`${styles.card} ${isSub ? styles.card_subagent : styles.card_main}`}
+      className={`${styles.card} ${isSub ? styles.card_subagent : styles.card_main} ${extendThread ? styles.card_subagent_extend : ""}`}
       data-status={session.status}
       onClick={onClick}
     >

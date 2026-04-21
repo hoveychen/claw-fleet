@@ -197,7 +197,7 @@ const EYE_COLOR = "var(--color-accent)";   // brand accent color
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function MascotEyes({ embedded, onQuip }: { embedded?: boolean; onQuip?: (text: string | null) => void } = {}) {
+export function MascotEyes({ embedded, onQuip, suppressQuip }: { embedded?: boolean; onQuip?: (text: string | null) => void; suppressQuip?: boolean } = {}) {
   const { t, i18n } = useTranslation();
   const { sessions } = useSessionsStore();
   const mood = useMood(sessions);
@@ -924,9 +924,12 @@ export function MascotEyes({ embedded, onQuip }: { embedded?: boolean; onQuip?: 
   }
 
   const overlayEnabled = useOverlayStore((s) => s.enabled);
+  const isMacOS = document.documentElement.getAttribute("data-platform") === "macos";
 
-  // When overlay is active, show a compact "find assistant" placeholder instead
-  if (overlayEnabled) {
+  // When overlay is active, show a compact "find assistant" placeholder instead.
+  // Skip on macOS — overlay is unsupported there (toggle_overlay is a no-op), so a
+  // stale overlayEnabled value would otherwise strand the user on a useless card.
+  if (overlayEnabled && !isMacOS) {
     return (
       <div className={styles.container}>
         <div className={styles.overlayPlaceholder}>
@@ -963,24 +966,26 @@ export function MascotEyes({ embedded, onQuip }: { embedded?: boolean; onQuip?: 
           <span className={styles.toggle_label}>{t("mascot.panel_title")}</span>
           <span className={styles.toggle_icon}>{expanded ? "▲" : "▼"}</span>
         </button>
-        <button
-          className={styles.popout_btn}
-          onClick={(e) => {
-            e.stopPropagation();
-            useOverlayStore.getState().setEnabled(true);
-          }}
-          title={t("overlay.popout")}
-        >
-          <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M10 2h4v4" />
-            <path d="M14 2L8 8" />
-            <path d="M12 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4" />
-          </svg>
-        </button>
+        {!isMacOS && (
+          <button
+            className={styles.popout_btn}
+            onClick={(e) => {
+              e.stopPropagation();
+              useOverlayStore.getState().setEnabled(true);
+            }}
+            title={t("overlay.popout")}
+          >
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M10 2h4v4" />
+              <path d="M14 2L8 8" />
+              <path d="M12 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4" />
+            </svg>
+          </button>
+        )}
       </div>
       {expanded && (
         <>
-          {quipText && (
+          {quipText && !suppressQuip && (
             <div className={styles.quipBubble} key={`${mood}-${quipIndex}-${clickReaction}`}>
               <div className={quipClasses}>{quipText}</div>
             </div>

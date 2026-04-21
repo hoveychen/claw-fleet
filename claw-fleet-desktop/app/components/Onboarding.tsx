@@ -486,6 +486,7 @@ function NotificationSettingsCard({
   onUserTitleChange: (title: string) => void;
 }) {
   const { t } = useTranslation();
+  const isMacOS = document.documentElement.getAttribute("data-platform") === "macos";
 
   return (
     <div className={`${styles.card} ${styles.card_info}`}>
@@ -588,16 +589,20 @@ function NotificationSettingsCard({
           />
         </label>
         <span className={styles.hint}>{t("settings.personalized_mascot_desc")}</span>
-        <label className={styles.toggle_item}>
-          <span>{t("settings.overlay")}</span>
-          <input
-            type="checkbox"
-            checked={overlayEnabled}
-            onChange={(e) => onToggleOverlay(e.target.checked)}
-            className={styles.source_checkbox}
-          />
-        </label>
-        <span className={styles.hint}>{t("settings.overlay_desc")}</span>
+        {!isMacOS && (
+          <>
+            <label className={styles.toggle_item}>
+              <span>{t("settings.overlay")}</span>
+              <input
+                type="checkbox"
+                checked={overlayEnabled}
+                onChange={(e) => onToggleOverlay(e.target.checked)}
+                className={styles.source_checkbox}
+              />
+            </label>
+            <span className={styles.hint}>{t("settings.overlay_desc")}</span>
+          </>
+        )}
       </div>
     </div>
   );

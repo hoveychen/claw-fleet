@@ -136,8 +136,10 @@
   background: rgba(255, 255, 255, 0.18);
 }
 
-/* When another subagent follows, run the thread all the way through */
-.card_subagent:has(+ .card_subagent)::before {
+/* When another subagent follows, run the thread all the way through.
+   Flag is set by LiteApp.tsx (don't rely on :has() — not all engines match it
+   reliably against CSS-modules-renamed sibling selectors). */
+.card_subagent_extend::before {
   height: calc(100% + 16px);
 }
 
