@@ -141,6 +141,20 @@
   flex-shrink: 0;
 }
 
+.nav_divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 6px 10px;
+  flex-shrink: 0;
+}
+
+:global([data-platform="macos"]) .nav_divider {
+  background: rgba(255, 255, 255, 0.08);
+}
+:global([data-platform="macos"][data-theme="light"]) .nav_divider {
+  background: rgba(0, 0, 0, 0.08);
+}
+
 /* ── Separator ───────────────────────────────────────────────────────────── */
 
 .separator {

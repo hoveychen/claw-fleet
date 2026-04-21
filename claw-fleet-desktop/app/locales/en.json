@@ -42,6 +42,8 @@
   "view_list": "List",
   "view_gallery": "Gallery",
   "view_audit": "Audit",
+  "view_memory": "Memory",
+  "view_skills": "Skills",
   "gallery_show_all": "Show All",
   "gallery_show_active": "Active Only",
   "gallery": {

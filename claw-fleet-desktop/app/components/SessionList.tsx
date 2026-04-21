@@ -6,10 +6,10 @@ import { useAuditStore, useConnectionStore, useDetailStore, useSessionsStore, us
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
-import { MemoryPanel } from "./MemoryPanel";
+import { MemoryView } from "./MemoryView";
 import { AuditView } from "./AuditView";
 import { ReportView } from "./report/ReportView";
-import { SkillsPanel } from "./SkillsPanel";
+import { SkillsView } from "./SkillsView";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import { MobileAccessPanel } from "./MobileAccessPanel";
@@ -250,6 +250,21 @@ export function SessionList() {
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
             <span className={styles.nav_label}>{t("view_report")}</span>
           </button>
+          <div className={styles.nav_divider} />
+          <button
+            className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("memory")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
+            <span className={styles.nav_label}>{t("view_memory")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("skills")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_skills")}</span>
+          </button>
         </nav>
 
         <div className={styles.separator} />
@@ -266,12 +281,6 @@ export function SessionList() {
 
           {/* Usage panel */}
           <UsagePanel />
-
-          {/* Memory panel */}
-          <MemoryPanel />
-
-          {/* Skills panel */}
-          <SkillsPanel />
 
           {/* Mascot */}
           <MascotEyes />
@@ -381,6 +390,10 @@ export function SessionList() {
         <GalleryView />
       ) : viewMode === "audit" ? (
         <AuditView />
+      ) : viewMode === "memory" ? (
+        <MemoryView />
+      ) : viewMode === "skills" ? (
+        <SkillsView />
       ) : (
         <ReportView />
       )}

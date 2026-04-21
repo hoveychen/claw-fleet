@@ -42,6 +42,8 @@
   "view_list": "列表",
   "view_gallery": "画廊",
   "view_audit": "审计",
+  "view_memory": "记忆",
+  "view_skills": "技能",
   "gallery_show_all": "全部显示",
   "gallery_show_active": "仅活跃",
   "gallery": {
