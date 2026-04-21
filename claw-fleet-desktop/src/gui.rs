@@ -1477,6 +1477,39 @@ fn quit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
+// ── Settings window ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn open_settings_window(app: tauri::AppHandle, connection: Option<String>) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("settings") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    let mut path = String::from("settings.html");
+    if let Some(conn) = connection.filter(|s| !s.is_empty()) {
+        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+        path.push_str("?connection=");
+        path.push_str(&utf8_percent_encode(&conn, NON_ALPHANUMERIC).to_string());
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        "settings",
+        tauri::WebviewUrl::App(path.into()),
+    )
+    .title("Settings")
+    .inner_size(780.0, 640.0)
+    .min_inner_size(560.0, 480.0)
+    .center()
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 // ── Tray helpers ─────────────────────────────────────────────────────────────
 
 fn status_label(s: &session::SessionStatus) -> &'static str {
@@ -2206,6 +2239,7 @@ pub fn run() {
             open_session_from_overlay,
             toggle_tray_panel,
             quit_app,
+            open_settings_window,
             get_tts_voices,
             speak_text,
             speak_text_say,

@@ -1,11 +1,14 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  openSettingsWindow,
   useDecisionStore,
   useDetailStore,
   useSessionsStore,
   useUIStore,
+  useWaitingAlertsStore,
 } from "../store";
 import type { SessionInfo } from "../types";
 import { CostSpeedChart } from "./CostSpeedChart";
@@ -13,6 +16,7 @@ import { DecisionPanel } from "./DecisionPanel";
 import { LiteSessionCard } from "./LiteSessionCard";
 import { MascotAlertBubble } from "./MascotAlertBubble";
 import { MascotEyes } from "./MascotEyes";
+import { MobileAccessPanel } from "./MobileAccessPanel";
 import { SessionDetail } from "./SessionDetail";
 import { TokenSpeedChart } from "./TokenSpeedChart";
 import styles from "./LiteApp.module.css";
@@ -33,6 +37,11 @@ export function LiteApp() {
   const { open, session: openedSession } = useDetailStore();
   const { setLiteMode } = useUIStore();
   const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
+  const hasAlerts = useWaitingAlertsStore(
+    (s) => s.alerts.some((a) => !s.dismissedIds.has(a.sessionId)),
+  );
+  const [showMobileAccess, setShowMobileAccess] = useState(false);
+  const [mobileActive, setMobileActive] = useState(false);
 
   // Keep session list flowing in lite mode (normal SessionList is unmounted).
   useEffect(() => {
@@ -44,6 +53,18 @@ export function LiteApp() {
       unlistenPromise.then((u) => u());
     };
   }, [setSessions, refresh]);
+
+  // Poll mobile access status for the icon-bar indicator dot.
+  useEffect(() => {
+    const check = () => {
+      invoke<{ running: boolean; tunnelUrl: string | null }>("get_mobile_access_status")
+        .then((s) => setMobileActive(s.running && !!s.tunnelUrl))
+        .catch(() => {});
+    };
+    check();
+    const interval = setInterval(check, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   const active = sessions.filter((s) =>
     ACTIVE_STATUSES.includes(s.status as typeof ACTIVE_STATUSES[number]),
@@ -61,7 +82,28 @@ export function LiteApp() {
           {t("title")}
         </span>
         <button
-          className={styles.exit_btn}
+          className={`${styles.icon_btn} ${mobileActive ? styles.icon_btn_active : ""}`}
+          title={t("settings.mobile_access")}
+          onClick={() => setShowMobileAccess(true)}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="4" y="1" width="8" height="14" rx="1.5" />
+            <line x1="7" y1="12" x2="9" y2="12" />
+          </svg>
+          {mobileActive && <span className={styles.icon_btn_dot} />}
+        </button>
+        <button
+          className={styles.icon_btn}
+          title={t("settings.title")}
+          onClick={openSettingsWindow}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="8" cy="8" r="1.5" />
+            <path d="M6.7 1.2l-.4 1.6a5 5 0 0 0-1.5.9L3.3 3.2 1.9 5.6l1.2 1.1a5 5 0 0 0 0 1.7l-1.2 1.1 1.4 2.4 1.5-.5a5 5 0 0 0 1.5.9l.4 1.6h2.6l.4-1.6a5 5 0 0 0 1.5-.9l1.5.5 1.4-2.4-1.2-1.1a5 5 0 0 0 0-1.7l1.2-1.1-1.4-2.4-1.5.5a5 5 0 0 0-1.5-.9L9.3 1.2z" />
+          </svg>
+        </button>
+        <button
+          className={styles.icon_btn}
           title={t("lite.exit")}
           onClick={() => setLiteMode(false)}
         >
@@ -71,6 +113,8 @@ export function LiteApp() {
           </svg>
         </button>
       </div>
+
+      {showMobileAccess && <MobileAccessPanel onClose={() => setShowMobileAccess(false)} />}
 
       {hasDecision ? (
         <DecisionPanel compact />
@@ -87,10 +131,11 @@ export function LiteApp() {
 
           <div className={styles.list}>
             {active.length > 0 ? (
-              active.map((s) => (
+              active.map((s, i) => (
                 <LiteSessionCard
                   key={s.jsonlPath}
                   session={s}
+                  nextIsSubagent={active[i + 1]?.isSubagent === true}
                   onClick={() => openSession(s)}
                 />
               ))
@@ -101,7 +146,7 @@ export function LiteApp() {
 
           <div className={styles.mascot_slot}>
             <MascotAlertBubble />
-            <MascotEyes />
+            <MascotEyes suppressQuip={hasAlerts} />
           </div>
         </div>
       )}

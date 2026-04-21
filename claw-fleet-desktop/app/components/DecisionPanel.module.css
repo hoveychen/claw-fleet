@@ -708,11 +708,42 @@
   color: var(--color-text);
 }
 
+.elicitation_attachment_chip_image {
+  gap: 8px;
+  padding: 4px 6px 4px 4px;
+  max-width: 260px;
+}
+
+.elicitation_attachment_thumb {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--color-bg);
+  display: block;
+}
+
+.elicitation_attachment_meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
 .elicitation_attachment_name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 140px;
+  max-width: 160px;
+}
+
+.elicitation_attachment_dims {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .elicitation_attachment_badge {

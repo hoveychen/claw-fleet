@@ -114,7 +114,7 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
   ),
 };
 
-export function SettingsPanel({ onClose }: { onClose: () => void }) {
+export function SettingsPanel({ onClose, standalone = false }: { onClose: () => void; standalone?: boolean }) {
   const { t } = useTranslation();
   const { connection, disconnect } = useConnectionStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
@@ -484,10 +484,17 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   const handleSwitchConnection = useCallback(async () => {
+    if (standalone) {
+      // Defer to the main window; it owns the connection + detail stores.
+      const { emit } = await import("@tauri-apps/api/event");
+      await emit("switch-connection").catch(() => {});
+      onClose();
+      return;
+    }
     await useDetailStore.getState().close();
     await disconnect();
     onClose();
-  }, [disconnect, onClose]);
+  }, [disconnect, onClose, standalone]);
 
   const hooksInstalled = hooksPlan?.alreadyInstalled || hooksStatus === "success";
 
@@ -502,9 +509,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
     { key: "sound", label: t("settings.sound") },
   ];
 
+  const wrapperProps = standalone
+    ? { className: styles.standalone_root }
+    : { className: styles.overlay, onClick: onClose };
+  const panelClass = standalone ? styles.standalone_panel : styles.panel;
+
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.panel} onClick={(e) => e.stopPropagation()}>
+    <div {...wrapperProps}>
+      <div className={panelClass} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div className={styles.header}>
           <h2 className={styles.title}>{t("settings.title")}</h2>

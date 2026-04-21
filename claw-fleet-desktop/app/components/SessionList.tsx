@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useAuditStore, useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
+import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
@@ -13,7 +13,6 @@ import { SkillsView } from "./SkillsView";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import { MobileAccessPanel } from "./MobileAccessPanel";
-import { SettingsPanel } from "./SettingsPanel";
 import styles from "./SessionList.module.css";
 import { TokenSpeedChart } from "./TokenSpeedChart";
 import { CostSpeedChart } from "./CostSpeedChart";
@@ -46,7 +45,6 @@ export function SessionList() {
   const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
   const [isDragging, setIsDragging] = useState(false);
   const [isWindows, setIsWindows] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
   const [showMobileAccess, setShowMobileAccess] = useState(false);
   const [mobileActive, setMobileActive] = useState(false);
 
@@ -290,7 +288,7 @@ export function SessionList() {
         <div className={styles.footer} data-wizard="settings-footer">
           <button
             className={styles.footer_card}
-            onClick={() => setShowSettings(true)}
+            onClick={openSettingsWindow}
             title={t("settings.title")}
           >
             <div className={styles.footer_avatar}>
@@ -336,9 +334,6 @@ export function SessionList() {
           onMouseDown={handleResizeMouseDown}
         />
       </aside>
-
-      {/* Settings panel */}
-      {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
 
       {/* Mobile access panel */}
       {showMobileAccess && <MobileAccessPanel onClose={() => setShowMobileAccess(false)} />}

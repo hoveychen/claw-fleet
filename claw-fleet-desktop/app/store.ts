@@ -30,6 +30,16 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
   },
 }));
 
+/** Open the standalone Settings window, seeding it with the current connection. */
+export async function openSettingsWindow(): Promise<void> {
+  const { connection } = useConnectionStore.getState();
+  await invoke("open_settings_window", {
+    connection: connection ? JSON.stringify(connection) : null,
+  }).catch((e) => {
+    console.error("open_settings_window failed:", e);
+  });
+}
+
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
@@ -489,6 +499,7 @@ interface DecisionState {
     sourcePath: string,
     displayName: string,
     fromClipboard?: boolean,
+    preview?: { previewUrl: string; width: number; height: number },
   ) => Promise<void>;
   /** Remove an attachment from a question by path. */
   removeElicitationAttachment: (id: string, question: string, path: string) => void;
@@ -676,7 +687,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     }));
   },
 
-  addElicitationAttachment: async (id, question, sourcePath, displayName, fromClipboard) => {
+  addElicitationAttachment: async (id, question, sourcePath, displayName, fromClipboard, preview) => {
     const resolvedPath = await invoke<string>("upload_elicitation_attachment", {
       sourcePath,
     });
@@ -684,11 +695,18 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       decisions: s.decisions.map((d) => {
         if (d.id !== id || d.kind !== "elicitation") return d;
         const prev = d.attachments[question] || [];
-        if (prev.some((a) => a.path === resolvedPath)) return d;
+        if (prev.some((a) => a.path === resolvedPath)) {
+          // Duplicate upload — drop the spare blob URL so it doesn't leak.
+          if (preview?.previewUrl) URL.revokeObjectURL(preview.previewUrl);
+          return d;
+        }
         const next: ElicitationAttachment = {
           path: resolvedPath,
           name: displayName,
           fromClipboard,
+          previewUrl: preview?.previewUrl,
+          width: preview?.width,
+          height: preview?.height,
         };
         return {
           ...d,
@@ -703,6 +721,8 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       decisions: s.decisions.map((d) => {
         if (d.id !== id || d.kind !== "elicitation") return d;
         const prev = d.attachments[question] || [];
+        const removed = prev.find((a) => a.path === path);
+        if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
         const next = prev.filter((a) => a.path !== path);
         return {
           ...d,

@@ -303,6 +303,12 @@ export interface ElicitationAttachment {
   name: string;
   /** true when saved from clipboard paste. */
   fromClipboard?: boolean;
+  /** In-memory blob URL for thumbnail preview (image attachments only). */
+  previewUrl?: string;
+  /** Natural image width, if the attachment is a decoded image. */
+  width?: number;
+  /** Natural image height, if the attachment is a decoded image. */
+  height?: number;
 }
 
 /** Agent is asking the user a question via AskUserQuestion. */

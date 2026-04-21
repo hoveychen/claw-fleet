@@ -33,6 +33,33 @@ function mimeToExtension(mime: string): string {
   return slash >= 0 ? m.slice(slash + 1).replace(/[^a-z0-9]/g, "") || "bin" : "bin";
 }
 
+// Webview clipboard API gives every pasted screenshot File.name = "image.png",
+// which collides visually for every paste. Replace that placeholder with a
+// timestamped name so users can tell attachments apart. Real dragged/copied
+// files keep their original names.
+function isDefaultClipboardName(name: string): boolean {
+  return !name || name === "image.png" || name === "image.jpg" || name === "image.jpeg";
+}
+
+function timestampedPasteName(ext: string): string {
+  const d = new Date();
+  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
+  const hms = `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
+  const ms = pad(d.getMilliseconds(), 3);
+  return `pasted-${hms}${ms}.${ext}`;
+}
+
+// Decode a blob URL to get its natural dimensions. Resolves null if decoding
+// fails (e.g. non-image or browser refuses).
+function readImageDimensions(url: string): Promise<{ width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => resolve(null);
+    img.src = url;
+  });
+}
+
 function basename(p: string): string {
   const normalized = p.replace(/\\/g, "/");
   const slash = normalized.lastIndexOf("/");
@@ -272,9 +299,9 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
           customText={customText}
           onCustomChange={(val) => setElicitationCustomAnswer(decision.id, q.question, val)}
           attachments={questionAttachments}
-          onAddAttachment={async (path, name, fromClipboard) => {
+          onAddAttachment={async (path, name, fromClipboard, preview) => {
             try {
-              await addElicitationAttachment(decision.id, q.question, path, name, fromClipboard);
+              await addElicitationAttachment(decision.id, q.question, path, name, fromClipboard, preview);
             } catch (e) {
               const detail = e instanceof Error ? e.message : String(e);
               showAttachError(
@@ -365,7 +392,12 @@ function OptionsBlock({
   customText: string;
   onCustomChange: (val: string) => void;
   attachments: ElicitationAttachment[];
-  onAddAttachment: (path: string, name: string, fromClipboard?: boolean) => void | Promise<void>;
+  onAddAttachment: (
+    path: string,
+    name: string,
+    fromClipboard?: boolean,
+    preview?: { previewUrl: string; width: number; height: number },
+  ) => void | Promise<void>;
   onRemoveAttachment: (path: string) => void;
   onAttachmentError: (msg: string) => void;
 }) {
@@ -428,6 +460,7 @@ function OptionsBlock({
       if (files.length === 0) return;
       e.preventDefault();
       for (const f of files) {
+        let previewUrl: string | null = null;
         try {
           if (f.size > MAX_ATTACHMENT_BYTES) {
             onAttachmentError(
@@ -437,14 +470,31 @@ function OptionsBlock({
           }
           const buf = await f.arrayBuffer();
           const bytes = Array.from(new Uint8Array(buf));
-          const ext = mimeToExtension(f.type || "application/octet-stream");
+          const mime = f.type || "application/octet-stream";
+          const ext = mimeToExtension(mime);
+          const isImage = mime.startsWith("image/");
+
+          // Generate preview metadata BEFORE hitting the backend so we can
+          // hand it to the store alongside the staged path.
+          let dims: { width: number; height: number } | null = null;
+          if (isImage) {
+            previewUrl = URL.createObjectURL(f);
+            dims = await readImageDimensions(previewUrl);
+          }
+
           const stagedPath = await invoke<string>("stage_pasted_attachment", {
             bytes,
             extension: ext,
           });
-          const displayName = f.name || `pasted.${ext}`;
-          await onAddAttachment(stagedPath, displayName, true);
+          const displayName = isDefaultClipboardName(f.name)
+            ? timestampedPasteName(ext)
+            : f.name;
+          await onAddAttachment(stagedPath, displayName, true, previewUrl && dims
+            ? { previewUrl, width: dims.width, height: dims.height }
+            : undefined);
+          previewUrl = null; // ownership transferred to the store
         } catch (err) {
+          if (previewUrl) URL.revokeObjectURL(previewUrl);
           const detail = err instanceof Error ? err.message : String(err);
           onAttachmentError(
             `${t("elicitation.attach_failed", "Attachment upload failed")}: ${detail}`,
@@ -520,28 +570,49 @@ function OptionsBlock({
         </span>
         {attachments.length > 0 && (
           <div className={styles.elicitation_attachments} onClick={(e) => e.stopPropagation()}>
-            {attachments.map((a) => (
-              <div key={a.path} className={styles.elicitation_attachment_chip} title={a.path}>
-                <span className={styles.elicitation_attachment_name}>{a.name}</span>
-                {a.fromClipboard && (
-                  <span className={styles.elicitation_attachment_badge}>
-                    {t("elicitation.attachment_pasted", "Pasted")}
-                  </span>
-                )}
-                <button
-                  type="button"
-                  className={styles.elicitation_attachment_remove}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onRemoveAttachment(a.path);
-                  }}
-                  title={t("elicitation.attachment_remove", "Remove attachment")}
-                  aria-label={t("elicitation.attachment_remove", "Remove attachment")}
+            {attachments.map((a) => {
+              const hasThumb = !!a.previewUrl;
+              const dims = a.width && a.height ? `${a.width}×${a.height}` : null;
+              return (
+                <div
+                  key={a.path}
+                  className={`${styles.elicitation_attachment_chip} ${hasThumb ? styles.elicitation_attachment_chip_image : ""}`}
+                  title={a.path}
                 >
-                  ×
-                </button>
-              </div>
-            ))}
+                  {hasThumb && (
+                    <img
+                      src={a.previewUrl}
+                      alt=""
+                      className={styles.elicitation_attachment_thumb}
+                      draggable={false}
+                    />
+                  )}
+                  <div className={styles.elicitation_attachment_meta}>
+                    <span className={styles.elicitation_attachment_name}>{a.name}</span>
+                    {dims && (
+                      <span className={styles.elicitation_attachment_dims}>{dims}</span>
+                    )}
+                  </div>
+                  {a.fromClipboard && !hasThumb && (
+                    <span className={styles.elicitation_attachment_badge}>
+                      {t("elicitation.attachment_pasted", "Pasted")}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.elicitation_attachment_remove}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onRemoveAttachment(a.path);
+                    }}
+                    title={t("elicitation.attachment_remove", "Remove attachment")}
+                    aria-label={t("elicitation.attachment_remove", "Remove attachment")}
+                  >
+                    ×
+                  </button>
+                </div>
+              );
+            })}
           </div>
         )}
         <div className={styles.elicitation_other_row}>

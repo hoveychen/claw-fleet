@@ -66,6 +66,25 @@ function App() {
     };
   }, [disconnect]);
 
+  // Sync theme/lang from other windows (standalone Settings, overlay).
+  useEffect(() => {
+    const unThemePromise = listen<string>("overlay-theme-changed", (e) => {
+      const next = e.payload as "dark" | "light" | "system";
+      if (useUIStore.getState().theme !== next) {
+        useUIStore.setState({ theme: next });
+      }
+    });
+    const unLangPromise = listen<string>("overlay-lang-changed", (e) => {
+      if (i18n.language !== e.payload) {
+        i18n.changeLanguage(e.payload);
+      }
+    });
+    return () => {
+      unThemePromise.then((fn) => fn());
+      unLangPromise.then((fn) => fn());
+    };
+  }, []);
+
   // Open a session detail when the user clicks an agent in the tray menu.
   useEffect(() => {
     const unlisten = listen<string>("open-session", (event) => {
