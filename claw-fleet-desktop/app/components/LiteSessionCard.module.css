@@ -110,6 +110,7 @@
 .card_subagent {
   position: relative;
   margin-left: 20px;
+  width: calc(100% - 20px);
 }
 
 /* Vertical thread sitting in the left margin, bridging up into the gap above */
@@ -120,7 +121,7 @@
   top: -8px;
   height: calc(50% + 8px);
   width: 1.5px;
-  background: rgba(245, 158, 11, 0.5);
+  background: rgba(255, 255, 255, 0.18);
   border-radius: 1px;
 }
 
@@ -132,7 +133,7 @@
   top: 50%;
   width: 10px;
   height: 1.5px;
-  background: rgba(245, 158, 11, 0.5);
+  background: rgba(255, 255, 255, 0.18);
 }
 
 /* When another subagent follows, run the thread all the way through */
