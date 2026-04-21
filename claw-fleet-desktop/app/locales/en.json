@@ -365,8 +365,11 @@
       "elicitation_desc": "When an agent has a question for you (AskUserQuestion), Fleet routes it to the app so you can answer from anywhere — no need to switch to the terminal window.",
       "elicitation_mock_q": "Which database should I use for the new auth service?",
       "elicitation_mock_a1": "PostgreSQL",
-      "elicitation_mock_a2": "SQLite"
+      "elicitation_mock_a2": "SQLite",
+      "plan_mock_subtitle": "Refactor auth middleware",
+      "plan_mock_content": "1. Extract auth middleware into a dedicated module\n2. Wire session tokens through the new storage layer\n3. Update route registration and docs"
     },
+    "preview_caption": "Preview · not interactive",
     "interaction_mode": {
       "title": "New: Global AskUserQuestion Mode",
       "description": "Route every Claude Code final response — reports, follow-ups, clarifications — through AskUserQuestion so they all appear as Fleet decision cards instead of terminal text. Only affects Claude Code; Cursor / Codex are unaffected. Requires Elicitation.",
@@ -944,7 +947,7 @@
     "elicitation_desc": "Route AskUserQuestion tool calls to Fleet so you can answer from the Fleet app instead of the terminal",
     "elicitation_enabled": "Enable elicitation",
     "plan_approval": "Plan Approval (ExitPlanMode)",
-    "plan_approval_desc": "Route ExitPlanMode plan approvals to the Fleet decision panel — preview, edit, then approve or reject (default off)",
+    "plan_approval_desc": "When an agent submits an ExitPlanMode plan, Fleet intercepts it and routes the plan to the decision panel — preview, edit, then approve or reject without returning to the terminal.",
     "plan_approval_enabled": "Enable plan approval interception",
     "interaction_mode": "Global AskUserQuestion Mode",
     "interaction_mode_desc": "Injects a guidance block into ~/.claude/CLAUDE.md that tells Claude Code to deliver every final response via AskUserQuestion instead of plain text. All reports, follow-ups, and clarifications appear as Fleet decision cards. Only affects Claude Code — Cursor / Codex / others are unaffected.",

@@ -365,8 +365,11 @@
       "elicitation_desc": "当 Agent 有问题需要你回答（AskUserQuestion）时，Fleet 会将问题转发到应用中，你随时随地都能回复，无需切回终端窗口。",
       "elicitation_mock_q": "新的认证服务应该使用哪个数据库？",
       "elicitation_mock_a1": "PostgreSQL",
-      "elicitation_mock_a2": "SQLite"
+      "elicitation_mock_a2": "SQLite",
+      "plan_mock_subtitle": "重构认证中间件",
+      "plan_mock_content": "1. 抽离 auth middleware 到独立模块\n2. 为 session token 接入新存储层\n3. 更新路由注册与文档"
     },
+    "preview_caption": "效果预览 · 非实时 UI",
     "interaction_mode": {
       "title": "新功能：全局 AskUserQuestion 模式",
       "description": "让 Claude Code 的所有最终输出（结果汇报、追问、澄清）都走 AskUserQuestion，以 Fleet 决策卡片的形式展示，不再在终端看到收尾文本。仅对 Claude Code 生效，不影响 Cursor / Codex 等。需要先启用「问答拦截」。",
@@ -944,7 +947,7 @@
     "elicitation_desc": "将 AskUserQuestion 工具调用转发到 Fleet，你可以在 Fleet 应用中回答而不需要在终端操作",
     "elicitation_enabled": "启用问答拦截",
     "plan_approval": "Plan 审批拦截（ExitPlanMode）",
-    "plan_approval_desc": "将 Agent 的 Plan 审批转发到 Fleet 决策面板，可直接预览、编辑并批准或驳回（默认关闭）",
+    "plan_approval_desc": "当 Agent 提交 ExitPlanMode 计划时，Fleet 会拦截并把计划转发到决策面板，你可以直接预览、编辑后批准或驳回。",
     "plan_approval_enabled": "启用 Plan 审批拦截",
     "interaction_mode": "全局 AskUserQuestion 模式",
     "interaction_mode_desc": "向 ~/.claude/CLAUDE.md 注入一段引导规则，让 Claude Code 的所有最终输出（结果汇报、追问、澄清）都通过 AskUserQuestion 呈现，统一以 Fleet 决策卡片的形式展示。不再在终端看到 AI 的收尾文本。仅对 Claude Code 生效，不影响 Cursor / Codex 等其他工具。",

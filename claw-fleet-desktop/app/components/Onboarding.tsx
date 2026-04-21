@@ -659,6 +659,30 @@ function MockElicitationPreview() {
   );
 }
 
+// ── Mock plan-approval card (static preview for onboarding) ──────────────
+
+function MockPlanApprovalPreview() {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.mock_decision}>
+      <div className={styles.mock_decision_header}>
+        <svg className={styles.mock_icon_plan} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M9 11l3 3L22 4" />
+          <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+        </svg>
+        <span className={styles.mock_decision_title}>{t("planApproval.title")}</span>
+      </div>
+      <div className={styles.mock_plan_subtitle}>{t("onboarding.hooks_setup.plan_mock_subtitle")}</div>
+      <div className={styles.mock_plan_content}>{t("onboarding.hooks_setup.plan_mock_content")}</div>
+      <div className={styles.mock_actions}>
+        <span className={styles.mock_btn_block}>{t("planApproval.reject")}</span>
+        <span className={styles.mock_btn_edit}>{t("planApproval.edit")}</span>
+        <span className={styles.mock_btn_allow}>{t("planApproval.approve")}</span>
+      </div>
+    </div>
+  );
+}
+
 // ── Global AskUserQuestion (Interaction Mode) card ───────────────────────
 
 function MockGlobalAskPreview() {
@@ -720,7 +744,10 @@ function InteractionModeCard({
             />
           </label>
         </div>
-        <MockGlobalAskPreview />
+        <div className={styles.hook_feature_preview}>
+          <span className={styles.preview_caption}>{t("onboarding.preview_caption")}</span>
+          <MockGlobalAskPreview />
+        </div>
       </div>
     </div>
   );
@@ -800,7 +827,10 @@ function HooksSetupCard({
             />
           </label>
         </div>
-        <MockGuardPreview />
+        <div className={styles.hook_feature_preview}>
+          <span className={styles.preview_caption}>{t("onboarding.preview_caption")}</span>
+          <MockGuardPreview />
+        </div>
       </div>
 
       {/* ── Elicitation section ────────────────────────────────────── */}
@@ -819,15 +849,18 @@ function HooksSetupCard({
             />
           </label>
         </div>
-        <MockElicitationPreview />
+        <div className={styles.hook_feature_preview}>
+          <span className={styles.preview_caption}>{t("onboarding.preview_caption")}</span>
+          <MockElicitationPreview />
+        </div>
       </div>
 
       {/* ── Plan Approval section ─────────────────────────────────── */}
       <div className={styles.hook_feature_section}>
         <div className={styles.hook_feature_header}>
           <div className={styles.hook_feature_text}>
-            <span className={styles.settings_label}>{t("settings.plan_approval", "Plan 审批拦截")}</span>
-            <p className={styles.hint}>{t("settings.plan_approval_desc", "将 ExitPlanMode 的计划审批转发到 Fleet 的决策面板，可编辑并批准或驳回")}</p>
+            <span className={styles.settings_label}>{t("settings.plan_approval")}</span>
+            <p className={styles.hint}>{t("settings.plan_approval_desc")}</p>
           </div>
           <label className={styles.hook_feature_toggle}>
             <input
@@ -837,6 +870,10 @@ function HooksSetupCard({
               className={styles.source_checkbox}
             />
           </label>
+        </div>
+        <div className={styles.hook_feature_preview}>
+          <span className={styles.preview_caption}>{t("onboarding.preview_caption")}</span>
+          <MockPlanApprovalPreview />
         </div>
       </div>
     </div>
