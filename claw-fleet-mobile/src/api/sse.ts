@@ -11,6 +11,10 @@ interface SSEHandlers {
   onWaitingAlert?: (alert: WaitingAlert) => void;
   onGuardRequest?: (request: GuardRequest) => void;
   onElicitationRequest?: (request: ElicitationRequest) => void;
+  /** A pending guard/elicitation/plan-approval request was answered elsewhere
+   *  (another client, or cleaned up by the CLI) and should be dropped from
+   *  the local pending list. */
+  onDecisionDismissed?: (id: string) => void;
   onConnect?: () => void;
   onDisconnect?: () => void;
 }
@@ -130,6 +134,15 @@ function dispatch(event: string, data: string, handlers: SSEHandlers) {
       case "elicitation-request": {
         const req: ElicitationRequest = JSON.parse(data);
         handlers.onElicitationRequest?.(req);
+        break;
+      }
+      case "guard-dismissed":
+      case "elicitation-dismissed":
+      case "plan-approval-dismissed": {
+        const id: string = JSON.parse(data);
+        if (typeof id === "string" && id.length > 0) {
+          handlers.onDecisionDismissed?.(id);
+        }
         break;
       }
     }

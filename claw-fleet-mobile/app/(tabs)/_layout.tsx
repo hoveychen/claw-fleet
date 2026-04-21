@@ -33,6 +33,7 @@ export default function TabLayout() {
   const addAlert = useSessionsStore((s) => s.addAlert);
   const addGuard = useDecisionsStore((s) => s.addGuard);
   const addElicitation = useDecisionsStore((s) => s.addElicitation);
+  const removeDecision = useDecisionsStore((s) => s.remove);
   const setFocusedId = useDecisionsStore((s) => s.setFocusedId);
   const pendingCount = useDecisionsStore((s) => s.pendingCount);
 
@@ -133,12 +134,18 @@ export default function TabLayout() {
     [addElicitation],
   );
 
+  const onDecisionDismissed = useCallback(
+    (id: string) => removeDecision(id),
+    [removeDecision],
+  );
+
   const sseUrl = client?.sseUrl() ?? null;
   useSSE(sseUrl, {
     onSessionsUpdated,
     onWaitingAlert,
     onGuardRequest,
     onElicitationRequest,
+    onDecisionDismissed,
   });
 
   // Fallback polling
@@ -146,23 +153,21 @@ export default function TabLayout() {
     if (!client) return;
     const interval = setInterval(() => {
       client.listSessions().then(setSessions).catch(() => {});
-      client
-        .getGuardPending()
-        .then((reqs) =>
-          reqs.forEach((req) => {
+      Promise.all([client.getGuardPending(), client.getElicitationPending()])
+        .then(([guards, elicits]) => {
+          const pendingIds = new Set<string>([
+            ...guards.map((r) => r.id),
+            ...elicits.map((r) => r.id),
+          ]);
+          for (const req of guards) {
             const existing = useDecisionsStore.getState().decisions;
             const isNew = !existing.some((d) => d.id === req.id);
             addGuard(req);
             if (isNew) {
               notifyGuardRequest(req.id, req.workspaceName, req.commandSummary);
             }
-          }),
-        )
-        .catch(() => {});
-      client
-        .getElicitationPending()
-        .then((reqs) =>
-          reqs.forEach((req) => {
+          }
+          for (const req of elicits) {
             const existing = useDecisionsStore.getState().decisions;
             const isNew = !existing.some((d) => d.id === req.id);
             addElicitation(req);
@@ -171,18 +176,22 @@ export default function TabLayout() {
                 req.questions[0]?.header ||
                 req.questions[0]?.question ||
                 "Question";
-              notifyElicitationRequest(
-                req.id,
-                req.workspaceName,
-                preview,
-              );
+              notifyElicitationRequest(req.id, req.workspaceName, preview);
             }
-          }),
-        )
+          }
+          // Drop any local decisions whose request files are gone
+          // (answered by another client or cleaned up by the CLI).
+          // This covers the case where SSE dismiss events were missed
+          // (stream dropped, app was backgrounded, etc.).
+          const local = useDecisionsStore.getState().decisions;
+          for (const d of local) {
+            if (!pendingIds.has(d.id)) removeDecision(d.id);
+          }
+        })
         .catch(() => {});
     }, 10000);
     return () => clearInterval(interval);
-  }, [client, setSessions]);
+  }, [client, setSessions, addGuard, addElicitation, removeDecision]);
 
   // Auto-open panel when new decisions arrive (only if app is in foreground)
   useEffect(() => {

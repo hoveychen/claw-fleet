@@ -465,8 +465,12 @@ impl LocalBackend {
                             }
                         }
                     }
-                    // Remove known IDs that no longer have request files
-                    // (already cleaned up by fleet guard).
+                    // Emit a dismiss event for any known id that no longer has
+                    // a pending request file (answered by another client, or
+                    // timed out / cleaned up by `fleet guard`).
+                    for id in known.iter().filter(|id| !pending.contains(*id)) {
+                        let _ = app_guard.emit("guard-dismissed", id.clone());
+                    }
                     known.retain(|id| pending.contains(id));
                 }
             });
@@ -505,6 +509,9 @@ impl LocalBackend {
                             }
                         }
                     }
+                    for id in known.iter().filter(|id| !pending.contains(*id)) {
+                        let _ = app_elicit.emit("elicitation-dismissed", id.clone());
+                    }
                     known.retain(|id| pending.contains(id));
                 }
             });
@@ -542,6 +549,9 @@ impl LocalBackend {
                                 let _ = app_plan.emit("plan-approval-request", &req);
                             }
                         }
+                    }
+                    for id in known.iter().filter(|id| !pending.contains(*id)) {
+                        let _ = app_plan.emit("plan-approval-dismissed", id.clone());
                     }
                     known.retain(|id| pending.contains(id));
                 }

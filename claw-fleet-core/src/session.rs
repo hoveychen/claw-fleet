@@ -121,7 +121,17 @@ pub struct SessionInfo {
 /// (`~/Library/Containers/<id>/Data/`).  This function uses `getpwuid` to
 /// obtain the real home from the passwd database so that `~/.claude/`,
 /// `~/.fleet/`, `~/.ssh/` etc. resolve to the actual user directories.
+///
+/// For integration tests, setting `FLEET_HOME` overrides the detected home
+/// so the test can operate on a temp dir without touching the real user's
+/// `~/.fleet/`. Intended for tests only — production code never sets it.
 pub fn real_home_dir() -> Option<PathBuf> {
+    if let Some(dir) = std::env::var_os("FLEET_HOME") {
+        let path = PathBuf::from(dir);
+        if !path.as_os_str().is_empty() {
+            return Some(path);
+        }
+    }
     #[cfg(target_os = "macos")]
     {
         use std::ffi::CStr;

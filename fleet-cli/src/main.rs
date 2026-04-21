@@ -1389,6 +1389,12 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         }
                     }
                 }
+                // Broadcast dismissed guard requests (answered / cleaned up)
+                for id in prev_guard_ids.difference(&guard_ids) {
+                    if let Ok(json) = serde_json::to_string(id) {
+                        sse_bg.broadcast("guard-dismissed", &json);
+                    }
+                }
                 prev_guard_ids.retain(|id| guard_ids.contains(id));
 
                 // Broadcast new elicitation requests
@@ -1411,6 +1417,12 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         }
                     }
                 }
+                // Broadcast dismissed elicitation requests (answered / cleaned up)
+                for id in prev_elicit_ids.difference(&elicit_ids) {
+                    if let Ok(json) = serde_json::to_string(id) {
+                        sse_bg.broadcast("elicitation-dismissed", &json);
+                    }
+                }
                 prev_elicit_ids.retain(|id| elicit_ids.contains(id));
 
                 // Broadcast new plan-approval requests
@@ -1431,6 +1443,12 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                                 sse_bg.broadcast("plan-approval-request", &json);
                             }
                         }
+                    }
+                }
+                // Broadcast dismissed plan-approval requests (answered / cleaned up)
+                for id in prev_plan_approval_ids.difference(&plan_approval_ids) {
+                    if let Ok(json) = serde_json::to_string(id) {
+                        sse_bg.broadcast("plan-approval-dismissed", &json);
                     }
                 }
                 prev_plan_approval_ids.retain(|id| plan_approval_ids.contains(id));

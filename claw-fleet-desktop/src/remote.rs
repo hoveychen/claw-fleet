@@ -1473,6 +1473,9 @@ fn connect_remote_start_probe(
                         let _ = app_guard.emit("guard-request", req);
                     }
                 }
+                for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
+                    let _ = app_guard.emit("guard-dismissed", id.clone());
+                }
                 known.retain(|id| pending_ids.contains(id));
             }
         });
@@ -1503,6 +1506,9 @@ fn connect_remote_start_probe(
                         ));
                         let _ = app_elicit.emit("elicitation-request", req);
                     }
+                }
+                for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
+                    let _ = app_elicit.emit("elicitation-dismissed", id.clone());
                 }
                 known.retain(|id| pending_ids.contains(id));
             }
@@ -1535,6 +1541,9 @@ fn connect_remote_start_probe(
                         ));
                         let _ = app_plan.emit("plan-approval-request", req);
                     }
+                }
+                for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
+                    let _ = app_plan.emit("plan-approval-dismissed", id.clone());
                 }
                 known.retain(|id| pending_ids.contains(id));
             }

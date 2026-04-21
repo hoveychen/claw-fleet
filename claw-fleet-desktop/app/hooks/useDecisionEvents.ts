@@ -38,6 +38,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   const addGuardRequest = useDecisionStore((s) => s.addGuardRequest);
   const addElicitationRequest = useDecisionStore((s) => s.addElicitationRequest);
   const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
+  const dismiss = useDecisionStore((s) => s.dismiss);
 
   // Dedup: re-emitted payloads (e.g. after remount / reconnect) shouldn't
   // double-chime.
@@ -96,4 +97,24 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
       unlisten.then((fn) => fn());
     };
   }, [addPlanApprovalRequest, silent]);
+
+  // Dismiss events — fire when another client (mobile, other desktop) answers
+  // a pending decision, or when `fleet guard`/`fleet elicitation` times out
+  // and cleans up the request file. The backend polling loop in
+  // local_backend.rs / remote.rs emits these by diffing the known id set
+  // against the current pending set.
+  useEffect(() => {
+    const unlistens = ["guard-dismissed", "elicitation-dismissed", "plan-approval-dismissed"].map(
+      (evt) => listen<string>(evt, (e) => {
+        const id = e.payload;
+        if (id) {
+          announcedIds.current.delete(id);
+          dismiss(id);
+        }
+      }),
+    );
+    return () => {
+      Promise.all(unlistens).then((fns) => fns.forEach((fn) => fn()));
+    };
+  }, [dismiss]);
 }
