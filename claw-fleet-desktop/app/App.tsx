@@ -1,7 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import "./App.css";
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { LiteApp } from "./components/LiteApp";
@@ -13,7 +13,8 @@ import { DecisionPanel } from "./components/DecisionPanel";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { Wizard } from "./components/Wizard";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
-import { type Connection, resolveTheme, useConnectionStore, useDetailStore, useOverlayStore, useSessionsStore, useUIStore } from "./store";
+import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
+import { type Connection, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useOverlayStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
@@ -35,6 +36,36 @@ function App() {
   // App root so events aren't dropped while DecisionPanel is unmounted
   // (e.g. lite mode with no pending decisions).
   useDecisionEvents();
+  useDecisionPeerSync();
+
+  // Bridge: when the main window is minimized and there are pending decisions,
+  // pop a floating decision window on the cursor's monitor bottom-center.
+  const [mainMinimized, setMainMinimized] = useState(false);
+  const decisions = useDecisionStore((s) => s.decisions);
+  const prevShouldShow = useRef(false);
+
+  useEffect(() => {
+    const unlisten = listen<boolean>(
+      "main-window-minimize-state-changed",
+      (e) => setMainMinimized(!!e.payload),
+    );
+    invoke<boolean>("is_main_window_minimized")
+      .then((v) => setMainMinimized(!!v))
+      .catch(() => {});
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  useEffect(() => {
+    const shouldShow = mainMinimized && decisions.length > 0;
+    if (shouldShow && !prevShouldShow.current) {
+      invoke("show_decision_float", { snapshot: decisions }).catch(() => {});
+    } else if (!shouldShow && prevShouldShow.current) {
+      invoke("hide_decision_float").catch(() => {});
+    }
+    prevShouldShow.current = shouldShow;
+  }, [mainMinimized, decisions]);
 
   const [isMacOS, setIsMacOS] = useState(false);
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {

@@ -29,8 +29,12 @@ function lastQuestionSentence(text: string): string {
  * dropped while the DecisionPanel itself is unmounted (e.g. lite mode with
  * no pending decisions). Backend emits are one-shot — if no listener is
  * attached at emit time, the event is gone.
+ *
+ * `silent: true` skips `playDecisionAlert` — used by the decision-float
+ * window so the main window stays the single source of audio.
  */
-export function useDecisionEvents() {
+export function useDecisionEvents(options: { silent?: boolean } = {}) {
+  const silent = options.silent ?? false;
   const addGuardRequest = useDecisionStore((s) => s.addGuardRequest);
   const addElicitationRequest = useDecisionStore((s) => s.addElicitationRequest);
   const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
@@ -42,7 +46,7 @@ export function useDecisionEvents() {
   useEffect(() => {
     const unlisten = listen<GuardRequest>("guard-request", (e) => {
       const r = e.payload;
-      if (!announcedIds.current.has(r.id)) {
+      if (!silent && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const spoken = [r.workspaceName, r.aiTitle, r.toolName || r.commandSummary]
           .filter((s): s is string => !!s && s.length > 0)
@@ -54,12 +58,12 @@ export function useDecisionEvents() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addGuardRequest]);
+  }, [addGuardRequest, silent]);
 
   useEffect(() => {
     const unlisten = listen<ElicitationRequest>("elicitation-request", (e) => {
       const r = e.payload;
-      if (!announcedIds.current.has(r.id)) {
+      if (!silent && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const body = r.questions[0]?.question ?? "";
         const [intro, after] = splitOnDivider(body);
@@ -74,12 +78,12 @@ export function useDecisionEvents() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addElicitationRequest]);
+  }, [addElicitationRequest, silent]);
 
   useEffect(() => {
     const unlisten = listen<PlanApprovalRequest>("plan-approval-request", (e) => {
       const r = e.payload;
-      if (!announcedIds.current.has(r.id)) {
+      if (!silent && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const spoken = [r.workspaceName, r.aiTitle ?? ""]
           .filter((s): s is string => !!s && s.length > 0)
@@ -91,5 +95,5 @@ export function useDecisionEvents() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, [addPlanApprovalRequest]);
+  }, [addPlanApprovalRequest, silent]);
 }

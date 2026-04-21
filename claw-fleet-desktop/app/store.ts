@@ -608,6 +608,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       console.error("respond_to_plan_approval (approve) failed:", e);
     }
     set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
   },
 
   rejectPlan: async (id, feedback) => {
@@ -622,6 +623,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       console.error("respond_to_plan_approval (reject) failed:", e);
     }
     set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
   },
 
   setPlanEditedText: (id, text) => {
@@ -783,6 +785,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       console.error("respond_to_elicitation failed:", e);
     }
     set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
   },
 
   declineElicitation: async (id) => {
@@ -796,6 +799,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       console.error("respond_to_elicitation (decline) failed:", e);
     }
     set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
   },
 
   respond: async (id, allow) => {
@@ -805,6 +809,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       console.error("respond_to_guard failed:", e);
     }
     set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
   },
 
   dismiss: (id) => set((s) => removeDecision(s, id)),

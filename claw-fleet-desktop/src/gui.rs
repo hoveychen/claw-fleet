@@ -665,6 +665,10 @@ pub struct AppState {
     pub mobile_tunnel: Arc<Mutex<Option<tunnel::CloudflareTunnel>>>,
     /// Whether mobile access setup (download + tunnel) is in progress.
     pub mobile_setup_in_progress: Arc<std::sync::atomic::AtomicBool>,
+    /// Serialized snapshot of the current decision queue, seeded by the main
+    /// window before it pops the decision-float. The float window reads this
+    /// on mount to hydrate its local store before live events arrive.
+    pub decision_float_snapshot: Arc<Mutex<Option<serde_json::Value>>>,
 }
 
 // ── Tauri commands ───────────────────────────────────────────────────────────
@@ -1596,6 +1600,104 @@ fn close_preview_window(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+// ── Decision float window (shown when main is minimized) ─────────────────────
+
+const DECISION_FLOAT_LABEL: &str = "decision-float";
+const DECISION_FLOAT_W: f64 = 480.0;
+const DECISION_FLOAT_H: f64 = 380.0;
+const DECISION_FLOAT_BOTTOM_MARGIN: f64 = 64.0;
+
+/// Logical top-left of the decision float window placed at the bottom-center
+/// of whichever monitor currently contains the cursor. Falls back to the
+/// primary monitor, then to (120, 120).
+fn decision_float_target_position(app: &tauri::AppHandle) -> (f64, f64) {
+    let cursor = app.cursor_position().ok();
+    let monitors = app.available_monitors().unwrap_or_default();
+
+    let chosen = cursor.and_then(|c| {
+        monitors.iter().find(|m| {
+            let pos = m.position();
+            let size = m.size();
+            let x0 = pos.x as f64;
+            let y0 = pos.y as f64;
+            let x1 = x0 + size.width as f64;
+            let y1 = y0 + size.height as f64;
+            c.x >= x0 && c.x < x1 && c.y >= y0 && c.y < y1
+        })
+    }).or_else(|| app.primary_monitor().ok().flatten().and_then(|_| monitors.first()));
+
+    if let Some(mon) = chosen {
+        let scale = mon.scale_factor();
+        let mon_x = mon.position().x as f64 / scale;
+        let mon_y = mon.position().y as f64 / scale;
+        let mon_w = mon.size().width as f64 / scale;
+        let mon_h = mon.size().height as f64 / scale;
+        let x = mon_x + (mon_w - DECISION_FLOAT_W) / 2.0;
+        let y = mon_y + mon_h - DECISION_FLOAT_H - DECISION_FLOAT_BOTTOM_MARGIN;
+        (x, y)
+    } else {
+        (120.0, 120.0)
+    }
+}
+
+#[tauri::command]
+fn show_decision_float(
+    app: tauri::AppHandle,
+    snapshot: serde_json::Value,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    *state.decision_float_snapshot.lock().unwrap() = Some(snapshot);
+
+    let (x, y) = decision_float_target_position(&app);
+
+    if let Some(w) = app.get_webview_window(DECISION_FLOAT_LABEL) {
+        let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+        let _ = w.unminimize();
+        let _ = w.show();
+        let _ = w.set_focus();
+        return Ok(());
+    }
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        DECISION_FLOAT_LABEL,
+        tauri::WebviewUrl::App("decision-float.html".into()),
+    )
+    .title("Fleet Decision")
+    .inner_size(DECISION_FLOAT_W, DECISION_FLOAT_H)
+    .min_inner_size(360.0, 280.0)
+    .position(x, y)
+    .resizable(true)
+    .decorations(false)
+    .always_on_top(true)
+    .skip_taskbar(true)
+    .focused(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+#[tauri::command]
+fn hide_decision_float(app: tauri::AppHandle, state: tauri::State<AppState>) {
+    *state.decision_float_snapshot.lock().unwrap() = None;
+    if let Some(w) = app.get_webview_window(DECISION_FLOAT_LABEL) {
+        let _ = w.hide();
+    }
+}
+
+#[tauri::command]
+fn get_decision_float_snapshot(state: tauri::State<AppState>) -> Option<serde_json::Value> {
+    state.decision_float_snapshot.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn is_main_window_minimized(app: tauri::AppHandle) -> bool {
+    app.get_webview_window("main")
+        .and_then(|w| w.is_minimized().ok())
+        .unwrap_or(false)
+}
+
 // ── Tray helpers ─────────────────────────────────────────────────────────────
 
 fn status_label(s: &session::SessionStatus) -> &'static str {
@@ -2050,6 +2152,7 @@ pub fn run() {
             mobile_server: Arc::new(Mutex::new(None)),
             mobile_tunnel: Arc::new(Mutex::new(None)),
             mobile_setup_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            decision_float_snapshot: Arc::new(Mutex::new(None)),
         })
         .setup(move |app| {
             // Replace NullBackend with the real LocalBackend now that AppHandle
@@ -2238,6 +2341,30 @@ pub fn run() {
                 }
             }
 
+            // ── Main window minimize watcher ─────────────────────────────────
+            // Emit a frontend event whenever the main window's minimized state
+            // may have changed, so the decision-float window can be shown /
+            // hidden accordingly. Tauri has no dedicated "minimized" event, so
+            // we re-check on Resized and Focused.
+            if let Some(main_win) = app.get_webview_window("main") {
+                let handle = app.handle().clone();
+                main_win.on_window_event(move |event| {
+                    use tauri::WindowEvent;
+                    match event {
+                        WindowEvent::Resized(_) | WindowEvent::Focused(_) => {
+                            if let Some(w) = handle.get_webview_window("main") {
+                                let minimized = w.is_minimized().unwrap_or(false);
+                                let _ = handle.emit(
+                                    "main-window-minimize-state-changed",
+                                    minimized,
+                                );
+                            }
+                        }
+                        _ => {}
+                    }
+                });
+            }
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2329,6 +2456,10 @@ pub fn run() {
             open_preview_window,
             update_preview_content,
             close_preview_window,
+            show_decision_float,
+            hide_decision_float,
+            get_decision_float_snapshot,
+            is_main_window_minimized,
             get_tts_voices,
             speak_text,
             speak_text_say,
