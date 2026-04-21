@@ -1,0 +1,86 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--color-bg-sidebar);
+  color: var(--color-text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  user-select: none;
+  cursor: default;
+}
+
+.title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 12px 14px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overscroll-behavior: contain;
+}
+
+.body p { margin: 0 0 0.5em; }
+.body p:last-child { margin-bottom: 0; }
+.body pre {
+  font-family: inherit;
+  font-size: 0.95em;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin: 0.4em 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.body code {
+  font-family: inherit;
+  font-size: 0.95em;
+  background: var(--color-bg);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.body pre code { background: transparent; padding: 0; }
+.body ul, .body ol { margin: 0.3em 0; padding-left: 1.4em; }
+.body li { margin-bottom: 0.2em; }
+.body table {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin: 0.4em 0;
+}
+.body th, .body td {
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  vertical-align: top;
+  text-align: left;
+  word-break: break-word;
+}
+.body th {
+  background: var(--color-bg);
+  font-weight: 600;
+}

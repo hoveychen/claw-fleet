@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "preview",
+  "description": "Capability for the decision preview subwindow",
+  "windows": ["preview"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-title",
+    "core:window:allow-set-theme",
+    "core:window:allow-close",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "opener:default",
+    "store:default"
+  ]
+}

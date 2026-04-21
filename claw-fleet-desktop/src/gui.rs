@@ -1510,6 +1510,92 @@ fn open_settings_window(app: tauri::AppHandle, connection: Option<String>) -> Re
     Ok(())
 }
 
+// ── Preview subwindow (lite-mode decision preview) ──────────────────────────
+
+#[tauri::command]
+fn open_preview_window(
+    app: tauri::AppHandle,
+    markdown: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    // If already open, just push new content via event and bring to front.
+    if let Some(w) = app.get_webview_window("preview") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let payload = serde_json::json!({
+            "markdown": markdown,
+            "title": title,
+        });
+        let _ = w.emit("preview://update", payload);
+        return Ok(());
+    }
+
+    let mut path = String::from("preview.html");
+    {
+        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+        path.push_str("?markdown=");
+        path.push_str(&utf8_percent_encode(&markdown, NON_ALPHANUMERIC).to_string());
+        if let Some(t) = title.as_deref().filter(|s| !s.is_empty()) {
+            path.push_str("&title=");
+            path.push_str(&utf8_percent_encode(t, NON_ALPHANUMERIC).to_string());
+        }
+    }
+
+    let mut builder = tauri::WebviewWindowBuilder::new(
+        &app,
+        "preview",
+        tauri::WebviewUrl::App(path.into()),
+    )
+    .title(title.as_deref().unwrap_or("Preview"))
+    .inner_size(420.0, 520.0)
+    .min_inner_size(280.0, 240.0)
+    .resizable(true)
+    .decorations(true)
+    .always_on_top(true)
+    .skip_taskbar(true);
+
+    // Position beside the main window when we can; otherwise let Tauri pick.
+    // Tauri's builder.position() takes logical coords, so convert physical
+    // -> logical using the main window's scale factor (HiDPI correctness).
+    if let Some(main) = app.get_webview_window("main") {
+        let scale = main.scale_factor().unwrap_or(1.0);
+        if let (Ok(pos), Ok(size)) = (main.outer_position(), main.outer_size()) {
+            let x = (pos.x as f64 + size.width as f64) / scale + 8.0;
+            let y = pos.y as f64 / scale;
+            builder = builder.position(x, y);
+        }
+    }
+
+    builder.build().map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn update_preview_content(
+    app: tauri::AppHandle,
+    markdown: String,
+    title: Option<String>,
+) -> Result<(), String> {
+    let Some(w) = app.get_webview_window("preview") else {
+        return Ok(());
+    };
+    let payload = serde_json::json!({
+        "markdown": markdown,
+        "title": title,
+    });
+    w.emit("preview://update", payload)
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn close_preview_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("preview") {
+        let _ = w.close();
+    }
+    Ok(())
+}
+
 // ── Tray helpers ─────────────────────────────────────────────────────────────
 
 fn status_label(s: &session::SessionStatus) -> &'static str {
@@ -2240,6 +2326,9 @@ pub fn run() {
             toggle_tray_panel,
             quit_app,
             open_settings_window,
+            open_preview_window,
+            update_preview_content,
+            close_preview_window,
             get_tts_voices,
             speak_text,
             speak_text_say,

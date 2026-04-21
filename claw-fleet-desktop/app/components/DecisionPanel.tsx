@@ -140,7 +140,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
 
 // ── Elicitation card renderer (multi-step wizard) ─────────────────────────
 
-function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
+function ElicitationCard({ decision, compact = false }: { decision: ElicitationDecision; compact?: boolean }) {
   const { t } = useTranslation();
   const {
     submitElicitation,
@@ -292,6 +292,7 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
         <OptionsBlock
           decisionId={decision.id}
           question={q}
+          compact={compact}
           effectiveMulti={effectiveMulti}
           selected={selected}
           onToggle={toggleElicitationOption}
@@ -372,6 +373,7 @@ function ElicitationCard({ decision }: { decision: ElicitationDecision }) {
 function OptionsBlock({
   decisionId,
   question,
+  compact,
   effectiveMulti,
   selected,
   onToggle,
@@ -385,6 +387,7 @@ function OptionsBlock({
 }: {
   decisionId: string;
   question: ElicitationDecision["request"]["questions"][number];
+  compact: boolean;
   effectiveMulti: boolean;
   selected: string[];
   onToggle: (id: string, questionText: string, label: string, multiSelect: boolean) => void;
@@ -425,6 +428,30 @@ function OptionsBlock({
     el.style.height = "auto";
     el.style.height = `${el.scrollHeight}px`;
   }, [customText, otherInputRef]);
+
+  // Lite mode: push preview into a floating Tauri subwindow instead of the
+  // inline grid, so the narrow main window isn't split in half. Normal mode
+  // keeps the side-by-side layout and leaves the subwindow untouched.
+  useEffect(() => {
+    if (!compact) return;
+    if (hasPreview) {
+      invoke("open_preview_window", {
+        markdown: focusedPreview ?? "",
+        title: focusedLabel || null,
+      }).catch(() => {});
+    } else {
+      invoke("close_preview_window").catch(() => {});
+    }
+  }, [compact, hasPreview, focusedPreview, focusedLabel]);
+
+  // Tear down the subwindow when the card unmounts (decision resolved, tab
+  // switched, or user exited lite mode). Only relevant in compact mode.
+  useEffect(() => {
+    if (!compact) return;
+    return () => {
+      invoke("close_preview_window").catch(() => {});
+    };
+  }, [compact]);
 
   const handlePickFiles = useCallback(async () => {
     try {
@@ -650,7 +677,9 @@ function OptionsBlock({
     </div>
   );
 
-  if (!hasPreview) return list;
+  // In lite mode the preview lives in a floating subwindow — don't split the
+  // panel in half. In normal mode keep the side-by-side grid as before.
+  if (!hasPreview || compact) return list;
   return (
     <div className={styles.elicitation_options_with_preview}>
       {list}
@@ -806,12 +835,12 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
 
 // ── Card dispatcher ──────────────────────────────────────────────────────
 
-function DecisionCard({ decision }: { decision: PendingDecision }) {
+function DecisionCard({ decision, compact }: { decision: PendingDecision; compact: boolean }) {
   switch (decision.kind) {
     case "guard":
       return <GuardCard decision={decision} />;
     case "elicitation":
-      return <ElicitationCard decision={decision} />;
+      return <ElicitationCard decision={decision} compact={compact} />;
     case "plan-approval":
       return <PlanApprovalCard decision={decision} />;
     default:
@@ -916,7 +945,7 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
     >
       {/* Card area — scrollable, shows the active decision */}
       <div className={styles.card_area} ref={cardAreaRef}>
-        <DecisionCard key={active.id} decision={active} />
+        <DecisionCard key={active.id} decision={active} compact={compact} />
       </div>
 
       {/* Tab bar — always at the bottom */}
