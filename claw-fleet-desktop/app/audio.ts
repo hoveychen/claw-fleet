@@ -176,6 +176,7 @@ async function processAlertQueue() {
 
 /** Play alert: chime (optional) → speech (optional), based on current settings. */
 export function playAlertSound(summary: string) {
+  if (getItem("tts-muted") === "true") return;
   const mode = (getItem("tts-mode") as TtsMode) || "off";
   if (mode === "off") {
     console.debug("[audio] alert skipped: tts mode off");
@@ -222,6 +223,7 @@ async function processDecisionQueue() {
  *  Guard items use an urgent "drop" preset to visibly distinguish
  *  destructive-command prompts from ordinary elicitation questions. */
 export function playDecisionAlert(kind: "guard" | "elicitation", spoken: string) {
+  if (getItem("tts-muted") === "true") return;
   const mode = (getItem("tts-mode") as TtsMode) || "off";
   if (mode === "off") return;
 

@@ -11,6 +11,7 @@ import {
   useWaitingAlertsStore,
 } from "../store";
 import type { SessionInfo } from "../types";
+import { getItem, setItem } from "../storage";
 import { CostSpeedChart } from "./CostSpeedChart";
 import { DecisionPanel } from "./DecisionPanel";
 import { LiteSessionCard } from "./LiteSessionCard";
@@ -41,6 +42,13 @@ export function LiteApp() {
     (s) => s.alerts.some((a) => !s.dismissedIds.has(a.sessionId)),
   );
   const [mobileActive, setMobileActive] = useState(false);
+  const [ttsMuted, setTtsMuted] = useState(() => getItem("tts-muted") === "true");
+
+  const toggleTtsMuted = () => {
+    const next = !ttsMuted;
+    setTtsMuted(next);
+    setItem("tts-muted", next ? "true" : "false");
+  };
 
   // Keep session list flowing in lite mode (normal SessionList is unmounted).
   useEffect(() => {
@@ -90,6 +98,25 @@ export function LiteApp() {
             <line x1="7" y1="12" x2="9" y2="12" />
           </svg>
           {mobileActive && <span className={styles.icon_btn_dot} />}
+        </button>
+        <button
+          className={styles.icon_btn}
+          title={t(ttsMuted ? "lite.unmute" : "lite.mute")}
+          onClick={toggleTtsMuted}
+        >
+          {ttsMuted ? (
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3L5 6H2v4h3l3 3z" />
+              <line x1="11" y1="6" x2="15" y2="10" />
+              <line x1="15" y1="6" x2="11" y2="10" />
+            </svg>
+          ) : (
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 3L5 6H2v4h3l3 3z" />
+              <path d="M11.5 5.5a3.5 3.5 0 0 1 0 5" />
+              <path d="M13.5 3.5a6 6 0 0 1 0 9" />
+            </svg>
+          )}
         </button>
         <button
           className={styles.icon_btn}

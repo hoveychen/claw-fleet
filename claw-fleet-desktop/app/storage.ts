@@ -25,6 +25,7 @@ const ALL_KEYS = [
   "tts-mode",
   "chime-sound",
   "tts-voice",
+  "tts-muted",
   "user-title",
   "auto-update-check",
   "llm-provider",

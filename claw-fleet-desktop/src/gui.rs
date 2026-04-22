@@ -396,6 +396,15 @@ pub(crate) fn play_tts_for_notification(app: &tauri::AppHandle, summary: &str) {
         return;
     }
 
+    let muted = store.get("tts-muted")
+        .and_then(|v| v.as_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| "false".to_string());
+
+    if muted == "true" {
+        log_debug("[tts] skipping notification TTS: muted");
+        return;
+    }
+
     // Skip fallback/generic summaries
     const FALLBACK_SUMMARIES: &[&str] = &[
         "Status update", "Bug fixed", "Feature added", "Agent is stuck",

@@ -901,7 +901,9 @@
   },
   "lite": {
     "enter": "Lite portrait mode",
-    "exit": "Exit lite mode"
+    "exit": "Exit lite mode",
+    "mute": "Mute alert sounds",
+    "unmute": "Unmute alert sounds"
   },
   "settings": {
     "title": "Settings",
