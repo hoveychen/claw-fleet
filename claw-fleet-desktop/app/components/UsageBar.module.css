@@ -5,6 +5,25 @@
   color: var(--color-text-dim);
 }
 
+.clickable {
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.clickable:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme="light"] .clickable:hover {
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.clickable:focus-visible {
+  outline: 2px solid var(--color-accent, #4ade80);
+  outline-offset: 1px;
+}
+
 .row {
   display: flex;
   align-items: center;

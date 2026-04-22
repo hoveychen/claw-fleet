@@ -21,6 +21,7 @@ import { useUsageRing } from "../hooks/useUsageRing";
 import { MobileAccessPanel } from "./MobileAccessPanel";
 import { SessionDetail } from "./SessionDetail";
 import { TokenSpeedChart } from "./TokenSpeedChart";
+import { UsagePanel } from "./UsagePanel";
 import styles from "./LiteApp.module.css";
 
 const ACTIVE_STATUSES = [
@@ -44,6 +45,7 @@ export function LiteApp() {
   );
   const [mobileActive, setMobileActive] = useState(false);
   const [ttsMuted, setTtsMuted] = useState(() => getItem("tts-muted") === "true");
+  const [showUsage, setShowUsage] = useState(false);
   const usageRing = useUsageRing();
 
   const toggleTtsMuted = () => {
@@ -144,6 +146,19 @@ export function LiteApp() {
 
       {showMobileAccess && <MobileAccessPanel onClose={() => setShowMobileAccess(false)} />}
 
+      {showUsage && (
+        <div className={styles.usage_overlay} onClick={() => setShowUsage(false)}>
+          <div className={styles.usage_panel} onClick={(e) => e.stopPropagation()}>
+            <button
+              className={styles.usage_close}
+              onClick={() => setShowUsage(false)}
+              aria-label="Close"
+            >×</button>
+            <UsagePanel />
+          </div>
+        </div>
+      )}
+
       {hasDecision ? (
         <DecisionPanel compact />
       ) : openedSession ? (
@@ -181,6 +196,7 @@ export function LiteApp() {
                 percent: usageRing.overall,
                 topSource: usageRing.topSource,
                 sources: usageRing.sources,
+                onClick: () => setShowUsage(true),
               } : null}
             />
           </div>

@@ -216,6 +216,7 @@ export interface UsageRingInput {
   percent: number;
   topSource?: string;
   sources?: UsageRingSourceBreakdown[];
+  onClick?: () => void;
 }
 
 export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usageRing }: { embedded?: boolean; onQuip?: (text: string | null) => void; suppressQuip?: boolean; dashboardMode?: boolean; usageRing?: UsageRingInput | null } = {}) {

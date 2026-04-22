@@ -10,6 +10,7 @@ export interface UsageBarData {
   percent: number;
   topSource?: string;
   sources?: UsageBarSource[];
+  onClick?: () => void;
 }
 
 function colorFor(pct: number): string {
@@ -23,13 +24,18 @@ export function UsageBar({ data }: { data: UsageBarData }) {
   const pct = Math.max(0, Math.min(100, data.percent));
   const color = colorFor(pct);
   const sources = (data.sources ?? []).slice().sort((a, b) => b.percent - a.percent);
-  const showBreakdown = hovered && sources.length > 0;
+  const clickable = typeof data.onClick === "function";
+  const showBreakdown = !clickable && hovered && sources.length > 0;
 
   return (
     <div
-      className={styles.wrap}
+      className={`${styles.wrap} ${clickable ? styles.clickable : ""}`}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onClick={clickable ? (e) => { e.stopPropagation(); data.onClick?.(); } : undefined}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); data.onClick?.(); } } : undefined}
     >
       <div className={styles.row}>
         <span className={styles.label}>{data.topSource ?? "Usage"}</span>
