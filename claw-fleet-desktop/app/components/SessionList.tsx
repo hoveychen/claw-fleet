@@ -6,6 +6,7 @@ import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, 
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
+import { useUsageRing } from "../hooks/useUsageRing";
 import { MemoryView } from "./MemoryView";
 import { AuditView } from "./AuditView";
 import { ReportView } from "./report/ReportView";
@@ -46,6 +47,7 @@ export function SessionList() {
   const [isDragging, setIsDragging] = useState(false);
   const [isWindows, setIsWindows] = useState(false);
   const [mobileActive, setMobileActive] = useState(false);
+  const usageRing = useUsageRing();
 
   // Poll mobile access status for the sidebar indicator.
   useEffect(() => {
@@ -280,7 +282,14 @@ export function SessionList() {
           <UsagePanel />
 
           {/* Mascot */}
-          <MascotEyes dashboardMode />
+          <MascotEyes
+            dashboardMode
+            usageRing={usageRing ? {
+              percent: usageRing.overall,
+              topSource: usageRing.topSource,
+              sources: usageRing.sources,
+            } : null}
+          />
         </div>
 
         {/* Footer profile card */}

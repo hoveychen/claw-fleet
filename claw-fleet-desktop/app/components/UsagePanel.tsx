@@ -1,60 +1,15 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ClaudeIcon, CursorIcon, CodexIcon, OpenClawIcon } from "./SessionCard";
 import styles from "./UsagePanel.module.css";
-
-const AUTO_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
-
-interface UsageStats {
-  utilization: number;
-  resets_at: string;
-  prev_utilization: number | null;
-}
-
-interface AccountInfoData {
-  email: string;
-  full_name: string;
-  organization_name: string;
-  plan: string;
-  auth_method: string;
-  five_hour: UsageStats | null;
-  seven_day: UsageStats | null;
-  seven_day_sonnet: UsageStats | null;
-}
-
-interface CursorUsageItem {
-  name: string;
-  used: number;
-  limit: number | null;
-  utilization: number | null;
-  resetsAt: string | null;
-}
-
-interface CursorAccountInfoData {
-  email: string;
-  signUpType: string;
-  membershipType: string;
-  subscriptionStatus: string;
-  totalPrompts: number;
-  dailyStats: unknown[];
-  usage: CursorUsageItem[];
-}
-
-interface CodexRateLimitWindow {
-  usedPercent: number;
-  windowDurationMins?: number | null;
-  resetsAt?: number | null;
-}
-
-interface CodexUsageItem {
-  limitId?: string | null;
-  limitName?: string | null;
-  planType?: string | null;
-  primary?: CodexRateLimitWindow | null;
-  secondary?: CodexRateLimitWindow | null;
-  credits?: { hasCredits: boolean; unlimited: boolean; balance?: string | null } | null;
-}
+import {
+  useUsageStore,
+  type UsageStats,
+  type CursorUsageItem,
+  type CodexRateLimitWindow,
+  type OpenClawSessionUsage,
+} from "../usageStore";
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -245,40 +200,18 @@ function SectionFooter({
 
 function ClaudeUsageSection() {
   const { t } = useTranslation();
-  const [info, setInfo] = useState<AccountInfoData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const { data: info, error, loading, lastUpdated, autoRefresh } = useUsageStore((s) => s.claude);
+  const load = useUsageStore((s) => s.load);
+  const setAutoRefresh = useUsageStore((s) => s.setAutoRefresh);
   const [, setTick] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await invoke<AccountInfoData>("get_account_info");
-      setInfo(data);
-      setLastUpdated(Date.now());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = autoRefresh ? setInterval(load, AUTO_REFRESH_INTERVAL_MS) : null;
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [autoRefresh]);
 
   useEffect(() => {
     const timer = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(timer);
   }, []);
+
+  const refresh = () => { load("claude"); };
+  const onAutoRefreshChange = (v: boolean) => setAutoRefresh("claude", v);
 
   const hasUsage = info && (info.five_hour || info.seven_day || info.seven_day_sonnet);
 
@@ -289,7 +222,7 @@ function ClaudeUsageSection() {
       {error && (
         <div className={styles.error}>
           <p>{error}</p>
-          <button className={styles.retry} onClick={load}>{t("account.retry")}</button>
+          <button className={styles.retry} onClick={refresh}>{t("account.retry")}</button>
         </div>
       )}
       {hasUsage && (
@@ -304,8 +237,8 @@ function ClaudeUsageSection() {
         lastUpdated={lastUpdated}
         loading={loading}
         autoRefresh={autoRefresh}
-        onAutoRefreshChange={setAutoRefresh}
-        onRefresh={load}
+        onAutoRefreshChange={onAutoRefreshChange}
+        onRefresh={refresh}
       />
     </div>
   );
@@ -315,40 +248,18 @@ function ClaudeUsageSection() {
 
 function CursorUsageSection() {
   const { t } = useTranslation();
-  const [info, setInfo] = useState<CursorAccountInfoData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const { data: info, error, loading, lastUpdated, autoRefresh } = useUsageStore((s) => s.cursor);
+  const load = useUsageStore((s) => s.load);
+  const setAutoRefresh = useUsageStore((s) => s.setAutoRefresh);
   const [, setTick] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await invoke<CursorAccountInfoData>("get_source_usage", { source: "cursor" });
-      setInfo(data);
-      setLastUpdated(Date.now());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = autoRefresh ? setInterval(load, AUTO_REFRESH_INTERVAL_MS) : null;
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [autoRefresh]);
 
   useEffect(() => {
     const timer = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(timer);
   }, []);
+
+  const refresh = () => { load("cursor"); };
+  const onAutoRefreshChange = (v: boolean) => setAutoRefresh("cursor", v);
 
   return (
     <div className={styles.tool_section}>
@@ -357,7 +268,7 @@ function CursorUsageSection() {
       {error && (
         <div className={styles.error}>
           <p>{error}</p>
-          <button className={styles.retry} onClick={load}>{t("account.retry")}</button>
+          <button className={styles.retry} onClick={refresh}>{t("account.retry")}</button>
         </div>
       )}
       {info && info.usage.length > 0 && (
@@ -372,8 +283,8 @@ function CursorUsageSection() {
         lastUpdated={lastUpdated}
         loading={loading}
         autoRefresh={autoRefresh}
-        onAutoRefreshChange={setAutoRefresh}
-        onRefresh={load}
+        onAutoRefreshChange={onAutoRefreshChange}
+        onRefresh={refresh}
       />
     </div>
   );
@@ -383,40 +294,18 @@ function CursorUsageSection() {
 
 function CodexUsageSection() {
   const { t } = useTranslation();
-  const [data, setData] = useState<CodexUsageItem | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const { data, error, loading, lastUpdated, autoRefresh } = useUsageStore((s) => s.codex);
+  const load = useUsageStore((s) => s.load);
+  const setAutoRefresh = useUsageStore((s) => s.setAutoRefresh);
   const [, setTick] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await invoke<CodexUsageItem>("get_source_usage", { source: "codex" });
-      setData(result);
-      setLastUpdated(Date.now());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = autoRefresh ? setInterval(load, AUTO_REFRESH_INTERVAL_MS) : null;
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [autoRefresh]);
 
   useEffect(() => {
     const timer = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(timer);
   }, []);
+
+  const refresh = () => { load("codex"); };
+  const onAutoRefreshChange = (v: boolean) => setAutoRefresh("codex", v);
 
   const hasBars = data && (data.primary || data.secondary);
 
@@ -430,7 +319,7 @@ function CodexUsageSection() {
       {error && (
         <div className={styles.error}>
           <p>{error}</p>
-          <button className={styles.retry} onClick={load}>{t("account.retry")}</button>
+          <button className={styles.retry} onClick={refresh}>{t("account.retry")}</button>
         </div>
       )}
       {hasBars && (
@@ -448,28 +337,14 @@ function CodexUsageSection() {
         lastUpdated={lastUpdated}
         loading={loading}
         autoRefresh={autoRefresh}
-        onAutoRefreshChange={setAutoRefresh}
-        onRefresh={load}
+        onAutoRefreshChange={onAutoRefreshChange}
+        onRefresh={refresh}
       />
     </div>
   );
 }
 
 // ── OpenClaw section ─────────────────────────────────────────────────────
-
-interface OpenClawSessionUsage {
-  sessionId: string;
-  agentId: string;
-  model: string;
-  contextTokens: number;
-  totalTokens: number | null;
-  percentUsed: number | null;
-  ageSecs: number;
-}
-
-interface OpenClawUsageInfo {
-  sessions: OpenClawSessionUsage[];
-}
 
 function OpenClawContextBar({ session }: { session: OpenClawSessionUsage }) {
   const { t } = useTranslation();
@@ -514,40 +389,18 @@ function OpenClawContextBar({ session }: { session: OpenClawSessionUsage }) {
 
 function OpenClawUsageSection() {
   const { t } = useTranslation();
-  const [data, setData] = useState<OpenClawUsageInfo | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [lastUpdated, setLastUpdated] = useState<number | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
+  const { data, error, loading, lastUpdated, autoRefresh } = useUsageStore((s) => s.openclaw);
+  const load = useUsageStore((s) => s.load);
+  const setAutoRefresh = useUsageStore((s) => s.setAutoRefresh);
   const [, setTick] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  async function load() {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await invoke<OpenClawUsageInfo>("get_source_usage", { source: "openclaw" });
-      setData(result);
-      setLastUpdated(Date.now());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  useEffect(() => { load(); }, []);
-
-  useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    timerRef.current = autoRefresh ? setInterval(load, AUTO_REFRESH_INTERVAL_MS) : null;
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [autoRefresh]);
 
   useEffect(() => {
     const timer = setInterval(() => setTick((n) => n + 1), 30_000);
     return () => clearInterval(timer);
   }, []);
+
+  const refresh = () => { load("openclaw"); };
+  const onAutoRefreshChange = (v: boolean) => setAutoRefresh("openclaw", v);
 
   const hasSessions = data && data.sessions.length > 0;
 
@@ -558,7 +411,7 @@ function OpenClawUsageSection() {
       {error && (
         <div className={styles.error}>
           <p>{error}</p>
-          <button className={styles.retry} onClick={load}>{t("account.retry")}</button>
+          <button className={styles.retry} onClick={refresh}>{t("account.retry")}</button>
         </div>
       )}
       {hasSessions && (
@@ -573,8 +426,8 @@ function OpenClawUsageSection() {
         lastUpdated={lastUpdated}
         loading={loading}
         autoRefresh={autoRefresh}
-        onAutoRefreshChange={setAutoRefresh}
-        onRefresh={load}
+        onAutoRefreshChange={onAutoRefreshChange}
+        onRefresh={refresh}
       />
     </div>
   );

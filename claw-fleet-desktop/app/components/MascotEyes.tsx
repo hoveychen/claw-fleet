@@ -206,7 +206,18 @@ const EYE_COLOR = "var(--color-accent)";   // brand accent color
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode }: { embedded?: boolean; onQuip?: (text: string | null) => void; suppressQuip?: boolean; dashboardMode?: boolean } = {}) {
+export interface UsageRingSourceBreakdown {
+  name: string;
+  percent: number;
+}
+
+export interface UsageRingInput {
+  percent: number;
+  topSource?: string;
+  sources?: UsageRingSourceBreakdown[];
+}
+
+export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usageRing }: { embedded?: boolean; onQuip?: (text: string | null) => void; suppressQuip?: boolean; dashboardMode?: boolean; usageRing?: UsageRingInput | null } = {}) {
   const { t, i18n } = useTranslation();
   const { sessions } = useSessionsStore();
   const mood = useMood(sessions);
@@ -227,6 +238,7 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode }: { 
   const [clickQuipKey, setClickQuipKey] = useState("");
   const [generatedBusyQuips, setGeneratedBusyQuips] = useState<string[]>([]);
   const [generatedIdleQuips, setGeneratedIdleQuips] = useState<string[]>([]);
+  const [ringHovered, setRingHovered] = useState(false);
 
   const blinkTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const gazeTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -949,6 +961,129 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode }: { 
             textAnchor="middle"
             className={styles.dashSparkle}
           >✦</text>,
+        );
+      }
+
+    }
+
+    // Usage ring — independent of dashboardMode; shows whenever usageRing prop is provided.
+    if (usageRing && Number.isFinite(usageRing.percent)) {
+      const pct = Math.max(0, Math.min(100, usageRing.percent));
+      const ringColor = pct >= 85 ? "#ef4444" : pct >= 70 ? "#fbbf24" : "#4ade80";
+      const cx = 100;
+      const cy = 45;
+      const r = 58;
+      const circumference = 2 * Math.PI * r;
+      const progressLen = (pct / 100) * circumference;
+      const colorFor = (p: number) => (p >= 85 ? "#ef4444" : p >= 70 ? "#fbbf24" : "#4ade80");
+
+      const breakdown = (usageRing.sources ?? []).slice().sort((a, b) => b.percent - a.percent);
+      const showLegend = ringHovered && breakdown.length > 0;
+
+      elements.push(
+        <g
+          key="usage-ring"
+          onMouseEnter={() => setRingHovered(true)}
+          onMouseLeave={() => setRingHovered(false)}
+        >
+          <circle
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            stroke="rgba(255,255,255,0.08)"
+            strokeWidth={2}
+            pointerEvents="none"
+          />
+          <circle
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            stroke={ringColor}
+            strokeWidth={3}
+            strokeLinecap="round"
+            strokeDasharray={`${progressLen} ${circumference - progressLen}`}
+            transform={`rotate(-90 ${cx} ${cy})`}
+            pointerEvents="stroke"
+          />
+          <text
+            x={cx}
+            y={95}
+            fontSize={10}
+            fontWeight="bold"
+            fill={ringColor}
+            textAnchor="middle"
+            dominantBaseline="central"
+            pointerEvents="none"
+          >{Math.round(pct)}%</text>
+        </g>,
+      );
+
+      if (showLegend) {
+        const panelX = 24;
+        const panelY = 4;
+        const panelW = 152;
+        const rowH = 14;
+        const panelH = breakdown.length * rowH + 10;
+        elements.push(
+          <g key="usage-ring-legend" pointerEvents="none">
+            <rect
+              x={panelX}
+              y={panelY}
+              width={panelW}
+              height={panelH}
+              rx={6}
+              fill="rgba(15,16,22,0.94)"
+              stroke="rgba(255,255,255,0.18)"
+              strokeWidth={0.75}
+            />
+            {breakdown.map((src, i) => {
+              const rowY = panelY + 5 + i * rowH + rowH / 2;
+              const srcPct = Math.max(0, Math.min(100, src.percent));
+              const srcColor = colorFor(srcPct);
+              const barX = 92;
+              const barW = 48;
+              const barH = 4;
+              return (
+                <g key={`legend-${src.name}`}>
+                  <circle cx={panelX + 8} cy={rowY} r={2.5} fill={srcColor} />
+                  <text
+                    x={panelX + 14}
+                    y={rowY}
+                    fontSize={8}
+                    fill="rgba(255,255,255,0.88)"
+                    dominantBaseline="central"
+                  >{src.name}</text>
+                  <rect
+                    x={barX}
+                    y={rowY - barH / 2}
+                    width={barW}
+                    height={barH}
+                    rx={2}
+                    fill="rgba(255,255,255,0.12)"
+                  />
+                  <rect
+                    x={barX}
+                    y={rowY - barH / 2}
+                    width={(srcPct / 100) * barW}
+                    height={barH}
+                    rx={2}
+                    fill={srcColor}
+                  />
+                  <text
+                    x={panelX + panelW - 6}
+                    y={rowY}
+                    fontSize={8}
+                    fontWeight="bold"
+                    fill={srcColor}
+                    textAnchor="end"
+                    dominantBaseline="central"
+                  >{Math.round(srcPct)}%</text>
+                </g>
+              );
+            })}
+          </g>,
         );
       }
     }

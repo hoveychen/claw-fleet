@@ -17,6 +17,7 @@ import { DecisionPanel } from "./DecisionPanel";
 import { LiteSessionCard } from "./LiteSessionCard";
 import { MascotAlertBubble } from "./MascotAlertBubble";
 import { MascotEyes } from "./MascotEyes";
+import { useUsageRing } from "../hooks/useUsageRing";
 import { MobileAccessPanel } from "./MobileAccessPanel";
 import { SessionDetail } from "./SessionDetail";
 import { TokenSpeedChart } from "./TokenSpeedChart";
@@ -43,6 +44,7 @@ export function LiteApp() {
   );
   const [mobileActive, setMobileActive] = useState(false);
   const [ttsMuted, setTtsMuted] = useState(() => getItem("tts-muted") === "true");
+  const usageRing = useUsageRing();
 
   const toggleTtsMuted = () => {
     const next = !ttsMuted;
@@ -172,7 +174,15 @@ export function LiteApp() {
 
           <div className={styles.mascot_slot}>
             <MascotAlertBubble />
-            <MascotEyes suppressQuip={hasAlerts} dashboardMode />
+            <MascotEyes
+              suppressQuip={hasAlerts}
+              dashboardMode
+              usageRing={usageRing ? {
+                percent: usageRing.overall,
+                topSource: usageRing.topSource,
+                sources: usageRing.sources,
+              } : null}
+            />
           </div>
         </div>
       )}
