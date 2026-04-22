@@ -176,10 +176,6 @@ async function processAlertQueue() {
 
 /** Play alert: chime (optional) → speech (optional), based on current settings. */
 export function playAlertSound(summary: string) {
-  if (getItem("overlay-muted") === "true") {
-    console.debug("[audio] alert skipped: overlay muted");
-    return;
-  }
   const mode = (getItem("tts-mode") as TtsMode) || "off";
   if (mode === "off") {
     console.debug("[audio] alert skipped: tts mode off");
@@ -224,11 +220,8 @@ async function processDecisionQueue() {
 /** Play a chime (and optionally speak) for a new DecisionPanel item.
  *
  *  Guard items use an urgent "drop" preset to visibly distinguish
- *  destructive-command prompts from ordinary elicitation questions.
- *  Respects the same `overlay-muted` and `tts-mode` settings as
- *  `playAlertSound`, so the existing user preferences carry over. */
+ *  destructive-command prompts from ordinary elicitation questions. */
 export function playDecisionAlert(kind: "guard" | "elicitation", spoken: string) {
-  if (getItem("overlay-muted") === "true") return;
   const mode = (getItem("tts-mode") as TtsMode) || "off";
   if (mode === "off") return;
 

@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useConnectionStore, useDetailStore, useOverlayStore } from "../store";
+import { useConnectionStore, useDetailStore } from "../store";
 import { getItem, setItem } from "../storage";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
 import { QRCodeCanvas } from "qrcode.react";
@@ -445,11 +445,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     [],
   );
 
-  // ── Overlay state (shared via store) ─────────────────────────────────────
-  const overlayEnabled = useOverlayStore((s) => s.enabled);
-  const setOverlayEnabled = useOverlayStore((s) => s.setEnabled);
-  const isMacOS = document.documentElement.getAttribute("data-platform") === "macos";
-
   // ── Mobile access state ──────────────────────────────────────────────
   const [mobileAccess, setMobileAccess] = useState<MobileAccessInfo | null>(null);
   const [mobileLoading, setMobileLoading] = useState(false);
@@ -550,24 +545,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   <span className={styles.row_label}>{t("settings.language")}</span>
                   <LanguageSwitcher />
                 </div>
-                {!isMacOS && (
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.overlay")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.overlay_desc")}
-                    </span>
-                  </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={overlayEnabled}
-                      onChange={(e) => setOverlayEnabled(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
-                </div>
-                )}
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.auto_update_check")}</span>

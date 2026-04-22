@@ -3,7 +3,7 @@ import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notif
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useSessionsStore, useOverlayStore } from "../store";
+import { useSessionsStore } from "../store";
 import { getItem, setItem, getSeenFeatures, markFeaturesSeen, ONBOARDING_FEATURES, type OnboardingFeatureId } from "../storage";
 import { type ChimePreset, CHIME_PRESETS, playChime } from "../audio";
 import { ThemeToggle } from "./ThemeToggle";
@@ -467,8 +467,6 @@ function NotificationSettingsCard({
   onChimeChange,
   personalizedMascot,
   onTogglePersonalizedMascot,
-  overlayEnabled,
-  onToggleOverlay,
   userTitle,
   onUserTitleChange,
 }: {
@@ -480,13 +478,10 @@ function NotificationSettingsCard({
   onChimeChange: (preset: ChimePreset) => void;
   personalizedMascot: boolean;
   onTogglePersonalizedMascot: (enabled: boolean) => void;
-  overlayEnabled: boolean;
-  onToggleOverlay: (enabled: boolean) => void;
   userTitle: string;
   onUserTitleChange: (title: string) => void;
 }) {
   const { t } = useTranslation();
-  const isMacOS = document.documentElement.getAttribute("data-platform") === "macos";
 
   return (
     <div className={`${styles.card} ${styles.card_info}`}>
@@ -576,7 +571,7 @@ function NotificationSettingsCard({
         />
       </div>
 
-      {/* Mascot & overlay */}
+      {/* Mascot */}
       <div className={styles.settings_group}>
         <span className={styles.settings_label}>{t("onboarding.settings_notif.mascot_title")}</span>
         <label className={styles.toggle_item}>
@@ -589,20 +584,6 @@ function NotificationSettingsCard({
           />
         </label>
         <span className={styles.hint}>{t("settings.personalized_mascot_desc")}</span>
-        {!isMacOS && (
-          <>
-            <label className={styles.toggle_item}>
-              <span>{t("settings.overlay")}</span>
-              <input
-                type="checkbox"
-                checked={overlayEnabled}
-                onChange={(e) => onToggleOverlay(e.target.checked)}
-                className={styles.source_checkbox}
-              />
-            </label>
-            <span className={styles.hint}>{t("settings.overlay_desc")}</span>
-          </>
-        )}
       </div>
     </div>
   );
@@ -1076,12 +1057,10 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     invoke("set_user_title", { title }).catch(() => {});
   }, []);
 
-  // ── Mascot & overlay state ──────────────────────────────────────────────
+  // ── Mascot state ────────────────────────────────────────────────────────
   const [personalizedMascot, setPersonalizedMascot] = useState(
     () => getItem("personalized-mascot") === "true",
   );
-  const overlayEnabled = useOverlayStore((s) => s.enabled);
-  const setOverlayEnabled = useOverlayStore((s) => s.setEnabled);
 
   const handleTogglePersonalizedMascot = useCallback((enabled: boolean) => {
     setPersonalizedMascot(enabled);
@@ -1223,8 +1202,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 onChimeChange={handleChimeChange}
                 personalizedMascot={personalizedMascot}
                 onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
-                overlayEnabled={overlayEnabled}
-                onToggleOverlay={setOverlayEnabled}
                 userTitle={userTitle}
                 onUserTitleChange={handleUserTitleChange}
               />
@@ -1324,8 +1301,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                       onChimeChange={handleChimeChange}
                       personalizedMascot={personalizedMascot}
                       onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
-                      overlayEnabled={overlayEnabled}
-                      onToggleOverlay={setOverlayEnabled}
                       userTitle={userTitle}
                       onUserTitleChange={handleUserTitleChange}
                     />

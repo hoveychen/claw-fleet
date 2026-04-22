@@ -396,15 +396,6 @@ pub(crate) fn play_tts_for_notification(app: &tauri::AppHandle, summary: &str) {
         return;
     }
 
-    let muted = store.get("overlay-muted")
-        .and_then(|v| v.as_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| "false".to_string());
-
-    if muted == "true" {
-        log_debug("[tts] skipping notification TTS: overlay muted");
-        return;
-    }
-
     // Skip fallback/generic summaries
     const FALLBACK_SUMMARIES: &[&str] = &[
         "Status update", "Bug fixed", "Feature added", "Agent is stuck",
@@ -1386,58 +1377,6 @@ fn set_llm_config(state: tauri::State<AppState>, config: llm_provider::LlmConfig
     state.backend.read().unwrap().set_llm_config(config)
 }
 
-// ── Overlay window commands ──────────────────────────────────────────────────
-
-#[tauri::command]
-fn toggle_overlay(app: tauri::AppHandle, visible: bool) {
-    // Overlay is disabled on macOS (no transparent floating window support
-    // without private APIs).
-    #[cfg(target_os = "macos")]
-    { let _ = (&app, visible); return; }
-
-    #[cfg(not(target_os = "macos"))]
-    if let Some(w) = app.get_webview_window("overlay") {
-        if visible {
-            // Move on-screen (bottom-right). Using position instead of
-            // show/hide avoids the transparent-window white-flash bug.
-            let _ = w.show();
-            if let Ok(Some(monitor)) = w.current_monitor() {
-                let size = monitor.size();
-                let scale = monitor.scale_factor();
-                let x = (size.width as f64 / scale) as i32 - 300;
-                let y = (size.height as f64 / scale) as i32 - 220;
-                let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
-                    x as f64, y as f64,
-                )));
-            } else {
-                let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
-                    100.0, 100.0,
-                )));
-            }
-        } else {
-            // Move off-screen to "hide"
-            let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(
-                -9999.0, -9999.0,
-            )));
-        }
-    }
-}
-
-#[tauri::command]
-fn center_overlay(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("overlay") {
-        if let Ok(Some(monitor)) = w.current_monitor() {
-            let size = monitor.size();
-            let scale = monitor.scale_factor();
-            if let Ok(win_size) = w.outer_size() {
-                let x = (size.width as f64 / scale - win_size.width as f64 / scale) / 2.0;
-                let y = (size.height as f64 / scale - win_size.height as f64 / scale) / 2.0;
-                let _ = w.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
-            }
-        }
-    }
-}
-
 #[tauri::command]
 fn show_main_window(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -1476,11 +1415,6 @@ fn set_lite_mode(app: tauri::AppHandle, enabled: bool) {
         let _ = w.set_size(tauri::Size::Logical(tauri::LogicalSize::new(1280.0, 820.0)));
         let _ = w.center();
     }
-}
-
-#[tauri::command]
-fn open_session_from_overlay(app: tauri::AppHandle, jsonl_path: String) {
-    let _ = app.emit("open-session", jsonl_path);
 }
 
 #[tauri::command]
@@ -1898,8 +1832,6 @@ struct MenuLabels {
 
     view: &'static str,
     toggle_lite: &'static str,
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    toggle_overlay: &'static str,
     theme: &'static str,
     theme_system: &'static str,
     theme_light: &'static str,
@@ -1945,7 +1877,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
 
             view: "视图",
             toggle_lite: "切换轻量模式",
-            toggle_overlay: "切换悬浮宠物",
             theme: "主题",
             theme_system: "跟随系统",
             theme_light: "亮色",
@@ -1989,7 +1920,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
 
             view: "View",
             toggle_lite: "Toggle Lite Mode",
-            toggle_overlay: "Toggle Overlay Mascot",
             theme: "Theme",
             theme_system: "System",
             theme_light: "Light",
@@ -2095,23 +2025,13 @@ fn build_app_menu(
         )
         .build()?;
 
-    #[allow(unused_mut)]
-    let mut view_builder = SubmenuBuilder::new(app, l.view).item(
-        &MenuItemBuilder::new(l.toggle_lite)
-            .id("menu-toggle-lite")
-            .accelerator("CmdOrCtrl+Shift+L")
-            .build(app)?,
-    );
-    // Overlay mascot is disabled on macOS (no transparent floating window).
-    #[cfg(not(target_os = "macos"))]
-    {
-        view_builder = view_builder.item(
-            &MenuItemBuilder::new(l.toggle_overlay)
-                .id("menu-toggle-overlay")
+    let view_submenu = SubmenuBuilder::new(app, l.view)
+        .item(
+            &MenuItemBuilder::new(l.toggle_lite)
+                .id("menu-toggle-lite")
+                .accelerator("CmdOrCtrl+Shift+L")
                 .build(app)?,
-        );
-    }
-    let view_submenu = view_builder
+        )
         .item(&theme_submenu)
         .separator()
         .item(
@@ -2213,9 +2133,6 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
         }
         "menu-toggle-lite" => {
             let _ = app.emit("menu-toggle-lite", ());
-        }
-        "menu-toggle-overlay" => {
-            let _ = app.emit("menu-toggle-overlay", ());
         }
         "menu-theme-system" => {
             let _ = app.emit("menu-theme", "system");
@@ -2754,12 +2671,6 @@ pub fn run() {
                         .build();
                     let _ = main_win.set_effects(effects);
                 }
-
-                // Overlay is not supported on macOS (requires private APIs
-                // for transparent floating windows). Destroy it immediately.
-                if let Some(overlay_win) = app.get_webview_window("overlay") {
-                    let _ = overlay_win.destroy();
-                }
             }
 
             // ── Main window minimize watcher ─────────────────────────────────
@@ -2867,11 +2778,8 @@ pub fn run() {
             get_user_title,
             set_user_title,
             open_notification_settings,
-            toggle_overlay,
-            center_overlay,
             show_main_window,
             set_lite_mode,
-            open_session_from_overlay,
             toggle_tray_panel,
             quit_app,
             open_settings_window,

@@ -14,7 +14,7 @@ import { UpdateNotice } from "./components/UpdateNotice";
 import { Wizard } from "./components/Wizard";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
-import { type Connection, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useOverlayStore, useSessionsStore, useUIStore } from "./store";
+import { type Connection, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
@@ -170,23 +170,6 @@ function App() {
     return () => {
       unlisten.then((fn) => fn());
     };
-  }, []);
-
-  // Sync overlay store when overlay is closed from the overlay window (right-click)
-  useEffect(() => {
-    const unlisten = listen("overlay-disabled", () => {
-      // Update store + storage without re-invoking toggle_overlay (already done by overlay)
-      setItem("overlay-enabled", "false");
-      useOverlayStore.setState({ enabled: false });
-    });
-    return () => { unlisten.then((fn) => fn()); };
-  }, []);
-
-  // Restore overlay on app startup if it was previously enabled
-  useEffect(() => {
-    if (useOverlayStore.getState().enabled) {
-      invoke("toggle_overlay", { visible: true }).catch(() => {});
-    }
   }, []);
 
   // Sync initial UI locale to the Rust backend.

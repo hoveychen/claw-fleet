@@ -47,7 +47,7 @@ export default function DecisionFloatApp() {
     }
   }, [decisionCount]);
 
-  // Theme + language sync, same mechanism as OverlayApp.
+  // Theme + language sync across windows.
   useEffect(() => {
     resolveTheme(useUIStore.getState().theme);
     const unThemePromise = listen<string>("overlay-theme-changed", (e) => {

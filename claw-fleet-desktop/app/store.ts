@@ -287,22 +287,6 @@ export const useAuditStore = create<AuditState>((set, get) => ({
     }),
 }));
 
-// ── Overlay store ───────────────────────────────────────────────────────────
-
-interface OverlayState {
-  enabled: boolean;
-  setEnabled: (enabled: boolean) => void;
-}
-
-export const useOverlayStore = create<OverlayState>((set) => ({
-  enabled: getItem("overlay-enabled") === "true",
-  setEnabled: (enabled) => {
-    setItem("overlay-enabled", enabled ? "true" : "false");
-    invoke("toggle_overlay", { visible: enabled }).catch(() => {});
-    set({ enabled });
-  },
-}));
-
 // ── Report store ────────────────────────────────────────────────────────────
 
 type ReportTab = "insights" | "daily";

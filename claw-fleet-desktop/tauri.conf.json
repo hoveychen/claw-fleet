@@ -18,22 +18,6 @@
         "minHeight": 600,
         "center": true,
         "titleBarStyle": "Overlay"
-      },
-      {
-        "label": "overlay",
-        "title": "",
-        "url": "/overlay.html",
-        "width": 280,
-        "height": 180,
-        "x": -9999,
-        "y": -9999,
-        "resizable": false,
-        "decorations": false,
-        "alwaysOnTop": true,
-        "skipTaskbar": true,
-        "shadow": false,
-        "focus": false,
-        "visible": true
       }
     ],
     "security": {

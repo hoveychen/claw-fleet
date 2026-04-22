@@ -9,12 +9,10 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react()],
 
-  // Multi-page build: main app + overlay window
   build: {
     rollupOptions: {
       input: {
         main: resolve(__dirname, "index.html"),
-        overlay: resolve(__dirname, "overlay.html"),
         tray: resolve(__dirname, "tray.html"),
         settings: resolve(__dirname, "settings.html"),
         preview: resolve(__dirname, "preview.html"),

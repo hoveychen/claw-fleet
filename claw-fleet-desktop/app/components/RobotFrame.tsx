@@ -1,12 +1,11 @@
 /**
  * RobotFrame — shared CRT-style robot container for mascot eyes.
  *
- * Used by both the sidebar (MascotEyes) and the floating overlay (OverlayMascot).
  * Renders a rounded frame with a "screen" area that has CRT scanlines,
  * vignette, and barrel distortion effects.
  *
  * - `children` is rendered inside the screen area
- * - `footer` is rendered below the screen (e.g. status bar in overlay)
+ * - `footer` is rendered below the screen
  * - Forwards className, onClick, onDoubleClick, onContextMenu to the frame
  * - When `tauriDrag` is set, the entire frame becomes a drag region:
  *   mousedown + move → window drag; mousedown + release → normal click

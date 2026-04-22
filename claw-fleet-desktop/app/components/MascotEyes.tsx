@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { useOverlayStore, useSessionsStore } from "../store";
+import { useSessionsStore } from "../store";
 import { getItem } from "../storage";
 import type { SessionInfo } from "../types";
 import { RobotFrame } from "./RobotFrame";
@@ -1030,42 +1030,6 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode }: { 
     );
   }
 
-  const overlayEnabled = useOverlayStore((s) => s.enabled);
-  const isMacOS = document.documentElement.getAttribute("data-platform") === "macos";
-
-  // When overlay is active, show a compact "find assistant" placeholder instead.
-  // Skip on macOS — overlay is unsupported there (toggle_overlay is a no-op), so a
-  // stale overlayEnabled value would otherwise strand the user on a useless card.
-  if (overlayEnabled && !isMacOS) {
-    return (
-      <div className={styles.container}>
-        <div className={styles.overlayPlaceholder}>
-          <button
-            className={styles.findBtn}
-            onClick={() => invoke("center_overlay").catch(() => {})}
-          >
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="7" cy="7" r="5" />
-              <path d="M14 14l-3.5-3.5" />
-            </svg>
-            <span>{t("overlay.find")}</span>
-          </button>
-          <button
-            className={styles.recallBtn}
-            onClick={() => useOverlayStore.getState().setEnabled(false)}
-            title={t("overlay.recall")}
-          >
-            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M12 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4" />
-              <path d="M9 7L2 14" />
-              <path d="M2 10v4h4" />
-            </svg>
-          </button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={styles.container}>
       <div className={styles.toggle}>
@@ -1073,22 +1037,6 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode }: { 
           <span className={styles.toggle_label}>{t("mascot.panel_title")}</span>
           <span className={styles.toggle_icon}>{expanded ? "▲" : "▼"}</span>
         </button>
-        {!isMacOS && (
-          <button
-            className={styles.popout_btn}
-            onClick={(e) => {
-              e.stopPropagation();
-              useOverlayStore.getState().setEnabled(true);
-            }}
-            title={t("overlay.popout")}
-          >
-            <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M10 2h4v4" />
-              <path d="M14 2L8 8" />
-              <path d="M12 9v4a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h4" />
-            </svg>
-          </button>
-        )}
       </div>
       {expanded && (
         <>
