@@ -29,7 +29,7 @@ function computeUnseenFeatures(): OnboardingFeatureId[] {
 }
 
 function App() {
-  const { theme, liteMode } = useUIStore();
+  const { theme, liteMode, setTheme, setLiteMode, setViewMode, setShowMobileAccess } = useUIStore();
   const { connection, setConnection, disconnect } = useConnectionStore();
 
   // Always-mounted listeners for backend decision events. Must live at the
@@ -115,6 +115,46 @@ function App() {
       unLangPromise.then((fn) => fn());
     };
   }, []);
+
+  // ── App-menu event handlers ────────────────────────────────────────
+  // Forwarded by Rust's `on_menu_event` for items with `menu-*` ids.
+  useEffect(() => {
+    const ps: Promise<() => void>[] = [];
+
+    ps.push(listen<"system" | "light" | "dark">("menu-theme", (e) => {
+      setTheme(e.payload);
+    }));
+    ps.push(listen("menu-toggle-lite", () => {
+      setLiteMode(!useUIStore.getState().liteMode);
+    }));
+    ps.push(listen("menu-daily-report", () => {
+      setViewMode("report");
+      if (useUIStore.getState().liteMode) setLiteMode(false);
+    }));
+    ps.push(listen("menu-welcome", () => {
+      setOnboardingMode("full");
+    }));
+    ps.push(listen("menu-mobile-access", () => {
+      setShowMobileAccess(true);
+    }));
+    ps.push(listen("menu-check-updates", async () => {
+      try {
+        const result = await invoke<{ has_update: boolean; latest_version: string; release_url: string }>(
+          "check_app_version",
+        );
+        if (result.has_update && result.release_url) {
+          const { openUrl } = await import("@tauri-apps/plugin-opener");
+          await openUrl(result.release_url).catch(() => {});
+        }
+      } catch {
+        /* network errors are silent */
+      }
+    }));
+
+    return () => {
+      ps.forEach((p) => p.then((fn) => fn()).catch(() => {}));
+    };
+  }, [setTheme, setLiteMode, setViewMode, setShowMobileAccess]);
 
   // Open a session detail when the user clicks an agent in the tray menu.
   useEffect(() => {

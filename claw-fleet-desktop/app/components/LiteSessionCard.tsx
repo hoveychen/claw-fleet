@@ -23,6 +23,7 @@ export function LiteSessionCard({
     <button
       className={`${styles.card} ${isSub ? styles.card_subagent : styles.card_main} ${extendThread ? styles.card_subagent_extend : ""}`}
       data-status={session.status}
+      data-session-id={session.id}
       onClick={onClick}
     >
       <div className={styles.row}>

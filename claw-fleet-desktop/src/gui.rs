@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{Emitter, Listener, Manager};
-use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
+use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
 
 use super::account::AccountInfo;
@@ -1324,10 +1324,17 @@ fn restart_app(app: tauri::AppHandle) {
 // ── Locale ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-fn set_locale(locale: String, state: tauri::State<AppState>) {
-    *state.locale.lock().unwrap() = locale.clone();
+fn set_locale(app: tauri::AppHandle, locale: String, state: tauri::State<AppState>) {
+    let prev = std::mem::replace(&mut *state.locale.lock().unwrap(), locale.clone());
     let title = state.user_title.lock().unwrap().clone();
     reapply_interaction_mode_if_installed(&state, &title, Some(&locale));
+    // Rebuild the app menu only if the language prefix actually changed, so
+    // we don't churn the native menu on every startup call.
+    let prev_prefix = prev.get(..2).unwrap_or("");
+    let next_prefix = locale.get(..2).unwrap_or("");
+    if prev_prefix != next_prefix {
+        install_app_menu(&app);
+    }
 }
 
 // ── Waiting alerts ──────────────────────────────────────────────────────────
@@ -1855,6 +1862,400 @@ fn usage_pct_str(utilization: f64) -> String {
     format!("{}%", pct)
 }
 
+// ── App menu bar ────────────────────────────────────────────────────────────
+//
+// Builds the top-of-window (macOS) / in-window (Windows/Linux) menu bar.
+// Custom items carry `menu-*` ids so they never collide with the tray menu's
+// own ids. Predefined items (cut/copy/paste, quit, close, about…) are handled
+// by the OS / webview directly and don't need a handler.
+//
+// Labels are locale-gated: when the frontend calls `set_locale`, we rebuild
+// the menu so macOS/Win/Linux show the user's language.
+
+struct MenuLabels {
+    app_menu_title: &'static str,
+    about_item: &'static str,
+    settings: &'static str,
+    check_updates: &'static str,
+    services: &'static str,
+    hide_self: &'static str,
+    hide_others: &'static str,
+    show_all: &'static str,
+    quit: &'static str,
+
+    file: &'static str,
+    switch_connection: &'static str,
+    daily_report: &'static str,
+    close_window: &'static str,
+
+    edit: &'static str,
+    undo: &'static str,
+    redo: &'static str,
+    cut: &'static str,
+    copy: &'static str,
+    paste: &'static str,
+    select_all: &'static str,
+
+    view: &'static str,
+    toggle_lite: &'static str,
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    toggle_overlay: &'static str,
+    theme: &'static str,
+    theme_system: &'static str,
+    theme_light: &'static str,
+    theme_dark: &'static str,
+    reload: &'static str,
+    fullscreen: &'static str,
+
+    window: &'static str,
+    minimize: &'static str,
+    maximize: &'static str,
+
+    help: &'static str,
+    welcome: &'static str,
+    mobile_access: &'static str,
+    report_issue: &'static str,
+}
+
+fn menu_labels(locale: &str) -> MenuLabels {
+    if locale.starts_with("zh") {
+        MenuLabels {
+            app_menu_title: "Claw Fleet",
+            about_item: "关于 Claw Fleet",
+            settings: "设置…",
+            check_updates: "检查更新…",
+            services: "服务",
+            hide_self: "隐藏 Claw Fleet",
+            hide_others: "隐藏其他",
+            show_all: "全部显示",
+            quit: "退出 Claw Fleet",
+
+            file: "文件",
+            switch_connection: "切换连接",
+            daily_report: "每日报告",
+            close_window: "关闭窗口",
+
+            edit: "编辑",
+            undo: "撤销",
+            redo: "重做",
+            cut: "剪切",
+            copy: "复制",
+            paste: "粘贴",
+            select_all: "全选",
+
+            view: "视图",
+            toggle_lite: "切换轻量模式",
+            toggle_overlay: "切换悬浮宠物",
+            theme: "主题",
+            theme_system: "跟随系统",
+            theme_light: "亮色",
+            theme_dark: "暗色",
+            reload: "重新加载",
+            fullscreen: "进入全屏",
+
+            window: "窗口",
+            minimize: "最小化",
+            maximize: "最大化",
+
+            help: "帮助",
+            welcome: "欢迎向导",
+            mobile_access: "移动端接入",
+            report_issue: "反馈问题…",
+        }
+    } else {
+        MenuLabels {
+            app_menu_title: "Claw Fleet",
+            about_item: "About Claw Fleet",
+            settings: "Settings…",
+            check_updates: "Check for Updates…",
+            services: "Services",
+            hide_self: "Hide Claw Fleet",
+            hide_others: "Hide Others",
+            show_all: "Show All",
+            quit: "Quit Claw Fleet",
+
+            file: "File",
+            switch_connection: "Switch Connection",
+            daily_report: "Daily Report",
+            close_window: "Close Window",
+
+            edit: "Edit",
+            undo: "Undo",
+            redo: "Redo",
+            cut: "Cut",
+            copy: "Copy",
+            paste: "Paste",
+            select_all: "Select All",
+
+            view: "View",
+            toggle_lite: "Toggle Lite Mode",
+            toggle_overlay: "Toggle Overlay Mascot",
+            theme: "Theme",
+            theme_system: "System",
+            theme_light: "Light",
+            theme_dark: "Dark",
+            reload: "Reload",
+            fullscreen: "Enter Full Screen",
+
+            window: "Window",
+            minimize: "Minimize",
+            maximize: "Maximize",
+
+            help: "Help",
+            welcome: "Welcome",
+            mobile_access: "Mobile Access",
+            report_issue: "Report Issue…",
+        }
+    }
+}
+
+fn build_app_menu(
+    app: &tauri::AppHandle,
+    l: &MenuLabels,
+) -> Result<tauri::menu::Menu<tauri::Wry>, tauri::Error> {
+    // ── App submenu (macOS shows as "Claw Fleet"; ignored on Win/Linux) ─
+    let about_meta = AboutMetadataBuilder::new()
+        .name(Some("Claw Fleet"))
+        .version(Some(env!("CARGO_PKG_VERSION")))
+        .website(Some("https://github.com/hoveychen/claw-fleet"))
+        .website_label(Some("GitHub"))
+        .build();
+    let about = PredefinedMenuItem::about(app, Some(l.about_item), Some(about_meta))?;
+
+    let app_submenu = SubmenuBuilder::new(app, l.app_menu_title)
+        .item(&about)
+        .separator()
+        .item(
+            &MenuItemBuilder::new(l.settings)
+                .id("menu-settings")
+                .accelerator("CmdOrCtrl+,")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::new(l.check_updates)
+                .id("menu-check-updates")
+                .build(app)?,
+        )
+        .separator()
+        .services_with_text(l.services)
+        .separator()
+        .hide_with_text(l.hide_self)
+        .hide_others_with_text(l.hide_others)
+        .show_all_with_text(l.show_all)
+        .separator()
+        .quit_with_text(l.quit)
+        .build()?;
+
+    // ── File ────────────────────────────────────────────────────────────
+    let file_submenu = SubmenuBuilder::new(app, l.file)
+        .item(
+            &MenuItemBuilder::new(l.switch_connection)
+                .id("menu-switch-connection")
+                .accelerator("CmdOrCtrl+Shift+C")
+                .build(app)?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::new(l.daily_report)
+                .id("menu-daily-report")
+                .build(app)?,
+        )
+        .separator()
+        .close_window_with_text(l.close_window)
+        .build()?;
+
+    // ── Edit (required for text inputs on macOS) ────────────────────────
+    let edit_submenu = SubmenuBuilder::new(app, l.edit)
+        .undo_with_text(l.undo)
+        .redo_with_text(l.redo)
+        .separator()
+        .cut_with_text(l.cut)
+        .copy_with_text(l.copy)
+        .paste_with_text(l.paste)
+        .separator()
+        .select_all_with_text(l.select_all)
+        .build()?;
+
+    // ── View ────────────────────────────────────────────────────────────
+    let theme_submenu = SubmenuBuilder::new(app, l.theme)
+        .item(
+            &MenuItemBuilder::new(l.theme_system)
+                .id("menu-theme-system")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::new(l.theme_light)
+                .id("menu-theme-light")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::new(l.theme_dark)
+                .id("menu-theme-dark")
+                .build(app)?,
+        )
+        .build()?;
+
+    #[allow(unused_mut)]
+    let mut view_builder = SubmenuBuilder::new(app, l.view).item(
+        &MenuItemBuilder::new(l.toggle_lite)
+            .id("menu-toggle-lite")
+            .accelerator("CmdOrCtrl+Shift+L")
+            .build(app)?,
+    );
+    // Overlay mascot is disabled on macOS (no transparent floating window).
+    #[cfg(not(target_os = "macos"))]
+    {
+        view_builder = view_builder.item(
+            &MenuItemBuilder::new(l.toggle_overlay)
+                .id("menu-toggle-overlay")
+                .build(app)?,
+        );
+    }
+    let view_submenu = view_builder
+        .item(&theme_submenu)
+        .separator()
+        .item(
+            &MenuItemBuilder::new(l.reload)
+                .id("menu-reload")
+                .accelerator("CmdOrCtrl+R")
+                .build(app)?,
+        )
+        .fullscreen_with_text(l.fullscreen)
+        .build()?;
+
+    // ── Window ──────────────────────────────────────────────────────────
+    let window_submenu = SubmenuBuilder::new(app, l.window)
+        .minimize_with_text(l.minimize)
+        .maximize_with_text(l.maximize)
+        .build()?;
+
+    // ── Help ────────────────────────────────────────────────────────────
+    let help_submenu = SubmenuBuilder::new(app, l.help)
+        .item(
+            &MenuItemBuilder::new(l.welcome)
+                .id("menu-welcome")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::new(l.mobile_access)
+                .id("menu-mobile-access")
+                .build(app)?,
+        )
+        .separator()
+        .item(
+            &MenuItemBuilder::new(l.report_issue)
+                .id("menu-report-issue")
+                .build(app)?,
+        )
+        .item(
+            &MenuItemBuilder::new(l.check_updates)
+                .id("menu-check-updates-help")
+                .build(app)?,
+        )
+        .build()?;
+
+    MenuBuilder::new(app)
+        .item(&app_submenu)
+        .item(&file_submenu)
+        .item(&edit_submenu)
+        .item(&view_submenu)
+        .item(&window_submenu)
+        .item(&help_submenu)
+        .build()
+}
+
+/// Build and install the app menu using the current locale stored in
+/// AppState. Called from `setup` (initial build) and `set_locale` (rebuild).
+fn install_app_menu(app: &tauri::AppHandle) {
+    let locale = {
+        let state = app.state::<AppState>();
+        let guard = state.locale.lock().unwrap();
+        guard.clone()
+    };
+    let labels = menu_labels(&locale);
+    match build_app_menu(app, &labels) {
+        Ok(menu) => {
+            let _ = app.set_menu(menu);
+        }
+        Err(e) => {
+            eprintln!("failed to build app menu: {e}");
+        }
+    }
+}
+
+/// Handle an event fired by the app menu (distinct from the tray menu).
+/// Returns `true` if the id was recognised and handled.
+fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
+    match id {
+        "menu-settings" => {
+            let _ = open_settings_window(app.clone(), None);
+        }
+        "menu-check-updates" | "menu-check-updates-help" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            let _ = app.emit("menu-check-updates", ());
+        }
+        "menu-switch-connection" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            let _ = app.emit("switch-connection", ());
+        }
+        "menu-daily-report" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            let _ = app.emit("menu-daily-report", ());
+        }
+        "menu-toggle-lite" => {
+            let _ = app.emit("menu-toggle-lite", ());
+        }
+        "menu-toggle-overlay" => {
+            let _ = app.emit("menu-toggle-overlay", ());
+        }
+        "menu-theme-system" => {
+            let _ = app.emit("menu-theme", "system");
+        }
+        "menu-theme-light" => {
+            let _ = app.emit("menu-theme", "light");
+        }
+        "menu-theme-dark" => {
+            let _ = app.emit("menu-theme", "dark");
+        }
+        "menu-reload" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.eval("window.location.reload()");
+            }
+        }
+        "menu-welcome" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            let _ = app.emit("menu-welcome", ());
+        }
+        "menu-mobile-access" => {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.set_focus();
+            }
+            let _ = app.emit("menu-mobile-access", ());
+        }
+        "menu-report-issue" => {
+            use tauri_plugin_opener::OpenerExt;
+            let _ = app
+                .opener()
+                .open_url("https://github.com/hoveychen/claw-fleet/issues", None::<&str>);
+        }
+        _ => return false,
+    }
+    true
+}
+
 fn build_tray_menu(
     app: &tauri::AppHandle,
     active_main: &[&SessionInfo],
@@ -2226,6 +2627,21 @@ pub fn run() {
             // `get_source_usage` / `get_account_info` calls now update the
             // cached tray summaries as a side-effect, avoiding duplicate
             // network requests that could hit rate limits.
+
+            // ── App menu bar ─────────────────────────────────────────────────
+            // Register the main app menu (File / Edit / View / Window / Help …).
+            // The global menu-event handler below dispatches custom items with
+            // `menu-*` ids; tray items keep their own (tray-scoped) handler.
+            // Labels come from the current locale (AppState::locale), which is
+            // synced from the frontend on mount via `set_locale`; the menu is
+            // rebuilt there whenever the user switches language.
+            install_app_menu(app.handle());
+            app.handle().on_menu_event(|app, event| {
+                let id = event.id().as_ref().to_string();
+                if id.starts_with("menu-") {
+                    handle_app_menu_event(app, &id);
+                }
+            });
 
             // ── Tray icon ────────────────────────────────────────────────────
             // Build an initial menu; it will be rebuilt dynamically by rebuild_tray().

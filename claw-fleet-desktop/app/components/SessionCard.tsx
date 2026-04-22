@@ -408,6 +408,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
   return (
     <div
       className={`${styles.card} ${isSelected ? styles.selected : ""} ${isActive ? styles.active : ""} ${variant === "group-main" ? styles.group_main : ""}`}
+      data-session-id={session.id}
       onClick={onClick}
       role="button"
       tabIndex={0}

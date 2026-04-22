@@ -37,7 +37,7 @@ export function SessionList() {
   const { t } = useTranslation();
   const { sessions, refresh, setSessions, scanReady, setScanReady } = useSessionsStore();
   const { session: viewedSession, open } = useDetailStore();
-  const { viewMode, setViewMode, setLiteMode } = useUIStore();
+  const { viewMode, setViewMode, setLiteMode, showMobileAccess, setShowMobileAccess } = useUIStore();
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const [filter, setFilter] = useState("");
@@ -45,7 +45,6 @@ export function SessionList() {
   const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
   const [isDragging, setIsDragging] = useState(false);
   const [isWindows, setIsWindows] = useState(false);
-  const [showMobileAccess, setShowMobileAccess] = useState(false);
   const [mobileActive, setMobileActive] = useState(false);
 
   // Poll mobile access status for the sidebar indicator.
@@ -281,7 +280,7 @@ export function SessionList() {
           <UsagePanel />
 
           {/* Mascot */}
-          <MascotEyes />
+          <MascotEyes dashboardMode />
         </div>
 
         {/* Footer profile card */}

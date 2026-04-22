@@ -35,12 +35,11 @@ export function LiteApp() {
   const { t } = useTranslation();
   const { sessions, setSessions, refresh } = useSessionsStore();
   const { open, session: openedSession } = useDetailStore();
-  const { setLiteMode } = useUIStore();
+  const { setLiteMode, showMobileAccess, setShowMobileAccess } = useUIStore();
   const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
   const hasAlerts = useWaitingAlertsStore(
     (s) => s.alerts.some((a) => !s.dismissedIds.has(a.sessionId)),
   );
-  const [showMobileAccess, setShowMobileAccess] = useState(false);
   const [mobileActive, setMobileActive] = useState(false);
 
   // Keep session list flowing in lite mode (normal SessionList is unmounted).
@@ -146,7 +145,7 @@ export function LiteApp() {
 
           <div className={styles.mascot_slot}>
             <MascotAlertBubble />
-            <MascotEyes suppressQuip={hasAlerts} />
+            <MascotEyes suppressQuip={hasAlerts} dashboardMode />
           </div>
         </div>
       )}

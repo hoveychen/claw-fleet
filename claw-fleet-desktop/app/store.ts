@@ -49,9 +49,11 @@ interface UIState {
   theme: Theme;
   viewMode: ViewMode;
   liteMode: boolean;
+  showMobileAccess: boolean;
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
   setLiteMode: (on: boolean) => void;
+  setShowMobileAccess: (v: boolean) => void;
 }
 
 function getSystemTheme(): "dark" | "light" {
@@ -66,6 +68,7 @@ export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
   viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
   liteMode: getItem("liteMode") === "true",
+  showMobileAccess: false,
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -80,6 +83,7 @@ export const useUIStore = create<UIState>((set) => ({
     invoke("set_lite_mode", { enabled: on }).catch(() => {});
     set({ liteMode: on });
   },
+  setShowMobileAccess: (v) => set({ showMobileAccess: v }),
 }));
 
 // ── Sessions store ───────────────────────────────────────────────────────────

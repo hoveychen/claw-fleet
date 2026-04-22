@@ -6,7 +6,16 @@ import { getItem } from "../storage";
 import type { SessionInfo } from "../types";
 import { RobotFrame } from "./RobotFrame";
 import { useMood } from "./useMood";
+import { useFleetState, type HealthLevel } from "./useFleetState";
 import styles from "./MascotEyes.module.css";
+
+// ── Dashboard-mode health tint colors (match existing LED palette) ──────────
+
+const HEALTH_COLORS: Record<HealthLevel, string> = {
+  green:  "#4ade80",
+  yellow: "#fbbf24",
+  red:    "#ef4444",
+};
 
 // ── Dynamic quip generation ─────────────────────────────────────────────────
 
@@ -197,10 +206,12 @@ const EYE_COLOR = "var(--color-accent)";   // brand accent color
 
 // ── Component ────────────────────────────────────────────────────────────────
 
-export function MascotEyes({ embedded, onQuip, suppressQuip }: { embedded?: boolean; onQuip?: (text: string | null) => void; suppressQuip?: boolean } = {}) {
+export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode }: { embedded?: boolean; onQuip?: (text: string | null) => void; suppressQuip?: boolean; dashboardMode?: boolean } = {}) {
   const { t, i18n } = useTranslation();
   const { sessions } = useSessionsStore();
   const mood = useMood(sessions);
+  const fleetState = useFleetState(sessions);
+  const mascotRootRef = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(true);
 
   const [isBlinking, setIsBlinking] = useState(false);
@@ -345,6 +356,42 @@ export function MascotEyes({ embedded, onQuip, suppressQuip }: { embedded?: bool
     return () => clearTimeout(t1);
   }, [mood]);
 
+  // ── Dashboard gaze: point toward the DOM row of the next attention target ──
+  const [dashboardGaze, setDashboardGaze] = useState<{ x: number; y: number } | null>(null);
+  const nextAttentionId = fleetState.nextAttentionId;
+
+  useEffect(() => {
+    if (!dashboardMode || !nextAttentionId) {
+      setDashboardGaze(null);
+      return;
+    }
+    const compute = () => {
+      const target = document.querySelector(
+        `[data-session-id="${CSS.escape(nextAttentionId)}"]`,
+      ) as HTMLElement | null;
+      const root = mascotRootRef.current;
+      if (!target || !root) {
+        setDashboardGaze((prev) => (prev === null ? prev : null));
+        return;
+      }
+      const tr = target.getBoundingClientRect();
+      const rr = root.getBoundingClientRect();
+      const dx = (tr.left + tr.width / 2) - (rr.left + rr.width / 2);
+      const dy = (tr.top + tr.height / 2) - (rr.top + rr.height / 2);
+      const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+      const maxOffset = 6;
+      const nx = (dx / dist) * maxOffset;
+      const ny = (dy / dist) * maxOffset;
+      setDashboardGaze((prev) => {
+        if (prev && Math.abs(prev.x - nx) < 0.3 && Math.abs(prev.y - ny) < 0.3) return prev;
+        return { x: nx, y: ny };
+      });
+    };
+    compute();
+    const id = setInterval(compute, 500);
+    return () => clearInterval(id);
+  }, [dashboardMode, nextAttentionId]);
+
   // ── Dynamic quip generation ────────────────────────────────────────────────
   const fetchQuips = useCallback(async (currentSessions: SessionInfo[]) => {
     if (getItem("personalized-mascot") !== "true") return;
@@ -468,6 +515,8 @@ export function MascotEyes({ embedded, onQuip, suppressQuip }: { embedded?: bool
   const wanderCfg = GAZE_WANDER[mood];
   const effectiveGaze = isLookingAround
     ? { x: Math.sin(Date.now() * 0.01) * 6, y: 0 }
+    : dashboardGaze
+    ? dashboardGaze
     : shape.gazeX !== undefined || shape.gazeY !== undefined
     ? {
         x: (shape.gazeX ?? 0) * 5 + gazeOffset.x * wanderCfg.dirBlend,
@@ -855,6 +904,55 @@ export function MascotEyes({ embedded, onQuip, suppressQuip }: { embedded?: bool
       );
     }
 
+    // Dashboard state-driven badges (waiting / stuck / completed)
+    if (dashboardMode) {
+      const waitSlots = Math.min(fleetState.waitingCount, 4);
+      for (let i = 0; i < waitSlots; i++) {
+        const spacing = 10;
+        const offset = (i - (waitSlots - 1) / 2) * spacing;
+        elements.push(
+          <text
+            key={`dash-wait-${i}`}
+            x={100 + offset}
+            y={-2}
+            fontSize={14}
+            fontWeight="bold"
+            fill="#fbbf24"
+            textAnchor="middle"
+            className={styles.dashWaitingMark}
+          >!</text>,
+        );
+      }
+      const stuckSlots = Math.min(fleetState.stuckCount, 4);
+      for (let i = 0; i < stuckSlots; i++) {
+        elements.push(
+          <ellipse
+            key={`dash-stuck-${i}`}
+            cx={30 + i * 9}
+            cy={12}
+            rx={2.5}
+            ry={4}
+            fill="#7dd3fc"
+            className={styles.dashSweatDrop}
+          />,
+        );
+      }
+      const doneSlots = Math.min(fleetState.recentlyCompletedIds.length, 4);
+      for (let i = 0; i < doneSlots; i++) {
+        elements.push(
+          <text
+            key={`dash-done-${i}`}
+            x={175 - i * 10}
+            y={10}
+            fontSize={11}
+            fill="#fbbf24"
+            textAnchor="middle"
+            className={styles.dashSparkle}
+          >✦</text>,
+        );
+      }
+    }
+
     // Click reaction: emoji burst
     if (clickReaction) {
       const burstEmojis = ["💕", "✨", "💖", "⭐", "💗"];
@@ -900,10 +998,19 @@ export function MascotEyes({ embedded, onQuip, suppressQuip }: { embedded?: bool
     onQuip?.(quipText || null);
   }, [quipText, onQuip]);
 
+  const tintStyle = dashboardMode
+    ? ({ "--color-accent": HEALTH_COLORS[fleetState.healthLevel] } as React.CSSProperties)
+    : undefined;
+
   // Embedded mode: just the SVG, no toggle/quip wrapper
   if (embedded) {
     return (
-      <div className={mascotClasses} onClick={handleMascotClick} style={{ background: "transparent" }}>
+      <div
+        ref={mascotRootRef}
+        className={mascotClasses}
+        onClick={handleMascotClick}
+        style={{ background: "transparent", ...(tintStyle ?? {}) }}
+      >
         <svg viewBox="0 -14 200 114" className={styles.svg}>
           <defs>
             <linearGradient id="grad-special" x1="0" y1="0" x2="0" y2="1">
@@ -991,7 +1098,7 @@ export function MascotEyes({ embedded, onQuip, suppressQuip }: { embedded?: bool
             </div>
           )}
           <RobotFrame onClick={handleMascotClick}>
-            <div className={mascotClasses}>
+            <div ref={mascotRootRef} className={mascotClasses} style={tintStyle}>
               <svg viewBox="0 -14 200 114" className={styles.svg}>
                 <defs>
                   <linearGradient id="grad-special" x1="0" y1="0" x2="0" y2="1">
