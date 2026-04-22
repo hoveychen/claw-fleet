@@ -10,6 +10,13 @@ async function boot() {
     installMocks();
   }
 
+  try {
+    const { installAppContextMenu } = await import("./contextMenu");
+    installAppContextMenu();
+  } catch (e) {
+    console.warn("[preview] context menu install failed:", e);
+  }
+
   const { default: PreviewApp } = await import("./PreviewApp");
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

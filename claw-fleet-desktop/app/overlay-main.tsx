@@ -25,6 +25,13 @@ async function boot() {
     console.warn("[overlay] i18n init failed:", e);
   }
 
+  try {
+    const { installAppContextMenu } = await import("./contextMenu");
+    installAppContextMenu();
+  } catch (e) {
+    console.warn("[overlay] context menu install failed:", e);
+  }
+
   const { default: OverlayApp } = await import("./OverlayApp");
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

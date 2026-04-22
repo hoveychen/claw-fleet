@@ -15,6 +15,13 @@ async function boot() {
     console.warn("[decision-float] i18n init failed:", e);
   }
 
+  try {
+    const { installAppContextMenu } = await import("./contextMenu");
+    installAppContextMenu();
+  } catch (e) {
+    console.warn("[decision-float] context menu install failed:", e);
+  }
+
   const { default: DecisionFloatApp } = await import("./DecisionFloatApp");
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

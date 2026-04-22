@@ -40,6 +40,9 @@ async function boot() {
     }
   }
 
+  const { installAppContextMenu } = await import("./contextMenu");
+  installAppContextMenu();
+
   const { default: SettingsApp } = await import("./SettingsApp");
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

@@ -26,6 +26,9 @@ async function boot() {
   // i18n must be imported after storage is ready (it reads "lang" synchronously).
   await import("./i18n");
 
+  const { installAppContextMenu } = await import("./contextMenu");
+  installAppContextMenu();
+
   const { default: App } = await import("./App");
 
   // In mock + lite, auto-accept a local connection so the ConnectionDialog

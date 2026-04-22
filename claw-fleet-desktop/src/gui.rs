@@ -45,6 +45,11 @@ fn check_app_version() -> version_check::VersionCheckResult {
     version_check::check_app_version()
 }
 
+#[tauri::command]
+fn get_app_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
 // ── TTS via Microsoft Edge TTS ───────────────────────────────────────────────
 
 #[derive(serde::Serialize, Clone)]
@@ -2387,6 +2392,7 @@ pub fn run() {
             get_log_path,
             get_platform,
             check_app_version,
+            get_app_version,
             kill_session,
             kill_workspace_sessions,
             resume_rate_limited_session,
