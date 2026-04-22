@@ -1,7 +1,8 @@
 .container {
   flex-shrink: 0;
-  overflow: hidden;
+  overflow: visible;
   width: 100%;
+  position: relative;
 }
 
 .toggle {
@@ -543,14 +544,19 @@
 /* ── Quip speech bubble ──────────────────────────────────────────────────── */
 
 .quipBubble {
-  position: relative;
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 10px;
+  right: 10px;
   background: var(--mascot-bubble-bg, rgba(255, 255, 255, 0.12));
   border: 1px solid var(--mascot-bubble-border, rgba(255, 255, 255, 0.15));
   border-radius: 12px;
   padding: 6px 12px;
-  margin: 4px 10px 6px;
+  margin: 0;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   animation: quipFadeIn 0.5s ease;
-  max-width: calc(100% - 20px);
+  z-index: 5;
 }
 
 /* Tail pointing down */

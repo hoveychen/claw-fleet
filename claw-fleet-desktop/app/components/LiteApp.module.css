@@ -119,11 +119,8 @@
   border-top: 1px solid var(--color-border, rgba(255, 255, 255, 0.06));
 }
 
-/* Mascot face stays compact; the alert bubble gets a wider cap so
-   multi-line summaries stay readable. */
 .mascot_slot > * {
   width: 100%;
-  max-width: 240px;
 }
 
 /* Session detail takes over the list + monitor area when a session is open. */

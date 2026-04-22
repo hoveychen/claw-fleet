@@ -1,0 +1,36 @@
+/* Shared styles applied by safeMarkdownComponents so every ReactMarkdown
+   site renders tables and inline code that respect the parent container
+   width — critical for lite mode (340px) where default table auto-sizing
+   otherwise pushes content past the panel edge. */
+
+.table_wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 0.4em 0;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.th,
+.td {
+  padding: 4px 8px;
+  border: 1px solid var(--color-border);
+  vertical-align: top;
+  text-align: left;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.th {
+  background: var(--color-bg);
+  font-weight: 600;
+}
+
+.code {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}

@@ -601,12 +601,16 @@
   font-size: 13px;
   font-weight: 500;
   color: var(--color-text);
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 .elicitation_option_desc {
   font-size: 12px;
   color: var(--color-text-secondary);
   line-height: 1.4;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 
 /* "Other" custom input row */

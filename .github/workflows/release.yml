@@ -391,7 +391,7 @@ jobs:
         run: |
           MOBILE_TAG=$(gh release list -L 50 --json tagName -q '[.[] | select(.tagName | startswith("mobile-v"))][0].tagName' 2>/dev/null || echo "")
           if [ -n "$MOBILE_TAG" ]; then
-            ASSET_URL=$(gh release view "$MOBILE_TAG" --json assets -q '.assets[0].browserDownloadUrl' 2>/dev/null || echo "")
+            ASSET_URL=$(gh release view "$MOBILE_TAG" --json assets -q '.assets[0].url' 2>/dev/null || echo "")
             echo "tag=$MOBILE_TAG" >> "$GITHUB_OUTPUT"
             echo "url=$ASSET_URL" >> "$GITHUB_OUTPUT"
           fi
