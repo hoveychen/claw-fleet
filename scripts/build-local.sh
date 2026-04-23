@@ -125,20 +125,34 @@ if [[ -d "$APP_BUNDLE" ]]; then
   mkdir -p "$PKG_DIR"
   PKG_NAME="claw-fleet-${DEV_VERSION}.pkg"
   echo "==> Building PKG installer..."
+
+  # Generate a non-relocatable component plist. Without this, PackageKit
+  # looks up the bundle id in LaunchServices and redirects the install to
+  # the first matching copy on disk (e.g. the one still sitting in
+  # target/release/bundle/macos/), silently ignoring --install-location.
+  PKG_STAGING=$(mktemp -d)
+  cp -R "$APP_BUNDLE" "$PKG_STAGING/"
+  COMPONENT_PLIST="$PKG_STAGING/component.plist"
+  pkgbuild --analyze --root "$PKG_STAGING" "$COMPONENT_PLIST"
+  /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
+
   if [[ -n "$APPLE_INSTALLER_IDENTITY" ]]; then
-    pkgbuild --component "$APP_BUNDLE" \
+    pkgbuild --root "$PKG_STAGING" \
+      --component-plist "$COMPONENT_PLIST" \
       --identifier "com.hoveychen.claw-fleet" \
       --version "$DEV_VERSION" \
       --install-location "/Applications" \
       --sign "$APPLE_INSTALLER_IDENTITY" \
       "$PKG_DIR/$PKG_NAME"
   else
-    pkgbuild --component "$APP_BUNDLE" \
+    pkgbuild --root "$PKG_STAGING" \
+      --component-plist "$COMPONENT_PLIST" \
       --identifier "com.hoveychen.claw-fleet" \
       --version "$DEV_VERSION" \
       --install-location "/Applications" \
       "$PKG_DIR/$PKG_NAME"
   fi
+  rm -rf "$PKG_STAGING"
   echo "==> PKG: $PKG_DIR/$PKG_NAME"
   open "$PKG_DIR/$PKG_NAME"
 fi
@@ -184,20 +198,30 @@ if [[ "$NOTARIZE" == true ]]; then
   echo "==> Re-creating PKG with notarized app..."
   rm -f "$PKG_DIR"/*.pkg
   PKG_NAME="claw-fleet-${DEV_VERSION}.pkg"
+
+  PKG_STAGING=$(mktemp -d)
+  cp -R "$APP_BUNDLE" "$PKG_STAGING/"
+  COMPONENT_PLIST="$PKG_STAGING/component.plist"
+  pkgbuild --analyze --root "$PKG_STAGING" "$COMPONENT_PLIST"
+  /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
+
   if [[ -n "${APPLE_INSTALLER_IDENTITY:-}" ]]; then
-    pkgbuild --component "$APP_BUNDLE" \
+    pkgbuild --root "$PKG_STAGING" \
+      --component-plist "$COMPONENT_PLIST" \
       --identifier "com.hoveychen.claw-fleet" \
       --version "$DEV_VERSION" \
       --install-location "/Applications" \
       --sign "$APPLE_INSTALLER_IDENTITY" \
       "$PKG_DIR/$PKG_NAME"
   else
-    pkgbuild --component "$APP_BUNDLE" \
+    pkgbuild --root "$PKG_STAGING" \
+      --component-plist "$COMPONENT_PLIST" \
       --identifier "com.hoveychen.claw-fleet" \
       --version "$DEV_VERSION" \
       --install-location "/Applications" \
       "$PKG_DIR/$PKG_NAME"
   fi
+  rm -rf "$PKG_STAGING"
 
   echo "==> Notarizing PKG..."
   xcrun notarytool submit "$PKG_DIR/$PKG_NAME" \
