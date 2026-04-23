@@ -140,14 +140,6 @@ if [[ -d "$APP_BUNDLE" ]]; then
       "$PKG_DIR/$PKG_NAME"
   fi
   echo "==> PKG: $PKG_DIR/$PKG_NAME"
-
-  # Dev version is 0.0.* so macOS installer would reject it as a downgrade if
-  # an official release is already installed. Clear the prior app + receipt
-  # before opening the pkg so the install proceeds.
-  echo "==> Removing previously installed Claw Fleet so the installer accepts this dev build (may prompt for sudo)..."
-  sudo pkgutil --forget com.hoveychen.claw-fleet >/dev/null 2>&1 || true
-  sudo rm -rf "/Applications/Claw Fleet.app"
-
   open "$PKG_DIR/$PKG_NAME"
 fi
 
