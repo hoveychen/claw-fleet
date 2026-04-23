@@ -1454,7 +1454,7 @@ fn open_settings_window(app: tauri::AppHandle, connection: Option<String>) -> Re
         path.push_str(&utf8_percent_encode(&conn, NON_ALPHANUMERIC).to_string());
     }
 
-    tauri::WebviewWindowBuilder::new(
+    let window = tauri::WebviewWindowBuilder::new(
         &app,
         "settings",
         tauri::WebviewUrl::App(path.into()),
@@ -1465,6 +1465,17 @@ fn open_settings_window(app: tauri::AppHandle, connection: Option<String>) -> Re
     .center()
     .build()
     .map_err(|e| e.to_string())?;
+
+    // Hide on close instead of destroying the WKWebView: tearing down a secondary
+    // webview races with delayed WebKit main-thread work items (observed crash in
+    // WebPageProxy::dispatchSetObscuredContentInsets on macOS 26.3.1).
+    let hide_target = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = hide_target.hide();
+        }
+    });
 
     Ok(())
 }
@@ -1525,7 +1536,19 @@ fn open_preview_window(
         }
     }
 
-    builder.build().map_err(|e| e.to_string())?;
+    let window = builder.build().map_err(|e| e.to_string())?;
+
+    // Same WKWebView teardown-race workaround as the settings window: hide
+    // instead of destroying so queued WebKit work items can't dereference a
+    // freed WebPageProxy.
+    let hide_target = window.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            api.prevent_close();
+            let _ = hide_target.hide();
+        }
+    });
+
     Ok(())
 }
 
