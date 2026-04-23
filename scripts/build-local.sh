@@ -30,10 +30,13 @@ else
 fi
 
 # ── Generate dev version ──────────────────────────────────────────────────────
+# Keep the numeric major/minor at 0.0 so macOS pkg installers never treat this
+# dev build as newer than an official SemVer release (e.g. 1.5.9). The date
+# lives in the patch segment so the version is still human-readable.
 YY=$(date +%y)
-MM=$((10#$(date +%m)))
-DD=$((10#$(date +%d)))
-DEV_VERSION="${YY}.${MM}.${DD}-dev.$(date +%s)"
+MM=$(date +%m)
+DD=$(date +%d)
+DEV_VERSION="0.0.${YY}${MM}${DD}-dev.$(date +%s)"
 echo "==> Dev version: $DEV_VERSION"
 
 export OPENSSL_STATIC=1
