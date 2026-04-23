@@ -126,15 +126,22 @@ if [[ -d "$APP_BUNDLE" ]]; then
   PKG_NAME="claw-fleet-${DEV_VERSION}.pkg"
   echo "==> Building PKG installer..."
 
-  # Generate a non-relocatable component plist. Without this, PackageKit
-  # looks up the bundle id in LaunchServices and redirects the install to
-  # the first matching copy on disk (e.g. the one still sitting in
-  # target/release/bundle/macos/), silently ignoring --install-location.
+  # Generate a component plist that disables two PackageKit defaults that
+  # break local dev installs:
+  #   - BundleIsRelocatable: macOS would otherwise redirect the install to
+  #     the first matching bundle registered in LaunchServices (e.g. the
+  #     app still sitting in target/release/bundle/macos/), silently
+  #     ignoring --install-location.
+  #   - BundleIsVersionChecked: the 0.0.* dev version is numerically lower
+  #     than any released 1.x.y, so without this PackageKit would skip the
+  #     component with "version X.Y.Z is already installed" and leave the
+  #     installed release bundle untouched.
   PKG_STAGING=$(mktemp -d)
   cp -R "$APP_BUNDLE" "$PKG_STAGING/"
   COMPONENT_PLIST="$PKG_STAGING/component.plist"
   pkgbuild --analyze --root "$PKG_STAGING" "$COMPONENT_PLIST"
   /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
+  /usr/libexec/PlistBuddy -c "Set :0:BundleIsVersionChecked false" "$COMPONENT_PLIST"
 
   if [[ -n "$APPLE_INSTALLER_IDENTITY" ]]; then
     pkgbuild --root "$PKG_STAGING" \
@@ -204,6 +211,7 @@ if [[ "$NOTARIZE" == true ]]; then
   COMPONENT_PLIST="$PKG_STAGING/component.plist"
   pkgbuild --analyze --root "$PKG_STAGING" "$COMPONENT_PLIST"
   /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
+  /usr/libexec/PlistBuddy -c "Set :0:BundleIsVersionChecked false" "$COMPONENT_PLIST"
 
   if [[ -n "${APPLE_INSTALLER_IDENTITY:-}" ]]; then
     pkgbuild --root "$PKG_STAGING" \
