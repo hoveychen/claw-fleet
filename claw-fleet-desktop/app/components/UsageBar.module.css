@@ -44,6 +44,31 @@
   color: var(--color-text-dim);
 }
 
+.label_indent {
+  padding-left: 8px;
+  max-width: 62px;
+}
+
+.group + .group {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="light"] .group + .group {
+  border-top-color: rgba(0, 0, 0, 0.08);
+}
+
+.group_name {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text);
+  opacity: 0.8;
+  margin-bottom: 2px;
+}
+
 .track {
   flex: 1;
   height: 4px;

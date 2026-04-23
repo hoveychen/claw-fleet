@@ -210,6 +210,7 @@ const EYE_COLOR = "var(--color-accent)";   // brand accent color
 export interface UsageRingSourceBreakdown {
   name: string;
   percent: number;
+  bars?: { label: string; percent: number }[];
 }
 
 export interface UsageRingInput {
