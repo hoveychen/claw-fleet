@@ -54,6 +54,25 @@ impl Default for LlmConfig {
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
+/// Real token + cost numbers as reported by the underlying provider.
+/// Present only when the CLI emits structured usage (Claude `--output-format json`);
+/// `None` for providers that return text only.
+#[derive(Clone, Debug, Default)]
+pub struct CompletionUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cache_creation_tokens: u64,
+    pub cache_read_tokens: u64,
+    pub total_cost_usd: f64,
+}
+
+/// Result of a `complete` call — always has text, may have real usage.
+#[derive(Clone, Debug)]
+pub struct Completion {
+    pub text: String,
+    pub usage: Option<CompletionUsage>,
+}
+
 pub trait LlmProvider: Send + Sync {
     /// Short identifier: "claude", "codex", "cursor".
     fn name(&self) -> &str;
@@ -67,8 +86,10 @@ pub trait LlmProvider: Send + Sync {
     fn default_fast_model(&self) -> &str;
     /// Recommended model for complex tasks (e.g. report summaries, lessons).
     fn default_standard_model(&self) -> &str;
-    /// Send a prompt and return the text response.  Blocks up to `timeout`.
-    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<String>;
+    /// Send a prompt and return the completion. Blocks up to `timeout`.
+    /// When available, `Completion.usage` carries provider-reported token/cost
+    /// numbers; otherwise callers fall back to character-based estimation.
+    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion>;
 }
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
@@ -224,15 +245,59 @@ impl LlmProvider for ClaudeCliProvider {
     fn default_fast_model(&self) -> &str { "haiku" }
     fn default_standard_model(&self) -> &str { "sonnet" }
 
-    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<String> {
+    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
         let bin = self.bin_path.as_deref()?;
-        run_cli(
+        // `--output-format json` makes Claude Code emit a single JSON object with
+        // `result` (the text) and a `usage` block carrying real token counts
+        // (including the ~36k cache_creation tokens CLI injects from its
+        // bundled system prompt / CLAUDE.md / tool defs). Without this flag the
+        // CLI only prints the assistant text, which forced us to estimate —
+        // and that estimate was off by orders of magnitude because we couldn't
+        // see the cache-creation head.
+        let raw = run_cli(
             bin,
-            &["-p", prompt, "--model", model, "--no-session-persistence"],
+            &[
+                "-p", prompt,
+                "--model", model,
+                "--no-session-persistence",
+                "--output-format", "json",
+            ],
             timeout,
             "llm:claude",
-        )
+        )?;
+        parse_claude_json_response(&raw)
     }
+}
+
+/// Parse Claude Code's `--output-format json` response into a `Completion`.
+/// Returns `None` on malformed JSON or when the run reported an error.
+fn parse_claude_json_response(raw: &str) -> Option<Completion> {
+    let v: serde_json::Value = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(e) => {
+            log_debug(&format!("[llm:claude] json parse failed: {e}"));
+            return None;
+        }
+    };
+    if v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false) {
+        log_debug("[llm:claude] response marked is_error=true");
+        return None;
+    }
+    let text = v.get("result").and_then(|r| r.as_str())?.to_string();
+    let usage = v.get("usage").map(|u| CompletionUsage {
+        input_tokens: u.get("input_tokens").and_then(|n| n.as_u64()).unwrap_or(0),
+        output_tokens: u.get("output_tokens").and_then(|n| n.as_u64()).unwrap_or(0),
+        cache_creation_tokens: u
+            .get("cache_creation_input_tokens")
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0),
+        cache_read_tokens: u
+            .get("cache_read_input_tokens")
+            .and_then(|n| n.as_u64())
+            .unwrap_or(0),
+        total_cost_usd: v.get("total_cost_usd").and_then(|n| n.as_f64()).unwrap_or(0.0),
+    });
+    Some(Completion { text, usage })
 }
 
 // ── Codex CLI provider ───────────────────────────────────────────────────────
@@ -278,14 +343,14 @@ impl LlmProvider for CodexCliProvider {
     fn default_fast_model(&self) -> &str { "gpt-5.1-codex-mini" }
     fn default_standard_model(&self) -> &str { "gpt-5.3-codex" }
 
-    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<String> {
+    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
         let bin = self.bin_path.as_deref()?;
         // exec: non-interactive mode (stdout = final message only)
         // --ephemeral: don't persist session
         // --full-auto: auto-approve (no interactive prompts)
         // --skip-git-repo-check: we're not in a repo context
         // --sandbox read-only: prevent file writes (pure text generation)
-        run_cli(
+        let text = run_cli(
             bin,
             &[
                 "exec",
@@ -298,7 +363,8 @@ impl LlmProvider for CodexCliProvider {
             ],
             timeout,
             "llm:codex",
-        )
+        )?;
+        Some(Completion { text, usage: None })
     }
 }
 
@@ -348,17 +414,18 @@ impl LlmProvider for CursorCliProvider {
     fn default_fast_model(&self) -> &str { "composer-2-fast" }
     fn default_standard_model(&self) -> &str { "composer-2" }
 
-    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<String> {
+    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
         let bin = self.bin_path.as_deref()?;
         // -p: print mode (non-interactive, output to stdout)
         // -f: trust workspace without interactive prompt
         // --mode ask: read-only Q&A (no file writes)
-        run_cli(
+        let text = run_cli(
             bin,
             &["-p", "-f", "--model", model, "--mode", "ask", prompt],
             timeout,
             "llm:cursor",
-        )
+        )?;
+        Some(Completion { text, usage: None })
     }
 }
 
@@ -536,6 +603,52 @@ mod tests {
         let models = p.list_models();
         assert!(!models.is_empty());
         assert!(models.iter().any(|m| m.id.contains("codex")));
+    }
+
+    #[test]
+    fn parse_claude_json_success() {
+        // Real-shape response from `claude -p "say hi" --output-format json`.
+        let raw = r#"{
+            "type":"result","subtype":"success","is_error":false,
+            "result":"Hey! hi there.",
+            "total_cost_usd":0.0477,
+            "usage":{
+                "input_tokens":10,
+                "cache_creation_input_tokens":36382,
+                "cache_read_input_tokens":0,
+                "output_tokens":450
+            }
+        }"#;
+        let c = parse_claude_json_response(raw).expect("parse ok");
+        assert_eq!(c.text, "Hey! hi there.");
+        let u = c.usage.expect("usage present");
+        assert_eq!(u.input_tokens, 10);
+        assert_eq!(u.output_tokens, 450);
+        assert_eq!(u.cache_creation_tokens, 36382);
+        assert_eq!(u.cache_read_tokens, 0);
+        assert!((u.total_cost_usd - 0.0477).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parse_claude_json_is_error_rejected() {
+        let raw = r#"{"is_error":true,"result":"boom"}"#;
+        assert!(parse_claude_json_response(raw).is_none());
+    }
+
+    #[test]
+    fn parse_claude_json_missing_result_rejected() {
+        let raw = r#"{"is_error":false,"usage":{"input_tokens":1}}"#;
+        assert!(parse_claude_json_response(raw).is_none());
+    }
+
+    #[test]
+    fn parse_claude_json_no_usage_block() {
+        // Some response shapes may omit usage entirely; accept text and mark
+        // usage as None so callers fall back to estimation.
+        let raw = r#"{"is_error":false,"result":"ok"}"#;
+        let c = parse_claude_json_response(raw).expect("parse ok");
+        assert_eq!(c.text, "ok");
+        assert!(c.usage.is_none());
     }
 
     #[test]
