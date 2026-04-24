@@ -818,7 +818,13 @@ pub fn generate_ai_summary(
     }
 
     let prompt = build_summary_prompt(report, locale);
-    provider.complete(&prompt, model, AI_SUMMARY_TIMEOUT)
+    crate::llm_usage::complete_accounted(
+        provider,
+        &prompt,
+        model,
+        AI_SUMMARY_TIMEOUT,
+        crate::llm_usage::SCENARIO_DAILY_REPORT_SUMMARY,
+    )
 }
 
 // ── Lessons extraction ───────────────────────────────────────────────────────
@@ -1096,7 +1102,13 @@ pub fn generate_lessons(
 
     let prompt = build_lessons_prompt(&all_pairs, locale, &existing_rules);
 
-    let raw = match provider.complete(&prompt, model, LESSONS_TIMEOUT) {
+    let raw = match crate::llm_usage::complete_accounted(
+        provider,
+        &prompt,
+        model,
+        LESSONS_TIMEOUT,
+        crate::llm_usage::SCENARIO_DAILY_REPORT_LESSONS,
+    ) {
         Some(r) => r,
         None => return None,
     };

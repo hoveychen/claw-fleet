@@ -14,6 +14,7 @@ pub mod guard;
 pub mod hooks;
 pub mod interaction_mode;
 pub mod llm_provider;
+pub mod llm_usage;
 pub mod memory;
 pub mod model_cost;
 pub mod openclaw_source;

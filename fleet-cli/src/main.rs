@@ -2938,6 +2938,22 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/fleet_llm_usage/daily" => {
+                let from_ms = query
+                    .get("from_ms")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let to_ms = query
+                    .get("to_ms")
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(u64::MAX);
+                let buckets = claw_fleet_core::llm_usage::list_usage_daily_buckets(from_ms, to_ms);
+                let body = serde_json::to_string(&buckets).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             // ── Session outcome analysis (delegated from remote clients) ──
             "/analyze" => {
                 let mut body_bytes = Vec::new();

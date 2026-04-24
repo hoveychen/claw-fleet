@@ -1387,6 +1387,19 @@ fn set_llm_config(state: tauri::State<AppState>, config: llm_provider::LlmConfig
 }
 
 #[tauri::command]
+fn list_fleet_llm_usage_daily(
+    from_ms: u64,
+    to_ms: u64,
+    state: tauri::State<AppState>,
+) -> Vec<llm_usage::FleetLlmUsageDailyBucket> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .list_fleet_llm_usage_daily(from_ms, to_ms)
+}
+
+#[tauri::command]
 fn show_main_window(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -2802,6 +2815,7 @@ pub fn run() {
             list_llm_providers,
             get_llm_config,
             set_llm_config,
+            list_fleet_llm_usage_daily,
             get_sources_config,
             set_source_enabled,
             restart_app,

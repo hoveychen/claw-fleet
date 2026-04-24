@@ -577,6 +577,18 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/llm/config", &config)
     }
 
+    fn list_fleet_llm_usage_daily(
+        &self,
+        from_ms: u64,
+        to_ms: u64,
+    ) -> Vec<crate::llm_usage::FleetLlmUsageDailyBucket> {
+        self.probe
+            .get(&format!(
+                "/fleet_llm_usage/daily?from_ms={from_ms}&to_ms={to_ms}"
+            ))
+            .unwrap_or_default()
+    }
+
     fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String> {
         let meta = std::fs::metadata(source_path).map_err(|e| e.to_string())?;
         if meta.len() > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
