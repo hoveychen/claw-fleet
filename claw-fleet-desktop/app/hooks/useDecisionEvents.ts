@@ -108,6 +108,9 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
       (evt) => listen<string>(evt, (e) => {
         const id = e.payload;
         if (id) {
+          console.log(
+            `[decision] ${evt} id=${id} — panel being removed (hook CLI cleaned up request file, or peer client answered)`,
+          );
           announcedIds.current.delete(id);
           dismiss(id);
         }

@@ -3305,6 +3305,9 @@ fn cmd_elicitation() {
     // native AskUserQuestion UI.
     let liveness_window = Duration::from_secs(5);
     if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+        claw_fleet_core::log_debug(
+            "[elicitation hook] no live consumer at startup (heartbeat stale >5s); falling back to Claude Code's native UI",
+        );
         return;
     }
 
@@ -3352,6 +3355,11 @@ fn cmd_elicitation() {
         }
         if !consumer_heartbeat::is_consumer_alive(liveness_window) {
             // Head went away — silently fall through to Claude's native UI.
+            claw_fleet_core::log_debug(&format!(
+                "[elicitation hook] consumer heartbeat lost after {:.1}s (request {}); deleting request file and falling back to native UI",
+                start.elapsed().as_secs_f32(),
+                request_id,
+            ));
             elicitation::cleanup(&request_id);
             return;
         }
@@ -3386,6 +3394,11 @@ fn cmd_elicitation() {
             }
         }
         None => {
+            claw_fleet_core::log_debug(&format!(
+                "[elicitation hook] timed out after {:.1}s waiting for user response (request {}); returning deny",
+                start.elapsed().as_secs_f32(),
+                request_id,
+            ));
             elicitation::cleanup(&request_id);
             // Timeout — deny so Claude Code falls back.
             let out = serde_json::json!({
@@ -3448,6 +3461,9 @@ fn cmd_plan_approval() {
     // native plan-approval UI as a fallback.
     let liveness_window = Duration::from_secs(5);
     if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+        claw_fleet_core::log_debug(
+            "[plan-approval hook] no live consumer at startup (heartbeat stale >5s); falling back to Claude Code's native UI",
+        );
         return;
     }
 
@@ -3495,6 +3511,11 @@ fn cmd_plan_approval() {
             break None;
         }
         if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+            claw_fleet_core::log_debug(&format!(
+                "[plan-approval hook] consumer heartbeat lost after {:.1}s (request {}); deleting request file and falling back to native UI",
+                start.elapsed().as_secs_f32(),
+                request_id,
+            ));
             plan_approval::cleanup(&request_id);
             return;
         }
@@ -3535,6 +3556,11 @@ fn cmd_plan_approval() {
             }
         }
         None => {
+            claw_fleet_core::log_debug(&format!(
+                "[plan-approval hook] timed out after {:.1}s waiting for user response (request {}); returning deny",
+                start.elapsed().as_secs_f32(),
+                request_id,
+            ));
             plan_approval::cleanup(&request_id);
             let out = serde_json::json!({
                 "hookSpecificOutput": {

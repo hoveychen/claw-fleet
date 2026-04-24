@@ -2491,6 +2491,10 @@ fn get_mobile_qr_data(state: tauri::State<'_, AppState>) -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Keep the consumer-heartbeat thread running when Fleet is backgrounded
+    // on macOS (no-op on other platforms). See app_nap.rs for rationale.
+    crate::app_nap::disable_app_nap();
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
