@@ -7,12 +7,15 @@
 //!
 //! Storage: JSONL append at `~/.fleet/fleet_llm_usage.jsonl`.
 //!
-//! Token accuracy: the provider trait returns only completion text, so tokens
-//! are estimated from character count (~4 chars/token). Entries set
-//! `tokenAccurate = false` so the UI can badge estimated numbers.
+//! Token accuracy: when the provider reports real usage (Claude CLI run with
+//! `--output-format json`), those numbers are written verbatim and entries are
+//! marked `tokenAccurate = true`. For providers that emit text only (Codex,
+//! Cursor), tokens fall back to character-count estimation (~4 chars/token)
+//! and entries set `tokenAccurate = false` so the UI can badge the numbers.
 //!
-//! Cost accuracy: only Claude-provider calls are priced via `model_cost::turn_cost_usd`.
-//! Codex / Cursor entries set `costAccurate = false` and `costUsd = 0.0`.
+//! Cost accuracy: Claude-provider calls record the CLI's own `total_cost_usd`
+//! (which includes cache-creation pricing). Codex / Cursor entries set
+//! `costAccurate = false` and `costUsd = 0.0`.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -186,6 +189,10 @@ fn canonical_claude_model(alias: &str) -> &str {
 /// Call `provider.complete()` and record a usage log entry tagged with
 /// `scenario`. Returns the completion text, or None on failure (no entry
 /// written on failure — we don't log effort that produced no output).
+///
+/// When the provider reports real usage (Claude CLI JSON output), those
+/// numbers are written verbatim. Otherwise tokens are estimated from char
+/// counts and cost is priced via `model_cost::turn_cost_usd` for Claude models.
 pub fn complete_accounted(
     provider: &dyn LlmProvider,
     prompt: &str,
@@ -194,22 +201,36 @@ pub fn complete_accounted(
     scenario: &str,
 ) -> Option<String> {
     let started = Instant::now();
-    let text = provider.complete(prompt, model, timeout)?;
+    let completion = provider.complete(prompt, model, timeout)?;
     let duration_ms = started.elapsed().as_millis() as u64;
 
-    let input_tokens = estimate_tokens(prompt);
-    let output_tokens = estimate_tokens(&text);
-
-    let (cost_usd, cost_accurate) = if provider.name() == "claude" {
-        let canonical = canonical_claude_model(model);
-        let usage = TurnUsage {
-            input_tokens,
-            output_tokens,
-            ..Default::default()
-        };
-        (turn_cost_usd(canonical, &usage), true)
-    } else {
-        (0.0, false)
+    let (input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
+         cost_usd, token_accurate, cost_accurate) = match &completion.usage {
+        Some(u) => (
+            u.input_tokens,
+            u.output_tokens,
+            u.cache_creation_tokens,
+            u.cache_read_tokens,
+            u.total_cost_usd,
+            true,
+            true,
+        ),
+        None => {
+            let input = estimate_tokens(prompt);
+            let output = estimate_tokens(&completion.text);
+            let (cost, cost_acc) = if provider.name() == "claude" {
+                let canonical = canonical_claude_model(model);
+                let usage = TurnUsage {
+                    input_tokens: input,
+                    output_tokens: output,
+                    ..Default::default()
+                };
+                (turn_cost_usd(canonical, &usage), true)
+            } else {
+                (0.0, false)
+            };
+            (input, output, 0, 0, cost, false, cost_acc)
+        }
     };
 
     let timestamp_ms = SystemTime::now()
@@ -224,15 +245,15 @@ pub fn complete_accounted(
         model: model.to_string(),
         input_tokens,
         output_tokens,
-        cache_creation_tokens: 0,
-        cache_read_tokens: 0,
+        cache_creation_tokens,
+        cache_read_tokens,
         duration_ms,
         cost_usd,
-        token_accurate: false,
+        token_accurate,
         cost_accurate,
     });
 
-    Some(text)
+    Some(completion.text)
 }
 
 // ── Tests ────────────────────────────────────────────────────────────────────

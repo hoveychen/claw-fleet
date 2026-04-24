@@ -2095,7 +2095,13 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             if !p.is_available() { return None; }
                             let model = &cfg.fast_model;
                             let timeout = std::time::Duration::from_secs(30);
-                            p.complete(&prompt, model, timeout)
+                            claw_fleet_core::llm_usage::complete_accounted(
+                                p.as_ref(),
+                                &prompt,
+                                model,
+                                timeout,
+                                claw_fleet_core::llm_usage::SCENARIO_GUARD_COMMAND,
+                            )
                         });
                         match result {
                             Some(analysis) => {
@@ -2666,7 +2672,13 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         let provider = claw_fleet_core::llm_provider::resolve_provider(&llm_cfg.provider);
                         match provider {
                             Some(p) => {
-                                match p.complete(&prompt, &llm_cfg.standard_model, std::time::Duration::from_secs(120)) {
+                                match claw_fleet_core::llm_usage::complete_accounted(
+                                    p.as_ref(),
+                                    &prompt,
+                                    &llm_cfg.standard_model,
+                                    std::time::Duration::from_secs(120),
+                                    claw_fleet_core::llm_usage::SCENARIO_AUDIT_RULES,
+                                ) {
                                     Some(resp) => {
                                         let json_str = resp.trim();
                                         let json_str = json_str

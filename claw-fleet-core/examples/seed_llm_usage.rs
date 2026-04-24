@@ -11,7 +11,7 @@
 
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use claw_fleet_core::llm_provider::{LlmModel, LlmProvider};
+use claw_fleet_core::llm_provider::{Completion, LlmModel, LlmProvider};
 use claw_fleet_core::llm_usage::{
     append_usage_entry, complete_accounted, list_usage_daily_buckets, FleetLlmUsageEntry,
     SCENARIO_AUDIT_RULES, SCENARIO_DAILY_REPORT_LESSONS, SCENARIO_DAILY_REPORT_SUMMARY,
@@ -28,12 +28,13 @@ impl LlmProvider for StubClaude {
     fn list_models(&self) -> Vec<LlmModel> { Vec::new() }
     fn default_fast_model(&self) -> &str { "haiku" }
     fn default_standard_model(&self) -> &str { "sonnet" }
-    fn complete(&self, _prompt: &str, _model: &str, _timeout: Duration) -> Option<String> {
-        Some(
-            "Stub response: this is the synthesized answer the stub provider returns for \
-             the purpose of exercising the accounting wrapper end to end."
+    fn complete(&self, _prompt: &str, _model: &str, _timeout: Duration) -> Option<Completion> {
+        Some(Completion {
+            text: "Stub response: this is the synthesized answer the stub provider returns for \
+                   the purpose of exercising the accounting wrapper end to end."
                 .into(),
-        )
+            usage: None,
+        })
     }
 }
 
