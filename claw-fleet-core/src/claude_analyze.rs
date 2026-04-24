@@ -158,7 +158,13 @@ pub fn analyze_session_outcome(
     let truncated: String = last_text.chars().take(MAX_INPUT_CHARS).collect();
     let prompt = build_prompt(&truncated, locale, user_title);
 
-    let raw = match provider.complete(&prompt, model, ANALYSIS_TIMEOUT) {
+    let raw = match crate::llm_usage::complete_accounted(
+        provider,
+        &prompt,
+        model,
+        ANALYSIS_TIMEOUT,
+        crate::llm_usage::SCENARIO_SESSION_ANALYZE,
+    ) {
         Some(r) => r,
         None => {
             log_debug(&format!("[claude_analyze] [{sid}] provider returned no response"));
@@ -406,7 +412,13 @@ pub fn generate_mascot_quips(
     // request has the best chance of completing before the next one fires.
     let quip_timeout = Duration::from_secs(270);
 
-    match provider.complete(&prompt, model, quip_timeout) {
+    match crate::llm_usage::complete_accounted(
+        provider,
+        &prompt,
+        model,
+        quip_timeout,
+        crate::llm_usage::SCENARIO_MASCOT_QUIPS,
+    ) {
         Some(raw) => {
             log_debug(&format!(
                 "[mascot_quips] raw response (len={}): {:?}",

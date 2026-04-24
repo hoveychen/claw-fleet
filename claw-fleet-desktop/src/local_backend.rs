@@ -1185,9 +1185,14 @@ impl Backend for LocalBackend {
         }
 
         let timeout = std::time::Duration::from_secs(30);
-        provider
-            .complete(&prompt, &llm_cfg.fast_model, timeout)
-            .ok_or_else(|| "LLM analysis timed out or failed".to_string())
+        crate::llm_usage::complete_accounted(
+            provider.as_ref(),
+            &prompt,
+            &llm_cfg.fast_model,
+            timeout,
+            crate::llm_usage::SCENARIO_GUARD_COMMAND,
+        )
+        .ok_or_else(|| "LLM analysis timed out or failed".to_string())
     }
 
     fn apply_elicitation_hook(&self) -> Result<(), String> {
@@ -1403,9 +1408,14 @@ impl Backend for LocalBackend {
         let provider = crate::llm_provider::resolve_provider(&cfg.provider)
             .ok_or_else(|| "No LLM provider available".to_string())?;
 
-        let response = provider
-            .complete(&prompt, &cfg.standard_model, std::time::Duration::from_secs(120))
-            .ok_or_else(|| "LLM did not return a response".to_string())?;
+        let response = crate::llm_usage::complete_accounted(
+            provider.as_ref(),
+            &prompt,
+            &cfg.standard_model,
+            std::time::Duration::from_secs(120),
+            crate::llm_usage::SCENARIO_AUDIT_RULES,
+        )
+        .ok_or_else(|| "LLM did not return a response".to_string())?;
 
         // Extract JSON array from the response (may have markdown fences).
         let json_str = response.trim();
@@ -1553,6 +1563,14 @@ impl Backend for LocalBackend {
     fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {
         *self.llm_config.lock().unwrap() = config;
         Ok(())
+    }
+
+    fn list_fleet_llm_usage_daily(
+        &self,
+        from_ms: u64,
+        to_ms: u64,
+    ) -> Vec<crate::llm_usage::FleetLlmUsageDailyBucket> {
+        crate::llm_usage::list_usage_daily_buckets(from_ms, to_ms)
     }
 
     fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String> {

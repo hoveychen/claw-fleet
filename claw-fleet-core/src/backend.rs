@@ -13,6 +13,7 @@ use crate::account::AccountInfo;
 use crate::audit::{AuditRuleInfo, AuditSummary, SuggestedRule};
 use crate::daily_report::{DailyReport, DailyReportStats, Lesson};
 use crate::llm_provider::{LlmConfig, LlmProviderInfo};
+use crate::llm_usage::FleetLlmUsageDailyBucket;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::search_index::SearchHit;
 use crate::session::SessionInfo;
@@ -326,6 +327,11 @@ pub trait Backend: Send + Sync {
     fn list_llm_providers(&self) -> Vec<LlmProviderInfo>;
     fn get_llm_config(&self) -> LlmConfig;
     fn set_llm_config(&self, config: LlmConfig) -> Result<(), String>;
+
+    // ── Fleet-self LLM usage accounting ─────────────────────────────────────
+    /// Return daily usage buckets (one per date × scenario) in [from_ms, to_ms].
+    fn list_fleet_llm_usage_daily(&self, from_ms: u64, to_ms: u64)
+        -> Vec<FleetLlmUsageDailyBucket>;
 
     // ── Decision-panel attachments ──────────────────────────────────────────
     /// Make a local file available to the agent process as an absolute path.

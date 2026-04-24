@@ -10,6 +10,7 @@ import { AccountInfo } from "./AccountInfo";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
 import { AgentSourceIcon } from "./SessionCard";
+import { UsageTrendPanel } from "./UsageTrendPanel";
 import styles from "./SettingsPanel.module.css";
 
 interface HookSetupPlan {
@@ -50,7 +51,7 @@ interface LlmConfig {
 
 type NotificationMode = "all" | "user_action" | "none";
 type TtsMode = "chime_and_speech" | "chime_only" | "off";
-type SettingsTab = "general" | "appearance" | "profile" | "connection" | "interaction" | "mobile" | "notifications" | "sound";
+type SettingsTab = "general" | "appearance" | "profile" | "connection" | "interaction" | "mobile" | "notifications" | "sound" | "usage";
 
 interface MobileAccessInfo {
   running: boolean;
@@ -110,6 +111,13 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M8 2L4 6H1v4h3l4 4V2z" />
       <path d="M11 5.5a3.5 3.5 0 0 1 0 5M13 3.5a6.5 6.5 0 0 1 0 9" />
+    </svg>
+  ),
+  usage: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M2 14V3" />
+      <path d="M2 14h12" />
+      <path d="M5 11l2.5-3L10 10l3-4" />
     </svg>
   ),
 };
@@ -502,6 +510,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     { key: "mobile", label: t("settings.mobile_access") },
     { key: "notifications", label: t("settings.notifications") },
     { key: "sound", label: t("settings.sound") },
+    { key: "usage", label: t("settings.usage") },
   ];
 
   const wrapperProps = standalone
@@ -1112,6 +1121,17 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     </div>
                   </>
                 )}
+              </div>
+            )}
+
+            {/* ── Usage ── */}
+            {activeTab === "usage" && (
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.usage")}</div>
+                <div className={styles.row_hint} style={{ marginBottom: 10 }}>
+                  {t("settings.usage_desc")}
+                </div>
+                <UsageTrendPanel />
               </div>
             )}
           </div>

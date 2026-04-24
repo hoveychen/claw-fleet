@@ -262,6 +262,13 @@ impl Backend for NullBackend {
     fn set_llm_config(&self, _: LlmConfig) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn list_fleet_llm_usage_daily(
+        &self,
+        _: u64,
+        _: u64,
+    ) -> Vec<llm_usage::FleetLlmUsageDailyBucket> {
+        vec![]
+    }
     fn upload_attachment(&self, _: &std::path::Path) -> Result<String, String> {
         Err("backend not ready".into())
     }
