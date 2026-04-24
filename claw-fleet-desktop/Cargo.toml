@@ -45,6 +45,16 @@ libc = "0.2"
 tiny_http = "0.12"
 percent-encoding = "2"
 
+# ── macOS-only: disable App Nap so the consumer-heartbeat thread keeps
+# running when Fleet is in the background.  Without this, a backgrounded
+# Fleet process gets suspended by the system, the heartbeat goes stale >5s,
+# and AskUserQuestion/guard hook CLIs delete the pending request and fall
+# back to Claude Code's native UI (user sees DecisionPanel vanish).
+# objc2 / objc2-foundation are already pulled in transitively by Tauri;
+# declaring them explicitly just lets us call NSProcessInfo.beginActivity.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
+
 [features]
 default = []
 # Compile OpenSSL from source — only needed for macOS universal cross-compilation.

@@ -873,6 +873,7 @@ dependencies = [
  "libc",
  "msedge-tts",
  "notify",
+ "objc2-foundation",
  "openssl",
  "percent-encoding",
  "reqwest 0.12.28",

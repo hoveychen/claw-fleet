@@ -5,6 +5,7 @@ pub use claw_fleet_core::*;
 
 // ── Desktop-only modules ────────────────────────────────────────────────────
 // These are always compiled — this crate IS the GUI app, so no #[cfg] gates.
+pub mod app_nap;
 pub mod embedded_server;
 mod gui;
 pub mod local_backend;
