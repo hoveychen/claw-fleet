@@ -559,6 +559,14 @@ impl AgentSource for OpenClawSource {
         Ok(messages)
     }
 
+    fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
+        let file_path = resolve_uri(path)
+            .ok_or_else(|| format!("Invalid OpenClaw URI: {path}"))?;
+        let parsed = crate::jsonl_tail::read_tail_lines_as_json(&file_path, n)
+            .map_err(|e| format!("Cannot read OpenClaw session: {e}"))?;
+        Ok(parsed.into_iter().map(normalize_message).collect())
+    }
+
     fn resolve_file_path(&self, path: &str) -> Option<std::path::PathBuf> {
         resolve_uri(path)
     }

@@ -704,6 +704,17 @@ fn get_messages(
     state.backend.read().unwrap().get_messages(&jsonl_path)
 }
 
+/// Read at most the last `tail` messages of a session. Used by SessionDetail
+/// to avoid stalling the webview on large transcripts.
+#[tauri::command]
+fn get_messages_tail(
+    jsonl_path: String,
+    tail: usize,
+    state: tauri::State<AppState>,
+) -> Result<Vec<Value>, String> {
+    state.backend.read().unwrap().get_messages_tail(&jsonl_path, tail)
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SkillInvocation {
@@ -2752,6 +2763,7 @@ pub fn run() {
             list_sessions,
             search_sessions,
             get_messages,
+            get_messages_tail,
             get_skill_history,
             get_session_todos,
             get_audit_events,

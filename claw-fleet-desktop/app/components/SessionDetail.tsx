@@ -17,7 +17,8 @@ function shortId(id: string) {
 
 export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
   const { t } = useTranslation();
-  const { session, messages, isLoading, searchQuery, close, open } = useDetailStore();
+  const { session, messages, isLoading, searchQuery, fullyLoaded, close, open, loadEarlier } =
+    useDetailStore();
   const sessions = useSessionsStore((s) => s.sessions);
   const liveSession = useMemo(() => {
     if (!session) return null;
@@ -155,6 +156,17 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
 
           {/* Messages */}
           <div ref={scrollRef} className={styles.scroll_area}>
+            {!fullyLoaded && messages.length > 0 && (
+              <button
+                className={styles.load_earlier_btn}
+                onClick={loadEarlier}
+                disabled={isLoading}
+              >
+                {isLoading
+                  ? t("detail.loading_earlier") || "Loading…"
+                  : t("detail.load_earlier") || "Load earlier messages"}
+              </button>
+            )}
             <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} />
           </div>
 

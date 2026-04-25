@@ -13,6 +13,7 @@ pub mod elicitation;
 pub mod guard;
 pub mod hooks;
 pub mod interaction_mode;
+pub mod jsonl_tail;
 pub mod llm_provider;
 pub mod llm_usage;
 pub mod memory;

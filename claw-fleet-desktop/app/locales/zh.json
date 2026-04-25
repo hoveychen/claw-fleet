@@ -213,7 +213,9 @@
   "detail": {
     "following": "自动跟随中",
     "scroll_to_latest": "滚动到最新",
-    "load_more": "加载前 {{count}} 条消息"
+    "load_more": "加载前 {{count}} 条消息",
+    "load_earlier": "加载更早的消息",
+    "loading_earlier": "正在加载更早的消息…"
   },
   "inspect": {
     "close": "关闭",

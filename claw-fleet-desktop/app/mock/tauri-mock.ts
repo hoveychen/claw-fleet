@@ -65,6 +65,13 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       const session = currentSessions.find((s) => s.jsonlPath === jsonlPath);
       return getMessagesForSession(session?.id ?? "");
     }
+    case "get_messages_tail": {
+      const jsonlPath = args.jsonlPath as string;
+      const tail = (args.tail as number) ?? 500;
+      const session = currentSessions.find((s) => s.jsonlPath === jsonlPath);
+      const all = getMessagesForSession(session?.id ?? "");
+      return all.slice(Math.max(0, all.length - tail));
+    }
     case "start_watching_session":
     case "stop_watching_session":
     case "set_locale":
