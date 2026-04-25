@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { TextBlock } from "./TextBlock";
 import styles from "./CompactSummaryBlock.module.css";
 
 interface Props {
@@ -25,7 +26,11 @@ export function CompactSummaryBlock({ summary }: Props) {
         </span>
         <span className={styles.line} />
       </button>
-      {open && <div className={styles.body}>{summary}</div>}
+      {open && (
+        <div className={styles.body}>
+          <TextBlock text={summary} />
+        </div>
+      )}
     </div>
   );
 }
