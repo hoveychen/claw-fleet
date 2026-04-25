@@ -247,6 +247,14 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&format!("/messages?path={}", encode_path(path)))
     }
 
+    fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<serde_json::Value>, String> {
+        self.probe.get(&format!(
+            "/messages?path={}&tail={}",
+            encode_path(path),
+            n
+        ))
+    }
+
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         self.probe.get_ok(&format!("/stop?pid={}&force=false", pid))
     }

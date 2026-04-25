@@ -342,7 +342,12 @@ fn handle_api_request(
         "/messages" => {
             let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
             let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
-            match backend.get_messages(&file_path) {
+            let tail: Option<usize> = query.get("tail").and_then(|s| s.parse().ok());
+            let result = match tail {
+                Some(n) => backend.get_messages_tail(&file_path, n),
+                None => backend.get_messages(&file_path),
+            };
+            match result {
                 Ok(messages) => json_ok(&messages),
                 Err(_) => json_error(404, "not found"),
             }

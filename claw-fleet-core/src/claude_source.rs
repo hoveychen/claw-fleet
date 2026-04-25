@@ -54,6 +54,11 @@ impl AgentSource for ClaudeCodeSource {
             .collect())
     }
 
+    fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
+        crate::jsonl_tail::read_tail_lines_as_json(std::path::Path::new(path), n)
+            .map_err(|e| e.to_string())
+    }
+
     fn watch_strategy(&self) -> WatchStrategy {
         WatchStrategy::Filesystem
     }

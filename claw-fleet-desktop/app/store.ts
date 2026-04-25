@@ -148,10 +148,26 @@ interface DetailState {
   messages: RawMessage[];
   isLoading: boolean;
   searchQuery: string | null;
+  /** How many tail messages we are currently displaying. Grows when the user
+   * presses "load earlier" or null when the full transcript has been loaded. */
+  loadedTail: number | null;
+  /** True iff the rendered messages cover the full transcript (no more earlier
+   * history to fetch). */
+  fullyLoaded: boolean;
   open: (session: SessionInfo, searchQuery?: string) => Promise<void>;
   close: () => Promise<void>;
+  loadEarlier: () => Promise<void>;
   appendMessages: (msgs: RawMessage[]) => void;
 }
+
+/** Initial number of tail messages to render when SessionDetail opens.
+ * Big enough to cover the active conversation context for the vast majority
+ * of sessions, small enough to keep the IPC payload + first React render fast
+ * even on multi-megabyte jsonl files. */
+const INITIAL_TAIL = 500;
+
+/** How much further back we go each time the user clicks "load earlier". */
+const LOAD_EARLIER_STEP = 1000;
 
 let tailUnlisten: UnlistenFn | null = null;
 
@@ -160,14 +176,24 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   messages: [],
   isLoading: false,
   searchQuery: null,
+  loadedTail: null,
+  fullyLoaded: false,
 
   open: async (session, searchQuery) => {
     await get().close();
 
-    set({ session, messages: [], isLoading: true, searchQuery: searchQuery ?? null });
+    set({
+      session,
+      messages: [],
+      isLoading: true,
+      searchQuery: searchQuery ?? null,
+      loadedTail: INITIAL_TAIL,
+      fullyLoaded: false,
+    });
 
-    const rawMessages = await invoke<RawMessage[]>("get_messages", {
+    const rawMessages = await invoke<RawMessage[]>("get_messages_tail", {
       jsonlPath: session.jsonlPath,
+      tail: INITIAL_TAIL,
     });
 
     await invoke("start_watching_session", { jsonlPath: session.jsonlPath });
@@ -176,7 +202,11 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       get().appendMessages(event.payload);
     });
 
-    set({ messages: rawMessages, isLoading: false });
+    set({
+      messages: rawMessages,
+      isLoading: false,
+      fullyLoaded: rawMessages.length < INITIAL_TAIL,
+    });
   },
 
   close: async () => {
@@ -185,7 +215,42 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       tailUnlisten = null;
     }
     await invoke("stop_watching_session");
-    set({ session: null, messages: [], isLoading: false, searchQuery: null });
+    set({
+      session: null,
+      messages: [],
+      isLoading: false,
+      searchQuery: null,
+      loadedTail: null,
+      fullyLoaded: false,
+    });
+  },
+
+  loadEarlier: async () => {
+    const { session, loadedTail, fullyLoaded, messages: snapshot } = get();
+    if (!session || fullyLoaded) return;
+    const snapshotLength = snapshot.length;
+    const nextTail = (loadedTail ?? INITIAL_TAIL) + LOAD_EARLIER_STEP;
+    set({ isLoading: true, loadedTail: nextTail });
+    const rawMessages = await invoke<RawMessage[]>("get_messages_tail", {
+      jsonlPath: session.jsonlPath,
+      tail: nextTail,
+    });
+    // Preserve any messages that arrived via `session-tail` while the
+    // refetch was in flight, deduping by uuid against the refetched window
+    // (the file may have grown by then so rawMessages can already include
+    // some of them).
+    const liveAppended = get().messages.slice(snapshotLength);
+    const fetchedUuids = new Set(
+      rawMessages.map((m) => m.uuid).filter((u): u is string => !!u),
+    );
+    const newOnly = liveAppended.filter(
+      (m) => !m.uuid || !fetchedUuids.has(m.uuid),
+    );
+    set({
+      messages: [...rawMessages, ...newOnly],
+      isLoading: false,
+      fullyLoaded: rawMessages.length < nextTail,
+    });
   },
 
   appendMessages: (msgs) => {

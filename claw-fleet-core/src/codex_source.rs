@@ -1648,6 +1648,37 @@ impl AgentSource for CodexSource {
         Ok(normalize_messages(parsed))
     }
 
+    fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
+        let file_path =
+            resolve_uri(path).ok_or_else(|| format!("Invalid Codex URI: {path}"))?;
+        let name = file_path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+
+        // Plain `.jsonl` can use the byte-level reverse-scan tail reader. The
+        // zstd-compressed variant must be fully decompressed first; in that
+        // case we still avoid parsing every line by slicing to the last n
+        // before `serde_json::from_str`.
+        let parsed: Vec<Value> = if name.ends_with(".jsonl.zst") {
+            let content = read_zst_file(&file_path)?;
+            let lines: Vec<&str> = content
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .collect();
+            let start = lines.len().saturating_sub(n);
+            lines[start..]
+                .iter()
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect()
+        } else {
+            crate::jsonl_tail::read_tail_lines_as_json(&file_path, n)
+                .map_err(|e| e.to_string())?
+        };
+
+        Ok(normalize_messages(parsed))
+    }
+
     fn resolve_file_path(&self, path: &str) -> Option<PathBuf> {
         resolve_uri(path)
     }

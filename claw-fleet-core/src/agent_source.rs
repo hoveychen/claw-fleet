@@ -47,6 +47,16 @@ pub trait AgentSource: Send + Sync {
     /// Read messages for a session identified by its path/URI.
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String>;
 
+    /// Read **at most** the last `n` messages of a session. Used by the
+    /// SessionDetail UI to avoid materializing huge transcripts on open.
+    /// Default impl falls back to `get_messages` and slices; sources backed by
+    /// a single jsonl file should override with a streaming tail reader.
+    fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
+        let all = self.get_messages(path)?;
+        let start = all.len().saturating_sub(n);
+        Ok(all[start..].to_vec())
+    }
+
     /// How this source should be watched for changes.
     fn watch_strategy(&self) -> WatchStrategy;
 

@@ -942,6 +942,13 @@ impl Backend for LocalBackend {
         }
     }
 
+    fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
+        match find_source_for_path(&self.sources, path) {
+            Some(source) => source.get_messages_tail(path, n),
+            None => Err(format!("No agent source can handle path: {path}")),
+        }
+    }
+
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         kill_pid_impl(pid)?;
         // Trigger a rescan after a delay.

@@ -224,6 +224,16 @@ pub type SourceDataFuture = Pin<Box<dyn Future<Output = Result<Value, String>> +
 pub trait Backend: Send + Sync {
     fn list_sessions(&self) -> Vec<SessionInfo>;
     fn get_messages(&self, path: &str) -> Result<Vec<Value>, String>;
+    /// Read at most the last `n` messages. Used by SessionDetail to avoid
+    /// loading huge transcripts on open. Default impl delegates to
+    /// `get_messages` and slices; backends should override when a faster
+    /// tail-only path is available (e.g. local filesystem reverse scan,
+    /// HTTP `/messages?tail=N`).
+    fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<Value>, String> {
+        let all = self.get_messages(path)?;
+        let start = all.len().saturating_sub(n);
+        Ok(all[start..].to_vec())
+    }
     fn kill_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String>;
     /// Headlessly resume a rate-limited session: spawns

@@ -1737,8 +1737,13 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             "/messages" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let tail: Option<usize> = query.get("tail").and_then(|s| s.parse().ok());
                 if let Some(source) = find_source_for_path(&sources, &file_path) {
-                    match source.get_messages(&file_path) {
+                    let result = match tail {
+                        Some(n) => source.get_messages_tail(&file_path, n),
+                        None => source.get_messages(&file_path),
+                    };
+                    match result {
                         Ok(messages) => {
                             let body = serde_json::to_string(&messages).unwrap_or_default();
                             let _ = request.respond(

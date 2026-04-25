@@ -201,6 +201,29 @@
   overflow-x: hidden;
 }
 
+.load_earlier_btn {
+  display: block;
+  width: calc(100% - 16px);
+  margin: 8px;
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  text-align: center;
+  border: 1px dashed var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.load_earlier_btn:hover:not(:disabled) {
+  color: var(--color-accent, #60a5fa);
+  background: var(--color-bg-secondary);
+}
+.load_earlier_btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
 /* Auto-follow indicator */
 .follow_bar {
   flex-shrink: 0;
