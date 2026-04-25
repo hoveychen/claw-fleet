@@ -2506,6 +2506,14 @@ pub fn run() {
     // on macOS (no-op on other platforms). See app_nap.rs for rationale.
     crate::app_nap::disable_app_nap();
 
+    // Workaround for WebKit2GTK DMA-BUF renderer hanging the GPU/compositor
+    // under rapid input on Linux. Falls back to shared-memory rendering.
+    // Must run before any WebView is initialized.
+    #[cfg(target_os = "linux")]
+    {
+        std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+    }
+
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             if let Some(w) = app.get_webview_window("main") {
