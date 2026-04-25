@@ -102,6 +102,12 @@
   overflow-y: auto;
 }
 
+.multiedit_stack {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
 /* Result */
 .result {
   padding: 8px 10px;

@@ -183,6 +183,8 @@ export interface RawMessage {
   uuid?: string;
   timestamp?: string;
   isSidechain?: boolean;
+  isCompactSummary?: boolean;
+  isVisibleInTranscriptOnly?: boolean;
   agentId?: string;
   sessionId?: string;
   slug?: string;

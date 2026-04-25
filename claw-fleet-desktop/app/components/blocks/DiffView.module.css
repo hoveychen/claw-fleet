@@ -1,0 +1,128 @@
+.root {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border-radius: 4px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  overflow: hidden;
+  margin: 4px 0;
+}
+
+.path_bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 8px;
+  background: var(--color-bg-tool);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
+
+.path_bar .path {
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.tag {
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.tag_new {
+  background: rgba(74, 222, 128, 0.15);
+  color: var(--color-success);
+}
+
+.tag_baseline_missing {
+  background: rgba(251, 191, 36, 0.15);
+  color: var(--color-warning);
+}
+
+.body {
+  max-height: 480px;
+  overflow: auto;
+}
+
+.row {
+  display: flex;
+  align-items: stretch;
+  white-space: pre;
+  line-height: 1.5;
+  min-height: 1.5em;
+}
+
+.gutter {
+  flex-shrink: 0;
+  width: 30px;
+  text-align: right;
+  padding: 0 6px 0 0;
+  color: var(--color-text-dim);
+  font-size: 10px;
+  user-select: none;
+  border-right: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.sign {
+  flex-shrink: 0;
+  width: 14px;
+  text-align: center;
+  user-select: none;
+  color: var(--color-text-dim);
+}
+
+.text {
+  flex: 1;
+  padding-right: 8px;
+  color: var(--color-text);
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.row_add {
+  background: rgba(74, 222, 128, 0.10);
+}
+
+.row_add .sign {
+  color: var(--color-success);
+}
+
+.row_del {
+  background: rgba(248, 113, 113, 0.12);
+}
+
+.row_del .sign {
+  color: var(--color-error-fg);
+}
+
+.row_del .text {
+  color: var(--color-text-secondary);
+}
+
+.hunk_sep {
+  padding: 2px 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+  font-size: 10px;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.empty_note {
+  padding: 8px 12px;
+  color: var(--color-text-dim);
+  font-style: italic;
+  font-size: 11px;
+}
