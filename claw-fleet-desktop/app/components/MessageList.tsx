@@ -12,6 +12,7 @@ import {
   GroupedToolUseBlocks,
   ToolUseBlock as ToolUseBlockComp,
 } from "./blocks/ToolUseBlock";
+import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import styles from "./MessageList.module.css";
 
 // ── Search highlight ─────────────────────────────────────────────────────────
@@ -57,16 +58,104 @@ function buildResultMap(
   return map;
 }
 
+// ── Write baseline replay ─────────────────────────────────────────────────────
+
+/** Strip Claude Code's `cat -n` line-number prefix from a Read result. */
+function stripCatNFormat(s: string): string {
+  return s.split("\n").map((line) => line.replace(/^\s*\d+\t/, "")).join("\n");
+}
+
+/**
+ * Walk session messages forward, tracking each `file_path`'s reconstructed
+ * content as Read results land and Write/Edit/MultiEdit ops apply. For each
+ * `Write` tool_use we capture the prior content (if known) so the diff view
+ * can render an accurate "before vs after". Edit/MultiEdit don't need this —
+ * their input already carries old/new strings.
+ */
+function buildWriteBaselineMap(messages: RawMessage[]): Map<string, string> {
+  const fileState = new Map<string, string>();
+  const baseline = new Map<string, string>();
+  const pendingReads = new Map<string, { path: string; full: boolean }>();
+
+  for (const msg of messages) {
+    if (!msg.message) continue;
+    const content = msg.message.content;
+    if (!Array.isArray(content)) continue;
+
+    for (const block of content) {
+      if (block.type === "tool_use") {
+        const tu = block as ToolUseBlock;
+        const path = typeof tu.input.file_path === "string" ? tu.input.file_path : undefined;
+        if (!path) continue;
+
+        if (tu.name === "Read") {
+          const full =
+            tu.input.offset === undefined && tu.input.limit === undefined;
+          pendingReads.set(tu.id, { path, full });
+        } else if (tu.name === "Write") {
+          const cur = fileState.get(path);
+          if (cur !== undefined) baseline.set(tu.id, cur);
+          const next = typeof tu.input.content === "string" ? tu.input.content : "";
+          fileState.set(path, next);
+        } else if (tu.name === "Edit") {
+          const cur = fileState.get(path);
+          if (cur !== undefined) {
+            const oldS = String(tu.input.old_string ?? "");
+            const newS = String(tu.input.new_string ?? "");
+            const replaceAll = tu.input.replace_all === true;
+            const next = replaceAll ? cur.split(oldS).join(newS) : cur.replace(oldS, newS);
+            fileState.set(path, next);
+          }
+        } else if (tu.name === "MultiEdit") {
+          let cur = fileState.get(path);
+          if (cur !== undefined) {
+            const edits = Array.isArray(tu.input.edits)
+              ? (tu.input.edits as Array<{
+                  old_string?: string;
+                  new_string?: string;
+                  replace_all?: boolean;
+                }>)
+              : [];
+            for (const e of edits) {
+              const oldS = String(e.old_string ?? "");
+              const newS = String(e.new_string ?? "");
+              cur = e.replace_all
+                ? cur.split(oldS).join(newS)
+                : cur.replace(oldS, newS);
+            }
+            fileState.set(path, cur);
+          }
+        }
+      } else if (block.type === "tool_result") {
+        const tr = block as ToolResultBlock;
+        const pending = pendingReads.get(tr.tool_use_id);
+        if (
+          pending &&
+          pending.full &&
+          !tr.is_error &&
+          typeof tr.content === "string"
+        ) {
+          fileState.set(pending.path, stripCatNFormat(tr.content));
+        }
+        pendingReads.delete(tr.tool_use_id);
+      }
+    }
+  }
+
+  return baseline;
+}
+
 // ── Content blocks renderer ───────────────────────────────────────────────────
 
 interface BlocksProps {
   content: ContentBlock[];
   resultMap: Map<string, ToolResultBlock>;
+  baselineMap: Map<string, string>;
   isPartial: boolean;
   searchTerms?: string[] | null;
 }
 
-const ContentBlocks = memo(function ContentBlocks({ content, resultMap, isPartial, searchTerms }: BlocksProps) {
+const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baselineMap, isPartial, searchTerms }: BlocksProps) {
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -141,6 +230,7 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, isPartia
           block={toolBlock}
           result={result}
           isPartial={isPartial && !result}
+          baseline={baselineMap.has(toolBlock.id) ? baselineMap.get(toolBlock.id) : null}
         />
       );
       i++;
@@ -159,16 +249,36 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, isPartia
 interface MsgProps {
   msg: RawMessage;
   resultMap: Map<string, ToolResultBlock>;
+  baselineMap: Map<string, string>;
   searchTerms?: string[] | null;
   msgIdx?: number;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, searchTerms, msgIdx }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searchTerms, msgIdx }: MsgProps) {
   if (!msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
   const isUser = msg.type === "user";
   const content = msg.message.content;
+
+  // Context-compaction marker: Claude Code injects a synthetic user message
+  // tagged `isCompactSummary: true` at the boundary. Render it as a compact
+  // banner instead of the giant blob.
+  if (isUser && msg.isCompactSummary) {
+    let summaryText = "";
+    if (typeof content === "string") {
+      summaryText = content;
+    } else if (Array.isArray(content)) {
+      for (const b of content) {
+        if (b.type === "text") summaryText += (b as { type: "text"; text: string }).text;
+      }
+    }
+    return (
+      <div className={styles.compact_row} data-msg-idx={msgIdx}>
+        <CompactSummaryBlock summary={summaryText} />
+      </div>
+    );
+  }
 
   // User messages: skip pure tool-result messages (rendered inline in tool blocks)
   if (isUser) {
@@ -205,6 +315,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, searchTerms, msgId
           <ContentBlocks
             content={content}
             resultMap={resultMap}
+            baselineMap={baselineMap}
             isPartial={isPartial}
             searchTerms={searchTerms}
           />
@@ -288,6 +399,7 @@ export function MessageList({ messages, isLoading, searchQuery }: Props) {
   const scrollAnchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   const resultMap = useMemo(() => buildResultMap(messages), [messages]);
+  const baselineMap = useMemo(() => buildWriteBaselineMap(messages), [messages]);
 
   const displayMsgs = useMemo(
     () => messages.filter((m) => m.type === "user" || m.type === "assistant"),
@@ -429,6 +541,7 @@ export function MessageList({ messages, isLoading, searchQuery }: Props) {
           key={msg.uuid ?? (effectiveStart + i)}
           msg={msg}
           resultMap={resultMap}
+          baselineMap={baselineMap}
           searchTerms={searchTerms}
           msgIdx={effectiveStart + i}
         />

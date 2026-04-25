@@ -40,6 +40,11 @@
   position: relative;
 }
 
+/* Context-compaction marker: full-width banner, no timeline dot/avatar */
+.compact_row {
+  padding: 4px 0;
+}
+
 .message.assistant {
   padding-left: 18px;
 }
