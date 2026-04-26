@@ -1168,6 +1168,10 @@
     "tunnel_failed": "隧道建立失败，请重试。",
     "retry": "重试",
     "stop_access": "终止移动端访问",
-    "confirm_disable": "确定终止移动端访问？所有已连接的移动设备将断开。"
+    "confirm_disable": "确定终止移动端访问？所有已连接的移动设备将断开。",
+    "provider_label": "隧道服务商",
+    "provider_auto": "自动（推荐）",
+    "provider_cloudflare": "Cloudflare",
+    "provider_localtunnel": "localtunnel"
   }
 }

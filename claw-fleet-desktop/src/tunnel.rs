@@ -11,9 +11,12 @@
 //! [`TunnelProvider`] + [`TunnelHandle`] traits below.
 
 use std::io::BufRead;
+use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 // ── Provider abstraction ────────────────────────────────────────────────────
@@ -53,11 +56,33 @@ pub trait TunnelHandle: Send {
 /// Boxed trait object alias used across the desktop crate.
 pub type BoxedTunnelHandle = Box<dyn TunnelHandle + Send>;
 
+/// Boxed provider alias — used when the caller wants an ordered fallback list
+/// without committing to a concrete provider type.
+pub type BoxedTunnelProvider = Box<dyn TunnelProvider + Send + Sync>;
+
 /// Phase callback type: receives identifiers like `"downloading"` / `"tunnel"`.
 pub type PhaseFn = Box<dyn Fn(&'static str) + Send>;
 
 /// Progress callback type: receives `(downloaded_bytes, total_bytes)`.
 pub type ProgressFn = Box<dyn Fn(u64, u64) + Send>;
+
+/// Resolve the ordered list of providers to try given a user preference.
+///
+/// - `Some("cloudflare")` / `Some("localtunnel")` pin a single provider — no
+///   fallback, the caller fails out if it doesn't work.
+/// - `None` or `Some("auto")` returns the default fallback chain
+///   (cloudflared first, localtunnel second). Future revisions will reorder
+///   based on detected region (P3: OpenFrp first for users in China).
+pub fn select_providers(preference: Option<&str>) -> Vec<BoxedTunnelProvider> {
+    match preference.unwrap_or("auto") {
+        "cloudflare" => vec![Box::new(CloudflareTunnelProvider::new())],
+        "localtunnel" => vec![Box::new(LocaltunnelProvider::new())],
+        _ => vec![
+            Box::new(CloudflareTunnelProvider::new()),
+            Box::new(LocaltunnelProvider::new()),
+        ],
+    }
+}
 
 // ── Common error type ───────────────────────────────────────────────────────
 
@@ -489,6 +514,238 @@ pub fn is_cloudflared_available() -> bool {
     find_cloudflared().is_some()
 }
 
+// ── Localtunnel provider ────────────────────────────────────────────────────
+
+/// Default upstream for the localtunnel allocation API.
+const LOCALTUNNEL_HOST: &str = "https://localtunnel.me";
+
+/// Provider that exposes the local port via the public localtunnel.me service
+/// (`*.loca.lt`). No account needed, no binary to download — the protocol is
+/// implemented in-process.
+///
+/// Protocol summary:
+/// 1. `GET /?new` returns `{id, url, port, max_conn_count}`. `url` is the
+///    public HTTPS URL, `port` is the TCP port on the upstream host that the
+///    client must dial to receive incoming HTTP request bytes.
+/// 2. The client maintains up to `max_conn_count` long-lived TCP connections
+///    to `<host>:<port>`. Whenever the upstream forwards an inbound HTTP
+///    request, it pipes raw bytes through one of those connections; the
+///    client relays the bytes to the local server and pipes the response back.
+/// 3. When a connection ends (request served, peer reset, etc.) the client
+///    reconnects.
+pub struct LocaltunnelProvider {
+    base: String,
+}
+
+impl LocaltunnelProvider {
+    pub fn new() -> Self {
+        Self { base: LOCALTUNNEL_HOST.to_string() }
+    }
+
+    /// Override the allocation host (mainly for tests / self-hosted servers).
+    pub fn with_base<S: Into<String>>(base: S) -> Self {
+        Self { base: base.into() }
+    }
+}
+
+impl Default for LocaltunnelProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct LocaltunnelInfo {
+    #[allow(dead_code)]
+    id: String,
+    port: u16,
+    max_conn_count: Option<u32>,
+    url: String,
+}
+
+impl TunnelProvider for LocaltunnelProvider {
+    fn name(&self) -> &'static str {
+        "localtunnel"
+    }
+
+    fn is_available(&self) -> bool {
+        // Pure protocol implementation — nothing to install, always usable as
+        // long as the network reaches localtunnel.me.
+        true
+    }
+
+    fn start(
+        &self,
+        local_port: u16,
+        on_phase: Option<PhaseFn>,
+        _on_progress: Option<ProgressFn>,
+    ) -> Result<BoxedTunnelHandle, TunnelError> {
+        if let Some(ref cb) = on_phase {
+            cb("tunnel");
+        }
+
+        let allocate_url = format!("{}/?new", self.base);
+        eprintln!("[localtunnel] allocating: {allocate_url}");
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(15))
+            .build()
+            .map_err(|e| TunnelError::SpawnFailed(format!("build http client: {e}")))?;
+
+        let resp = client
+            .get(&allocate_url)
+            .send()
+            .map_err(|e| TunnelError::SpawnFailed(format!("allocate request: {e}")))?;
+
+        if !resp.status().is_success() {
+            return Err(TunnelError::SpawnFailed(format!(
+                "allocate returned HTTP {}",
+                resp.status()
+            )));
+        }
+
+        let info: LocaltunnelInfo = resp
+            .json()
+            .map_err(|e| TunnelError::SpawnFailed(format!("parse allocate JSON: {e}")))?;
+
+        let upstream_host = parse_https_host(&info.url)
+            .ok_or_else(|| TunnelError::SpawnFailed(format!("malformed URL: {}", info.url)))?
+            .to_string();
+        eprintln!(
+            "[localtunnel] url={} upstream={}:{}",
+            info.url, upstream_host, info.port
+        );
+
+        // Clamp the connection pool: server hint may be aggressive, but a
+        // single user only needs a handful of parallel requests.
+        let conn_count = info.max_conn_count.unwrap_or(10).clamp(1, 10) as usize;
+
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let mut workers = Vec::with_capacity(conn_count);
+        for i in 0..conn_count {
+            let host = upstream_host.clone();
+            let port = info.port;
+            let shutdown = shutdown.clone();
+            let handle = std::thread::Builder::new()
+                .name(format!("localtunnel-{i}"))
+                .spawn(move || localtunnel_worker_loop(host, port, local_port, shutdown))
+                .map_err(|e| TunnelError::SpawnFailed(format!("spawn worker {i}: {e}")))?;
+            workers.push(handle);
+        }
+
+        Ok(Box::new(LocaltunnelHandle {
+            public_url: info.url,
+            shutdown,
+            workers: Some(workers),
+        }))
+    }
+}
+
+/// A live localtunnel session. Dropping (or calling `stop`) signals every
+/// worker thread to exit and joins them.
+pub struct LocaltunnelHandle {
+    public_url: String,
+    shutdown: Arc<AtomicBool>,
+    workers: Option<Vec<JoinHandle<()>>>,
+}
+
+impl TunnelHandle for LocaltunnelHandle {
+    fn url(&self) -> &str {
+        &self.public_url
+    }
+
+    fn stop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        if let Some(workers) = self.workers.take() {
+            for w in workers {
+                let _ = w.join();
+            }
+        }
+    }
+}
+
+impl Drop for LocaltunnelHandle {
+    fn drop(&mut self) {
+        TunnelHandle::stop(self);
+    }
+}
+
+/// Extract the host portion of an `https://` URL — e.g.
+/// `https://abc.loca.lt/foo` → `abc.loca.lt`.
+fn parse_https_host(url: &str) -> Option<&str> {
+    let rest = url.strip_prefix("https://")?;
+    let end = rest.find('/').unwrap_or(rest.len());
+    let host = &rest[..end];
+    if host.is_empty() {
+        None
+    } else {
+        Some(host)
+    }
+}
+
+/// Continuously maintain one reverse-tunnel TCP connection to the localtunnel
+/// upstream, reconnecting when an inbound request finishes or the dial fails.
+/// Exits when `shutdown` flips to true (next iteration after the current
+/// connection winds down).
+fn localtunnel_worker_loop(
+    host: String,
+    remote_port: u16,
+    local_port: u16,
+    shutdown: Arc<AtomicBool>,
+) {
+    let addr_str = format!("{host}:{remote_port}");
+    while !shutdown.load(Ordering::Relaxed) {
+        let resolved: Option<SocketAddr> = addr_str
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut it| it.next());
+        let Some(remote_addr) = resolved else {
+            eprintln!("[localtunnel] DNS resolve failed: {addr_str}");
+            std::thread::sleep(Duration::from_secs(2));
+            continue;
+        };
+        match TcpStream::connect_timeout(&remote_addr, Duration::from_secs(10)) {
+            Ok(remote) => {
+                // Bound the read so the worker can periodically observe
+                // `shutdown` even when the upstream keeps an idle connection
+                // open.
+                let _ = remote.set_read_timeout(Some(Duration::from_secs(60)));
+                if let Err(e) = localtunnel_pipe_one(remote, local_port) {
+                    eprintln!("[localtunnel] pipe error: {e}");
+                }
+            }
+            Err(e) => {
+                eprintln!("[localtunnel] connect {remote_addr} failed: {e}");
+                std::thread::sleep(Duration::from_secs(2));
+            }
+        }
+    }
+}
+
+/// Bridge a single inbound localtunnel connection with the local HTTP server,
+/// piping bytes both ways until either side closes.
+fn localtunnel_pipe_one(remote: TcpStream, local_port: u16) -> std::io::Result<()> {
+    let local_addr = SocketAddr::from(([127, 0, 0, 1], local_port));
+    let local = TcpStream::connect_timeout(&local_addr, Duration::from_secs(5))?;
+
+    let mut remote_a = remote.try_clone()?;
+    let mut local_a = local.try_clone()?;
+    let mut remote_b = remote;
+    let mut local_b = local;
+
+    let t1 = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut remote_a, &mut local_a);
+        let _ = local_a.shutdown(Shutdown::Write);
+    });
+    let t2 = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut local_b, &mut remote_b);
+        let _ = remote_b.shutdown(Shutdown::Write);
+    });
+    let _ = t1.join();
+    let _ = t2.join();
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -524,5 +781,32 @@ mod tests {
         let p = path.unwrap();
         assert!(p.to_string_lossy().contains(".fleet"));
         assert!(p.to_string_lossy().contains("cloudflared"));
+    }
+
+    #[test]
+    fn parse_https_host_extracts_hostname() {
+        assert_eq!(parse_https_host("https://abc.loca.lt"), Some("abc.loca.lt"));
+        assert_eq!(
+            parse_https_host("https://abc.loca.lt/some/path"),
+            Some("abc.loca.lt")
+        );
+        assert_eq!(
+            parse_https_host("https://abc.loca.lt:443/p"),
+            Some("abc.loca.lt:443")
+        );
+    }
+
+    #[test]
+    fn parse_https_host_rejects_non_https() {
+        assert_eq!(parse_https_host("http://abc.loca.lt"), None);
+        assert_eq!(parse_https_host("ftp://abc.loca.lt"), None);
+        assert_eq!(parse_https_host("https:///nohost"), None);
+    }
+
+    #[test]
+    fn localtunnel_provider_is_always_available() {
+        let p = LocaltunnelProvider::new();
+        assert_eq!(p.name(), "localtunnel");
+        assert!(p.is_available());
     }
 }
