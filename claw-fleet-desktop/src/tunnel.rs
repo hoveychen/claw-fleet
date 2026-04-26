@@ -1,10 +1,14 @@
-//! Cloudflare Quick Tunnel integration.
+//! Tunnel provider abstraction for exposing the local mobile-access HTTP
+//! server to the public internet.
 //!
-//! Spawns `cloudflared tunnel --url http://localhost:<port>` to expose a local
-//! port via a random `*.trycloudflare.com` URL.  No Cloudflare account needed.
+//! The default provider is [`CloudflareTunnelProvider`], which spawns
+//! `cloudflared tunnel --url http://localhost:<port>` to expose the port via a
+//! random `*.trycloudflare.com` URL — no Cloudflare account needed. If
+//! `cloudflared` is not found on the system, it is automatically downloaded to
+//! `~/.fleet/cloudflared` on first use (~18 MB).
 //!
-//! If `cloudflared` is not found on the system, it is automatically downloaded
-//! to `~/.fleet/cloudflared` on first use (~18 MB download).
+//! Future providers (localtunnel, OpenFrp, …) plug in by implementing the
+//! [`TunnelProvider`] + [`TunnelHandle`] traits below.
 
 use std::io::BufRead;
 use std::path::PathBuf;
@@ -12,49 +16,128 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{mpsc, Arc};
 use std::time::Duration;
 
-/// A running Cloudflare Quick Tunnel.
-pub struct CloudflareTunnel {
-    process: Child,
-    public_url: String,
+// ── Provider abstraction ────────────────────────────────────────────────────
+
+/// A backend that can establish a public-internet tunnel to a local port.
+pub trait TunnelProvider: Send + Sync {
+    /// Stable identifier (e.g. `"cloudflare"`) used in logs and UI.
+    fn name(&self) -> &'static str;
+
+    /// True when the provider's runtime dependencies (binaries etc.) are
+    /// already installed and no download is required.
+    fn is_available(&self) -> bool;
+
+    /// Bring up the tunnel forwarding the public URL to
+    /// `http://127.0.0.1:<local_port>`.
+    ///
+    /// `on_phase` is invoked with stable identifiers (`"downloading"`,
+    /// `"tunnel"`, …) so the UI can render setup progress. `on_progress`
+    /// reports `(downloaded, total)` byte counts while the provider's binary
+    /// is being fetched; not all providers download a binary.
+    fn start(
+        &self,
+        local_port: u16,
+        on_phase: Option<PhaseFn>,
+        on_progress: Option<ProgressFn>,
+    ) -> Result<BoxedTunnelHandle, TunnelError>;
 }
+
+/// A live tunnel. Dropping the handle stops the tunnel.
+pub trait TunnelHandle: Send {
+    /// Public HTTPS URL routing to the local port.
+    fn url(&self) -> &str;
+    /// Stop the tunnel and release resources. Idempotent.
+    fn stop(&mut self);
+}
+
+/// Boxed trait object alias used across the desktop crate.
+pub type BoxedTunnelHandle = Box<dyn TunnelHandle + Send>;
+
+/// Phase callback type: receives identifiers like `"downloading"` / `"tunnel"`.
+pub type PhaseFn = Box<dyn Fn(&'static str) + Send>;
+
+/// Progress callback type: receives `(downloaded_bytes, total_bytes)`.
+pub type ProgressFn = Box<dyn Fn(u64, u64) + Send>;
+
+// ── Common error type ───────────────────────────────────────────────────────
 
 /// Errors that can occur when starting a tunnel.
 #[derive(Debug)]
 pub enum TunnelError {
-    /// Failed to download cloudflared.
+    /// Failed to download the provider's required binary.
     DownloadFailed(String),
-    /// Failed to spawn the process.
+    /// Failed to spawn the provider's process.
     SpawnFailed(String),
-    /// Could not parse the public URL from cloudflared output.
-    /// Contains the last few lines of cloudflared stderr for diagnostics.
+    /// Could not parse the public URL from provider output.
+    /// Contains the last few lines of stderr/stdout for diagnostics.
     UrlParseTimeout(String),
 }
 
 impl std::fmt::Display for TunnelError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TunnelError::DownloadFailed(e) => write!(f, "failed to download cloudflared: {e}"),
-            TunnelError::SpawnFailed(e) => write!(f, "failed to start cloudflared: {e}"),
+            TunnelError::DownloadFailed(e) => write!(f, "failed to download tunnel binary: {e}"),
+            TunnelError::SpawnFailed(e) => write!(f, "failed to start tunnel process: {e}"),
             TunnelError::UrlParseTimeout(output) => write!(
                 f,
-                "timed out waiting for tunnel URL. cloudflared output:\n{output}"
+                "timed out waiting for tunnel URL. provider output:\n{output}"
             ),
         }
     }
 }
 
-impl CloudflareTunnel {
-    /// Start a Quick Tunnel pointing to `http://localhost:<port>`.
-    ///
-    /// If `cloudflared` is not installed, it will be automatically downloaded
-    /// to `~/.fleet/cloudflared`.
-    ///
-    /// Blocks until the tunnel URL is available (up to 30 seconds).
-    pub fn start(local_port: u16) -> Result<Self, TunnelError> {
-        let binary = find_or_download_cloudflared()?;
-        Self::start_with_binary(&binary, local_port)
+// ── Cloudflare provider ─────────────────────────────────────────────────────
+
+/// Provider that exposes the local port via Cloudflare's Quick Tunnel
+/// (`*.trycloudflare.com`). No Cloudflare account required.
+pub struct CloudflareTunnelProvider;
+
+impl CloudflareTunnelProvider {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for CloudflareTunnelProvider {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TunnelProvider for CloudflareTunnelProvider {
+    fn name(&self) -> &'static str {
+        "cloudflare"
     }
 
+    fn is_available(&self) -> bool {
+        is_cloudflared_available()
+    }
+
+    fn start(
+        &self,
+        local_port: u16,
+        on_phase: Option<PhaseFn>,
+        on_progress: Option<ProgressFn>,
+    ) -> Result<BoxedTunnelHandle, TunnelError> {
+        if let Some(ref cb) = on_phase {
+            cb("downloading");
+        }
+        let binary = find_or_download_cloudflared_with_progress(on_progress)?;
+        if let Some(ref cb) = on_phase {
+            cb("tunnel");
+        }
+        let handle = CloudflareTunnel::start_with_binary(&binary, local_port)?;
+        Ok(Box::new(handle))
+    }
+}
+
+/// A running Cloudflare Quick Tunnel.
+pub struct CloudflareTunnel {
+    process: Child,
+    public_url: String,
+}
+
+impl CloudflareTunnel {
     /// Start a Quick Tunnel using a specific binary path.
     pub fn start_with_binary(binary: &str, local_port: u16) -> Result<Self, TunnelError> {
         eprintln!("[tunnel] starting: {binary} tunnel --url http://127.0.0.1:{local_port}");
@@ -137,13 +220,14 @@ impl CloudflareTunnel {
         }
     }
 
-    /// The public HTTPS URL for this tunnel.
-    pub fn url(&self) -> &str {
+}
+
+impl TunnelHandle for CloudflareTunnel {
+    fn url(&self) -> &str {
         &self.public_url
     }
 
-    /// Stop the tunnel by killing the cloudflared process.
-    pub fn stop(&mut self) {
+    fn stop(&mut self) {
         let _ = self.process.kill();
         let _ = self.process.wait();
     }
@@ -151,23 +235,14 @@ impl CloudflareTunnel {
 
 impl Drop for CloudflareTunnel {
     fn drop(&mut self) {
-        self.stop();
+        TunnelHandle::stop(self);
     }
 }
 
 // ── Find or download ────────────────────────────────────────────────────────
 
-/// Find cloudflared on the system, or auto-download it to `~/.fleet/`.
-fn find_or_download_cloudflared() -> Result<String, TunnelError> {
-    if let Some(path) = find_cloudflared() {
-        return Ok(path);
-    }
-
-    eprintln!("[tunnel] cloudflared not found, downloading...");
-    download_cloudflared(None)
-}
-
-/// Same as above but with a progress callback for UI reporting.
+/// Find cloudflared on the system, or auto-download it to `~/.fleet/`, with an
+/// optional progress callback for UI reporting.
 pub fn find_or_download_cloudflared_with_progress(
     on_progress: Option<ProgressFn>,
 ) -> Result<String, TunnelError> {
@@ -234,9 +309,6 @@ fn fleet_cloudflared_path() -> Option<PathBuf> {
         { h.join(".fleet").join("cloudflared") }
     })
 }
-
-/// Progress callback type for download reporting.
-pub type ProgressFn = Box<dyn Fn(u64, u64) + Send>;
 
 /// Download cloudflared binary to `~/.fleet/cloudflared`.
 /// Accepts an optional progress callback `on_progress(downloaded, total)`.
