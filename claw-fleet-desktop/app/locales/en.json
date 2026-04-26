@@ -1168,6 +1168,10 @@
     "tunnel_failed": "Failed to establish tunnel. Please try again.",
     "retry": "Retry",
     "stop_access": "Stop Mobile Access",
-    "confirm_disable": "Stop mobile access? Any connected mobile devices will be disconnected."
+    "confirm_disable": "Stop mobile access? Any connected mobile devices will be disconnected.",
+    "provider_label": "Tunnel provider",
+    "provider_auto": "Auto (recommended)",
+    "provider_cloudflare": "Cloudflare",
+    "provider_localtunnel": "localtunnel"
   }
 }

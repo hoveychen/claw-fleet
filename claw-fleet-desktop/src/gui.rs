@@ -2320,6 +2320,7 @@ struct MobileAccessInfo {
 async fn enable_mobile_access(
     state: tauri::State<'_, AppState>,
     app: tauri::AppHandle,
+    provider: Option<String>,
 ) -> Result<MobileAccessInfo, String> {
     // Stop existing server/tunnel if any.
     {
@@ -2367,22 +2368,37 @@ async fn enable_mobile_access(
     // The provider drives the "downloading" → "tunnel" phase events itself.
     let mobile_tunnel = state.mobile_tunnel.clone();
     let setup_flag = state.mobile_setup_in_progress.clone();
-    let app_for_progress = app.clone();
-    let app_for_phase = app.clone();
+    let app_for_callbacks = app.clone();
+    let provider_pref = provider.clone();
     let tunnel_result = tokio::task::spawn_blocking(move || {
-        let phase_cb: tunnel::PhaseFn = Box::new(move |phase: &'static str| {
-            let _ = app_for_phase.emit("mobile-access-phase", phase);
-        });
-        let progress_cb: tunnel::ProgressFn = Box::new(move |downloaded, total| {
-            let _ = app_for_progress.emit("mobile-access-progress", serde_json::json!({
-                "downloaded": downloaded,
-                "total": total,
-            }));
-        });
-
-        let provider = tunnel::CloudflareTunnelProvider::new();
-        tunnel::TunnelProvider::start(&provider, port, Some(phase_cb), Some(progress_cb))
-            .map_err(|e| e.to_string())
+        let providers = tunnel::select_providers(provider_pref.as_deref());
+        let mut last_err: Option<String> = None;
+        for p in providers {
+            if !p.is_available() {
+                last_err = Some(format!("{}: provider not available", p.name()));
+                continue;
+            }
+            let app_phase = app_for_callbacks.clone();
+            let phase_cb: tunnel::PhaseFn = Box::new(move |phase: &'static str| {
+                let _ = app_phase.emit("mobile-access-phase", phase);
+            });
+            let app_progress = app_for_callbacks.clone();
+            let progress_cb: tunnel::ProgressFn = Box::new(move |downloaded, total| {
+                let _ = app_progress.emit("mobile-access-progress", serde_json::json!({
+                    "downloaded": downloaded,
+                    "total": total,
+                }));
+            });
+            match tunnel::TunnelProvider::start(&*p, port, Some(phase_cb), Some(progress_cb)) {
+                Ok(h) => return Ok(h),
+                Err(e) => {
+                    let msg = format!("{}: {e}", p.name());
+                    log_debug(&format!("[mobile-access] {msg}"));
+                    last_err = Some(msg);
+                }
+            }
+        }
+        Err(last_err.unwrap_or_else(|| "no tunnel provider available".to_string()))
     })
     .await
     .map_err(|e| {

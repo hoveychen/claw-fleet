@@ -22,6 +22,16 @@ interface DownloadProgress {
   total: number;
 }
 
+type TunnelProviderPref = "auto" | "cloudflare" | "localtunnel";
+
+const PROVIDER_PREF_KEY = "claw-fleet.mobile.tunnelProvider";
+
+function loadProviderPref(): TunnelProviderPref {
+  const v = localStorage.getItem(PROVIDER_PREF_KEY);
+  if (v === "cloudflare" || v === "localtunnel" || v === "auto") return v;
+  return "auto";
+}
+
 export function MobileAccessPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
   const [info, setInfo] = useState<MobileAccessInfo | null>(null);
@@ -31,6 +41,12 @@ export function MobileAccessPanel({ onClose }: { onClose: () => void }) {
   const [phase, setPhase] = useState<"downloading" | "tunnel" | null>(null);
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [providerPref, setProviderPref] = useState<TunnelProviderPref>(loadProviderPref);
+
+  const handleProviderPrefChange = useCallback((v: TunnelProviderPref) => {
+    setProviderPref(v);
+    localStorage.setItem(PROVIDER_PREF_KEY, v);
+  }, []);
 
   // Listen for setup events.
   useEffect(() => {
@@ -94,7 +110,9 @@ export function MobileAccessPanel({ onClose }: { onClose: () => void }) {
     setProgress(null);
     setPhase(null);
     try {
-      const data = await invoke<MobileAccessInfo>("enable_mobile_access");
+      const data = await invoke<MobileAccessInfo>("enable_mobile_access", {
+        provider: providerPref === "auto" ? null : providerPref,
+      });
       setInfo(data);
       const qr = await invoke<string | null>("get_mobile_qr_data");
       setQrData(qr);
@@ -103,7 +121,7 @@ export function MobileAccessPanel({ onClose }: { onClose: () => void }) {
     }
     setLoading(false);
     setProgress(null);
-  }, []);
+  }, [providerPref]);
 
   const handleDisable = useCallback(async () => {
     const confirmed = await ask(t("mobile_panel.confirm_disable"), { kind: "warning" });
@@ -137,6 +155,18 @@ export function MobileAccessPanel({ onClose }: { onClose: () => void }) {
                 </svg>
               </div>
               <p className={styles.desc}>{t("settings.mobile_desc")}</p>
+              <label className={styles.provider_row}>
+                <span className={styles.provider_label}>{t("mobile_panel.provider_label")}</span>
+                <select
+                  className={styles.provider_select}
+                  value={providerPref}
+                  onChange={(e) => handleProviderPrefChange(e.target.value as TunnelProviderPref)}
+                >
+                  <option value="auto">{t("mobile_panel.provider_auto")}</option>
+                  <option value="cloudflare">{t("mobile_panel.provider_cloudflare")}</option>
+                  <option value="localtunnel">{t("mobile_panel.provider_localtunnel")}</option>
+                </select>
+              </label>
               <button
                 className={styles.enable_btn}
                 onClick={handleEnable}

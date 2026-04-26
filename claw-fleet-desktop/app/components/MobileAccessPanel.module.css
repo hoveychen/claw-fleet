@@ -192,3 +192,28 @@
   text-align: center;
   margin: 0;
 }
+
+.provider_row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: 280px;
+}
+
+.provider_label {
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.provider_select {
+  flex: 0 1 auto;
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 12px;
+  cursor: pointer;
+}
