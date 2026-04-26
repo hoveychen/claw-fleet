@@ -666,8 +666,9 @@ pub struct AppState {
     pub cached_llm_providers: Arc<Mutex<Vec<llm_provider::LlmProviderInfo>>>,
     /// Mobile access: embedded HTTP server (None = not started).
     pub mobile_server: Arc<Mutex<Option<embedded_server::EmbeddedServer>>>,
-    /// Mobile access: Cloudflare tunnel (None = not started).
-    pub mobile_tunnel: Arc<Mutex<Option<tunnel::CloudflareTunnel>>>,
+    /// Mobile access: active tunnel handle (None = not started). Type-erased
+    /// so additional providers (localtunnel, OpenFrp) can plug in.
+    pub mobile_tunnel: Arc<Mutex<Option<tunnel::BoxedTunnelHandle>>>,
     /// Whether mobile access setup (download + tunnel) is in progress.
     pub mobile_setup_in_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Serialized snapshot of the current decision queue, seeded by the main
@@ -2362,16 +2363,16 @@ async fn enable_mobile_access(
     // Mark setup as in-progress.
     state.mobile_setup_in_progress.store(true, std::sync::atomic::Ordering::Relaxed);
 
-    // Download cloudflared (if needed) and start tunnel — in a blocking thread
-    // so we don't freeze the UI.
+    // Bring up the tunnel — in a blocking thread so we don't freeze the UI.
+    // The provider drives the "downloading" → "tunnel" phase events itself.
     let mobile_tunnel = state.mobile_tunnel.clone();
     let setup_flag = state.mobile_setup_in_progress.clone();
     let app_for_progress = app.clone();
     let app_for_phase = app.clone();
     let tunnel_result = tokio::task::spawn_blocking(move || {
-        // Notify frontend we're checking/downloading cloudflared.
-        let _ = app_for_phase.emit("mobile-access-phase", "downloading");
-
+        let phase_cb: tunnel::PhaseFn = Box::new(move |phase: &'static str| {
+            let _ = app_for_phase.emit("mobile-access-phase", phase);
+        });
         let progress_cb: tunnel::ProgressFn = Box::new(move |downloaded, total| {
             let _ = app_for_progress.emit("mobile-access-progress", serde_json::json!({
                 "downloaded": downloaded,
@@ -2379,13 +2380,8 @@ async fn enable_mobile_access(
             }));
         });
 
-        let binary = tunnel::find_or_download_cloudflared_with_progress(Some(progress_cb))
-            .map_err(|e| e.to_string())?;
-
-        // Notify frontend we're starting the tunnel.
-        let _ = app_for_phase.emit("mobile-access-phase", "tunnel");
-
-        tunnel::CloudflareTunnel::start_with_binary(&binary, port)
+        let provider = tunnel::CloudflareTunnelProvider::new();
+        tunnel::TunnelProvider::start(&provider, port, Some(phase_cb), Some(progress_cb))
             .map_err(|e| e.to_string())
     })
     .await
