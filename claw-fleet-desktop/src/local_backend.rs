@@ -418,6 +418,23 @@ impl LocalBackend {
             });
         }
 
+        // Dedicated auto-resume ticker. The watch thread only fires when JSONL
+        // files change, and rate-limited sessions produce no writes — without
+        // this ticker, `resets_at` could pass with nobody checking until some
+        // other session happens to wake the watcher.
+        {
+            let sess_ar = sessions.clone();
+            let ar_ar = auto_resume_last_fire.clone();
+            let running_ar = running.clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(Duration::from_secs(30));
+                if !running_ar.load(Ordering::SeqCst) {
+                    break;
+                }
+                maybe_fire_auto_resume(&sess_ar, &ar_ar);
+            });
+        }
+
         // Consumer heartbeat — tells `fleet guard`/`fleet elicitation` that a
         // head is alive and will consume requests.  Without this they fall
         // through (allow / native UI) instead of blocking Claude for 120s.
