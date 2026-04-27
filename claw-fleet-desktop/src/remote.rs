@@ -620,6 +620,31 @@ impl crate::backend::Backend for RemoteBackend {
         )?;
         Ok(resp.path)
     }
+
+    fn start_feishu_oauth(&self) -> Result<claw_fleet_core::feishu::OauthHandle, String> {
+        self.probe.get("/feishu/start_oauth")
+    }
+    fn poll_feishu_oauth(
+        &self,
+        state: &str,
+    ) -> Result<claw_fleet_core::feishu::OauthStatus, String> {
+        self.probe.get(&format!("/feishu/poll_oauth?state={}", encode_path(state)))
+    }
+    fn feishu_status(&self) -> Result<claw_fleet_core::feishu::FeishuConnection, String> {
+        self.probe.get("/feishu/status")
+    }
+    fn disconnect_feishu(&self) -> Result<(), String> {
+        self.probe.post_ok("/feishu/disconnect")
+    }
+    fn get_feishu_creds(&self) -> Result<claw_fleet_core::feishu::StoredCreds, String> {
+        self.probe.get("/feishu/creds")
+    }
+    fn set_feishu_creds(
+        &self,
+        creds: claw_fleet_core::feishu::StoredCreds,
+    ) -> Result<(), String> {
+        self.probe.post_json_ok("/feishu/creds", &creds)
+    }
 }
 
 // ── Progress event emitted to the frontend during connect ────────────────────

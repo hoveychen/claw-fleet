@@ -297,6 +297,107 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
+  // ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────
+  type FeishuConnection =
+    | { kind: "not_connected" }
+    | { kind: "connected"; open_id: string; name: string | null };
+  type OauthHandle = { state: string; authorizeUrl: string; port: number };
+  type OauthStatus =
+    | { kind: "pending" }
+    | { kind: "connected"; open_id: string; name: string | null }
+    | { kind: "failed"; reason: string };
+
+  const [feishuConn, setFeishuConn] = useState<FeishuConnection>({ kind: "not_connected" });
+  const [feishuAuthorizing, setFeishuAuthorizing] = useState(false);
+  const [feishuError, setFeishuError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (activeTab !== "interaction") return;
+    invoke<FeishuConnection>("feishu_status").then(setFeishuConn).catch(() => {});
+  }, [activeTab]);
+
+  const handleConnectFeishu = useCallback(async () => {
+    setFeishuError(null);
+    setFeishuAuthorizing(true);
+    try {
+      const handle = await invoke<OauthHandle>("connect_feishu");
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(handle.authorizeUrl);
+      const oauthState = handle.state;
+      const started = Date.now();
+      const tick = async (): Promise<void> => {
+        if (Date.now() - started > 5 * 60 * 1000) {
+          setFeishuAuthorizing(false);
+          setFeishuError("oauth flow timed out");
+          return;
+        }
+        try {
+          const status = await invoke<OauthStatus>("poll_feishu_oauth", { oauthState });
+          if (status.kind === "pending") {
+            setTimeout(tick, 1500);
+            return;
+          }
+          if (status.kind === "connected") {
+            setFeishuConn({ kind: "connected", open_id: status.open_id, name: status.name });
+          } else {
+            setFeishuError(status.reason);
+          }
+        } catch (e: unknown) {
+          setFeishuError(typeof e === "string" ? e : String(e));
+        }
+        setFeishuAuthorizing(false);
+      };
+      setTimeout(tick, 1500);
+    } catch (e: unknown) {
+      setFeishuAuthorizing(false);
+      setFeishuError(typeof e === "string" ? e : String(e));
+    }
+  }, []);
+
+  const handleDisconnectFeishu = useCallback(async () => {
+    try {
+      await invoke("disconnect_feishu");
+      setFeishuConn({ kind: "not_connected" });
+      setFeishuError(null);
+    } catch (e: unknown) {
+      setFeishuError(typeof e === "string" ? e : String(e));
+    }
+  }, []);
+
+  type FeishuStoredCreds = {
+    app_id: string;
+    app_secret: string;
+    encrypt_key: string;
+    verification_token: string;
+  };
+  const [feishuCreds, setFeishuCreds] = useState<FeishuStoredCreds>({
+    app_id: "",
+    app_secret: "",
+    encrypt_key: "",
+    verification_token: "",
+  });
+  const [feishuCredsSaving, setFeishuCredsSaving] = useState(false);
+  const [feishuCredsSaved, setFeishuCredsSaved] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== "interaction") return;
+    invoke<FeishuStoredCreds>("get_feishu_creds").then(setFeishuCreds).catch(() => {});
+  }, [activeTab]);
+
+  const handleSaveFeishuCreds = useCallback(async () => {
+    setFeishuError(null);
+    setFeishuCredsSaved(false);
+    setFeishuCredsSaving(true);
+    try {
+      await invoke("set_feishu_creds", { creds: feishuCreds });
+      setFeishuCredsSaved(true);
+    } catch (e: unknown) {
+      setFeishuError(typeof e === "string" ? e : String(e));
+    } finally {
+      setFeishuCredsSaving(false);
+    }
+  }, [feishuCreds]);
+
   // ── Notifications state ─────────────────────────────────────────────────
   const [notifMode, setNotifMode] = useState<NotificationMode>(
     () => (getItem("notification-mode") as NotificationMode) || "user_action",
@@ -911,6 +1012,86 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <span className={styles.toggle_slider} />
                   </label>
                 </div>
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.feishu")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.feishu_desc")}
+                  </span>
+                </div>
+                <div className={styles.row} style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                  {(["app_id", "app_secret", "encrypt_key", "verification_token"] as const).map((key) => (
+                    <div key={key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <label style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                        {t(`settings.feishu_${key}`)}
+                      </label>
+                      <input
+                        type={key === "app_secret" || key === "encrypt_key" ? "password" : "text"}
+                        value={feishuCreds[key]}
+                        onChange={(e) => {
+                          setFeishuCreds((prev) => ({ ...prev, [key]: e.target.value }));
+                          setFeishuCredsSaved(false);
+                        }}
+                        placeholder={key === "encrypt_key" || key === "verification_token" ? t("settings.feishu_optional") : ""}
+                        spellCheck={false}
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        style={{
+                          padding: "6px 8px",
+                          background: "var(--color-bg-soft, #1a1a1a)",
+                          border: "1px solid var(--color-border, #333)",
+                          borderRadius: 4,
+                          color: "var(--color-text, #eee)",
+                          fontFamily: "monospace",
+                          fontSize: 12,
+                        }}
+                      />
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button
+                      className={styles.hooks_install_btn}
+                      onClick={handleSaveFeishuCreds}
+                      disabled={feishuCredsSaving}
+                    >
+                      {feishuCredsSaving ? t("account.loading") : t("settings.feishu_save_creds")}
+                    </button>
+                    {feishuCredsSaved && (
+                      <span style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                        {t("settings.feishu_creds_saved")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                {feishuConn.kind === "connected" ? (
+                  <>
+                    <div className={styles.row}>
+                      <span className={styles.row_label}>
+                        {t("settings.feishu_connected_as")}: {feishuConn.name || feishuConn.open_id}
+                      </span>
+                      <button className={styles.switch_btn} onClick={handleDisconnectFeishu}>
+                        {t("settings.feishu_disconnect")}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className={styles.row}>
+                    <button
+                      className={styles.hooks_install_btn}
+                      onClick={handleConnectFeishu}
+                      disabled={feishuAuthorizing}
+                    >
+                      {feishuAuthorizing ? t("settings.feishu_authorizing") : t("settings.feishu_connect")}
+                    </button>
+                  </div>
+                )}
+                {feishuError && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-error, #d33)" }}>
+                      {t("settings.feishu_failed")}: {feishuError}
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 

@@ -10,6 +10,7 @@ pub mod consumer_heartbeat;
 pub mod cursor;
 pub mod daily_report;
 pub mod elicitation;
+pub mod feishu;
 pub mod guard;
 pub mod hooks;
 pub mod interaction_mode;
