@@ -9,6 +9,7 @@ pub mod app_nap;
 pub mod embedded_server;
 mod gui;
 pub mod local_backend;
+pub mod region;
 pub mod remote;
 pub mod tunnel;
 pub mod version_check;

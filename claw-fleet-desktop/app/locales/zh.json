@@ -1172,6 +1172,7 @@
     "provider_label": "隧道服务商",
     "provider_auto": "自动（推荐）",
     "provider_cloudflare": "Cloudflare",
-    "provider_localtunnel": "localtunnel"
+    "provider_localtunnel": "localtunnel",
+    "china_hint": "检测到你在中国大陆：trycloudflare.com 在国内常常慢或不可达，自动模式会优先尝试 localtunnel。"
   }
 }

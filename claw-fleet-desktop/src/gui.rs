@@ -2510,6 +2510,13 @@ fn get_mobile_qr_data(state: tauri::State<'_, AppState>) -> Option<String> {
     Some(format!("{}/mobile?token={}", tunnel.url(), server.token()))
 }
 
+/// Returns whether the user is likely in mainland China, used by the mobile
+/// panel to surface a one-line tip about provider reachability.
+#[tauri::command]
+fn is_china_region() -> bool {
+    matches!(crate::region::detect(), crate::region::Region::China)
+}
+
 // ── App setup ────────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2885,6 +2892,7 @@ pub fn run() {
             disable_mobile_access,
             get_mobile_access_status,
             get_mobile_qr_data,
+            is_china_region,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

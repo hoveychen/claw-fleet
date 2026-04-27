@@ -42,6 +42,11 @@ export function MobileAccessPanel({ onClose }: { onClose: () => void }) {
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [providerPref, setProviderPref] = useState<TunnelProviderPref>(loadProviderPref);
+  const [isChinaRegion, setIsChinaRegion] = useState(false);
+
+  useEffect(() => {
+    invoke<boolean>("is_china_region").then(setIsChinaRegion).catch(() => {});
+  }, []);
 
   const handleProviderPrefChange = useCallback((v: TunnelProviderPref) => {
     setProviderPref(v);
@@ -155,6 +160,9 @@ export function MobileAccessPanel({ onClose }: { onClose: () => void }) {
                 </svg>
               </div>
               <p className={styles.desc}>{t("settings.mobile_desc")}</p>
+              {isChinaRegion && providerPref === "auto" && (
+                <p className={styles.china_hint}>{t("mobile_panel.china_hint")}</p>
+              )}
               <label className={styles.provider_row}>
                 <span className={styles.provider_label}>{t("mobile_panel.provider_label")}</span>
                 <select
