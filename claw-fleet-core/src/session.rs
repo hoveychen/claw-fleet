@@ -465,12 +465,58 @@ fn detect_rate_limit(last_lines: &[Value]) -> Option<RateLimitState> {
     None
 }
 
+/// True iff the last meaningful (user/assistant) record is a synthetic
+/// "[Request interrupted by user]" / "...for tool use" user message, which
+/// claude-code writes when Esc is pressed mid-turn.
+fn is_last_meaningful_an_interrupt(last_lines: &[Value]) -> bool {
+    let last = last_lines.iter().rev().find(|v| {
+        matches!(
+            v.get("type").and_then(|t| t.as_str()),
+            Some("user") | Some("assistant")
+        )
+    });
+    let Some(last) = last else { return false };
+    if last.get("type").and_then(|t| t.as_str()) != Some("user") {
+        return false;
+    }
+    let Some(blocks) = last
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())
+    else {
+        return false;
+    };
+    blocks.iter().any(|b| {
+        b.get("type").and_then(|t| t.as_str()) == Some("text")
+            && matches!(
+                b.get("text").and_then(|t| t.as_str()),
+                Some("[Request interrupted by user]")
+                    | Some("[Request interrupted by user for tool use]")
+            )
+    })
+}
+
 fn determine_status(
     last_lines: &[Value],
     file_age_secs: f64,
     content_age_secs: f64,
     hook_state: Option<&HookState>,
 ) -> SessionStatus {
+    // Phase -1: Esc-interrupt detection.
+    // When the user presses Esc, claude-code appends a synthetic user message
+    // whose only text block is "[Request interrupted by user]" (or the
+    // "...for tool use" variant). Without this short-circuit, the rest of the
+    // pipeline misreads it: the user-as-last-message branch returns Thinking
+    // for 120s, and a stale ModelProcessing hook pins the card to Thinking
+    // even longer. Treat interrupt as terminal — fall straight through to
+    // content-age aging (Active <30s, Idle thereafter).
+    if is_last_meaningful_an_interrupt(last_lines) {
+        if content_age_secs < 30.0 {
+            return SessionStatus::Active;
+        }
+        return SessionStatus::Idle;
+    }
+
     // Phase 0: Hook-based overrides for stale JSONL scenarios.
     // Hooks give us definitive signals that are more reliable than file-age guessing.
     // Only apply when the JSONL is not actively streaming (file_age >= 8s),
@@ -1722,6 +1768,25 @@ mod tests {
         json!({ "type": "user", "message": { "role": "user", "content": [{"type": "text", "text": "hello"}] } })
     }
 
+    fn interrupt_user_msg(for_tool_use: bool) -> Value {
+        let text = if for_tool_use {
+            "[Request interrupted by user for tool use]"
+        } else {
+            "[Request interrupted by user]"
+        };
+        json!({ "type": "user", "message": { "role": "user", "content": [{"type": "text", "text": text}] } })
+    }
+
+    fn user_tool_result_msg() -> Value {
+        json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": "abc", "content": "ok"}]
+            }
+        })
+    }
+
     fn text_block(text: &str) -> Value {
         json!({"type": "text", "text": text})
     }
@@ -1955,6 +2020,58 @@ mod tests {
     fn status_user_message_too_old() {
         let lines = vec![user_msg()];
         assert_eq!(ds(&lines, 200.0, None), SessionStatus::Idle);
+    }
+
+    // Interrupt regression: user pressed Esc; JSONL ends with a synthetic
+    // user message containing "[Request interrupted by user]". Must NOT be
+    // treated as "model thinking about the user's prompt".
+    #[test]
+    fn status_interrupt_initial_thinking_not_thinking() {
+        let lines = vec![
+            user_msg(),
+            json!({"type": "file-history-snapshot", "messageId": "m", "snapshot": {}}),
+            interrupt_user_msg(false),
+        ];
+        let s = ds(&lines, 5.0, None);
+        assert_ne!(s, SessionStatus::Thinking, "got {:?}", s);
+    }
+
+    #[test]
+    fn status_interrupt_during_tool_use_not_thinking() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![thinking_block()], Some("tool_use")),
+            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
+            user_tool_result_msg(),
+            interrupt_user_msg(true),
+        ];
+        let s = ds(&lines, 5.0, None);
+        assert_ne!(s, SessionStatus::Thinking, "got {:?}", s);
+        assert_ne!(s, SessionStatus::Executing, "got {:?}", s);
+    }
+
+    #[test]
+    fn status_interrupt_overrides_hook_model_processing() {
+        // hook_state is stale; the JSONL has a fresh interrupt marker that
+        // must take precedence over Phase-0 hook overrides.
+        let lines = vec![
+            user_msg(),
+            interrupt_user_msg(false),
+        ];
+        let s = ds(&lines, 20.0, Some(&HookState::ModelProcessing));
+        assert_ne!(s, SessionStatus::Thinking, "got {:?}", s);
+    }
+
+    #[test]
+    fn status_interrupt_for_tool_use_variant_not_executing() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![tool_use_block("Bash")], Some("tool_use")),
+            interrupt_user_msg(true),
+        ];
+        let s = ds(&lines, 20.0, Some(&HookState::ToolExecuting));
+        assert_ne!(s, SessionStatus::Executing, "got {:?}", s);
+        assert_ne!(s, SessionStatus::Thinking, "got {:?}", s);
     }
 
     #[test]
