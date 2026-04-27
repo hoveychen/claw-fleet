@@ -217,3 +217,16 @@
   font-size: 12px;
   cursor: pointer;
 }
+
+.china_hint {
+  font-size: 11px;
+  color: var(--color-text);
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.2);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0;
+  max-width: 280px;
+  line-height: 1.5;
+  text-align: left;
+}

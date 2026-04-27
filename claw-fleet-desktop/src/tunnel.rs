@@ -70,17 +70,32 @@ pub type ProgressFn = Box<dyn Fn(u64, u64) + Send>;
 ///
 /// - `Some("cloudflare")` / `Some("localtunnel")` pin a single provider — no
 ///   fallback, the caller fails out if it doesn't work.
-/// - `None` or `Some("auto")` returns the default fallback chain
-///   (cloudflared first, localtunnel second). Future revisions will reorder
-///   based on detected region (P3: OpenFrp first for users in China).
+/// - `None` or `Some("auto")` returns a fallback chain whose order depends on
+///   the detected region: in mainland China, `trycloudflare.com` is often slow
+///   or blocked, so localtunnel is tried first there.
 pub fn select_providers(preference: Option<&str>) -> Vec<BoxedTunnelProvider> {
+    select_providers_for_region(preference, super::region::detect())
+}
+
+/// Pure form of [`select_providers`] used for testing. Production code should
+/// call [`select_providers`], which detects the region itself.
+pub fn select_providers_for_region(
+    preference: Option<&str>,
+    region: super::region::Region,
+) -> Vec<BoxedTunnelProvider> {
     match preference.unwrap_or("auto") {
         "cloudflare" => vec![Box::new(CloudflareTunnelProvider::new())],
         "localtunnel" => vec![Box::new(LocaltunnelProvider::new())],
-        _ => vec![
-            Box::new(CloudflareTunnelProvider::new()),
-            Box::new(LocaltunnelProvider::new()),
-        ],
+        _ => match region {
+            super::region::Region::China => vec![
+                Box::new(LocaltunnelProvider::new()),
+                Box::new(CloudflareTunnelProvider::new()),
+            ],
+            super::region::Region::Other => vec![
+                Box::new(CloudflareTunnelProvider::new()),
+                Box::new(LocaltunnelProvider::new()),
+            ],
+        },
     }
 }
 
@@ -808,5 +823,33 @@ mod tests {
         let p = LocaltunnelProvider::new();
         assert_eq!(p.name(), "localtunnel");
         assert!(p.is_available());
+    }
+
+    #[test]
+    fn auto_in_china_puts_localtunnel_first() {
+        let names: Vec<&str> = select_providers_for_region(None, crate::region::Region::China)
+            .iter()
+            .map(|p| p.name())
+            .collect();
+        assert_eq!(names, vec!["localtunnel", "cloudflare"]);
+    }
+
+    #[test]
+    fn auto_outside_china_puts_cloudflare_first() {
+        let names: Vec<&str> = select_providers_for_region(None, crate::region::Region::Other)
+            .iter()
+            .map(|p| p.name())
+            .collect();
+        assert_eq!(names, vec!["cloudflare", "localtunnel"]);
+    }
+
+    #[test]
+    fn pinned_provider_ignores_region() {
+        let names: Vec<&str> =
+            select_providers_for_region(Some("cloudflare"), crate::region::Region::China)
+                .iter()
+                .map(|p| p.name())
+                .collect();
+        assert_eq!(names, vec!["cloudflare"]);
     }
 }

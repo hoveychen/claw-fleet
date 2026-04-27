@@ -1172,6 +1172,7 @@
     "provider_label": "Tunnel provider",
     "provider_auto": "Auto (recommended)",
     "provider_cloudflare": "Cloudflare",
-    "provider_localtunnel": "localtunnel"
+    "provider_localtunnel": "localtunnel",
+    "china_hint": "Detected mainland-China region: trycloudflare.com is often slow or blocked here. Auto mode will try localtunnel first."
   }
 }
