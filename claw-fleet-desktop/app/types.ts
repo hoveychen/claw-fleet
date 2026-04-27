@@ -59,6 +59,15 @@ export interface SessionInfo {
   rateLimit?: RateLimitState | null;
   /** Snapshot of the latest TodoWrite state; absent when the session has never invoked TodoWrite. */
   todos?: TodoSummary | null;
+  /** Number of times this session was context-compacted (auto or manual /compact). */
+  compactCount?: number;
+  /** Sum of context sizes (in tokens) right before each compaction. */
+  compactPreTokens?: number;
+  /** Sum of summary sizes (in tokens) produced by each compaction. */
+  compactPostTokens?: number;
+  /** Estimated USD cost of compact LLM calls (the calls themselves are not
+   *  recorded as standalone turns, so this is an approximation). */
+  compactCostUsd?: number;
 }
 
 export type SessionOutcome =

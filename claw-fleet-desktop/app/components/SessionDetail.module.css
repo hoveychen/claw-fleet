@@ -119,6 +119,11 @@
   color: var(--color-warning, #e8a838);
 }
 
+.compact_chip {
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
 .close_btn {
   padding: 3px 8px;
   background: none;
