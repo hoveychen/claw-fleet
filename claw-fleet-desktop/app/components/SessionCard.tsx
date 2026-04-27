@@ -448,6 +448,9 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
         {session.isSubagent ? (
           <span className={styles.tag_subagent} title={session.agentType ?? t("subagent")}>
             <SubagentTypeIcon type={session.agentType} />
+            <span className={styles.tag_subagent_label}>
+              {session.agentType ?? t("subagent")}
+            </span>
           </span>
         ) : (
           <span className={styles.tag_main} title={t("card.tip_main")}>◈ {t("main")}</span>
