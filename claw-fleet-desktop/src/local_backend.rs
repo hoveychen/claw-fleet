@@ -421,14 +421,39 @@ impl LocalBackend {
         // Consumer heartbeat — tells `fleet guard`/`fleet elicitation` that a
         // head is alive and will consume requests.  Without this they fall
         // through (allow / native UI) instead of blocking Claude for 120s.
+        //
+        // Interval kept tight (500ms) so brief macOS process throttling — e.g.
+        // during window resize drag — can't push the file's timestamp past the
+        // hook's liveness_window (30s) and trigger a spurious panel-vanish.
+        //
+        // Self-check: if our own monotonic gap between iterations ever exceeds
+        // STALL_WARN, the thread itself was starved (process suspended, GC
+        // stall, scheduler pressure). That instantly distinguishes "we stopped
+        // running" from "we ran but the file write was lost" without needing
+        // hook-side correlation.
         {
             let running_hb = running.clone();
-            std::thread::spawn(move || loop {
-                if !running_hb.load(Ordering::SeqCst) {
-                    break;
+            std::thread::spawn(move || {
+                const STALL_WARN: Duration = Duration::from_millis(2000);
+                let mut last_tick: Option<Instant> = None;
+                loop {
+                    if !running_hb.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let now = Instant::now();
+                    if let Some(prev) = last_tick {
+                        let gap = now.saturating_duration_since(prev);
+                        if gap >= STALL_WARN {
+                            claw_fleet_core::log_debug(&format!(
+                                "[heartbeat] self-check: thread stalled for {:.2}s (expected ~0.5s; process likely suspended/throttled)",
+                                gap.as_secs_f64()
+                            ));
+                        }
+                    }
+                    last_tick = Some(now);
+                    claw_fleet_core::consumer_heartbeat::write_heartbeat();
+                    std::thread::sleep(Duration::from_millis(500));
                 }
-                claw_fleet_core::consumer_heartbeat::write_heartbeat();
-                std::thread::sleep(Duration::from_secs(2));
             });
         }
 
@@ -462,6 +487,7 @@ impl LocalBackend {
                                     id, req.command_summary
                                 ));
                                 let _ = app_guard.emit("guard-request", &req);
+                                send_guard_card(&req);
                             }
                         }
                     }
@@ -506,6 +532,7 @@ impl LocalBackend {
                                     req.questions.len()
                                 ));
                                 let _ = app_elicit.emit("elicitation-request", &req);
+                                send_elicitation_card(&req);
                             }
                         }
                     }
@@ -547,6 +574,7 @@ impl LocalBackend {
                                     req.plan_content.len()
                                 ));
                                 let _ = app_plan.emit("plan-approval-request", &req);
+                                send_plan_card(&req);
                             }
                         }
                     }
@@ -595,6 +623,121 @@ impl LocalBackend {
 /// Convert a session list into an index request (list of (path, id) pairs).
 fn sessions_to_index_request(sessions: &[SessionInfo]) -> IndexRequest {
     sessions.iter().map(|s| (s.jsonl_path.clone(), s.id.clone())).collect()
+}
+
+// ── Feishu card hooks ─────────────────────────────────────────────────────────
+//
+// These wrappers render Card 2.0 JSON for an incoming decision request and
+// hand it to `claw_fleet_core::feishu`.  When Feishu isn't connected the
+// `bound_open_id` check inside `notify_decision_created` short-circuits and
+// these become free no-ops.  Failures are logged and swallowed — a flaky
+// Feishu session must never block the local desktop watcher.
+//
+// Each `send_*_card` runs the actual HTTP POST on a detached thread so a
+// slow Feishu round-trip (up to FEISHU_HTTP_TIMEOUT) cannot stall the
+// pending-request poller.  Race window: if the user responds on desktop
+// before the send-thread completes, `resolve_feishu_card` finds no
+// mapping and the card stays in its un-resolved state.  Acceptable for
+// now — proper resolution on out-of-order events is tracked for the
+// webhook slice.
+
+fn send_guard_card(req: &claw_fleet_core::guard::GuardRequest) {
+    let req = req.clone();
+    std::thread::spawn(move || {
+        let card = claw_fleet_core::feishu::GuardCard {
+            workspace: req.workspace_name.clone(),
+            command: req.command.clone(),
+            risk_label: if req.risk_tags.is_empty() {
+                None
+            } else {
+                Some(req.risk_tags.join(", "))
+            },
+            llm_analysis: None,
+            decision_id: req.id.clone(),
+        };
+        if let Err(e) = claw_fleet_core::feishu::notify_decision_created(
+            &req.id,
+            claw_fleet_core::feishu::DecisionKind::Guard,
+            &card.to_card_json(),
+        ) {
+            crate::log_debug(&format!("[feishu] send guard card failed: {e}"));
+        }
+    });
+}
+
+fn send_elicitation_card(req: &claw_fleet_core::elicitation::ElicitationRequest) {
+    // The desktop UI walks questions one at a time; mirror the *first*
+    // question to the Feishu surface for now.  Multi-step rendering is a
+    // follow-up that needs the webhook slice anyway.
+    let req = req.clone();
+    std::thread::spawn(move || {
+        let Some(first) = req.questions.first() else {
+            return;
+        };
+        let total = req.questions.len() as u32;
+        let card = claw_fleet_core::feishu::ElicitationCard {
+            workspace: req.workspace_name.clone(),
+            question: first.question.clone(),
+            options: first
+                .options
+                .iter()
+                .map(|o| claw_fleet_core::feishu::ElicitationOptionCard {
+                    label: o.label.clone(),
+                    description: if o.description.is_empty() {
+                        None
+                    } else {
+                        Some(o.description.clone())
+                    },
+                    value: o.label.clone(),
+                })
+                .collect(),
+            multi_select: first.multi_select,
+            allow_other: false,
+            step: if total > 1 { Some((1, total)) } else { None },
+            decision_id: req.id.clone(),
+        };
+        if let Err(e) = claw_fleet_core::feishu::notify_decision_created(
+            &req.id,
+            claw_fleet_core::feishu::DecisionKind::Elicitation,
+            &card.to_card_json(),
+        ) {
+            crate::log_debug(&format!("[feishu] send elicitation card failed: {e}"));
+        }
+    });
+}
+
+fn send_plan_card(req: &claw_fleet_core::plan_approval::PlanApprovalRequest) {
+    let req = req.clone();
+    std::thread::spawn(move || {
+        let card = claw_fleet_core::feishu::PlanCard {
+            workspace: req.workspace_name.clone(),
+            plan_markdown: req.plan_content.clone(),
+            decision_id: req.id.clone(),
+        };
+        if let Err(e) = claw_fleet_core::feishu::notify_decision_created(
+            &req.id,
+            claw_fleet_core::feishu::DecisionKind::PlanApproval,
+            &card.to_card_json(),
+        ) {
+            crate::log_debug(&format!("[feishu] send plan card failed: {e}"));
+        }
+    });
+}
+
+fn resolve_feishu_card(
+    decision_id: &str,
+    kind: claw_fleet_core::feishu::DecisionKind,
+    summary: &str,
+) {
+    let decision_id = decision_id.to_string();
+    let summary = summary.to_string();
+    std::thread::spawn(move || {
+        if let Err(e) =
+            claw_fleet_core::feishu::notify_decision_resolved(&decision_id, kind, &summary)
+        {
+            crate::log_debug(&format!("[feishu] resolve card failed: {e}"));
+        }
+    });
 }
 
 /// Dedicated indexer thread. Receives session lists via channel, coalesces
@@ -1165,7 +1308,10 @@ impl Backend for LocalBackend {
                 GuardDecision::Block
             },
         };
-        crate::guard::write_response(&resp)
+        let result = crate::guard::write_response(&resp);
+        let summary = if allow { "✅ Allow" } else { "🚫 Block" };
+        resolve_feishu_card(id, claw_fleet_core::feishu::DecisionKind::Guard, summary);
+        result
     }
 
     fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String> {
@@ -1224,12 +1370,30 @@ impl Backend for LocalBackend {
         declined: bool,
         answers: std::collections::HashMap<String, String>,
     ) -> Result<(), String> {
+        let summary = if declined {
+            "已取消".to_string()
+        } else if answers.is_empty() {
+            "已回复".to_string()
+        } else {
+            let mut parts: Vec<String> = answers
+                .iter()
+                .map(|(q, a)| format!("- **{}**: {}", q, a))
+                .collect();
+            parts.sort();
+            parts.join("\n")
+        };
         let resp = crate::elicitation::ElicitationResponse {
             id: id.to_string(),
             declined,
             answers,
         };
-        crate::elicitation::write_response(&resp)
+        let result = crate::elicitation::write_response(&resp);
+        resolve_feishu_card(
+            id,
+            claw_fleet_core::feishu::DecisionKind::Elicitation,
+            &summary,
+        );
+        result
     }
 
     fn apply_plan_approval_hook(&self) -> Result<(), String> {
@@ -1266,13 +1430,27 @@ impl Backend for LocalBackend {
         edited_plan: Option<String>,
         feedback: Option<String>,
     ) -> Result<(), String> {
+        let summary = match decision {
+            "approve" => "✅ Approved".to_string(),
+            "reject" => match feedback.as_deref() {
+                Some(f) if !f.is_empty() => format!("🚫 Rejected — {f}"),
+                _ => "🚫 Rejected".to_string(),
+            },
+            other => format!("decision: {other}"),
+        };
         let resp = crate::plan_approval::PlanApprovalResponse {
             id: id.to_string(),
             decision: decision.to_string(),
             edited_plan,
             feedback,
         };
-        crate::plan_approval::write_response(&resp)
+        let result = crate::plan_approval::write_response(&resp);
+        resolve_feishu_card(
+            id,
+            claw_fleet_core::feishu::DecisionKind::PlanApproval,
+            &summary,
+        );
+        result
     }
 
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
@@ -1593,6 +1771,31 @@ impl Backend for LocalBackend {
             ));
         }
         Ok(abs.to_string_lossy().into_owned())
+    }
+
+    fn start_feishu_oauth(&self) -> Result<claw_fleet_core::feishu::OauthHandle, String> {
+        claw_fleet_core::feishu::start_oauth()
+    }
+    fn poll_feishu_oauth(
+        &self,
+        state: &str,
+    ) -> Result<claw_fleet_core::feishu::OauthStatus, String> {
+        claw_fleet_core::feishu::poll_oauth(state)
+    }
+    fn feishu_status(&self) -> Result<claw_fleet_core::feishu::FeishuConnection, String> {
+        claw_fleet_core::feishu::status()
+    }
+    fn disconnect_feishu(&self) -> Result<(), String> {
+        claw_fleet_core::feishu::disconnect()
+    }
+    fn get_feishu_creds(&self) -> Result<claw_fleet_core::feishu::StoredCreds, String> {
+        Ok(claw_fleet_core::feishu::get_stored_creds())
+    }
+    fn set_feishu_creds(
+        &self,
+        creds: claw_fleet_core::feishu::StoredCreds,
+    ) -> Result<(), String> {
+        claw_fleet_core::feishu::set_stored_creds(creds)
     }
 }
 

@@ -351,6 +351,29 @@ pub trait Backend: Send + Sync {
     /// returns the server-side temp path. UI layers concatenate the returned
     /// path into the textarea as `@<path>` so Claude Code picks it up.
     fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String>;
+
+    // ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────
+    // Skeleton: default impls report "not configured" until the operator sets
+    // the FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_ENCRYPT_KEY env vars and
+    // wires up the Feishu app per design/feishu-integration.md.
+    fn start_feishu_oauth(&self) -> Result<crate::feishu::OauthHandle, String> {
+        Err("feishu integration not configured".into())
+    }
+    fn poll_feishu_oauth(&self, _state: &str) -> Result<crate::feishu::OauthStatus, String> {
+        Err("feishu integration not configured".into())
+    }
+    fn feishu_status(&self) -> Result<crate::feishu::FeishuConnection, String> {
+        Ok(crate::feishu::FeishuConnection::NotConnected)
+    }
+    fn disconnect_feishu(&self) -> Result<(), String> {
+        Err("feishu integration not configured".into())
+    }
+    fn get_feishu_creds(&self) -> Result<crate::feishu::StoredCreds, String> {
+        Ok(crate::feishu::StoredCreds::default())
+    }
+    fn set_feishu_creds(&self, _creds: crate::feishu::StoredCreds) -> Result<(), String> {
+        Err("feishu integration not configured".into())
+    }
 }
 
 /// Upper bound on a single attachment payload. Enforced by both the uploader

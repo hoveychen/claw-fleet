@@ -1,6 +1,8 @@
 use clap::{Parser, Subcommand};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod feishu;
+
 use claw_fleet_core::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
 use claw_fleet_core::agent_source::{self, build_sources, find_source_for_path};
 use claw_fleet_core::hooks;
@@ -3021,6 +3023,153 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            // ── Feishu (Lark) bridge endpoints ───────────────────────────
+            "/feishu/start_oauth" => {
+                let body = match feishu::start_oauth() {
+                    Ok(handle) => serde_json::to_string(&handle).unwrap_or_default(),
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(503)
+                                .with_header(json_header),
+                        );
+                        continue;
+                    }
+                };
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/feishu/poll_oauth" => {
+                let qs = parse_query(query_str);
+                let state = qs.get("state").cloned().unwrap_or_default();
+                match feishu::poll_oauth(&state) {
+                    Ok(status) => {
+                        let body = serde_json::to_string(&status).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(404)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/feishu/status" => {
+                match feishu::status() {
+                    Ok(conn) => {
+                        let body = serde_json::to_string(&conn).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/feishu/disconnect" => {
+                match feishu::disconnect() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/feishu/creds" if request.method() == &tiny_http::Method::Get => {
+                let creds = claw_fleet_core::feishu::get_stored_creds();
+                let body = serde_json::to_string(&creds).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/feishu/creds" if request.method() == &tiny_http::Method::Post => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                let parsed: Result<claw_fleet_core::feishu::StoredCreds, _> =
+                    serde_json::from_slice(&body_bytes);
+                let (status, body) = match parsed {
+                    Ok(c) => match claw_fleet_core::feishu::set_stored_creds(c) {
+                        Ok(()) => (200, r#"{"ok":true}"#.to_string()),
+                        Err(e) => (500, serde_json::json!({"error": e}).to_string()),
+                    },
+                    Err(e) => (
+                        400,
+                        serde_json::json!({"error": format!("invalid body: {e}")}).to_string(),
+                    ),
+                };
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(status)
+                        .with_header(json_header),
+                );
+            }
+
+            "/webhook/feishu" if request.method() == &tiny_http::Method::Post => {
+                let timestamp = request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("X-Lark-Request-Timestamp"))
+                    .map(|h| h.value.as_str().to_string());
+                let nonce = request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("X-Lark-Request-Nonce"))
+                    .map(|h| h.value.as_str().to_string());
+                let signature = request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.as_str().as_str().eq_ignore_ascii_case("X-Lark-Signature"))
+                    .map(|h| h.value.as_str().to_string());
+
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+
+                let (status, body) = match claw_fleet_core::feishu::handle_webhook(
+                    &body_bytes,
+                    timestamp.as_deref(),
+                    nonce.as_deref(),
+                    signature.as_deref(),
+                ) {
+                    Ok(b) => (200, b),
+                    Err(e) => (
+                        400,
+                        serde_json::json!({"error": e}).to_string().into_bytes(),
+                    ),
+                };
+                let _ = request.respond(
+                    tiny_http::Response::from_data(body)
+                        .with_status_code(status)
+                        .with_header(json_header),
+                );
+            }
+
             _ => {
                 let _ = request.respond(tiny_http::Response::empty(404));
             }
@@ -3195,7 +3344,7 @@ fn cmd_guard() {
             // No live consumer (Fleet app not running / no SSE client on
             // `fleet serve`) — fall through silently so Claude isn't blocked
             // by a request nobody will answer.
-            let liveness_window = Duration::from_secs(5);
+            let liveness_window = Duration::from_secs(30);
             if !consumer_heartbeat::is_consumer_alive(liveness_window) {
                 return;
             }
@@ -3320,10 +3469,10 @@ fn cmd_elicitation() {
 
     // No live consumer — fall through silently; Claude Code will use its
     // native AskUserQuestion UI.
-    let liveness_window = Duration::from_secs(5);
+    let liveness_window = Duration::from_secs(30);
     if !consumer_heartbeat::is_consumer_alive(liveness_window) {
         claw_fleet_core::log_debug(
-            "[elicitation hook] no live consumer at startup (heartbeat stale >5s); falling back to Claude Code's native UI",
+            "[elicitation hook] no live consumer at startup (heartbeat stale >30s); falling back to Claude Code's native UI",
         );
         return;
     }
@@ -3476,10 +3625,10 @@ fn cmd_plan_approval() {
 
     // No live consumer — fall through silently so Claude Code keeps its
     // native plan-approval UI as a fallback.
-    let liveness_window = Duration::from_secs(5);
+    let liveness_window = Duration::from_secs(30);
     if !consumer_heartbeat::is_consumer_alive(liveness_window) {
         claw_fleet_core::log_debug(
-            "[plan-approval hook] no live consumer at startup (heartbeat stale >5s); falling back to Claude Code's native UI",
+            "[plan-approval hook] no live consumer at startup (heartbeat stale >30s); falling back to Claude Code's native UI",
         );
         return;
     }
