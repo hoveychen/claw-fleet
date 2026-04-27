@@ -2,8 +2,8 @@
 //! cannot suspend Fleet when it is backgrounded.
 //!
 //! Why this exists: `claw-fleet-core`'s consumer-heartbeat contract requires
-//! the desktop app to touch `~/.fleet/consumer.heartbeat` every 2s (stale
-//! window 5s) so `fleet elicitation` / `fleet guard` / `fleet plan-approval`
+//! the desktop app to touch `~/.fleet/consumer.heartbeat` every 500ms (stale
+//! window 30s) so `fleet elicitation` / `fleet guard` / `fleet plan-approval`
 //! hook CLIs know a live head will consume their requests. When App Nap
 //! suspends the whole process, that file stops updating, the hooks delete
 //! their pending request files, and any on-screen DecisionPanel vanishes
