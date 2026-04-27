@@ -176,32 +176,44 @@ export function SessionList() {
           !subagentsByParent.has(s.parentSessionId) ||
           !mains.find((m) => m.id === s.parentSessionId))
     );
-    const result: { session: SessionInfo; indented: boolean }[] = [];
+    const result: { session: SessionInfo; indented: boolean; extend: boolean }[] = [];
     for (const main of mains) {
-      result.push({ session: main, indented: false });
+      result.push({ session: main, indented: false, extend: false });
       for (const sub of subagentsByParent.get(main.id) ?? []) {
-        result.push({ session: sub, indented: true });
+        result.push({ session: sub, indented: true, extend: false });
       }
     }
     for (const orphan of orphans) {
-      result.push({ session: orphan, indented: false });
+      result.push({ session: orphan, indented: false, extend: false });
+    }
+    // Mark each indented row whose successor is also indented so the L-bracket
+    // thread runs through the full height instead of stopping at the elbow.
+    for (let i = 0; i < result.length - 1; i++) {
+      if (result[i].indented && result[i + 1].indented) {
+        result[i].extend = true;
+      }
     }
     return result;
   }
 
   function renderGroup(list: SessionInfo[]) {
-    return buildTree(list).map(({ session: s, indented }) => (
-      <div key={s.jsonlPath} className={indented ? styles.indented : undefined}>
-        <SessionCard
-          session={s}
-          isSelected={viewedSession?.jsonlPath === s.jsonlPath}
-          onClick={() => {
-            const isFtsHit = filter.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
-            open(s, isFtsHit ? filter.trim() : undefined);
-          }}
-        />
-      </div>
-    ));
+    return buildTree(list).map(({ session: s, indented, extend }) => {
+      const className = indented
+        ? `${styles.indented}${extend ? ` ${styles.indented_extend}` : ""}`
+        : undefined;
+      return (
+        <div key={s.jsonlPath} className={className}>
+          <SessionCard
+            session={s}
+            isSelected={viewedSession?.jsonlPath === s.jsonlPath}
+            onClick={() => {
+              const isFtsHit = filter.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
+              open(s, isFtsHit ? filter.trim() : undefined);
+            }}
+          />
+        </div>
+      );
+    });
   }
 
   const isRemote = connection?.type === "remote";

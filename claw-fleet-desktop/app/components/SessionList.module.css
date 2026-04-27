@@ -332,10 +332,39 @@
   padding: 8px 6px 4px;
 }
 
+/* Subagent row: indent and draw an L-bracket connector in the left gutter,
+   mirroring the lite-mode timeline thread (see LiteSessionCard.module.css). */
 .indented {
-  padding-left: 12px;
-  border-left: 2px solid var(--color-border);
-  margin-left: 6px;
+  position: relative;
+  margin-left: 20px;
+}
+
+.indented::before {
+  content: "";
+  position: absolute;
+  left: -11px;
+  top: -8px;
+  height: calc(50% + 8px);
+  width: 1.5px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 1px;
+}
+
+.indented::after {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  width: 10px;
+  height: 1.5px;
+  background: rgba(255, 255, 255, 0.18);
+}
+
+/* When the next row is also a subagent, run the vertical thread all the way
+   through. The flag is computed in SessionList.tsx (don't rely on :has() —
+   not all engines match it reliably against CSS-modules-renamed siblings). */
+.indented_extend::before {
+  height: calc(100% + 16px);
 }
 
 .empty {

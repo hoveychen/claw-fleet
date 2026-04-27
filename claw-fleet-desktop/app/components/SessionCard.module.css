@@ -233,7 +233,8 @@
 }
 
 .tag_main    { background: var(--tag-main-bg); color: var(--tag-main-fg); }
-.tag_subagent{ background: var(--tag-sub-bg);  color: var(--tag-sub-fg); display: inline-flex; align-items: center; padding: 2px 5px; }
+.tag_subagent{ background: var(--tag-sub-bg);  color: var(--tag-sub-fg); display: inline-flex; align-items: center; gap: 3px; padding: 2px 5px; max-width: 90px; overflow: hidden; }
+.tag_subagent_label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tag_ide     { background: var(--color-bg-secondary); color: var(--color-text-dim); }
 .tag_model   { background: var(--color-bg-secondary); color: var(--color-text-secondary); }
 .tag_thinking{ background: var(--thinking-toggle-bg); color: var(--thinking-label); display: inline-flex; align-items: center; }
