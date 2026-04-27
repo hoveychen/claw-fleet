@@ -246,7 +246,8 @@
     "tip_context": "Context window usage: {{percent}}%",
     "tip_cost": "Session cost (USD)",
     "tip_cost_agent": "Self: ${{self}} · Agent total (main + subagents): ${{total}}",
-    "tip_todos": "Todos: {{completed}} done · {{inProgress}} in progress · {{pending}} pending"
+    "tip_todos": "Todos: {{completed}} done · {{inProgress}} in progress · {{pending}} pending",
+    "tip_compact": "Context compactions: {{count}} · {{pre}} input tokens summarised · {{post}} summary tokens produced · estimated cost ~${{cost}} (compact LLM calls aren't logged separately, priced from cache_read + output rates)"
   },
   "onboarding": {
     "welcome": "Welcome to Claw Fleet",

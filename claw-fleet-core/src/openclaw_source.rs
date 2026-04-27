@@ -407,6 +407,10 @@ fn parse_openclaw_session(
         last_outcome: None,
         rate_limit: None,
         todos: None,
+        compact_count: 0,
+        compact_pre_tokens: 0,
+        compact_post_tokens: 0,
+        compact_cost_usd: 0.0,
     })
 }
 

@@ -348,6 +348,7 @@
 .cost_total { color: var(--color-warning, #e8a838); font-weight: 500; }
 .context { color: var(--color-text-dim); }
 .context_high { color: var(--color-warning, #e8a838); }
+.compact_chip { color: var(--color-text-dim); }
 .time { color: var(--color-text-dim); }
 
 /* Stop button */

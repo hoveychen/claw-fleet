@@ -116,6 +116,19 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
                   ${liveSession.totalCostUsd.toFixed(2)}
                 </span>
               )}
+              {(liveSession.compactCount ?? 0) > 0 && (
+                <span
+                  className={styles.compact_chip}
+                  title={t("card.tip_compact", {
+                    count: liveSession.compactCount ?? 0,
+                    pre: (liveSession.compactPreTokens ?? 0).toLocaleString(),
+                    post: (liveSession.compactPostTokens ?? 0).toLocaleString(),
+                    cost: (liveSession.compactCostUsd ?? 0).toFixed(2),
+                  })}
+                >
+                  ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
+                </span>
+              )}
               {liveSession.contextPercent != null && (
                 <span
                   className={`${styles.context} ${liveSession.contextPercent >= 0.8 ? styles.context_high : ""}`}

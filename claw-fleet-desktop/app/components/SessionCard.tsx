@@ -524,6 +524,19 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
           {session.totalOutputTokens.toLocaleString()} {t("tokens")}
         </span>
         <SessionCost session={session} />
+        {(session.compactCount ?? 0) > 0 && (
+          <span
+            className={styles.compact_chip}
+            title={t("card.tip_compact", {
+              count: session.compactCount ?? 0,
+              pre: (session.compactPreTokens ?? 0).toLocaleString(),
+              post: (session.compactPostTokens ?? 0).toLocaleString(),
+              cost: (session.compactCostUsd ?? 0).toFixed(2),
+            })}
+          >
+            ⊞ {session.compactCount}× ~${(session.compactCostUsd ?? 0).toFixed(2)}
+          </span>
+        )}
         {session.contextPercent != null && (
           <span
             className={`${styles.context} ${session.contextPercent >= 0.8 ? styles.context_high : ""}`}

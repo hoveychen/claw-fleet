@@ -111,6 +111,20 @@ pub struct SessionInfo {
     /// session card.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub todos: Option<crate::session_todos::TodoSummary>,
+    /// Number of times this session was context-compacted (auto or manual /compact).
+    #[serde(default)]
+    pub compact_count: u32,
+    /// Sum of context sizes (in tokens) right before each compaction.
+    #[serde(default)]
+    pub compact_pre_tokens: u64,
+    /// Sum of summary sizes (in tokens) produced by each compaction.
+    #[serde(default)]
+    pub compact_post_tokens: u64,
+    /// Estimated USD cost of the compact LLM calls. Approximation —
+    /// the compact invocation is not recorded as a standalone assistant
+    /// turn, so this is computed as `cache_read_price × pre + output_price × post`.
+    #[serde(default)]
+    pub compact_cost_usd: f64,
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -725,10 +739,24 @@ pub struct SessionStats {
     pub total_cost_usd: f64,
     /// USD/min over the last 5-minute window.
     pub cost_speed_usd_per_min: f64,
+    /// Number of `compact_boundary` events in the transcript.
+    pub compact_count: u32,
+    /// Sum of `compactMetadata.preTokens` across all compact events
+    /// (context size before each compaction).
+    pub compact_pre_tokens: u64,
+    /// Sum of `compactMetadata.postTokens` across all compact events
+    /// (summary size produced by each compaction).
+    pub compact_post_tokens: u64,
+    /// Estimated USD cost spent on compact LLM calls. The compact
+    /// invocation itself is not recorded as a separate assistant turn,
+    /// so we approximate as `cache_read_price × preTokens +
+    /// output_price × postTokens` using the model that was active just
+    /// before each compaction.
+    pub compact_cost_usd: f64,
 }
 
 fn compute_session_stats(lines: &[&str]) -> SessionStats {
-    use crate::model_cost::{turn_cost_usd, TurnUsage};
+    use crate::model_cost::{get_model_costs, turn_cost_usd, TurnUsage};
 
     let mut total_output: u64 = 0;
     let mut total_cost: f64 = 0.0;
@@ -737,10 +765,47 @@ fn compute_session_stats(lines: &[&str]) -> SessionStats {
     let mut seen_msg_ids: HashSet<String> = HashSet::new();
     let mut last_model: Option<String> = None;
 
+    let mut compact_count: u32 = 0;
+    let mut compact_pre_tokens: u64 = 0;
+    let mut compact_post_tokens: u64 = 0;
+    let mut compact_cost_usd: f64 = 0.0;
+
     for line in lines {
         let Ok(v): Result<Value, _> = serde_json::from_str(line) else {
             continue;
         };
+
+        // `compact_boundary` is a system meta event Claude Code emits each time
+        // it summarises the conversation. The summary LLM call itself is not
+        // logged as a standalone assistant turn, so its true cost is not in
+        // the transcript — we approximate from `compactMetadata`.
+        if v.get("type").and_then(|t| t.as_str()) == Some("system")
+            && v.get("subtype").and_then(|s| s.as_str()) == Some("compact_boundary")
+        {
+            compact_count += 1;
+            let meta = v.get("compactMetadata");
+            let pre = meta
+                .and_then(|m| m.get("preTokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let post = meta
+                .and_then(|m| m.get("postTokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            compact_pre_tokens += pre;
+            compact_post_tokens += post;
+
+            // Price the compact call against the most recently seen model.
+            // `get_model_costs("")` falls back to the default tier when no
+            // assistant turn has been seen yet (defensive — compact almost
+            // never precedes the first assistant turn).
+            let pricing_model = last_model.as_deref().unwrap_or("");
+            let costs = get_model_costs(pricing_model);
+            compact_cost_usd += (pre as f64 / 1_000_000.0) * costs.cache_read
+                + (post as f64 / 1_000_000.0) * costs.output;
+            continue;
+        }
+
         if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
             continue;
         }
@@ -857,6 +922,10 @@ fn compute_session_stats(lines: &[&str]) -> SessionStats {
         total_output_tokens: total_output,
         total_cost_usd: total_cost,
         cost_speed_usd_per_min,
+        compact_count,
+        compact_pre_tokens,
+        compact_post_tokens,
+        compact_cost_usd,
     }
 }
 
@@ -1187,6 +1256,10 @@ pub fn parse_session_info(
         last_outcome: None,
         rate_limit,
         todos,
+        compact_count: stats.compact_count,
+        compact_pre_tokens: stats.compact_pre_tokens,
+        compact_post_tokens: stats.compact_post_tokens,
+        compact_cost_usd: stats.compact_cost_usd,
     })
 }
 
@@ -1795,6 +1868,10 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
+            compact_count: 0,
+            compact_pre_tokens: 0,
+            compact_post_tokens: 0,
+            compact_cost_usd: 0.0,
         }
     }
 
@@ -2117,6 +2194,79 @@ mod tests {
             "cost_speed={}",
             stats.cost_speed_usd_per_min
         );
+    }
+
+    #[test]
+    fn session_stats_compact_count_and_estimated_cost() {
+        // Sequence: one Sonnet assistant turn, then a compact_boundary,
+        // then another assistant turn, then a second compact_boundary.
+        // Sonnet pricing → cache_read $0.30/M, output $15/M.
+        // Compact #1: pre 100k → cost $0.30 * 0.1 = $0.03, post 5k → $15 * 0.005 = $0.075.
+        // Compact #2: pre 200k → $0.30 * 0.2 = $0.06,  post 8k → $15 * 0.008 = $0.12.
+        // Total compact cost = 0.03 + 0.075 + 0.06 + 0.12 = 0.285 USD.
+        let pre_assistant = json!({
+            "type": "assistant",
+            "message": {
+                "id": "pre1",
+                "model": "claude-sonnet-4-6-20251101",
+                "stop_reason": "end_turn",
+                "usage": {"output_tokens": 100}
+            }
+        }).to_string();
+        let compact1 = json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "compactMetadata": {
+                "trigger": "auto",
+                "preTokens": 100_000,
+                "postTokens": 5_000,
+                "durationMs": 30_000
+            }
+        }).to_string();
+        let mid_assistant = json!({
+            "type": "assistant",
+            "message": {
+                "id": "mid1",
+                "model": "claude-sonnet-4-6-20251101",
+                "stop_reason": "end_turn",
+                "usage": {"output_tokens": 100}
+            }
+        }).to_string();
+        let compact2 = json!({
+            "type": "system",
+            "subtype": "compact_boundary",
+            "compactMetadata": {
+                "trigger": "manual",
+                "preTokens": 200_000,
+                "postTokens": 8_000
+            }
+        }).to_string();
+        let lines: Vec<&str> = vec![&pre_assistant, &compact1, &mid_assistant, &compact2];
+        let stats = compute_session_stats(&lines);
+        assert_eq!(stats.compact_count, 2);
+        assert_eq!(stats.compact_pre_tokens, 300_000);
+        assert_eq!(stats.compact_post_tokens, 13_000);
+        assert!(
+            (stats.compact_cost_usd - 0.285).abs() < 1e-6,
+            "compact_cost_usd={}",
+            stats.compact_cost_usd
+        );
+    }
+
+    #[test]
+    fn session_stats_compact_with_missing_metadata() {
+        // A compact_boundary without compactMetadata still bumps the count
+        // but contributes 0 to tokens and cost — defensive against schema drift.
+        let bare_compact = json!({
+            "type": "system",
+            "subtype": "compact_boundary"
+        }).to_string();
+        let lines: Vec<&str> = vec![&bare_compact];
+        let stats = compute_session_stats(&lines);
+        assert_eq!(stats.compact_count, 1);
+        assert_eq!(stats.compact_pre_tokens, 0);
+        assert_eq!(stats.compact_post_tokens, 0);
+        assert_eq!(stats.compact_cost_usd, 0.0);
     }
 
     #[test]

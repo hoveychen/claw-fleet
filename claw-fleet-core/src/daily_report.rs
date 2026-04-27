@@ -1311,6 +1311,10 @@ fn make_session_info_for_date(
         last_outcome: None,
         rate_limit: None,
         todos: None,
+        compact_count: 0,
+        compact_pre_tokens: 0,
+        compact_post_tokens: 0,
+        compact_cost_usd: 0.0,
     })
 }
 
@@ -1847,6 +1851,10 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
+            compact_count: 0,
+            compact_pre_tokens: 0,
+            compact_post_tokens: 0,
+            compact_cost_usd: 0.0,
         };
 
         let s2 = crate::session::SessionInfo {
@@ -1880,6 +1888,10 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
+            compact_count: 0,
+            compact_pre_tokens: 0,
+            compact_post_tokens: 0,
+            compact_cost_usd: 0.0,
         };
 
         let sessions: Vec<&crate::session::SessionInfo> = vec![&s1, &s2];
