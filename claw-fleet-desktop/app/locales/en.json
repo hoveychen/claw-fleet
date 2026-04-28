@@ -136,7 +136,8 @@
     "other_label": "Other",
     "edited_plan": "Edited plan:",
     "feedback": "Feedback: {{text}}",
-    "has_image": "(includes pasted image)"
+    "has_image": "(includes pasted image)",
+    "empty": "No decisions or prompts yet for this session."
   },
   "audit": {
     "panel_title": "Security Audit",
@@ -234,7 +235,10 @@
     "scroll_to_latest": "Scroll to latest",
     "load_more": "Load {{count}} more messages",
     "load_earlier": "Load earlier messages",
-    "loading_earlier": "Loading earlier messages…"
+    "loading_earlier": "Loading earlier messages…",
+    "tab_decisions": "Decisions",
+    "tab_skills": "Skills",
+    "tab_messages": "Messages"
   },
   "inspect": {
     "close": "Close",

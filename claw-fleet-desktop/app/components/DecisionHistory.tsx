@@ -12,6 +12,12 @@ import styles from "./DecisionHistory.module.css";
 interface Props {
   sessionId: string;
   jsonlPath?: string;
+  /**
+   * "inline" (default): collapsible header, fits between Skill history and
+   * the message scroll. "tab": no header, list is always expanded — used
+   * when the parent view renders this as a full panel inside a tab.
+   */
+  mode?: "inline" | "tab";
 }
 
 function recordTimestamp(rec: DecisionHistoryRecord): string {
@@ -141,7 +147,7 @@ function recordSummary(rec: DecisionHistoryRecord): string {
   return rec.aiTitle ?? rec.workspaceName ?? "Plan approval";
 }
 
-export function DecisionHistory({ sessionId, jsonlPath }: Props) {
+export function DecisionHistory({ sessionId, jsonlPath, mode = "inline" }: Props) {
   const { t } = useTranslation();
   const [records, setRecords] = useState<DecisionHistoryRecord[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -157,21 +163,32 @@ export function DecisionHistory({ sessionId, jsonlPath }: Props) {
       .catch(() => setRecords([]));
   }, [sessionId, jsonlPath]);
 
-  if (records.length === 0) return null;
+  // Inline mode: hide the panel entirely when no records exist (preserves
+  // the original chrome-light behavior). Tab mode: render an empty state
+  // because the tab itself is always present.
+  if (mode === "inline" && records.length === 0) return null;
 
   // Backend returns oldest-first; show newest-first in the panel.
   const ordered = [...records].sort((a, b) =>
     recordTimestamp(b).localeCompare(recordTimestamp(a))
   );
 
+  const isTab = mode === "tab";
+  const showList = isTab || expanded;
+
   return (
-    <div className={styles.root}>
-      <div className={styles.header} onClick={() => setExpanded((v) => !v)}>
-        <span className={styles.title}>{t("decision_history.title")}</span>
-        <span className={styles.count}>{records.length}</span>
-        <span className={styles.chevron}>{expanded ? "▾" : "▸"}</span>
-      </div>
-      {expanded && (
+    <div className={`${styles.root} ${isTab ? styles.root_tab : ""}`}>
+      {!isTab && (
+        <div className={styles.header} onClick={() => setExpanded((v) => !v)}>
+          <span className={styles.title}>{t("decision_history.title")}</span>
+          <span className={styles.count}>{records.length}</span>
+          <span className={styles.chevron}>{expanded ? "▾" : "▸"}</span>
+        </div>
+      )}
+      {isTab && records.length === 0 && (
+        <div className={styles.empty}>{t("decision_history.empty")}</div>
+      )}
+      {showList && records.length > 0 && (
         <div className={styles.list}>
           {ordered.map((rec) => {
             const open = openId === rec.id;
