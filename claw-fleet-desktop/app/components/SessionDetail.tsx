@@ -31,6 +31,8 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
   // or when viewing a subagent (show sibling tabs + parent).
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowing, setIsFollowing] = useState(true);
+  type ViewTab = "decisions" | "skills" | "messages";
+  const [viewTab, setViewTab] = useState<ViewTab>("decisions");
 
   const checkFollow = useCallback(() => {
     const el = scrollRef.current;
@@ -44,7 +46,7 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
     if (!el) return;
     el.addEventListener("scroll", checkFollow, { passive: true });
     return () => el.removeEventListener("scroll", checkFollow);
-  }, [checkFollow, session]);
+  }, [checkFollow, session, viewTab]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
@@ -165,37 +167,70 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
           {/* Path */}
           <div className={styles.path}>{liveSession.workspacePath}</div>
 
-          {/* Skill history */}
-          <SkillHistory jsonlPath={liveSession.jsonlPath} />
-
-          {/* Decision history */}
-          <DecisionHistory sessionId={liveSession.id} jsonlPath={liveSession.jsonlPath} />
-
-          {/* Messages */}
-          <div ref={scrollRef} className={styles.scroll_area}>
-            {!fullyLoaded && messages.length > 0 && (
-              <button
-                className={styles.load_earlier_btn}
-                onClick={loadEarlier}
-                disabled={isLoading}
-              >
-                {isLoading
-                  ? t("detail.loading_earlier") || "Loading…"
-                  : t("detail.load_earlier") || "Load earlier messages"}
-              </button>
-            )}
-            <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} />
+          {/* View tabs: Decisions (default) / Skills / Messages */}
+          <div className={styles.view_tab_bar}>
+            <button
+              className={`${styles.view_tab} ${viewTab === "decisions" ? styles.view_tab_active : ""}`}
+              onClick={() => setViewTab("decisions")}
+            >
+              {t("detail.tab_decisions")}
+            </button>
+            <button
+              className={`${styles.view_tab} ${viewTab === "skills" ? styles.view_tab_active : ""}`}
+              onClick={() => setViewTab("skills")}
+            >
+              {t("detail.tab_skills")}
+            </button>
+            <button
+              className={`${styles.view_tab} ${viewTab === "messages" ? styles.view_tab_active : ""}`}
+              onClick={() => setViewTab("messages")}
+            >
+              {t("detail.tab_messages")}
+            </button>
           </div>
 
-          {/* Auto-follow indicator */}
-          {isFollowing ? (
-            <div className={styles.follow_bar}>
-              {t("detail.following")}
+          {viewTab === "decisions" && (
+            <DecisionHistory
+              sessionId={liveSession.id}
+              jsonlPath={liveSession.jsonlPath}
+              mode="tab"
+            />
+          )}
+
+          {viewTab === "skills" && (
+            <div className={styles.skills_panel}>
+              <SkillHistory jsonlPath={liveSession.jsonlPath} />
             </div>
-          ) : (
-            <button className={styles.follow_bar_btn} onClick={scrollToBottom}>
-              ↓ {t("detail.scroll_to_latest")}
-            </button>
+          )}
+
+          {viewTab === "messages" && (
+            <>
+              <div ref={scrollRef} className={styles.scroll_area}>
+                {!fullyLoaded && messages.length > 0 && (
+                  <button
+                    className={styles.load_earlier_btn}
+                    onClick={loadEarlier}
+                    disabled={isLoading}
+                  >
+                    {isLoading
+                      ? t("detail.loading_earlier") || "Loading…"
+                      : t("detail.load_earlier") || "Load earlier messages"}
+                  </button>
+                )}
+                <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} />
+              </div>
+
+              {/* Auto-follow indicator */}
+              {isFollowing ? (
+                <div className={styles.follow_bar}>
+                  {t("detail.following")}
+                </div>
+              ) : (
+                <button className={styles.follow_bar_btn} onClick={scrollToBottom}>
+                  ↓ {t("detail.scroll_to_latest")}
+                </button>
+              )}
+            </>
           )}
         </>
       )}

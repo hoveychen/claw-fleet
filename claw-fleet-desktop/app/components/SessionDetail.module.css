@@ -185,6 +185,41 @@
 .tab_dot[data-status="active"]      { background: var(--badge-active-fg); }
 .tab_dot[data-status="delegating"]  { background: var(--badge-delegating-fg); }
 
+/* View tabs (Decisions / Skills / Messages) */
+.view_tab_bar {
+  display: flex;
+  gap: 0;
+  padding: 0 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg);
+  flex-shrink: 0;
+}
+
+.view_tab {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-dim);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+.view_tab:hover {
+  color: var(--color-text);
+}
+.view_tab_active {
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent, #60a5fa);
+}
+
+.skills_panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
 /* Path */
 .path {
   padding: 4px 16px;

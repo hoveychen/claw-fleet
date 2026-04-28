@@ -136,7 +136,8 @@
     "other_label": "其他",
     "edited_plan": "改写后的计划：",
     "feedback": "反馈：{{text}}",
-    "has_image": "（含粘贴的截图）"
+    "has_image": "（含粘贴的截图）",
+    "empty": "本次会话还没有决策或提示。"
   },
   "audit": {
     "panel_title": "安全审计",
@@ -234,7 +235,10 @@
     "scroll_to_latest": "滚动到最新",
     "load_more": "加载前 {{count}} 条消息",
     "load_earlier": "加载更早的消息",
-    "loading_earlier": "正在加载更早的消息…"
+    "loading_earlier": "正在加载更早的消息…",
+    "tab_decisions": "决策",
+    "tab_skills": "技能",
+    "tab_messages": "对话"
   },
   "inspect": {
     "close": "关闭",

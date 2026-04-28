@@ -6,6 +6,22 @@
   font-size: 12px;
 }
 
+/* Tab mode: panel fills the available space and scrolls internally. */
+.root_tab {
+  flex: 1;
+  min-height: 0;
+  border-bottom: none;
+  overflow: auto;
+  padding: 8px 16px 12px;
+}
+
+.empty {
+  color: var(--color-text-dim);
+  font-size: 12px;
+  padding: 12px 4px;
+  text-align: center;
+}
+
 .header {
   display: flex;
   align-items: center;
