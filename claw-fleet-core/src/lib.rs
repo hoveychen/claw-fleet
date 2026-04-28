@@ -9,6 +9,7 @@ pub mod codex_source;
 pub mod consumer_heartbeat;
 pub mod cursor;
 pub mod daily_report;
+pub mod decision_history;
 pub mod elicitation;
 pub mod feishu;
 pub mod guard;

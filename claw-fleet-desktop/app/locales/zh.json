@@ -119,6 +119,23 @@
     "loading": "加载中…",
     "no_skills": "未找到 Skill 文件。"
   },
+  "decision_history": {
+    "title": "决策记录",
+    "kind_ask": "提问",
+    "kind_plan": "计划",
+    "outcome": {
+      "answered": "已回答",
+      "declined": "已拒绝",
+      "timeout": "已超时",
+      "heartbeat-lost": "桌面端掉线",
+      "approved": "已批准",
+      "approved-with-edits": "批准并改写",
+      "rejected": "已驳回"
+    },
+    "other_label": "其他",
+    "edited_plan": "改写后的计划：",
+    "feedback": "反馈：{{text}}"
+  },
   "audit": {
     "panel_title": "安全审计",
     "scanning": "正在扫描会话…",
