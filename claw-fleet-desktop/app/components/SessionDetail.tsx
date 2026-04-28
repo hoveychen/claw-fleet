@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore } from "../store";
-import type { SessionInfo } from "../types";
+import type { DecisionHistoryRecord, SessionInfo } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
 import { SkillHistory } from "./SkillHistory";
@@ -33,6 +34,48 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
   const [isFollowing, setIsFollowing] = useState(true);
   type ViewTab = "decisions" | "skills" | "messages";
   const [viewTab, setViewTab] = useState<ViewTab>("decisions");
+  const [userPickedTab, setUserPickedTab] = useState(false);
+  const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
+  const [decisionsLoaded, setDecisionsLoaded] = useState(false);
+
+  useEffect(() => {
+    setUserPickedTab(false);
+    setDecisionsLoaded(false);
+    setDecisionRecords([]);
+  }, [liveSession?.id]);
+
+  useEffect(() => {
+    const sid = liveSession?.id;
+    if (!sid) return;
+    let cancelled = false;
+    invoke<DecisionHistoryRecord[]>("list_session_decisions", {
+      sessionId: sid,
+      jsonlPath: liveSession?.jsonlPath ?? null,
+    })
+      .then((r) => {
+        if (cancelled) return;
+        setDecisionRecords(r ?? []);
+        setDecisionsLoaded(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setDecisionRecords([]);
+        setDecisionsLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [liveSession?.id, liveSession?.jsonlPath]);
+
+  useEffect(() => {
+    if (!decisionsLoaded || userPickedTab) return;
+    setViewTab(decisionRecords.length > 0 ? "decisions" : "messages");
+  }, [decisionsLoaded, decisionRecords.length, userPickedTab]);
+
+  const pickTab = useCallback((tab: ViewTab) => {
+    setUserPickedTab(true);
+    setViewTab(tab);
+  }, []);
 
   const checkFollow = useCallback(() => {
     const el = scrollRef.current;
@@ -143,63 +186,58 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
             </div>
           </div>
 
-          {/* Subagent tabs */}
-          {tabs.length > 0 && (
-            <div className={styles.tab_bar}>
-              {tabs.map((tab) => (
-                <button
-                  key={tab.id}
-                  className={`${styles.tab} ${tab.id === liveSession.id ? styles.tab_active : ""}`}
-                  onClick={() => { if (tab.id !== liveSession.id) open(tab); }}
-                >
-                  <span
-                    className={styles.tab_dot}
-                    data-status={tab.status}
-                  />
-                  {tab.isSubagent
-                    ? `⎇ ${tab.agentType ?? shortId(tab.id)}`
-                    : `◈ ${t("main")}`}
-                </button>
-              ))}
-            </div>
-          )}
-
           {/* Path */}
           <div className={styles.path}>{liveSession.workspacePath}</div>
 
-          {/* View tabs: Decisions (default) / Skills / Messages */}
-          <div className={styles.view_tab_bar}>
+          {/* Combined tab bar: subagent tabs (if any) + view tabs */}
+          <div className={styles.tab_bar}>
+            {tabs.length > 0 && (
+              <>
+                {tabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    className={`${styles.tab} ${tab.id === liveSession.id ? styles.tab_active : ""}`}
+                    onClick={() => { if (tab.id !== liveSession.id) open(tab); }}
+                  >
+                    <span
+                      className={styles.tab_dot}
+                      data-status={tab.status}
+                    />
+                    {tab.isSubagent
+                      ? `⎇ ${tab.agentType ?? shortId(tab.id)}`
+                      : `◈ ${t("main")}`}
+                  </button>
+                ))}
+                <span className={styles.tab_separator} aria-hidden="true" />
+              </>
+            )}
             <button
               className={`${styles.view_tab} ${viewTab === "decisions" ? styles.view_tab_active : ""}`}
-              onClick={() => setViewTab("decisions")}
+              onClick={() => pickTab("decisions")}
             >
               {t("detail.tab_decisions")}
             </button>
             <button
               className={`${styles.view_tab} ${viewTab === "skills" ? styles.view_tab_active : ""}`}
-              onClick={() => setViewTab("skills")}
+              onClick={() => pickTab("skills")}
             >
               {t("detail.tab_skills")}
             </button>
             <button
               className={`${styles.view_tab} ${viewTab === "messages" ? styles.view_tab_active : ""}`}
-              onClick={() => setViewTab("messages")}
+              onClick={() => pickTab("messages")}
             >
               {t("detail.tab_messages")}
             </button>
           </div>
 
           {viewTab === "decisions" && (
-            <DecisionHistory
-              sessionId={liveSession.id}
-              jsonlPath={liveSession.jsonlPath}
-              mode="tab"
-            />
+            <DecisionHistory records={decisionRecords} mode="tab" />
           )}
 
           {viewTab === "skills" && (
             <div className={styles.skills_panel}>
-              <SkillHistory jsonlPath={liveSession.jsonlPath} />
+              <SkillHistory jsonlPath={liveSession.jsonlPath} mode="tab" />
             </div>
           )}
 

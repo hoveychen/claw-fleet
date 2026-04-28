@@ -119,6 +119,10 @@
     "loading": "加载中…",
     "no_skills": "未找到 Skill 文件。"
   },
+  "skill_history": {
+    "title": "Skill 调用记录",
+    "empty": "本次会话还没有 Skill 调用。"
+  },
   "decision_history": {
     "title": "决策记录",
     "kind_ask": "提问",
@@ -237,7 +241,7 @@
     "load_earlier": "加载更早的消息",
     "loading_earlier": "正在加载更早的消息…",
     "tab_decisions": "决策",
-    "tab_skills": "技能",
+    "tab_skills": "Skills",
     "tab_messages": "对话"
   },
   "inspect": {
@@ -1159,6 +1163,10 @@
     "backToPlan": "返回",
     "rejectConfirm": "确认驳回",
     "feedbackPlaceholder": "给 Agent 留下反馈…"
+  },
+  "decision_panel": {
+    "history_title": "本会话最近记录",
+    "history_more": "另有 {{count}} 条，可在会话详情中查看"
   },
   "view_report": "日报",
   "report": {

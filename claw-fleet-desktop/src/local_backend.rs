@@ -1475,7 +1475,17 @@ impl Backend for LocalBackend {
         session_id: &str,
         jsonl_path: Option<&str>,
     ) -> Vec<crate::decision_history::DecisionHistoryRecord> {
-        let path = jsonl_path.map(std::path::Path::new);
+        let resolved = if jsonl_path.is_none() {
+            self.sessions
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|s| s.id == session_id)
+                .map(|s| s.jsonl_path.clone())
+        } else {
+            None
+        };
+        let path = jsonl_path.or(resolved.as_deref()).map(std::path::Path::new);
         crate::decision_history::list_session_records_with_jsonl(session_id, path)
     }
 

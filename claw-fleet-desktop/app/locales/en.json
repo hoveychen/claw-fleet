@@ -119,6 +119,10 @@
     "loading": "Loading…",
     "no_skills": "No skill files found."
   },
+  "skill_history": {
+    "title": "Skill History",
+    "empty": "No skill invocations yet for this session."
+  },
   "decision_history": {
     "title": "Decisions",
     "kind_ask": "Ask",
@@ -1159,6 +1163,10 @@
     "backToPlan": "Back",
     "rejectConfirm": "Reject plan",
     "feedbackPlaceholder": "Leave feedback for the agent…"
+  },
+  "decision_panel": {
+    "history_title": "Recent in this session",
+    "history_more": "+{{count}} more in session detail"
   },
   "view_report": "Report",
   "report": {

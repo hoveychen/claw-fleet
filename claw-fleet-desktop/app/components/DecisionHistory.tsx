@@ -1,5 +1,4 @@
-import { useEffect, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   DecisionHistoryRecord,
@@ -10,8 +9,7 @@ import type {
 import styles from "./DecisionHistory.module.css";
 
 interface Props {
-  sessionId: string;
-  jsonlPath?: string;
+  records: DecisionHistoryRecord[];
   /**
    * "inline" (default): collapsible header, fits between Skill history and
    * the message scroll. "tab": no header, list is always expanded — used
@@ -147,21 +145,10 @@ function recordSummary(rec: DecisionHistoryRecord): string {
   return rec.aiTitle ?? rec.workspaceName ?? "Plan approval";
 }
 
-export function DecisionHistory({ sessionId, jsonlPath, mode = "inline" }: Props) {
+export function DecisionHistory({ records, mode = "inline" }: Props) {
   const { t } = useTranslation();
-  const [records, setRecords] = useState<DecisionHistoryRecord[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!sessionId) return;
-    invoke<DecisionHistoryRecord[]>("list_session_decisions", {
-      sessionId,
-      jsonlPath: jsonlPath ?? null,
-    })
-      .then((r) => setRecords(r ?? []))
-      .catch(() => setRecords([]));
-  }, [sessionId, jsonlPath]);
 
   // Inline mode: hide the panel entirely when no records exist (preserves
   // the original chrome-light behavior). Tab mode: render an empty state
