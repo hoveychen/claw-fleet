@@ -148,14 +148,37 @@ pub fn read_request(id: &str) -> Option<ElicitationRequest> {
 }
 
 /// List all pending request IDs in the elicitation directory.
+///
+/// Soft form — returns an empty vec on any failure (missing directory,
+/// I/O error, etc.). Use this for callers that want a flat "best-effort"
+/// snapshot. The watcher loop should use [`list_pending_requests_checked`]
+/// instead so a transient `read_dir` error doesn't get conflated with
+/// "no requests pending" and silently dismiss every active panel.
 pub fn list_pending_requests() -> Vec<String> {
+    list_pending_requests_checked().unwrap_or_default()
+}
+
+/// Strict form — distinguishes "directory absent / readable but empty"
+/// (returns `Ok(vec![])`) from "I/O error reading the directory" (returns
+/// `Err`). The watcher in `local_backend.rs` uses the `Err` to skip the
+/// dismissal-emit step for that tick, so a transient APFS hiccup doesn't
+/// take every active decision panel down with it.
+pub fn list_pending_requests_checked() -> std::io::Result<Vec<String>> {
     let Some(dir) = elicitation_dir() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Vec::new();
+    list_pending_in_dir(&dir)
+}
+
+fn list_pending_in_dir(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        // Dir hasn't been created yet (no requests written yet) is a
+        // legitimate "empty" state, not an error worth surfacing.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
     };
-    entries
+    Ok(entries
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
@@ -165,5 +188,57 @@ pub fn list_pending_requests() -> Vec<String> {
                 None
             }
         })
-        .collect()
+        .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh_tmp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "fleet-elicit-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn list_pending_in_dir_missing_returns_ok_empty() {
+        // Critical contract: missing directory must NOT propagate as Err,
+        // otherwise the watcher will keep skipping ticks every time the
+        // user starts fresh with no pending requests.
+        let dir = fresh_tmp_dir("missing");
+        assert!(!dir.exists());
+        let result = list_pending_in_dir(&dir);
+        assert!(matches!(&result, Ok(v) if v.is_empty()), "got {result:?}");
+    }
+
+    #[test]
+    fn list_pending_in_dir_filters_responses_and_other_files() {
+        let dir = fresh_tmp_dir("filter");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("req-a.json"), "{}").unwrap();
+        fs::write(dir.join("req-b.json"), "{}").unwrap();
+        fs::write(dir.join("req-a.response.json"), "{}").unwrap();
+        fs::write(dir.join("ignored.txt"), "ignore").unwrap();
+
+        let mut ids = list_pending_in_dir(&dir).unwrap();
+        ids.sort();
+        assert_eq!(ids, vec!["req-a".to_string(), "req-b".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_pending_in_dir_empty_dir_returns_ok_empty() {
+        let dir = fresh_tmp_dir("empty");
+        fs::create_dir_all(&dir).unwrap();
+        let ids = list_pending_in_dir(&dir).unwrap();
+        assert!(ids.is_empty());
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
