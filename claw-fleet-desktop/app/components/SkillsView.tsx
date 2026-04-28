@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { TextBlock } from "./blocks/TextBlock";
+import { useConnectionStore } from "../store";
 import styles from "./MemoryView.module.css";
+import skillStyles from "./SkillsView.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -12,6 +14,57 @@ interface SkillItem {
   path: string;
   sizeBytes: number;
   modifiedMs: number;
+}
+
+interface SkillFileEntry {
+  name: string;
+  relativePath: string;
+  absolutePath: string;
+  sizeBytes: number;
+  isDir: boolean;
+}
+
+// Extensions we render as text. Others fall back to a "binary" placeholder.
+const TEXT_EXTENSIONS = new Set([
+  "md", "markdown", "txt", "text",
+  "py", "rb", "sh", "bash", "zsh", "fish",
+  "js", "jsx", "ts", "tsx", "mjs", "cjs",
+  "json", "jsonc", "yaml", "yml", "toml", "ini", "conf", "cfg",
+  "html", "htm", "css", "scss", "sass", "less",
+  "rs", "go", "java", "kt", "swift", "c", "h", "cpp", "hpp", "cc", "m", "mm",
+  "lua", "pl", "php", "sql", "graphql", "gql",
+  "xml", "svg", "csv", "tsv", "log",
+  "dockerfile", "gitignore", "env", "rules",
+]);
+
+function extOf(name: string): string {
+  const lower = name.toLowerCase();
+  // Common extensionless filenames that are still text
+  if (lower === "dockerfile" || lower === "makefile" || lower === "readme") {
+    return lower;
+  }
+  const idx = lower.lastIndexOf(".");
+  return idx >= 0 ? lower.slice(idx + 1) : "";
+}
+
+function isTextFile(name: string): boolean {
+  return TEXT_EXTENSIONS.has(extOf(name));
+}
+
+function isMarkdown(name: string): boolean {
+  const e = extOf(name);
+  return e === "md" || e === "markdown";
+}
+
+function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes}B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}K`;
+  return `${(bytes / 1024 / 1024).toFixed(1)}M`;
+}
+
+function indentLevel(relativePath: string): number {
+  if (!relativePath) return 0;
+  return relativePath.split("/").length - 1;
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
@@ -111,17 +164,68 @@ export function SkillsView() {
 
 function SkillDetail({ skill }: { skill: SkillItem }) {
   const { t } = useTranslation();
-  const [content, setContent] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const isLocal = useConnectionStore(
+    (s) => s.connection?.type === "local",
+  );
+  const [files, setFiles] = useState<SkillFileEntry[] | null>(null);
+  const [activeFile, setActiveFile] = useState<SkillFileEntry | null>(null);
+  // Set of `relativePath` values for directories that are currently collapsed.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    setLoading(true);
-    setContent(null);
-    invoke<string>("get_skill_content", { path: skill.path })
-      .then(setContent)
-      .catch(() => setContent("(error reading skill file)"))
-      .finally(() => setLoading(false));
+    setFiles(null);
+    setActiveFile(null);
+    setCollapsed(new Set());
+    invoke<SkillFileEntry[]>("list_skill_files", { skillPath: skill.path })
+      .then((entries) => {
+        setFiles(entries);
+        const defaultFile =
+          entries.find((e) => !e.isDir && e.absolutePath === skill.path) ??
+          entries.find((e) => !e.isDir && e.name.toLowerCase() === "skill.md") ??
+          entries.find((e) => !e.isDir) ??
+          null;
+        setActiveFile(defaultFile);
+      })
+      .catch(() => {
+        setFiles([]);
+      });
   }, [skill.path]);
+
+  const fileEntries = files ?? [];
+  const fileCount = fileEntries.filter((f) => !f.isDir).length;
+
+  // Hide entries whose ancestor directory is collapsed.
+  const visibleEntries = useMemo(() => {
+    if (collapsed.size === 0) return fileEntries;
+    return fileEntries.filter((entry) => {
+      const parts = entry.relativePath.split("/");
+      // Walk every ancestor prefix and return false if any is collapsed.
+      for (let i = 1; i < parts.length; i++) {
+        const ancestor = parts.slice(0, i).join("/");
+        if (collapsed.has(ancestor)) return false;
+      }
+      return true;
+    });
+  }, [fileEntries, collapsed]);
+
+  const toggleDir = useCallback((relativePath: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(relativePath)) next.delete(relativePath);
+      else next.add(relativePath);
+      return next;
+    });
+  }, []);
+
+  const reveal = useCallback(async () => {
+    if (!activeFile) return;
+    try {
+      const { revealItemInDir } = await import("@tauri-apps/plugin-opener");
+      await revealItemInDir(activeFile.absolutePath);
+    } catch (e) {
+      console.error("revealItemInDir failed:", e);
+    }
+  }, [activeFile]);
 
   return (
     <>
@@ -135,15 +239,127 @@ function SkillDetail({ skill }: { skill: SkillItem }) {
             </>
           )}
         </div>
-      </div>
-      <div className={styles.detail_body}>
-        {loading && <p className={styles.loading}>{t("skills.loading")}</p>}
-        {content !== null && (
-          <div className={styles.content_markdown}>
-            <TextBlock text={content} />
+        {isLocal && activeFile && (
+          <div className={styles.detail_actions}>
+            <button
+              className={styles.promote_btn}
+              onClick={reveal}
+              title={t("skills.reveal_in_finder")}
+            >
+              {t("skills.reveal_in_finder")}
+            </button>
           </div>
         )}
       </div>
+
+      <div className={skillStyles.detail_split}>
+        {fileCount > 1 && (
+          <aside className={skillStyles.tree_pane}>
+            <div className={skillStyles.tree_label}>
+              {t("skills.files_label")}
+            </div>
+            {visibleEntries.map((entry) => {
+              const depth = indentLevel(entry.relativePath);
+              if (entry.isDir) {
+                const isCollapsed = collapsed.has(entry.relativePath);
+                return (
+                  <button
+                    key={entry.absolutePath}
+                    className={skillStyles.tree_item}
+                    style={{ paddingLeft: 8 + depth * 12 }}
+                    onClick={() => toggleDir(entry.relativePath)}
+                    title={entry.relativePath}
+                  >
+                    <span className={skillStyles.tree_chevron}>
+                      {isCollapsed ? "▸" : "▾"}
+                    </span>
+                    <span className={skillStyles.tree_name}>{entry.name}/</span>
+                  </button>
+                );
+              }
+              const active = activeFile?.absolutePath === entry.absolutePath;
+              return (
+                <button
+                  key={entry.absolutePath}
+                  className={`${skillStyles.tree_item} ${active ? skillStyles.tree_item_active : ""}`}
+                  style={{ paddingLeft: 8 + depth * 12 }}
+                  onClick={() => setActiveFile(entry)}
+                  title={entry.relativePath}
+                >
+                  <span className={skillStyles.tree_name}>{entry.name}</span>
+                  <span className={skillStyles.tree_size}>
+                    {formatSize(entry.sizeBytes)}
+                  </span>
+                </button>
+              );
+            })}
+          </aside>
+        )}
+
+        <div className={styles.detail_body}>
+          {files === null ? (
+            <p className={styles.loading}>{t("skills.loading")}</p>
+          ) : activeFile ? (
+            <FilePreview file={activeFile} />
+          ) : (
+            <p className={styles.empty}>{t("skills.select_file")}</p>
+          )}
+        </div>
+      </div>
     </>
+  );
+}
+
+// ── Single-file preview ──────────────────────────────────────────────────────
+
+function FilePreview({ file }: { file: SkillFileEntry }) {
+  const { t } = useTranslation();
+  const [content, setContent] = useState<string | null>(null);
+  const [error, setError] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setContent(null);
+    setError(false);
+    if (!isTextFile(file.name)) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    invoke<string>("get_skill_content", { path: file.absolutePath })
+      .then((c) => {
+        setContent(c);
+        setError(false);
+      })
+      .catch(() => setError(true))
+      .finally(() => setLoading(false));
+  }, [file.absolutePath, file.name]);
+
+  if (loading) {
+    return <p className={styles.loading}>{t("skills.loading")}</p>;
+  }
+
+  if (!isTextFile(file.name)) {
+    return (
+      <p className={styles.empty}>
+        {t("skills.binary_file")} ({formatSize(file.sizeBytes)})
+      </p>
+    );
+  }
+
+  if (error || content === null) {
+    return <p className={styles.empty}>{t("skills.read_error")}</p>;
+  }
+
+  // For markdown, render directly. For other text, wrap in a fenced code
+  // block so TextBlock's syntax highlighter takes over.
+  const rendered = isMarkdown(file.name)
+    ? content
+    : "```" + extOf(file.name) + "\n" + content + "\n```";
+
+  return (
+    <div className={styles.content_markdown}>
+      <TextBlock text={rendered} />
+    </div>
   );
 }

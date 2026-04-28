@@ -121,7 +121,8 @@
     "files_label": "Files",
     "select_file": "Pick a file on the left to preview.",
     "binary_file": "Binary or non-text file — preview not available.",
-    "read_error": "Failed to read file."
+    "read_error": "Failed to read file.",
+    "reveal_in_finder": "Reveal in Finder"
   },
   "skill_history": {
     "title": "Skill History",
