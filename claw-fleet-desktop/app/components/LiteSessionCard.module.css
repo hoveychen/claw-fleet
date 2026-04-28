@@ -163,6 +163,9 @@
 }
 
 .rate_limit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10px;
   color: #e06565;
 }
