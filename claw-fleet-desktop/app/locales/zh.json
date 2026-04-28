@@ -121,7 +121,8 @@
     "files_label": "文件",
     "select_file": "请选择左侧文件查看内容。",
     "binary_file": "二进制或非文本文件，无法在此预览。",
-    "read_error": "读取文件失败。"
+    "read_error": "读取文件失败。",
+    "reveal_in_finder": "在 Finder 中显示"
   },
   "skill_history": {
     "title": "Skill 调用记录",

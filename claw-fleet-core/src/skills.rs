@@ -7,7 +7,7 @@
 //! Name and description are extracted from YAML frontmatter when present.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +27,21 @@ pub struct SkillItem {
     pub path: String,
     pub size_bytes: u64,
     pub modified_ms: u64,
+}
+
+/// A file or directory inside a skill's root directory. Returned as a flat list;
+/// the frontend reconstructs the tree by splitting `relative_path` on `/`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillFileEntry {
+    /// Final path component (e.g. `foo.py`, `scripts`).
+    pub name: String,
+    /// Path relative to the skill root, with forward slashes (e.g. `scripts/foo.py`).
+    pub relative_path: String,
+    /// Absolute filesystem path; suitable for passing to `read_skill_file`.
+    pub absolute_path: String,
+    pub size_bytes: u64,
+    pub is_dir: bool,
 }
 
 // ── Scan ──────────────────────────────────────────────────────────────────────
@@ -129,6 +144,96 @@ fn parse_frontmatter(content: &str, name_source: &Path) -> (String, String) {
         name.unwrap_or(fallback_name),
         description.unwrap_or_default(),
     )
+}
+
+// ── List files inside a skill ────────────────────────────────────────────────
+
+const MAX_SKILL_TREE_DEPTH: usize = 6;
+
+/// List every file and subdirectory inside a skill's root.
+///
+/// `skill_path` is the same value carried in `SkillItem.path` — the path to
+/// `SKILL.md` for directory-based skills, or the flat `<name>.md` file for
+/// flat skills. For flat skills this returns a single entry (the file itself).
+pub fn list_skill_files(skill_path: &str) -> Result<Vec<SkillFileEntry>, String> {
+    let claude_dir = get_claude_dir().ok_or_else(|| "cannot determine home dir".to_string())?;
+    let skills_dir = claude_dir.join("skills");
+    let canonical_skills_dir = fs::canonicalize(&skills_dir).map_err(|e| e.to_string())?;
+
+    let canonical = fs::canonicalize(skill_path).map_err(|e| e.to_string())?;
+    if !canonical.starts_with(&canonical_skills_dir) {
+        return Err("path is outside allowed skills directory".into());
+    }
+
+    let root: PathBuf = if canonical.is_file() {
+        let parent = canonical
+            .parent()
+            .ok_or_else(|| "invalid skill path".to_string())?;
+        if parent == canonical_skills_dir.as_path() {
+            // Flat skill (~/.claude/skills/<name>.md): single-file entry.
+            let metadata = fs::metadata(&canonical).map_err(|e| e.to_string())?;
+            let name = canonical
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            return Ok(vec![SkillFileEntry {
+                relative_path: name.clone(),
+                absolute_path: canonical.to_string_lossy().to_string(),
+                size_bytes: metadata.len(),
+                is_dir: false,
+                name,
+            }]);
+        }
+        parent.to_path_buf()
+    } else if canonical.is_dir() {
+        canonical.clone()
+    } else {
+        return Err("skill path does not exist".into());
+    };
+
+    let mut entries = Vec::new();
+    walk_skill_dir(&root, &root, &mut entries, 0);
+    entries.sort_by(|a, b| a.relative_path.cmp(&b.relative_path));
+    Ok(entries)
+}
+
+fn walk_skill_dir(root: &Path, dir: &Path, out: &mut Vec<SkillFileEntry>, depth: usize) {
+    if depth > MAX_SKILL_TREE_DEPTH {
+        return;
+    }
+    let Ok(rd) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in rd.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let Ok(metadata) = entry.metadata() else {
+            continue;
+        };
+        let is_dir = metadata.is_dir();
+        let rel = path
+            .strip_prefix(root)
+            .ok()
+            .and_then(|p| p.to_str())
+            .map(|s| s.replace('\\', "/"))
+            .unwrap_or_default();
+        out.push(SkillFileEntry {
+            name: name.to_string(),
+            relative_path: rel,
+            absolute_path: path.to_string_lossy().to_string(),
+            size_bytes: if is_dir { 0 } else { metadata.len() },
+            is_dir,
+        });
+        if is_dir {
+            walk_skill_dir(root, &path, out, depth + 1);
+        }
+    }
 }
 
 // ── Read file content ─────────────────────────────────────────────────────────

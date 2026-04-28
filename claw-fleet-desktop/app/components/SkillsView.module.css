@@ -1,0 +1,95 @@
+/* Detail pane is split into a tree pane (only when >1 file) + the existing
+   detail_body content area. */
+.detail_split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.tree_pane {
+  width: 220px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--color-border);
+  padding: 10px 8px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.tree_label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 4px 8px 8px;
+}
+
+.tree_item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  text-align: left;
+  width: 100%;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+}
+
+.tree_item:hover {
+  background: var(--color-bg-secondary);
+}
+
+.tree_item_active,
+.tree_item_active:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.tree_chevron {
+  font-size: 9px;
+  width: 10px;
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  text-align: center;
+}
+
+.tree_name {
+  font-size: 12px;
+  color: var(--color-text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tree_size {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+:global([data-platform="macos"]) .tree_pane {
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+:global([data-platform="macos"]) .tree_item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+:global([data-platform="macos"]) .tree_item_active,
+:global([data-platform="macos"]) .tree_item_active:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+:global([data-platform="macos"][data-theme="light"]) .tree_pane {
+  border-right-color: rgba(0, 0, 0, 0.08);
+}
+:global([data-platform="macos"][data-theme="light"]) .tree_item:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+:global([data-platform="macos"][data-theme="light"]) .tree_item_active,
+:global([data-platform="macos"][data-theme="light"]) .tree_item_active:hover {
+  background: rgba(0, 0, 0, 0.1);
+}
