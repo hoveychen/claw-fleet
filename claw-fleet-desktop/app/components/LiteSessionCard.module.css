@@ -91,6 +91,14 @@
 .badge_main {
   background: rgba(99, 102, 241, 0.18);
   color: #a5b4fc;
+  max-width: 110px;
+  overflow: hidden;
+}
+
+.badge_main_label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .badge_sub {
