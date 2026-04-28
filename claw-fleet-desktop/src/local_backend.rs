@@ -1473,8 +1473,10 @@ impl Backend for LocalBackend {
     fn list_session_decisions(
         &self,
         session_id: &str,
+        jsonl_path: Option<&str>,
     ) -> Vec<crate::decision_history::DecisionHistoryRecord> {
-        crate::decision_history::list_session_records(session_id)
+        let path = jsonl_path.map(std::path::Path::new);
+        crate::decision_history::list_session_records_with_jsonl(session_id, path)
     }
 
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {

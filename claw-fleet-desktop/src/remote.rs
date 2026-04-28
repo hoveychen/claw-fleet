@@ -484,15 +484,25 @@ impl crate::backend::Backend for RemoteBackend {
     fn list_session_decisions(
         &self,
         session_id: &str,
+        jsonl_path: Option<&str>,
     ) -> Vec<claw_fleet_core::decision_history::DecisionHistoryRecord> {
-        let encoded = percent_encoding::utf8_percent_encode(
+        let encoded_id = percent_encoding::utf8_percent_encode(
             session_id,
             percent_encoding::NON_ALPHANUMERIC,
         )
         .to_string();
-        self.probe
-            .get(&format!("/session_decisions?session_id={encoded}"))
-            .unwrap_or_default()
+        let url = match jsonl_path {
+            Some(p) => {
+                let encoded_path = percent_encoding::utf8_percent_encode(
+                    p,
+                    percent_encoding::NON_ALPHANUMERIC,
+                )
+                .to_string();
+                format!("/session_decisions?session_id={encoded_id}&jsonl_path={encoded_path}")
+            }
+            None => format!("/session_decisions?session_id={encoded_id}"),
+        };
+        self.probe.get(&url).unwrap_or_default()
     }
 
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {

@@ -307,11 +307,15 @@ pub trait Backend: Send + Sync {
     ) -> Result<(), String>;
 
     // ── Decision history (per-session log of resolved decision panels) ──
-    /// Return all elicitation + plan-approval records persisted for a
-    /// session, oldest-first. Empty when nothing has been recorded yet.
+    /// Return all decision records (elicitation + plan-approval + user
+    /// prompts extracted from the session jsonl) for a session, oldest-first.
+    /// Empty when nothing has been recorded yet. When `jsonl_path` is
+    /// provided the backend will sync any new user prompts from the jsonl
+    /// into the persisted history before returning.
     fn list_session_decisions(
         &self,
         session_id: &str,
+        jsonl_path: Option<&str>,
     ) -> Vec<crate::decision_history::DecisionHistoryRecord>;
 
     // ── Interaction mode (global CLAUDE.md guidance) ────────────────────────

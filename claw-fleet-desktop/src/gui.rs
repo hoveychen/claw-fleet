@@ -1077,12 +1077,13 @@ fn respond_to_plan_approval(
 fn list_session_decisions(
     state: tauri::State<AppState>,
     session_id: String,
+    jsonl_path: Option<String>,
 ) -> Vec<claw_fleet_core::decision_history::DecisionHistoryRecord> {
     state
         .backend
         .read()
         .unwrap()
-        .list_session_decisions(&session_id)
+        .list_session_decisions(&session_id, jsonl_path.as_deref())
 }
 
 // ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────────

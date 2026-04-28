@@ -169,7 +169,7 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
           <SkillHistory jsonlPath={liveSession.jsonlPath} />
 
           {/* Decision history */}
-          <DecisionHistory sessionId={liveSession.id} />
+          <DecisionHistory sessionId={liveSession.id} jsonlPath={liveSession.jsonlPath} />
 
           {/* Messages */}
           <div ref={scrollRef} className={styles.scroll_area}>

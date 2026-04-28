@@ -123,6 +123,7 @@
     "title": "决策记录",
     "kind_ask": "提问",
     "kind_plan": "计划",
+    "kind_user": "我说",
     "outcome": {
       "answered": "已回答",
       "declined": "已拒绝",
@@ -134,7 +135,8 @@
     },
     "other_label": "其他",
     "edited_plan": "改写后的计划：",
-    "feedback": "反馈：{{text}}"
+    "feedback": "反馈：{{text}}",
+    "has_image": "（含粘贴的截图）"
   },
   "audit": {
     "panel_title": "安全审计",

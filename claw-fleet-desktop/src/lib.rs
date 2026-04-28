@@ -207,6 +207,7 @@ impl Backend for NullBackend {
     fn list_session_decisions(
         &self,
         _: &str,
+        _: Option<&str>,
     ) -> Vec<claw_fleet_core::decision_history::DecisionHistoryRecord> {
         vec![]
     }

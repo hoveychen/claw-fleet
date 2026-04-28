@@ -5,11 +5,18 @@ import type {
   DecisionHistoryRecord,
   ElicitationHistoryRecord,
   PlanApprovalHistoryRecord,
+  UserPromptHistoryRecord,
 } from "../types";
 import styles from "./DecisionHistory.module.css";
 
 interface Props {
   sessionId: string;
+  jsonlPath?: string;
+}
+
+function recordTimestamp(rec: DecisionHistoryRecord): string {
+  if (rec.kind === "user-prompt") return rec.sentAt;
+  return rec.requestedAt;
 }
 
 function fmtTime(iso: string): string {
@@ -81,6 +88,20 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
   );
 }
 
+function UserPromptBody({ rec }: { rec: UserPromptHistoryRecord }) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.body}>
+      <pre className={styles.user_prompt_text}>{rec.text}</pre>
+      {rec.hasImage && (
+        <div className={styles.user_prompt_image_note}>
+          {t("decision_history.has_image")}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
   const { t } = useTranslation();
   return (
@@ -114,10 +135,13 @@ function recordSummary(rec: DecisionHistoryRecord): string {
       .trim()
       .slice(0, 80);
   }
+  if (rec.kind === "user-prompt") {
+    return rec.text.replace(/\s+/g, " ").trim().slice(0, 80);
+  }
   return rec.aiTitle ?? rec.workspaceName ?? "Plan approval";
 }
 
-export function DecisionHistory({ sessionId }: Props) {
+export function DecisionHistory({ sessionId, jsonlPath }: Props) {
   const { t } = useTranslation();
   const [records, setRecords] = useState<DecisionHistoryRecord[]>([]);
   const [expanded, setExpanded] = useState(false);
@@ -125,14 +149,20 @@ export function DecisionHistory({ sessionId }: Props) {
 
   useEffect(() => {
     if (!sessionId) return;
-    invoke<DecisionHistoryRecord[]>("list_session_decisions", { sessionId })
+    invoke<DecisionHistoryRecord[]>("list_session_decisions", {
+      sessionId,
+      jsonlPath: jsonlPath ?? null,
+    })
       .then((r) => setRecords(r ?? []))
       .catch(() => setRecords([]));
-  }, [sessionId]);
+  }, [sessionId, jsonlPath]);
 
   if (records.length === 0) return null;
 
-  const ordered = [...records].reverse();
+  // Backend returns oldest-first; show newest-first in the panel.
+  const ordered = [...records].sort((a, b) =>
+    recordTimestamp(b).localeCompare(recordTimestamp(a))
+  );
 
   return (
     <div className={styles.root}>
@@ -146,6 +176,17 @@ export function DecisionHistory({ sessionId }: Props) {
           {ordered.map((rec) => {
             const open = openId === rec.id;
             const isPlan = rec.kind === "plan-approval";
+            const isUser = rec.kind === "user-prompt";
+            const kindKey = isUser
+              ? "decision_history.kind_user"
+              : isPlan
+              ? "decision_history.kind_plan"
+              : "decision_history.kind_ask";
+            const kindClass = isUser
+              ? styles.kind_chip_user
+              : isPlan
+              ? styles.kind_chip_plan
+              : "";
             return (
               <div
                 key={rec.id}
@@ -153,21 +194,22 @@ export function DecisionHistory({ sessionId }: Props) {
                 onClick={() => setOpenId(open ? null : rec.id)}
               >
                 <div className={styles.row_head}>
-                  <span
-                    className={`${styles.kind_chip} ${isPlan ? styles.kind_chip_plan : ""}`}
-                  >
-                    {t(isPlan ? "decision_history.kind_plan" : "decision_history.kind_ask")}
+                  <span className={`${styles.kind_chip} ${kindClass}`}>
+                    {t(kindKey)}
                   </span>
-                  <span
-                    className={`${styles.outcome_chip} ${outcomeClass(rec.outcome)}`}
-                  >
-                    {t(`decision_history.outcome.${rec.outcome}`)}
-                  </span>
+                  {!isUser && (
+                    <span
+                      className={`${styles.outcome_chip} ${outcomeClass(rec.outcome)}`}
+                    >
+                      {t(`decision_history.outcome.${rec.outcome}`)}
+                    </span>
+                  )}
                   <span className={styles.summary}>{recordSummary(rec)}</span>
-                  <span className={styles.time}>{fmtTime(rec.resolvedAt)}</span>
+                  <span className={styles.time}>{fmtTime(recordTimestamp(rec))}</span>
                 </div>
                 {open && rec.kind === "elicitation" && <ElicitationBody rec={rec} />}
                 {open && rec.kind === "plan-approval" && <PlanApprovalBody rec={rec} />}
+                {open && rec.kind === "user-prompt" && <UserPromptBody rec={rec} />}
               </div>
             );
           })}

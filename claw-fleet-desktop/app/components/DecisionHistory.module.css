@@ -76,6 +76,11 @@
   color: var(--color-accent, #60a5fa);
 }
 
+.kind_chip_user {
+  background: rgba(168, 85, 247, 0.18);
+  color: rgb(168, 85, 247);
+}
+
 .outcome_chip {
   font-size: 10px;
   padding: 1px 6px;
@@ -174,5 +179,25 @@
 .feedback {
   font-size: 11px;
   color: var(--color-text-secondary);
+  font-style: italic;
+}
+
+.user_prompt_text {
+  white-space: pre-wrap;
+  font-family: var(--font-sans, inherit);
+  font-size: 11px;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 6px;
+  max-height: 240px;
+  overflow: auto;
+  margin: 0;
+}
+
+.user_prompt_image_note {
+  font-size: 10px;
+  color: var(--color-text-dim);
   font-style: italic;
 }

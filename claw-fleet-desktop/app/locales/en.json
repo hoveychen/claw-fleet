@@ -123,6 +123,7 @@
     "title": "Decisions",
     "kind_ask": "Ask",
     "kind_plan": "Plan",
+    "kind_user": "You",
     "outcome": {
       "answered": "answered",
       "declined": "declined",
@@ -134,7 +135,8 @@
     },
     "other_label": "Other",
     "edited_plan": "Edited plan:",
-    "feedback": "Feedback: {{text}}"
+    "feedback": "Feedback: {{text}}",
+    "has_image": "(includes pasted image)"
   },
   "audit": {
     "panel_title": "Security Audit",
