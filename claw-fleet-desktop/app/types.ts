@@ -420,9 +420,19 @@ export interface PlanApprovalHistoryRecord {
   feedback?: string | null;
 }
 
+export interface UserPromptHistoryRecord {
+  kind: "user-prompt";
+  id: string;
+  sessionId: string;
+  text: string;
+  hasImage?: boolean;
+  sentAt: string;
+}
+
 export type DecisionHistoryRecord =
   | ElicitationHistoryRecord
-  | PlanApprovalHistoryRecord;
+  | PlanApprovalHistoryRecord
+  | UserPromptHistoryRecord;
 
 /** Union of all decision types the panel can display. */
 export type PendingDecision =
