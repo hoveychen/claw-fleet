@@ -1319,6 +1319,33 @@ impl Backend for LocalBackend {
         crate::skills::read_skill_file(path)
     }
 
+    fn list_skill_files(
+        &self,
+        skill_path: &str,
+    ) -> Result<Vec<crate::skills::SkillFileEntry>, String> {
+        crate::skills::list_skill_files(skill_path)
+    }
+
+    fn get_skill_history(
+        &self,
+        jsonl_path: &str,
+    ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
+        use claw_fleet_core::skill_history;
+        let main_path = std::path::Path::new(jsonl_path);
+        let main_msgs = self.get_messages(jsonl_path)?;
+        let mut out = skill_history::extract_from_messages(&main_msgs, false);
+
+        for sub in skill_history::subagent_jsonl_paths(main_path) {
+            let sub_str = sub.to_string_lossy().to_string();
+            // Best-effort: a single broken subagent file shouldn't lose the rest.
+            let Ok(msgs) = self.get_messages(&sub_str) else { continue };
+            out.extend(skill_history::extract_from_messages(&msgs, true));
+        }
+
+        skill_history::sort_by_timestamp(&mut out);
+        Ok(out)
+    }
+
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

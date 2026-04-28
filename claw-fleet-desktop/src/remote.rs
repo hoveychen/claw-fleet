@@ -381,6 +381,24 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&format!("/skill_content?path={}", encode_path(path)))
     }
 
+    fn list_skill_files(
+        &self,
+        skill_path: &str,
+    ) -> Result<Vec<crate::skills::SkillFileEntry>, String> {
+        self.probe.get(&format!(
+            "/skill_files?path={}",
+            encode_path(skill_path)
+        ))
+    }
+
+    fn get_skill_history(
+        &self,
+        jsonl_path: &str,
+    ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
+        self.probe
+            .get(&format!("/skill_history?path={}", encode_path(jsonl_path)))
+    }
+
     fn get_waiting_alerts(&self) -> Vec<crate::backend::WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

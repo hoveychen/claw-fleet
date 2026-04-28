@@ -716,18 +716,12 @@ fn get_messages_tail(
     state.backend.read().unwrap().get_messages_tail(&jsonl_path, tail)
 }
 
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct SkillInvocation {
-    skill: String,
-    args: Option<String>,
-    timestamp: String,
-}
-
 #[tauri::command]
-fn get_skill_history(jsonl_path: String, state: tauri::State<AppState>) -> Result<Vec<SkillInvocation>, String> {
-    let messages = state.backend.read().unwrap().get_messages(&jsonl_path)?;
-    Ok(extract_skill_history(&messages))
+fn get_skill_history(
+    jsonl_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
+    state.backend.read().unwrap().get_skill_history(&jsonl_path)
 }
 
 #[tauri::command]
@@ -737,50 +731,6 @@ fn get_session_todos(
 ) -> Result<Vec<claw_fleet_core::session_todos::TodoItem>, String> {
     let messages = state.backend.read().unwrap().get_messages(&jsonl_path)?;
     Ok(claw_fleet_core::session_todos::extract_latest_todos(&messages))
-}
-
-fn extract_skill_history(messages: &[Value]) -> Vec<SkillInvocation> {
-    let mut history = Vec::new();
-    for msg in messages {
-        if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-            continue;
-        }
-        let timestamp = msg
-            .get("timestamp")
-            .and_then(|t| t.as_str())
-            .unwrap_or("")
-            .to_string();
-        let Some(content_blocks) = msg
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_array())
-        else {
-            continue;
-        };
-        for block in content_blocks {
-            if block.get("type").and_then(|t| t.as_str()) == Some("tool_use")
-                && block.get("name").and_then(|n| n.as_str()) == Some("Skill")
-            {
-                if let Some(skill) = block
-                    .get("input")
-                    .and_then(|i| i.get("skill"))
-                    .and_then(|s| s.as_str())
-                {
-                    let args = block
-                        .get("input")
-                        .and_then(|i| i.get("args"))
-                        .and_then(|a| a.as_str())
-                        .map(|s| s.to_string());
-                    history.push(SkillInvocation {
-                        skill: skill.to_string(),
-                        args,
-                        timestamp: timestamp.clone(),
-                    });
-                }
-            }
-        }
-    }
-    history
 }
 
 // ── Security audit ──────────────────────────────────────────────────────────
@@ -1367,6 +1317,14 @@ fn list_skills(state: tauri::State<AppState>) -> Vec<skills::SkillItem> {
 #[tauri::command]
 fn get_skill_content(path: String, state: tauri::State<AppState>) -> Result<String, String> {
     state.backend.read().unwrap().get_skill_content(&path)
+}
+
+#[tauri::command]
+fn list_skill_files(
+    skill_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<skills::SkillFileEntry>, String> {
+    state.backend.read().unwrap().list_skill_files(&skill_path)
 }
 
 // ── Agent sources config ─────────────────────────────────────────────────────
@@ -2890,6 +2848,7 @@ pub fn run() {
             promote_memory,
             list_skills,
             get_skill_content,
+            list_skill_files,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,

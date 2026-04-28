@@ -117,11 +117,20 @@
   "skills": {
     "panel_title": "Skills",
     "loading": "加载中…",
-    "no_skills": "未找到 Skill 文件。"
+    "no_skills": "未找到 Skill 文件。",
+    "files_label": "文件",
+    "select_file": "请选择左侧文件查看内容。",
+    "binary_file": "二进制或非文本文件，无法在此预览。",
+    "read_error": "读取文件失败。"
   },
   "skill_history": {
     "title": "Skill 调用记录",
-    "empty": "本次会话还没有 Skill 调用。"
+    "empty": "本次会话还没有 Skill 调用。",
+    "section_main": "主代理",
+    "section_subagent": "子代理",
+    "loading_detail": "加载中…",
+    "no_description": "（该 skill 暂无描述）",
+    "skill_not_found": "未找到对应的 SKILL.md 文件。"
   },
   "decision_history": {
     "title": "决策记录",

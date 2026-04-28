@@ -32,7 +32,7 @@ use daily_report::{DailyReport, DailyReportStats, Lesson};
 use llm_provider::{LlmConfig, LlmProviderInfo};
 use memory::{MemoryHistoryEntry, WorkspaceMemory};
 use search_index::SearchHit;
-use skills::SkillItem;
+use skills::{SkillFileEntry, SkillItem};
 use serde_json::Value;
 
 /// Tracks which session file is currently being watched (tailed) for live
@@ -136,6 +136,15 @@ impl Backend for NullBackend {
         vec![]
     }
     fn get_skill_content(&self, _: &str) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
+    fn list_skill_files(&self, _: &str) -> Result<Vec<SkillFileEntry>, String> {
+        Err("backend not ready".into())
+    }
+    fn get_skill_history(
+        &self,
+        _: &str,
+    ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
         Err("backend not ready".into())
     }
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {

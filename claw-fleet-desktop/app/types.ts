@@ -106,6 +106,7 @@ export interface SkillInvocation {
   skill: string;
   args: string | null;
   timestamp: string;
+  isSubagent: boolean;
 }
 
 export type SessionTodoStatus = "pending" | "in_progress" | "completed";
