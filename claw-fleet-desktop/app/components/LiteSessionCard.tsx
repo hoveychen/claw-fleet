@@ -13,10 +13,11 @@ export function LiteSessionCard({
   nextIsSubagent?: boolean;
 }) {
   const { t } = useTranslation();
-  const title = session.aiTitle || session.workspaceName;
+  const isSub = session.isSubagent;
+  // Main agents now surface workspaceName via a badge, so don't duplicate it as the fallback title.
+  const title = isSub ? (session.aiTitle || session.workspaceName) : (session.aiTitle ?? "");
   const preview = session.lastMessagePreview?.trim() ?? "";
   const speed = session.tokenSpeed;
-  const isSub = session.isSubagent;
   const extendThread = isSub && nextIsSubagent;
 
   return (
@@ -38,7 +39,9 @@ export function LiteSessionCard({
             </span>
           </span>
         ) : (
-          <span className={styles.badge_main} title={t("main")}>◈ {t("main")}</span>
+          <span className={styles.badge_main} title={session.workspaceName}>
+            <span className={styles.badge_main_label}>{session.workspaceName}</span>
+          </span>
         )}
         <span className={styles.title} title={title}>{title}</span>
         {speed >= 0.5 && (
