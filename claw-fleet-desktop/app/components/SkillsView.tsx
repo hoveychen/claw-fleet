@@ -171,11 +171,13 @@ function SkillDetail({ skill }: { skill: SkillItem }) {
   const [activeFile, setActiveFile] = useState<SkillFileEntry | null>(null);
   // Set of `relativePath` values for directories that are currently collapsed.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [fileQuery, setFileQuery] = useState("");
 
   useEffect(() => {
     setFiles(null);
     setActiveFile(null);
     setCollapsed(new Set());
+    setFileQuery("");
     invoke<SkillFileEntry[]>("list_skill_files", { skillPath: skill.path })
       .then((entries) => {
         setFiles(entries);
@@ -195,18 +197,39 @@ function SkillDetail({ skill }: { skill: SkillItem }) {
   const fileCount = fileEntries.filter((f) => !f.isDir).length;
 
   // Hide entries whose ancestor directory is collapsed.
+  // While the user is filtering, ignore collapse state and instead match
+  // against name + relativePath (case-insensitive). Directory rows show
+  // when any descendant matches, so the path stays legible.
   const visibleEntries = useMemo(() => {
+    const q = fileQuery.trim().toLowerCase();
+    if (q) {
+      const matchingPaths = new Set<string>();
+      for (const entry of fileEntries) {
+        if (entry.isDir) continue;
+        if (
+          entry.name.toLowerCase().includes(q) ||
+          entry.relativePath.toLowerCase().includes(q)
+        ) {
+          matchingPaths.add(entry.relativePath);
+          // Also surface every ancestor directory.
+          const parts = entry.relativePath.split("/");
+          for (let i = 1; i < parts.length; i++) {
+            matchingPaths.add(parts.slice(0, i).join("/"));
+          }
+        }
+      }
+      return fileEntries.filter((e) => matchingPaths.has(e.relativePath));
+    }
     if (collapsed.size === 0) return fileEntries;
     return fileEntries.filter((entry) => {
       const parts = entry.relativePath.split("/");
-      // Walk every ancestor prefix and return false if any is collapsed.
       for (let i = 1; i < parts.length; i++) {
         const ancestor = parts.slice(0, i).join("/");
         if (collapsed.has(ancestor)) return false;
       }
       return true;
     });
-  }, [fileEntries, collapsed]);
+  }, [fileEntries, collapsed, fileQuery]);
 
   const toggleDir = useCallback((relativePath: string) => {
     setCollapsed((prev) => {
@@ -258,6 +281,16 @@ function SkillDetail({ skill }: { skill: SkillItem }) {
             <div className={skillStyles.tree_label}>
               {t("skills.files_label")}
             </div>
+            <input
+              className={skillStyles.tree_filter}
+              type="text"
+              value={fileQuery}
+              onChange={(e) => setFileQuery(e.target.value)}
+              placeholder={t("skills.filter_files")}
+            />
+            {visibleEntries.length === 0 && (
+              <p className={skillStyles.tree_empty}>{t("skills.no_match")}</p>
+            )}
             {visibleEntries.map((entry) => {
               const depth = indentLevel(entry.relativePath);
               if (entry.isDir) {
