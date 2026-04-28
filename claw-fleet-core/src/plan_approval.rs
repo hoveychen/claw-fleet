@@ -131,15 +131,27 @@ pub fn read_request(id: &str) -> Option<PlanApprovalRequest> {
     serde_json::from_str(&content).ok()
 }
 
-/// List all pending request IDs in the plan-approval directory.
+/// List all pending request IDs in the plan-approval directory. Soft form
+/// — returns an empty vec on any failure. See [`list_pending_requests_checked`]
+/// for the variant that distinguishes "no requests" from "couldn't read".
 pub fn list_pending_requests() -> Vec<String> {
+    list_pending_requests_checked().unwrap_or_default()
+}
+
+/// Strict form — `Ok(vec![])` for "directory missing / no requests" but
+/// `Err` for actual I/O errors. The directory watcher uses this so a
+/// transient `read_dir` error doesn't get treated as "all requests vanished"
+/// and dismiss every active panel.
+pub fn list_pending_requests_checked() -> std::io::Result<Vec<String>> {
     let Some(dir) = plan_approval_dir() else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Vec::new();
+    let entries = match fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
     };
-    entries
+    Ok(entries
         .filter_map(|e| e.ok())
         .filter_map(|e| {
             let name = e.file_name().to_string_lossy().to_string();
@@ -149,7 +161,7 @@ pub fn list_pending_requests() -> Vec<String> {
                 None
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]

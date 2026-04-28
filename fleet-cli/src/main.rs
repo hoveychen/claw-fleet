@@ -3373,7 +3373,11 @@ fn cmd_guard() {
             // `fleet serve`) — fall through silently so Claude isn't blocked
             // by a request nobody will answer.
             let liveness_window = Duration::from_secs(30);
-            if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+            let status = consumer_heartbeat::consumer_status(liveness_window);
+            if !status.is_alive() {
+                claw_fleet_core::log_debug(&format!(
+                    "[guard hook] no live consumer at startup (status={status}); falling back to Claude Code's native UI",
+                ));
                 return;
             }
 
@@ -3437,8 +3441,14 @@ fn cmd_guard() {
                     println!("{}", out);
                     return;
                 }
-                if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+                let status = consumer_heartbeat::consumer_status(liveness_window);
+                if !status.is_alive() {
                     // Head went away while we waited — fall through silently.
+                    claw_fleet_core::log_debug(&format!(
+                        "[guard hook] consumer heartbeat lost after {:.1}s (request {}, status={status}); deleting request file and falling back to native UI",
+                        start.elapsed().as_secs_f32(),
+                        request_id,
+                    ));
                     guard::cleanup(&request_id);
                     return;
                 }
@@ -3501,10 +3511,11 @@ fn cmd_elicitation() {
     // No live consumer — fall through silently; Claude Code will use its
     // native AskUserQuestion UI.
     let liveness_window = Duration::from_secs(30);
-    if !consumer_heartbeat::is_consumer_alive(liveness_window) {
-        claw_fleet_core::log_debug(
-            "[elicitation hook] no live consumer at startup (heartbeat stale >30s); falling back to Claude Code's native UI",
-        );
+    let startup_status = consumer_heartbeat::consumer_status(liveness_window);
+    if !startup_status.is_alive() {
+        claw_fleet_core::log_debug(&format!(
+            "[elicitation hook] no live consumer at startup (status={startup_status}); falling back to Claude Code's native UI",
+        ));
         return;
     }
 
@@ -3550,10 +3561,11 @@ fn cmd_elicitation() {
         if start.elapsed() > timeout {
             break None;
         }
-        if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+        let loop_status = consumer_heartbeat::consumer_status(liveness_window);
+        if !loop_status.is_alive() {
             // Head went away — silently fall through to Claude's native UI.
             claw_fleet_core::log_debug(&format!(
-                "[elicitation hook] consumer heartbeat lost after {:.1}s (request {}); deleting request file and falling back to native UI",
+                "[elicitation hook] consumer heartbeat lost after {:.1}s (request {}, status={loop_status}); deleting request file and falling back to native UI",
                 start.elapsed().as_secs_f32(),
                 request_id,
             ));
@@ -3692,10 +3704,11 @@ fn cmd_plan_approval() {
     // No live consumer — fall through silently so Claude Code keeps its
     // native plan-approval UI as a fallback.
     let liveness_window = Duration::from_secs(30);
-    if !consumer_heartbeat::is_consumer_alive(liveness_window) {
-        claw_fleet_core::log_debug(
-            "[plan-approval hook] no live consumer at startup (heartbeat stale >30s); falling back to Claude Code's native UI",
-        );
+    let startup_status = consumer_heartbeat::consumer_status(liveness_window);
+    if !startup_status.is_alive() {
+        claw_fleet_core::log_debug(&format!(
+            "[plan-approval hook] no live consumer at startup (status={startup_status}); falling back to Claude Code's native UI",
+        ));
         return;
     }
 
@@ -3742,9 +3755,10 @@ fn cmd_plan_approval() {
         if start.elapsed() > timeout {
             break None;
         }
-        if !consumer_heartbeat::is_consumer_alive(liveness_window) {
+        let loop_status = consumer_heartbeat::consumer_status(liveness_window);
+        if !loop_status.is_alive() {
             claw_fleet_core::log_debug(&format!(
-                "[plan-approval hook] consumer heartbeat lost after {:.1}s (request {}); deleting request file and falling back to native UI",
+                "[plan-approval hook] consumer heartbeat lost after {:.1}s (request {}, status={loop_status}); deleting request file and falling back to native UI",
                 start.elapsed().as_secs_f32(),
                 request_id,
             ));

@@ -486,7 +486,19 @@ impl LocalBackend {
                     if !running_guard.load(Ordering::SeqCst) {
                         break;
                     }
-                    let pending = crate::guard::list_pending_requests();
+                    // Use the strict variant so a transient `read_dir` error
+                    // doesn't get conflated with "all requests vanished" and
+                    // dismiss every active panel (closing the user's decision
+                    // panel for no reason). On Err we just skip this tick.
+                    let pending = match crate::guard::list_pending_requests_checked() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            crate::log_debug(&format!(
+                                "[guard watcher] read_dir failed (skipping dismissal step): {e}"
+                            ));
+                            continue;
+                        }
+                    };
                     for id in &pending {
                         if known.insert(id.clone()) {
                             // New request — read it and emit a Tauri event.
@@ -531,7 +543,15 @@ impl LocalBackend {
                     if !running_elicit.load(Ordering::SeqCst) {
                         break;
                     }
-                    let pending = crate::elicitation::list_pending_requests();
+                    let pending = match crate::elicitation::list_pending_requests_checked() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            crate::log_debug(&format!(
+                                "[elicitation watcher] read_dir failed (skipping dismissal step): {e}"
+                            ));
+                            continue;
+                        }
+                    };
                     for id in &pending {
                         if known.insert(id.clone()) {
                             if let Some(mut req) = crate::elicitation::read_request(id) {
@@ -573,7 +593,15 @@ impl LocalBackend {
                     if !running_plan.load(Ordering::SeqCst) {
                         break;
                     }
-                    let pending = crate::plan_approval::list_pending_requests();
+                    let pending = match crate::plan_approval::list_pending_requests_checked() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            crate::log_debug(&format!(
+                                "[plan-approval watcher] read_dir failed (skipping dismissal step): {e}"
+                            ));
+                            continue;
+                        }
+                    };
                     for id in &pending {
                         if known.insert(id.clone()) {
                             if let Some(mut req) = crate::plan_approval::read_request(id) {
