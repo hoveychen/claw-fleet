@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { SessionInfo } from "../types";
+import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
 import { SkillHistory } from "./SkillHistory";
 import styles from "./SessionDetail.module.css";
@@ -166,6 +167,9 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
 
           {/* Skill history */}
           <SkillHistory jsonlPath={liveSession.jsonlPath} />
+
+          {/* Decision history */}
+          <DecisionHistory sessionId={liveSession.id} />
 
           {/* Messages */}
           <div ref={scrollRef} className={styles.scroll_area}>

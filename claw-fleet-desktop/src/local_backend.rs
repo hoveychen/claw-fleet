@@ -1470,6 +1470,13 @@ impl Backend for LocalBackend {
         result
     }
 
+    fn list_session_decisions(
+        &self,
+        session_id: &str,
+    ) -> Vec<crate::decision_history::DecisionHistoryRecord> {
+        crate::decision_history::list_session_records(session_id)
+    }
+
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
         crate::agent_source::get_sources_config_local()
     }

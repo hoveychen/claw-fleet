@@ -369,6 +369,61 @@ export interface PlanApprovalDecision {
   arrivedAt: number;
 }
 
+// ── Decision history (persisted log for `list_session_decisions`) ──────
+
+export type ElicitationOutcome =
+  | "answered"
+  | "declined"
+  | "heartbeat-lost"
+  | "timeout";
+
+export type PlanApprovalOutcome =
+  | "approved"
+  | "approved-with-edits"
+  | "rejected"
+  | "heartbeat-lost"
+  | "timeout";
+
+export interface SelectedOption {
+  label: string;
+  description?: string | null;
+  /** True when the user typed via the "Other" escape hatch. */
+  other?: boolean;
+}
+
+export interface ElicitationHistoryRecord {
+  kind: "elicitation";
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  aiTitle?: string | null;
+  requestedAt: string;
+  resolvedAt: string;
+  outcome: ElicitationOutcome;
+  questions: ElicitationQuestion[];
+  /** question text → selected option (empty unless outcome === "answered"). */
+  answers: Record<string, SelectedOption>;
+}
+
+export interface PlanApprovalHistoryRecord {
+  kind: "plan-approval";
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  aiTitle?: string | null;
+  requestedAt: string;
+  resolvedAt: string;
+  outcome: PlanApprovalOutcome;
+  planContent: string;
+  planFilePath?: string | null;
+  editedPlan?: string | null;
+  feedback?: string | null;
+}
+
+export type DecisionHistoryRecord =
+  | ElicitationHistoryRecord
+  | PlanApprovalHistoryRecord;
+
 /** Union of all decision types the panel can display. */
 export type PendingDecision =
   | GuardDecision

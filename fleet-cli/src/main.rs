@@ -1736,6 +1736,16 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/session_decisions" => {
+                let raw_id = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
+                let session_id = percent_decode_str(raw_id).decode_utf8_lossy().to_string();
+                let records = claw_fleet_core::decision_history::list_session_records(&session_id);
+                let body = serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string());
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             "/messages" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
@@ -3424,6 +3434,9 @@ fn cmd_guard() {
 
 fn cmd_elicitation() {
     use claw_fleet_core::consumer_heartbeat;
+    use claw_fleet_core::decision_history::{
+        self, DecisionHistoryRecord, ElicitationOutcome, build_elicitation_record,
+    };
     use claw_fleet_core::elicitation::{self, ElicitationRequest};
     use claw_fleet_core::guard::{self, HookInput};
     use std::io::Read;
@@ -3526,6 +3539,15 @@ fn cmd_elicitation() {
                 start.elapsed().as_secs_f32(),
                 request_id,
             ));
+            let rec = build_elicitation_record(
+                &req,
+                ElicitationOutcome::HeartbeatLost,
+                &std::collections::HashMap::new(),
+                chrono::Utc::now().to_rfc3339(),
+            );
+            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec)) {
+                eprintln!("decision_history append (heartbeat-lost): {e}");
+            }
             elicitation::cleanup(&request_id);
             return;
         }
@@ -3533,6 +3555,20 @@ fn cmd_elicitation() {
     };
     match resp {
         Some(resp) => {
+            let outcome = if resp.declined {
+                ElicitationOutcome::Declined
+            } else {
+                ElicitationOutcome::Answered
+            };
+            let rec = build_elicitation_record(
+                &req,
+                outcome,
+                &resp.answers,
+                chrono::Utc::now().to_rfc3339(),
+            );
+            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec)) {
+                eprintln!("decision_history append: {e}");
+            }
             elicitation::cleanup(&request_id);
             if resp.declined {
                 // User declined — deny so Claude Code knows.
@@ -3565,6 +3601,15 @@ fn cmd_elicitation() {
                 start.elapsed().as_secs_f32(),
                 request_id,
             ));
+            let rec = build_elicitation_record(
+                &req,
+                ElicitationOutcome::Timeout,
+                &std::collections::HashMap::new(),
+                chrono::Utc::now().to_rfc3339(),
+            );
+            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::Elicitation(rec)) {
+                eprintln!("decision_history append (timeout): {e}");
+            }
             elicitation::cleanup(&request_id);
             // Timeout — deny so Claude Code falls back.
             let out = serde_json::json!({
@@ -3583,6 +3628,9 @@ fn cmd_elicitation() {
 
 fn cmd_plan_approval() {
     use claw_fleet_core::consumer_heartbeat;
+    use claw_fleet_core::decision_history::{
+        self, DecisionHistoryRecord, PlanApprovalOutcome, build_plan_approval_record,
+    };
     use claw_fleet_core::guard::{self, HookInput};
     use claw_fleet_core::plan_approval::{self, PlanApprovalRequest};
     use std::io::Read;
@@ -3682,6 +3730,15 @@ fn cmd_plan_approval() {
                 start.elapsed().as_secs_f32(),
                 request_id,
             ));
+            let rec = build_plan_approval_record(
+                &req,
+                PlanApprovalOutcome::HeartbeatLost,
+                None,
+                chrono::Utc::now().to_rfc3339(),
+            );
+            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec)) {
+                eprintln!("decision_history append (heartbeat-lost): {e}");
+            }
             plan_approval::cleanup(&request_id);
             return;
         }
@@ -3690,6 +3747,24 @@ fn cmd_plan_approval() {
 
     match resp {
         Some(resp) => {
+            let outcome = if resp.decision == "approve" {
+                if resp.edited_plan.is_some() {
+                    PlanApprovalOutcome::ApprovedWithEdits
+                } else {
+                    PlanApprovalOutcome::Approved
+                }
+            } else {
+                PlanApprovalOutcome::Rejected
+            };
+            let rec = build_plan_approval_record(
+                &req,
+                outcome,
+                Some(&resp),
+                chrono::Utc::now().to_rfc3339(),
+            );
+            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec)) {
+                eprintln!("decision_history append: {e}");
+            }
             plan_approval::cleanup(&request_id);
             if resp.decision == "approve" {
                 // Approve — optionally echo back an edited plan via updatedInput.
@@ -3727,6 +3802,15 @@ fn cmd_plan_approval() {
                 start.elapsed().as_secs_f32(),
                 request_id,
             ));
+            let rec = build_plan_approval_record(
+                &req,
+                PlanApprovalOutcome::Timeout,
+                None,
+                chrono::Utc::now().to_rfc3339(),
+            );
+            if let Err(e) = decision_history::append_record(&DecisionHistoryRecord::PlanApproval(rec)) {
+                eprintln!("decision_history append (timeout): {e}");
+            }
             plan_approval::cleanup(&request_id);
             let out = serde_json::json!({
                 "hookSpecificOutput": {

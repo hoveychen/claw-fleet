@@ -481,6 +481,20 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/plan-approval/respond", &resp)
     }
 
+    fn list_session_decisions(
+        &self,
+        session_id: &str,
+    ) -> Vec<claw_fleet_core::decision_history::DecisionHistoryRecord> {
+        let encoded = percent_encoding::utf8_percent_encode(
+            session_id,
+            percent_encoding::NON_ALPHANUMERIC,
+        )
+        .to_string();
+        self.probe
+            .get(&format!("/session_decisions?session_id={encoded}"))
+            .unwrap_or_default()
+    }
+
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Req<'a> { user_title: &'a str, locale: &'a str }

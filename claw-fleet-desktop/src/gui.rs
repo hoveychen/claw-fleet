@@ -1073,6 +1073,18 @@ fn respond_to_plan_approval(
         .respond_to_plan_approval(&id, &decision, edited_plan, feedback)
 }
 
+#[tauri::command]
+fn list_session_decisions(
+    state: tauri::State<AppState>,
+    session_id: String,
+) -> Vec<claw_fleet_core::decision_history::DecisionHistoryRecord> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .list_session_decisions(&session_id)
+}
+
 // ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────────
 
 #[tauri::command]
@@ -2898,6 +2910,7 @@ pub fn run() {
             remove_plan_approval_hook,
             list_pending_plan_approvals,
             respond_to_plan_approval,
+            list_session_decisions,
             connect_feishu,
             poll_feishu_oauth,
             feishu_status,

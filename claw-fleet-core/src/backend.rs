@@ -306,6 +306,14 @@ pub trait Backend: Send + Sync {
         feedback: Option<String>,
     ) -> Result<(), String>;
 
+    // ── Decision history (per-session log of resolved decision panels) ──
+    /// Return all elicitation + plan-approval records persisted for a
+    /// session, oldest-first. Empty when nothing has been recorded yet.
+    fn list_session_decisions(
+        &self,
+        session_id: &str,
+    ) -> Vec<crate::decision_history::DecisionHistoryRecord>;
+
     // ── Interaction mode (global CLAUDE.md guidance) ────────────────────────
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_interaction_mode(&self) -> Result<(), String>;

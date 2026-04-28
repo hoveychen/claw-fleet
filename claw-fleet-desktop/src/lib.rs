@@ -204,6 +204,12 @@ impl Backend for NullBackend {
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn list_session_decisions(
+        &self,
+        _: &str,
+    ) -> Vec<claw_fleet_core::decision_history::DecisionHistoryRecord> {
+        vec![]
+    }
     fn apply_interaction_mode(&self, _: &str, _: &str) -> Result<(), String> {
         Err("backend not ready".into())
     }

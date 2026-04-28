@@ -119,6 +119,23 @@
     "loading": "Loading…",
     "no_skills": "No skill files found."
   },
+  "decision_history": {
+    "title": "Decisions",
+    "kind_ask": "Ask",
+    "kind_plan": "Plan",
+    "outcome": {
+      "answered": "answered",
+      "declined": "declined",
+      "timeout": "timeout",
+      "heartbeat-lost": "heartbeat lost",
+      "approved": "approved",
+      "approved-with-edits": "approved with edits",
+      "rejected": "rejected"
+    },
+    "other_label": "Other",
+    "edited_plan": "Edited plan:",
+    "feedback": "Feedback: {{text}}"
+  },
   "audit": {
     "panel_title": "Security Audit",
     "scanning": "Scanning sessions…",
