@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore } from "../store";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import type { SessionInfo, SessionStatus } from "../types";
-import { SessionCard, StatusBadge, StatusIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
+import { SessionCard, StatusBadge, StatusIcon, SubagentTypeIcon, RateLimitControls, formatModel } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import styles from "./GalleryView.module.css";
 
@@ -102,6 +102,7 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
         <div className={styles.group_header} onClick={() => onSelect(main)}>
           <span className={styles.group_name}>{main.workspaceName}</span>
           <StatusBadge status={main.status} />
+          <RateLimitControls session={main} />
           <div className={styles.group_stats}>
             <span className={styles.group_stat}>
               {main.totalOutputTokens.toLocaleString()} {t("tokens")}
@@ -129,6 +130,7 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
       <div className={styles.group_header} onClick={() => onSelect(main)}>
         <span className={styles.group_name}>{main.workspaceName}</span>
         <StatusBadge status={main.status} />
+        <RateLimitControls session={main} />
         <div className={styles.group_stats}>
           <span className={styles.group_stat}>
             {subagents.length} {t("gallery.subs")}

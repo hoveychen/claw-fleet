@@ -40,6 +40,44 @@ export function RateLimitCountdown({ state }: { state: RateLimitState }) {
   );
 }
 
+// ── Rate-limit controls (countdown + resume button) ─────────────────────────
+
+export function RateLimitControls({ session }: { session: SessionInfo }) {
+  const { t } = useTranslation();
+  const [resuming, setResuming] = useState(false);
+  if (session.status !== "rateLimited" || !session.rateLimit) return null;
+  const handleResume = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (resuming) return;
+    setResuming(true);
+    try {
+      await invoke("resume_rate_limited_session", {
+        sessionId: session.id,
+        workspacePath: session.workspacePath,
+      });
+    } catch (err) {
+      console.error("resume failed", err);
+    } finally {
+      setResuming(false);
+    }
+  };
+  return (
+    <>
+      <RateLimitCountdown state={session.rateLimit} />
+      {!session.isSubagent && (
+        <button
+          className={styles.resume_btn}
+          onClick={handleResume}
+          disabled={resuming}
+          title={t("rateLimit.resumeNow")}
+        >
+          {resuming ? "…" : "▶"}
+        </button>
+      )}
+    </>
+  );
+}
+
 // ── Subagent type icon ────────────────────────────────────────────────────────
 
 export function SubagentTypeIcon({ type }: { type: string | null }) {
@@ -359,23 +397,6 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
     session.status
   );
   const [killing, setKilling] = useState(false);
-  const [resuming, setResuming] = useState(false);
-
-  const handleResume = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (resuming) return;
-    setResuming(true);
-    try {
-      await invoke("resume_rate_limited_session", {
-        sessionId: session.id,
-        workspacePath: session.workspacePath,
-      });
-    } catch (err) {
-      console.error("resume failed", err);
-    } finally {
-      setResuming(false);
-    }
-  };
 
   const handleStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -418,19 +439,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
       <div className={`${styles.header} ${hideHeader ? styles.header_compact : ""}`}>
         {!hideHeader && <span className={styles.workspace}>{session.workspaceName}</span>}
         {!hideHeader && <StatusBadge status={session.status} />}
-        {session.status === "rateLimited" && session.rateLimit && (
-          <RateLimitCountdown state={session.rateLimit} />
-        )}
-        {session.status === "rateLimited" && !session.isSubagent && (
-          <button
-            className={styles.resume_btn}
-            onClick={handleResume}
-            disabled={resuming}
-            title={t("rateLimit.resumeNow")}
-          >
-            {resuming ? "…" : "▶"}
-          </button>
-        )}
+        {!hideHeader && <RateLimitControls session={session} />}
         {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
           <button
             className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
