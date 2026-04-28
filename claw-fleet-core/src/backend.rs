@@ -17,7 +17,8 @@ use crate::llm_usage::FleetLlmUsageDailyBucket;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::search_index::SearchHit;
 use crate::session::SessionInfo;
-use crate::skills::SkillItem;
+use crate::skill_history::SkillInvocation;
+use crate::skills::{SkillFileEntry, SkillItem};
 
 // ── Shared types ─────────────────────────────────────────────────────────────
 
@@ -269,6 +270,11 @@ pub trait Backend: Send + Sync {
     // ── Skills ────────────────────────────────────────────────────────────────
     fn list_skills(&self) -> Vec<SkillItem>;
     fn get_skill_content(&self, path: &str) -> Result<String, String>;
+    fn list_skill_files(&self, skill_path: &str) -> Result<Vec<SkillFileEntry>, String>;
+    /// Per-session Skill invocation history. Scans the main jsonl and any
+    /// sibling `<sid>/subagents/agent-*.jsonl` files; subagent entries are
+    /// flagged with `is_subagent: true`.
+    fn get_skill_history(&self, jsonl_path: &str) -> Result<Vec<SkillInvocation>, String>;
 
     // ── Waiting alerts ────────────────────────────────────────────────────────
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert>;

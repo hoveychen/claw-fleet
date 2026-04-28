@@ -27,6 +27,7 @@ pub mod rate_limit_parser;
 pub mod search_index;
 pub mod session;
 pub mod session_todos;
+pub mod skill_history;
 pub mod skills;
 pub mod tcc;
 

@@ -117,11 +117,20 @@
   "skills": {
     "panel_title": "Skills",
     "loading": "Loading…",
-    "no_skills": "No skill files found."
+    "no_skills": "No skill files found.",
+    "files_label": "Files",
+    "select_file": "Pick a file on the left to preview.",
+    "binary_file": "Binary or non-text file — preview not available.",
+    "read_error": "Failed to read file."
   },
   "skill_history": {
     "title": "Skill History",
-    "empty": "No skill invocations yet for this session."
+    "empty": "No skill invocations yet for this session.",
+    "section_main": "Main agent",
+    "section_subagent": "Subagent",
+    "loading_detail": "Loading…",
+    "no_description": "(No description for this skill)",
+    "skill_not_found": "SKILL.md file not found."
   },
   "decision_history": {
     "title": "Decisions",

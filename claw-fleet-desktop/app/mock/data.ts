@@ -710,11 +710,11 @@ export const MOCK_WAITING_ALERTS: WaitingAlert[] = [
 
 export const MOCK_SKILL_HISTORY: Record<string, SkillInvocation[]> = {
   "sess-api-main": [
-    { skill: "review-pr", args: "142", timestamp: new Date(NOW - 42 * MIN).toISOString() },
-    { skill: "commit", args: "-m 'Fix JWT issuer validation'", timestamp: new Date(NOW - 10 * MIN).toISOString() },
+    { skill: "review-pr", args: "142", timestamp: new Date(NOW - 42 * MIN).toISOString(), isSubagent: false },
+    { skill: "commit", args: "-m 'Fix JWT issuer validation'", timestamp: new Date(NOW - 10 * MIN).toISOString(), isSubagent: false },
   ],
   "sess-web-waiting": [
-    { skill: "review-pr", args: "87", timestamp: new Date(NOW - 55 * MIN).toISOString() },
+    { skill: "review-pr", args: "87", timestamp: new Date(NOW - 55 * MIN).toISOString(), isSubagent: false },
   ],
 };
 

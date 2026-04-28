@@ -1915,12 +1915,53 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/skill_history" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                if let Some(source) = find_source_for_path(&sources, &file_path) {
+                    use claw_fleet_core::skill_history;
+                    let main_msgs = source.get_messages(&file_path).unwrap_or_default();
+                    let mut out = skill_history::extract_from_messages(&main_msgs, false);
+
+                    let main_path = std::path::Path::new(&file_path);
+                    for sub in skill_history::subagent_jsonl_paths(main_path) {
+                        let sub_str = sub.to_string_lossy().to_string();
+                        let Ok(msgs) = source.get_messages(&sub_str) else { continue };
+                        out.extend(skill_history::extract_from_messages(&msgs, true));
+                    }
+                    skill_history::sort_by_timestamp(&mut out);
+
+                    let body = serde_json::to_string(&out).unwrap_or_default();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body).with_header(json_header),
+                    );
+                } else {
+                    let _ = request.respond(tiny_http::Response::empty(404));
+                }
+            }
+
             "/skill_content" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 match skills::read_skill_file(&file_path) {
                     Ok(content) => {
                         let body = serde_json::to_string(&content).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
+            }
+
+            "/skill_files" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let skill_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                match skills::list_skill_files(&skill_path) {
+                    Ok(entries) => {
+                        let body = serde_json::to_string(&entries).unwrap_or_default();
                         let _ = request.respond(
                             tiny_http::Response::from_string(body).with_header(json_header),
                         );
