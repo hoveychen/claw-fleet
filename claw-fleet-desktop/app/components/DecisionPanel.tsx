@@ -7,6 +7,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useDecisionStore } from "../store";
 import { safeMarkdownComponents } from "../markdown/safeLinks";
 import type {
+  DecisionHistoryRecord,
   ElicitationAttachment,
   ElicitationDecision,
   GuardDecision,
@@ -848,6 +849,122 @@ function DecisionCard({ decision, compact }: { decision: PendingDecision; compac
   }
 }
 
+// ── Past-history strip (context shown above the active card) ────────────
+
+function recordKindKey(rec: DecisionHistoryRecord): string {
+  if (rec.kind === "user-prompt") return "decision_history.kind_user";
+  if (rec.kind === "plan-approval") return "decision_history.kind_plan";
+  return "decision_history.kind_ask";
+}
+
+function recordSummaryShort(rec: DecisionHistoryRecord): string {
+  if (rec.kind === "user-prompt") {
+    return rec.text.replace(/\s+/g, " ").trim().slice(0, 60);
+  }
+  if (rec.kind === "elicitation") {
+    const first = rec.questions[0];
+    if (!first) return "AskUserQuestion";
+    const body = first.question;
+    const m = body.match(/^\s*---\s*$/m);
+    return (m && m.index !== undefined ? body.slice(0, m.index) : body)
+      .trim()
+      .slice(0, 60);
+  }
+  return rec.aiTitle ?? rec.workspaceName ?? "Plan approval";
+}
+
+function recordTime(rec: DecisionHistoryRecord): string {
+  const iso = rec.kind === "user-prompt" ? rec.sentAt : rec.requestedAt;
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+const HISTORY_VISIBLE_LIMIT = 5;
+
+function PastHistoryStrip({ sessionId }: { sessionId: string }) {
+  const { t } = useTranslation();
+  const [records, setRecords] = useState<DecisionHistoryRecord[]>([]);
+  const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    if (!sessionId) {
+      setRecords([]);
+      return;
+    }
+    let cancelled = false;
+    invoke<DecisionHistoryRecord[]>("list_session_decisions", {
+      sessionId,
+      jsonlPath: null,
+    })
+      .then((r) => {
+        if (!cancelled) setRecords(r ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setRecords([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId]);
+
+  if (records.length === 0) return null;
+
+  // Backend returns oldest-first; show newest-first, capped at HISTORY_VISIBLE_LIMIT.
+  const reversed = [...records].reverse();
+  const recent = reversed.slice(0, HISTORY_VISIBLE_LIMIT);
+
+  return (
+    <div className={`${styles.history} ${expanded ? styles.history_open : ""}`}>
+      <button
+        type="button"
+        className={styles.history_header}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <span className={styles.history_chevron}>{expanded ? "▾" : "▸"}</span>
+        <span className={styles.history_title}>
+          {t("decision_panel.history_title", "Recent in this session")}
+        </span>
+        <span className={styles.history_count}>{records.length}</span>
+      </button>
+      {expanded && (
+        <div className={styles.history_list}>
+          {recent.map((rec) => {
+            const isUser = rec.kind === "user-prompt";
+            const isPlan = rec.kind === "plan-approval";
+            const kindClass = isUser
+              ? styles.history_kind_user
+              : isPlan
+              ? styles.history_kind_plan
+              : styles.history_kind_ask;
+            return (
+              <div key={rec.id} className={styles.history_row}>
+                <span className={`${styles.history_kind} ${kindClass}`}>
+                  {t(recordKindKey(rec))}
+                </span>
+                <span className={styles.history_summary}>
+                  {recordSummaryShort(rec) || ""}
+                </span>
+                <span className={styles.history_time}>{recordTime(rec)}</span>
+              </div>
+            );
+          })}
+          {records.length > HISTORY_VISIBLE_LIMIT && (
+            <div className={styles.history_more}>
+              {t("decision_panel.history_more", {
+                count: records.length - HISTORY_VISIBLE_LIMIT,
+                defaultValue: "+{{count}} more in session detail",
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Tab label helper ─────────────────────────────────────────────────────
 
 function tabLabel(d: PendingDecision): string {
@@ -943,6 +1060,11 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
       className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""}`}
       style={compact ? undefined : { width: `${currentWidth}px` }}
     >
+      {/* Past-history context strip (hidden in compact / lite mode where vertical room is tight) */}
+      {!compact && active.request.sessionId && (
+        <PastHistoryStrip sessionId={active.request.sessionId} />
+      )}
+
       {/* Card area — scrollable, shows the active decision */}
       <div className={styles.card_area} ref={cardAreaRef}>
         <DecisionCard key={active.id} decision={active} compact={compact} />

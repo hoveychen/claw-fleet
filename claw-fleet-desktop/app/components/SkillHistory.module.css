@@ -14,6 +14,13 @@
   margin-bottom: 4px;
 }
 
+.empty {
+  color: var(--color-text-dim);
+  font-size: 12px;
+  padding: 12px 4px;
+  text-align: center;
+}
+
 .list {
   display: flex;
   flex-wrap: wrap;

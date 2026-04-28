@@ -1742,9 +1742,21 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let jsonl_path = query.get("jsonl_path").map(|s| {
                     percent_decode_str(s.as_str()).decode_utf8_lossy().to_string()
                 });
+                let resolved = if jsonl_path.is_none() {
+                    scan_all_sources(&sources)
+                        .into_iter()
+                        .find(|s| s.id == session_id)
+                        .map(|s| s.jsonl_path)
+                } else {
+                    None
+                };
+                let path = jsonl_path
+                    .as_deref()
+                    .or(resolved.as_deref())
+                    .map(std::path::Path::new);
                 let records = claw_fleet_core::decision_history::list_session_records_with_jsonl(
                     &session_id,
-                    jsonl_path.as_deref().map(std::path::Path::new),
+                    path,
                 );
                 let body = serde_json::to_string(&records).unwrap_or_else(|_| "[]".to_string());
                 let _ = request.respond(
