@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import type { Components } from "react-markdown";
+import remarkGfm from "remark-gfm";
+import { safeMarkdownComponents } from "../markdown/safeLinks";
 import type {
   DecisionHistoryRecord,
   ElicitationHistoryRecord,
@@ -7,6 +11,14 @@ import type {
   UserPromptHistoryRecord,
 } from "../types";
 import styles from "./DecisionHistory.module.css";
+
+// Inline-only markdown variant: unwraps the surrounding <p> so we can drop the
+// rendered output inside <span>s (option label/desc) without producing invalid
+// HTML or unwanted block margins.
+const inlineMarkdownComponents: Components = {
+  ...safeMarkdownComponents,
+  p: ({ children }) => <>{children}</>,
+};
 
 interface Props {
   records: DecisionHistoryRecord[];
@@ -59,7 +71,14 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
         const selected = rec.answers[q.question];
         return (
           <div key={qi} className={styles.question_block}>
-            <div className={styles.question_text}>{q.question}</div>
+            <div className={styles.question_text}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={safeMarkdownComponents}
+              >
+                {q.question}
+              </ReactMarkdown>
+            </div>
             {q.options.map((opt, oi) => {
               const isSelected =
                 selected != null &&
@@ -71,16 +90,32 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                   className={`${styles.option} ${isSelected ? styles.option_selected : ""}`}
                 >
                   <span className={styles.option_label}>
-                    {isSelected ? "✓" : "○"} {opt.label}
+                    <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
+                    <ReactMarkdown
+                      remarkPlugins={[remarkGfm]}
+                      components={inlineMarkdownComponents}
+                    >
+                      {opt.label}
+                    </ReactMarkdown>
                   </span>
-                  <span className={styles.option_desc}>{opt.description}</span>
+                  {opt.description && (
+                    <span className={styles.option_desc}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={inlineMarkdownComponents}
+                      >
+                        {opt.description}
+                      </ReactMarkdown>
+                    </span>
+                  )}
                 </div>
               );
             })}
             {selected?.other && (
               <div className={`${styles.option} ${styles.option_selected}`}>
                 <span className={styles.option_label}>
-                  ✓ {t("decision_history.other_label")}
+                  <span className={styles.option_marker}>✓</span>
+                  {t("decision_history.other_label")}
                 </span>
                 <span className={styles.option_desc}>{selected.label}</span>
               </div>
@@ -110,13 +145,27 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
   const { t } = useTranslation();
   return (
     <div className={styles.body}>
-      <pre className={styles.plan_content}>{rec.planContent}</pre>
+      <div className={styles.plan_content}>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={safeMarkdownComponents}
+        >
+          {rec.planContent}
+        </ReactMarkdown>
+      </div>
       {rec.editedPlan && (
         <>
           <div className={styles.question_text}>
             {t("decision_history.edited_plan")}
           </div>
-          <pre className={styles.plan_content}>{rec.editedPlan}</pre>
+          <div className={styles.plan_content}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={safeMarkdownComponents}
+            >
+              {rec.editedPlan}
+            </ReactMarkdown>
+          </div>
         </>
       )}
       {rec.feedback && (
@@ -155,9 +204,9 @@ export function DecisionHistory({ records, mode = "inline" }: Props) {
   // because the tab itself is always present.
   if (mode === "inline" && records.length === 0) return null;
 
-  // Backend returns oldest-first; show newest-first in the panel.
+  // Show oldest-first so the list reads chronologically as the session evolved.
   const ordered = [...records].sort((a, b) =>
-    recordTimestamp(b).localeCompare(recordTimestamp(a))
+    recordTimestamp(a).localeCompare(recordTimestamp(b))
   );
 
   const isTab = mode === "tab";
