@@ -911,9 +911,10 @@ function PastHistoryStrip({ sessionId }: { sessionId: string }) {
 
   if (records.length === 0) return null;
 
-  // Backend returns oldest-first; show newest-first, capped at HISTORY_VISIBLE_LIMIT.
-  const reversed = [...records].reverse();
-  const recent = reversed.slice(0, HISTORY_VISIBLE_LIMIT);
+  // Backend returns oldest-first. Keep the most recent HISTORY_VISIBLE_LIMIT
+  // entries, but render them chronologically within that window so the strip
+  // reads in the same direction as the Decisions tab.
+  const recent = records.slice(-HISTORY_VISIBLE_LIMIT);
 
   return (
     <div className={`${styles.history} ${expanded ? styles.history_open : ""}`}>
