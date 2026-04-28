@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import type { SessionInfo } from "../types";
-import { RateLimitCountdown, StatusIcon, SubagentTypeIcon } from "./SessionCard";
+import { RateLimitControls, StatusIcon, SubagentTypeIcon } from "./SessionCard";
 import styles from "./LiteSessionCard.module.css";
 
 export function LiteSessionCard({
@@ -20,12 +20,22 @@ export function LiteSessionCard({
   const speed = session.tokenSpeed;
   const extendThread = isSub && nextIsSubagent;
 
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      onClick?.();
+    }
+  };
+
   return (
-    <button
+    <div
       className={`${styles.card} ${isSub ? styles.card_subagent : styles.card_main} ${extendThread ? styles.card_subagent_extend : ""}`}
       data-status={session.status}
       data-session-id={session.id}
+      role="button"
+      tabIndex={0}
       onClick={onClick}
+      onKeyDown={handleKeyDown}
     >
       <div className={styles.row}>
         <span className={styles.status_icon} data-status={session.status}>
@@ -54,9 +64,9 @@ export function LiteSessionCard({
       {preview && <div className={styles.preview}>{preview}</div>}
       {session.status === "rateLimited" && session.rateLimit && (
         <div className={styles.rate_limit}>
-          <RateLimitCountdown state={session.rateLimit} />
+          <RateLimitControls session={session} />
         </div>
       )}
-    </button>
+    </div>
   );
 }
