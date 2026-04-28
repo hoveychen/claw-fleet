@@ -38,7 +38,13 @@ export function LiteApp() {
   const { t } = useTranslation();
   const { sessions, setSessions, refresh } = useSessionsStore();
   const { open, session: openedSession } = useDetailStore();
-  const { setLiteMode, showMobileAccess, setShowMobileAccess } = useUIStore();
+  const {
+    setLiteMode,
+    showMobileAccess,
+    setShowMobileAccess,
+    viewingDecisionHistory,
+    setViewingDecisionHistory,
+  } = useUIStore();
   const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
   const hasAlerts = useWaitingAlertsStore(
     (s) => s.alerts.some((a) => !s.dismissedIds.has(a.sessionId)),
@@ -64,6 +70,16 @@ export function LiteApp() {
       unlistenPromise.then((u) => u());
     };
   }, [setSessions, refresh]);
+
+  // The "view session history" hop from DecisionPanel only stays armed while
+  // SessionDetail is actually open. Once the user closes it (or it gets closed
+  // for any other reason), drop the flag so the next pending decision regains
+  // priority over the lite-mode body.
+  useEffect(() => {
+    if (!openedSession && viewingDecisionHistory) {
+      setViewingDecisionHistory(false);
+    }
+  }, [openedSession, viewingDecisionHistory, setViewingDecisionHistory]);
 
   // Poll mobile access status for the icon-bar indicator dot.
   useEffect(() => {
@@ -159,7 +175,11 @@ export function LiteApp() {
         </div>
       )}
 
-      {hasDecision ? (
+      {viewingDecisionHistory && openedSession ? (
+        <div className={styles.detail_area}>
+          <SessionDetail lite />
+        </div>
+      ) : hasDecision ? (
         <DecisionPanel compact />
       ) : openedSession ? (
         <div className={styles.detail_area}>

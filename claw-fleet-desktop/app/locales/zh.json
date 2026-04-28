@@ -1166,7 +1166,8 @@
   },
   "decision_panel": {
     "history_title": "本会话最近记录",
-    "history_more": "另有 {{count}} 条，可在会话详情中查看"
+    "history_more": "另有 {{count}} 条，可在会话详情中查看",
+    "view_session_history": "查看本会话历史"
   },
   "view_report": "日报",
   "report": {

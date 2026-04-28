@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useDecisionStore } from "../store";
+import { useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
 import { safeMarkdownComponents } from "../markdown/safeLinks";
 import type {
   DecisionHistoryRecord,
@@ -984,11 +984,15 @@ function tabLabel(d: PendingDecision): string {
 // ── Main panel ───────────────────────────────────────────────────────────
 
 export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
+  const { t } = useTranslation();
   const {
     decisions,
     activeDecisionId,
     setActiveDecision,
   } = useDecisionStore();
+  const sessions = useSessionsStore((s) => s.sessions);
+  const openDetail = useDetailStore((s) => s.open);
+  const setViewingDecisionHistory = useUIStore((s) => s.setViewingDecisionHistory);
 
   // Escape key: block the active guard decision.
   const { respond } = useDecisionStore();
@@ -1061,9 +1065,34 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
       className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""}`}
       style={compact ? undefined : { width: `${currentWidth}px` }}
     >
-      {/* Past-history context strip (hidden in compact / lite mode where vertical room is tight) */}
-      {!compact && active.request.sessionId && (
+      {/* Past-history context.
+       *  - Normal mode: collapsible strip lists recent decisions inline.
+       *  - Lite mode: a single chip-button hops to the session's Decisions tab
+       *    (LiteApp shows SessionDetail instead of this panel until the user
+       *    closes it). Avoids stuffing a list into the narrow lite window. */}
+      {active.request.sessionId && !compact && (
         <PastHistoryStrip sessionId={active.request.sessionId} />
+      )}
+      {active.request.sessionId && compact && (
+        <button
+          type="button"
+          className={styles.history_jump}
+          onClick={() => {
+            const sid = active.request.sessionId;
+            const found = sessions.find((s) => s.id === sid);
+            if (!found) return;
+            setViewingDecisionHistory(true);
+            openDetail(found).catch(() => {});
+          }}
+        >
+          <span className={styles.history_jump_chevron}>↗</span>
+          <span className={styles.history_jump_label}>
+            {t(
+              "decision_panel.view_session_history",
+              "View this session's history",
+            )}
+          </span>
+        </button>
       )}
 
       {/* Card area — scrollable, shows the active decision */}

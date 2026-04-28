@@ -1166,7 +1166,8 @@
   },
   "decision_panel": {
     "history_title": "Recent in this session",
-    "history_more": "+{{count}} more in session detail"
+    "history_more": "+{{count}} more in session detail",
+    "view_session_history": "View this session's history"
   },
   "view_report": "Report",
   "report": {

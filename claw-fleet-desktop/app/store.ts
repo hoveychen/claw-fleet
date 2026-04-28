@@ -50,10 +50,15 @@ interface UIState {
   viewMode: ViewMode;
   liteMode: boolean;
   showMobileAccess: boolean;
+  // Lite-mode hop from the active DecisionPanel into the session's history tab.
+  // Lets SessionDetail take precedence over DecisionPanel until the user closes
+  // it again. Cleared automatically when the opened session goes away.
+  viewingDecisionHistory: boolean;
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
   setLiteMode: (on: boolean) => void;
   setShowMobileAccess: (v: boolean) => void;
+  setViewingDecisionHistory: (v: boolean) => void;
 }
 
 function getSystemTheme(): "dark" | "light" {
@@ -69,6 +74,7 @@ export const useUIStore = create<UIState>((set) => ({
   viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
   liteMode: getItem("liteMode") === "true",
   showMobileAccess: false,
+  viewingDecisionHistory: false,
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -84,6 +90,7 @@ export const useUIStore = create<UIState>((set) => ({
     set({ liteMode: on });
   },
   setShowMobileAccess: (v) => set({ showMobileAccess: v }),
+  setViewingDecisionHistory: (v) => set({ viewingDecisionHistory: v }),
 }));
 
 // ── Sessions store ───────────────────────────────────────────────────────────
