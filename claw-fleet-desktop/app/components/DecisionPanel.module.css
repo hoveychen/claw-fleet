@@ -193,9 +193,10 @@
   padding: 2px 0;
 }
 
-/* Lite-mode replacement for the history strip: a single chip-button that hops
-   to SessionDetail's Decisions tab. Sits in the same slot above the card, so
-   layout matches the normal-mode strip without the inline list. */
+/* Lite-mode replacement for the history strip: a single chip-button that
+   opens a dedicated LiteDecisionHistory view in the lite window. Sits in the
+   same slot above the card, so layout matches the normal-mode strip without
+   the inline list. */
 .history_jump {
   flex-shrink: 0;
   display: flex;

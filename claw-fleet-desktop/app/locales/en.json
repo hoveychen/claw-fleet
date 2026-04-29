@@ -1181,6 +1181,11 @@
     "history_more": "+{{count}} more in session detail",
     "view_session_history": "View this session's history"
   },
+  "lite_decision_history": {
+    "back": "Back",
+    "loading": "Loading…",
+    "error": "Failed to load decisions."
+  },
   "view_report": "Report",
   "report": {
     "loading": "Loading report...",
