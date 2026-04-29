@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
+import { useDecisionStore, useUIStore } from "../store";
 import { safeMarkdownComponents } from "../markdown/safeLinks";
 import type {
   DecisionHistoryRecord,
@@ -990,9 +990,9 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
     activeDecisionId,
     setActiveDecision,
   } = useDecisionStore();
-  const sessions = useSessionsStore((s) => s.sessions);
-  const openDetail = useDetailStore((s) => s.open);
-  const setViewingDecisionHistory = useUIStore((s) => s.setViewingDecisionHistory);
+  const setLiteDecisionHistorySessionId = useUIStore(
+    (s) => s.setLiteDecisionHistorySessionId,
+  );
 
   // Escape key: block the active guard decision.
   const { respond } = useDecisionStore();
@@ -1067,9 +1067,9 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
     >
       {/* Past-history context.
        *  - Normal mode: collapsible strip lists recent decisions inline.
-       *  - Lite mode: a single chip-button hops to the session's Decisions tab
-       *    (LiteApp shows SessionDetail instead of this panel until the user
-       *    closes it). Avoids stuffing a list into the narrow lite window. */}
+       *  - Lite mode: a single chip-button swaps the lite body for a
+       *    dedicated decision-history view (LiteDecisionHistory). Avoids
+       *    stuffing the list into the narrow lite window. */}
       {active.request.sessionId && !compact && (
         <PastHistoryStrip sessionId={active.request.sessionId} />
       )}
@@ -1079,10 +1079,8 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
           className={styles.history_jump}
           onClick={() => {
             const sid = active.request.sessionId;
-            const found = sessions.find((s) => s.id === sid);
-            if (!found) return;
-            setViewingDecisionHistory(true);
-            openDetail(found).catch(() => {});
+            if (!sid) return;
+            setLiteDecisionHistorySessionId(sid);
           }}
         >
           <span className={styles.history_jump_chevron}>↗</span>
