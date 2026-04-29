@@ -2036,6 +2036,52 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/list_claude_binaries" => {
+                let bins = claw_fleet_core::claude_binary::discover();
+                let body = serde_json::to_string(&bins).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/claude_binary_override" => {
+                if request.method() == &tiny_http::Method::Post {
+                    #[derive(serde::Deserialize)]
+                    struct Body { path: Option<String> }
+                    let mut buf = String::new();
+                    let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                    let parsed: Result<Body, _> = serde_json::from_str(&buf);
+                    let path = parsed.ok().and_then(|b| b.path);
+                    let cleaned = path.and_then(|p| {
+                        let t = p.trim().to_string();
+                        if t.is_empty() { None } else { Some(t) }
+                    });
+                    let cfg = claw_fleet_core::claude_binary::ClaudeBinaryConfig { override_path: cleaned };
+                    match cfg.save() {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    }
+                } else {
+                    let cfg = claw_fleet_core::claude_binary::ClaudeBinaryConfig::load();
+                    let body = serde_json::json!({ "path": cfg.override_path }).to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body).with_header(json_header),
+                    );
+                }
+            }
+
             "/remove_hooks" => {
                 match hooks::remove_fleet_hooks() {
                     Ok(()) => {

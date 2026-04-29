@@ -544,6 +544,25 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn list_claude_binaries(&self) -> Vec<crate::claude_binary::ClaudeBinary> {
+        self.probe.get("/list_claude_binaries").unwrap_or_default()
+    }
+
+    fn get_claude_binary_override(&self) -> Option<String> {
+        #[derive(serde::Deserialize)]
+        struct Resp { path: Option<String> }
+        self.probe
+            .get::<Resp>("/claude_binary_override")
+            .ok()
+            .and_then(|r| r.path)
+    }
+
+    fn set_claude_binary_override(&self, path: Option<String>) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Body { path: Option<String> }
+        self.probe.post_json_ok("/claude_binary_override", &Body { path })
+    }
+
     fn search_sessions(&self, query: &str, limit: usize) -> Vec<crate::search_index::SearchHit> {
         let encoded_q = percent_encoding::utf8_percent_encode(query, percent_encoding::NON_ALPHANUMERIC).to_string();
         self.probe

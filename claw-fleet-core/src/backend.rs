@@ -332,6 +332,19 @@ pub trait Backend: Send + Sync {
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo>;
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String>;
 
+    // ── Claude binary discovery & override ───────────────────────────────────
+    /// Enumerate every Claude CLI binary fleet can find on the host, ranked by
+    /// priority. The first entry is what fleet would auto-pick if no override
+    /// is set. Multiple entries cover the case where the user has the official
+    /// installer **and** the VS Code / Cursor extension bundle installed
+    /// simultaneously — the Settings panel uses this list to let the user
+    /// pick which binary fleet should drive.
+    fn list_claude_binaries(&self) -> Vec<crate::claude_binary::ClaudeBinary>;
+    /// The currently-persisted user override path, or `None` for "auto".
+    fn get_claude_binary_override(&self) -> Option<String>;
+    /// Persist the user's choice. `None` (or empty string) clears the override.
+    fn set_claude_binary_override(&self, path: Option<String>) -> Result<(), String>;
+
     // ── Full-text search ─────────────────────────────────────────────────────
     fn search_sessions(&self, query: &str, limit: usize) -> Vec<SearchHit>;
 

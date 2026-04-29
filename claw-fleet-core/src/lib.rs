@@ -4,6 +4,7 @@ pub mod audit;
 pub mod auto_resume;
 pub mod backend;
 pub mod claude_analyze;
+pub mod claude_binary;
 pub mod claude_source;
 pub mod codex_source;
 pub mod consumer_heartbeat;
@@ -127,35 +128,17 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
     backend::DetectedTools { cli, vscode, jetbrains, desktop, cursor, openclaw, codex }
 }
 
+/// Resolve the Claude CLI binary fleet should use, honouring the user override.
+///
+/// Wraps [`claude_binary::resolve`] with the persisted [`claude_binary::ClaudeBinaryConfig`]
+/// override so callers don't need to thread the config through.  Returns `(found, path)`
+/// for backwards compatibility with older call sites.
 pub fn check_cli_installed() -> (bool, Option<String>) {
-    #[cfg(unix)]
-    let cmd = "which";
-    #[cfg(not(unix))]
-    let cmd = "where";
-
-    if let Ok(output) = std::process::Command::new(cmd).arg("claude").output() {
-        if output.status.success() {
-            let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            return (true, Some(path));
-        }
+    let config = claude_binary::ClaudeBinaryConfig::load();
+    match claude_binary::resolve(config.override_path.as_deref()) {
+        Some(b) => (true, Some(b.path)),
+        None => (false, None),
     }
-
-    let common_paths = [
-        session::real_home_dir().map(|h| h.join(".npm-global").join("bin").join("claude")),
-        session::real_home_dir().map(|h| h.join(".local").join("bin").join("claude")),
-        Some(std::path::PathBuf::from("/usr/local/bin/claude")),
-        Some(std::path::PathBuf::from("/opt/homebrew/bin/claude")),
-    ];
-
-    for path_opt in &common_paths {
-        if let Some(path) = path_opt {
-            if path.exists() {
-                return (true, Some(path.to_string_lossy().to_string()));
-            }
-        }
-    }
-
-    (false, None)
 }
 
 // ── Shared constants ─────────────────────────────────────────────────────────

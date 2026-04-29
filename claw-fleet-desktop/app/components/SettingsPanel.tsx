@@ -29,6 +29,12 @@ interface SourceInfo {
   available: boolean;
 }
 
+interface ClaudeBinary {
+  path: string;
+  source: string;
+  version: string | null;
+}
+
 interface LlmModel {
   id: string;
   displayName: string;
@@ -140,6 +146,30 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       await invoke("set_source_enabled", { name, enabled });
       setSources((prev) => prev.map((s) => (s.name === name ? { ...s, enabled } : s)));
       setSourcesNeedRestart(true);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // ── Claude binary picker ────────────────────────────────────────────────
+  const [claudeBinaries, setClaudeBinaries] = useState<ClaudeBinary[]>([]);
+  const [claudeBinaryOverride, setClaudeBinaryOverrideState] = useState<string>("");
+  const [claudeBinaryNeedRestart, setClaudeBinaryNeedRestart] = useState(false);
+
+  useEffect(() => {
+    invoke<ClaudeBinary[]>("list_claude_binaries").then(setClaudeBinaries).catch(() => {});
+    invoke<string | null>("get_claude_binary_override")
+      .then((p) => setClaudeBinaryOverrideState(p ?? ""))
+      .catch(() => {});
+  }, []);
+
+  const handleClaudeBinaryChange = useCallback(async (value: string) => {
+    setClaudeBinaryOverrideState(value);
+    try {
+      await invoke("set_claude_binary_override", {
+        path: value === "" ? null : value,
+      });
+      setClaudeBinaryNeedRestart(true);
     } catch {
       // ignore
     }
@@ -873,6 +903,48 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 {hooksStatus === "error" && (
                   <p className={styles.hooks_error}>{t("hooks.install_error", { error: hooksError })}</p>
+                )}
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.claude_binary")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.claude_binary_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.claude_binary_picker")}</span>
+                  <select
+                    className={styles.select}
+                    value={claudeBinaryOverride}
+                    onChange={(e) => handleClaudeBinaryChange(e.target.value)}
+                  >
+                    <option value="">{t("settings.claude_binary_auto")}</option>
+                    {claudeBinaries.map((b) => (
+                      <option key={b.path} value={b.path}>
+                        {t(`settings.claude_binary_source.${b.source}`)}
+                        {b.version ? ` ${b.version}` : ""}
+                        {" — "}{b.path}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {claudeBinaryOverride && !claudeBinaries.some((b) => b.path === claudeBinaryOverride) && (
+                  <div className={styles.row}>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                      {t("settings.claude_binary_custom_path", { path: claudeBinaryOverride })}
+                    </span>
+                  </div>
+                )}
+                {claudeBinaryNeedRestart && (
+                  <div className={styles.sources_restart_row}>
+                    <span className={styles.sources_restart_hint}>{t("settings.sources_restart")}</span>
+                    <button
+                      className={styles.sources_restart_btn}
+                      onClick={() => invoke("restart_app")}
+                    >
+                      {t("settings.sources_restart_btn")}
+                    </button>
+                  </div>
                 )}
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.sources")}</div>

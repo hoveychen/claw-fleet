@@ -1341,6 +1341,23 @@ fn set_source_enabled(name: String, enabled: bool, state: tauri::State<AppState>
     state.backend.read().unwrap().set_source_enabled(&name, enabled)
 }
 
+// ── Claude binary discovery & override ──────────────────────────────────────
+
+#[tauri::command]
+fn list_claude_binaries(state: tauri::State<AppState>) -> Vec<claude_binary::ClaudeBinary> {
+    state.backend.read().unwrap().list_claude_binaries()
+}
+
+#[tauri::command]
+fn get_claude_binary_override(state: tauri::State<AppState>) -> Option<String> {
+    state.backend.read().unwrap().get_claude_binary_override()
+}
+
+#[tauri::command]
+fn set_claude_binary_override(path: Option<String>, state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().set_claude_binary_override(path)
+}
+
 // ── App restart ─────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -2884,6 +2901,9 @@ pub fn run() {
             list_fleet_llm_usage_daily,
             get_sources_config,
             set_source_enabled,
+            list_claude_binaries,
+            get_claude_binary_override,
+            set_claude_binary_override,
             restart_app,
             get_notification_mode,
             set_notification_mode,
