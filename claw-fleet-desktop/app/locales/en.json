@@ -1002,6 +1002,22 @@
       "openclaw": "OpenClaw",
       "codex": "Codex"
     },
+    "claude_binary": "Claude Binary",
+    "claude_binary_desc": "Fleet auto-detects Claude installations across PATH, Homebrew, npm, and IDE extensions. Override here if you want a specific one.",
+    "claude_binary_picker": "Use binary",
+    "claude_binary_auto": "Auto-detect (recommended)",
+    "claude_binary_custom_path": "Custom path: {{path}}",
+    "claude_binary_source": {
+      "path": "PATH",
+      "native-installer": "Native installer",
+      "homebrew": "Homebrew",
+      "npm-global": "npm global",
+      "usr-local-bin": "/usr/local/bin",
+      "vscode-extension": "VS Code extension",
+      "vscode-insiders-extension": "VS Code Insiders extension",
+      "cursor-extension": "Cursor extension",
+      "windsurf-extension": "Windsurf extension"
+    },
     "mobile_access": "Mobile",
     "mobile_desc": "Enable mobile access to monitor your agents from your phone. Requires cloudflared for remote access.",
     "mobile_enable": "Enable Mobile Access",

@@ -216,12 +216,11 @@ pub struct ClaudeCliProvider {
 
 impl ClaudeCliProvider {
     pub fn new() -> Self {
-        let bin_path = resolve_binary("claude", &[
-            "~/.npm-global/bin/claude",
-            "~/.local/bin/claude",
-            "/usr/local/bin/claude",
-            "/opt/homebrew/bin/claude",
-        ]);
+        // Use the unified discoverer so the LLM-completion path benefits from
+        // the same IDE-extension scan and user override that auto-resume uses.
+        let config = crate::claude_binary::ClaudeBinaryConfig::load();
+        let bin_path = crate::claude_binary::resolve(config.override_path.as_deref())
+            .map(|b| b.path);
         Self { bin_path }
     }
 }

@@ -1002,6 +1002,22 @@
       "openclaw": "OpenClaw",
       "codex": "Codex"
     },
+    "claude_binary": "Claude 二进制",
+    "claude_binary_desc": "Fleet 会自动从 PATH、Homebrew、npm 以及 IDE 扩展中检测 Claude 安装。如需指定特定版本，可在此覆盖。",
+    "claude_binary_picker": "使用此二进制",
+    "claude_binary_auto": "自动检测（推荐）",
+    "claude_binary_custom_path": "自定义路径：{{path}}",
+    "claude_binary_source": {
+      "path": "PATH",
+      "native-installer": "原生安装器",
+      "homebrew": "Homebrew",
+      "npm-global": "npm 全局",
+      "usr-local-bin": "/usr/local/bin",
+      "vscode-extension": "VS Code 扩展",
+      "vscode-insiders-extension": "VS Code Insiders 扩展",
+      "cursor-extension": "Cursor 扩展",
+      "windsurf-extension": "Windsurf 扩展"
+    },
     "mobile_access": "移动端",
     "mobile_desc": "开启移动端访问，从手机监控你的 Agent。远程访问需要安装 cloudflared。",
     "mobile_enable": "开启移动端访问",

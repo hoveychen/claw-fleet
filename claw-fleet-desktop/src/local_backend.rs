@@ -1552,6 +1552,23 @@ impl Backend for LocalBackend {
         crate::agent_source::set_source_enabled_local(name, enabled)
     }
 
+    fn list_claude_binaries(&self) -> Vec<crate::claude_binary::ClaudeBinary> {
+        crate::claude_binary::discover()
+    }
+
+    fn get_claude_binary_override(&self) -> Option<String> {
+        crate::claude_binary::ClaudeBinaryConfig::load().override_path
+    }
+
+    fn set_claude_binary_override(&self, path: Option<String>) -> Result<(), String> {
+        let cleaned = path.and_then(|p| {
+            let trimmed = p.trim().to_string();
+            if trimmed.is_empty() { None } else { Some(trimmed) }
+        });
+        let config = crate::claude_binary::ClaudeBinaryConfig { override_path: cleaned };
+        config.save()
+    }
+
     fn get_audit_events(&self) -> crate::audit::AuditSummary {
         let all_sessions = self.sessions.lock().unwrap().clone();
         let active_ids: HashSet<String> = all_sessions
