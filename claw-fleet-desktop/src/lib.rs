@@ -290,6 +290,15 @@ impl Backend for NullBackend {
     fn upload_attachment(&self, _: &std::path::Path) -> Result<String, String> {
         Err("backend not ready".into())
     }
+    fn list_claude_binaries(&self) -> Vec<claw_fleet_core::claude_binary::ClaudeBinary> {
+        vec![]
+    }
+    fn get_claude_binary_override(&self) -> Option<String> {
+        None
+    }
+    fn set_claude_binary_override(&self, _: Option<String>) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
 }
 
 // ── Desktop-only pattern update helpers ─────────────────────────────────────
