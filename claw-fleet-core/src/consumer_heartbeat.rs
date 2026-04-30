@@ -209,11 +209,39 @@ fn process_alive(pid: u32) -> bool {
     unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
 }
 
-#[cfg(not(unix))]
-fn process_alive(_pid: u32) -> bool {
-    // Windows isn't supported yet; assume alive so the heartbeat-only
-    // flow remains unchanged on that platform.
-    true
+#[cfg(windows)]
+fn process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+    extern "system" {
+        fn OpenProcess(
+            dw_desired_access: u32,
+            b_inherit_handle: i32,
+            dw_process_id: u32,
+        ) -> Handle;
+        fn CloseHandle(h_object: Handle) -> i32;
+        fn GetExitCodeProcess(h_process: Handle, lp_exit_code: *mut u32) -> i32;
+    }
+    // SAFETY: OpenProcess returns NULL on failure (no handle to close);
+    // on success we always pair the handle with CloseHandle. A pid that
+    // has exited but whose handle is still openable reports STILL_ACTIVE
+    // only while running — once exited, GetExitCodeProcess returns the
+    // real exit code.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            return false;
+        }
+        let mut exit_code: u32 = 0;
+        let got = GetExitCodeProcess(h, &mut exit_code) != 0;
+        CloseHandle(h);
+        got && exit_code == STILL_ACTIVE
+    }
 }
 
 #[cfg(test)]
