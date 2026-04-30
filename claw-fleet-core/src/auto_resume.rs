@@ -318,6 +318,7 @@ mod tests {
         assert!(!should_auto_resume(&s, &cfg, Utc::now()));
     }
 
+    #[cfg(unix)]
     #[test]
     fn spawn_resume_with_path_records_stderr_and_reaps_child() {
         // Repro for the silent-failure bug: when the spawned process exits
@@ -326,7 +327,8 @@ mod tests {
         //
         // We use /bin/sh as a stand-in "claude" — passing `--resume <id> -p continue`
         // makes sh complain to stderr and exit non-zero, which is exactly the
-        // shape of the real failure mode.
+        // shape of the real failure mode. The fixture is unix-only; the
+        // spawn/reap logic itself is platform-agnostic.
         let tmp = std::env::temp_dir().join(format!(
             "fleet_test_spawn_resume_{}_{}",
             std::process::id(),
