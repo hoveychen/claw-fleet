@@ -178,16 +178,27 @@ fn list_pending_in_dir(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
-    Ok(entries
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.ends_with(".json") && !name.contains(".response.") {
-                Some(name.trim_end_matches(".json").to_string())
-            } else {
-                None
-            }
-        })
+
+    // Two-pass: collect responses first so we can drop any request whose
+    // partner response already exists. A `<id>.json` paired with a
+    // `<id>.response.json` means the user already answered — re-surfacing it
+    // creates the "old decision panels keep coming back after every install"
+    // bug, because the orphan persists indefinitely once the original `fleet
+    // elicitation` CLI subprocess has died (no live consumer means cleanup()
+    // is never called).
+    let mut request_ids: Vec<String> = Vec::new();
+    let mut response_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if let Some(id) = name.strip_suffix(".response.json") {
+            response_ids.insert(id.to_string());
+        } else if let Some(id) = name.strip_suffix(".json") {
+            request_ids.push(id.to_string());
+        }
+    }
+    Ok(request_ids
+        .into_iter()
+        .filter(|id| !response_ids.contains(id))
         .collect())
 }
 
@@ -227,9 +238,28 @@ mod tests {
         fs::write(dir.join("req-a.response.json"), "{}").unwrap();
         fs::write(dir.join("ignored.txt"), "ignore").unwrap();
 
-        let mut ids = list_pending_in_dir(&dir).unwrap();
-        ids.sort();
-        assert_eq!(ids, vec!["req-a".to_string(), "req-b".to_string()]);
+        // req-a already has a response — the user already answered it, so it
+        // must NOT show up as pending again.  Without this check, every fresh
+        // launch of the desktop app would re-surface every orphaned request
+        // whose `fleet elicitation` CLI was SIGKILL'd before it could call
+        // cleanup().
+        let ids = list_pending_in_dir(&dir).unwrap();
+        assert_eq!(ids, vec!["req-b".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_pending_in_dir_excludes_already_answered_request() {
+        // Regression: orphaned `<id>.json` paired with a `<id>.response.json`
+        // (left behind when the CLI subprocess died after the desktop app
+        // wrote the response) must not be reported as pending.
+        let dir = fresh_tmp_dir("answered");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("answered.json"), "{}").unwrap();
+        fs::write(dir.join("answered.response.json"), "{}").unwrap();
+
+        let ids = list_pending_in_dir(&dir).unwrap();
+        assert!(ids.is_empty(), "answered orphan leaked into pending: {ids:?}");
         let _ = fs::remove_dir_all(&dir);
     }
 
