@@ -146,22 +146,65 @@ pub fn list_pending_requests_checked() -> std::io::Result<Vec<String>> {
     let Some(dir) = guard_dir() else {
         return Ok(Vec::new());
     };
-    let entries = match fs::read_dir(&dir) {
+    list_pending_in_dir(&dir)
+}
+
+fn list_pending_in_dir(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
+    let entries = match fs::read_dir(dir) {
         Ok(e) => e,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(e) => return Err(e),
     };
-    Ok(entries
-        .filter_map(|e| e.ok())
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            if name.ends_with(".json") && !name.contains(".response.") {
-                Some(name.trim_end_matches(".json").to_string())
-            } else {
-                None
-            }
-        })
+
+    // Two-pass: drop any request whose partner `<id>.response.json` already
+    // exists.  Orphan request files left behind by SIGKILL'd `fleet guard`
+    // CLIs would otherwise re-surface as fresh panels on every desktop-app
+    // launch — see the same logic in `elicitation::list_pending_in_dir`.
+    let mut request_ids: Vec<String> = Vec::new();
+    let mut response_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if let Some(id) = name.strip_suffix(".response.json") {
+            response_ids.insert(id.to_string());
+        } else if let Some(id) = name.strip_suffix(".json") {
+            request_ids.push(id.to_string());
+        }
+    }
+    Ok(request_ids
+        .into_iter()
+        .filter(|id| !response_ids.contains(id))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fresh_tmp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "fleet-guard-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn list_pending_in_dir_excludes_already_answered_request() {
+        let dir = fresh_tmp_dir("answered");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("answered.json"), "{}").unwrap();
+        fs::write(dir.join("answered.response.json"), "{}").unwrap();
+        fs::write(dir.join("still-pending.json"), "{}").unwrap();
+
+        let mut ids = list_pending_in_dir(&dir).unwrap();
+        ids.sort();
+        assert_eq!(ids, vec!["still-pending".to_string()]);
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 // ── Guard logic (used by `fleet guard` CLI) ─────────────────────────────────
