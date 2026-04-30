@@ -34,7 +34,10 @@ use crate::session::{SessionInfo, SessionStatus, compute_context_percent};
 const CODEX_URI_PREFIX: &str = "codex://";
 
 pub struct CodexSource {
-    process_cache: std::sync::Mutex<(std::time::Instant, Vec<CodexProcess>)>,
+    /// `None` timestamp = never scanned, force refresh on first read.
+    /// Avoids `Instant::now() - 999s` which panics on Windows runners
+    /// with low uptime ("overflow when subtracting duration from instant").
+    process_cache: std::sync::Mutex<(Option<std::time::Instant>, Vec<CodexProcess>)>,
 }
 
 /// A running Codex process with its PID, working directory, and optional thread ID.
@@ -68,10 +71,7 @@ struct SqliteThread {
 impl CodexSource {
     pub fn new() -> Self {
         Self {
-            process_cache: std::sync::Mutex::new((
-                std::time::Instant::now() - std::time::Duration::from_secs(999),
-                Vec::new(),
-            )),
+            process_cache: std::sync::Mutex::new((None, Vec::new())),
         }
     }
 }
@@ -1625,9 +1625,10 @@ impl AgentSource for CodexSource {
         // Reuse cached process list if fresh (< 10 s).
         let codex_processes = {
             let mut guard = self.process_cache.lock().unwrap();
-            if guard.0.elapsed() > Duration::from_secs(10) {
+            let stale = guard.0.map_or(true, |t| t.elapsed() > Duration::from_secs(10));
+            if stale {
                 guard.1 = scan_codex_processes();
-                guard.0 = std::time::Instant::now();
+                guard.0 = Some(std::time::Instant::now());
             }
             guard.1.clone()
         };

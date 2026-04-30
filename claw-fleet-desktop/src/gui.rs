@@ -657,7 +657,10 @@ pub struct AppState {
     /// Timestamp of the last tray icon click.  While the menu is presumed open
     /// (within [`TRAY_MENU_GRACE_SECS`] of a click) we defer `set_menu` calls
     /// so macOS doesn't close the menu under the user's cursor.
-    pub tray_last_click: Arc<Mutex<std::time::Instant>>,
+    /// `None` = no tray click yet, treat as "long ago" (grace period
+    /// expired). Avoids `Instant::now() - 600s` at app start, which
+    /// panics on Windows machines with low uptime.
+    pub tray_last_click: Arc<Mutex<Option<std::time::Instant>>>,
     /// Whether a deferred tray rebuild is pending.
     pub tray_rebuild_pending: Arc<Mutex<bool>>,
     /// LLM provider config (which CLI + models to use for analysis/reports).
@@ -1847,8 +1850,12 @@ fn rebuild_tray(app: &tauri::AppHandle) {
     if fingerprint != prev {
         // If the menu is presumed open (recent tray click), defer the rebuild
         // so we don't close it under the user's cursor.
-        let since_click = state.tray_last_click.lock().unwrap().elapsed();
-        if since_click < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS) {
+        let within_grace = state
+            .tray_last_click
+            .lock()
+            .unwrap()
+            .map_or(false, |t| t.elapsed() < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
+        if within_grace {
             *state.tray_rebuild_pending.lock().unwrap() = true;
             return;
         }
@@ -1867,8 +1874,12 @@ fn flush_pending_tray_rebuild(app: &tauri::AppHandle) {
     let pending = *state.tray_rebuild_pending.lock().unwrap();
     if !pending { return; }
 
-    let since_click = state.tray_last_click.lock().unwrap().elapsed();
-    if since_click < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS) {
+    let within_grace = state
+        .tray_last_click
+        .lock()
+        .unwrap()
+        .map_or(false, |t| t.elapsed() < std::time::Duration::from_secs(TRAY_MENU_GRACE_SECS));
+    if within_grace {
         return; // still within grace period
     }
 
@@ -2587,7 +2598,7 @@ pub fn run() {
             cached_sessions: Arc::new(Mutex::new(Vec::new())),
             cached_usage: Arc::new(Mutex::new(Vec::new())),
             tray_fingerprint: Arc::new(Mutex::new(0)),
-            tray_last_click: Arc::new(Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(600))),
+            tray_last_click: Arc::new(Mutex::new(None)),
             tray_rebuild_pending: Arc::new(Mutex::new(false)),
             llm_config: Arc::new(Mutex::new(llm_provider::LlmConfig::default())),
             cached_llm_providers: Arc::new(Mutex::new(Vec::new())),
@@ -2721,7 +2732,7 @@ pub fn run() {
                         if matches!(button_state, tauri::tray::MouseButtonState::Up) {
                             let app = tray.app_handle();
                             let state = app.state::<AppState>();
-                            *state.tray_last_click.lock().unwrap() = std::time::Instant::now();
+                            *state.tray_last_click.lock().unwrap() = Some(std::time::Instant::now());
 
                             // Left-click: show main window
                             if matches!(button, tauri::tray::MouseButton::Left) {
