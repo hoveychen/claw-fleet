@@ -1,0 +1,302 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Step 1 — Test + build fleet-cli for all platforms
+  # ═══════════════════════════════════════════════════════════════════════════
+  cli-build:
+    name: CLI — ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            zigbuild: true
+            artifact: fleet-linux-x64
+
+          - name: Linux ARM64
+            runner: ubuntu-22.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            zigbuild: true
+            artifact: fleet-linux-arm64
+
+          - name: macOS Universal
+            runner: macos-latest
+            rust_target: universal-apple-darwin
+            artifact: fleet-macos
+
+          - name: Windows x64
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            artifact: fleet-windows-x64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do
+            sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$toml"
+            rm -f "${toml}.bak"
+          done
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.rust_target }}
+
+      - name: Setup Zig
+        if: matrix.zigbuild
+        uses: goto-bus-stop/setup-zig@v2
+
+      - name: Install cargo-zigbuild
+        if: matrix.zigbuild
+        run: cargo install cargo-zigbuild
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run unit tests (host platform)
+        shell: bash
+        run: |
+          # cargo test must run on the host triple — cross-compiled binaries
+          # can't execute. fleet-cli + claw-fleet-core have unit tests; skip
+          # claw-fleet-desktop (Tauri/webkit deps) — its build is exercised in
+          # the desktop-build job.
+          cargo test --release -p fleet-cli -p claw-fleet-core
+
+      - name: Build fleet-cli
+        shell: bash
+        run: |
+          mkdir -p dist
+
+          if [ "${{ matrix.rust_target }}" = "universal-apple-darwin" ]; then
+            cargo build --release -p fleet-cli --target aarch64-apple-darwin
+            cargo build --release -p fleet-cli --target x86_64-apple-darwin
+            lipo -create \
+              target/aarch64-apple-darwin/release/fleet-cli \
+              target/x86_64-apple-darwin/release/fleet-cli \
+              -output dist/${{ matrix.artifact }}
+            chmod +x dist/${{ matrix.artifact }}
+
+          elif [ "${{ matrix.zigbuild }}" = "true" ]; then
+            cargo zigbuild --release -p fleet-cli --target ${{ matrix.rust_target }}.2.17
+            cp target/${{ matrix.rust_target }}/release/fleet-cli dist/${{ matrix.artifact }}
+
+          else
+            cargo build --release -p fleet-cli --target ${{ matrix.rust_target }}
+            EXT=""
+            if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
+            cp "target/${{ matrix.rust_target }}/release/fleet-cli${EXT}" \
+               "dist/${{ matrix.artifact }}${EXT}"
+          fi
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/
+          if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Step 2 — Build desktop apps (unsigned). Tag-time signing happens in
+  # release.yml, which downloads these artifacts.
+  # ═══════════════════════════════════════════════════════════════════════════
+  desktop-build:
+    needs: cli-build
+    name: Desktop — ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Universal)
+            runner: macos-latest
+            rust_target: universal-apple-darwin
+            tauri_args: --target universal-apple-darwin --features vendored-ssl
+            sidecar_artifact: fleet-macos
+            sidecar_name: fleet-universal-apple-darwin
+            fixed_suffix: macos
+
+          - name: Windows (x64)
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+            tauri_args: --target x86_64-pc-windows-msvc
+            sidecar_artifact: fleet-windows-x64
+            sidecar_name: fleet-x86_64-pc-windows-msvc.exe
+            fixed_suffix: windows-x64
+
+          - name: Linux (x86_64)
+            runner: ubuntu-22.04
+            rust_target: x86_64-unknown-linux-gnu
+            tauri_args: --target x86_64-unknown-linux-gnu
+            sidecar_artifact: fleet-linux-x64
+            sidecar_name: fleet-x86_64-unknown-linux-gnu
+            fixed_suffix: linux-x64
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set version from tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do
+            sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" "$toml"
+            rm -f "${toml}.bak"
+          done
+
+      # ── Download CLI artifacts from step 1 ────────────────────────────────
+
+      - name: Download sidecar CLI
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.sidecar_artifact }}
+          path: claw-fleet-desktop/binaries
+
+      - name: Download Linux x64 probe
+        uses: actions/download-artifact@v4
+        with:
+          name: fleet-linux-x64
+          path: claw-fleet-desktop/resources
+
+      - name: Download Linux arm64 probe
+        uses: actions/download-artifact@v4
+        with:
+          name: fleet-linux-arm64
+          path: claw-fleet-desktop/resources
+
+      - name: Prepare sidecar and probes
+        shell: bash
+        run: |
+          cd claw-fleet-desktop/binaries
+          mv ${{ matrix.sidecar_artifact }}* ${{ matrix.sidecar_name }}
+          chmod +x ${{ matrix.sidecar_name }} 2>/dev/null || true
+
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp ${{ matrix.sidecar_name }} fleet-linux
+          fi
+
+          if [ "${{ matrix.rust_target }}" = "universal-apple-darwin" ]; then
+            mkdir -p ../../target/universal-apple-darwin/release
+            cp ${{ matrix.sidecar_name }} ../../target/universal-apple-darwin/release/fleet-cli
+          fi
+
+          cd ../resources
+          chmod +x fleet-linux-x64 fleet-linux-arm64
+
+      # ── Build desktop app (unsigned) ──────────────────────────────────────
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: claw-fleet-desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.rust_target }}
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            libasound2-dev \
+            xdg-utils
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: claw-fleet-desktop
+
+      - name: Build Tauri app (unsigned)
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ''
+          OPENSSL_STATIC: '1'
+        with:
+          projectPath: claw-fleet-desktop
+          args: ${{ matrix.tauri_args }}
+          includeUpdaterJson: false
+
+      # ── Collect unsigned artifacts ────────────────────────────────────────
+
+      - name: Collect macOS .app (unsigned)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          # Tar to preserve permissions and symlinks across artifact transit.
+          (cd "target/${{ matrix.rust_target }}/release/bundle/macos" && \
+            tar -czf - "Claw Fleet.app") > "dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.app.tar.gz"
+
+      - name: Collect Windows installer
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          find target/${{ matrix.rust_target }}/release/bundle/nsis \
+            -name "*.exe" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}-setup.exe
+
+      - name: Collect Linux bundles
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          find target/${{ matrix.rust_target }}/release/bundle/deb \
+            -name "*.deb" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.deb 2>/dev/null || true
+          find target/${{ matrix.rust_target }}/release/bundle/appimage \
+            -name "*.AppImage" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.AppImage 2>/dev/null || true
+
+      - name: Upload desktop artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.fixed_suffix == 'macos' && 'desktop-macos-unsigned' || format('desktop-{0}', matrix.fixed_suffix) }}
+          path: dist-artifacts/
+          if-no-files-found: error
