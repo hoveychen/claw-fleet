@@ -150,12 +150,88 @@ jobs:
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
+  # Notarize the signed .pkg with Apple's notary service and staple the ticket.
+  # ═══════════════════════════════════════════════════════════════════════════
+  notarize-macos:
+    name: Notarize macOS pkg
+    needs: [resolve, sign-macos]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download signed pkg
+        uses: actions/download-artifact@v4
+        with:
+          name: release-macos-signed
+          path: out
+
+      - name: Decode API key
+        env:
+          API_KEY_BASE64: ${{ secrets.APP_STORE_CONNECT_KEY }}
+        run: |
+          mkdir -p private_keys
+          echo "$API_KEY_BASE64" | base64 --decode > "private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_KEY_ID }}.p8"
+
+      - name: Notarize and staple
+        env:
+          API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+          API_ISSUER_ID: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        run: |
+          set -o pipefail
+          for artifact in out/*.pkg; do
+            [ -f "$artifact" ] || continue
+            echo "── Submitting $(basename "$artifact") for notarization..."
+            xcrun notarytool submit "$artifact" \
+              --key "private_keys/AuthKey_${API_KEY_ID}.p8" \
+              --key-id "$API_KEY_ID" \
+              --issuer "$API_ISSUER_ID" \
+              --wait \
+              --timeout 15m \
+              2>&1 | tee notarize-output.log
+            NOTARY_EXIT=$?
+
+            SUB_ID=$(grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' notarize-output.log | head -1)
+
+            if [ $NOTARY_EXIT -ne 0 ] || grep -q "status: Rejected\|status: Invalid" notarize-output.log; then
+              echo "── Notarization failed or rejected. Fetching detailed log..."
+              if [ -n "$SUB_ID" ]; then
+                xcrun notarytool log "$SUB_ID" \
+                  --key "private_keys/AuthKey_${API_KEY_ID}.p8" \
+                  --key-id "$API_KEY_ID" \
+                  --issuer "$API_ISSUER_ID" \
+                  notarize-log.json || true
+                echo "── Notarization detailed log:"
+                cat notarize-log.json 2>/dev/null || echo "(no log available)"
+                echo ""
+                echo "── Notarization info:"
+                xcrun notarytool info "$SUB_ID" \
+                  --key "private_keys/AuthKey_${API_KEY_ID}.p8" \
+                  --key-id "$API_KEY_ID" \
+                  --issuer "$API_ISSUER_ID" || true
+              else
+                echo "(could not extract submission ID)"
+              fi
+              exit 1
+            fi
+
+            echo "── Stapling $(basename "$artifact")..."
+            xcrun stapler staple "$artifact"
+            echo "── Done: $(basename "$artifact")"
+          done
+
+      - name: Upload notarized pkg
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos-notarized
+          path: out/
+          if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════
   # Publish release with all artifacts (CLI binaries + Win/Linux bundles from
-  # CI + signed macOS pkg from sign-macos).
+  # CI + notarized macOS pkg).
   # ═══════════════════════════════════════════════════════════════════════════
   publish:
     name: Publish Release
-    needs: [resolve, sign-macos]
+    needs: [resolve, notarize-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -192,10 +268,10 @@ jobs:
           run-id: ${{ needs.resolve.outputs.run_id }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Download signed macOS pkg
+      - name: Download notarized macOS pkg
         uses: actions/download-artifact@v4
         with:
-          name: release-macos-signed
+          name: release-macos-notarized
           path: all-artifacts
 
       - name: List artifacts
