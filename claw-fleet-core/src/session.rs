@@ -178,9 +178,41 @@ pub fn is_process_alive(pid: u32) -> bool {
     std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
-#[cfg(not(unix))]
-pub fn is_process_alive(_pid: u32) -> bool {
-    true // Fallback: assume alive
+#[cfg(windows)]
+pub fn is_process_alive(pid: u32) -> bool {
+    if pid == 0 {
+        return false;
+    }
+    use std::ffi::c_void;
+    type Handle = *mut c_void;
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+    const STILL_ACTIVE: u32 = 259;
+    const ERROR_INVALID_PARAMETER: u32 = 87;
+    extern "system" {
+        fn OpenProcess(
+            dw_desired_access: u32,
+            b_inherit_handle: i32,
+            dw_process_id: u32,
+        ) -> Handle;
+        fn CloseHandle(h_object: Handle) -> i32;
+        fn GetExitCodeProcess(h_process: Handle, lp_exit_code: *mut u32) -> i32;
+        fn GetLastError() -> u32;
+    }
+    // SAFETY: standard Win32 calls. Handle is closed in every success path.
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if h.is_null() {
+            // Mirror Unix EPERM-as-alive: ERROR_INVALID_PARAMETER means
+            // the pid doesn't refer to any process; any other error
+            // (e.g. ERROR_ACCESS_DENIED) means the process exists but
+            // we don't have rights to query it.
+            return GetLastError() != ERROR_INVALID_PARAMETER;
+        }
+        let mut exit_code: u32 = 0;
+        let got = GetExitCodeProcess(h, &mut exit_code) != 0;
+        CloseHandle(h);
+        got && exit_code == STILL_ACTIVE
+    }
 }
 
 fn decode_workspace_path(encoded: &str) -> String {
@@ -1315,15 +1347,19 @@ pub fn parse_session_info(
 /// already-parsed session files whose mtime hasn't changed.
 pub struct ScanCache {
     /// Cached `scan_cli_processes()` result + timestamp.
-    pub process_cache: Mutex<(Instant, Vec<CliProcess>)>,
+    /// `None` timestamp = never scanned, force refresh on first read.
+    pub process_cache: Mutex<(Option<Instant>, Vec<CliProcess>)>,
     /// JSONL path → (mtime_ms, SessionInfo).
     pub session_cache: Mutex<HashMap<String, (u64, SessionInfo)>>,
 }
 
 impl ScanCache {
     pub fn new() -> Self {
+        // `None` timestamp instead of `Instant::now() - 999s`: that
+        // subtraction panics on Windows runners with low uptime
+        // ("overflow when subtracting duration from instant").
         Self {
-            process_cache: Mutex::new((Instant::now() - Duration::from_secs(999), Vec::new())),
+            process_cache: Mutex::new((None, Vec::new())),
             session_cache: Mutex::new(HashMap::new()),
         }
     }
@@ -1419,9 +1455,10 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     // Reuse cached process list if fresh (< 10 s).
     let cli_processes = {
         let mut guard = scan_cache.process_cache.lock().unwrap();
-        if guard.0.elapsed() > Duration::from_secs(10) {
+        let stale = guard.0.map_or(true, |t| t.elapsed() > Duration::from_secs(10));
+        if stale {
             guard.1 = scan_cli_processes();
-            guard.0 = Instant::now();
+            guard.0 = Some(Instant::now());
         }
         guard.1.clone()
     };
