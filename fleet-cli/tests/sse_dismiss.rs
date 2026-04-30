@@ -37,7 +37,7 @@ fn unique_tempdir(label: &str) -> std::path::PathBuf {
     dir
 }
 
-fn wait_for_port_file(path: &Path, timeout: Duration) -> u16 {
+fn wait_for_port_file(path: &Path, timeout: Duration, serve: &mut ServeGuard) -> u16 {
     let deadline = Instant::now() + timeout;
     loop {
         if let Ok(s) = std::fs::read_to_string(path) {
@@ -48,7 +48,21 @@ fn wait_for_port_file(path: &Path, timeout: Duration) -> u16 {
             }
         }
         if Instant::now() >= deadline {
-            panic!("timed out waiting for port-file {}", path.display());
+            // Surface the child's stdout+stderr so a Windows CI failure
+            // doesn't reduce to "timed out" with no clue why serve died.
+            let exit = match serve.child.try_wait() {
+                Ok(Some(status)) => format!("exited {:?}", status),
+                Ok(None) => "still running".to_string(),
+                Err(e) => format!("try_wait err: {e}"),
+            };
+            let stdout = std::fs::read_to_string(&serve.stdout_log).unwrap_or_default();
+            let stderr = std::fs::read_to_string(&serve.stderr_log).unwrap_or_default();
+            panic!(
+                "timed out waiting for port-file {}\n  child: {exit}\n  --- stdout ---\n{}\n  --- stderr ---\n{}",
+                path.display(),
+                stdout,
+                stderr
+            );
         }
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -56,6 +70,8 @@ fn wait_for_port_file(path: &Path, timeout: Duration) -> u16 {
 
 struct ServeGuard {
     child: Child,
+    stdout_log: std::path::PathBuf,
+    stderr_log: std::path::PathBuf,
 }
 
 impl Drop for ServeGuard {
@@ -67,6 +83,10 @@ impl Drop for ServeGuard {
 
 fn spawn_fleet_serve(fleet_home: &Path, port_file: &Path, token: &str) -> ServeGuard {
     let binary = env!("CARGO_BIN_EXE_fleet-cli");
+    let stdout_log = fleet_home.join("serve.stdout.log");
+    let stderr_log = fleet_home.join("serve.stderr.log");
+    let stdout_file = std::fs::File::create(&stdout_log).expect("create stdout log");
+    let stderr_file = std::fs::File::create(&stderr_log).expect("create stderr log");
     let child = Command::new(binary)
         .args([
             "serve",
@@ -78,11 +98,15 @@ fn spawn_fleet_serve(fleet_home: &Path, port_file: &Path, token: &str) -> ServeG
             port_file.to_str().unwrap(),
         ])
         .env("FLEET_HOME", fleet_home)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::from(stdout_file))
+        .stderr(Stdio::from(stderr_file))
         .spawn()
         .expect("spawn fleet-cli serve");
-    ServeGuard { child }
+    ServeGuard {
+        child,
+        stdout_log,
+        stderr_log,
+    }
 }
 
 fn connect_sse(port: u16, token: &str) -> TcpStream {
@@ -168,8 +192,8 @@ fn run_dismiss_roundtrip(
     let port_file = fleet_home.join("port");
     let token = "integration-test-token";
 
-    let _serve = spawn_fleet_serve(&fleet_home, &port_file, token);
-    let port = wait_for_port_file(&port_file, Duration::from_secs(10));
+    let mut serve = spawn_fleet_serve(&fleet_home, &port_file, token);
+    let port = wait_for_port_file(&port_file, Duration::from_secs(10), &mut serve);
 
     let mut stream = connect_sse(port, token);
     let mut preamble = [0u8; 256];
