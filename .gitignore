@@ -32,3 +32,6 @@ promo/video/node_modules/
 *.sw?
 promo/
 Cargo.toml.bak
+
+# Fleet PRD Discipline scratch state — agent-managed, not for version control
+TASKS.md
