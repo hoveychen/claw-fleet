@@ -412,6 +412,8 @@ impl crate::backend::Backend for RemoteBackend {
             elicitation_installed: false,
             interaction_mode_installed: false,
             plan_approval_installed: false,
+            prd_context_installed: false,
+            prd_discipline_installed: false,
         })
     }
 
@@ -531,6 +533,16 @@ impl crate::backend::Backend for RemoteBackend {
 
     fn remove_interaction_mode(&self) -> Result<(), String> {
         self.probe.post_ok("/remove_interaction_mode")
+    }
+
+    fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { user_title: &'a str, locale: &'a str }
+        self.probe.post_json_ok("/apply_prd_mode", &Req { user_title, locale })
+    }
+
+    fn remove_prd_mode(&self) -> Result<(), String> {
+        self.probe.post_ok("/remove_prd_mode")
     }
 
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {

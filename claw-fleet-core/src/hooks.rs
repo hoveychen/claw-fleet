@@ -22,6 +22,7 @@ const FLEET_HOOK_COMMAND: &str =
 const FLEET_GUARD_MARKER: &str = "\" guard;";
 const FLEET_ELICITATION_MARKER: &str = "\" elicitation;";
 const FLEET_PLAN_APPROVAL_MARKER: &str = "\" plan-approval;";
+const FLEET_PRD_CONTEXT_MARKER: &str = "\" prd-context;";
 
 /// Event types we need hooks for.
 const FLEET_HOOK_EVENTS: &[&str] = &[
@@ -52,6 +53,10 @@ pub struct HookSetupPlan {
     pub plan_approval_installed: bool,
     /// Whether the interaction-mode CLAUDE.md guidance is installed.
     pub interaction_mode_installed: bool,
+    /// Whether the PRD-context (UserPromptSubmit injection) hook is installed.
+    pub prd_context_installed: bool,
+    /// Whether the PRD-discipline CLAUDE.md guidance is installed.
+    pub prd_discipline_installed: bool,
 }
 
 /// The "cooked" state derived from the most recent hook events for a session.
@@ -120,6 +125,8 @@ pub fn plan_hook_setup() -> HookSetupPlan {
     let elicitation_installed = has_elicitation_hook(&hooks_obj);
     let plan_approval_installed = has_plan_approval_hook(&hooks_obj);
     let interaction_mode_installed = crate::interaction_mode::is_interaction_mode_installed();
+    let prd_context_installed = has_prd_context_hook(&hooks_obj);
+    let prd_discipline_installed = crate::prd_discipline::is_prd_discipline_installed();
 
     HookSetupPlan {
         to_add,
@@ -129,6 +136,8 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         elicitation_installed,
         plan_approval_installed,
         interaction_mode_installed,
+        prd_context_installed,
+        prd_discipline_installed,
     }
 }
 
@@ -506,6 +515,101 @@ fn is_plan_approval_group(group: &Value) -> bool {
         .unwrap_or(false)
 }
 
+// ── PRD-context hook (UserPromptSubmit injection of TASKS.md) ───────────
+
+/// Install the PRD-context hook (UserPromptSubmit, no matcher) into
+/// settings.json. The hook calls `fleet prd-context`, which reads the active
+/// workspace's `TASKS.md` and emits it as additional context, so context
+/// compression can't erase the macro plan.
+pub fn apply_prd_context_hook() -> Result<(), String> {
+    let fleet_bin = resolve_fleet_binary()
+        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+
+    if !obj.contains_key("hooks") {
+        obj.insert("hooks".into(), json!({}));
+    }
+    let hooks_obj = obj
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+        .ok_or("hooks is not an object")?;
+
+    // UserPromptSubmit hooks have no matcher field — they run for every prompt.
+    let prd_context_group = json!({
+        "hooks": [{
+            "type": "command",
+            "command": fault_tolerant_command(&fleet_bin, "prd-context"),
+            "timeout": 10000
+        }]
+    });
+
+    if let Some(existing) = hooks_obj.get_mut("UserPromptSubmit") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_prd_context_group(group));
+            arr.push(prd_context_group);
+        }
+    } else {
+        hooks_obj.insert(
+            "UserPromptSubmit".to_string(),
+            json!([prd_context_group]),
+        );
+    }
+
+    write_settings(&settings)
+}
+
+/// Remove the PRD-context hook from settings.json.
+pub fn remove_prd_context_hook() -> Result<(), String> {
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(());
+    };
+
+    if let Some(arr) = hooks_obj
+        .get_mut("UserPromptSubmit")
+        .and_then(|v| v.as_array_mut())
+    {
+        arr.retain(|group| !is_prd_context_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("UserPromptSubmit");
+        }
+    }
+
+    if hooks_obj.is_empty() {
+        obj.remove("hooks");
+    }
+
+    write_settings(&settings)
+}
+
+fn has_prd_context_hook(hooks_obj: &Map<String, Value>) -> bool {
+    hooks_obj
+        .get("UserPromptSubmit")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(|group| is_prd_context_group(group)))
+        .unwrap_or(false)
+}
+
+fn is_prd_context_group(group: &Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains(FLEET_PRD_CONTEXT_MARKER))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
 // ── Read hook events ─────────────────────────────────────────────────────────
 
 /// Read the hook events file and compute per-session HookState.
@@ -707,6 +811,16 @@ mod tests {
         })
     }
 
+    fn prd_context_group_for(bin: &str) -> Value {
+        json!({
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "prd-context"),
+                "timeout": 10000
+            }]
+        })
+    }
+
     #[test]
     fn guard_marker_detects_actual_generated_command() {
         // Reproduces the dedup bug: the marker `"fleet guard"` (with a space)
@@ -764,15 +878,32 @@ mod tests {
 
     #[test]
     fn markers_do_not_cross_match() {
-        // All three markers must be mutually exclusive.
+        // All four markers must be mutually exclusive.
         let g = guard_group_for("/x/fleet");
         let e = elicitation_group_for("/x/fleet");
         let p = plan_approval_group_for("/x/fleet");
+        let c = prd_context_group_for("/x/fleet");
         assert!(!is_elicitation_group(&g));
         assert!(!is_plan_approval_group(&g));
+        assert!(!is_prd_context_group(&g));
         assert!(!is_guard_group(&e));
         assert!(!is_plan_approval_group(&e));
+        assert!(!is_prd_context_group(&e));
         assert!(!is_guard_group(&p));
         assert!(!is_elicitation_group(&p));
+        assert!(!is_prd_context_group(&p));
+        assert!(!is_guard_group(&c));
+        assert!(!is_elicitation_group(&c));
+        assert!(!is_plan_approval_group(&c));
+    }
+
+    #[test]
+    fn prd_context_marker_detects_actual_generated_command() {
+        let group = prd_context_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet");
+        assert!(
+            is_prd_context_group(&group),
+            "is_prd_context_group must recognise the command actually produced by \
+             fault_tolerant_command"
+        );
     }
 }

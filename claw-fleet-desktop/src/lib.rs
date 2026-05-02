@@ -159,6 +159,8 @@ impl Backend for NullBackend {
             elicitation_installed: false,
             interaction_mode_installed: false,
             plan_approval_installed: false,
+            prd_context_installed: false,
+            prd_discipline_installed: false,
         }
     }
     fn apply_hooks(&self) -> Result<(), String> {
@@ -224,6 +226,12 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
     fn remove_interaction_mode(&self) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn apply_prd_mode(&self, _: &str, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn remove_prd_mode(&self) -> Result<(), String> {
         Err("backend not ready".into())
     }
     fn get_sources_config(&self) -> Vec<agent_source::SourceInfo> {

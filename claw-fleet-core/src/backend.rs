@@ -328,6 +328,14 @@ pub trait Backend: Send + Sync {
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_interaction_mode(&self) -> Result<(), String>;
 
+    // ── PRD Discipline mode (commit guard + TASKS.md re-injection hook) ─────
+    /// Enable the PRD Discipline mode: install the guidance block in
+    /// CLAUDE.md AND register the UserPromptSubmit hook that re-injects
+    /// the workspace's TASKS.md on every prompt. Two halves move together
+    /// so the UI exposes a single toggle.
+    fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
+    fn remove_prd_mode(&self) -> Result<(), String>;
+
     // ── Agent sources config ─────────────────────────────────────────────────
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo>;
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String>;
