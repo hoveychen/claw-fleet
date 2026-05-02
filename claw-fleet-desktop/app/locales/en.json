@@ -420,6 +420,10 @@
       "mock_a2": "Roll back the migration",
       "mock_a3": "Show me the failures"
     },
+    "prd_mode": {
+      "title": "New: PRD Discipline Mode",
+      "description": "Keep Claude Code focused across long multi-step plans (P1–P10). Adds a commit-discipline rule (no proactive commits mid-PRD) and persists your macro plan to TASKS.md at the workspace root, with a UserPromptSubmit hook that re-injects the active region every turn — so context compression no longer makes Claude forget remaining tasks."
+    },
     "copy_hint": "Click to copy"
   },
   "mascot": {
@@ -977,6 +981,9 @@
     "interaction_mode_desc": "Injects a guidance block into ~/.claude/CLAUDE.md that tells Claude Code to deliver every final response via AskUserQuestion instead of plain text. All reports, follow-ups, and clarifications appear as Fleet decision cards. Only affects Claude Code — Cursor / Codex / others are unaffected.",
     "interaction_mode_enabled": "Enable global AskUserQuestion mode",
     "interaction_mode_requires_elicitation": "Requires Elicitation to be enabled",
+    "prd_mode": "PRD Discipline Mode",
+    "prd_mode_desc": "Keep Claude focused across long multi-step plans. Adds commit-discipline rules (no proactive commits mid-PRD) and persists the macro plan to TASKS.md at the workspace root. A UserPromptSubmit hook re-injects the active TASKS.md region every turn so context compression doesn't drop remaining tasks. Only affects Claude Code.",
+    "prd_mode_enabled": "Enable PRD discipline mode",
     "feishu": "Feishu (Lark) Decision Panel Mirror",
     "feishu_desc": "Once connected, every Guard / Elicitation / Plan-Approval card is mirrored to Feishu — review and resolve from your phone. Create an enterprise self-built app at open.feishu.cn first, paste the credentials below, save, then click \"Connect Feishu\".",
     "feishu_app_id": "App ID",

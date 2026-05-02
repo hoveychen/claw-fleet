@@ -21,6 +21,8 @@ interface HookSetupPlan {
   elicitationInstalled: boolean;
   interactionModeInstalled: boolean;
   planApprovalInstalled: boolean;
+  prdContextInstalled: boolean;
+  prdDisciplineInstalled: boolean;
 }
 
 interface SourceInfo {
@@ -217,6 +219,15 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
           console.error("auto-apply interaction mode:", e),
         );
       }
+      // PRD discipline: opt-in, disk is the source of truth.
+      const prdInstalled = plan.prdDisciplineInstalled && plan.prdContextInstalled;
+      setPrdModeEnabled(prdInstalled);
+      setItem("prd-mode-enabled", prdInstalled ? "true" : "false");
+      if (prdInstalled) {
+        invoke("apply_prd_mode").catch((e: unknown) =>
+          console.error("auto-apply prd mode:", e),
+        );
+      }
     }).catch(() => {});
   }, []);
 
@@ -283,6 +294,26 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("interaction mode toggle failed:", e);
+    }
+  }, []);
+
+  // ── PRD discipline mode state (default off) ───────────────────────────
+  const [prdModeEnabled, setPrdModeEnabled] = useState(
+    () => getItem("prd-mode-enabled") === "true",
+  );
+
+  const handleTogglePrdMode = useCallback(async (enabled: boolean) => {
+    setPrdModeEnabled(enabled);
+    setItem("prd-mode-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_prd_mode");
+      } else {
+        await invoke("remove_prd_mode");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("prd mode toggle failed:", e);
     }
   }, []);
 
@@ -1080,6 +1111,24 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       checked={interactionModeEnabled}
                       disabled={!elicitationEnabled}
                       onChange={(e) => handleToggleInteractionMode(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.prd_mode")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.prd_mode_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.prd_mode_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={prdModeEnabled}
+                      onChange={(e) => handleTogglePrdMode(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>

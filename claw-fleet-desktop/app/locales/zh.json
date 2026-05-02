@@ -420,6 +420,10 @@
       "mock_a2": "回滚迁移",
       "mock_a3": "先给我看失败详情"
     },
+    "prd_mode": {
+      "title": "新功能：PRD 自律模式",
+      "description": "让 Claude 在长 PRD（P1-P10）中保持专注：注入一条 commit 纪律（PRD 进行中不主动发起 commit），并把宏观计划持久化到工作区根目录的 TASKS.md。每次用户发送消息前，UserPromptSubmit 钩子会自动把 TASKS.md 中标记为「活动区」的部分重新注入上下文 —— 即便上下文被压缩，也不会忘记尚未完成的任务。仅对 Claude Code 生效。"
+    },
     "copy_hint": "点击复制"
   },
   "mascot": {
@@ -977,6 +981,9 @@
     "interaction_mode_desc": "向 ~/.claude/CLAUDE.md 注入一段引导规则，让 Claude Code 的所有最终输出（结果汇报、追问、澄清）都通过 AskUserQuestion 呈现，统一以 Fleet 决策卡片的形式展示。不再在终端看到 AI 的收尾文本。仅对 Claude Code 生效，不影响 Cursor / Codex 等其他工具。",
     "interaction_mode_enabled": "启用全局 AskUserQuestion 模式",
     "interaction_mode_requires_elicitation": "需先开启「问答拦截」",
+    "prd_mode": "PRD 自律模式",
+    "prd_mode_desc": "让 Claude 在长 PRD 中保持专注：注入「PRD 进行中不主动发起 commit」的纪律规则，并把宏观计划持久化到工作区根目录的 TASKS.md；UserPromptSubmit 钩子会在每一轮对话开头自动把 TASKS.md 的活动区重新注入上下文，避免因为上下文压缩遗失剩余任务。仅对 Claude Code 生效。",
+    "prd_mode_enabled": "启用 PRD 自律模式",
     "feishu": "飞书 (Lark) 决策面板镜像",
     "feishu_desc": "授权飞书后，所有 Guard / 问答 / Plan 审批卡片会同步推送到飞书，可在手机上直接处理。请先到 open.feishu.cn 创建企业自建应用，把下面的凭证填好并保存，再点「连接飞书」。",
     "feishu_app_id": "App ID",
