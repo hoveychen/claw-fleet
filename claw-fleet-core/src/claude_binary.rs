@@ -108,7 +108,7 @@ pub fn discover() -> Vec<ClaudeBinary> {
     let mut out: Vec<ClaudeBinary> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    let mut push = |bin: ClaudeBinary, out: &mut Vec<ClaudeBinary>, seen: &mut std::collections::HashSet<String>| {
+    let push = |bin: ClaudeBinary, out: &mut Vec<ClaudeBinary>, seen: &mut std::collections::HashSet<String>| {
         let canon = std::fs::canonicalize(&bin.path)
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|_| bin.path.clone());
