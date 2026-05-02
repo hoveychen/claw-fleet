@@ -8,6 +8,7 @@ use claw_fleet_core::agent_source::{self, build_sources, find_source_for_path};
 use claw_fleet_core::hooks;
 use claw_fleet_core::interaction_mode;
 use claw_fleet_core::memory;
+use claw_fleet_core::prd_discipline;
 use claw_fleet_core::skills;
 use claw_fleet_core::session::{get_claude_dir, scan_all_sources, SessionInfo, SessionStatus};
 use claw_fleet_core::{FLEET_SKILL_MD, SKILL_TARGETS};
@@ -276,6 +277,9 @@ enum Commands {
     /// [internal] Plan-approval hook — intercepts ExitPlanMode for Fleet UI
     #[command(hide = true)]
     PlanApproval,
+    /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
+    #[command(hide = true)]
+    PrdContext,
 }
 
 #[derive(Subcommand)]
@@ -293,7 +297,8 @@ fn main() {
             | Commands::Skill { .. }
             | Commands::Guard
             | Commands::Elicitation
-            | Commands::PlanApproval => {
+            | Commands::PlanApproval
+            | Commands::PrdContext => {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
                     match &cli.command {
                         Commands::Serve { .. } => "serve",
@@ -301,6 +306,7 @@ fn main() {
                         Commands::Guard => "guard",
                         Commands::Elicitation => "elicitation",
                         Commands::PlanApproval => "plan-approval",
+                        Commands::PrdContext => "prd-context",
                         _ => unreachable!(),
                     }
                 );
@@ -329,6 +335,7 @@ fn main() {
         Commands::Guard => cmd_guard(),
         Commands::Elicitation => cmd_elicitation(),
         Commands::PlanApproval => cmd_plan_approval(),
+        Commands::PrdContext => cmd_prd_context(),
     }
 }
 
@@ -2371,6 +2378,68 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            // ── PRD Discipline mode endpoints ────────────────────────────────
+            "/apply_prd_mode" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct Req { user_title: String, locale: String }
+                match serde_json::from_slice::<Req>(&body_bytes) {
+                    Ok(req_body) => {
+                        let result = prd_discipline::apply_prd_discipline(
+                            &req_body.user_title,
+                            &req_body.locale,
+                        )
+                        .and_then(|()| hooks::apply_prd_context_hook());
+                        match result {
+                            Ok(()) => {
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/remove_prd_mode" => {
+                let r1 = prd_discipline::remove_prd_discipline();
+                let r2 = hooks::remove_prd_context_hook();
+                match r1.and(r2) {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             // ── Plan-approval hook endpoints ─────────────────────────────────
             "/apply_plan_approval_hook" => {
                 match hooks::apply_plan_approval_hook() {
@@ -3941,6 +4010,91 @@ fn cmd_plan_approval() {
             println!("{}", out);
         }
     }
+}
+
+// ── PRD-context CLI (hook entrypoint for UserPromptSubmit) ─────────────────
+
+/// Re-inject the workspace's `TASKS.md` (active plan region) into every user
+/// prompt as additional context. Companion to PRD Discipline mode — survives
+/// context compression, since the file lives on disk.
+fn cmd_prd_context() {
+    use std::io::Read;
+
+    // Read stdin payload — Claude Code sends `{ session_id, cwd, prompt, ... }`.
+    let mut input = String::new();
+    let _ = std::io::stdin().read_to_string(&mut input);
+
+    // Prefer the `cwd` field from stdin (authoritative for this hook firing);
+    // fall back to process cwd if parsing fails.
+    let cwd_from_stdin = serde_json::from_str::<serde_json::Value>(&input)
+        .ok()
+        .and_then(|v| {
+            v.get("cwd")
+                .and_then(|c| c.as_str())
+                .map(std::path::PathBuf::from)
+        });
+
+    let cwd = cwd_from_stdin
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+
+    let tasks_path = cwd.join("TASKS.md");
+    let Ok(content) = std::fs::read_to_string(&tasks_path) else {
+        // No TASKS.md → silent no-op. PRD mode just doesn't trigger here.
+        return;
+    };
+
+    // Cap at 64 KB so a runaway TASKS.md can't blow up every prompt.
+    const MAX_BYTES: usize = 64 * 1024;
+    let body = if content.len() > MAX_BYTES {
+        format!(
+            "{}\n\n… (TASKS.md truncated at {MAX_BYTES} bytes; full file at {})\n",
+            &content[..MAX_BYTES],
+            tasks_path.display(),
+        )
+    } else {
+        content
+    };
+
+    // Pull out just the active-plan region between sentinels, if marked.
+    // Anything outside is treated as history and not re-injected.
+    let active = extract_prd_active_region(&body).unwrap_or(body);
+    let active_trimmed = active.trim();
+    if active_trimmed.is_empty() {
+        return;
+    }
+
+    let reminder = format!(
+        "<system-reminder>\n\
+The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
+Discipline mode) is shown below. This file is the durable macro plan — \
+defer to it over your in-context memory of which P-tasks are done. After \
+each P-task, update the checkbox in this file before moving on.\n\
+\n\
+File: {}\n\
+\n\
+{}\n\
+</system-reminder>",
+        tasks_path.display(),
+        active_trimmed,
+    );
+
+    let out = serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "UserPromptSubmit",
+            "additionalContext": reminder,
+        }
+    });
+    println!("{out}");
+}
+
+fn extract_prd_active_region(content: &str) -> Option<String> {
+    const BEGIN: &str = "<!-- fleet:prd:begin -->";
+    const END: &str = "<!-- fleet:prd:end -->";
+    let begin_idx = content.find(BEGIN)?;
+    let after_begin = begin_idx + BEGIN.len();
+    let end_offset = content[after_begin..].find(END)?;
+    Some(content[after_begin..after_begin + end_offset].to_string())
 }
 
 // ── Daily report CLI ────────────────────────────────────────────────────────
