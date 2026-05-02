@@ -125,39 +125,78 @@ plan lives on disk.\n\
   to `<workspace_root>/TASKS.md` BEFORE starting P1.\n\
 - After completing each P-task, update its checkbox in TASKS.md to `[x]`.\n\
 - At the start of every turn (after a compression, or whenever you are \
-  unsure of macro state), the file is automatically re-injected as a \
-  system-reminder by Fleet's UserPromptSubmit hook — but you can also `Read` \
-  it explicitly when you need it.\n\
-- When the plan is fully complete, you may delete TASKS.md (or leave it for \
-  history — {title}'s call when committing).\n\
+  unsure of macro state), the active-plan regions are automatically \
+  re-injected as a system-reminder by Fleet's UserPromptSubmit hook — but \
+  you can also `Read` the file explicitly when you need it.\n\
+- When your plan is fully complete, you may remove your plan's sentinel \
+  block (or leave it for history — {title}'s call when committing). Do NOT \
+  touch other plans' blocks.\n\
 \n\
-**Format** — keep it dead simple, GitHub-task-list compatible:\n\
+### Multiple plans in one TASKS.md\n\
+\n\
+A single workspace's `TASKS.md` may carry **several plans in parallel** — \
+{title} can have you working on plan A while another agent (or another \
+conversation) is mid-flight on plan B. Each plan lives inside its own \
+sentinel pair, identified by a unique `id`:\n\
 \n\
 ```markdown\n\
 # TASKS\n\
 \n\
-<!-- fleet:prd:begin -->\n\
+<!-- fleet:prd:begin id=\"auth-refactor\" -->\n\
 \n\
-**Plan:** {{one-line description of the overall goal}}\n\
+**Plan:** Migrate session middleware to the new auth crate\n\
 \n\
-- [ ] **P1** — {{short title}}\n\
-  - {{optional sub-bullets / acceptance notes}}\n\
-- [ ] **P2** — {{short title}}\n\
-- [x] **P3** — {{short title}} ← already done\n\
-- [ ] **P4** — {{short title}}\n\
+- [x] **P1** — Audit existing call sites\n\
+- [ ] **P2** — Swap middleware impl\n\
+- [ ] **P3** — Update integration tests\n\
 \n\
-<!-- fleet:prd:end -->\n\
+<!-- fleet:prd:end id=\"auth-refactor\" -->\n\
+\n\
+<!-- fleet:prd:begin id=\"prd-multiplan\" -->\n\
+\n\
+**Plan:** Teach TASKS.md to host parallel plans\n\
+\n\
+- [ ] **P1** — New sentinel format with `id=\"...\"`\n\
+- [ ] **P2** — Hook scans all blocks and re-injects each\n\
+\n\
+<!-- fleet:prd:end id=\"prd-multiplan\" -->\n\
 ```\n\
 \n\
-Rules of thumb for the format:\n\
-- Outermost sentinel `<!-- fleet:prd:begin -->` / `<!-- fleet:prd:end -->` \
-  marks the active plan region — Fleet only re-injects what's between them. \
-  Anything outside is ignored (you can keep historical plans below if you \
-  want).\n\
+**Rules for working with multi-plan TASKS.md:**\n\
+\n\
+1. **Pick a unique `id` for your plan.** Use kebab-case, ≤ 32 chars, \
+   describing the work (e.g. `auth-refactor`, `import-cleanup`). Before \
+   creating a new plan, `Read` TASKS.md and confirm no existing block uses \
+   the same id.\n\
+2. **Only edit your own block.** When you tick a checkbox or revise your \
+   plan, modify only the lines between *your* `begin id=\"X\"` and \
+   `end id=\"X\"`. Treat every other block as read-only — it belongs to \
+   another plan that may be in flight.\n\
+3. **Match the id on both sentinels.** `begin id=\"X\"` must be paired with \
+   `end id=\"X\"`. Mismatched ids will be ignored by the hook.\n\
+4. **Legacy unmarked blocks are still recognised.** A bare \
+   `<!-- fleet:prd:begin -->` / `<!-- fleet:prd:end -->` pair (no `id=`) is \
+   treated as a single anonymous plan for backwards compatibility. Don't \
+   create new ones in this form — always use an explicit id.\n\
+5. **Don't merge or reorder other people's plans.** If two blocks look \
+   redundant, surface that to {title} rather than collapsing them yourself; \
+   the other block may belong to a session you can't see.\n\
+\n\
+Rules of thumb for the format itself:\n\
 - Use `- [ ]` for pending and `- [x]` for done. Don't invent new statuses; \
   the simple checkbox is the contract.\n\
 - Keep P-task titles ≤ 60 chars. Long acceptance notes go in sub-bullets.\n\
 - {language_line}\n\
+\n\
+### Keep TASKS.md out of git\n\
+\n\
+TASKS.md is scratch state for the agent — it doesn't belong in version \
+control. The first time you create `TASKS.md` in a workspace (i.e. it didn't \
+exist before this turn), check whether it's already covered by `.gitignore` \
+and, if not, **mention it to {title} and offer to add a `TASKS.md` line \
+to `.gitignore`**. Do not silently rewrite `.gitignore` — surface the \
+suggestion and let {title} approve. On subsequent edits to an existing \
+TASKS.md, no reminder is needed.\n\
 \n\
 ## When this mode does NOT apply\n\
 \n\
@@ -345,5 +384,44 @@ mod tests {
         // collide, otherwise applying one removes the other.
         assert_ne!(BEGIN_MARKER, "<!-- fleet:interaction-mode:begin -->");
         assert_ne!(END_MARKER, "<!-- fleet:interaction-mode:end -->");
+    }
+
+    #[test]
+    fn render_documents_multi_plan_id_format() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("fleet:prd:begin id=") && g.contains("fleet:prd:end id="),
+            "guidance must teach the id-tagged sentinel form so multiple plans can coexist"
+        );
+        assert!(
+            g.contains("unique") && g.contains("id"),
+            "guidance must require ids to be unique within one TASKS.md"
+        );
+        assert!(
+            g.contains("only edit your own") || g.contains("Only edit your own"),
+            "guidance must instruct the agent to leave other plans' blocks untouched"
+        );
+    }
+
+    #[test]
+    fn render_keeps_legacy_unmarked_block_compatibility() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.to_lowercase().contains("legacy") || g.to_lowercase().contains("backwards"),
+            "guidance must call out backwards compatibility for the unmarked sentinel form"
+        );
+    }
+
+    #[test]
+    fn render_includes_gitignore_reminder() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains(".gitignore") && g.contains("TASKS.md"),
+            "guidance must remind the agent to surface a .gitignore entry for TASKS.md"
+        );
+        assert!(
+            g.contains("offer") || g.contains("mention") || g.contains("ask"),
+            "guidance must say to surface the suggestion to the user, not silently edit .gitignore"
+        );
     }
 }

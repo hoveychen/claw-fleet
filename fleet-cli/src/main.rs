@@ -4056,27 +4056,37 @@ fn cmd_prd_context() {
         content
     };
 
-    // Pull out just the active-plan region between sentinels, if marked.
-    // Anything outside is treated as history and not re-injected.
-    let active = extract_prd_active_region(&body).unwrap_or(body);
-    let active_trimmed = active.trim();
-    if active_trimmed.is_empty() {
+    // Pull out every active-plan region between sentinels. Multiple plans
+    // may coexist, each tagged with a unique `id="..."`; legacy unmarked
+    // pairs are still recognised for backwards compatibility.
+    let blocks = extract_prd_blocks(&body);
+    if blocks.is_empty() {
         return;
     }
 
+    let rendered = render_prd_blocks(&blocks);
+    if rendered.trim().is_empty() {
+        return;
+    }
+
+    let plan_word = if blocks.len() == 1 { "plan" } else { "plans" };
     let reminder = format!(
         "<system-reminder>\n\
 The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
-Discipline mode) is shown below. This file is the durable macro plan — \
-defer to it over your in-context memory of which P-tasks are done. After \
-each P-task, update the checkbox in this file before moving on.\n\
+Discipline mode) holds {n} active {plan_word} below. This file is the \
+durable macro plan — defer to it over your in-context memory of which \
+P-tasks are done. After each P-task, update the checkbox in this file \
+before moving on. Only modify the block whose `id` matches the plan you \
+are working on; treat every other block as another agent's in-flight work.\n\
 \n\
-File: {}\n\
+File: {path}\n\
 \n\
-{}\n\
+{rendered}\n\
 </system-reminder>",
-        tasks_path.display(),
-        active_trimmed,
+        n = blocks.len(),
+        plan_word = plan_word,
+        path = tasks_path.display(),
+        rendered = rendered,
     );
 
     let out = serde_json::json!({
@@ -4088,13 +4098,228 @@ File: {}\n\
     println!("{out}");
 }
 
-fn extract_prd_active_region(content: &str) -> Option<String> {
-    const BEGIN: &str = "<!-- fleet:prd:begin -->";
-    const END: &str = "<!-- fleet:prd:end -->";
-    let begin_idx = content.find(BEGIN)?;
-    let after_begin = begin_idx + BEGIN.len();
-    let end_offset = content[after_begin..].find(END)?;
-    Some(content[after_begin..after_begin + end_offset].to_string())
+#[derive(Debug, PartialEq, Eq)]
+struct PrdBlock {
+    id: Option<String>,
+    body: String,
+}
+
+/// Scan a TASKS.md body for every active-plan region. A block opens on a
+/// line containing `<!-- fleet:prd:begin ... -->` and closes on a matching
+/// `<!-- fleet:prd:end ... -->` whose `id` agrees with the opener (both
+/// missing counts as agreement, preserving the legacy unmarked form).
+/// Mismatched or unterminated blocks are dropped silently — the hook
+/// re-runs on every prompt, so a partially-edited file self-heals.
+fn extract_prd_blocks(content: &str) -> Vec<PrdBlock> {
+    let mut out = Vec::new();
+    let mut current: Option<(Option<String>, String)> = None;
+
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(id) = parse_sentinel_line(trimmed, "begin") {
+            // A second `begin` while one is already open means the previous
+            // block was never closed — drop it and start fresh.
+            current = Some((id, String::new()));
+            continue;
+        }
+        if let Some(id) = parse_sentinel_line(trimmed, "end") {
+            if let Some((open_id, body)) = current.take() {
+                if open_id == id {
+                    out.push(PrdBlock { id: open_id, body });
+                }
+                // id mismatch → discard the dangling block; do not start a
+                // new one from the `end` line.
+            }
+            continue;
+        }
+        if let Some((_, body)) = current.as_mut() {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    out
+}
+
+/// Parse a sentinel comment line. `kind` is either "begin" or "end". Returns
+/// `Some(None)` for the legacy unmarked form, `Some(Some(id))` when an
+/// `id="..."` attribute is present, or `None` if the line isn't a sentinel
+/// of the requested kind.
+fn parse_sentinel_line(line: &str, kind: &str) -> Option<Option<String>> {
+    let prefix = format!("<!-- fleet:prd:{kind}");
+    let suffix = "-->";
+    let rest = line.strip_prefix(&prefix)?;
+    let inner = rest.strip_suffix(suffix)?.trim();
+    if inner.is_empty() {
+        return Some(None);
+    }
+    // Expect `id="..."` (double-quoted). Be lenient about whitespace but
+    // strict about the attribute name so typos don't accidentally match.
+    let after_id = inner.strip_prefix("id")?.trim_start();
+    let after_eq = after_id.strip_prefix('=')?.trim_start();
+    let quoted = after_eq.strip_prefix('"')?;
+    let close = quoted.find('"')?;
+    let id = &quoted[..close];
+    if id.is_empty() {
+        return None;
+    }
+    Some(Some(id.to_string()))
+}
+
+fn render_prd_blocks(blocks: &[PrdBlock]) -> String {
+    // Single anonymous (legacy) block: render its body unwrapped to keep the
+    // pre-multiplan output shape identical.
+    if blocks.len() == 1 && blocks[0].id.is_none() {
+        return blocks[0].body.trim().to_string();
+    }
+    let mut out = String::new();
+    for (i, b) in blocks.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n---\n\n");
+        }
+        let label = b.id.as_deref().unwrap_or("(anonymous)");
+        out.push_str(&format!("## Plan: {label}\n\n"));
+        out.push_str(b.body.trim());
+    }
+    out
+}
+
+#[cfg(test)]
+mod prd_context_tests {
+    use super::*;
+
+    #[test]
+    fn extract_returns_empty_when_no_sentinels() {
+        let blocks = extract_prd_blocks("# TASKS\n\nno markers here\n");
+        assert!(blocks.is_empty());
+    }
+
+    #[test]
+    fn extract_single_anonymous_block_legacy() {
+        let body = "# TASKS\n\n<!-- fleet:prd:begin -->\nplan body\n<!-- fleet:prd:end -->\n";
+        let blocks = extract_prd_blocks(body);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].id, None);
+        assert!(blocks[0].body.contains("plan body"));
+    }
+
+    #[test]
+    fn extract_multiple_id_tagged_blocks_coexist() {
+        let body = "\
+<!-- fleet:prd:begin id=\"alpha\" -->\n\
+alpha body\n\
+<!-- fleet:prd:end id=\"alpha\" -->\n\
+\n\
+filler outside any block\n\
+\n\
+<!-- fleet:prd:begin id=\"beta\" -->\n\
+beta body\n\
+<!-- fleet:prd:end id=\"beta\" -->\n";
+        let blocks = extract_prd_blocks(body);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].id.as_deref(), Some("alpha"));
+        assert!(blocks[0].body.contains("alpha body"));
+        assert_eq!(blocks[1].id.as_deref(), Some("beta"));
+        assert!(blocks[1].body.contains("beta body"));
+    }
+
+    #[test]
+    fn extract_drops_block_with_mismatched_end_id() {
+        let body = "\
+<!-- fleet:prd:begin id=\"alpha\" -->\n\
+alpha body\n\
+<!-- fleet:prd:end id=\"beta\" -->\n";
+        // alpha is opened but never properly closed → discarded.
+        assert!(extract_prd_blocks(body).is_empty());
+    }
+
+    #[test]
+    fn extract_drops_unterminated_block_when_new_one_starts() {
+        let body = "\
+<!-- fleet:prd:begin id=\"alpha\" -->\n\
+alpha body\n\
+<!-- fleet:prd:begin id=\"beta\" -->\n\
+beta body\n\
+<!-- fleet:prd:end id=\"beta\" -->\n";
+        let blocks = extract_prd_blocks(body);
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0].id.as_deref(), Some("beta"));
+    }
+
+    #[test]
+    fn extract_ignores_content_outside_sentinels() {
+        let body = "\
+prelude that should be ignored\n\
+<!-- fleet:prd:begin id=\"x\" -->\n\
+inside\n\
+<!-- fleet:prd:end id=\"x\" -->\n\
+trailing notes outside\n";
+        let blocks = extract_prd_blocks(body);
+        assert_eq!(blocks.len(), 1);
+        assert!(!blocks[0].body.contains("prelude"));
+        assert!(!blocks[0].body.contains("trailing notes"));
+        assert!(blocks[0].body.contains("inside"));
+    }
+
+    #[test]
+    fn render_single_legacy_block_keeps_old_shape() {
+        let blocks = vec![PrdBlock {
+            id: None,
+            body: "the body\n".into(),
+        }];
+        let out = render_prd_blocks(&blocks);
+        // No "## Plan:" header for the legacy single-anonymous case so
+        // existing single-plan workspaces see the same injection as before.
+        assert_eq!(out, "the body");
+    }
+
+    #[test]
+    fn render_multiple_blocks_get_plan_headings() {
+        let blocks = vec![
+            PrdBlock {
+                id: Some("a".into()),
+                body: "A body\n".into(),
+            },
+            PrdBlock {
+                id: Some("b".into()),
+                body: "B body\n".into(),
+            },
+        ];
+        let out = render_prd_blocks(&blocks);
+        assert!(out.contains("## Plan: a"));
+        assert!(out.contains("## Plan: b"));
+        assert!(out.contains("A body"));
+        assert!(out.contains("B body"));
+        assert!(out.contains("---"), "blocks must be visually separated");
+    }
+
+    #[test]
+    fn parse_sentinel_handles_id_and_legacy() {
+        assert_eq!(
+            parse_sentinel_line("<!-- fleet:prd:begin -->", "begin"),
+            Some(None)
+        );
+        assert_eq!(
+            parse_sentinel_line("<!-- fleet:prd:begin id=\"foo\" -->", "begin"),
+            Some(Some("foo".to_string()))
+        );
+        assert_eq!(
+            parse_sentinel_line("<!-- fleet:prd:end id=\"foo\" -->", "end"),
+            Some(Some("foo".to_string()))
+        );
+        // Wrong kind:
+        assert_eq!(
+            parse_sentinel_line("<!-- fleet:prd:end -->", "begin"),
+            None
+        );
+        // Empty id is rejected so a typo doesn't silently masquerade as
+        // anonymous.
+        assert_eq!(
+            parse_sentinel_line("<!-- fleet:prd:begin id=\"\" -->", "begin"),
+            None
+        );
+        // Not a sentinel at all:
+        assert_eq!(parse_sentinel_line("# TASKS", "begin"), None);
+    }
 }
 
 // ── Daily report CLI ────────────────────────────────────────────────────────
