@@ -1436,6 +1436,20 @@ impl Backend for LocalBackend {
         crate::interaction_mode::remove_interaction_mode()
     }
 
+    fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
+        crate::prd_discipline::apply_prd_discipline(user_title, locale)?;
+        crate::hooks::apply_prd_context_hook()?;
+        Ok(())
+    }
+
+    fn remove_prd_mode(&self) -> Result<(), String> {
+        // Remove both halves regardless of which fails — best effort, then
+        // surface the first error if any so the UI can re-try.
+        let r1 = crate::prd_discipline::remove_prd_discipline();
+        let r2 = crate::hooks::remove_prd_context_hook();
+        r1.and(r2)
+    }
+
     fn respond_to_elicitation(
         &self,
         id: &str,
