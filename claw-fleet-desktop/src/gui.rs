@@ -451,6 +451,7 @@ fn get_user_title(state: tauri::State<AppState>) -> String {
 fn set_user_title(title: String, state: tauri::State<AppState>) {
     *state.user_title.lock().unwrap() = title.clone();
     reapply_interaction_mode_if_installed(&state, &title, None);
+    reapply_prd_mode_if_installed(&state, &title, None);
 }
 
 /// If the interaction-mode guidance is currently installed, regenerate it with
@@ -471,6 +472,25 @@ fn reapply_interaction_mode_if_installed(
     };
     if let Err(e) = backend.apply_interaction_mode(title_override, &locale) {
         eprintln!("re-apply interaction mode failed: {e}");
+    }
+}
+
+fn reapply_prd_mode_if_installed(
+    state: &tauri::State<AppState>,
+    title_override: &str,
+    locale_override: Option<&str>,
+) {
+    let backend = state.backend.read().unwrap();
+    let plan = backend.get_hooks_plan();
+    if !plan.prd_discipline_installed {
+        return;
+    }
+    let locale = match locale_override {
+        Some(l) => l.to_string(),
+        None => state.locale.lock().unwrap().clone(),
+    };
+    if let Err(e) = backend.apply_prd_mode(title_override, &locale) {
+        eprintln!("re-apply prd mode failed: {e}");
     }
 }
 
@@ -937,6 +957,18 @@ fn remove_interaction_mode(state: tauri::State<AppState>) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn apply_prd_mode(state: tauri::State<AppState>) -> Result<(), String> {
+    let title = state.user_title.lock().unwrap().clone();
+    let locale = state.locale.lock().unwrap().clone();
+    state.backend.read().unwrap().apply_prd_mode(&title, &locale)
+}
+
+#[tauri::command]
+fn remove_prd_mode(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().remove_prd_mode()
+}
+
+#[tauri::command]
 fn respond_to_elicitation(
     state: tauri::State<AppState>,
     id: String,
@@ -1375,6 +1407,7 @@ fn set_locale(app: tauri::AppHandle, locale: String, state: tauri::State<AppStat
     let prev = std::mem::replace(&mut *state.locale.lock().unwrap(), locale.clone());
     let title = state.user_title.lock().unwrap().clone();
     reapply_interaction_mode_if_installed(&state, &title, Some(&locale));
+    reapply_prd_mode_if_installed(&state, &title, Some(&locale));
     // Rebuild the app menu only if the language prefix actually changed, so
     // we don't churn the native menu on every startup call.
     let prev_prefix = prev.get(..2).unwrap_or("");
@@ -2891,6 +2924,8 @@ pub fn run() {
             remove_elicitation_hook,
             apply_interaction_mode,
             remove_interaction_mode,
+            apply_prd_mode,
+            remove_prd_mode,
             respond_to_elicitation,
             upload_elicitation_attachment,
             stage_pasted_attachment,
