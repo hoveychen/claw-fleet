@@ -1369,6 +1369,46 @@ fn list_plugins(state: tauri::State<AppState>) -> Vec<plugins::PluginItem> {
     state.backend.read().unwrap().list_plugins()
 }
 
+#[tauri::command]
+fn set_plugin_enabled(
+    state: tauri::State<AppState>,
+    plugin_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .set_plugin_enabled(&plugin_id, enabled)
+}
+
+#[tauri::command]
+fn install_plugin(state: tauri::State<AppState>, plugin_id: String) -> Result<(), String> {
+    state.backend.read().unwrap().install_plugin(&plugin_id)
+}
+
+#[tauri::command]
+fn uninstall_plugin(state: tauri::State<AppState>, plugin_id: String) -> Result<(), String> {
+    state.backend.read().unwrap().uninstall_plugin(&plugin_id)
+}
+
+#[tauri::command]
+fn list_marketplaces(
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::claude_cli::CliMarketplace> {
+    state.backend.read().unwrap().list_marketplaces()
+}
+
+#[tauri::command]
+fn add_marketplace(state: tauri::State<AppState>, source: String) -> Result<(), String> {
+    state.backend.read().unwrap().add_marketplace(&source)
+}
+
+#[tauri::command]
+fn remove_marketplace(state: tauri::State<AppState>, name: String) -> Result<(), String> {
+    state.backend.read().unwrap().remove_marketplace(&name)
+}
+
 // ── Agent sources config ─────────────────────────────────────────────────────
 
 /// Return the current sources config merged with availability info.
@@ -2918,6 +2958,12 @@ pub fn run() {
             get_skill_content,
             list_skill_files,
             list_plugins,
+            set_plugin_enabled,
+            install_plugin,
+            uninstall_plugin,
+            list_marketplaces,
+            add_marketplace,
+            remove_marketplace,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,

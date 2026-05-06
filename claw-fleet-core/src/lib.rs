@@ -5,6 +5,7 @@ pub mod auto_resume;
 pub mod backend;
 pub mod claude_analyze;
 pub mod claude_binary;
+pub mod claude_cli;
 pub mod claude_source;
 pub mod codex_source;
 pub mod consumer_heartbeat;

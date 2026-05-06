@@ -1316,7 +1316,31 @@ impl Backend for LocalBackend {
     }
 
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
-        crate::plugins::scan_all_plugins()
+        crate::plugins::scan_with_catalog()
+    }
+
+    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String> {
+        crate::claude_cli::set_plugin_enabled(plugin_id, enabled).map_err(|e| e.to_string())
+    }
+
+    fn install_plugin(&self, plugin_id: &str) -> Result<(), String> {
+        crate::claude_cli::install_plugin(plugin_id).map_err(|e| e.to_string())
+    }
+
+    fn uninstall_plugin(&self, plugin_id: &str) -> Result<(), String> {
+        crate::claude_cli::uninstall_plugin(plugin_id).map_err(|e| e.to_string())
+    }
+
+    fn list_marketplaces(&self) -> Vec<crate::claude_cli::CliMarketplace> {
+        crate::claude_cli::list_marketplaces().unwrap_or_default()
+    }
+
+    fn add_marketplace(&self, source: &str) -> Result<(), String> {
+        crate::claude_cli::add_marketplace(source).map_err(|e| e.to_string())
+    }
+
+    fn remove_marketplace(&self, name: &str) -> Result<(), String> {
+        crate::claude_cli::remove_marketplace(name).map_err(|e| e.to_string())
     }
 
     fn get_skill_content(&self, path: &str) -> Result<String, String> {

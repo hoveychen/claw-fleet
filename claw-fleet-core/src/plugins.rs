@@ -7,12 +7,13 @@
 //! are surfaced as simple counts so the UI can render badges without
 //! re-walking each plugin's directory tree.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::claude_cli::{self, CliPlugin};
 use crate::session::get_claude_dir;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -37,6 +38,12 @@ pub struct PluginItem {
     pub root_path: String,
     pub manifest_path: String,
     pub contributes: PluginContributions,
+    /// `true` when the plugin's directory exists locally under
+    /// `~/.claude/plugins/marketplaces/<mk>/{plugins,external_plugins}/<name>/`.
+    /// `false` for catalog-only entries surfaced via the `claude plugin
+    /// list --available` CLI but not yet fetched to disk.
+    #[serde(default)]
+    pub is_downloaded: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -96,6 +103,65 @@ pub fn scan_all_plugins() -> Vec<PluginItem> {
 
     results.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     results
+}
+
+// ── Scan + CLI catalog merge ─────────────────────────────────────────────────
+
+/// Returns the union of:
+///   - everything `scan_all_plugins` finds on disk (`is_downloaded: true`)
+///   - everything `claude plugin list --json --available` returns whose
+///     `pluginId` isn't already in the on-disk set (`is_downloaded: false`)
+///
+/// On CLI failure (binary missing, non-zero exit, garbled JSON) we silently
+/// fall back to the on-disk scan only — Plugins page should still render.
+pub fn scan_with_catalog() -> Vec<PluginItem> {
+    let scanned = scan_all_plugins();
+    let enabled = read_enabled_plugins();
+    match claude_cli::list_plugins(true) {
+        Ok(resp) => merge_with_catalog(scanned, &resp.available, &enabled),
+        Err(_) => scanned,
+    }
+}
+
+/// Pure helper: append catalog-only entries (those whose `pluginId` is not
+/// already present in `scanned`) and re-sort by name. Exposed for testing.
+pub fn merge_with_catalog(
+    mut scanned: Vec<PluginItem>,
+    catalog: &[CliPlugin],
+    enabled: &BTreeMap<String, bool>,
+) -> Vec<PluginItem> {
+    let on_disk: BTreeSet<String> =
+        scanned.iter().map(|p| p.plugin_id.clone()).collect();
+    for cp in catalog {
+        if on_disk.contains(&cp.plugin_id) {
+            continue;
+        }
+        let enabled_flag = enabled.get(&cp.plugin_id).copied().unwrap_or(false);
+        scanned.push(PluginItem {
+            name: cp.name.clone(),
+            description: cp.description.clone(),
+            author: None,
+            version: None,
+            homepage: None,
+            marketplace: cp.marketplace_name.clone(),
+            source_kind: "catalog".to_string(),
+            plugin_id: cp.plugin_id.clone(),
+            enabled: enabled_flag,
+            install_count: cp.install_count,
+            root_path: String::new(),
+            manifest_path: String::new(),
+            contributes: PluginContributions {
+                commands: 0,
+                agents: 0,
+                skills: 0,
+                hooks: false,
+                mcp: false,
+            },
+            is_downloaded: false,
+        });
+    }
+    scanned.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    scanned
 }
 
 // ── Per-directory scan ────────────────────────────────────────────────────────
@@ -178,6 +244,7 @@ fn scan_plugin_dir(
             root_path: plugin_dir.to_string_lossy().to_string(),
             manifest_path: manifest_path.to_string_lossy().to_string(),
             contributes,
+            is_downloaded: true,
         });
     }
 }
@@ -362,5 +429,91 @@ mod tests {
         assert_eq!(c.skills, 0);
         assert!(!c.hooks);
         assert!(!c.mcp);
+    }
+
+    fn make_scanned(plugin_id: &str, name: &str) -> PluginItem {
+        PluginItem {
+            name: name.to_string(),
+            description: "scanned".to_string(),
+            author: None,
+            version: None,
+            homepage: None,
+            marketplace: "mk".to_string(),
+            source_kind: "internal".to_string(),
+            plugin_id: plugin_id.to_string(),
+            enabled: false,
+            install_count: None,
+            root_path: format!("/tmp/{name}"),
+            manifest_path: format!("/tmp/{name}/.claude-plugin/plugin.json"),
+            contributes: PluginContributions {
+                commands: 0,
+                agents: 0,
+                skills: 0,
+                hooks: false,
+                mcp: false,
+            },
+            is_downloaded: true,
+        }
+    }
+
+    fn make_catalog(plugin_id: &str, name: &str, mk: &str) -> CliPlugin {
+        CliPlugin {
+            plugin_id: plugin_id.to_string(),
+            name: name.to_string(),
+            description: format!("desc-{name}"),
+            marketplace_name: mk.to_string(),
+            source: serde_json::Value::Null,
+            install_count: Some(123),
+        }
+    }
+
+    #[test]
+    fn merge_with_catalog_appends_only_new_items() {
+        let scanned = vec![
+            make_scanned("alpha@mk", "alpha"),
+            make_scanned("bravo@mk", "bravo"),
+        ];
+        let catalog = vec![
+            // Already on disk — must be deduped, not duplicated.
+            make_catalog("alpha@mk", "alpha", "mk"),
+            // New entry — should be appended with is_downloaded=false.
+            make_catalog("charlie@mk", "charlie", "mk"),
+        ];
+        let enabled = BTreeMap::new();
+        let merged = merge_with_catalog(scanned, &catalog, &enabled);
+
+        assert_eq!(merged.len(), 3, "alpha must not be duplicated");
+        let charlie = merged
+            .iter()
+            .find(|p| p.plugin_id == "charlie@mk")
+            .expect("charlie present");
+        assert!(!charlie.is_downloaded);
+        assert_eq!(charlie.source_kind, "catalog");
+        assert_eq!(charlie.install_count, Some(123));
+        assert!(charlie.root_path.is_empty());
+    }
+
+    #[test]
+    fn merge_with_catalog_carries_enabled_flag_for_catalog_only_items() {
+        let scanned: Vec<PluginItem> = vec![];
+        let catalog = vec![make_catalog("delta@mk", "delta", "mk")];
+        let mut enabled = BTreeMap::new();
+        enabled.insert("delta@mk".to_string(), true);
+
+        let merged = merge_with_catalog(scanned, &catalog, &enabled);
+        assert_eq!(merged.len(), 1);
+        assert!(merged[0].enabled, "enabled map should be honoured");
+    }
+
+    #[test]
+    fn merge_with_catalog_sorts_by_name() {
+        let scanned = vec![make_scanned("zulu@mk", "zulu")];
+        let catalog = vec![
+            make_catalog("alpha@mk", "alpha", "mk"),
+            make_catalog("mike@mk", "mike", "mk"),
+        ];
+        let merged = merge_with_catalog(scanned, &catalog, &BTreeMap::new());
+        let order: Vec<&str> = merged.iter().map(|p| p.name.as_str()).collect();
+        assert_eq!(order, vec!["alpha", "mike", "zulu"]);
     }
 }

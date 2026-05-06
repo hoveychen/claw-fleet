@@ -381,6 +381,56 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get("/plugins").unwrap_or_default()
     }
 
+    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            plugin_id: &'a str,
+            enabled: bool,
+        }
+        self.probe
+            .post_json_ok("/plugins/set_enabled", &Req { plugin_id, enabled })
+    }
+
+    fn install_plugin(&self, plugin_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            plugin_id: &'a str,
+        }
+        self.probe
+            .post_json_ok("/plugins/install", &Req { plugin_id })
+    }
+
+    fn uninstall_plugin(&self, plugin_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            plugin_id: &'a str,
+        }
+        self.probe
+            .post_json_ok("/plugins/uninstall", &Req { plugin_id })
+    }
+
+    fn list_marketplaces(&self) -> Vec<claw_fleet_core::claude_cli::CliMarketplace> {
+        self.probe.get("/plugins/marketplaces").unwrap_or_default()
+    }
+
+    fn add_marketplace(&self, source: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            source: &'a str,
+        }
+        self.probe
+            .post_json_ok("/plugins/marketplaces/add", &Req { source })
+    }
+
+    fn remove_marketplace(&self, name: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            name: &'a str,
+        }
+        self.probe
+            .post_json_ok("/plugins/marketplaces/remove", &Req { name })
+    }
+
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         self.probe.get(&format!("/skill_content?path={}", encode_path(path)))
     }
