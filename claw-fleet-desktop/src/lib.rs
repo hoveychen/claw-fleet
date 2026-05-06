@@ -150,6 +150,24 @@ impl Backend for NullBackend {
     fn list_plugins(&self) -> Vec<claw_fleet_core::plugins::PluginItem> {
         vec![]
     }
+    fn set_plugin_enabled(&self, _: &str, _: bool) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn install_plugin(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn uninstall_plugin(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn list_marketplaces(&self) -> Vec<claw_fleet_core::claude_cli::CliMarketplace> {
+        vec![]
+    }
+    fn add_marketplace(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn remove_marketplace(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         vec![]
     }

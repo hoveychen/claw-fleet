@@ -1924,11 +1924,182 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             "/plugins" => {
-                let items = plugins::scan_all_plugins();
+                let items = plugins::scan_with_catalog();
                 let body = serde_json::to_string(&items).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
+            }
+
+            "/plugins/set_enabled" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    plugin_id: String,
+                    enabled: bool,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<Body, _> = serde_json::from_str(&buf);
+                match parsed {
+                    Ok(body) => {
+                        match claw_fleet_core::claude_cli::set_plugin_enabled(
+                            &body.plugin_id,
+                            body.enabled,
+                        ) {
+                            Ok(()) => {
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body =
+                                    serde_json::json!({"error": e.to_string()}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/plugins/marketplaces" if request.method() == &tiny_http::Method::Get => {
+                let items =
+                    claw_fleet_core::claude_cli::list_marketplaces().unwrap_or_default();
+                let body = serde_json::to_string(&items).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/plugins/marketplaces/add" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    source: String,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(body) => match claw_fleet_core::claude_cli::add_marketplace(&body.source)
+                    {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e.to_string()}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/plugins/marketplaces/remove" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    name: String,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(body) => match claw_fleet_core::claude_cli::remove_marketplace(&body.name)
+                    {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e.to_string()}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/plugins/install" | "/plugins/uninstall"
+                if request.method() == &tiny_http::Method::Post =>
+            {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    plugin_id: String,
+                }
+                let is_install = request.url().starts_with("/plugins/install");
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<Body, _> = serde_json::from_str(&buf);
+                match parsed {
+                    Ok(body) => {
+                        let result = if is_install {
+                            claw_fleet_core::claude_cli::install_plugin(&body.plugin_id)
+                        } else {
+                            claw_fleet_core::claude_cli::uninstall_plugin(&body.plugin_id)
+                        };
+                        match result {
+                            Ok(()) => {
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body =
+                                    serde_json::json!({"error": e.to_string()}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
             }
 
             "/skill_history" => {

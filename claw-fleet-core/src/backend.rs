@@ -279,6 +279,19 @@ pub trait Backend: Send + Sync {
     // ── Plugins ──────────────────────────────────────────────────────────────
     /// Scan `~/.claude/plugins/` for installed Claude Code plugins.
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem>;
+    /// Enable or disable a downloaded plugin via `claude plugin enable|disable`.
+    fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String>;
+    /// Install (download) a plugin from a marketplace via `claude plugin install`.
+    fn install_plugin(&self, plugin_id: &str) -> Result<(), String>;
+    /// Uninstall (remove on-disk + prune from enabled set) via `claude plugin uninstall`.
+    fn uninstall_plugin(&self, plugin_id: &str) -> Result<(), String>;
+    /// List configured marketplaces via `claude plugin marketplace list --json`.
+    fn list_marketplaces(&self) -> Vec<crate::claude_cli::CliMarketplace>;
+    /// Add a marketplace via `claude plugin marketplace add <source>`.
+    /// `source` may be a GitHub `owner/repo`, a git URL, or a local path.
+    fn add_marketplace(&self, source: &str) -> Result<(), String>;
+    /// Remove a marketplace via `claude plugin marketplace remove <name>`.
+    fn remove_marketplace(&self, name: &str) -> Result<(), String>;
 
     // ── Waiting alerts ────────────────────────────────────────────────────────
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert>;
