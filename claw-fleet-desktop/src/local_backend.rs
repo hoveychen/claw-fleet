@@ -1315,6 +1315,10 @@ impl Backend for LocalBackend {
         crate::skills::scan_all_skills()
     }
 
+    fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
+        crate::plugins::scan_all_plugins()
+    }
+
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         crate::skills::read_skill_file(path)
     }

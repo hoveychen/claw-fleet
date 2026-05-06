@@ -147,6 +147,9 @@ impl Backend for NullBackend {
     ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
         Err("backend not ready".into())
     }
+    fn list_plugins(&self) -> Vec<claw_fleet_core::plugins::PluginItem> {
+        vec![]
+    }
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         vec![]
     }

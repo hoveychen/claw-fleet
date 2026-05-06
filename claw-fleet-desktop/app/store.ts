@@ -43,7 +43,7 @@ export async function openSettingsWindow(): Promise<void> {
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills";
+export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills" | "plugins";
 
 interface UIState {
   theme: Theme;

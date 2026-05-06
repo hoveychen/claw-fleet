@@ -377,6 +377,10 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get("/skills").unwrap_or_default()
     }
 
+    fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
+        self.probe.get("/plugins").unwrap_or_default()
+    }
+
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         self.probe.get(&format!("/skill_content?path={}", encode_path(path)))
     }

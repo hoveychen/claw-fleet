@@ -276,6 +276,10 @@ pub trait Backend: Send + Sync {
     /// flagged with `is_subagent: true`.
     fn get_skill_history(&self, jsonl_path: &str) -> Result<Vec<SkillInvocation>, String>;
 
+    // ── Plugins ──────────────────────────────────────────────────────────────
+    /// Scan `~/.claude/plugins/` for installed Claude Code plugins.
+    fn list_plugins(&self) -> Vec<crate::plugins::PluginItem>;
+
     // ── Waiting alerts ────────────────────────────────────────────────────────
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert>;
 
