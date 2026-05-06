@@ -1362,6 +1362,13 @@ fn list_skill_files(
     state.backend.read().unwrap().list_skill_files(&skill_path)
 }
 
+// ── Plugins ──────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_plugins(state: tauri::State<AppState>) -> Vec<plugins::PluginItem> {
+    state.backend.read().unwrap().list_plugins()
+}
+
 // ── Agent sources config ─────────────────────────────────────────────────────
 
 /// Return the current sources config merged with availability info.
@@ -2910,6 +2917,7 @@ pub fn run() {
             list_skills,
             get_skill_content,
             list_skill_files,
+            list_plugins,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,

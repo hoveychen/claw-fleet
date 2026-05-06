@@ -11,6 +11,7 @@ import { MemoryView } from "./MemoryView";
 import { AuditView } from "./AuditView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
+import { PluginsView } from "./PluginsView";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import { MobileAccessPanel } from "./MobileAccessPanel";
@@ -276,6 +277,13 @@ export function SessionList() {
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_skills")}</span>
           </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("plugins")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_plugins")}</span>
+          </button>
         </nav>
 
         <div className={styles.separator} />
@@ -409,6 +417,8 @@ export function SessionList() {
         <MemoryView />
       ) : viewMode === "skills" ? (
         <SkillsView />
+      ) : viewMode === "plugins" ? (
+        <PluginsView />
       ) : (
         <ReportView />
       )}

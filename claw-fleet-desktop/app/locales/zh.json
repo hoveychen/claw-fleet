@@ -44,6 +44,7 @@
   "view_audit": "审计",
   "view_memory": "记忆",
   "view_skills": "技能",
+  "view_plugins": "插件",
   "gallery_show_all": "全部显示",
   "gallery_show_active": "仅活跃",
   "gallery": {
@@ -125,6 +126,30 @@
     "reveal_in_finder": "在 Finder 中显示",
     "filter_files": "过滤文件…",
     "no_match": "没有匹配的文件。"
+  },
+  "plugins": {
+    "panel_title": "插件",
+    "filter_placeholder": "过滤插件…",
+    "loading": "加载中…",
+    "no_plugins": "未找到已安装的插件。",
+    "pick_plugin": "请选择左侧插件查看详情。",
+    "enabled": "已启用",
+    "disabled": "未启用",
+    "external": "外部",
+    "reveal_manifest": "在 Finder 中打开",
+    "meta_status": "状态",
+    "meta_id": "ID",
+    "meta_author": "作者",
+    "meta_version": "版本",
+    "meta_installs": "安装量",
+    "meta_homepage": "主页",
+    "contributes_title": "贡献内容",
+    "contributes_commands": "{{count}} 个命令",
+    "contributes_agents": "{{count}} 个 agent",
+    "contributes_skills": "{{count}} 个 skill",
+    "contributes_hooks": "Hooks",
+    "contributes_mcp": "MCP 服务器",
+    "path_label": "安装路径"
   },
   "skill_history": {
     "title": "Skill 调用记录",

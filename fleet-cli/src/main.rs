@@ -9,6 +9,7 @@ use claw_fleet_core::hooks;
 use claw_fleet_core::interaction_mode;
 use claw_fleet_core::memory;
 use claw_fleet_core::prd_discipline;
+use claw_fleet_core::plugins;
 use claw_fleet_core::skills;
 use claw_fleet_core::session::{get_claude_dir, scan_all_sources, SessionInfo, SessionStatus};
 use claw_fleet_core::{FLEET_SKILL_MD, SKILL_TARGETS};
@@ -1916,6 +1917,14 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
             "/skills" => {
                 let items = skills::scan_all_skills();
+                let body = serde_json::to_string(&items).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/plugins" => {
+                let items = plugins::scan_all_plugins();
                 let body = serde_json::to_string(&items).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
