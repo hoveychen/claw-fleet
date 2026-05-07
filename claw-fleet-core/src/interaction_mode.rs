@@ -236,6 +236,14 @@ After the user answers, if the answer clearly dispatches you to execute \
 turn. Do NOT re-wrap that executing turn in another `AskUserQuestion` unless \
 you again reach a genuine wait-for-input surface.\n\
 \n\
+**Session-end exemption.** When the user picks an option that clearly closes \
+the conversation (e.g. \"任务结束\", \"下班\", \"收工\", or anything \
+equivalently meaning \"we are done\"), this turn ends with a one-line \
+plain-text acknowledgement instead of another `AskUserQuestion`. This is the \
+only literal exemption to the every-turn-asks rule at the top of this file; \
+do not append a trade-off explanation — the rules above explicitly authorize \
+the plain-text close-out here, so there is no conflict to surface.\n\
+\n\
 ## When The Tool Is Absent\n\
 \n\
 If `AskUserQuestion` is not in your toolset this turn — neither directly \
