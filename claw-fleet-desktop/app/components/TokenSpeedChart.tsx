@@ -18,7 +18,7 @@ function formatTime(ms: number): string {
 
 const WINDOW_MS = 5 * 60 * 1000;
 
-export function TokenSpeedChart({ compact = false }: { compact?: boolean } = {}) {
+export function TokenSpeedChart({ compact = false, collapsed: tile = false }: { compact?: boolean; collapsed?: boolean } = {}) {
   const { t } = useTranslation();
   const speedHistory = useSessionsStore((s) => s.speedHistory);
   const [collapsed, setCollapsed] = useCollapsed("token-speed-chart", false);
@@ -30,6 +30,16 @@ export function TokenSpeedChart({ compact = false }: { compact?: boolean } = {})
       ? speedHistory[speedHistory.length - 1].time
       : Date.now();
   const domainStart = domainEnd - WINDOW_MS;
+
+  if (tile) {
+    const tooltip = `${t("chart.title")}: ${currentSpeed.toFixed(1)} tok/s`;
+    return (
+      <div className={styles.tile} title={tooltip}>
+        <span className={styles.tile_value}>{Math.round(currentSpeed)}</span>
+        <span className={styles.tile_label}>{t("chart.unit")}</span>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.panel}>

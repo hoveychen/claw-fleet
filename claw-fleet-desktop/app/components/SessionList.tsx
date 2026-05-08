@@ -41,7 +41,7 @@ export function SessionList() {
   const { t } = useTranslation();
   const { sessions, refresh, setSessions, scanReady, setScanReady } = useSessionsStore();
   const { session: viewedSession, open } = useDetailStore();
-  const { viewMode, setViewMode, setLiteMode, showMobileAccess, setShowMobileAccess } = useUIStore();
+  const { viewMode, setViewMode, setLiteMode, sidebarCollapsed, setSidebarCollapsed, showMobileAccess, setShowMobileAccess } = useUIStore();
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const [filter, setFilter] = useState("");
@@ -223,18 +223,24 @@ export function SessionList() {
 
   const isRemote = connection?.type === "remote";
 
+  const COLLAPSED_WIDTH = 64;
+  const effectiveWidth = sidebarCollapsed ? COLLAPSED_WIDTH : sidebarWidth;
+
   return (
     <>
-      <aside className={styles.sidebar} style={{ width: sidebarWidth }}>
+      <aside
+        className={`${styles.sidebar}${sidebarCollapsed ? ` ${styles.sidebar_collapsed}` : ""}`}
+        style={{ width: effectiveWidth }}
+      >
         {/* Header — hidden on Windows (title bar already shows product name) */}
         {!isWindows && (
           <div className={styles.header} data-tauri-drag-region>
-            <h1 className={styles.title} data-tauri-drag-region>{t("title")}</h1>
+            {!sidebarCollapsed && <h1 className={styles.title} data-tauri-drag-region>{t("title")}</h1>}
           </div>
         )}
 
         {/* Navigation */}
-        <nav className={styles.nav} data-wizard="view-toggle">
+        <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
           <button
             className={`${styles.nav_item} ${viewMode === "list" ? styles.nav_active : ""}`}
             onClick={() => setViewMode("list")}
@@ -311,24 +317,26 @@ export function SessionList() {
         <div className={styles.sidebar_content}>
           {/* Token Speed Chart */}
           <div data-wizard="token-speed">
-            <TokenSpeedChart />
+            <TokenSpeedChart collapsed={sidebarCollapsed} />
           </div>
 
-          {/* Cost Speed Chart (collapsed by default) */}
-          <CostSpeedChart />
+          {/* Cost Speed Chart (collapsed by default) — hidden in narrow rail */}
+          {!sidebarCollapsed && <CostSpeedChart />}
 
           {/* Usage panel */}
-          <UsagePanel />
+          <UsagePanel collapsed={sidebarCollapsed} />
 
-          {/* Mascot */}
-          <MascotEyes
-            dashboardMode
-            usageRing={usageRing ? {
-              percent: usageRing.overall,
-              topSource: usageRing.topSource,
-              sources: usageRing.sources,
-            } : null}
-          />
+          {/* Mascot — hidden in narrow rail */}
+          {!sidebarCollapsed && (
+            <MascotEyes
+              dashboardMode
+              usageRing={usageRing ? {
+                percent: usageRing.overall,
+                topSource: usageRing.topSource,
+                sources: usageRing.sources,
+              } : null}
+            />
+          )}
         </div>
 
         {/* Footer profile card */}
@@ -341,45 +349,62 @@ export function SessionList() {
             <div className={styles.footer_avatar}>
               <img src="/app-icon.png" alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
             </div>
-            <div className={styles.footer_info}>
-              <span className={styles.footer_name}>{t("title")}</span>
-              <span className={styles.footer_status}>
-                <span className={`${styles.footer_dot} ${isRemote ? styles.footer_dot_remote : ""}`} />
-                {isRemote ? t("settings.remote") : t("settings.local")}
-              </span>
-            </div>
-            <button
-              className={styles.footer_mobile_btn}
-              onClick={(e) => { e.stopPropagation(); setLiteMode(true); }}
-              title={t("lite.enter")}
-            >
-              {/* Dock-to-right-strip glyph — distinct from the mobile phone icon */}
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
-                <rect x="10" y="2.5" width="4.5" height="11" rx="1.3" fill="currentColor" fillOpacity="0.35" stroke="none" />
-                <line x1="10" y1="2.5" x2="10" y2="13.5" />
-              </svg>
-            </button>
-            <button
-              className={`${styles.footer_mobile_btn} ${mobileActive ? styles.footer_mobile_active : ""}`}
-              onClick={(e) => { e.stopPropagation(); setShowMobileAccess(true); }}
-              title={t("settings.mobile_access")}
-            >
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                <rect x="4" y="1" width="8" height="14" rx="1.5" />
-                <line x1="7" y1="12" x2="9" y2="12" />
-              </svg>
-              {mobileActive && <span className={styles.footer_mobile_dot} />}
-            </button>
+            {!sidebarCollapsed && (
+              <>
+                <div className={styles.footer_info}>
+                  <span className={styles.footer_name}>{t("title")}</span>
+                  <span className={styles.footer_status}>
+                    <span className={`${styles.footer_dot} ${isRemote ? styles.footer_dot_remote : ""}`} />
+                    {isRemote ? t("settings.remote") : t("settings.local")}
+                  </span>
+                </div>
+                <button
+                  className={styles.footer_mobile_btn}
+                  onClick={(e) => { e.stopPropagation(); setLiteMode(true); }}
+                  title={t("lite.enter")}
+                >
+                  {/* Dock-to-right-strip glyph — distinct from the mobile phone icon */}
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
+                    <rect x="10" y="2.5" width="4.5" height="11" rx="1.3" fill="currentColor" fillOpacity="0.35" stroke="none" />
+                    <line x1="10" y1="2.5" x2="10" y2="13.5" />
+                  </svg>
+                </button>
+                <button
+                  className={`${styles.footer_mobile_btn} ${mobileActive ? styles.footer_mobile_active : ""}`}
+                  onClick={(e) => { e.stopPropagation(); setShowMobileAccess(true); }}
+                  title={t("settings.mobile_access")}
+                >
+                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="4" y="1" width="8" height="14" rx="1.5" />
+                    <line x1="7" y1="12" x2="9" y2="12" />
+                  </svg>
+                  {mobileActive && <span className={styles.footer_mobile_dot} />}
+                </button>
+              </>
+            )}
             <span className={styles.footer_gear}>⚙</span>
           </button>
         </div>
 
-        {/* Resize handle */}
-        <div
-          className={`${styles.resize_handle} ${isDragging ? styles.resize_handle_active : ""}`}
-          onMouseDown={handleResizeMouseDown}
-        />
+        {/* Collapse / expand toggle */}
+        <button
+          type="button"
+          className={styles.collapse_toggle}
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          title={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+          aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        >
+          <span className={styles.collapse_toggle_glyph}>{sidebarCollapsed ? "»" : "«"}</span>
+        </button>
+
+        {/* Resize handle — hidden when collapsed */}
+        {!sidebarCollapsed && (
+          <div
+            className={`${styles.resize_handle} ${isDragging ? styles.resize_handle_active : ""}`}
+            onMouseDown={handleResizeMouseDown}
+          />
+        )}
       </aside>
 
       {/* Mobile access panel */}
