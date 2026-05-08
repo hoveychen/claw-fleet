@@ -118,7 +118,6 @@
 
 .tile_selected {
   background: var(--color-bg-secondary);
-  border-color: var(--color-accent);
 }
 
 .tile_fleetsession {
@@ -152,6 +151,13 @@
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.tile_name_selected {
+  background: var(--color-accent);
+  color: #fff;
 }
 
 /* ── View segmented control ─────────────────────────────────────────────── */
@@ -238,12 +244,16 @@
   background: var(--color-bg-secondary);
 }
 
-.list_row_selected {
-  background: rgba(99, 102, 241, 0.12);
+.list_row_selected,
+.list_row_selected td {
+  background: var(--color-accent);
+  color: #fff;
 }
 
-.list_row_selected:hover {
-  background: rgba(99, 102, 241, 0.18);
+.list_row_selected:hover,
+.list_row_selected:hover td {
+  background: var(--color-accent);
+  filter: brightness(1.05);
 }
 
 .list_cell,
@@ -303,7 +313,12 @@
 }
 
 .column_row_selected {
-  background: rgba(99, 102, 241, 0.18) !important;
+  background: var(--color-accent) !important;
+  color: #fff;
+}
+
+.column_row_selected .column_row_chev {
+  color: #fff;
 }
 
 .column_row_breadcrumb {
