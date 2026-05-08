@@ -299,6 +299,22 @@ pub fn duplicate_path(path: &str) -> Result<String, String> {
     Ok(dest.to_string_lossy().to_string())
 }
 
+/// Read up to `max_bytes` from a file. Refuses to read directories or files
+/// whose size exceeds the limit. Error strings are prefixed (`path not found:`,
+/// `path is a directory:`, `file too large:`) so callers can branch on them.
+pub fn read_file_bytes(path: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+    let p = Path::new(path);
+    let meta = fs::metadata(p).map_err(|e| format!("path not found: {path}: {e}"))?;
+    if meta.is_dir() {
+        return Err(format!("path is a directory: {path}"));
+    }
+    let size = meta.len();
+    if size > max_bytes {
+        return Err(format!("file too large: {size} bytes (max {max_bytes})"));
+    }
+    fs::read(p).map_err(|e| e.to_string())
+}
+
 // ── helpers ────────────────────────────────────────────────────────────────
 
 fn is_ancestor(ancestor: &Path, descendant: &Path) -> bool {
@@ -831,5 +847,38 @@ mod tests {
             fs::read(Path::new(&dup).join("inside.txt")).unwrap(),
             b"y"
         );
+    }
+
+    #[test]
+    fn read_file_bytes_returns_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("hello.txt");
+        fs::write(&f, b"hello world").unwrap();
+        let bytes = read_file_bytes(f.to_str().unwrap(), 1024).unwrap();
+        assert_eq!(bytes, b"hello world");
+    }
+
+    #[test]
+    fn read_file_bytes_rejects_oversize() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("big.bin");
+        fs::write(&f, vec![0u8; 2048]).unwrap();
+        let err = read_file_bytes(f.to_str().unwrap(), 1024).unwrap_err();
+        assert!(err.starts_with("file too large:"), "got: {err}");
+    }
+
+    #[test]
+    fn read_file_bytes_rejects_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = read_file_bytes(dir.path().to_str().unwrap(), 1024).unwrap_err();
+        assert!(err.starts_with("path is a directory:"), "got: {err}");
+    }
+
+    #[test]
+    fn read_file_bytes_rejects_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = dir.path().join("nope.txt");
+        let err = read_file_bytes(missing.to_str().unwrap(), 1024).unwrap_err();
+        assert!(err.starts_with("path not found:"), "got: {err}");
     }
 }

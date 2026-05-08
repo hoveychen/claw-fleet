@@ -158,7 +158,11 @@
     "delete_to_trash_hint": "macOS moves to Trash; other platforms delete directly.",
     "new_folder_title": "New folder",
     "new_folder_placeholder": "Folder name",
-    "toast_path_copied": "Path copied"
+    "toast_path_copied": "Path copied",
+    "gallery_preview_loading": "Loading preview…",
+    "gallery_preview_too_large": "File exceeds 5 MB, preview disabled",
+    "gallery_preview_unsupported": "Preview not supported for this file type",
+    "gallery_preview_error": "Preview failed"
   },
   "gallery_show_all": "Show All",
   "gallery_show_active": "Active Only",

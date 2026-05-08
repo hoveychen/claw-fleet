@@ -158,7 +158,11 @@
     "delete_to_trash_hint": "macOS 会移到废纸篓；其他系统会直接删除。",
     "new_folder_title": "新建文件夹",
     "new_folder_placeholder": "文件夹名",
-    "toast_path_copied": "路径已复制"
+    "toast_path_copied": "路径已复制",
+    "gallery_preview_loading": "加载预览中…",
+    "gallery_preview_too_large": "文件超过 5 MB，暂不预览",
+    "gallery_preview_unsupported": "暂不支持此类文件的预览",
+    "gallery_preview_error": "预览失败"
   },
   "gallery_show_all": "全部显示",
   "gallery_show_active": "仅活跃",

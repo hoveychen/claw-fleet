@@ -2591,6 +2591,45 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/files/read_bytes" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    path: String,
+                    max_bytes: u64,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => match claw_fleet_core::project::read_file_bytes(&b.path, b.max_bytes)
+                    {
+                        Ok(bytes) => {
+                            use base64::Engine;
+                            let encoded = base64::engine::general_purpose::STANDARD.encode(&bytes);
+                            let body = serde_json::json!({"bytes_base64": encoded}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/fleet_sessions/status" if request.method() == &tiny_http::Method::Post => {
                 #[derive(serde::Deserialize)]
                 struct Body {

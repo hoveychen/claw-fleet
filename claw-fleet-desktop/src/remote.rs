@@ -565,6 +565,18 @@ impl crate::backend::Backend for RemoteBackend {
         Ok(r.path)
     }
 
+    fn read_file_bytes(&self, path: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { path: &'a str, max_bytes: u64 }
+        #[derive(serde::Deserialize)]
+        struct Resp { bytes_base64: String }
+        let r: Resp = self.probe.post_json("/files/read_bytes", &Req { path, max_bytes })?;
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD
+            .decode(&r.bytes_base64)
+            .map_err(|e| format!("invalid base64 from probe: {e}"))
+    }
+
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         self.probe.get(&format!("/skill_content?path={}", encode_path(path)))
     }

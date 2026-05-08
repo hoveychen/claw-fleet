@@ -240,6 +240,9 @@ impl Backend for NullBackend {
     fn duplicate_path(&self, _: &str) -> Result<String, String> {
         Err("backend not ready".into())
     }
+    fn read_file_bytes(&self, _: &str, _: u64) -> Result<Vec<u8>, String> {
+        Err("backend not ready".into())
+    }
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         vec![]
     }

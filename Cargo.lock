@@ -869,6 +869,7 @@ dependencies = [
 name = "claw-fleet-desktop"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "claw-fleet-core",
  "futures",
@@ -1638,6 +1639,7 @@ dependencies = [
 name = "fleet-cli"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "clap",
  "claw-fleet-core",
