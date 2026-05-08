@@ -59,9 +59,12 @@
     "column_empty": "(empty)",
     "expedited": "Rush",
     "drag_to_move": "Drag to move",
+    "drag_or_click": "Click to open · drag to move",
+    "click_to_open": "Click to open session detail",
     "system_managed": "System-managed status — drag disabled",
     "toast_default_locked": "Default columns are system-managed; drag custom columns instead.",
     "toast_must_clear": "Move {{count}} session(s) out of this column first.",
+    "toast_session_not_started": "Session hasn't started yet — no transcript to open.",
     "confirm_delete_column": "Delete column \"{{name}}\"? This only removes the column from this project — sessions are not affected."
   },
   "launcher": {

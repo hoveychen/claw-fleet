@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useDetailStore, useSessionsStore } from "../store";
 import styles from "./KanbanView.module.css";
 
 interface KanbanColumn {
@@ -112,6 +113,19 @@ export function KanbanView({
       flashToast(String(e));
     }
   };
+
+  const openSessionDetail = useCallback(
+    (s: FleetSession) => {
+      const liveSessions = useSessionsStore.getState().sessions;
+      const live = liveSessions.find((info) => info.id === s.id);
+      if (!live) {
+        flashToast(t("kanban.toast_session_not_started"));
+        return;
+      }
+      useDetailStore.getState().open(live);
+    },
+    [t],
+  );
 
   const addColumn = async () => {
     const name = window.prompt(t("kanban.new_column_prompt"));
@@ -239,6 +253,7 @@ export function KanbanView({
                 column={col}
                 onDragStart={() => setDraggingSessionId(s.id)}
                 onDragEnd={() => setDraggingSessionId(null)}
+                onOpen={() => openSessionDetail(s)}
                 isDragging={draggingSessionId === s.id}
                 t={t}
               />
@@ -284,6 +299,7 @@ function KanbanCard({
   column,
   onDragStart,
   onDragEnd,
+  onOpen,
   isDragging,
   t,
 }: {
@@ -291,6 +307,7 @@ function KanbanCard({
   column: KanbanColumn;
   onDragStart: () => void;
   onDragEnd: () => void;
+  onOpen: () => void;
   isDragging: boolean;
   t: (k: string) => string;
 }) {
@@ -307,7 +324,8 @@ function KanbanCard({
       draggable={draggable}
       onDragStart={draggable ? handleDragStart : undefined}
       onDragEnd={onDragEnd}
-      title={draggable ? t("kanban.drag_to_move") : t("kanban.system_managed")}
+      onClick={onOpen}
+      title={draggable ? t("kanban.drag_or_click") : t("kanban.click_to_open")}
     >
       <div className={styles.card_header}>
         <span
