@@ -222,6 +222,24 @@ impl Backend for NullBackend {
     fn list_directory(&self, _: &str) -> Result<Vec<claw_fleet_core::project::FileEntry>, String> {
         Err("backend not ready".into())
     }
+    fn move_path(&self, _: &str, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn copy_path(&self, _: &str, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn rename_path(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
+    fn delete_path(&self, _: &str, _: bool) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn mkdir(&self, _: &str, _: &str) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
+    fn duplicate_path(&self, _: &str) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         vec![]
     }

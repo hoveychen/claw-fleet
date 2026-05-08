@@ -2276,6 +2276,14 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/fleet_sessions/needing-input" if request.method() == &tiny_http::Method::Get => {
+                let items = claw_fleet_core::supervisor::session_pending_requests();
+                let body = serde_json::to_string(&items).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             "/fleet_sessions/spawn" if request.method() == &tiny_http::Method::Post => {
                 let mut buf = String::new();
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
@@ -2390,6 +2398,193 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         let _ = request.respond(
                             tiny_http::Response::from_string(body)
                                 .with_status_code(404)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/files/move" | "/files/copy" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    from: String,
+                    to: String,
+                }
+                let is_move = request.url().starts_with("/files/move");
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => {
+                        let result = if is_move {
+                            claw_fleet_core::project::move_path(&b.from, &b.to)
+                        } else {
+                            claw_fleet_core::project::copy_path(&b.from, &b.to)
+                        };
+                        match result {
+                            Ok(()) => {
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/files/rename" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    path: String,
+                    new_name: String,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => match claw_fleet_core::project::rename_path(&b.path, &b.new_name) {
+                        Ok(new_path) => {
+                            let body = serde_json::json!({"path": new_path}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/files/delete" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    path: String,
+                    to_trash: bool,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => match claw_fleet_core::project::delete_path(&b.path, b.to_trash) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/files/mkdir" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    parent: String,
+                    name: String,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => match claw_fleet_core::project::mkdir(&b.parent, &b.name) {
+                        Ok(new_path) => {
+                            let body = serde_json::json!({"path": new_path}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/files/duplicate" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    path: String,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => match claw_fleet_core::project::duplicate_path(&b.path) {
+                        Ok(new_path) => {
+                            let body = serde_json::json!({"path": new_path}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
                                 .with_header(json_header),
                         );
                     }

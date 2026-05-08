@@ -520,6 +520,51 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&format!("/list_directory?path={}", encode_path(dir_path)))
     }
 
+    fn move_path(&self, from: &str, to: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { from: &'a str, to: &'a str }
+        self.probe.post_json_ok("/files/move", &Req { from, to })
+    }
+
+    fn copy_path(&self, from: &str, to: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { from: &'a str, to: &'a str }
+        self.probe.post_json_ok("/files/copy", &Req { from, to })
+    }
+
+    fn rename_path(&self, path: &str, new_name: &str) -> Result<String, String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { path: &'a str, new_name: &'a str }
+        #[derive(serde::Deserialize)]
+        struct Resp { path: String }
+        let r: Resp = self.probe.post_json("/files/rename", &Req { path, new_name })?;
+        Ok(r.path)
+    }
+
+    fn delete_path(&self, path: &str, to_trash: bool) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { path: &'a str, to_trash: bool }
+        self.probe.post_json_ok("/files/delete", &Req { path, to_trash })
+    }
+
+    fn mkdir(&self, parent: &str, name: &str) -> Result<String, String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { parent: &'a str, name: &'a str }
+        #[derive(serde::Deserialize)]
+        struct Resp { path: String }
+        let r: Resp = self.probe.post_json("/files/mkdir", &Req { parent, name })?;
+        Ok(r.path)
+    }
+
+    fn duplicate_path(&self, path: &str) -> Result<String, String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { path: &'a str }
+        #[derive(serde::Deserialize)]
+        struct Resp { path: String }
+        let r: Resp = self.probe.post_json("/files/duplicate", &Req { path })?;
+        Ok(r.path)
+    }
+
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         self.probe.get(&format!("/skill_content?path={}", encode_path(path)))
     }
@@ -1806,6 +1851,47 @@ fn connect_remote_start_probe(
                 }
                 for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
                     let _ = app_plan.emit("plan-approval-dismissed", id.clone());
+                }
+                known.retain(|id| pending_ids.contains(id));
+            }
+        });
+    }
+
+    // Session-pending polling thread — remote analogue of the LocalBackend
+    // session-pending watcher. Polls `GET /fleet_sessions/needing-input` and
+    // emits `session-pending-request` / `-dismissed` events for the global
+    // DecisionPanel.
+    {
+        let app_pending = app.clone();
+        let pr_pending = poller_running.clone();
+        let probe_pending = probe.clone();
+        std::thread::spawn(move || {
+            let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            loop {
+                std::thread::sleep(Duration::from_millis(1000));
+                if !*pr_pending.lock().unwrap() {
+                    break;
+                }
+                let Ok(pending) = probe_pending
+                    .get::<Vec<claw_fleet_core::supervisor::SessionPendingRequest>>(
+                        "/fleet_sessions/needing-input",
+                    )
+                else {
+                    continue;
+                };
+                let pending_ids: std::collections::HashSet<String> =
+                    pending.iter().map(|r| r.id.clone()).collect();
+                for req in &pending {
+                    if known.insert(req.id.clone()) {
+                        claw_fleet_core::log_debug(&format!(
+                            "[remote-session-pending] new: id={} project={}",
+                            req.id, req.project_id
+                        ));
+                        let _ = app_pending.emit("session-pending-request", req);
+                    }
+                }
+                for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
+                    let _ = app_pending.emit("session-pending-dismissed", id.clone());
                 }
                 known.retain(|id| pending_ids.contains(id));
             }

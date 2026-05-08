@@ -1545,6 +1545,85 @@ fn open_path_in_system(path: String) -> Result<(), String> {
     Ok(())
 }
 
+/// QuickLook a file (macOS `qlmanage -p`). Non-macOS falls back to opening
+/// the file with the system default app. Local-only.
+#[tauri::command]
+fn quick_look(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        // qlmanage -p blocks until the panel closes; spawn detached so the
+        // Tauri command returns immediately.
+        std::process::Command::new("qlmanage")
+            .arg("-p")
+            .arg(&path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .map_err(|e| format!("spawn qlmanage: {e}"))?;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        open_path_in_system(path)
+    }
+}
+
+/// Reveal a path in the host OS file manager (macOS Finder via `open -R`).
+/// Local-only — meaningless when the active backend is RemoteBackend, but the
+/// command will still try to resolve `path` against the local filesystem.
+#[tauri::command]
+fn reveal_in_system(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .output()
+            .map_err(|e| format!("spawn open: {e}"))?;
+        if !out.status.success() {
+            return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+        }
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Err("reveal_in_system is macOS-only".into())
+    }
+}
+
+// ── File operations (move / copy / rename / delete / mkdir / duplicate) ────
+
+#[tauri::command]
+fn move_path(state: tauri::State<AppState>, from: String, to: String) -> Result<(), String> {
+    state.backend.read().unwrap().move_path(&from, &to)
+}
+
+#[tauri::command]
+fn copy_path(state: tauri::State<AppState>, from: String, to: String) -> Result<(), String> {
+    state.backend.read().unwrap().copy_path(&from, &to)
+}
+
+#[tauri::command]
+fn rename_path(state: tauri::State<AppState>, path: String, new_name: String) -> Result<String, String> {
+    state.backend.read().unwrap().rename_path(&path, &new_name)
+}
+
+#[tauri::command]
+fn delete_path(state: tauri::State<AppState>, path: String, to_trash: bool) -> Result<(), String> {
+    state.backend.read().unwrap().delete_path(&path, to_trash)
+}
+
+#[tauri::command]
+fn mkdir(state: tauri::State<AppState>, parent: String, name: String) -> Result<String, String> {
+    state.backend.read().unwrap().mkdir(&parent, &name)
+}
+
+#[tauri::command]
+fn duplicate_path(state: tauri::State<AppState>, path: String) -> Result<String, String> {
+    state.backend.read().unwrap().duplicate_path(&path)
+}
+
 // ── Agent sources config ─────────────────────────────────────────────────────
 
 /// Return the current sources config merged with availability info.
@@ -3125,6 +3204,14 @@ pub fn run() {
             ensure_fleet_cli_link,
             list_directory,
             open_path_in_system,
+            reveal_in_system,
+            quick_look,
+            move_path,
+            copy_path,
+            rename_path,
+            delete_path,
+            mkdir,
+            duplicate_path,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,

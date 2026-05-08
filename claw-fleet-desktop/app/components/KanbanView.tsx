@@ -42,9 +42,11 @@ interface FleetSession {
 export function KanbanView({
   project,
   onProjectChanged,
+  compact = false,
 }: {
   project: Project;
   onProjectChanged: () => void;
+  compact?: boolean;
 }) {
   const { t } = useTranslation();
   const [sessions, setSessions] = useState<FleetSession[]>([]);
@@ -189,11 +191,11 @@ export function KanbanView({
   };
 
   return (
-    <div className={styles.board}>
+    <div className={`${styles.board} ${compact ? styles.board_compact : ""}`}>
       {sortedColumns.map((col) => (
         <div
           key={col.id}
-          className={styles.column}
+          className={`${styles.column} ${compact ? styles.column_compact : ""}`}
           onDragOver={(e) => {
             e.preventDefault();
           }}
