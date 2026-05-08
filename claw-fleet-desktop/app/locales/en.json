@@ -1067,6 +1067,10 @@
     "mute": "Mute alert sounds",
     "unmute": "Unmute alert sounds"
   },
+  "sidebar": {
+    "collapse": "Collapse sidebar",
+    "expand": "Expand sidebar"
+  },
   "settings": {
     "title": "Settings",
     "close": "Close",

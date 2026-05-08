@@ -10,6 +10,7 @@ import {
   type CodexRateLimitWindow,
   type OpenClawSessionUsage,
 } from "../usageStore";
+import { useUsageRing } from "../hooks/useUsageRing";
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -450,13 +451,23 @@ interface SetupStatus {
   [key: string]: unknown;
 }
 
-export function UsagePanel() {
+export function UsagePanel({ collapsed = false }: { collapsed?: boolean } = {}) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(true);
   const [hasClaude, setHasClaude] = useState(true);
   const [hasCursor, setHasCursor] = useState(false);
   const [hasCodex, setHasCodex] = useState(false);
   const [hasOpenclaw, setHasOpenclaw] = useState(false);
+  const ring = useUsageRing();
+  // Auto-load Claude usage when collapsed (so tile has data without expanding panel)
+  const loadUsage = useUsageStore((s) => s.load);
+  useEffect(() => {
+    if (!collapsed) return;
+    if (hasClaude) loadUsage("claude");
+    if (hasCursor) loadUsage("cursor");
+    if (hasCodex) loadUsage("codex");
+    if (hasOpenclaw) loadUsage("openclaw");
+  }, [collapsed, hasClaude, hasCursor, hasCodex, hasOpenclaw, loadUsage]);
 
   useEffect(() => {
     invoke<SetupStatus>("check_setup_status")
@@ -471,6 +482,27 @@ export function UsagePanel() {
   }, []);
 
   if (!hasClaude && !hasCursor && !hasCodex && !hasOpenclaw) return null;
+
+  if (collapsed) {
+    if (!ring) {
+      return (
+        <div className={styles.tile} title={t("account.loading")}>
+          <span className={styles.tile_value}>—</span>
+          <span className={styles.tile_label}>{t("account.usage")}</span>
+        </div>
+      );
+    }
+    const detail = ring.sources
+      .map((s) => `${s.name}: ${Math.round(s.percent)}%`)
+      .join("\n");
+    const tooltip = `${t("account.usage")} — ${ring.topSource} ${Math.round(ring.overall)}%\n${detail}`;
+    return (
+      <div className={styles.tile} title={tooltip}>
+        <span className={styles.tile_value}>{Math.round(ring.overall)}%</span>
+        <span className={styles.tile_label}>{ring.topSource}</span>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.container}>

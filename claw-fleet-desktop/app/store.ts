@@ -49,6 +49,7 @@ interface UIState {
   theme: Theme;
   viewMode: ViewMode;
   liteMode: boolean;
+  sidebarCollapsed: boolean;
   showMobileAccess: boolean;
   // Lite-mode hop from the active DecisionPanel into a dedicated decision-
   // history view. Holds the session id whose history is being viewed, or null
@@ -58,6 +59,7 @@ interface UIState {
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
   setLiteMode: (on: boolean) => void;
+  setSidebarCollapsed: (on: boolean) => void;
   setShowMobileAccess: (v: boolean) => void;
   setLiteDecisionHistorySessionId: (id: string | null) => void;
 }
@@ -74,6 +76,7 @@ export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
   viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
   liteMode: getItem("liteMode") === "true",
+  sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   showMobileAccess: false,
   liteDecisionHistorySessionId: null,
   setTheme: (t) => {
@@ -89,6 +92,10 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("liteMode", on ? "true" : "false");
     invoke("set_lite_mode", { enabled: on }).catch(() => {});
     set({ liteMode: on });
+  },
+  setSidebarCollapsed: (on) => {
+    setItem("sidebar-collapsed", on ? "true" : "false");
+    set({ sidebarCollapsed: on });
   },
   setShowMobileAccess: (v) => set({ showMobileAccess: v }),
   setLiteDecisionHistorySessionId: (id) =>

@@ -1064,6 +1064,10 @@
     "mute": "静音提示音",
     "unmute": "取消静音"
   },
+  "sidebar": {
+    "collapse": "折叠侧边栏",
+    "expand": "展开侧边栏"
+  },
   "settings": {
     "title": "设置",
     "close": "关闭",
