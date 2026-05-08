@@ -1119,7 +1119,9 @@
   },
   "sidebar": {
     "collapse": "折叠侧边栏",
-    "expand": "展开侧边栏"
+    "expand": "展开侧边栏",
+    "projects_collapse": "折叠项目列表",
+    "projects_expand": "展开项目列表"
   },
   "settings": {
     "title": "设置",

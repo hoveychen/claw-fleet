@@ -1122,7 +1122,9 @@
   },
   "sidebar": {
     "collapse": "Collapse sidebar",
-    "expand": "Expand sidebar"
+    "expand": "Expand sidebar",
+    "projects_collapse": "Collapse project list",
+    "projects_expand": "Expand project list"
   },
   "settings": {
     "title": "Settings",

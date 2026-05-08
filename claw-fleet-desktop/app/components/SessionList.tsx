@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useSessionsStore, useUIStore } from "../store";
+import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
@@ -51,7 +51,41 @@ export function SessionList() {
   const [isDragging, setIsDragging] = useState(false);
   const [isWindows, setIsWindows] = useState(false);
   const [mobileActive, setMobileActive] = useState(false);
+  const [projectsExpanded, setProjectsExpanded] = useState<boolean>(
+    () => getItem("nav-projects-expanded") === "true",
+  );
+  const projects = useProjectsStore((s) => s.projects);
+  const fleetSessions = useProjectsStore((s) => s.fleetSessions);
+  const setSelectedProjectId = useProjectsStore((s) => s.setSelectedProjectId);
   const usageRing = useUsageRing();
+
+  const projectCounts = (() => {
+    const total = new Map<string, number>();
+    const running = new Map<string, number>();
+    for (const fs of fleetSessions) {
+      total.set(fs.projectId, (total.get(fs.projectId) ?? 0) + 1);
+      if (fs.status === "running") {
+        running.set(fs.projectId, (running.get(fs.projectId) ?? 0) + 1);
+      }
+    }
+    return { total, running };
+  })();
+
+  const toggleProjectsExpanded = useCallback(() => {
+    setProjectsExpanded((prev) => {
+      const next = !prev;
+      setItem("nav-projects-expanded", next ? "true" : "false");
+      return next;
+    });
+  }, []);
+
+  const openProject = useCallback(
+    (projectId: string) => {
+      setSelectedProjectId(projectId);
+      setViewMode("projects");
+    },
+    [setSelectedProjectId, setViewMode],
+  );
 
   // Poll mobile access status for the sidebar indicator.
   useEffect(() => {
@@ -62,6 +96,17 @@ export function SessionList() {
     };
     check();
     const interval = setInterval(check, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // Keep the projects store fresh so the sidebar nav can show per-project
+  // session counts whether or not the Projects view is mounted.
+  useEffect(() => {
+    const projectsStore = useProjectsStore.getState();
+    projectsStore.refresh();
+    const interval = setInterval(() => {
+      useProjectsStore.getState().refresh();
+    }, 5000);
     return () => clearInterval(interval);
   }, []);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
@@ -241,6 +286,79 @@ export function SessionList() {
 
         {/* Navigation */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
+          <div className={styles.nav_project_row}>
+            <button
+              className={`${styles.nav_item} ${styles.nav_item_with_chevron} ${viewMode === "projects" ? styles.nav_active : ""}`}
+              onClick={() => setViewMode("projects")}
+            >
+              <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4.5h4.5l1.5 1.5h6V12a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4.5Z"/></svg></span>
+              <span className={styles.nav_label}>{t("view_projects")}</span>
+            </button>
+            {!sidebarCollapsed && projects.length > 0 && (
+              <button
+                type="button"
+                className={styles.nav_chevron}
+                onClick={toggleProjectsExpanded}
+                title={projectsExpanded ? t("sidebar.projects_collapse") : t("sidebar.projects_expand")}
+                aria-label={projectsExpanded ? t("sidebar.projects_collapse") : t("sidebar.projects_expand")}
+                aria-expanded={projectsExpanded}
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{
+                    transform: projectsExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                    transition: "transform 0.15s",
+                  }}
+                >
+                  <polyline points="3,2 7,5 3,8" />
+                </svg>
+              </button>
+            )}
+          </div>
+          {!sidebarCollapsed && projectsExpanded && projects.length > 0 && (
+            <ul className={styles.nav_project_list}>
+              {projects.map((p) => {
+                const total = projectCounts.total.get(p.id) ?? 0;
+                const running = projectCounts.running.get(p.id) ?? 0;
+                return (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      className={styles.nav_project_item}
+                      onClick={() => openProject(p.id)}
+                      title={p.name}
+                    >
+                      <span className={styles.nav_project_name}>{p.name}</span>
+                      {running > 0 && (
+                        <span className={`${styles.nav_project_chip} ${styles.nav_project_chip_running}`} title={t("active")}>
+                          {running}
+                        </span>
+                      )}
+                      <span className={styles.nav_project_chip} title={t("recent")}>
+                        {total}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <button
+            className={styles.nav_item}
+            onClick={() => setLauncherInitial({})}
+            title={t("launcher.title")}
+          >
+            <span className={styles.nav_icon}>+</span>
+            <span className={styles.nav_label}>{t("launcher.new_session")}</span>
+          </button>
+          <div className={styles.nav_divider} />
           <button
             className={`${styles.nav_item} ${viewMode === "list" ? styles.nav_active : ""}`}
             onClick={() => setViewMode("list")}
@@ -293,21 +411,6 @@ export function SessionList() {
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_plugins")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "projects" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("projects")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4.5h4.5l1.5 1.5h6V12a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4.5Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_projects")}</span>
-          </button>
-          <button
-            className={styles.nav_item}
-            onClick={() => setLauncherInitial({})}
-            title={t("launcher.title")}
-          >
-            <span className={styles.nav_icon}>+</span>
-            <span className={styles.nav_label}>{t("launcher.new_session")}</span>
           </button>
         </nav>
 
