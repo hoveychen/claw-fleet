@@ -59,6 +59,8 @@ interface UIState {
   // Project detail Inspector (right-side Kanban / SessionDetail panel).
   projectInspectorCollapsed: boolean;
   projectInspectorWidth: number;
+  // Project detail bottom kanban pane height (px).
+  projectKanbanHeight: number;
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
   setLiteMode: (on: boolean) => void;
@@ -67,6 +69,7 @@ interface UIState {
   setLiteDecisionHistorySessionId: (id: string | null) => void;
   setProjectInspectorCollapsed: (on: boolean) => void;
   setProjectInspectorWidth: (px: number) => void;
+  setProjectKanbanHeight: (px: number) => void;
 }
 
 function getSystemTheme(): "dark" | "light" {
@@ -88,6 +91,10 @@ export const useUIStore = create<UIState>((set) => ({
   projectInspectorWidth: Math.max(
     240,
     Math.min(520, parseInt(getItem("project-inspector-width") ?? "320", 10) || 320),
+  ),
+  projectKanbanHeight: Math.max(
+    120,
+    Math.min(600, parseInt(getItem("project-kanban-height") ?? "240", 10) || 240),
   ),
   setTheme: (t) => {
     setItem("theme", t);
@@ -118,6 +125,11 @@ export const useUIStore = create<UIState>((set) => ({
     const clamped = Math.max(240, Math.min(520, Math.round(px)));
     setItem("project-inspector-width", String(clamped));
     set({ projectInspectorWidth: clamped });
+  },
+  setProjectKanbanHeight: (px) => {
+    const clamped = Math.max(120, Math.min(600, Math.round(px)));
+    setItem("project-kanban-height", String(clamped));
+    set({ projectKanbanHeight: clamped });
   },
 }));
 
