@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { useSessionsStore } from "../store";
+import { useFleetManagedStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import styles from "./SessionCard.module.css";
 
@@ -393,6 +393,8 @@ export function useMultiSource() {
 export function SessionCard({ session, isSelected, onClick, variant, hideHeader }: Props) {
   const { t } = useTranslation();
   const multiSource = useMultiSource();
+  const fleetManagedIds = useFleetManagedStore((s) => s.managedIds);
+  const isFleetManaged = !session.isSubagent && fleetManagedIds.has(session.id);
   const isActive = ["thinking", "executing", "streaming", "processing", "waitingInput", "delegating"].includes(
     session.status
   );
@@ -438,6 +440,23 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
       {/* Header row */}
       <div className={`${styles.header} ${hideHeader ? styles.header_compact : ""}`}>
         {!hideHeader && <span className={styles.workspace}>{session.workspaceName}</span>}
+        {!hideHeader && isFleetManaged && (
+          <span
+            title={t("session_badge.fleet_managed_tip")}
+            style={{
+              display: "inline-block",
+              padding: "1px 6px",
+              borderRadius: 4,
+              background: "var(--color-accent)",
+              color: "var(--color-bg)",
+              fontSize: 10,
+              fontWeight: 700,
+              lineHeight: 1.4,
+            }}
+          >
+            {t("session_badge.fleet_managed")}
+          </span>
+        )}
         {!hideHeader && <StatusBadge status={session.status} />}
         {!hideHeader && <RateLimitControls session={session} />}
         {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (

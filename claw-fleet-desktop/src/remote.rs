@@ -431,6 +431,95 @@ impl crate::backend::Backend for RemoteBackend {
             .post_json_ok("/plugins/marketplaces/remove", &Req { name })
     }
 
+    // ── Projects ──────────────────────────────────────────────────────────────
+
+    fn list_projects(&self) -> Vec<claw_fleet_core::project::Project> {
+        self.probe.get("/projects").unwrap_or_default()
+    }
+
+    fn create_project(
+        &self,
+        input: claw_fleet_core::project::ProjectInput,
+    ) -> Result<claw_fleet_core::project::Project, String> {
+        self.probe.post_json("/projects/create", &input)
+    }
+
+    fn update_project(&self, project: claw_fleet_core::project::Project) -> Result<(), String> {
+        self.probe.post_json_ok("/projects/update", &project)
+    }
+
+    fn delete_project(&self, project_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            project_id: &'a str,
+        }
+        self.probe
+            .post_json_ok("/projects/delete", &Req { project_id })
+    }
+
+    fn list_fleet_sessions(&self) -> Vec<claw_fleet_core::project::FleetSession> {
+        self.probe.get("/fleet_sessions").unwrap_or_default()
+    }
+
+    fn spawn_fleet_session(
+        &self,
+        form: claw_fleet_core::project::LauncherForm,
+    ) -> Result<claw_fleet_core::project::FleetSession, String> {
+        self.probe.post_json("/fleet_sessions/spawn", &form)
+    }
+
+    fn cancel_fleet_session(&self, session_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { session_id: &'a str }
+        self.probe
+            .post_json_ok("/fleet_sessions/cancel", &Req { session_id })
+    }
+
+    fn resume_fleet_session(&self, session_id: &str, follow_up_prompt: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { session_id: &'a str, follow_up_prompt: &'a str }
+        self.probe.post_json_ok(
+            "/fleet_sessions/resume",
+            &Req { session_id, follow_up_prompt },
+        )
+    }
+
+    fn set_fleet_session_status(
+        &self,
+        session_id: &str,
+        status: &str,
+        note: Option<&str>,
+    ) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { session_id: &'a str, status: &'a str, note: Option<&'a str> }
+        self.probe.post_json_ok(
+            "/fleet_sessions/status",
+            &Req { session_id, status, note },
+        )
+    }
+
+    fn is_fleet_daemon_installed(&self) -> bool {
+        // Daemon installation is a local-machine concern; remote sessions
+        // don't manage launchd on the head box.
+        false
+    }
+
+    fn install_fleet_daemon(&self, _: &str, _: u16, _: &str) -> Result<(), String> {
+        Err("install_fleet_daemon is local-only".into())
+    }
+
+    fn uninstall_fleet_daemon(&self) -> Result<(), String> {
+        Err("uninstall_fleet_daemon is local-only".into())
+    }
+
+    fn ensure_fleet_cli_link(&self, _: &str) -> Result<(), String> {
+        Err("ensure_fleet_cli_link is local-only".into())
+    }
+
+    fn list_directory(&self, dir_path: &str) -> Result<Vec<claw_fleet_core::project::FileEntry>, String> {
+        self.probe.get(&format!("/list_directory?path={}", encode_path(dir_path)))
+    }
+
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         self.probe.get(&format!("/skill_content?path={}", encode_path(path)))
     }

@@ -293,6 +293,58 @@ pub trait Backend: Send + Sync {
     /// Remove a marketplace via `claude plugin marketplace remove <name>`.
     fn remove_marketplace(&self, name: &str) -> Result<(), String>;
 
+    // ── Projects (workspace + kanban + fleet-managed sessions) ───────────────
+    /// List Fleet projects from `~/.claude/fleet/projects.json`.
+    fn list_projects(&self) -> Vec<crate::project::Project>;
+    /// Create a new project; returns the persisted record.
+    fn create_project(&self, input: crate::project::ProjectInput) -> Result<crate::project::Project, String>;
+    /// Persist updated project metadata (id must match an existing project).
+    fn update_project(&self, project: crate::project::Project) -> Result<(), String>;
+    /// Delete a project by id (metadata only — the workspace directory and its
+    /// `.fleetsession` files are untouched per Boss's "delete metadata only"
+    /// decision).
+    fn delete_project(&self, project_id: &str) -> Result<(), String>;
+    /// List all fleet-managed sessions across all projects (read from
+    /// `~/.claude/fleet/fleet-sessions.json`).
+    fn list_fleet_sessions(&self) -> Vec<crate::project::FleetSession>;
+    /// Enqueue a new fleet-managed session. Spawn happens on the next
+    /// supervisor tick (macOS only); other platforms return NotSupported.
+    fn spawn_fleet_session(
+        &self,
+        form: crate::project::LauncherForm,
+    ) -> Result<crate::project::FleetSession, String>;
+    /// SIGTERM a running fleet session and mark it complete.
+    fn cancel_fleet_session(&self, session_id: &str) -> Result<(), String>;
+    /// Re-queue a completed fleet session with a follow-up prompt.
+    /// Spawn becomes `claude --resume <sid> -p <prompt>` on the next tick.
+    fn resume_fleet_session(&self, session_id: &str, follow_up_prompt: &str) -> Result<(), String>;
+    /// Update a session's status (used by `fleet session status` self-report
+    /// from agents, and by kanban drag-and-drop). If `status` doesn't match
+    /// any of the project's kanban_columns, it's recorded in `note` and the
+    /// column is unchanged.
+    fn set_fleet_session_status(
+        &self,
+        session_id: &str,
+        status: &str,
+        note: Option<&str>,
+    ) -> Result<(), String>;
+
+    /// Whether the macOS LaunchAgent plist for `fleet serve` is installed.
+    /// Always returns `false` on non-macOS.
+    fn is_fleet_daemon_installed(&self) -> bool;
+    /// Install the LaunchAgent plist + `launchctl bootstrap`. macOS only.
+    fn install_fleet_daemon(&self, fleet_path: &str, port: u16, token: &str) -> Result<(), String>;
+    /// `launchctl bootout` + remove the plist. macOS only.
+    fn uninstall_fleet_daemon(&self) -> Result<(), String>;
+    /// Create / refresh `~/.claude/fleet/bin/fleet → <fleet_path>` so that
+    /// fleet-managed agents can call `fleet session status` from PATH.
+    fn ensure_fleet_cli_link(&self, fleet_path: &str) -> Result<(), String>;
+
+    // ── File browser (P7) ─────────────────────────────────────────────────────
+    /// List entries under an absolute directory path (within a project's
+    /// workspace). Sorted (dirs first, then case-insensitive name).
+    fn list_directory(&self, dir_path: &str) -> Result<Vec<crate::project::FileEntry>, String>;
+
     // ── Waiting alerts ────────────────────────────────────────────────────────
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert>;
 
