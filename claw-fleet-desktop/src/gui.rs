@@ -1624,6 +1624,25 @@ fn duplicate_path(state: tauri::State<AppState>, path: String) -> Result<String,
     state.backend.read().unwrap().duplicate_path(&path)
 }
 
+#[tauri::command]
+fn read_file_bytes(
+    state: tauri::State<AppState>,
+    path: String,
+    max_bytes: u64,
+) -> Result<ReadFileBytesResponse, String> {
+    let bytes = state.backend.read().unwrap().read_file_bytes(&path, max_bytes)?;
+    use base64::Engine;
+    Ok(ReadFileBytesResponse {
+        bytes_base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+    })
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ReadFileBytesResponse {
+    bytes_base64: String,
+}
+
 // ── Agent sources config ─────────────────────────────────────────────────────
 
 /// Return the current sources config merged with availability info.
@@ -3212,6 +3231,7 @@ pub fn run() {
             delete_path,
             mkdir,
             duplicate_path,
+            read_file_bytes,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,

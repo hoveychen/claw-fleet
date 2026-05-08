@@ -362,6 +362,9 @@ pub trait Backend: Send + Sync {
     /// Duplicate a file/dir into the same parent (Finder-style "name copy"
     /// suffix). Returns the new path.
     fn duplicate_path(&self, path: &str) -> Result<String, String>;
+    /// Read a file's full contents. Refuses to read directories or files
+    /// whose size exceeds `max_bytes`. Used by the gallery preview pane.
+    fn read_file_bytes(&self, path: &str, max_bytes: u64) -> Result<Vec<u8>, String>;
 
     // ── Waiting alerts ────────────────────────────────────────────────────────
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert>;

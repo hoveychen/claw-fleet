@@ -1488,6 +1488,10 @@ impl Backend for LocalBackend {
         crate::project::duplicate_path(path)
     }
 
+    fn read_file_bytes(&self, path: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
+        crate::project::read_file_bytes(path, max_bytes)
+    }
+
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         crate::skills::read_skill_file(path)
     }

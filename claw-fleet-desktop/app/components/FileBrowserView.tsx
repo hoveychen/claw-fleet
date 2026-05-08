@@ -2,7 +2,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useFleetManagedStore } from "../store";
+import { safeMarkdownComponents } from "../markdown/safeLinks";
 import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import styles from "./FileBrowserView.module.css";
 
@@ -55,6 +58,104 @@ function entryKind(entry: FileEntry): string {
   const idx = entry.name.lastIndexOf(".");
   if (idx > 0) return entry.name.slice(idx + 1).toUpperCase();
   return "File";
+}
+
+const PREVIEW_MAX_BYTES_DEFAULT = 5 * 1024 * 1024;
+const PREVIEW_MAX_BYTES_PDF = 25 * 1024 * 1024;
+const PREVIEW_MAX_BYTES_VIDEO = 100 * 1024 * 1024;
+
+const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg"]);
+const HTML_EXTS = new Set(["html", "htm"]);
+const MD_EXTS = new Set(["md", "markdown"]);
+const PDF_EXTS = new Set(["pdf"]);
+const VIDEO_EXTS = new Set(["mp4", "mov", "m4v", "webm", "mkv", "ogv", "ogg"]);
+const TEXT_EXTS = new Set([
+  "txt", "log",
+  "json", "yaml", "yml", "toml", "ini", "env",
+  "js", "jsx", "ts", "tsx", "mjs", "cjs",
+  "py", "pyi",
+  "rs", "go", "java", "kt", "swift", "scala",
+  "c", "cc", "cpp", "cxx", "h", "hpp",
+  "cs",
+  "rb", "php", "pl", "lua",
+  "sh", "bash", "zsh", "fish",
+  "css", "scss", "sass", "less",
+  "sql",
+  "xml",
+  "tex",
+]);
+
+type PreviewKind =
+  | "image"
+  | "html"
+  | "markdown"
+  | "pdf"
+  | "video"
+  | "text"
+  | "unsupported"
+  | "too_large"
+  | "idle";
+
+type PreviewState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "too_large" }
+  | { kind: "unsupported" }
+  | { kind: "error"; message: string }
+  | { kind: "html"; text: string }
+  | { kind: "markdown"; text: string }
+  | { kind: "text"; text: string }
+  | { kind: "image"; dataUrl: string }
+  | { kind: "pdf"; dataUrl: string }
+  | { kind: "video"; dataUrl: string };
+
+function lowerExt(name: string): string {
+  const idx = name.lastIndexOf(".");
+  return idx > 0 ? name.slice(idx + 1).toLowerCase() : "";
+}
+
+function maxBytesForKind(kind: PreviewKind): number {
+  if (kind === "pdf") return PREVIEW_MAX_BYTES_PDF;
+  if (kind === "video") return PREVIEW_MAX_BYTES_VIDEO;
+  return PREVIEW_MAX_BYTES_DEFAULT;
+}
+
+function classifyPreviewKind(entry: FileEntry | null): PreviewKind {
+  if (!entry || entry.isDir || entry.isFleetsession) return "idle";
+  const ext = lowerExt(entry.name);
+  if (!ext) return "unsupported";
+  let kind: PreviewKind = "unsupported";
+  if (IMAGE_EXTS.has(ext)) kind = "image";
+  else if (HTML_EXTS.has(ext)) kind = "html";
+  else if (MD_EXTS.has(ext)) kind = "markdown";
+  else if (PDF_EXTS.has(ext)) kind = "pdf";
+  else if (VIDEO_EXTS.has(ext)) kind = "video";
+  else if (TEXT_EXTS.has(ext)) kind = "text";
+  if (kind === "unsupported") return "unsupported";
+  if (entry.sizeBytes > maxBytesForKind(kind)) return "too_large";
+  return kind;
+}
+
+function imageMimeFromExt(name: string): string {
+  const ext = lowerExt(name);
+  if (ext === "svg") return "image/svg+xml";
+  if (ext === "jpg" || ext === "jpeg") return "image/jpeg";
+  return `image/${ext}`;
+}
+
+function videoMimeFromExt(name: string): string {
+  const ext = lowerExt(name);
+  if (ext === "mov" || ext === "m4v") return "video/mp4";
+  if (ext === "mkv") return "video/x-matroska";
+  if (ext === "ogv" || ext === "ogg") return "video/ogg";
+  return `video/${ext}`;
+}
+
+function decodeBase64ToText(b64: string): string {
+  const binary = atob(b64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new TextDecoder("utf-8").decode(bytes);
 }
 
 function compareEntries(a: FileEntry, b: FileEntry, sortKey: SortKey, sortDir: SortDir): number {
@@ -114,6 +215,7 @@ export function FileBrowserView({
     loadPref<SortDir>(projectId, "sortDir", "asc"),
   );
   const [columnEntries, setColumnEntries] = useState<Map<string, FileEntry[]>>(new Map());
+  const [previewState, setPreviewState] = useState<PreviewState>({ kind: "idle" });
 
   const setViewMode = useCallback(
     (m: ViewMode) => {
@@ -704,6 +806,67 @@ export function FileBrowserView({
       ? sortedEntries.find((e) => selected.has(e.path)) ?? null
       : null;
 
+  const focusPath = galleryFocus?.path ?? null;
+  const focusSize = galleryFocus?.sizeBytes ?? 0;
+  const focusName = galleryFocus?.name ?? "";
+
+  useEffect(() => {
+    if (viewMode !== "gallery") {
+      setPreviewState({ kind: "idle" });
+      return;
+    }
+    const kind = classifyPreviewKind(galleryFocus);
+    if (kind === "idle") {
+      setPreviewState({ kind: "idle" });
+      return;
+    }
+    if (kind === "too_large") {
+      setPreviewState({ kind: "too_large" });
+      return;
+    }
+    if (kind === "unsupported") {
+      setPreviewState({ kind: "unsupported" });
+      return;
+    }
+    let cancelled = false;
+    setPreviewState({ kind: "loading" });
+    invoke<{ bytesBase64: string }>("read_file_bytes", {
+      path: focusPath,
+      maxBytes: maxBytesForKind(kind),
+    })
+      .then((resp) => {
+        if (cancelled) return;
+        if (kind === "image") {
+          setPreviewState({
+            kind: "image",
+            dataUrl: `data:${imageMimeFromExt(focusName)};base64,${resp.bytesBase64}`,
+          });
+        } else if (kind === "pdf") {
+          setPreviewState({
+            kind: "pdf",
+            dataUrl: `data:application/pdf;base64,${resp.bytesBase64}`,
+          });
+        } else if (kind === "video") {
+          setPreviewState({
+            kind: "video",
+            dataUrl: `data:${videoMimeFromExt(focusName)};base64,${resp.bytesBase64}`,
+          });
+        } else {
+          const text = decodeBase64ToText(resp.bytesBase64);
+          setPreviewState({ kind, text });
+        }
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setPreviewState({ kind: "error", message: String(e) });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // galleryFocus is recomputed each render but its primitives below are stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, focusPath, focusSize, focusName]);
+
   return (
     <div
       ref={containerRef}
@@ -866,26 +1029,107 @@ export function FileBrowserView({
         </div>
       ) : (
         <div className={styles.gallery_wrap}>
-          <div className={styles.gallery_focus}>
+          <div
+            className={`${styles.gallery_focus} ${
+              previewState.kind === "image" ||
+              previewState.kind === "html" ||
+              previewState.kind === "markdown" ||
+              previewState.kind === "pdf" ||
+              previewState.kind === "video" ||
+              previewState.kind === "text"
+                ? styles.gallery_focus_active
+                : ""
+            }`}
+          >
             {galleryFocus ? (
               <>
-                <div className={styles.gallery_focus_icon} aria-hidden>
-                  {galleryFocus.isFleetsession
-                    ? statusEmoji(
-                        galleryFocus.fleetSessionId
-                          ? fleetSessionsById.get(galleryFocus.fleetSessionId)?.status
-                          : undefined,
-                      )
-                    : galleryFocus.isDir
-                      ? "📁"
-                      : "📄"}
-                </div>
+                {previewState.kind === "image" ? (
+                  <div className={styles.gallery_preview_box}>
+                    <img
+                      className={styles.gallery_preview_img}
+                      src={previewState.dataUrl}
+                      alt={galleryFocus.name}
+                    />
+                  </div>
+                ) : previewState.kind === "html" ? (
+                  <div className={styles.gallery_preview_box}>
+                    <iframe
+                      className={styles.gallery_preview_iframe}
+                      sandbox="allow-scripts"
+                      srcDoc={previewState.text}
+                      title={galleryFocus.name}
+                    />
+                  </div>
+                ) : previewState.kind === "markdown" ? (
+                  <div className={styles.gallery_preview_box}>
+                    <div className={styles.gallery_preview_md}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={safeMarkdownComponents}
+                      >
+                        {previewState.text}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                ) : previewState.kind === "pdf" ? (
+                  <div className={styles.gallery_preview_box}>
+                    <iframe
+                      className={styles.gallery_preview_iframe}
+                      src={previewState.dataUrl}
+                      title={galleryFocus.name}
+                    />
+                  </div>
+                ) : previewState.kind === "video" ? (
+                  <div className={styles.gallery_preview_box}>
+                    <video
+                      className={styles.gallery_preview_video}
+                      src={previewState.dataUrl}
+                      controls
+                    />
+                  </div>
+                ) : previewState.kind === "text" ? (
+                  <div className={styles.gallery_preview_box}>
+                    <pre className={styles.gallery_preview_pre}>{previewState.text}</pre>
+                  </div>
+                ) : (
+                  <div className={styles.gallery_focus_icon} aria-hidden>
+                    {galleryFocus.isFleetsession
+                      ? statusEmoji(
+                          galleryFocus.fleetSessionId
+                            ? fleetSessionsById.get(galleryFocus.fleetSessionId)?.status
+                            : undefined,
+                        )
+                      : galleryFocus.isDir
+                        ? "📁"
+                        : "📄"}
+                  </div>
+                )}
                 <div className={styles.gallery_focus_meta}>
                   <div className={styles.gallery_focus_name}>{galleryFocus.name}</div>
                   <div className={styles.gallery_focus_sub}>
                     {entryKind(galleryFocus)}
                     {!galleryFocus.isDir && ` · ${formatBytes(galleryFocus.sizeBytes)}`}
                   </div>
+                  {previewState.kind === "loading" && (
+                    <div className={styles.gallery_preview_status}>
+                      {t("file_browser.gallery_preview_loading")}
+                    </div>
+                  )}
+                  {previewState.kind === "too_large" && (
+                    <div className={styles.gallery_preview_status}>
+                      {t("file_browser.gallery_preview_too_large")}
+                    </div>
+                  )}
+                  {previewState.kind === "unsupported" && (
+                    <div className={styles.gallery_preview_status}>
+                      {t("file_browser.gallery_preview_unsupported")}
+                    </div>
+                  )}
+                  {previewState.kind === "error" && (
+                    <div className={styles.gallery_preview_status_error}>
+                      {t("file_browser.gallery_preview_error")}: {previewState.message}
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
