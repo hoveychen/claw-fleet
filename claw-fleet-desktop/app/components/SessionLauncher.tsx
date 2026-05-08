@@ -3,6 +3,12 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useFleetManagedStore } from "../store";
+import {
+  ChatComposer,
+  type ChatComposerAttachment,
+  type ChatComposerHandle,
+  type ChatComposerStagedAttachment,
+} from "./ChatComposer";
 import styles from "./SessionLauncher.module.css";
 
 interface Project {
@@ -33,28 +39,29 @@ export interface SessionLauncherProps {
   onSubmitted?: (session: FleetSession) => void;
 }
 
+function basename(p: string): string {
+  const normalized = p.replace(/\\/g, "/");
+  const slash = normalized.lastIndexOf("/");
+  return slash >= 0 ? normalized.slice(slash + 1) : normalized;
+}
+
 export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLauncherProps) {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsLoaded, setProjectsLoaded] = useState(false);
   const [projectId, setProjectId] = useState<string>(initial?.projectId ?? "");
   const [prompt, setPrompt] = useState<string>(initial?.prompt ?? "");
-  const [contextFiles, setContextFiles] = useState<string[]>(initial?.contextFiles ?? []);
+  const [attachments, setAttachments] = useState<ChatComposerAttachment[]>(
+    () =>
+      (initial?.contextFiles ?? []).map((path) => ({
+        path,
+        name: basename(path),
+      })),
+  );
   const [expedited, setExpedited] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [addMenuOpen, setAddMenuOpen] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
-  const addMenuWrapRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    if (!addMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (!addMenuWrapRef.current?.contains(e.target as Node)) setAddMenuOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [addMenuOpen]);
+  const composerRef = useRef<ChatComposerHandle | null>(null);
 
   // Load projects on first open.
   useEffect(() => {
@@ -71,8 +78,8 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
         setProjects([]);
         setProjectsLoaded(true);
       });
-    // Focus the prompt textarea when opening.
-    setTimeout(() => textareaRef.current?.focus(), 50);
+    // Focus the composer when opening.
+    setTimeout(() => composerRef.current?.focus(), 50);
   }, [initial, projectId]);
 
   // Reset form when re-opened with different defaults.
@@ -80,13 +87,60 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
     if (initial) {
       setProjectId(initial.projectId ?? "");
       setPrompt(initial.prompt ?? "");
-      setContextFiles(initial.contextFiles ?? []);
+      setAttachments(
+        (initial.contextFiles ?? []).map((path) => ({
+          path,
+          name: basename(path),
+        })),
+      );
       setExpedited(false);
       setError(null);
     }
   }, [initial]);
 
   if (!initial) return null;
+
+  const addAttachmentEntry = (entry: ChatComposerAttachment) => {
+    setAttachments((prev) => {
+      if (prev.some((a) => a.path === entry.path)) return prev;
+      return [...prev, entry];
+    });
+  };
+
+  const handleAddAttachment = (s: ChatComposerStagedAttachment) => {
+    addAttachmentEntry({
+      path: s.path,
+      name: s.name,
+      fromClipboard: s.fromClipboard,
+      previewUrl: s.preview?.previewUrl,
+      width: s.preview?.width,
+      height: s.preview?.height,
+    });
+  };
+
+  const handleRemoveAttachment = (path: string) => {
+    setAttachments((prev) => {
+      const removed = prev.find((a) => a.path === path);
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+      return prev.filter((a) => a.path !== path);
+    });
+  };
+
+  const pickFiles = async () => {
+    const picked = await openDialog({ multiple: true, directory: false });
+    if (picked == null) return;
+    const arr = Array.isArray(picked) ? picked : [picked];
+    for (const p of arr) {
+      const path = typeof p === "string" ? p : String(p);
+      addAttachmentEntry({ path, name: basename(path) });
+    }
+  };
+
+  const pickDirectory = async () => {
+    const picked = await openDialog({ multiple: false, directory: true });
+    if (typeof picked !== "string") return;
+    addAttachmentEntry({ path: picked, name: basename(picked) });
+  };
 
   const handleSubmit = async () => {
     if (!projectId) {
@@ -104,7 +158,7 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
         form: {
           projectId,
           prompt: prompt.trim(),
-          contextFiles,
+          contextFiles: attachments.map((a) => a.path),
           expedited,
         },
       });
@@ -154,123 +208,63 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
               </select>
             </label>
 
-            <label className={styles.field}>
-              <span>{t("launcher.prompt")}</span>
-              <textarea
-                ref={textareaRef}
-                className={styles.prompt}
-                rows={6}
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onInput={(e) => {
-                  const el = e.currentTarget;
-                  el.style.height = "auto";
-                  el.style.height = `${Math.min(el.scrollHeight, 320)}px`;
-                }}
-                placeholder={t("launcher.prompt_placeholder")}
-                disabled={submitting}
-                onKeyDown={(e) => {
-                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                    e.preventDefault();
-                    handleSubmit();
-                  }
-                }}
-              />
-            </label>
-
-            <div className={styles.field}>
-              <div className={styles.field_header}>
-                <span>{t("launcher.context_files")}</span>
-                <div className={styles.file_add_menu_wrap} ref={addMenuWrapRef}>
-                  <button
-                    type="button"
-                    className={styles.file_add_btn}
-                    disabled={submitting}
-                    onClick={() => setAddMenuOpen((v) => !v)}
-                    aria-haspopup="menu"
-                    aria-expanded={addMenuOpen}
-                  >
-                    {t("launcher.add")} ▾
-                  </button>
-                  {addMenuOpen && (
-                    <div className={styles.file_add_menu} role="menu">
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={async () => {
-                          setAddMenuOpen(false);
-                          const picked = await openDialog({ multiple: true, directory: false });
-                          if (picked == null) return;
-                          const arr = Array.isArray(picked) ? picked : [picked];
-                          const paths = arr.map((p) => (typeof p === "string" ? p : String(p)));
-                          setContextFiles((prev) => Array.from(new Set([...prev, ...paths])));
-                        }}
-                      >
-                        <svg
-                          className={styles.file_add_menu_icon}
-                          width="14"
-                          height="14"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.3"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M9.5 1.5H3.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V5.5z" />
-                          <path d="M9.5 1.5v4h4" />
-                        </svg>
-                        <span>{t("launcher.add_files")}</span>
-                      </button>
-                      <button
-                        type="button"
-                        role="menuitem"
-                        onClick={async () => {
-                          setAddMenuOpen(false);
-                          const picked = await openDialog({ multiple: false, directory: true });
-                          if (typeof picked !== "string") return;
-                          setContextFiles((prev) => Array.from(new Set([...prev, picked])));
-                        }}
-                      >
-                        <svg
-                          className={styles.file_add_menu_icon}
-                          width="14"
-                          height="14"
-                          viewBox="0 0 16 16"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.3"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          aria-hidden="true"
-                        >
-                          <path d="M1.5 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" />
-                        </svg>
-                        <span>{t("launcher.add_directory")}</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              {contextFiles.length > 0 && (
-                <ul className={styles.file_list}>
-                  {contextFiles.map((f, i) => (
-                    <li key={f}>
-                      <span title={f}>{f}</span>
-                      <button
-                        type="button"
-                        className={styles.file_remove}
-                        onClick={() => setContextFiles(contextFiles.filter((_, j) => j !== i))}
-                        disabled={submitting}
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
+            <ChatComposer
+              ref={composerRef}
+              value={prompt}
+              onChange={setPrompt}
+              attachments={attachments}
+              onAddAttachment={handleAddAttachment}
+              onRemoveAttachment={handleRemoveAttachment}
+              onAttachmentError={setError}
+              onSubmit={handleSubmit}
+              submitting={submitting}
+              submitDisabled={!projectId || !prompt.trim()}
+              placeholder={t("launcher.prompt_placeholder")}
+              disabled={submitting}
+              addMenuItems={[
+                {
+                  id: "files",
+                  label: t("launcher.add_files"),
+                  onSelect: pickFiles,
+                  icon: (
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M9.5 1.5H3.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V5.5z" />
+                      <path d="M9.5 1.5v4h4" />
+                    </svg>
+                  ),
+                },
+                {
+                  id: "folder",
+                  label: t("launcher.add_directory"),
+                  onSelect: pickDirectory,
+                  icon: (
+                    <svg
+                      width="14"
+                      height="14"
+                      viewBox="0 0 16 16"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M1.5 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" />
+                    </svg>
+                  ),
+                },
+              ]}
+            />
 
             <label className={styles.checkbox}>
               <input
@@ -284,20 +278,6 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
             </label>
 
             {error && <div className={styles.error}>{error}</div>}
-
-            <div className={styles.actions}>
-              <button type="button" onClick={onClose} disabled={submitting}>
-                {t("cancel")}
-              </button>
-              <button
-                type="button"
-                className={styles.primary}
-                onClick={handleSubmit}
-                disabled={submitting || !projectId || !prompt.trim()}
-              >
-                {submitting ? t("launcher.submitting") : t("launcher.submit")}
-              </button>
-            </div>
           </>
         )}
       </div>

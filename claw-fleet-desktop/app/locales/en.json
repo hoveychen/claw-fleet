@@ -1358,6 +1358,16 @@
     "attach_too_large": "Attachment is too large (max 50 MiB)",
     "attach_error_dismiss": "Dismiss"
   },
+  "composer": {
+    "placeholder": "Type a message…",
+    "attach_tooltip": "Attach file or image",
+    "attach_title": "Choose files or images",
+    "attachment_pasted": "Pasted",
+    "attachment_remove": "Remove attachment",
+    "attach_failed": "Attachment upload failed",
+    "attach_too_large": "Attachment is too large (max 50 MiB)",
+    "send": "Send (⌘/Ctrl+Enter)"
+  },
   "planApproval": {
     "title": "Plan ready for approval",
     "approve": "Approve",

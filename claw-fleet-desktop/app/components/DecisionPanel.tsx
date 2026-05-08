@@ -3,7 +3,6 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
 import { safeMarkdownComponents } from "../markdown/safeLinks";
 import type {
@@ -15,58 +14,8 @@ import type {
   PlanApprovalDecision,
   SessionPendingDecision,
 } from "../types";
+import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import styles from "./DecisionPanel.module.css";
-
-// Mirror of claw_fleet_core::backend::MAX_ATTACHMENT_BYTES so the UI can
-// reject oversized pastes before burning the full round-trip.
-const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
-
-// Best-effort mapping from a MIME type to a filename extension. Falls back to
-// "bin" when unknown — the stage command accepts that too.
-function mimeToExtension(mime: string): string {
-  const m = mime.toLowerCase();
-  if (m === "image/png") return "png";
-  if (m === "image/jpeg" || m === "image/jpg") return "jpg";
-  if (m === "image/gif") return "gif";
-  if (m === "image/webp") return "webp";
-  if (m === "image/bmp") return "bmp";
-  if (m === "image/svg+xml") return "svg";
-  const slash = m.indexOf("/");
-  return slash >= 0 ? m.slice(slash + 1).replace(/[^a-z0-9]/g, "") || "bin" : "bin";
-}
-
-// Webview clipboard API gives every pasted screenshot File.name = "image.png",
-// which collides visually for every paste. Replace that placeholder with a
-// timestamped name so users can tell attachments apart. Real dragged/copied
-// files keep their original names.
-function isDefaultClipboardName(name: string): boolean {
-  return !name || name === "image.png" || name === "image.jpg" || name === "image.jpeg";
-}
-
-function timestampedPasteName(ext: string): string {
-  const d = new Date();
-  const pad = (n: number, w = 2) => String(n).padStart(w, "0");
-  const hms = `${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-  const ms = pad(d.getMilliseconds(), 3);
-  return `pasted-${hms}${ms}.${ext}`;
-}
-
-// Decode a blob URL to get its natural dimensions. Resolves null if decoding
-// fails (e.g. non-image or browser refuses).
-function readImageDimensions(url: string): Promise<{ width: number; height: number } | null> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => resolve(null);
-    img.src = url;
-  });
-}
-
-function basename(p: string): string {
-  const normalized = p.replace(/\\/g, "/");
-  const slash = normalized.lastIndexOf("/");
-  return slash >= 0 ? normalized.slice(slash + 1) : normalized;
-}
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
@@ -154,7 +103,6 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
     addElicitationAttachment,
     removeElicitationAttachment,
   } = useDecisionStore();
-  const otherInputRef = useRef<HTMLTextAreaElement>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
   const errorDismissTimer = useRef<number | null>(null);
   const showAttachError = useCallback((msg: string) => {
@@ -298,7 +246,6 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           effectiveMulti={effectiveMulti}
           selected={selected}
           onToggle={toggleElicitationOption}
-          otherInputRef={otherInputRef}
           customText={customText}
           onCustomChange={(val) => setElicitationCustomAnswer(decision.id, q.question, val)}
           attachments={questionAttachments}
@@ -379,7 +326,6 @@ function OptionsBlock({
   effectiveMulti,
   selected,
   onToggle,
-  otherInputRef,
   customText,
   onCustomChange,
   attachments,
@@ -393,7 +339,6 @@ function OptionsBlock({
   effectiveMulti: boolean;
   selected: string[];
   onToggle: (id: string, questionText: string, label: string, multiSelect: boolean) => void;
-  otherInputRef: React.RefObject<HTMLTextAreaElement | null>;
   customText: string;
   onCustomChange: (val: string) => void;
   attachments: ElicitationAttachment[];
@@ -407,6 +352,7 @@ function OptionsBlock({
   onAttachmentError: (msg: string) => void;
 }) {
   const { t } = useTranslation();
+  const composerRef = useRef<ChatComposerHandle | null>(null);
   // Preview side-by-side layout only applies when question is single-select per
   // the AskUserQuestion spec. User-forced multi mode falls back to list layout.
   const hasPreview = useMemo(
@@ -423,13 +369,6 @@ function OptionsBlock({
   }, [firstWithPreview]);
 
   const focusedPreview = question.options.find((o) => o.label === focusedLabel)?.preview;
-
-  useEffect(() => {
-    const el = otherInputRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${el.scrollHeight}px`;
-  }, [customText, otherInputRef]);
 
   // Lite mode: push preview into a floating Tauri subwindow instead of the
   // inline grid, so the narrow main window isn't split in half. Normal mode
@@ -455,85 +394,6 @@ function OptionsBlock({
     };
   }, [compact]);
 
-  const handlePickFiles = useCallback(async () => {
-    try {
-      const result = await openDialog({
-        multiple: true,
-        title: t("elicitation.attach_title", "Choose files or images"),
-      });
-      if (result == null) return;
-      const picked = Array.isArray(result) ? result : [result];
-      for (const p of picked) {
-        const path = typeof p === "string" ? p : String(p);
-        await onAddAttachment(path, basename(path), false);
-      }
-    } catch (e) {
-      const detail = e instanceof Error ? e.message : String(e);
-      onAttachmentError(
-        `${t("elicitation.attach_failed", "Attachment upload failed")}: ${detail}`,
-      );
-    }
-  }, [onAddAttachment, onAttachmentError, t]);
-
-  const handlePaste = useCallback(
-    async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
-      const items = e.clipboardData?.items;
-      if (!items || items.length === 0) return;
-      const files: File[] = [];
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        if (it.kind !== "file") continue;
-        const file = it.getAsFile();
-        if (file) files.push(file);
-      }
-      if (files.length === 0) return;
-      e.preventDefault();
-      for (const f of files) {
-        let previewUrl: string | null = null;
-        try {
-          if (f.size > MAX_ATTACHMENT_BYTES) {
-            onAttachmentError(
-              t("elicitation.attach_too_large", "Attachment is too large (max 50 MiB)"),
-            );
-            continue;
-          }
-          const buf = await f.arrayBuffer();
-          const bytes = Array.from(new Uint8Array(buf));
-          const mime = f.type || "application/octet-stream";
-          const ext = mimeToExtension(mime);
-          const isImage = mime.startsWith("image/");
-
-          // Generate preview metadata BEFORE hitting the backend so we can
-          // hand it to the store alongside the staged path.
-          let dims: { width: number; height: number } | null = null;
-          if (isImage) {
-            previewUrl = URL.createObjectURL(f);
-            dims = await readImageDimensions(previewUrl);
-          }
-
-          const stagedPath = await invoke<string>("stage_pasted_attachment", {
-            bytes,
-            extension: ext,
-          });
-          const displayName = isDefaultClipboardName(f.name)
-            ? timestampedPasteName(ext)
-            : f.name;
-          await onAddAttachment(stagedPath, displayName, true, previewUrl && dims
-            ? { previewUrl, width: dims.width, height: dims.height }
-            : undefined);
-          previewUrl = null; // ownership transferred to the store
-        } catch (err) {
-          if (previewUrl) URL.revokeObjectURL(previewUrl);
-          const detail = err instanceof Error ? err.message : String(err);
-          onAttachmentError(
-            `${t("elicitation.attach_failed", "Attachment upload failed")}: ${detail}`,
-          );
-        }
-      }
-    },
-    [onAddAttachment, onAttachmentError, t],
-  );
-
   const list = (
     <div className={styles.elicitation_options}>
       {question.options.map((opt) => {
@@ -545,14 +405,10 @@ function OptionsBlock({
             ? `${opt.label} — ${opt.description}`
             : opt.label;
           onCustomChange(seed);
-          // Focus the Other textarea so the user can start editing immediately.
+          // Focus the Other composer so the user can start editing immediately.
           requestAnimationFrame(() => {
-            const el = otherInputRef.current;
-            if (el) {
-              el.focus();
-              // Place caret at the end.
-              el.setSelectionRange(el.value.length, el.value.length);
-            }
+            composerRef.current?.focus();
+            composerRef.current?.setSelectionAtEnd();
           });
         };
         return (
@@ -590,91 +446,22 @@ function OptionsBlock({
         );
       })}
 
-      <div
-        className={`${styles.elicitation_other} ${customText || attachments.length > 0 ? styles.elicitation_other_active : ""}`}
-        onClick={() => otherInputRef.current?.focus()}
-      >
+      <div className={styles.elicitation_other_block}>
         <span className={styles.elicitation_option_label}>
           {t("elicitation.other", "Other")}
         </span>
-        {attachments.length > 0 && (
-          <div className={styles.elicitation_attachments} onClick={(e) => e.stopPropagation()}>
-            {attachments.map((a) => {
-              const hasThumb = !!a.previewUrl;
-              const dims = a.width && a.height ? `${a.width}×${a.height}` : null;
-              return (
-                <div
-                  key={a.path}
-                  className={`${styles.elicitation_attachment_chip} ${hasThumb ? styles.elicitation_attachment_chip_image : ""}`}
-                  title={a.path}
-                >
-                  {hasThumb && (
-                    <img
-                      src={a.previewUrl}
-                      alt=""
-                      className={styles.elicitation_attachment_thumb}
-                      draggable={false}
-                    />
-                  )}
-                  <div className={styles.elicitation_attachment_meta}>
-                    <span className={styles.elicitation_attachment_name}>{a.name}</span>
-                    {dims && (
-                      <span className={styles.elicitation_attachment_dims}>{dims}</span>
-                    )}
-                  </div>
-                  {a.fromClipboard && !hasThumb && (
-                    <span className={styles.elicitation_attachment_badge}>
-                      {t("elicitation.attachment_pasted", "Pasted")}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    className={styles.elicitation_attachment_remove}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onRemoveAttachment(a.path);
-                    }}
-                    title={t("elicitation.attachment_remove", "Remove attachment")}
-                    aria-label={t("elicitation.attachment_remove", "Remove attachment")}
-                  >
-                    ×
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <div className={styles.elicitation_other_row}>
-          <button
-            type="button"
-            className={styles.elicitation_attach_btn}
-            onClick={(e) => {
-              e.stopPropagation();
-              handlePickFiles();
-            }}
-            title={t("elicitation.attach_tooltip", "Attach file or image")}
-            aria-label={t("elicitation.attach_tooltip", "Attach file or image")}
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-          <textarea
-            ref={otherInputRef}
-            className={styles.elicitation_other_input}
-            rows={1}
-            placeholder={t("elicitation.other_placeholder", "Type your answer…")}
-            value={customText}
-            onChange={(e) => onCustomChange(e.target.value)}
-            onPaste={handlePaste}
-            onInput={(e) => {
-              const el = e.currentTarget;
-              el.style.height = "auto";
-              el.style.height = `${el.scrollHeight}px`;
-            }}
-          />
-        </div>
+        <ChatComposer
+          ref={composerRef}
+          value={customText}
+          onChange={onCustomChange}
+          attachments={attachments}
+          onAddAttachment={(s) =>
+            onAddAttachment(s.path, s.name, s.fromClipboard, s.preview)
+          }
+          onRemoveAttachment={onRemoveAttachment}
+          onAttachmentError={onAttachmentError}
+          placeholder={t("elicitation.other_placeholder", "Type your answer…")}
+        />
       </div>
     </div>
   );
