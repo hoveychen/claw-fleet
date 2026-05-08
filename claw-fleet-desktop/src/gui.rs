@@ -2877,6 +2877,16 @@ pub fn run() {
                 });
             }
 
+            // ── Supervisor daemon auto-install (macOS) ───────────────────
+            // Without this, the `fleet serve` LaunchAgent never gets loaded,
+            // supervisor::tick() never fires, and queued FleetSession entries
+            // sit forever in `~/.claude/fleet/fleet-sessions.json`.
+            // Idempotent and fast; run on a background thread anyway so a
+            // slow `launchctl bootstrap` can't stall startup.
+            std::thread::spawn(|| {
+                crate::daemon_autostart::ensure_supervisor_daemon();
+            });
+
             // Truncate the hook events file if it has grown too large.
             hooks::maybe_truncate_events_file();
 
