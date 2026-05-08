@@ -188,6 +188,73 @@ export const useSessionsStore = create<SessionsState>((set) => ({
   },
 }));
 
+// ── Projects store ──────────────────────────────────────────────────────────
+// Shared state for the Projects view + the sidebar nav: list of projects,
+// fleet sessions used to derive per-project counts, and the currently-
+// selected project id.
+
+export interface KanbanColumn {
+  id: string;
+  name: string;
+  color: string | null;
+  isDefault: boolean;
+  order: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  workspace: string;
+  concurrency: number;
+  kanbanColumns: KanbanColumn[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface FleetSession {
+  id: string;
+  projectId: string;
+  workspace: string;
+  fleetsessionPath: string | null;
+  prompt: string;
+  contextFiles: string[];
+  status: string;
+  note: string | null;
+  createdAt: number;
+  startedAt: number | null;
+  completedAt: number | null;
+  pid: number | null;
+  expedited: boolean;
+}
+
+interface ProjectsState {
+  projects: Project[];
+  fleetSessions: FleetSession[];
+  selectedProjectId: string | null;
+  loaded: boolean;
+  setSelectedProjectId: (id: string | null) => void;
+  refresh: () => Promise<void>;
+}
+
+export const useProjectsStore = create<ProjectsState>((set) => ({
+  projects: [],
+  fleetSessions: [],
+  selectedProjectId: null,
+  loaded: false,
+  setSelectedProjectId: (id) => set({ selectedProjectId: id }),
+  refresh: async () => {
+    try {
+      const [projects, fleetSessions] = await Promise.all([
+        invoke<Project[]>("list_projects"),
+        invoke<FleetSession[]>("list_fleet_sessions").catch(() => []),
+      ]);
+      set({ projects, fleetSessions, loaded: true });
+    } catch {
+      set({ loaded: true });
+    }
+  },
+}));
+
 // ── Fleet-managed sessions store ──────────────────────────────────────────────
 // Tracks which session ids were spawned by Fleet itself (vs. observed
 // passively from another tool). Populated by ProjectsView + SessionList on

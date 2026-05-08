@@ -2,45 +2,11 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useDetailStore, useSessionsStore, useUIStore } from "../store";
+import { useDetailStore, useProjectsStore, useSessionsStore, useUIStore, type KanbanColumn, type Project } from "../store";
 import { FileBrowserView, type FileBrowserSelection } from "./FileBrowserView";
 import { KanbanView } from "./KanbanView";
 import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import styles from "./ProjectsView.module.css";
-
-interface KanbanColumn {
-  id: string;
-  name: string;
-  color: string | null;
-  isDefault: boolean;
-  order: number;
-}
-
-interface Project {
-  id: string;
-  name: string;
-  workspace: string;
-  concurrency: number;
-  kanbanColumns: KanbanColumn[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-interface FleetSession {
-  id: string;
-  projectId: string;
-  workspace: string;
-  fleetsessionPath: string | null;
-  prompt: string;
-  contextFiles: string[];
-  status: string;
-  note: string | null;
-  createdAt: number;
-  startedAt: number | null;
-  completedAt: number | null;
-  pid: number | null;
-  expedited: boolean;
-}
 
 type DialogMode =
   | { type: "create" }
@@ -50,29 +16,18 @@ type DialogMode =
 
 export function ProjectsView() {
   const { t } = useTranslation();
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [fleetSessions, setFleetSessions] = useState<FleetSession[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const projects = useProjectsStore((s) => s.projects);
+  const fleetSessions = useProjectsStore((s) => s.fleetSessions);
+  const loaded = useProjectsStore((s) => s.loaded);
+  const selectedId = useProjectsStore((s) => s.selectedProjectId);
+  const setSelectedId = useProjectsStore((s) => s.setSelectedProjectId);
   const [dialog, setDialog] = useState<DialogMode>(null);
   const [error, setError] = useState<string | null>(null);
   const [launcherInitial, setLauncherInitial] = useState<SessionLauncherProps["initial"]>(null);
   const [listCollapsed, setListCollapsed] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      const [projData, sessData] = await Promise.all([
-        invoke<Project[]>("list_projects"),
-        invoke<FleetSession[]>("list_fleet_sessions").catch(() => []),
-      ]);
-      setProjects(projData);
-      setFleetSessions(sessData);
-    } catch {
-      setProjects([]);
-      setFleetSessions([]);
-    } finally {
-      setLoaded(true);
-    }
+    await useProjectsStore.getState().refresh();
   }, []);
 
   useEffect(() => {
