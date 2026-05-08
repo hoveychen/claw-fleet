@@ -216,6 +216,7 @@ export function FileBrowserView({
   );
   const [columnEntries, setColumnEntries] = useState<Map<string, FileEntry[]>>(new Map());
   const [previewState, setPreviewState] = useState<PreviewState>({ kind: "idle" });
+  const anchorRef = useRef<string | null>(null);
 
   const setViewMode = useCallback(
     (m: ViewMode) => {
@@ -604,15 +605,27 @@ export function FileBrowserView({
     return out;
   }, [currentDir, workspace]);
 
-  const handleClick = (entry: FileEntry, e: React.MouseEvent) => {
+  const handleClick = (entry: FileEntry, e: React.MouseEvent, list: FileEntry[]) => {
     if (e.metaKey || e.ctrlKey) {
       const next = new Set(selected);
       if (next.has(entry.path)) next.delete(entry.path);
       else next.add(entry.path);
       setSelected(next);
-    } else {
-      setSelected(new Set([entry.path]));
+      anchorRef.current = entry.path;
+      return;
     }
+    if (e.shiftKey && anchorRef.current) {
+      const anchorIdx = list.findIndex((x) => x.path === anchorRef.current);
+      const clickIdx = list.findIndex((x) => x.path === entry.path);
+      if (anchorIdx !== -1 && clickIdx !== -1) {
+        const [from, to] =
+          anchorIdx < clickIdx ? [anchorIdx, clickIdx] : [clickIdx, anchorIdx];
+        setSelected(new Set(list.slice(from, to + 1).map((x) => x.path)));
+        return;
+      }
+    }
+    setSelected(new Set([entry.path]));
+    anchorRef.current = entry.path;
   };
 
   const handleDoubleClick = async (entry: FileEntry) => {
@@ -742,7 +755,7 @@ export function FileBrowserView({
         onDragOver={entry.isDir ? (e) => dragOverDir(e, entry.path) : undefined}
         onDragLeave={entry.isDir ? dragLeave : undefined}
         onDrop={entry.isDir ? (e) => dropOnDir(e, entry.path) : undefined}
-        onClick={isRenaming ? undefined : (e) => handleClick(entry, e)}
+        onClick={isRenaming ? undefined : (e) => handleClick(entry, e, sortedEntries)}
         onDoubleClick={isRenaming ? undefined : () => handleDoubleClick(entry)}
         onContextMenu={isRenaming ? undefined : (e) => openContextMenu(e, entry)}
         title={entry.path}
@@ -753,7 +766,7 @@ export function FileBrowserView({
         {isRenaming ? (
           <RenameInput entry={entry} onCommit={commitRename} onCancel={() => setRenamingPath(null)} />
         ) : (
-          <span className={styles.tile_name}>{entry.name}</span>
+          <span className={`${styles.tile_name} ${isSel ? styles.tile_name_selected : ""}`}>{entry.name}</span>
         )}
       </div>
     );
@@ -774,7 +787,7 @@ export function FileBrowserView({
         onDragOver={entry.isDir ? (e) => dragOverDir(e, entry.path) : undefined}
         onDragLeave={entry.isDir ? dragLeave : undefined}
         onDrop={entry.isDir ? (e) => dropOnDir(e, entry.path) : undefined}
-        onClick={(e) => handleClick(entry, e)}
+        onClick={(e) => handleClick(entry, e, sortedEntries)}
         onDoubleClick={() => handleDoubleClick(entry)}
         onContextMenu={(e) => openContextMenu(e, entry)}
         title={entry.path}
@@ -1009,7 +1022,15 @@ export function FileBrowserView({
                         onDragOver={entry.isDir ? (e) => dragOverDir(e, entry.path) : undefined}
                         onDragLeave={entry.isDir ? dragLeave : undefined}
                         onDrop={entry.isDir ? (e) => dropOnDir(e, entry.path) : undefined}
-                        onClick={(e) => handleClick(entry, e)}
+                        onClick={(e) => {
+                          if (entry.isDir && !(e.metaKey || e.ctrlKey || e.shiftKey)) {
+                            setSelected(new Set([entry.path]));
+                            setCurrentDir(entry.path);
+                            anchorRef.current = entry.path;
+                          } else {
+                            handleClick(entry, e, sorted);
+                          }
+                        }}
                         onDoubleClick={() => handleDoubleClick(entry)}
                         onContextMenu={(e) => openContextMenu(e, entry)}
                         title={entry.path}
