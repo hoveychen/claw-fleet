@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore } from "../store";
+import type { SessionInfo } from "../types";
 import styles from "./KanbanView.module.css";
 
 interface KanbanColumn {
@@ -311,12 +312,28 @@ function KanbanCard({
   isDragging: boolean;
   t: (k: string) => string;
 }) {
+  // Live SessionInfo (real-time transcript scan) keyed by Claude session UUID,
+  // which is exactly FleetSession.id. Zustand selector returns the same
+  // reference when the underlying SessionInfo hasn't changed, so this only
+  // re-renders when this card's session actually updates.
+  const liveInfo: SessionInfo | undefined = useSessionsStore((s) =>
+    s.sessions.find((info) => info.id === session.id),
+  );
+
   const draggable = !column.isDefault;
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData("text/plain", session.id);
     e.dataTransfer.effectAllowed = "move";
     onDragStart();
   };
+
+  const title =
+    liveInfo?.aiTitle?.trim() ||
+    session.prompt.slice(0, 60) ||
+    session.id.slice(0, 8);
+  const speed = liveInfo?.tokenSpeed ?? 0;
+  const dotInlineStyle =
+    !liveInfo && column.color ? { background: column.color } : undefined;
 
   return (
     <div
@@ -330,10 +347,17 @@ function KanbanCard({
       <div className={styles.card_header}>
         <span
           className={styles.card_status_dot}
-          style={column.color ? { background: column.color } : undefined}
+          data-status={liveInfo?.status}
+          style={dotInlineStyle}
           aria-hidden
         />
-        <span className={styles.card_title}>{session.prompt.slice(0, 60) || session.id.slice(0, 8)}</span>
+        <span className={styles.card_title}>{title}</span>
+        {speed >= 0.5 && (
+          <span className={styles.card_speed}>
+            {speed.toFixed(1)}
+            <span className={styles.card_speed_unit}> {t("tok_s")}</span>
+          </span>
+        )}
         {session.expedited && <span className={styles.card_chip}>{t("kanban.expedited")}</span>}
       </div>
       {session.note && <div className={styles.card_note}>{session.note}</div>}
