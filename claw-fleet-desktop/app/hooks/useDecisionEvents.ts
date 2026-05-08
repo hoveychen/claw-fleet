@@ -2,7 +2,12 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef } from "react";
 import { playDecisionAlert } from "../audio";
 import { useDecisionStore } from "../store";
-import type { ElicitationRequest, GuardRequest, PlanApprovalRequest } from "../types";
+import type {
+  ElicitationRequest,
+  GuardRequest,
+  PlanApprovalRequest,
+  SessionPendingRequest,
+} from "../types";
 
 // Split a `question` field on a line containing only `---` (per Fleet
 // Interaction Mode's "Speech Summary Divider" convention). Returns
@@ -38,6 +43,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   const addGuardRequest = useDecisionStore((s) => s.addGuardRequest);
   const addElicitationRequest = useDecisionStore((s) => s.addElicitationRequest);
   const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
+  const addSessionPendingRequest = useDecisionStore((s) => s.addSessionPendingRequest);
   const dismiss = useDecisionStore((s) => s.dismiss);
 
   // Dedup: re-emitted payloads (e.g. after remount / reconnect) shouldn't
@@ -98,13 +104,33 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     };
   }, [addPlanApprovalRequest, silent]);
 
+  useEffect(() => {
+    const unlisten = listen<SessionPendingRequest>("session-pending-request", (e) => {
+      const r = e.payload;
+      if (!silent && !announcedIds.current.has(r.id)) {
+        announcedIds.current.add(r.id);
+        // Reuse the elicitation chime — same "agent yielded, your turn" feel.
+        playDecisionAlert("elicitation", r.promptPreview ?? "");
+      }
+      addSessionPendingRequest(r);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addSessionPendingRequest, silent]);
+
   // Dismiss events — fire when another client (mobile, other desktop) answers
   // a pending decision, or when `fleet guard`/`fleet elicitation` times out
   // and cleans up the request file. The backend polling loop in
   // local_backend.rs / remote.rs emits these by diffing the known id set
   // against the current pending set.
   useEffect(() => {
-    const unlistens = ["guard-dismissed", "elicitation-dismissed", "plan-approval-dismissed"].map(
+    const unlistens = [
+      "guard-dismissed",
+      "elicitation-dismissed",
+      "plan-approval-dismissed",
+      "session-pending-dismissed",
+    ].map(
       (evt) => listen<string>(evt, (e) => {
         const id = e.payload;
         if (id) {

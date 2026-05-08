@@ -24,6 +24,8 @@
 
 use std::process::{Command, Stdio};
 
+use serde::{Deserialize, Serialize};
+
 use crate::project::{
     self, FleetSession, LauncherForm, DEFAULT_COLUMN_COMPLETE, DEFAULT_COLUMN_QUEUED,
     DEFAULT_COLUMN_RUNNING,
@@ -87,6 +89,7 @@ pub fn enqueue(form: LauncherForm) -> Result<FleetSession, String> {
         completed_at: None,
         pid: None,
         expedited: form.expedited,
+        final_by_agent: false,
     };
     sessions.push(new.clone());
     project::save_fleet_sessions(&sessions)?;
@@ -108,6 +111,10 @@ pub fn cancel(session_id: &str) -> Result<(), String> {
     sessions[idx].completed_at = Some(now_ms());
     sessions[idx].pid = None;
     sessions[idx].note = Some("cancelled".into());
+    // User-initiated cancel counts as proactive resolution — suppress the
+    // wait-for-input card so it doesn't pop on a sid the user just killed.
+    sessions[idx].final_by_agent = true;
+    crate::idle::clear_idle(session_id);
     project::save_fleet_sessions(&sessions)
 }
 
@@ -130,6 +137,14 @@ pub fn resume(session_id: &str, follow_up_prompt: String) -> Result<(), String> 
     sessions[idx].completed_at = None;
     sessions[idx].started_at = None;
     sessions[idx].note = None;
+    // Resume = "agent will run again", so we re-enter the wait-for-input
+    // lifecycle from scratch: clear any leftover idle sentinel from the
+    // previous turn (otherwise the card watcher would re-emit between this
+    // call and the next supervisor tick that respawns claude) and reset
+    // final_by_agent so the next end-of-turn can again show the card if the
+    // agent doesn't self-mark.
+    crate::idle::clear_idle(session_id);
+    sessions[idx].final_by_agent = false;
     project::save_fleet_sessions(&sessions)
 }
 
@@ -153,8 +168,19 @@ pub fn set_status(session_id: &str, new_status: &str, note: Option<String>) -> R
 
     if valid_column {
         sessions[idx].status = new_status.into();
-        if new_status == DEFAULT_COLUMN_COMPLETE {
+        // Stamp completed_at + flag final_by_agent when moving into ANY
+        // terminal column (default `complete` plus any user-defined
+        // `is_terminal: true` column). `set_status` is the proactive path —
+        // called from agent self-mark (`fleet session status complete`) or
+        // from the SessionPendingCard buttons. The supervisor's own Pass 1
+        // auto-complete on process exit takes a different code path that
+        // intentionally leaves `final_by_agent = false`.
+        let is_terminal = proj
+            .map(|p| project::is_terminal_status(p, new_status))
+            .unwrap_or(false);
+        if is_terminal {
             sessions[idx].completed_at = Some(now_ms());
+            sessions[idx].final_by_agent = true;
         }
     } else {
         // Unknown status string from agent — record as note, do not move column.
@@ -202,10 +228,16 @@ fn tick_macos() -> Result<(), String> {
                         s.note = Some("process exited".into());
                     }
                 }
-                // Drop any leftover idle sentinel — the agent's Stop hook may have
-                // touched it just before the process died, but a complete session
-                // shouldn't keep flipping the kanban via Pass 1.5.
-                crate::idle::clear_idle(&s.id);
+                // Intentionally NOT calling `idle::clear_idle` here. If the
+                // agent's Stop hook fired right before the process exited
+                // (the normal `claude --print` end-of-turn flow), the
+                // sentinel survives this auto-complete so the wait-for-input
+                // DecisionPanel card can pop and ask the user to confirm
+                // (set_status will then flag `final_by_agent`) or send a
+                // follow-up via `resume`. Hard cleanup of the sentinel
+                // happens in `set_status` (terminal-column path) and in
+                // `resume`, both of which represent a proactive user/agent
+                // action.
                 changed = true;
             }
         }
@@ -365,6 +397,153 @@ pub fn ensure_fleet_cli_link(fleet_path: &str) -> Result<(), String> {
 }
 
 // ── Pending detection ───────────────────────────────────────────────────────
+
+/// One fleet session that has gone idle (Stop hook fired) and is awaiting user
+/// input, paired with the project's terminal column ids so the DecisionPanel
+/// card can render its action buttons. Returned by
+/// [`fleet_sessions_needing_input`].
+#[derive(Clone, Debug)]
+pub struct PendingFleetSession {
+    pub session: FleetSession,
+    /// `(id, name)` pairs for every terminal kanban column on the owning
+    /// project, in display order. Always at least one entry (`complete`).
+    pub terminal_columns: Vec<(String, String)>,
+}
+
+/// One terminal kanban column, in the wire-format shape used by the
+/// `session-pending-request` Tauri event and the
+/// `GET /fleet_sessions/needing-input` HTTP endpoint.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalColumn {
+    pub id: String,
+    pub name: String,
+}
+
+/// Wait-for-input DecisionPanel request payload. Emitted as
+/// `session-pending-request` by the desktop watcher and returned verbatim by
+/// `GET /fleet_sessions/needing-input` (the remote-backend probe contract).
+///
+/// `id` is the unique key the frontend uses to dedup cards; we set it to
+/// `session_id` because there is at most one pending-input card per session
+/// at a time.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPendingRequest {
+    pub id: String,
+    pub session_id: String,
+    pub project_id: String,
+    pub workspace: String,
+    /// Display name for the card / tab (workspace basename in the wire
+    /// payload; LocalBackend's watcher overwrites with the live SessionInfo
+    /// workspace name before emitting the Tauri event).
+    pub workspace_name: String,
+    /// First non-empty line of the originating prompt, capped at 200 chars,
+    /// so the card has something to show even before the frontend has
+    /// fetched the live transcript tail.
+    pub prompt_preview: String,
+    pub terminal_columns: Vec<TerminalColumn>,
+    /// `idle::IdleRecord.since` (ms since epoch) — when the agent's Stop hook
+    /// last fired. `None` if the sentinel was cleared between listing and read.
+    pub since_ms: Option<u64>,
+}
+
+/// Wire-format list for the `session-pending-request` event source. Wraps
+/// [`fleet_sessions_needing_input`] with prompt-preview trimming and idle
+/// timestamp lookup so both LocalBackend (direct call) and RemoteBackend
+/// (via HTTP `GET /fleet_sessions/needing-input`) speak the same shape.
+pub fn session_pending_requests() -> Vec<SessionPendingRequest> {
+    fleet_sessions_needing_input()
+        .into_iter()
+        .map(|p| {
+            let prompt_preview = p
+                .session
+                .prompt
+                .lines()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .chars()
+                .take(200)
+                .collect::<String>();
+            let since_ms = crate::idle::read_idle(&p.session.id).map(|r| r.since);
+            let workspace_name = std::path::Path::new(&p.session.workspace)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| p.session.workspace.clone());
+            SessionPendingRequest {
+                id: p.session.id.clone(),
+                session_id: p.session.id.clone(),
+                project_id: p.session.project_id.clone(),
+                workspace: p.session.workspace.clone(),
+                workspace_name,
+                prompt_preview,
+                terminal_columns: p
+                    .terminal_columns
+                    .into_iter()
+                    .map(|(id, name)| TerminalColumn { id, name })
+                    .collect(),
+                since_ms,
+            }
+        })
+        .collect()
+}
+
+/// List the fleet sessions that are currently idle (Stop hook fired) AND not
+/// yet **proactively** finalised by the agent or user, AND whose owning
+/// project we still know about. This is the source of truth for the
+/// wait-for-input DecisionPanel card — guard / elicitation pendings are
+/// surfaced through their own dedicated cards and are intentionally
+/// excluded here.
+///
+/// The trigger is `idle::list_idle_sessions()`. The suppression check is
+/// `!final_by_agent`, NOT a status-terminal check: when headless
+/// `claude --print` exits at end-of-turn the supervisor's Pass 1 auto-marks
+/// status = complete (per Boss's "process exit is normal" decision), but
+/// `final_by_agent` stays false until the agent self-marks via fleet-cli
+/// (`fleet session status <terminal>`) or the user picks a terminal-column
+/// button on the SessionPendingCard. So sessions whose status was just
+/// auto-completed by Pass 1 still surface here.
+///
+/// Sessions launched outside of fleet (no `FleetSession` record) are
+/// skipped: the DecisionPanel only intervenes for fleet-managed main
+/// agents. Subagents don't appear here either because the idle hook is
+/// only wired to the `Stop` event, never `SubagentStop`.
+pub fn fleet_sessions_needing_input() -> Vec<PendingFleetSession> {
+    let idle_ids = crate::idle::list_idle_sessions();
+    if idle_ids.is_empty() {
+        return Vec::new();
+    }
+    let projects = project::list_projects();
+    let sessions = project::list_fleet_sessions();
+
+    let mut out = Vec::new();
+    for sid in idle_ids {
+        let Some(s) = sessions.iter().find(|s| s.id == sid) else {
+            continue;
+        };
+        let Some(proj) = projects.iter().find(|p| p.id == s.project_id) else {
+            continue;
+        };
+        if s.final_by_agent {
+            continue;
+        }
+        let mut cols: Vec<&project::KanbanColumn> = proj
+            .kanban_columns
+            .iter()
+            .filter(|c| c.is_terminal || c.id == DEFAULT_COLUMN_COMPLETE)
+            .collect();
+        cols.sort_by_key(|c| c.order);
+        let terminal_columns: Vec<(String, String)> = cols
+            .into_iter()
+            .map(|c| (c.id.clone(), c.name.clone()))
+            .collect();
+        out.push(PendingFleetSession {
+            session: s.clone(),
+            terminal_columns,
+        });
+    }
+    out
+}
 
 /// Build a set of session IDs that currently have a pending guard or
 /// elicitation request awaiting user response, OR an idle sentinel touched by
@@ -528,6 +707,292 @@ mod tests {
         let pending = pending_session_ids();
         assert!(pending.contains("sess-a"));
         assert!(!pending.contains("sess-b"));
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    // ── fleet_sessions_needing_input ────────────────────────────────────────
+
+    fn write_project_with_columns(home: &std::path::Path, cols: Vec<project::KanbanColumn>) -> project::Project {
+        let dir = home.join(".claude").join("fleet");
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = project::Project {
+            id: "proj-1".into(),
+            name: "test".into(),
+            workspace: home.to_string_lossy().to_string(),
+            concurrency: 1,
+            kanban_columns: cols,
+            created_at: 0,
+            updated_at: 0,
+        };
+        let json = serde_json::to_string_pretty(&vec![p.clone()]).unwrap();
+        std::fs::write(dir.join("projects.json"), json).unwrap();
+        p
+    }
+
+    fn write_session(home: &std::path::Path, sid: &str, project_id: &str, status: &str) {
+        write_session_full(home, sid, project_id, status, false);
+    }
+
+    fn write_session_full(
+        home: &std::path::Path,
+        sid: &str,
+        project_id: &str,
+        status: &str,
+        final_by_agent: bool,
+    ) {
+        let dir = home.join(".claude").join("fleet");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut existing: Vec<project::FleetSession> =
+            std::fs::read_to_string(dir.join("fleet-sessions.json"))
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default();
+        existing.push(project::FleetSession {
+            id: sid.into(),
+            project_id: project_id.into(),
+            workspace: home.to_string_lossy().to_string(),
+            fleetsession_path: None,
+            prompt: "p".into(),
+            context_files: vec![],
+            status: status.into(),
+            note: None,
+            created_at: 0,
+            started_at: Some(0),
+            completed_at: None,
+            pid: None,
+            expedited: false,
+            final_by_agent,
+        });
+        let json = serde_json::to_string_pretty(&existing).unwrap();
+        std::fs::write(dir.join("fleet-sessions.json"), json).unwrap();
+    }
+
+    #[test]
+    fn pending_input_excludes_only_final_by_agent_sessions() {
+        // After Boss's "process exit is normal" decision, status=complete
+        // alone no longer suppresses the card — Pass 1 auto-complete leaves
+        // `final_by_agent = false` so the user can still pop the card and
+        // confirm. Only sessions whose agent or user has *proactively*
+        // marked final (via fleet-cli or the card buttons) are filtered.
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("pending-input-final-by-agent");
+        let _override = FleetHomeOverride::new(&home);
+
+        let project = write_project_with_columns(&home, project::default_kanban_columns());
+        // Auto-completed by Pass 1 (process exited): status=complete but
+        // final_by_agent=false → must still appear in the pending list.
+        write_session_full(
+            &home,
+            "sess-auto-complete",
+            &project.id,
+            project::DEFAULT_COLUMN_COMPLETE,
+            false,
+        );
+        // Agent self-marked complete: status=complete + final_by_agent=true
+        // → must be excluded from the pending list (no card).
+        write_session_full(
+            &home,
+            "sess-marked-final",
+            &project.id,
+            project::DEFAULT_COLUMN_COMPLETE,
+            true,
+        );
+        crate::idle::mark_idle("sess-auto-complete").unwrap();
+        crate::idle::mark_idle("sess-marked-final").unwrap();
+
+        let pending = fleet_sessions_needing_input();
+        let ids: Vec<&str> = pending.iter().map(|p| p.session.id.as_str()).collect();
+        assert_eq!(ids, vec!["sess-auto-complete"]);
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn pending_input_skips_sessions_outside_known_projects() {
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("pending-input-orphan");
+        let _override = FleetHomeOverride::new(&home);
+
+        // No projects.json at all → an idle sentinel for an untracked sid must
+        // produce zero card emissions.
+        crate::idle::mark_idle("rogue-sid").unwrap();
+        assert!(fleet_sessions_needing_input().is_empty());
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn pending_input_lists_terminal_columns_in_order() {
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("pending-input-cols");
+        let _override = FleetHomeOverride::new(&home);
+
+        let mut cols = project::default_kanban_columns();
+        cols.push(project::KanbanColumn {
+            id: "shipped".into(),
+            name: "Shipped".into(),
+            color: None,
+            is_default: false,
+            is_terminal: true,
+            order: 5, // after complete (order=3)
+        });
+        cols.push(project::KanbanColumn {
+            id: "blocked".into(),
+            name: "Blocked".into(),
+            color: None,
+            is_default: false,
+            is_terminal: false,
+            order: 4, // after complete but not terminal — must be filtered
+        });
+        let project = write_project_with_columns(&home, cols);
+        write_session(&home, "sess-1", &project.id, project::DEFAULT_COLUMN_RUNNING);
+        crate::idle::mark_idle("sess-1").unwrap();
+
+        let pending = fleet_sessions_needing_input();
+        assert_eq!(pending.len(), 1);
+        let cols = &pending[0].terminal_columns;
+        assert_eq!(
+            cols,
+            &vec![
+                (project::DEFAULT_COLUMN_COMPLETE.into(), "Complete".into()),
+                ("shipped".into(), "Shipped".into()),
+            ],
+            "terminal_columns must be sorted by order and exclude non-terminal entries"
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn session_pending_requests_includes_prompt_preview_and_since_ms() {
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("pending-input-wire");
+        let _override = FleetHomeOverride::new(&home);
+
+        let project = write_project_with_columns(&home, project::default_kanban_columns());
+        write_session(&home, "sess-1", &project.id, project::DEFAULT_COLUMN_RUNNING);
+        // Override the prompt to test prompt_preview trimming.
+        let mut sessions = project::list_fleet_sessions();
+        sessions[0].prompt = "  \n\nfirst line that should appear\nsecond line should not\n"
+            .into();
+        project::save_fleet_sessions(&sessions).unwrap();
+        crate::idle::mark_idle("sess-1").unwrap();
+
+        let requests = session_pending_requests();
+        assert_eq!(requests.len(), 1);
+        let r = &requests[0];
+        assert_eq!(r.id, r.session_id);
+        assert_eq!(r.session_id, "sess-1");
+        assert_eq!(r.project_id, project.id);
+        assert_eq!(r.prompt_preview, "first line that should appear");
+        assert!(r.since_ms.is_some(), "since_ms must be populated when sentinel exists");
+        assert_eq!(
+            r.terminal_columns,
+            vec![TerminalColumn {
+                id: project::DEFAULT_COLUMN_COMPLETE.into(),
+                name: "Complete".into()
+            }]
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn session_pending_request_serialises_camel_case() {
+        // The wire contract used by the HTTP probe and Tauri event emitter:
+        // verify keys are camelCase so the TypeScript side parses cleanly
+        // without an extra rename layer.
+        let req = SessionPendingRequest {
+            id: "s1".into(),
+            session_id: "s1".into(),
+            project_id: "p1".into(),
+            workspace: "/ws".into(),
+            workspace_name: "ws".into(),
+            prompt_preview: "hi".into(),
+            terminal_columns: vec![TerminalColumn {
+                id: "complete".into(),
+                name: "Complete".into(),
+            }],
+            since_ms: Some(123),
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert!(json.get("sessionId").is_some(), "sessionId (camelCase) expected");
+        assert!(json.get("projectId").is_some());
+        assert!(json.get("workspaceName").is_some());
+        assert!(json.get("promptPreview").is_some());
+        assert!(json.get("terminalColumns").is_some());
+        assert!(json.get("sinceMs").is_some());
+        // snake_case keys must NOT exist.
+        assert!(json.get("session_id").is_none());
+    }
+
+    #[test]
+    fn set_status_stamps_completed_at_and_final_by_agent_for_terminal_column() {
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("set-status-terminal");
+        let _override = FleetHomeOverride::new(&home);
+
+        let mut cols = project::default_kanban_columns();
+        cols.push(project::KanbanColumn {
+            id: "shipped".into(),
+            name: "Shipped".into(),
+            color: None,
+            is_default: false,
+            is_terminal: true,
+            order: 5,
+        });
+        let project = write_project_with_columns(&home, cols);
+        write_session(&home, "sess-1", &project.id, project::DEFAULT_COLUMN_RUNNING);
+
+        set_status("sess-1", "shipped", None).unwrap();
+
+        let sessions = project::list_fleet_sessions();
+        let s = sessions.iter().find(|s| s.id == "sess-1").unwrap();
+        assert_eq!(s.status, "shipped");
+        assert!(
+            s.completed_at.is_some(),
+            "completed_at must be stamped when moving into a terminal column"
+        );
+        assert!(
+            s.final_by_agent,
+            "final_by_agent must be set when proactively moving into a terminal column"
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn resume_clears_idle_sentinel_and_resets_final_by_agent() {
+        // Resuming a session with a follow-up prompt re-opens the lifecycle.
+        // Both `idle` sentinel and `final_by_agent` flag must be reset so the
+        // card watcher won't keep emitting the (now stale) card and the next
+        // end-of-turn can again fire a fresh card.
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("resume-clears-sentinel");
+        let _override = FleetHomeOverride::new(&home);
+
+        let project = write_project_with_columns(&home, project::default_kanban_columns());
+        write_session_full(
+            &home,
+            "sess-1",
+            &project.id,
+            project::DEFAULT_COLUMN_COMPLETE,
+            true,
+        );
+        crate::idle::mark_idle("sess-1").unwrap();
+        assert!(crate::idle::list_idle_sessions().contains(&"sess-1".to_string()));
+
+        resume("sess-1", "follow-up please".into()).unwrap();
+
+        assert!(
+            !crate::idle::list_idle_sessions().contains(&"sess-1".to_string()),
+            "resume must clear the idle sentinel"
+        );
+        let sessions = project::list_fleet_sessions();
+        let s = sessions.iter().find(|s| s.id == "sess-1").unwrap();
+        assert_eq!(s.status, project::DEFAULT_COLUMN_QUEUED);
+        assert!(!s.final_by_agent, "resume must reset final_by_agent");
 
         let _ = std::fs::remove_dir_all(&home);
     }

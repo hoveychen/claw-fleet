@@ -407,6 +407,17 @@ pub struct FleetSession {
     pub completed_at: Option<i64>,
     pub pid: Option<u32>,
     pub expedited: bool,
+    /// `true` when the session has been **proactively** finalised — either
+    /// the agent self-marked via `fleet session status <terminal-column>` or
+    /// the user picked a terminal-column button on the wait-for-input
+    /// DecisionPanel card. NOT set when the supervisor's Pass 1 auto-marks a
+    /// session "complete" because the headless `claude --print` process
+    /// exited at end-of-turn — that flow leaves the flag false so the card
+    /// can pop and ask the user to confirm or resume. `#[serde(default)]`
+    /// keeps legacy persisted records (pre-pending-decision-panel PRD)
+    /// deserialising as `false`.
+    #[serde(default)]
+    pub final_by_agent: bool,
 }
 
 // ── Storage paths ───────────────────────────────────────────────────────────
