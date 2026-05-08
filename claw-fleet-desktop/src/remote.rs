@@ -557,6 +557,7 @@ impl crate::backend::Backend for RemoteBackend {
             plan_approval_installed: false,
             prd_context_installed: false,
             prd_discipline_installed: false,
+            idle_hooks_installed: false,
         })
     }
 

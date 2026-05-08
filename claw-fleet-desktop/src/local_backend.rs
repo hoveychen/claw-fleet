@@ -1401,6 +1401,12 @@ impl Backend for LocalBackend {
     }
 
     fn uninstall_fleet_daemon(&self) -> Result<(), String> {
+        // Best-effort: pull our Stop / UserPromptSubmit kanban hooks too. They
+        // were auto-installed by daemon_autostart::ensure_supervisor_daemon, so
+        // the symmetric uninstall belongs here.
+        if let Err(e) = crate::hooks::remove_idle_hooks() {
+            eprintln!("[uninstall] remove_idle_hooks: {e}");
+        }
         crate::launchd::uninstall()
     }
 

@@ -306,6 +306,15 @@ enum SessionCommands {
         #[arg(long)]
         note: Option<String>,
     },
+    /// [internal] Mark the current fleet session idle (turn ended, awaiting next user prompt).
+    /// Wired to Claude Code's `Stop` hook by `apply_idle_hooks`. Silent no-op if
+    /// FLEET_SESSION_ID is unset (non-fleet-managed sessions running with global hooks).
+    #[command(hide = true)]
+    Idle,
+    /// [internal] Clear the idle sentinel for the current session (next prompt arrived).
+    /// Wired to Claude Code's `UserPromptSubmit` hook.
+    #[command(hide = true)]
+    Resume,
 }
 
 fn main() {
@@ -358,6 +367,8 @@ fn main() {
         Commands::PrdContext => cmd_prd_context(),
         Commands::Session { action } => match action {
             SessionCommands::Status { state, note } => cmd_session_status(&state, note.as_deref()),
+            SessionCommands::Idle => cmd_session_idle(),
+            SessionCommands::Resume => cmd_session_resume(),
         },
     }
 }
@@ -4546,6 +4557,33 @@ fn cmd_session_status(state: &str, note: Option<&str>) {
             std::process::exit(1);
         }
     }
+}
+
+/// `fleet session idle` — Stop-hook entrypoint. Marks the current session idle
+/// so the supervisor's tick flips the kanban card from Running → Pending.
+///
+/// Silently exits 0 if FLEET_SESSION_ID is unset (e.g. user has global Fleet
+/// hooks installed but ran claude outside the supervisor) — never blocks the hook.
+fn cmd_session_idle() {
+    let Some(sid) = read_fleet_session_id() else {
+        return;
+    };
+    if let Err(e) = claw_fleet_core::idle::mark_idle(&sid) {
+        eprintln!("fleet session idle: {e}");
+    }
+}
+
+/// `fleet session resume` — UserPromptSubmit-hook entrypoint. Clears the idle
+/// sentinel so the supervisor flips the card back to Running on next tick.
+fn cmd_session_resume() {
+    let Some(sid) = read_fleet_session_id() else {
+        return;
+    };
+    claw_fleet_core::idle::clear_idle(&sid);
+}
+
+fn read_fleet_session_id() -> Option<String> {
+    std::env::var("FLEET_SESSION_ID").ok().filter(|s| !s.is_empty())
 }
 
 // ── PRD-context CLI (hook entrypoint for UserPromptSubmit) ─────────────────

@@ -16,6 +16,7 @@ pub mod elicitation;
 pub mod feishu;
 pub mod guard;
 pub mod hooks;
+pub mod idle;
 pub mod interaction_mode;
 pub mod jsonl_tail;
 pub mod launchd;
