@@ -264,6 +264,8 @@ function ProjectDetail({
   const inspectorWidth = useUIStore((s) => s.projectInspectorWidth);
   const setInspectorCollapsed = useUIStore((s) => s.setProjectInspectorCollapsed);
   const setInspectorWidth = useUIStore((s) => s.setProjectInspectorWidth);
+  const kanbanHeight = useUIStore((s) => s.projectKanbanHeight);
+  const setKanbanHeight = useUIStore((s) => s.setProjectKanbanHeight);
   const [selection, setSelection] = useState<FileBrowserSelection>({ paths: [], entries: [] });
   const handleSelection = useCallback(
     (s: FileBrowserSelection) => setSelection(s),
@@ -271,71 +273,70 @@ function ProjectDetail({
   );
 
   return (
-    <>
-      <div className={styles.detail_main}>
-        <div className={styles.detail_header}>
-          <button
-            type="button"
-            className={styles.list_toggle}
-            onClick={onToggleList}
-            title={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
-            aria-label={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
-          >
-            {listCollapsed ? "›" : "‹"}
-          </button>
-          <h3 className={styles.detail_title}>{project.name}</h3>
-          <div className={styles.detail_actions}>
-            <button type="button" onClick={onNewSession}>+ {t("launcher.new_session")}</button>
-            <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
-            <button type="button" onClick={onDelete} className={styles.danger}>
-              {t("projects.delete")}
+    <div className={styles.workspace_split}>
+      <div className={styles.main_pane}>
+        <div className={styles.detail_main}>
+          <div className={styles.detail_header}>
+            <button
+              type="button"
+              className={styles.list_toggle}
+              onClick={onToggleList}
+              title={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
+              aria-label={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
+            >
+              {listCollapsed ? "›" : "‹"}
             </button>
-            {inspectorCollapsed && (
-              <button
-                type="button"
-                className={styles.inspector_show_btn}
-                onClick={() => setInspectorCollapsed(false)}
-                title={t("projects.inspector_show")}
-              >
-                ⊟ {t("projects.inspector")}
+            <h3 className={styles.detail_title}>{project.name}</h3>
+            <div className={styles.detail_actions}>
+              <button type="button" onClick={onNewSession}>+ {t("launcher.new_session")}</button>
+              <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
+              <button type="button" onClick={onDelete} className={styles.danger}>
+                {t("projects.delete")}
               </button>
-            )}
+              {inspectorCollapsed && (
+                <button
+                  type="button"
+                  className={styles.inspector_show_btn}
+                  onClick={() => setInspectorCollapsed(false)}
+                  title={t("projects.inspector_show")}
+                >
+                  ⊟ {t("projects.inspector")}
+                </button>
+              )}
+            </div>
           </div>
+          <dl className={styles.kv} style={{ marginBottom: 8 }}>
+            <dt>{t("projects.workspace")}</dt>
+            <dd>{project.workspace}</dd>
+            <dt>{t("projects.concurrency")}</dt>
+            <dd>{project.concurrency}</dd>
+            <dt>{t("projects.session_count")}</dt>
+            <dd>{sessionCount}</dd>
+          </dl>
         </div>
-        <dl className={styles.kv} style={{ marginBottom: 8 }}>
-          <dt>{t("projects.workspace")}</dt>
-          <dd>{project.workspace}</dd>
-          <dt>{t("projects.concurrency")}</dt>
-          <dd>{project.concurrency}</dd>
-          <dt>{t("projects.session_count")}</dt>
-          <dd>{sessionCount}</dd>
-        </dl>
-      </div>
-
-      <div className={styles.workspace_split}>
-        <div className={styles.main_pane}>
-          <FileBrowserView
-            projectId={project.id}
-            workspace={project.workspace}
-            onSelectionChange={handleSelection}
-          />
+        <FileBrowserView
+          projectId={project.id}
+          workspace={project.workspace}
+          onSelectionChange={handleSelection}
+        />
+        <KanbanResizer height={kanbanHeight} onHeight={setKanbanHeight} />
+        <div className={styles.kanban_pane} style={{ height: kanbanHeight }}>
+          <KanbanView project={project} onProjectChanged={onProjectChanged} compact />
         </div>
-        {!inspectorCollapsed && (
-          <>
-            <InspectorResizer width={inspectorWidth} onWidth={setInspectorWidth} />
-            <aside className={styles.inspector_pane} style={{ width: inspectorWidth }}>
-              <Inspector
-                project={project}
-                selection={selection}
-                onProjectChanged={onProjectChanged}
-                onCollapse={() => setInspectorCollapsed(true)}
-                t={t}
-              />
-            </aside>
-          </>
-        )}
       </div>
-    </>
+      {!inspectorCollapsed && (
+        <>
+          <InspectorResizer width={inspectorWidth} onWidth={setInspectorWidth} />
+          <aside className={styles.inspector_pane} style={{ width: inspectorWidth }}>
+            <Inspector
+              selection={selection}
+              onCollapse={() => setInspectorCollapsed(true)}
+              t={t}
+            />
+          </aside>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -379,16 +380,52 @@ function InspectorResizer({
   );
 }
 
+function KanbanResizer({
+  height,
+  onHeight,
+}: {
+  height: number;
+  onHeight: (px: number) => void;
+}) {
+  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (!active) return;
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current) return;
+      const dy = dragRef.current.startY - e.clientY;
+      onHeight(dragRef.current.startHeight + dy);
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      setActive(false);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [active, onHeight]);
+
+  return (
+    <div
+      className={`${styles.kanban_resizer} ${active ? styles.kanban_resizer_active : ""}`}
+      onMouseDown={(e) => {
+        dragRef.current = { startY: e.clientY, startHeight: height };
+        setActive(true);
+      }}
+    />
+  );
+}
+
 function Inspector({
-  project,
   selection,
-  onProjectChanged,
   onCollapse,
   t,
 }: {
-  project: Project;
   selection: FileBrowserSelection;
-  onProjectChanged: () => void;
   onCollapse: () => void;
   t: (k: string, opts?: Record<string, unknown>) => string;
 }) {
@@ -401,7 +438,7 @@ function Inspector({
       ? selection.entries[0]
       : null;
 
-  let title = t("projects.inspector_kanban_title");
+  let title = t("projects.inspector");
   if (fleetSessionEntry) title = t("projects.inspector_session_title");
   else if (singleFile) title = t("projects.inspector_file_title");
   else if (selection.entries.length > 1) title = t("projects.inspector_selection_title");
@@ -428,9 +465,9 @@ function Inspector({
         ) : selection.entries.length > 1 ? (
           <SelectionSummaryInspector selection={selection} t={t} />
         ) : (
-          <div className={styles.inspector_kanban_wrap}>
-            <KanbanView project={project} onProjectChanged={onProjectChanged} compact />
-          </div>
+          <p className={styles.inspector_placeholder}>
+            {t("projects.inspector_placeholder")}
+          </p>
         )}
       </div>
     </>

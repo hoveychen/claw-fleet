@@ -112,7 +112,7 @@
     "inspector": "面板",
     "inspector_show": "展开侧栏",
     "inspector_hide": "折叠侧栏",
-    "inspector_kanban_title": "看板",
+    "inspector_placeholder": "选中文件查看详情",
     "inspector_session_title": "会话",
     "inspector_session_id": "Session",
     "inspector_session_not_started": "尚未启动",

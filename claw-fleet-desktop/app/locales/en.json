@@ -112,7 +112,7 @@
     "inspector": "Inspector",
     "inspector_show": "Show inspector",
     "inspector_hide": "Hide inspector",
-    "inspector_kanban_title": "Kanban",
+    "inspector_placeholder": "Select a file to inspect.",
     "inspector_session_title": "Session",
     "inspector_session_id": "Session",
     "inspector_session_not_started": "not started",
