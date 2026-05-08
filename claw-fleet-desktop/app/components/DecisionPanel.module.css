@@ -763,7 +763,14 @@
   overflow-wrap: anywhere;
 }
 
-/* "Other" custom input row */
+/* "Other" composer wrapper — label above the shared ChatComposer */
+.elicitation_other_block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* "Other" custom input row (legacy — superseded by ChatComposer; kept for now) */
 .elicitation_other {
   display: flex;
   flex-direction: column;
