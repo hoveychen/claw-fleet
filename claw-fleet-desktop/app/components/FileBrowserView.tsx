@@ -217,6 +217,51 @@ export function FileBrowserView({
   const [columnEntries, setColumnEntries] = useState<Map<string, FileEntry[]>>(new Map());
   const [previewState, setPreviewState] = useState<PreviewState>({ kind: "idle" });
   const anchorRef = useRef<string | null>(null);
+  const tileRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const marqueeBaseRef = useRef<Set<string>>(new Set());
+  const [marqueeRect, setMarqueeRect] = useState<
+    { left: number; top: number; width: number; height: number } | null
+  >(null);
+
+  const startMarquee = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("[data-marquee-tile='1']")) return;
+      if (target.closest("input,textarea,button,select,a")) return;
+      e.preventDefault();
+      const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+      const startX = e.clientX;
+      const startY = e.clientY;
+      marqueeBaseRef.current = additive ? new Set(selected) : new Set();
+      setMarqueeRect({ left: startX, top: startY, width: 0, height: 0 });
+      if (!additive) setSelected(new Set());
+
+      const onMove = (ev: MouseEvent) => {
+        const minX = Math.min(startX, ev.clientX);
+        const maxX = Math.max(startX, ev.clientX);
+        const minY = Math.min(startY, ev.clientY);
+        const maxY = Math.max(startY, ev.clientY);
+        setMarqueeRect({ left: minX, top: minY, width: maxX - minX, height: maxY - minY });
+        const hit = new Set<string>(marqueeBaseRef.current);
+        tileRefs.current.forEach((el, path) => {
+          const r = el.getBoundingClientRect();
+          if (r.right >= minX && r.left <= maxX && r.bottom >= minY && r.top <= maxY) {
+            hit.add(path);
+          }
+        });
+        setSelected(hit);
+      };
+      const onUp = () => {
+        setMarqueeRect(null);
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [selected],
+  );
 
   const setViewMode = useCallback(
     (m: ViewMode) => {
@@ -748,6 +793,11 @@ export function FileBrowserView({
     return (
       <div
         key={key ?? entry.path}
+        ref={(el) => {
+          if (el) tileRefs.current.set(entry.path, el);
+          else tileRefs.current.delete(entry.path);
+        }}
+        data-marquee-tile="1"
         className={`${styles.tile} ${isSel ? styles.tile_selected : ""} ${entry.isFleetsession ? styles.tile_fleetsession : ""} ${isDropHover ? styles.tile_drop_target : ""}`}
         data-status={fleetStatus}
         draggable={!isRenaming}
@@ -942,7 +992,7 @@ export function FileBrowserView({
       {error && <div className={styles.error}>{error}</div>}
 
       {viewMode === "icon" ? (
-        <div className={styles.grid}>
+        <div className={styles.grid} onMouseDown={startMarquee}>
           {sortedEntries.length === 0 && !error ? (
             <div className={styles.empty}>{t("file_browser.empty")}</div>
           ) : (
@@ -1159,7 +1209,7 @@ export function FileBrowserView({
               </div>
             )}
           </div>
-          <div className={styles.gallery_strip}>
+          <div className={styles.gallery_strip} onMouseDown={startMarquee}>
             {sortedEntries.length === 0 && !error ? (
               <div className={styles.empty}>{t("file_browser.empty")}</div>
             ) : (
@@ -1167,6 +1217,18 @@ export function FileBrowserView({
             )}
           </div>
         </div>
+      )}
+
+      {marqueeRect && (
+        <div
+          className={styles.marquee}
+          style={{
+            left: marqueeRect.left,
+            top: marqueeRect.top,
+            width: marqueeRect.width,
+            height: marqueeRect.height,
+          }}
+        />
       )}
 
       {contextMenu && (
