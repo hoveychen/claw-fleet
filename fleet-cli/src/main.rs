@@ -281,12 +281,31 @@ enum Commands {
     /// [internal] PRD-context hook — re-injects the workspace's TASKS.md on every UserPromptSubmit
     #[command(hide = true)]
     PrdContext,
+    /// Manage the current fleet-managed session (called from inside a Claude session)
+    Session {
+        #[command(subcommand)]
+        action: SessionCommands,
+    },
 }
 
 #[derive(Subcommand)]
 enum SkillCommands {
     /// Install Fleet skill to all detected AI tools (Claude Code, Copilot, Gemini CLI)
     Install,
+}
+
+#[derive(Subcommand)]
+enum SessionCommands {
+    /// Report the current session's status (e.g. complete, in-review, custom-column-name).
+    /// Reads FLEET_SESSION_ID from env. If the status matches one of the project's
+    /// kanban_columns, the card moves; otherwise the value is recorded as a free-text note.
+    Status {
+        /// New status value (kanban column id or any free-text label).
+        state: String,
+        /// Optional note to attach (overrides status if status is unknown).
+        #[arg(long)]
+        note: Option<String>,
+    },
 }
 
 fn main() {
@@ -337,6 +356,9 @@ fn main() {
         Commands::Elicitation => cmd_elicitation(),
         Commands::PlanApproval => cmd_plan_approval(),
         Commands::PrdContext => cmd_prd_context(),
+        Commands::Session { action } => match action {
+            SessionCommands::Status { state, note } => cmd_session_status(&state, note.as_deref()),
+        },
     }
 }
 
@@ -1311,12 +1333,35 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             eprintln!("[fleet serve] failed to write port-file {}: {}", pf.display(), e);
         }
     }
+    // Always write the canonical port + token files under ~/.claude/fleet/ so
+    // `fleet session status` (called from inside a managed Claude session) can
+    // discover the supervisor regardless of how fleet serve was started.
+    if let (Some(pp), Some(tp)) = (
+        claw_fleet_core::launchd::port_file_path(),
+        claw_fleet_core::launchd::token_file_path(),
+    ) {
+        if let Some(dir) = pp.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(&pp, actual_port.to_string());
+        let _ = std::fs::write(&tp, &token);
+    }
     {
         use std::io::Write as _;
         println!("FLEET_PROBE_PORT={}", actual_port);
         let _ = std::io::stdout().flush();
     }
     eprintln!("[fleet serve] listening on 127.0.0.1:{} (version {})", actual_port, env!("CARGO_PKG_VERSION"));
+
+    // ── Supervisor tick thread ─────────────────────────────────────────────
+    // On macOS this loop spawns queued fleet sessions, reaps finished pids,
+    // and persists state. On other platforms `tick()` is a no-op.
+    std::thread::spawn(|| loop {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        if let Err(e) = claw_fleet_core::supervisor::tick() {
+            eprintln!("[fleet serve] supervisor tick error: {e}");
+        }
+    });
 
     // ── Background SSE broadcaster thread ──────────────────────────────────
     // Polls for session changes, waiting alerts, guard/elicitation requests
@@ -2091,6 +2136,285 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             }
                         }
                     }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/projects" if request.method() == &tiny_http::Method::Get => {
+                let items = claw_fleet_core::project::list_projects();
+                let body = serde_json::to_string(&items).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/projects/create" if request.method() == &tiny_http::Method::Post => {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<claw_fleet_core::project::ProjectInput, _> =
+                    serde_json::from_str(&buf);
+                match parsed {
+                    Ok(input) => match claw_fleet_core::project::create_project(input) {
+                        Ok(p) => {
+                            let body = serde_json::to_string(&p).unwrap_or_default();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/projects/update" if request.method() == &tiny_http::Method::Post => {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<claw_fleet_core::project::Project, _> =
+                    serde_json::from_str(&buf);
+                match parsed {
+                    Ok(project) => match claw_fleet_core::project::update_project(project) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/projects/delete" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    project_id: String,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<Body, _> = serde_json::from_str(&buf);
+                match parsed {
+                    Ok(body) => match claw_fleet_core::project::delete_project(&body.project_id) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/fleet_sessions" if request.method() == &tiny_http::Method::Get => {
+                let items = claw_fleet_core::project::list_fleet_sessions();
+                let body = serde_json::to_string(&items).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/fleet_sessions/spawn" if request.method() == &tiny_http::Method::Post => {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<claw_fleet_core::project::LauncherForm, _> =
+                    serde_json::from_str(&buf);
+                match parsed {
+                    Ok(form) => match claw_fleet_core::supervisor::enqueue(form) {
+                        Ok(s) => {
+                            let body = serde_json::to_string(&s).unwrap_or_default();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/fleet_sessions/cancel" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body { session_id: String }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => match claw_fleet_core::supervisor::cancel(&b.session_id) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/fleet_sessions/resume" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body { session_id: String, follow_up_prompt: String }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => match claw_fleet_core::supervisor::resume(&b.session_id, b.follow_up_prompt) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/list_directory" if request.method() == &tiny_http::Method::Get => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let dir_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                match claw_fleet_core::project::list_directory(&dir_path) {
+                    Ok(items) => {
+                        let body = serde_json::to_string(&items).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(404)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/fleet_sessions/status" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                struct Body {
+                    session_id: String,
+                    status: String,
+                    note: Option<String>,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<Body>(&buf) {
+                    Ok(b) => match claw_fleet_core::supervisor::set_status(
+                        &b.session_id,
+                        &b.status,
+                        b.note,
+                    ) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
                     Err(e) => {
                         let body = serde_json::json!({"error": e.to_string()}).to_string();
                         let _ = request.respond(
@@ -4188,6 +4512,38 @@ fn cmd_plan_approval() {
                 }
             });
             println!("{}", out);
+        }
+    }
+}
+
+// ── Session self-report (called by agents from inside a managed session) ──
+
+/// `fleet session status <state> [--note <msg>]` — agent self-reports its
+/// current status to the supervisor.
+///
+/// Reads `FLEET_SESSION_ID` from env, then writes the status directly to
+/// `~/.claude/fleet/fleet-sessions.json` via `claw_fleet_core::supervisor`.
+/// The running supervisor's tick loop (in fleet serve) picks up the change
+/// on its next pass.
+///
+/// v1 uses direct file write rather than HTTP to keep fleet-cli light (no
+/// extra HTTP client dep). The HTTP endpoint at `/fleet_sessions/status`
+/// is still available for the Tauri GUI and remote backends that already
+/// have a probe client.
+fn cmd_session_status(state: &str, note: Option<&str>) {
+    let session_id = match std::env::var("FLEET_SESSION_ID") {
+        Ok(s) if !s.is_empty() => s,
+        _ => {
+            eprintln!("Error: FLEET_SESSION_ID env var not set. Are you running inside a fleet-managed session?");
+            std::process::exit(2);
+        }
+    };
+
+    match claw_fleet_core::supervisor::set_status(&session_id, state, note.map(String::from)) {
+        Ok(()) => println!("ok"),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
         }
     }
 }

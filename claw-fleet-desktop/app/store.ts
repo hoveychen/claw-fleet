@@ -43,7 +43,7 @@ export async function openSettingsWindow(): Promise<void> {
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills" | "plugins";
+export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills" | "plugins" | "projects";
 
 interface UIState {
   theme: Theme;
@@ -147,6 +147,29 @@ export const useSessionsStore = create<SessionsState>((set) => ({
   refresh: async () => {
     const sessions = await invoke<SessionInfo[]>("list_sessions");
     useSessionsStore.getState().setSessions(sessions);
+  },
+}));
+
+// ── Fleet-managed sessions store ──────────────────────────────────────────────
+// Tracks which session ids were spawned by Fleet itself (vs. observed
+// passively from another tool). Populated by ProjectsView + SessionList on
+// mount; consumed by SessionCard / LiteSessionCard for the
+// "fleet-managed / non-managed" badge.
+
+interface FleetManagedState {
+  managedIds: Set<string>;
+  refresh: () => Promise<void>;
+}
+
+export const useFleetManagedStore = create<FleetManagedState>((set) => ({
+  managedIds: new Set(),
+  refresh: async () => {
+    try {
+      const sessions = await invoke<{ id: string }[]>("list_fleet_sessions");
+      set({ managedIds: new Set(sessions.map((s) => s.id)) });
+    } catch {
+      set({ managedIds: new Set() });
+    }
   },
 }));
 

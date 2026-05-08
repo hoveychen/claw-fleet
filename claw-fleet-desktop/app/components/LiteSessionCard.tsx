@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import type { SessionInfo } from "../types";
 import { RateLimitControls, StatusIcon, SubagentTypeIcon } from "./SessionCard";
+import { useFleetManagedStore } from "../store";
 import styles from "./LiteSessionCard.module.css";
 
 export function LiteSessionCard({
@@ -13,6 +14,8 @@ export function LiteSessionCard({
   nextIsSubagent?: boolean;
 }) {
   const { t } = useTranslation();
+  const managedIds = useFleetManagedStore((s) => s.managedIds);
+  const isFleetManaged = !session.isSubagent && managedIds.has(session.id);
   const isSub = session.isSubagent;
   // Main agents now surface workspaceName via a badge, so don't duplicate it as the fallback title.
   const title = isSub ? (session.aiTitle || session.workspaceName) : (session.aiTitle ?? "");
@@ -51,6 +54,15 @@ export function LiteSessionCard({
         ) : (
           <span className={styles.badge_main} title={session.workspaceName}>
             <span className={styles.badge_main_label}>{session.workspaceName}</span>
+          </span>
+        )}
+        {isFleetManaged && (
+          <span
+            className={styles.badge_main}
+            title={t("session_badge.fleet_managed_tip")}
+            style={{ background: "var(--color-accent)", color: "var(--color-bg)" }}
+          >
+            <span className={styles.badge_main_label}>{t("session_badge.fleet_managed")}</span>
           </span>
         )}
         <span className={styles.title} title={title}>{title}</span>

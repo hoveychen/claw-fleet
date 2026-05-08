@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
+import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useSessionsStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
@@ -12,6 +12,8 @@ import { AuditView } from "./AuditView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
 import { PluginsView } from "./PluginsView";
+import { ProjectsView } from "./ProjectsView";
+import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import { MobileAccessPanel } from "./MobileAccessPanel";
@@ -45,6 +47,7 @@ export function SessionList() {
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
+  const [launcherInitial, setLauncherInitial] = useState<SessionLauncherProps["initial"]>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isWindows, setIsWindows] = useState(false);
   const [mobileActive, setMobileActive] = useState(false);
@@ -65,6 +68,7 @@ export function SessionList() {
 
   useEffect(() => {
     invoke<string>("get_platform").then((p) => setIsWindows(p === "windows"));
+    useFleetManagedStore.getState().refresh();
     // Load audit data for the unread critical badge
     invoke<import("../types").AuditSummary>("get_audit_events")
       .then((data) => {
@@ -284,6 +288,21 @@ export function SessionList() {
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_plugins")}</span>
           </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "projects" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("projects")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4.5h4.5l1.5 1.5h6V12a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4.5Z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_projects")}</span>
+          </button>
+          <button
+            className={styles.nav_item}
+            onClick={() => setLauncherInitial({})}
+            title={t("launcher.title")}
+          >
+            <span className={styles.nav_icon}>+</span>
+            <span className={styles.nav_label}>{t("launcher.new_session")}</span>
+          </button>
         </nav>
 
         <div className={styles.separator} />
@@ -419,9 +438,16 @@ export function SessionList() {
         <SkillsView />
       ) : viewMode === "plugins" ? (
         <PluginsView />
+      ) : viewMode === "projects" ? (
+        <ProjectsView />
       ) : (
         <ReportView />
       )}
+
+      <SessionLauncher
+        initial={launcherInitial}
+        onClose={() => setLauncherInitial(null)}
+      />
     </>
   );
 }

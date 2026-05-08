@@ -1343,6 +1343,75 @@ impl Backend for LocalBackend {
         crate::claude_cli::remove_marketplace(name).map_err(|e| e.to_string())
     }
 
+    // ── Projects ──────────────────────────────────────────────────────────────
+
+    fn list_projects(&self) -> Vec<crate::project::Project> {
+        crate::project::list_projects()
+    }
+
+    fn create_project(
+        &self,
+        input: crate::project::ProjectInput,
+    ) -> Result<crate::project::Project, String> {
+        crate::project::create_project(input)
+    }
+
+    fn update_project(&self, project: crate::project::Project) -> Result<(), String> {
+        crate::project::update_project(project)
+    }
+
+    fn delete_project(&self, project_id: &str) -> Result<(), String> {
+        crate::project::delete_project(project_id)
+    }
+
+    fn list_fleet_sessions(&self) -> Vec<crate::project::FleetSession> {
+        crate::project::list_fleet_sessions()
+    }
+
+    fn spawn_fleet_session(
+        &self,
+        form: crate::project::LauncherForm,
+    ) -> Result<crate::project::FleetSession, String> {
+        crate::supervisor::enqueue(form)
+    }
+
+    fn cancel_fleet_session(&self, session_id: &str) -> Result<(), String> {
+        crate::supervisor::cancel(session_id)
+    }
+
+    fn resume_fleet_session(&self, session_id: &str, follow_up_prompt: &str) -> Result<(), String> {
+        crate::supervisor::resume(session_id, follow_up_prompt.to_string())
+    }
+
+    fn set_fleet_session_status(
+        &self,
+        session_id: &str,
+        status: &str,
+        note: Option<&str>,
+    ) -> Result<(), String> {
+        crate::supervisor::set_status(session_id, status, note.map(String::from))
+    }
+
+    fn is_fleet_daemon_installed(&self) -> bool {
+        crate::launchd::is_installed()
+    }
+
+    fn install_fleet_daemon(&self, fleet_path: &str, port: u16, token: &str) -> Result<(), String> {
+        crate::launchd::install(fleet_path, port, token)
+    }
+
+    fn uninstall_fleet_daemon(&self) -> Result<(), String> {
+        crate::launchd::uninstall()
+    }
+
+    fn ensure_fleet_cli_link(&self, fleet_path: &str) -> Result<(), String> {
+        crate::supervisor::ensure_fleet_cli_link(fleet_path)
+    }
+
+    fn list_directory(&self, dir_path: &str) -> Result<Vec<crate::project::FileEntry>, String> {
+        crate::project::list_directory(dir_path)
+    }
+
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         crate::skills::read_skill_file(path)
     }

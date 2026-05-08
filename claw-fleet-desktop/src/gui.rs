@@ -1409,6 +1409,142 @@ fn remove_marketplace(state: tauri::State<AppState>, name: String) -> Result<(),
     state.backend.read().unwrap().remove_marketplace(&name)
 }
 
+// ── Projects ─────────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_projects(state: tauri::State<AppState>) -> Vec<claw_fleet_core::project::Project> {
+    state.backend.read().unwrap().list_projects()
+}
+
+#[tauri::command]
+fn create_project(
+    state: tauri::State<AppState>,
+    input: claw_fleet_core::project::ProjectInput,
+) -> Result<claw_fleet_core::project::Project, String> {
+    state.backend.read().unwrap().create_project(input)
+}
+
+#[tauri::command]
+fn update_project(
+    state: tauri::State<AppState>,
+    project: claw_fleet_core::project::Project,
+) -> Result<(), String> {
+    state.backend.read().unwrap().update_project(project)
+}
+
+#[tauri::command]
+fn delete_project(state: tauri::State<AppState>, project_id: String) -> Result<(), String> {
+    state.backend.read().unwrap().delete_project(&project_id)
+}
+
+#[tauri::command]
+fn list_fleet_sessions(state: tauri::State<AppState>) -> Vec<claw_fleet_core::project::FleetSession> {
+    state.backend.read().unwrap().list_fleet_sessions()
+}
+
+#[tauri::command]
+fn spawn_fleet_session(
+    state: tauri::State<AppState>,
+    form: claw_fleet_core::project::LauncherForm,
+) -> Result<claw_fleet_core::project::FleetSession, String> {
+    state.backend.read().unwrap().spawn_fleet_session(form)
+}
+
+#[tauri::command]
+fn cancel_fleet_session(state: tauri::State<AppState>, session_id: String) -> Result<(), String> {
+    state.backend.read().unwrap().cancel_fleet_session(&session_id)
+}
+
+#[tauri::command]
+fn resume_fleet_session(
+    state: tauri::State<AppState>,
+    session_id: String,
+    follow_up_prompt: String,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .resume_fleet_session(&session_id, &follow_up_prompt)
+}
+
+#[tauri::command]
+fn set_fleet_session_status(
+    state: tauri::State<AppState>,
+    session_id: String,
+    status: String,
+    note: Option<String>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .set_fleet_session_status(&session_id, &status, note.as_deref())
+}
+
+#[tauri::command]
+fn is_fleet_daemon_installed(state: tauri::State<AppState>) -> bool {
+    state.backend.read().unwrap().is_fleet_daemon_installed()
+}
+
+#[tauri::command]
+fn install_fleet_daemon(
+    state: tauri::State<AppState>,
+    fleet_path: String,
+    port: u16,
+    token: String,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .install_fleet_daemon(&fleet_path, port, &token)
+}
+
+#[tauri::command]
+fn uninstall_fleet_daemon(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().uninstall_fleet_daemon()
+}
+
+#[tauri::command]
+fn ensure_fleet_cli_link(
+    state: tauri::State<AppState>,
+    fleet_path: String,
+) -> Result<(), String> {
+    state.backend.read().unwrap().ensure_fleet_cli_link(&fleet_path)
+}
+
+#[tauri::command]
+fn list_directory(
+    state: tauri::State<AppState>,
+    dir_path: String,
+) -> Result<Vec<claw_fleet_core::project::FileEntry>, String> {
+    state.backend.read().unwrap().list_directory(&dir_path)
+}
+
+#[tauri::command]
+fn open_path_in_system(path: String) -> Result<(), String> {
+    // Open a file or directory using the OS default application.
+    // On macOS uses `open`; falls back to `xdg-open` / `cmd /c start` on
+    // other platforms.
+    #[cfg(target_os = "macos")]
+    let cmd_name = "open";
+    #[cfg(target_os = "linux")]
+    let cmd_name = "xdg-open";
+    #[cfg(target_os = "windows")]
+    let cmd_name = "explorer";
+
+    let out = std::process::Command::new(cmd_name)
+        .arg(&path)
+        .output()
+        .map_err(|e| format!("spawn {cmd_name}: {e}"))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("{cmd_name} failed: {stderr}"));
+    }
+    Ok(())
+}
+
 // ── Agent sources config ─────────────────────────────────────────────────────
 
 /// Return the current sources config merged with availability info.
@@ -2964,6 +3100,21 @@ pub fn run() {
             list_marketplaces,
             add_marketplace,
             remove_marketplace,
+            list_projects,
+            create_project,
+            update_project,
+            delete_project,
+            list_fleet_sessions,
+            spawn_fleet_session,
+            cancel_fleet_session,
+            resume_fleet_session,
+            set_fleet_session_status,
+            is_fleet_daemon_installed,
+            install_fleet_daemon,
+            uninstall_fleet_daemon,
+            ensure_fleet_cli_link,
+            list_directory,
+            open_path_in_system,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,
