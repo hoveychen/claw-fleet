@@ -202,6 +202,10 @@ fn tick_macos() -> Result<(), String> {
                         s.note = Some("process exited".into());
                     }
                 }
+                // Drop any leftover idle sentinel — the agent's Stop hook may have
+                // touched it just before the process died, but a complete session
+                // shouldn't keep flipping the kanban via Pass 1.5.
+                crate::idle::clear_idle(&s.id);
                 changed = true;
             }
         }
@@ -252,6 +256,9 @@ fn tick_macos() -> Result<(), String> {
 
         // Decide whether this is the initial spawn or a --resume follow-up.
         let is_resume = s.started_at.is_some() || s.completed_at.is_some();
+        // Drop any stale idle sentinel from a previous run before respawning,
+        // otherwise Pass 1.5 would immediately flip the new run back to pending.
+        crate::idle::clear_idle(&s.id);
         match spawn_claude(&s.id, &s.workspace, &s.prompt, &s.context_files, is_resume) {
             Ok(pid) => {
                 s.pid = Some(pid);
@@ -360,8 +367,9 @@ pub fn ensure_fleet_cli_link(fleet_path: &str) -> Result<(), String> {
 // ── Pending detection ───────────────────────────────────────────────────────
 
 /// Build a set of session IDs that currently have a pending guard or
-/// elicitation request awaiting user response. Used by `tick_macos` to flip
-/// running↔pending for our fleet sessions.
+/// elicitation request awaiting user response, OR an idle sentinel touched by
+/// the agent's Stop hook (turn ended, awaiting next user prompt). Used by
+/// `tick_macos` to flip running↔pending for our fleet sessions.
 fn pending_session_ids() -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
     for id in crate::guard::list_pending_requests() {
@@ -373,6 +381,9 @@ fn pending_session_ids() -> std::collections::HashSet<String> {
         if let Some(req) = crate::elicitation::read_request(&id) {
             out.insert(req.session_id);
         }
+    }
+    for sid in crate::idle::list_idle_sessions() {
+        out.insert(sid);
     }
     out
 }
@@ -408,6 +419,47 @@ fn kill_pid(_pid: u32) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    // real_home_dir() reads $FLEET_HOME globally, so tests that mutate it
+    // must serialize. Mirrors the helper pattern used in decision_history.
+    static FLEET_HOME_LOCK: Mutex<()> = Mutex::new(());
+
+    struct FleetHomeOverride {
+        prev: Option<std::ffi::OsString>,
+    }
+
+    impl FleetHomeOverride {
+        fn new(tmp: &std::path::Path) -> Self {
+            let prev = std::env::var_os("FLEET_HOME");
+            unsafe { std::env::set_var("FLEET_HOME", tmp) };
+            FleetHomeOverride { prev }
+        }
+    }
+
+    impl Drop for FleetHomeOverride {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(p) = &self.prev {
+                    std::env::set_var("FLEET_HOME", p);
+                } else {
+                    std::env::remove_var("FLEET_HOME");
+                }
+            }
+        }
+    }
+
+    fn fresh_tmp_home(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "fleet-supervisor-test-{}-{}-{}",
+            tag,
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
 
     #[test]
     fn enqueue_rejects_empty_prompt() {
@@ -425,5 +477,58 @@ mod tests {
     fn resume_rejects_empty_prompt() {
         let r = resume("fake", "  ".into());
         assert!(r.is_err());
+    }
+
+    /// End-to-end check: the agent's Stop hook drops a sentinel into
+    /// `~/.fleet/idle/<sid>.json` (via `crate::idle::mark_idle`). The
+    /// supervisor's `pending_session_ids()` must include that sid in its
+    /// pending set so Pass 1.5 will flip the kanban card to Pending. After
+    /// `clear_idle`, the sid must drop out of the set.
+    #[test]
+    fn idle_sentinel_appears_in_pending_session_ids() {
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("idle-pending");
+        let _override = FleetHomeOverride::new(&home);
+
+        let sid = "test-session-idle-flip";
+
+        // Baseline: sid not pending.
+        assert!(
+            !pending_session_ids().contains(sid),
+            "sid must not be pending before mark_idle"
+        );
+
+        // Stop hook fires → idle::mark_idle.
+        crate::idle::mark_idle(sid).unwrap();
+        assert!(
+            pending_session_ids().contains(sid),
+            "sid must appear in pending set after mark_idle"
+        );
+
+        // UserPromptSubmit hook fires → idle::clear_idle.
+        crate::idle::clear_idle(sid);
+        assert!(
+            !pending_session_ids().contains(sid),
+            "sid must drop out of pending set after clear_idle"
+        );
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// Coexistence with the existing guard/elicitation pending sources: an
+    /// idle sentinel for one session must not affect another session that
+    /// has neither a sentinel nor a guard/elicitation request.
+    #[test]
+    fn idle_sentinel_only_affects_its_own_session() {
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("idle-isolate");
+        let _override = FleetHomeOverride::new(&home);
+
+        crate::idle::mark_idle("sess-a").unwrap();
+        let pending = pending_session_ids();
+        assert!(pending.contains("sess-a"));
+        assert!(!pending.contains("sess-b"));
+
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

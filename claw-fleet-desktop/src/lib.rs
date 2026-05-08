@@ -236,6 +236,7 @@ impl Backend for NullBackend {
             plan_approval_installed: false,
             prd_context_installed: false,
             prd_discipline_installed: false,
+            idle_hooks_installed: false,
         }
     }
     fn apply_hooks(&self) -> Result<(), String> {

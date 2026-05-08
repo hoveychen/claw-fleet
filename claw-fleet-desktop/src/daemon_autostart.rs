@@ -30,6 +30,14 @@ pub fn ensure_supervisor_daemon() {
         eprintln!("[daemon-autostart] ensure_fleet_cli_link: {e}");
     }
 
+    // Install Stop / UserPromptSubmit hooks so the kanban Pending column lights
+    // up when an agent ends its turn. Hooks no-op for non-fleet sessions (the
+    // CLI checks FLEET_SESSION_ID and exits 0 if unset). Idempotent: marker
+    // dedup inside apply_idle_hooks.
+    if let Err(e) = claw_fleet_core::hooks::apply_idle_hooks() {
+        eprintln!("[daemon-autostart] apply_idle_hooks: {e}");
+    }
+
     if launchd::is_installed() && launchd::installed_plist_points_at(&fleet_path_str) {
         return;
     }

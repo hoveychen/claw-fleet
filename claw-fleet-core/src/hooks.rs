@@ -23,6 +23,8 @@ const FLEET_GUARD_MARKER: &str = "\" guard;";
 const FLEET_ELICITATION_MARKER: &str = "\" elicitation;";
 const FLEET_PLAN_APPROVAL_MARKER: &str = "\" plan-approval;";
 const FLEET_PRD_CONTEXT_MARKER: &str = "\" prd-context;";
+const FLEET_IDLE_STOP_MARKER: &str = "\" session idle;";
+const FLEET_IDLE_RESUME_MARKER: &str = "\" session resume;";
 
 /// Event types we need hooks for.
 const FLEET_HOOK_EVENTS: &[&str] = &[
@@ -57,6 +59,8 @@ pub struct HookSetupPlan {
     pub prd_context_installed: bool,
     /// Whether the PRD-discipline CLAUDE.md guidance is installed.
     pub prd_discipline_installed: bool,
+    /// Whether the idle hooks (Stop + UserPromptSubmit → kanban Pending) are installed.
+    pub idle_hooks_installed: bool,
 }
 
 /// The "cooked" state derived from the most recent hook events for a session.
@@ -127,6 +131,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
     let interaction_mode_installed = crate::interaction_mode::is_interaction_mode_installed();
     let prd_context_installed = has_prd_context_hook(&hooks_obj);
     let prd_discipline_installed = crate::prd_discipline::is_prd_discipline_installed();
+    let idle_hooks_installed = has_idle_hooks(&hooks_obj);
 
     HookSetupPlan {
         to_add,
@@ -138,6 +143,7 @@ pub fn plan_hook_setup() -> HookSetupPlan {
         interaction_mode_installed,
         prd_context_installed,
         prd_discipline_installed,
+        idle_hooks_installed,
     }
 }
 
@@ -610,6 +616,142 @@ fn is_prd_context_group(group: &Value) -> bool {
         .unwrap_or(false)
 }
 
+// ── Idle hooks (Stop + UserPromptSubmit → kanban Pending sentinel) ──────
+
+/// Install both idle hooks: `Stop` calls `fleet session idle` (marks the
+/// kanban card Pending), `UserPromptSubmit` calls `fleet session resume`
+/// (clears it back to Running on next prompt).
+///
+/// Coexists with the prd-context hook on UserPromptSubmit — markers are
+/// distinct, retain-then-push only filters our own group.
+pub fn apply_idle_hooks() -> Result<(), String> {
+    let fleet_bin = resolve_fleet_binary()
+        .ok_or("Cannot find fleet binary — install fleet CLI first")?;
+
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let obj = settings.as_object_mut().ok_or("settings is not an object")?;
+
+    if !obj.contains_key("hooks") {
+        obj.insert("hooks".into(), json!({}));
+    }
+    let hooks_obj = obj
+        .get_mut("hooks")
+        .and_then(|h| h.as_object_mut())
+        .ok_or("hooks is not an object")?;
+
+    let stop_group = json!({
+        "hooks": [{
+            "type": "command",
+            "command": fault_tolerant_command(&fleet_bin, "session idle"),
+            "timeout": 5000
+        }]
+    });
+    let resume_group = json!({
+        "hooks": [{
+            "type": "command",
+            "command": fault_tolerant_command(&fleet_bin, "session resume"),
+            "timeout": 5000
+        }]
+    });
+
+    if let Some(existing) = hooks_obj.get_mut("Stop") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_idle_stop_group(group));
+            arr.push(stop_group);
+        }
+    } else {
+        hooks_obj.insert("Stop".to_string(), json!([stop_group]));
+    }
+
+    if let Some(existing) = hooks_obj.get_mut("UserPromptSubmit") {
+        if let Some(arr) = existing.as_array_mut() {
+            arr.retain(|group| !is_idle_resume_group(group));
+            arr.push(resume_group);
+        }
+    } else {
+        hooks_obj.insert("UserPromptSubmit".to_string(), json!([resume_group]));
+    }
+
+    write_settings(&settings)
+}
+
+/// Remove both idle hooks from settings.json.
+pub fn remove_idle_hooks() -> Result<(), String> {
+    let mut settings = read_settings().unwrap_or_else(|| json!({}));
+    let Some(obj) = settings.as_object_mut() else {
+        return Ok(());
+    };
+    let Some(hooks_obj) = obj.get_mut("hooks").and_then(|h| h.as_object_mut()) else {
+        return Ok(());
+    };
+
+    if let Some(arr) = hooks_obj.get_mut("Stop").and_then(|v| v.as_array_mut()) {
+        arr.retain(|group| !is_idle_stop_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("Stop");
+        }
+    }
+    if let Some(arr) = hooks_obj
+        .get_mut("UserPromptSubmit")
+        .and_then(|v| v.as_array_mut())
+    {
+        arr.retain(|group| !is_idle_resume_group(group));
+        if arr.is_empty() {
+            hooks_obj.remove("UserPromptSubmit");
+        }
+    }
+
+    if hooks_obj.is_empty() {
+        obj.remove("hooks");
+    }
+
+    write_settings(&settings)
+}
+
+fn has_idle_hooks(hooks_obj: &Map<String, Value>) -> bool {
+    let stop = hooks_obj
+        .get("Stop")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(|group| is_idle_stop_group(group)))
+        .unwrap_or(false);
+    let resume = hooks_obj
+        .get("UserPromptSubmit")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.iter().any(|group| is_idle_resume_group(group)))
+        .unwrap_or(false);
+    stop && resume
+}
+
+fn is_idle_stop_group(group: &Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains(FLEET_IDLE_STOP_MARKER))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
+fn is_idle_resume_group(group: &Value) -> bool {
+    group
+        .get("hooks")
+        .and_then(|h| h.as_array())
+        .map(|arr| {
+            arr.iter().any(|hook| {
+                hook.get("command")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains(FLEET_IDLE_RESUME_MARKER))
+                    .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
+}
+
 // ── Read hook events ─────────────────────────────────────────────────────────
 
 /// Read the hook events file and compute per-session HookState.
@@ -821,6 +963,26 @@ mod tests {
         })
     }
 
+    fn idle_stop_group_for(bin: &str) -> Value {
+        json!({
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "session idle"),
+                "timeout": 5000
+            }]
+        })
+    }
+
+    fn idle_resume_group_for(bin: &str) -> Value {
+        json!({
+            "hooks": [{
+                "type": "command",
+                "command": fault_tolerant_command(bin, "session resume"),
+                "timeout": 5000
+            }]
+        })
+    }
+
     #[test]
     fn guard_marker_detects_actual_generated_command() {
         // Reproduces the dedup bug: the marker `"fleet guard"` (with a space)
@@ -905,5 +1067,57 @@ mod tests {
             "is_prd_context_group must recognise the command actually produced by \
              fault_tolerant_command"
         );
+    }
+
+    #[test]
+    fn idle_markers_detect_actual_generated_commands() {
+        let stop = idle_stop_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet");
+        let resume = idle_resume_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet");
+        assert!(is_idle_stop_group(&stop), "is_idle_stop_group must recognise generated cmd");
+        assert!(
+            is_idle_resume_group(&resume),
+            "is_idle_resume_group must recognise generated cmd"
+        );
+    }
+
+    #[test]
+    fn idle_markers_do_not_cross_match_prd_context_or_each_other() {
+        // UserPromptSubmit hosts BOTH prd-context and idle-resume; their markers
+        // must not collide. Stop hosts idle-stop; it must not match resume.
+        let bin = "/x/fleet";
+        let stop = idle_stop_group_for(bin);
+        let resume = idle_resume_group_for(bin);
+        let prd = prd_context_group_for(bin);
+
+        assert!(!is_idle_resume_group(&stop));
+        assert!(!is_idle_stop_group(&resume));
+        assert!(!is_idle_resume_group(&prd));
+        assert!(!is_idle_stop_group(&prd));
+        assert!(!is_prd_context_group(&resume));
+        assert!(!is_prd_context_group(&stop));
+
+        // And the original four markers must not catch the new groups.
+        assert!(!is_guard_group(&stop));
+        assert!(!is_elicitation_group(&stop));
+        assert!(!is_plan_approval_group(&stop));
+        assert!(!is_guard_group(&resume));
+        assert!(!is_elicitation_group(&resume));
+        assert!(!is_plan_approval_group(&resume));
+    }
+
+    #[test]
+    fn idle_idempotent_retain_removes_stale_groups() {
+        // Mirrors apply_idle_hooks: existing fleet idle groups must be filtered
+        // out across binary path changes, leaving unrelated entries intact.
+        let mut user_prompt_arr = vec![
+            json!({ "hooks": [{"type": "command", "command": "user-other"}] }),
+            prd_context_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet"),
+            idle_resume_group_for("/Applications/Claw Fleet.app/Contents/MacOS/fleet"),
+            idle_resume_group_for("/Users/x/workspace/claude-fleet/target/debug/fleet"),
+        ];
+        user_prompt_arr.retain(|g| !is_idle_resume_group(g));
+        // PRD-context must survive; only the unrelated entry + prd-context remain.
+        assert_eq!(user_prompt_arr.len(), 2, "prd-context must not be filtered");
+        assert!(user_prompt_arr.iter().any(|g| is_prd_context_group(g)));
     }
 }
