@@ -133,6 +133,24 @@ impl LocalBackend {
 
         step!("DBs opened");
 
+        // ── Startup zombie recovery ───────────────────────────────────────
+        // Sweep fleet-sessions.json for sessions stuck in Running/Pending
+        // whose pid is gone (None or dead) so the kanban board doesn't show
+        // ghosts on first paint. Idempotent — `fleet serve` runs the same
+        // sweep when its tick loop boots, so calling here from the desktop
+        // side is a belt-and-suspenders cleanup for the case where the user
+        // opens the app before the LaunchAgent has come up.
+        match crate::supervisor::migrate_zombie_running() {
+            Ok(0) => {}
+            Ok(n) => log_debug(&format!(
+                "[BACKEND-INIT] recovered {n} zombie session(s)"
+            )),
+            Err(e) => log_debug(&format!(
+                "[BACKEND-INIT] zombie recovery failed: {e}"
+            )),
+        }
+        step!("zombie recovery done");
+
         // Dedicated indexer thread — receives session lists via channel,
         // coalesces rapid requests, and runs indexing off the scan threads.
         let (index_tx, index_rx) = std::sync::mpsc::channel::<IndexRequest>();

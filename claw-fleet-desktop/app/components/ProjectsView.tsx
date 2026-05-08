@@ -197,6 +197,7 @@ export function ProjectsView() {
                 name: input.name,
                 workspace: input.workspace,
                 concurrency: input.concurrency ?? dialog.project.concurrency,
+                kanbanColumns: input.kanbanColumns ?? dialog.project.kanbanColumns,
               };
               await invoke("update_project", { project: updated });
               setDialog(null);
@@ -585,13 +586,65 @@ function ProjectFormDialog({
   mode: "create" | "edit";
   initial?: Project;
   onCancel: () => void;
-  onSubmit: (input: { name: string; workspace: string; concurrency?: number }) => void;
+  onSubmit: (input: {
+    name: string;
+    workspace: string;
+    concurrency?: number;
+    kanbanColumns?: KanbanColumn[];
+  }) => void;
   error: string | null;
   t: (k: string, opts?: Record<string, unknown>) => string;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
   const [workspace, setWorkspace] = useState(initial?.workspace ?? "");
   const [concurrency, setConcurrency] = useState(initial?.concurrency ?? 1);
+  const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>(() =>
+    initial?.kanbanColumns
+      ? [...initial.kanbanColumns].sort((a, b) => a.order - b.order)
+      : [],
+  );
+
+  const renumber = (cols: KanbanColumn[]): KanbanColumn[] =>
+    cols.map((c, i) => ({ ...c, order: i }));
+
+  const renameCol = (id: string, newName: string) => {
+    setKanbanColumns((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, name: newName } : c)),
+    );
+  };
+
+  const recolorCol = (id: string, newColor: string) => {
+    setKanbanColumns((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, color: newColor } : c)),
+    );
+  };
+
+  const deleteCol = (id: string) => {
+    setKanbanColumns((prev) => renumber(prev.filter((c) => c.id !== id)));
+  };
+
+  const moveCol = (id: string, dir: -1 | 1) => {
+    setKanbanColumns((prev) => {
+      const idx = prev.findIndex((c) => c.id === id);
+      if (idx < 0) return prev;
+      const target = idx + dir;
+      if (target < 0 || target >= prev.length) return prev;
+      const next = [...prev];
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return renumber(next);
+    });
+  };
+
+  const addCol = () => {
+    const newCol: KanbanColumn = {
+      id: `col-${crypto.randomUUID()}`,
+      name: t("projects.column_new_default") as string,
+      color: "#a78bfa",
+      isDefault: false,
+      order: kanbanColumns.length,
+    };
+    setKanbanColumns((prev) => [...prev, newCol]);
+  };
 
   return (
     <div className={styles.modal_overlay} onClick={onCancel}>
@@ -641,12 +694,96 @@ function ProjectFormDialog({
             onChange={(e) => setConcurrency(Math.max(1, parseInt(e.target.value || "1", 10)))}
           />
         </label>
+
+        {mode === "edit" && (
+          <div className={styles.field}>
+            <span>{t("projects.kanban_columns")}</span>
+            <div className={styles.column_list}>
+              {kanbanColumns.map((col, idx) => (
+                <div key={col.id} className={styles.column_row}>
+                  <input
+                    type="color"
+                    className={styles.column_swatch}
+                    value={col.color ?? "#a78bfa"}
+                    onChange={(e) => recolorCol(col.id, e.target.value)}
+                    title={t("projects.column_color") as string}
+                  />
+                  <input
+                    type="text"
+                    className={styles.column_name_input}
+                    value={col.name}
+                    disabled={col.isDefault}
+                    onChange={(e) => renameCol(col.id, e.target.value)}
+                    title={
+                      col.isDefault
+                        ? (t("projects.column_default") as string)
+                        : (t("projects.column_rename") as string)
+                    }
+                  />
+                  {col.isDefault && (
+                    <span className={styles.column_lock} aria-hidden>
+                      🔒
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    className={styles.column_move_btn}
+                    onClick={() => moveCol(col.id, -1)}
+                    disabled={idx === 0}
+                    title={t("projects.column_move_up") as string}
+                    aria-label={t("projects.column_move_up") as string}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.column_move_btn}
+                    onClick={() => moveCol(col.id, 1)}
+                    disabled={idx === kanbanColumns.length - 1}
+                    title={t("projects.column_move_down") as string}
+                    aria-label={t("projects.column_move_down") as string}
+                  >
+                    ↓
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.column_delete_btn}
+                    onClick={() => deleteCol(col.id)}
+                    disabled={col.isDefault}
+                    title={
+                      col.isDefault
+                        ? (t("projects.column_default") as string)
+                        : (t("projects.column_delete") as string)
+                    }
+                    aria-label={t("projects.column_delete") as string}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+            <button type="button" className={styles.column_add_btn} onClick={addCol}>
+              + {t("projects.column_add")}
+            </button>
+          </div>
+        )}
+
         {error && <div className={styles.error}>{error}</div>}
         <div className={styles.modal_actions}>
           <button type="button" onClick={onCancel}>{t("cancel")}</button>
           <button
             type="button"
-            onClick={() => onSubmit({ name: name.trim(), workspace: workspace.trim(), concurrency })}
+            onClick={() =>
+              onSubmit({
+                name: name.trim(),
+                workspace: workspace.trim(),
+                concurrency,
+                kanbanColumns:
+                  mode === "edit"
+                    ? kanbanColumns.map((c) => ({ ...c, name: c.name.trim() || c.id }))
+                    : undefined,
+              })
+            }
             disabled={!name.trim() || !workspace.trim()}
           >
             {mode === "create" ? t("projects.create") : t("projects.save")}

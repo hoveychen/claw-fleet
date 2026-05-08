@@ -51,21 +51,13 @@
     "fleet_managed_tip": "This session was launched by Fleet (queue / resume / kanban supported)."
   },
   "kanban": {
-    "add_column": "Add Column",
-    "new_column_prompt": "Column name:",
-    "delete_column": "Delete column",
     "default_column_locked": "Default column — locked",
-    "double_click_to_rename": "Double-click to rename",
     "column_empty": "(empty)",
     "expedited": "Rush",
-    "drag_to_move": "Drag to move",
     "drag_or_click": "Click to open · drag to move",
     "click_to_open": "Click to open session detail",
-    "system_managed": "System-managed status — drag disabled",
     "toast_default_locked": "Default columns are system-managed; drag custom columns instead.",
-    "toast_must_clear": "Move {{count}} session(s) out of this column first.",
-    "toast_session_not_started": "Session hasn't started yet — no transcript to open.",
-    "confirm_delete_column": "Delete column \"{{name}}\"? This only removes the column from this project — sessions are not affected."
+    "toast_session_not_started": "Session hasn't started yet — no transcript to open."
   },
   "launcher": {
     "title": "New Fleet Session",
@@ -105,6 +97,13 @@
     "kanban_columns": "Kanban Columns",
     "column_default": "Default column (locked)",
     "column_custom": "Custom column",
+    "column_add": "Add column",
+    "column_delete": "Delete column",
+    "column_rename": "Click to rename",
+    "column_color": "Change color",
+    "column_move_up": "Move up",
+    "column_move_down": "Move down",
+    "column_new_default": "New column",
     "tab_kanban": "Kanban",
     "tab_files": "Files",
     "show_list": "Show project list",

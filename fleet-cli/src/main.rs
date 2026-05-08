@@ -1364,6 +1364,17 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     }
     eprintln!("[fleet serve] listening on 127.0.0.1:{} (version {})", actual_port, env!("CARGO_PKG_VERSION"));
 
+    // ── Startup zombie recovery ────────────────────────────────────────────
+    // If `fleet serve` was killed mid-flight (host crash, log-out, etc.) any
+    // sessions whose pids are gone are still recorded as Running/Pending in
+    // fleet-sessions.json. Sweep them to Complete before the tick loop starts
+    // so the kanban board reflects reality on first paint.
+    match claw_fleet_core::supervisor::migrate_zombie_running() {
+        Ok(0) => {}
+        Ok(n) => eprintln!("[fleet serve] recovered {n} zombie session(s) on startup"),
+        Err(e) => eprintln!("[fleet serve] zombie recovery failed: {e}"),
+    }
+
     // ── Supervisor tick thread ─────────────────────────────────────────────
     // On macOS this loop spawns queued fleet sessions, reaps finished pids,
     // and persists state. On other platforms `tick()` is a no-op.

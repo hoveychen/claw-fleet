@@ -192,6 +192,51 @@ pub fn set_status(session_id: &str, new_status: &str, note: Option<String>) -> R
     project::save_fleet_sessions(&sessions)
 }
 
+// ── Startup migration ────────────────────────────────────────────────────────
+
+/// One-shot migration: scan fleet-sessions.json and recover any session that's
+/// stuck in `running` / `pending` but whose pid is gone — either because the
+/// pid is None (process was never recorded, or cleared without flipping
+/// status), or because the recorded pid no longer responds to signal 0
+/// (process exited but tick never reaped it, e.g. host crashed).
+///
+/// Should be called once when the backend starts up (LocalBackend::new and
+/// `fleet serve` boot path). Idempotent — safe to call multiple times.
+///
+/// Returns the number of sessions that were migrated, for logging.
+pub fn migrate_zombie_running() -> Result<usize, String> {
+    let mut sessions = project::list_fleet_sessions();
+    let mut migrated = 0usize;
+
+    for s in sessions.iter_mut() {
+        let stuck = s.status == DEFAULT_COLUMN_RUNNING || s.status == "pending";
+        if !stuck {
+            continue;
+        }
+        let dead = match s.pid {
+            None => true,
+            Some(pid) => !pid_alive(pid),
+        };
+        if !dead {
+            continue;
+        }
+        s.pid = None;
+        s.status = DEFAULT_COLUMN_COMPLETE.into();
+        if s.completed_at.is_none() {
+            s.completed_at = Some(now_ms());
+        }
+        if s.note.is_none() {
+            s.note = Some("recovered on startup".into());
+        }
+        migrated += 1;
+    }
+
+    if migrated > 0 {
+        project::save_fleet_sessions(&sessions)?;
+    }
+    Ok(migrated)
+}
+
 // ── Background tick ──────────────────────────────────────────────────────────
 
 /// One tick of the supervisor loop. Should be called every ~1s by whoever
@@ -240,6 +285,24 @@ fn tick_macos() -> Result<(), String> {
                 // action.
                 changed = true;
             }
+        }
+    }
+
+    // Pass 1bis: recover sessions stuck in running/pending with no pid at all.
+    // This catches host-crash zombies that Pass 1 can't see (it only checks
+    // sessions whose pid field is Some).
+    for s in sessions.iter_mut() {
+        if s.pid.is_none()
+            && (s.status == DEFAULT_COLUMN_RUNNING || s.status == "pending")
+        {
+            s.status = DEFAULT_COLUMN_COMPLETE.into();
+            if s.completed_at.is_none() {
+                s.completed_at = Some(now_ms());
+            }
+            if s.note.is_none() {
+                s.note = Some("recovered on startup".into());
+            }
+            changed = true;
         }
     }
 
@@ -993,6 +1056,91 @@ mod tests {
         let s = sessions.iter().find(|s| s.id == "sess-1").unwrap();
         assert_eq!(s.status, project::DEFAULT_COLUMN_QUEUED);
         assert!(!s.final_by_agent, "resume must reset final_by_agent");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn migrate_zombie_running_recovers_pidless_running_and_pending() {
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("migrate-zombie");
+        let _override = FleetHomeOverride::new(&home);
+
+        let project = write_project_with_columns(&home, project::default_kanban_columns());
+        // pidless Running — must be recovered
+        write_session(&home, "sess-zombie-running", &project.id, project::DEFAULT_COLUMN_RUNNING);
+        // pidless Pending — must be recovered
+        write_session(&home, "sess-zombie-pending", &project.id, "pending");
+        // Queued — must NOT be touched (still waiting for slot)
+        write_session(&home, "sess-queued", &project.id, project::DEFAULT_COLUMN_QUEUED);
+        // Already complete — must NOT be touched
+        write_session(&home, "sess-done", &project.id, project::DEFAULT_COLUMN_COMPLETE);
+
+        let migrated = migrate_zombie_running().unwrap();
+        assert_eq!(migrated, 2, "exactly the two zombie rows must be migrated");
+
+        let sessions = project::list_fleet_sessions();
+        let by_id = |sid: &str| sessions.iter().find(|s| s.id == sid).unwrap().clone();
+
+        let r = by_id("sess-zombie-running");
+        assert_eq!(r.status, project::DEFAULT_COLUMN_COMPLETE);
+        assert!(r.completed_at.is_some());
+        assert_eq!(r.note.as_deref(), Some("recovered on startup"));
+
+        let p = by_id("sess-zombie-pending");
+        assert_eq!(p.status, project::DEFAULT_COLUMN_COMPLETE);
+        assert!(p.completed_at.is_some());
+
+        assert_eq!(by_id("sess-queued").status, project::DEFAULT_COLUMN_QUEUED);
+        assert_eq!(by_id("sess-done").status, project::DEFAULT_COLUMN_COMPLETE);
+
+        // Idempotency — running again must report 0 migrated.
+        let again = migrate_zombie_running().unwrap();
+        assert_eq!(again, 0, "second run is a no-op");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn migrate_zombie_running_handles_dead_pid() {
+        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let home = fresh_tmp_home("migrate-zombie-deadpid");
+        let _override = FleetHomeOverride::new(&home);
+
+        let project = write_project_with_columns(&home, project::default_kanban_columns());
+
+        // Running session with a clearly-dead pid (pid 0 is reserved on unix
+        // and never represents a live user process; pid_alive returns false).
+        let dir = home.join(".claude").join("fleet");
+        std::fs::create_dir_all(&dir).unwrap();
+        let s = project::FleetSession {
+            id: "sess-dead-pid".into(),
+            project_id: project.id.clone(),
+            workspace: home.to_string_lossy().to_string(),
+            fleetsession_path: None,
+            prompt: "p".into(),
+            context_files: vec![],
+            status: project::DEFAULT_COLUMN_RUNNING.into(),
+            note: None,
+            created_at: 0,
+            started_at: Some(0),
+            completed_at: None,
+            // Pick a pid that the kernel definitely does not have allocated.
+            // i32::MAX is well beyond pid_max on every supported platform.
+            pid: Some(i32::MAX as u32 - 1),
+            expedited: false,
+            final_by_agent: false,
+        };
+        let json = serde_json::to_string_pretty(&vec![s]).unwrap();
+        std::fs::write(dir.join("fleet-sessions.json"), json).unwrap();
+
+        let migrated = migrate_zombie_running().unwrap();
+        assert_eq!(migrated, 1);
+
+        let sessions = project::list_fleet_sessions();
+        let r = sessions.iter().find(|x| x.id == "sess-dead-pid").unwrap();
+        assert_eq!(r.status, project::DEFAULT_COLUMN_COMPLETE);
+        assert!(r.pid.is_none(), "pid must be cleared after migration");
 
         let _ = std::fs::remove_dir_all(&home);
     }
