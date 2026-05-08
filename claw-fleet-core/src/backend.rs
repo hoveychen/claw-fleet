@@ -345,6 +345,24 @@ pub trait Backend: Send + Sync {
     /// workspace). Sorted (dirs first, then case-insensitive name).
     fn list_directory(&self, dir_path: &str) -> Result<Vec<crate::project::FileEntry>, String>;
 
+    // ── File operations (projects-finder-redesign P1) ─────────────────────────
+    /// Move `from` → `to`. Cross-device falls back to copy + delete-source.
+    /// Refuses to overwrite an existing destination.
+    fn move_path(&self, from: &str, to: &str) -> Result<(), String>;
+    /// Recursively copy `from` → `to`. Refuses to overwrite.
+    fn copy_path(&self, from: &str, to: &str) -> Result<(), String>;
+    /// Rename in place (same parent). `new_name` is a single path component.
+    /// Returns the new absolute path.
+    fn rename_path(&self, path: &str, new_name: &str) -> Result<String, String>;
+    /// Delete a file/dir. `to_trash = true` routes through the macOS Trash
+    /// (osascript). On non-macOS or `to_trash = false`, removes directly.
+    fn delete_path(&self, path: &str, to_trash: bool) -> Result<(), String>;
+    /// Create a new directory `name` inside `parent`. Returns the new path.
+    fn mkdir(&self, parent: &str, name: &str) -> Result<String, String>;
+    /// Duplicate a file/dir into the same parent (Finder-style "name copy"
+    /// suffix). Returns the new path.
+    fn duplicate_path(&self, path: &str) -> Result<String, String>;
+
     // ── Waiting alerts ────────────────────────────────────────────────────────
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert>;
 

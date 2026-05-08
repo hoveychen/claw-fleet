@@ -103,14 +103,20 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 16px 20px;
-  overflow-y: auto;
+  overflow: hidden;
+}
+
+.detail_main {
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px 0;
+  flex-shrink: 0;
 }
 
 .detail_header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 16px;
 }
 
@@ -119,6 +125,30 @@
   font-weight: 700;
   color: var(--color-text);
   margin: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.list_toggle {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+  line-height: 1;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+}
+
+.list_toggle:hover {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border-color: var(--color-accent);
 }
 
 .detail_actions {
@@ -230,6 +260,45 @@
   border-color: var(--color-accent);
 }
 
+.field_row {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.field_row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--color-text);
+  outline: none;
+}
+
+.field_row input:focus {
+  border-color: var(--color-accent);
+}
+
+.browse_btn {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.browse_btn:hover {
+  background: var(--color-bg);
+  border-color: var(--color-accent);
+}
+
 .error {
   color: #dc2626;
   font-size: 12px;
@@ -283,5 +352,165 @@
 .tab_active {
   background: var(--color-accent);
   color: var(--color-bg);
+  border-color: var(--color-accent);
+}
+
+/* ── Inspector layout (P2) ───────────────────────────────────────────────── */
+
+.workspace_split {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+}
+
+.main_pane {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.inspector_resizer {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  border-left: 1px solid var(--color-border);
+}
+
+.inspector_resizer:hover,
+.inspector_resizer_active {
+  background: var(--color-accent);
+  opacity: 0.5;
+}
+
+.inspector_pane {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.inspector_header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.inspector_header_title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inspector_close_btn {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+}
+
+.inspector_close_btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent);
+}
+
+.inspector_body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.inspector_section {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow-y: auto;
+}
+
+.inspector_section_title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-text-dim);
+  margin: 0;
+  font-weight: 700;
+}
+
+.inspector_kv {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 4px 10px;
+  font-size: 11px;
+}
+
+.inspector_kv dt {
+  color: var(--color-text-dim);
+}
+
+.inspector_kv dd {
+  margin: 0;
+  word-break: break-all;
+}
+
+.inspector_kanban_wrap {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 4px 4px;
+}
+
+.inspector_open_btn {
+  align-self: flex-start;
+  background: var(--color-accent);
+  color: var(--color-bg);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inspector_open_btn:hover {
+  filter: brightness(1.1);
+}
+
+.inspector_show_btn {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.inspector_show_btn:hover {
+  color: var(--color-text);
   border-color: var(--color-accent);
 }

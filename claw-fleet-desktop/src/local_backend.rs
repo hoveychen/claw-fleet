@@ -631,6 +631,42 @@ impl LocalBackend {
             });
         }
 
+        // Session-pending watcher — polls fleet_sessions_needing_input for
+        // idle main-agent sessions whose status hasn't been moved into a
+        // terminal column. New entries surface in the global DecisionPanel as
+        // SessionPendingCard; entries that disappear (user clicked "complete",
+        // agent received next prompt, etc.) emit a dismissal event so the
+        // panel can drop the card.
+        {
+            let app_pending = app.clone();
+            let running_pending = running.clone();
+            std::thread::spawn(move || {
+                let mut known: HashSet<String> = HashSet::new();
+                loop {
+                    std::thread::sleep(Duration::from_millis(1000));
+                    if !running_pending.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let pending = crate::supervisor::session_pending_requests();
+                    let pending_ids: HashSet<String> =
+                        pending.iter().map(|r| r.id.clone()).collect();
+                    for req in &pending {
+                        if known.insert(req.id.clone()) {
+                            crate::log_debug(&format!(
+                                "[session-pending] new: id={} project={}",
+                                req.id, req.project_id
+                            ));
+                            let _ = app_pending.emit("session-pending-request", req);
+                        }
+                    }
+                    for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
+                        let _ = app_pending.emit("session-pending-dismissed", id.clone());
+                    }
+                    known.retain(|id| pending_ids.contains(id));
+                }
+            });
+        }
+
         // Start the daily report scheduler (backfills missing reports in background).
         crate::daily_report::start_report_scheduler(
             report_store.clone(),
@@ -1416,6 +1452,30 @@ impl Backend for LocalBackend {
 
     fn list_directory(&self, dir_path: &str) -> Result<Vec<crate::project::FileEntry>, String> {
         crate::project::list_directory(dir_path)
+    }
+
+    fn move_path(&self, from: &str, to: &str) -> Result<(), String> {
+        crate::project::move_path(from, to)
+    }
+
+    fn copy_path(&self, from: &str, to: &str) -> Result<(), String> {
+        crate::project::copy_path(from, to)
+    }
+
+    fn rename_path(&self, path: &str, new_name: &str) -> Result<String, String> {
+        crate::project::rename_path(path, new_name)
+    }
+
+    fn delete_path(&self, path: &str, to_trash: bool) -> Result<(), String> {
+        crate::project::delete_path(path, to_trash)
+    }
+
+    fn mkdir(&self, parent: &str, name: &str) -> Result<String, String> {
+        crate::project::mkdir(parent, name)
+    }
+
+    fn duplicate_path(&self, path: &str) -> Result<String, String> {
+        crate::project::duplicate_path(path)
     }
 
     fn get_skill_content(&self, path: &str) -> Result<String, String> {

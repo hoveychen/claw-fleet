@@ -31,11 +31,21 @@ pub const DEFAULT_COLUMN_COMPLETE: &str = "complete";
 /// `complete` with `is_default = false`.
 pub fn default_kanban_columns() -> Vec<KanbanColumn> {
     vec![
-        KanbanColumn { id: DEFAULT_COLUMN_QUEUED.into(),   name: "Queued".into(),   color: Some("#94a3b8".into()), is_default: true, order: 0 },
-        KanbanColumn { id: DEFAULT_COLUMN_RUNNING.into(),  name: "Running".into(),  color: Some("#22c55e".into()), is_default: true, order: 1 },
-        KanbanColumn { id: DEFAULT_COLUMN_PENDING.into(),  name: "Pending".into(),  color: Some("#f59e0b".into()), is_default: true, order: 2 },
-        KanbanColumn { id: DEFAULT_COLUMN_COMPLETE.into(), name: "Complete".into(), color: Some("#3b82f6".into()), is_default: true, order: 3 },
+        KanbanColumn { id: DEFAULT_COLUMN_QUEUED.into(),   name: "Queued".into(),   color: Some("#94a3b8".into()), is_default: true, is_terminal: false, order: 0 },
+        KanbanColumn { id: DEFAULT_COLUMN_RUNNING.into(),  name: "Running".into(),  color: Some("#22c55e".into()), is_default: true, is_terminal: false, order: 1 },
+        KanbanColumn { id: DEFAULT_COLUMN_PENDING.into(),  name: "Pending".into(),  color: Some("#f59e0b".into()), is_default: true, is_terminal: false, order: 2 },
+        KanbanColumn { id: DEFAULT_COLUMN_COMPLETE.into(), name: "Complete".into(), color: Some("#3b82f6".into()), is_default: true, is_terminal: true,  order: 3 },
     ]
+}
+
+/// True if `status_id` corresponds to a terminal column on `project` (i.e. the
+/// session is "done" and should not surface as a wait-for-input card). The
+/// default `complete` column is always terminal even when older persisted
+/// projects.json was written before the `is_terminal` field existed.
+pub fn is_terminal_status(project: &Project, status_id: &str) -> bool {
+    project.kanban_columns.iter().any(|c| {
+        c.id == status_id && (c.is_terminal || c.id == DEFAULT_COLUMN_COMPLETE)
+    })
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
@@ -47,6 +57,13 @@ pub struct KanbanColumn {
     pub name: String,
     pub color: Option<String>,
     pub is_default: bool,
+    /// `true` for columns that mark a session as finished — used by the
+    /// supervisor to suppress the wait-for-input DecisionPanel card and to
+    /// stamp `completed_at` on `set_status`. Default `complete` column is
+    /// always terminal (see `is_terminal_status` for the backward-compat
+    /// fallback applied to legacy projects.json data).
+    #[serde(default)]
+    pub is_terminal: bool,
     pub order: i32,
 }
 
@@ -159,6 +176,213 @@ pub fn list_directory(dir_path: &str) -> Result<Vec<FileEntry>, String> {
     });
     Ok(out)
 }
+
+// ── File operations (move / copy / rename / delete / mkdir / duplicate) ────
+
+/// Move `from` to `to`. If both live on the same filesystem this is a `rename`.
+/// Cross-device: falls back to recursive copy + delete-source. Refuses to
+/// overwrite an existing destination, and refuses to move a directory into
+/// itself or one of its descendants.
+pub fn move_path(from: &str, to: &str) -> Result<(), String> {
+    let from_p = Path::new(from);
+    let to_p = Path::new(to);
+    if !from_p.exists() {
+        return Err(format!("source not found: {from}"));
+    }
+    if to_p.exists() {
+        return Err(format!("destination already exists: {to}"));
+    }
+    if let Some(parent) = to_p.parent() {
+        if !parent.is_dir() {
+            return Err(format!("destination parent not a directory: {}", parent.display()));
+        }
+    }
+    if from_p.is_dir() && is_ancestor(from_p, to_p) {
+        return Err("cannot move a directory into itself".into());
+    }
+    match fs::rename(from_p, to_p) {
+        Ok(()) => Ok(()),
+        Err(e) if e.raw_os_error() == Some(libc_xdev()) => {
+            // Cross-device; fall back to recursive copy + delete.
+            copy_recursive(from_p, to_p)?;
+            delete_recursive(from_p)?;
+            Ok(())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Recursively copy `from` to `to`. Refuses to overwrite an existing
+/// destination, and refuses to copy a directory into itself.
+pub fn copy_path(from: &str, to: &str) -> Result<(), String> {
+    let from_p = Path::new(from);
+    let to_p = Path::new(to);
+    if !from_p.exists() {
+        return Err(format!("source not found: {from}"));
+    }
+    if to_p.exists() {
+        return Err(format!("destination already exists: {to}"));
+    }
+    if from_p.is_dir() && is_ancestor(from_p, to_p) {
+        return Err("cannot copy a directory into itself".into());
+    }
+    copy_recursive(from_p, to_p)
+}
+
+/// Rename a file/dir in place (keeps the same parent directory). `new_name`
+/// must be a single path component (no `/`). Returns the new absolute path.
+pub fn rename_path(path: &str, new_name: &str) -> Result<String, String> {
+    if new_name.is_empty() || new_name.contains('/') || new_name == "." || new_name == ".." {
+        return Err(format!("invalid name: {new_name}"));
+    }
+    let p = Path::new(path);
+    if !p.exists() {
+        return Err(format!("path not found: {path}"));
+    }
+    let parent = p.parent().ok_or_else(|| "path has no parent".to_string())?;
+    let new_path = parent.join(new_name);
+    if new_path.exists() {
+        return Err(format!("name already taken: {}", new_path.display()));
+    }
+    fs::rename(p, &new_path).map_err(|e| e.to_string())?;
+    Ok(new_path.to_string_lossy().to_string())
+}
+
+/// Delete a file or directory. When `to_trash = true` and the platform is
+/// macOS, routes through Finder's Trash via `osascript`. Otherwise removes
+/// directly with `remove_file` / `remove_dir_all`.
+pub fn delete_path(path: &str, to_trash: bool) -> Result<(), String> {
+    let p = Path::new(path);
+    if !p.exists() {
+        return Err(format!("path not found: {path}"));
+    }
+    if to_trash {
+        #[cfg(target_os = "macos")]
+        {
+            return trash_via_osascript(p);
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            // No portable trash on Linux/Windows in v1; fall through to hard delete.
+        }
+    }
+    delete_recursive(p)
+}
+
+/// Create a new directory `name` inside `parent`. Returns the new absolute path.
+pub fn mkdir(parent: &str, name: &str) -> Result<String, String> {
+    if name.is_empty() || name.contains('/') || name == "." || name == ".." {
+        return Err(format!("invalid name: {name}"));
+    }
+    let parent_p = Path::new(parent);
+    if !parent_p.is_dir() {
+        return Err(format!("parent not a directory: {parent}"));
+    }
+    let new_path = parent_p.join(name);
+    if new_path.exists() {
+        return Err(format!("already exists: {}", new_path.display()));
+    }
+    fs::create_dir(&new_path).map_err(|e| e.to_string())?;
+    Ok(new_path.to_string_lossy().to_string())
+}
+
+/// Duplicate a file/dir into the same parent, picking a Finder-style suffix:
+/// `name copy`, `name copy 2`, `name copy 3`, ... Returns the new absolute path.
+pub fn duplicate_path(path: &str) -> Result<String, String> {
+    let p = Path::new(path);
+    if !p.exists() {
+        return Err(format!("path not found: {path}"));
+    }
+    let parent = p.parent().ok_or_else(|| "path has no parent".to_string())?;
+    let dest = pick_duplicate_dest(parent, p);
+    copy_recursive(p, &dest)?;
+    Ok(dest.to_string_lossy().to_string())
+}
+
+// ── helpers ────────────────────────────────────────────────────────────────
+
+fn is_ancestor(ancestor: &Path, descendant: &Path) -> bool {
+    let a = fs::canonicalize(ancestor).unwrap_or_else(|_| ancestor.to_path_buf());
+    let d = match descendant.parent() {
+        Some(p) => fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf()),
+        None => return false,
+    };
+    d.starts_with(&a)
+}
+
+fn copy_recursive(from: &Path, to: &Path) -> Result<(), String> {
+    if from.is_dir() {
+        fs::create_dir(to).map_err(|e| e.to_string())?;
+        for entry in fs::read_dir(from).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let from_child = entry.path();
+            let to_child = to.join(entry.file_name());
+            copy_recursive(&from_child, &to_child)?;
+        }
+        Ok(())
+    } else {
+        fs::copy(from, to).map(|_| ()).map_err(|e| e.to_string())
+    }
+}
+
+fn delete_recursive(p: &Path) -> Result<(), String> {
+    if p.is_dir() {
+        fs::remove_dir_all(p).map_err(|e| e.to_string())
+    } else {
+        fs::remove_file(p).map_err(|e| e.to_string())
+    }
+}
+
+fn pick_duplicate_dest(parent: &Path, src: &Path) -> PathBuf {
+    let (stem, ext) = match src.file_name().and_then(|n| n.to_str()) {
+        Some(name) => match name.rfind('.') {
+            Some(i) if i > 0 && !src.is_dir() => (name[..i].to_string(), Some(name[i..].to_string())),
+            _ => (name.to_string(), None),
+        },
+        None => ("untitled".to_string(), None),
+    };
+    let base_with_copy = format!("{stem} copy");
+    for n in 0..1000 {
+        let candidate = if n == 0 {
+            base_with_copy.clone()
+        } else {
+            format!("{base_with_copy} {}", n + 1)
+        };
+        let with_ext = match &ext {
+            Some(e) => format!("{candidate}{e}"),
+            None => candidate,
+        };
+        let p = parent.join(&with_ext);
+        if !p.exists() {
+            return p;
+        }
+    }
+    parent.join(format!("{stem} copy {}", now_ms()))
+}
+
+#[cfg(target_os = "macos")]
+fn trash_via_osascript(p: &Path) -> Result<(), String> {
+    let posix = p.to_string_lossy().replace('"', "\\\"");
+    let script = format!(
+        "tell application \"Finder\" to delete (POSIX file \"{posix}\" as alias)"
+    );
+    let out = std::process::Command::new("osascript")
+        .arg("-e")
+        .arg(&script)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().to_string());
+    }
+    Ok(())
+}
+
+/// `EXDEV` — "cross-device link". Used to detect when `rename` needs a
+/// copy + delete fallback. Defined inline so we don't pull in `libc`.
+#[cfg(unix)]
+fn libc_xdev() -> i32 { 18 }
+#[cfg(not(unix))]
+fn libc_xdev() -> i32 { 17 } // ERROR_NOT_SAME_DEVICE on Windows
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -318,6 +542,94 @@ mod tests {
     }
 
     #[test]
+    fn default_complete_column_is_terminal_others_are_not() {
+        let cols = default_kanban_columns();
+        for c in &cols {
+            if c.id == DEFAULT_COLUMN_COMPLETE {
+                assert!(c.is_terminal, "complete column must be terminal");
+            } else {
+                assert!(!c.is_terminal, "{} must not be terminal", c.id);
+            }
+        }
+    }
+
+    fn project_with(columns: Vec<KanbanColumn>) -> Project {
+        Project {
+            id: "p1".into(),
+            name: "p1".into(),
+            workspace: "/tmp".into(),
+            concurrency: 1,
+            kanban_columns: columns,
+            created_at: 0,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn is_terminal_status_handles_default_columns() {
+        let p = project_with(default_kanban_columns());
+        assert!(is_terminal_status(&p, DEFAULT_COLUMN_COMPLETE));
+        assert!(!is_terminal_status(&p, DEFAULT_COLUMN_RUNNING));
+        assert!(!is_terminal_status(&p, DEFAULT_COLUMN_QUEUED));
+        assert!(!is_terminal_status(&p, DEFAULT_COLUMN_PENDING));
+        // Unknown status id never terminal.
+        assert!(!is_terminal_status(&p, "nonexistent"));
+    }
+
+    #[test]
+    fn is_terminal_status_respects_custom_terminal_flag() {
+        let mut cols = default_kanban_columns();
+        cols.push(KanbanColumn {
+            id: "shipped".into(),
+            name: "Shipped".into(),
+            color: None,
+            is_default: false,
+            is_terminal: true,
+            order: 4,
+        });
+        cols.push(KanbanColumn {
+            id: "blocked".into(),
+            name: "Blocked".into(),
+            color: None,
+            is_default: false,
+            is_terminal: false,
+            order: 5,
+        });
+        let p = project_with(cols);
+        assert!(is_terminal_status(&p, "shipped"));
+        assert!(!is_terminal_status(&p, "blocked"));
+    }
+
+    #[test]
+    fn is_terminal_status_falls_back_for_legacy_complete_column() {
+        // Legacy projects.json deserialises with `is_terminal: false` (serde default)
+        // for the default complete column — fallback by id keeps it terminal.
+        let legacy_complete = KanbanColumn {
+            id: DEFAULT_COLUMN_COMPLETE.into(),
+            name: "Complete".into(),
+            color: None,
+            is_default: true,
+            is_terminal: false, // legacy: missing field deserialised as false
+            order: 3,
+        };
+        let p = project_with(vec![legacy_complete]);
+        assert!(
+            is_terminal_status(&p, DEFAULT_COLUMN_COMPLETE),
+            "default complete column must remain terminal even with legacy data"
+        );
+    }
+
+    #[test]
+    fn kanban_column_deserialises_legacy_json_without_is_terminal() {
+        // Older projects.json was written before is_terminal existed; serde must
+        // tolerate the missing field rather than refusing to parse the file.
+        let legacy = r#"{"id":"complete","name":"Complete","color":null,"isDefault":true,"order":3}"#;
+        let col: KanbanColumn = serde_json::from_str(legacy).unwrap();
+        assert_eq!(col.id, "complete");
+        assert!(!col.is_terminal, "missing field deserialises as false");
+    }
+
+    #[test]
     fn empty_workspace_rejected() {
         let r = create_project(ProjectInput {
             name: "x".into(),
@@ -335,5 +647,178 @@ mod tests {
             concurrency: None,
         });
         assert!(r.is_err());
+    }
+
+    // ── File operations ──────────────────────────────────────────────────────
+
+    fn touch(path: &Path) {
+        fs::write(path, b"x").unwrap();
+    }
+
+    #[test]
+    fn move_file_same_parent() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        touch(&a);
+        move_path(a.to_str().unwrap(), b.to_str().unwrap()).unwrap();
+        assert!(!a.exists());
+        assert!(b.exists());
+    }
+
+    #[test]
+    fn move_refuses_existing_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        touch(&a);
+        touch(&b);
+        let err = move_path(a.to_str().unwrap(), b.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("already exists"));
+        assert!(a.exists());
+    }
+
+    #[test]
+    fn move_dir_into_itself_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("parent");
+        fs::create_dir(&parent).unwrap();
+        let inside = parent.join("inside");
+        let err = move_path(parent.to_str().unwrap(), inside.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("itself"));
+        assert!(parent.exists());
+    }
+
+    #[test]
+    fn copy_file_creates_independent_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        fs::write(&a, b"hello").unwrap();
+        copy_path(a.to_str().unwrap(), b.to_str().unwrap()).unwrap();
+        assert_eq!(fs::read(&a).unwrap(), b"hello");
+        assert_eq!(fs::read(&b).unwrap(), b"hello");
+        // Mutating the source must not affect the copy.
+        fs::write(&a, b"changed").unwrap();
+        assert_eq!(fs::read(&b).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn copy_directory_recursively() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir(&src).unwrap();
+        fs::write(src.join("f1.txt"), b"1").unwrap();
+        let nested = src.join("nested");
+        fs::create_dir(&nested).unwrap();
+        fs::write(nested.join("f2.txt"), b"2").unwrap();
+        let dst = dir.path().join("dst");
+        copy_path(src.to_str().unwrap(), dst.to_str().unwrap()).unwrap();
+        assert_eq!(fs::read(dst.join("f1.txt")).unwrap(), b"1");
+        assert_eq!(fs::read(dst.join("nested").join("f2.txt")).unwrap(), b"2");
+    }
+
+    #[test]
+    fn rename_invalid_name_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        touch(&a);
+        for bad in ["", "..", ".", "with/slash"] {
+            let err = rename_path(a.to_str().unwrap(), bad).unwrap_err();
+            assert!(err.contains("invalid"), "want invalid for {bad:?}: {err}");
+        }
+        assert!(a.exists());
+    }
+
+    #[test]
+    fn rename_collision_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        let b = dir.path().join("b.txt");
+        touch(&a);
+        touch(&b);
+        let err = rename_path(a.to_str().unwrap(), "b.txt").unwrap_err();
+        assert!(err.contains("already taken"));
+    }
+
+    #[test]
+    fn rename_returns_new_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        touch(&a);
+        let new_path = rename_path(a.to_str().unwrap(), "z.txt").unwrap();
+        assert!(new_path.ends_with("z.txt"));
+        assert!(Path::new(&new_path).exists());
+    }
+
+    #[test]
+    fn delete_file_no_trash() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        touch(&a);
+        delete_path(a.to_str().unwrap(), false).unwrap();
+        assert!(!a.exists());
+    }
+
+    #[test]
+    fn delete_dir_recursively() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().join("d");
+        fs::create_dir(&d).unwrap();
+        fs::write(d.join("f.txt"), b"x").unwrap();
+        delete_path(d.to_str().unwrap(), false).unwrap();
+        assert!(!d.exists());
+    }
+
+    #[test]
+    fn mkdir_creates_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let new_path = mkdir(dir.path().to_str().unwrap(), "child").unwrap();
+        assert!(Path::new(&new_path).is_dir());
+    }
+
+    #[test]
+    fn mkdir_invalid_name_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        for bad in ["", "..", "a/b"] {
+            let err = mkdir(dir.path().to_str().unwrap(), bad).unwrap_err();
+            assert!(err.contains("invalid"), "want invalid for {bad:?}: {err}");
+        }
+    }
+
+    #[test]
+    fn mkdir_existing_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = mkdir(dir.path().to_str().unwrap(), "child").unwrap();
+        let err = mkdir(dir.path().to_str().unwrap(), "child").unwrap_err();
+        assert!(err.contains("already exists"));
+    }
+
+    #[test]
+    fn duplicate_picks_finder_style_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.txt");
+        fs::write(&a, b"x").unwrap();
+        let dup1 = duplicate_path(a.to_str().unwrap()).unwrap();
+        assert!(dup1.ends_with("a copy.txt"));
+        let dup2 = duplicate_path(a.to_str().unwrap()).unwrap();
+        assert!(dup2.ends_with("a copy 2.txt"));
+        let dup3 = duplicate_path(a.to_str().unwrap()).unwrap();
+        assert!(dup3.ends_with("a copy 3.txt"));
+    }
+
+    #[test]
+    fn duplicate_directory_no_extension() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().join("folder");
+        fs::create_dir(&d).unwrap();
+        fs::write(d.join("inside.txt"), b"y").unwrap();
+        let dup = duplicate_path(d.to_str().unwrap()).unwrap();
+        assert!(dup.ends_with("folder copy"));
+        assert!(Path::new(&dup).is_dir());
+        assert_eq!(
+            fs::read(Path::new(&dup).join("inside.txt")).unwrap(),
+            b"y"
+        );
     }
 }

@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileBrowserView } from "./FileBrowserView";
+import { useDetailStore, useSessionsStore, useUIStore } from "../store";
+import { FileBrowserView, type FileBrowserSelection } from "./FileBrowserView";
 import { KanbanView } from "./KanbanView";
 import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import styles from "./ProjectsView.module.css";
@@ -55,6 +57,7 @@ export function ProjectsView() {
   const [dialog, setDialog] = useState<DialogMode>(null);
   const [error, setError] = useState<string | null>(null);
   const [launcherInitial, setLauncherInitial] = useState<SessionLauncherProps["initial"]>(null);
+  const [listCollapsed, setListCollapsed] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -111,31 +114,38 @@ export function ProjectsView() {
         <p className={styles.empty}>{t("projects.empty")}</p>
       ) : (
         <div className={styles.body}>
-          <ul className={styles.list_pane} style={{ listStyle: "none", margin: 0 }}>
-            {projects.map((p) => (
-              <li
-                key={p.id}
-                className={`${styles.list_item} ${selectedId === p.id ? styles.list_item_active : ""}`}
-                onClick={() => setSelectedId(p.id)}
-              >
-                <div className={styles.list_item_title}>{p.name}</div>
-                <div className={styles.list_item_sub}>
-                  <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {p.workspace}
-                  </span>
-                  <span className={styles.chip}>
-                    {sessionCountByProject.get(p.id) ?? 0}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
+          {!listCollapsed && (
+            <ul className={styles.list_pane} style={{ listStyle: "none", margin: 0 }}>
+              {projects.map((p) => (
+                <li
+                  key={p.id}
+                  className={`${styles.list_item} ${selectedId === p.id ? styles.list_item_active : ""}`}
+                  onClick={() => {
+                    setSelectedId(p.id);
+                    setListCollapsed(true);
+                  }}
+                >
+                  <div className={styles.list_item_title}>{p.name}</div>
+                  <div className={styles.list_item_sub}>
+                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {p.workspace}
+                    </span>
+                    <span className={styles.chip}>
+                      {sessionCountByProject.get(p.id) ?? 0}
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
 
           <div className={styles.detail_pane}>
             {selected ? (
               <ProjectDetail
                 project={selected}
                 sessionCount={sessionCountByProject.get(selected.id) ?? 0}
+                listCollapsed={listCollapsed}
+                onToggleList={() => setListCollapsed((v) => !v)}
                 onEdit={() => {
                   setError(null);
                   setDialog({ type: "edit", project: selected });
@@ -232,6 +242,8 @@ export function ProjectsView() {
 function ProjectDetail({
   project,
   sessionCount,
+  listCollapsed,
+  onToggleList,
   onEdit,
   onDelete,
   onNewSession,
@@ -240,56 +252,289 @@ function ProjectDetail({
 }: {
   project: Project;
   sessionCount: number;
+  listCollapsed: boolean;
+  onToggleList: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onNewSession: () => void;
   onProjectChanged: () => void;
   t: (k: string, opts?: Record<string, unknown>) => string;
 }) {
-  const [tab, setTab] = useState<"kanban" | "files">("kanban");
+  const inspectorCollapsed = useUIStore((s) => s.projectInspectorCollapsed);
+  const inspectorWidth = useUIStore((s) => s.projectInspectorWidth);
+  const setInspectorCollapsed = useUIStore((s) => s.setProjectInspectorCollapsed);
+  const setInspectorWidth = useUIStore((s) => s.setProjectInspectorWidth);
+  const [selection, setSelection] = useState<FileBrowserSelection>({ paths: [], entries: [] });
+  const handleSelection = useCallback(
+    (s: FileBrowserSelection) => setSelection(s),
+    [],
+  );
+
   return (
     <>
-      <div className={styles.detail_header}>
-        <h3 className={styles.detail_title}>{project.name}</h3>
-        <div className={styles.detail_actions}>
-          <button type="button" onClick={onNewSession}>+ {t("launcher.new_session")}</button>
-          <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
-          <button type="button" onClick={onDelete} className={styles.danger}>
-            {t("projects.delete")}
+      <div className={styles.detail_main}>
+        <div className={styles.detail_header}>
+          <button
+            type="button"
+            className={styles.list_toggle}
+            onClick={onToggleList}
+            title={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
+            aria-label={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
+          >
+            {listCollapsed ? "›" : "‹"}
           </button>
+          <h3 className={styles.detail_title}>{project.name}</h3>
+          <div className={styles.detail_actions}>
+            <button type="button" onClick={onNewSession}>+ {t("launcher.new_session")}</button>
+            <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
+            <button type="button" onClick={onDelete} className={styles.danger}>
+              {t("projects.delete")}
+            </button>
+            {inspectorCollapsed && (
+              <button
+                type="button"
+                className={styles.inspector_show_btn}
+                onClick={() => setInspectorCollapsed(false)}
+                title={t("projects.inspector_show")}
+              >
+                ⊟ {t("projects.inspector")}
+              </button>
+            )}
+          </div>
         </div>
+        <dl className={styles.kv} style={{ marginBottom: 8 }}>
+          <dt>{t("projects.workspace")}</dt>
+          <dd>{project.workspace}</dd>
+          <dt>{t("projects.concurrency")}</dt>
+          <dd>{project.concurrency}</dd>
+          <dt>{t("projects.session_count")}</dt>
+          <dd>{sessionCount}</dd>
+        </dl>
       </div>
-      <dl className={styles.kv} style={{ marginBottom: 8 }}>
-        <dt>{t("projects.workspace")}</dt>
-        <dd>{project.workspace}</dd>
-        <dt>{t("projects.concurrency")}</dt>
-        <dd>{project.concurrency}</dd>
-        <dt>{t("projects.session_count")}</dt>
-        <dd>{sessionCount}</dd>
-      </dl>
-      <div style={{ display: "flex", gap: 4, marginBottom: 8 }}>
-        <button
-          type="button"
-          className={tab === "kanban" ? styles.tab_active : styles.tab}
-          onClick={() => setTab("kanban")}
-        >
-          {t("projects.tab_kanban")}
-        </button>
-        <button
-          type="button"
-          className={tab === "files" ? styles.tab_active : styles.tab}
-          onClick={() => setTab("files")}
-        >
-          {t("projects.tab_files")}
-        </button>
+
+      <div className={styles.workspace_split}>
+        <div className={styles.main_pane}>
+          <FileBrowserView
+            projectId={project.id}
+            workspace={project.workspace}
+            onSelectionChange={handleSelection}
+          />
+        </div>
+        {!inspectorCollapsed && (
+          <>
+            <InspectorResizer width={inspectorWidth} onWidth={setInspectorWidth} />
+            <aside className={styles.inspector_pane} style={{ width: inspectorWidth }}>
+              <Inspector
+                project={project}
+                selection={selection}
+                onProjectChanged={onProjectChanged}
+                onCollapse={() => setInspectorCollapsed(true)}
+                t={t}
+              />
+            </aside>
+          </>
+        )}
       </div>
-      {tab === "kanban" ? (
-        <KanbanView project={project} onProjectChanged={onProjectChanged} />
-      ) : (
-        <FileBrowserView projectId={project.id} workspace={project.workspace} />
-      )}
     </>
   );
+}
+
+function InspectorResizer({
+  width,
+  onWidth,
+}: {
+  width: number;
+  onWidth: (px: number) => void;
+}) {
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  const [active, setActive] = useState(false);
+
+  useEffect(() => {
+    if (!active) return;
+    const onMove = (e: MouseEvent) => {
+      if (!dragRef.current) return;
+      const dx = dragRef.current.startX - e.clientX;
+      onWidth(dragRef.current.startWidth + dx);
+    };
+    const onUp = () => {
+      dragRef.current = null;
+      setActive(false);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, [active, onWidth]);
+
+  return (
+    <div
+      className={`${styles.inspector_resizer} ${active ? styles.inspector_resizer_active : ""}`}
+      onMouseDown={(e) => {
+        dragRef.current = { startX: e.clientX, startWidth: width };
+        setActive(true);
+      }}
+    />
+  );
+}
+
+function Inspector({
+  project,
+  selection,
+  onProjectChanged,
+  onCollapse,
+  t,
+}: {
+  project: Project;
+  selection: FileBrowserSelection;
+  onProjectChanged: () => void;
+  onCollapse: () => void;
+  t: (k: string, opts?: Record<string, unknown>) => string;
+}) {
+  const fleetSessionEntry =
+    selection.entries.length === 1 && selection.entries[0].isFleetsession
+      ? selection.entries[0]
+      : null;
+  const singleFile =
+    !fleetSessionEntry && selection.entries.length === 1 && !selection.entries[0].isDir
+      ? selection.entries[0]
+      : null;
+
+  let title = t("projects.inspector_kanban_title");
+  if (fleetSessionEntry) title = t("projects.inspector_session_title");
+  else if (singleFile) title = t("projects.inspector_file_title");
+  else if (selection.entries.length > 1) title = t("projects.inspector_selection_title");
+
+  return (
+    <>
+      <div className={styles.inspector_header}>
+        <span className={styles.inspector_header_title}>{title}</span>
+        <button
+          type="button"
+          className={styles.inspector_close_btn}
+          onClick={onCollapse}
+          title={t("projects.inspector_hide")}
+          aria-label={t("projects.inspector_hide")}
+        >
+          ›
+        </button>
+      </div>
+      <div className={styles.inspector_body}>
+        {fleetSessionEntry ? (
+          <FleetSessionInspector entry={fleetSessionEntry} t={t} />
+        ) : singleFile ? (
+          <FileInfoInspector entry={singleFile} t={t} />
+        ) : selection.entries.length > 1 ? (
+          <SelectionSummaryInspector selection={selection} t={t} />
+        ) : (
+          <div className={styles.inspector_kanban_wrap}>
+            <KanbanView project={project} onProjectChanged={onProjectChanged} compact />
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function FleetSessionInspector({
+  entry,
+  t,
+}: {
+  entry: { name: string; path: string; fleetSessionId: string | null };
+  t: (k: string, opts?: Record<string, unknown>) => string;
+}) {
+  const live = useSessionsStore((s) =>
+    entry.fleetSessionId
+      ? s.sessions.find((info) => info.id === entry.fleetSessionId) ?? null
+      : null,
+  );
+  const open = () => {
+    if (live) useDetailStore.getState().open(live);
+  };
+  return (
+    <div className={styles.inspector_section}>
+      <h4 className={styles.inspector_section_title}>{t("projects.inspector_session_title")}</h4>
+      <dl className={styles.inspector_kv}>
+        <dt>{t("projects.inspector_name")}</dt>
+        <dd>{entry.name}</dd>
+        <dt>{t("projects.inspector_session_id")}</dt>
+        <dd style={{ fontFamily: "var(--font-mono, monospace)" }}>
+          {entry.fleetSessionId ? entry.fleetSessionId.slice(0, 8) : "—"}
+        </dd>
+        <dt>{t("projects.inspector_status")}</dt>
+        <dd>{live?.status ?? t("projects.inspector_session_not_started")}</dd>
+        {live?.aiTitle && (
+          <>
+            <dt>{t("projects.inspector_title")}</dt>
+            <dd>{live.aiTitle}</dd>
+          </>
+        )}
+      </dl>
+      <button
+        type="button"
+        className={styles.inspector_open_btn}
+        disabled={!live}
+        onClick={open}
+      >
+        {t("projects.inspector_open_session")}
+      </button>
+    </div>
+  );
+}
+
+function FileInfoInspector({
+  entry,
+  t,
+}: {
+  entry: { name: string; path: string; sizeBytes: number; modifiedMs: number };
+  t: (k: string, opts?: Record<string, unknown>) => string;
+}) {
+  return (
+    <div className={styles.inspector_section}>
+      <h4 className={styles.inspector_section_title}>{t("projects.inspector_file_title")}</h4>
+      <dl className={styles.inspector_kv}>
+        <dt>{t("projects.inspector_name")}</dt>
+        <dd>{entry.name}</dd>
+        <dt>{t("projects.inspector_size")}</dt>
+        <dd>{formatBytes(entry.sizeBytes)}</dd>
+        <dt>{t("projects.inspector_modified")}</dt>
+        <dd>{new Date(entry.modifiedMs).toLocaleString()}</dd>
+        <dt>{t("projects.inspector_path")}</dt>
+        <dd>{entry.path}</dd>
+      </dl>
+    </div>
+  );
+}
+
+function SelectionSummaryInspector({
+  selection,
+  t,
+}: {
+  selection: FileBrowserSelection;
+  t: (k: string, opts?: Record<string, unknown>) => string;
+}) {
+  const totalBytes = selection.entries.reduce((acc, e) => acc + e.sizeBytes, 0);
+  const dirCount = selection.entries.filter((e) => e.isDir).length;
+  const fileCount = selection.entries.length - dirCount;
+  return (
+    <div className={styles.inspector_section}>
+      <h4 className={styles.inspector_section_title}>{t("projects.inspector_selection_title")}</h4>
+      <dl className={styles.inspector_kv}>
+        <dt>{t("projects.inspector_count")}</dt>
+        <dd>{t("projects.inspector_count_value", { files: fileCount, dirs: dirCount })}</dd>
+        <dt>{t("projects.inspector_total_size")}</dt>
+        <dd>{formatBytes(totalBytes)}</dd>
+      </dl>
+    </div>
+  );
+}
+
+function formatBytes(n: number): string {
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function ProjectFormDialog({
@@ -326,12 +571,28 @@ function ProjectFormDialog({
         </label>
         <label className={styles.field}>
           <span>{t("projects.workspace")}</span>
-          <input
-            type="text"
-            value={workspace}
-            placeholder="/absolute/path/to/workspace"
-            onChange={(e) => setWorkspace(e.target.value)}
-          />
+          <div className={styles.field_row}>
+            <input
+              type="text"
+              value={workspace}
+              placeholder="/absolute/path/to/workspace"
+              onChange={(e) => setWorkspace(e.target.value)}
+            />
+            <button
+              type="button"
+              className={styles.browse_btn}
+              onClick={async () => {
+                const picked = await openDialog({
+                  directory: true,
+                  multiple: false,
+                  defaultPath: workspace.trim() || undefined,
+                });
+                if (typeof picked === "string") setWorkspace(picked);
+              }}
+            >
+              {t("projects.browse")}
+            </button>
+          </div>
         </label>
         <label className={styles.field}>
           <span>{t("projects.concurrency")}</span>
