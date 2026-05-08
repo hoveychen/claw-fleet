@@ -107,6 +107,10 @@
   border-radius: 6px;
   padding: 8px 10px;
   font-size: 12px;
+  cursor: pointer;
+}
+
+.card[draggable="true"] {
   cursor: grab;
 }
 

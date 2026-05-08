@@ -59,9 +59,12 @@
     "column_empty": "（空）",
     "expedited": "插队",
     "drag_to_move": "拖拽移动",
+    "drag_or_click": "点击查看 · 拖拽移动",
+    "click_to_open": "点击查看 session 详情",
     "system_managed": "系统推断状态 — 不可拖动",
     "toast_default_locked": "默认列由系统推断；只能拖动到自定义列。",
     "toast_must_clear": "请先把这一列的 {{count}} 个 session 移到别处。",
+    "toast_session_not_started": "Session 还没启动，暂无 transcript 可看。",
     "confirm_delete_column": "删除列「{{name}}」？只删该项目里的此列，不影响 session 本身。"
   },
   "launcher": {
