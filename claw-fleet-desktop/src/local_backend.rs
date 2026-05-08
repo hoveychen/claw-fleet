@@ -639,6 +639,7 @@ impl LocalBackend {
         // panel can drop the card.
         {
             let app_pending = app.clone();
+            let sess_pending = sessions.clone();
             let running_pending = running.clone();
             std::thread::spawn(move || {
                 let mut known: HashSet<String> = HashSet::new();
@@ -647,7 +648,16 @@ impl LocalBackend {
                     if !running_pending.load(Ordering::SeqCst) {
                         break;
                     }
-                    let pending = crate::supervisor::session_pending_requests();
+                    let mut pending = crate::supervisor::session_pending_requests();
+                    // Replace the workspace-basename fallback with the live
+                    // SessionInfo workspaceName when available (matches the
+                    // guard / elicitation watchers' display behaviour).
+                    for req in pending.iter_mut() {
+                        let (ws, _) = resolve_session_display(&sess_pending, &req.session_id);
+                        if !ws.is_empty() {
+                            req.workspace_name = ws;
+                        }
+                    }
                     let pending_ids: HashSet<String> =
                         pending.iter().map(|r| r.id.clone()).collect();
                     for req in &pending {

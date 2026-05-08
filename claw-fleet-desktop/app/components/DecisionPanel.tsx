@@ -4,7 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useDecisionStore, useUIStore } from "../store";
+import { useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
 import { safeMarkdownComponents } from "../markdown/safeLinks";
 import type {
   DecisionHistoryRecord,
@@ -13,6 +13,7 @@ import type {
   GuardDecision,
   PendingDecision,
   PlanApprovalDecision,
+  SessionPendingDecision,
 } from "../types";
 import styles from "./DecisionPanel.module.css";
 
@@ -834,6 +835,145 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
   );
 }
 
+// ── Session-pending card (wait-for-input after agent end-of-turn) ────────
+
+function SessionPendingCard({ decision }: { decision: SessionPendingDecision }) {
+  const { t } = useTranslation();
+  const {
+    setSessionPendingFollowUp,
+    markSessionPendingStatus,
+    submitSessionPendingFollowUp,
+  } = useDecisionStore();
+  const sessionsList = useSessionsStore((s) => s.sessions);
+  const openDetail = useDetailStore((s) => s.open);
+  const req = decision.request;
+
+  // Live SessionInfo, if available — gives us aiTitle and the latest
+  // assistant message preview without re-fetching the transcript.
+  const info = useMemo(
+    () => sessionsList.find((s) => s.id === req.sessionId),
+    [sessionsList, req.sessionId],
+  );
+
+  const lastMessage = info?.lastMessagePreview?.trim() || req.promptPreview;
+  const titleText = info?.aiTitle || req.workspaceName || t("session_pending.title", "Session waiting for input");
+
+  const handleStatusClick = useCallback(
+    (statusId: string) => {
+      if (decision.submitting) return;
+      markSessionPendingStatus(decision.id, statusId);
+    },
+    [decision.id, decision.submitting, markSessionPendingStatus],
+  );
+
+  const handleFollowUpSubmit = useCallback(() => {
+    if (decision.submitting || !decision.followUpText.trim()) return;
+    submitSessionPendingFollowUp(decision.id);
+  }, [decision.id, decision.followUpText, decision.submitting, submitSessionPendingFollowUp]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleFollowUpSubmit();
+      }
+    },
+    [handleFollowUpSubmit],
+  );
+
+  const handleOpenDetail = useCallback(() => {
+    if (info) {
+      openDetail(info);
+    }
+  }, [info, openDetail]);
+
+  return (
+    <div className={styles.card}>
+      <div className={styles.card_header}>
+        <svg
+          className={styles.card_icon}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <polyline points="12 6 12 12 16 14" />
+        </svg>
+        <span className={styles.card_title}>
+          {t("session_pending.title", "Session waiting for input")}
+        </span>
+        {req.workspaceName && (
+          <span className={styles.card_workspace}>{req.workspaceName}</span>
+        )}
+      </div>
+
+      {info?.aiTitle && (
+        <div className={styles.card_subtitle}>{titleText}</div>
+      )}
+
+      <div className={styles.analysis}>
+        <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>
+          {lastMessage || ""}
+        </ReactMarkdown>
+      </div>
+
+      <div className={styles.actions}>
+        {req.terminalColumns.map((col) => (
+          <button
+            key={col.id}
+            className={`${styles.btn} ${styles.btn_allow}`}
+            onClick={() => handleStatusClick(col.id)}
+            disabled={decision.submitting}
+            title={t("session_pending.mark_status_tip", "Move this session into {{name}}", {
+              name: col.name,
+            })}
+          >
+            {col.name}
+          </button>
+        ))}
+        {info && (
+          <button
+            type="button"
+            className={styles.btn}
+            onClick={handleOpenDetail}
+            disabled={decision.submitting}
+          >
+            {t("session_pending.open_detail", "Open session detail")}
+          </button>
+        )}
+      </div>
+
+      <textarea
+        className={styles.plan_feedback}
+        value={decision.followUpText}
+        onChange={(e) => setSessionPendingFollowUp(decision.id, e.target.value)}
+        onKeyDown={handleKeyDown}
+        placeholder={t(
+          "session_pending.followup_placeholder",
+          "Type a follow-up prompt (⌘/Ctrl+Enter to send)…",
+        )}
+        rows={3}
+        disabled={decision.submitting}
+      />
+      <div className={styles.actions}>
+        <button
+          type="button"
+          className={`${styles.btn} ${styles.btn_allow}`}
+          onClick={handleFollowUpSubmit}
+          disabled={decision.submitting || !decision.followUpText.trim()}
+        >
+          {decision.submitting
+            ? t("session_pending.sending", "Sending…")
+            : t("session_pending.send", "Send follow-up")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Card dispatcher ──────────────────────────────────────────────────────
 
 function DecisionCard({ decision, compact }: { decision: PendingDecision; compact: boolean }) {
@@ -844,6 +984,8 @@ function DecisionCard({ decision, compact }: { decision: PendingDecision; compac
       return <ElicitationCard decision={decision} compact={compact} />;
     case "plan-approval":
       return <PlanApprovalCard decision={decision} />;
+    case "session-pending":
+      return <SessionPendingCard decision={decision} />;
     default:
       return null;
   }
@@ -974,6 +1116,10 @@ function tabLabel(d: PendingDecision): string {
   }
   if (d.kind === "plan-approval") {
     return d.request.aiTitle || "Plan";
+  }
+  if (d.kind === "session-pending") {
+    const text = d.request.promptPreview || d.request.workspaceName || "Pending";
+    return text.length > 24 ? `${text.slice(0, 24)}…` : text;
   }
   const first = d.request.questions[0];
   if (first?.header) return first.header;

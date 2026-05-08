@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, SessionPendingRequest, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -583,6 +583,22 @@ interface DecisionState {
   addElicitationRequest: (req: ElicitationRequest) => void;
   /** Add a plan-approval request to the queue. */
   addPlanApprovalRequest: (req: PlanApprovalRequest) => void;
+  /** Add a session-pending request (idle-but-not-final) to the queue. */
+  addSessionPendingRequest: (req: SessionPendingRequest) => void;
+  /** Update the user's free-text follow-up while they're typing. */
+  setSessionPendingFollowUp: (id: string, text: string) => void;
+  /**
+   * Mark the session into a terminal kanban column (the user clicked one of
+   * the action buttons on the SessionPendingCard). Removes the decision
+   * from the queue when the backend write succeeds.
+   */
+  markSessionPendingStatus: (id: string, statusId: string) => Promise<void>;
+  /**
+   * Send the typed follow-up prompt back to the agent. Re-queues the session
+   * via `resume_fleet_session`, which causes the supervisor's next tick to
+   * spawn `claude --resume <sid>`. Removes the decision from the queue.
+   */
+  submitSessionPendingFollowUp: (id: string) => Promise<void>;
   /** Respond to a decision (allow/block for guard). Removes it from the queue. */
   respond: (id: string, allow: boolean) => Promise<void>;
   /** Submit elicitation answers. */
@@ -705,6 +721,84 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
     playChime("ding_dong").catch(() => {});
+  },
+
+  addSessionPendingRequest: (req) => {
+    const decision: PendingDecision = {
+      kind: "session-pending",
+      id: req.id,
+      request: req,
+      followUpText: "",
+      submitting: false,
+      arrivedAt: Date.now(),
+    };
+    set((s) => {
+      // Dedup: the watcher polls every second, so a re-emit shouldn't
+      // duplicate the card. Match by id.
+      if (s.decisions.some((d) => d.id === decision.id)) return s;
+      return {
+        decisions: [...s.decisions, decision],
+        activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
+      };
+    });
+    playChime("ding_dong").catch(() => {});
+  },
+
+  setSessionPendingFollowUp: (id, text) =>
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "session-pending" ? { ...d, followUpText: text } : d,
+      ),
+    })),
+
+  markSessionPendingStatus: async (id, statusId) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "session-pending" ? { ...d, submitting: true } : d,
+      ),
+    }));
+    try {
+      await invoke("set_fleet_session_status", {
+        sessionId: id,
+        status: statusId,
+        note: null,
+      });
+      set((s) => removeDecision(s, id));
+    } catch (e) {
+      console.error("set_fleet_session_status failed:", e);
+      set((s) => ({
+        decisions: s.decisions.map((d) =>
+          d.id === id && d.kind === "session-pending" ? { ...d, submitting: false } : d,
+        ),
+      }));
+    }
+  },
+
+  submitSessionPendingFollowUp: async (id) => {
+    const state = get();
+    const decision = state.decisions.find((d) => d.id === id);
+    if (!decision || decision.kind !== "session-pending") return;
+    const prompt = decision.followUpText.trim();
+    if (!prompt) return;
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "session-pending" ? { ...d, submitting: true } : d,
+      ),
+    }));
+    try {
+      await invoke("resume_fleet_session", {
+        sessionId: id,
+        followUpPrompt: prompt,
+      });
+      set((s) => removeDecision(s, id));
+    } catch (e) {
+      console.error("resume_fleet_session (session-pending follow-up) failed:", e);
+      set((s) => ({
+        decisions: s.decisions.map((d) =>
+          d.id === id && d.kind === "session-pending" ? { ...d, submitting: false } : d,
+        ),
+      }));
+    }
   },
 
   approvePlan: async (id, editedPlan) => {

@@ -1374,6 +1374,14 @@
     "history_more": "+{{count}} more in session detail",
     "view_session_history": "View this session's history"
   },
+  "session_pending": {
+    "title": "Session waiting for input",
+    "mark_status_tip": "Move this session into {{name}}",
+    "open_detail": "Open session detail",
+    "followup_placeholder": "Type a follow-up prompt (⌘/Ctrl+Enter to send)…",
+    "send": "Send follow-up",
+    "sending": "Sending…"
+  },
   "lite_decision_history": {
     "back": "Back",
     "loading": "Loading…",

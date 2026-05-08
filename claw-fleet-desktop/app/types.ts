@@ -435,11 +435,51 @@ export type DecisionHistoryRecord =
   | PlanApprovalHistoryRecord
   | UserPromptHistoryRecord;
 
+// ── Session-pending types (wait-for-input DecisionPanel card) ──────────
+
+export interface SessionPendingTerminalColumn {
+  id: string;
+  name: string;
+}
+
+export interface SessionPendingRequest {
+  id: string;
+  sessionId: string;
+  projectId: string;
+  /** Absolute workspace path (e.g. "/Users/me/projects/foo"). */
+  workspace: string;
+  /** Display name (workspace basename or live SessionInfo workspaceName). */
+  workspaceName: string;
+  /** First non-empty line of the originating prompt, capped at 200 chars. */
+  promptPreview: string;
+  /** Terminal kanban columns (complete + any user-marked is_terminal columns), in display order. */
+  terminalColumns: SessionPendingTerminalColumn[];
+  /** When the agent's Stop hook fired (epoch ms). null when sentinel was cleared between list and read. */
+  sinceMs: number | null;
+}
+
+/**
+ * Agent has finished a turn and the supervisor saw the idle sentinel, but
+ * the session hasn't been moved into a terminal column yet — show a
+ * DecisionPanel card so the user can mark final or send a follow-up prompt.
+ */
+export interface SessionPendingDecision {
+  kind: "session-pending";
+  id: string;
+  request: SessionPendingRequest;
+  /** Free-text follow-up the user is composing. Empty until the user types. */
+  followUpText: string;
+  /** True while a terminal-status / follow-up submission is in flight. */
+  submitting: boolean;
+  arrivedAt: number;
+}
+
 /** Union of all decision types the panel can display. */
 export type PendingDecision =
   | GuardDecision
   | ElicitationDecision
-  | PlanApprovalDecision;
+  | PlanApprovalDecision
+  | SessionPendingDecision;
 
 // ── Daily Report types ────────────────────────────────────────────────────────
 

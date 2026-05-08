@@ -71,6 +71,14 @@ pub fn list_idle_sessions() -> Vec<String> {
     list_idle_in_dir(&dir)
 }
 
+/// Read a session's idle sentinel, if any. Used by the wait-for-input
+/// DecisionPanel card to surface "since X minutes ago".
+pub fn read_idle(session_id: &str) -> Option<IdleRecord> {
+    let path = record_path(session_id)?;
+    let s = fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&s).ok()
+}
+
 fn list_idle_in_dir(dir: &std::path::Path) -> Vec<String> {
     let entries = match fs::read_dir(dir) {
         Ok(e) => e,
