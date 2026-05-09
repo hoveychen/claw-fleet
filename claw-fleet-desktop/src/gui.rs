@@ -3280,6 +3280,7 @@ pub fn run() {
             open_notification_settings,
             show_main_window,
             set_lite_mode,
+            crate::traffic_lights::nudge_traffic_lights,
             toggle_tray_panel,
             quit_app,
             open_settings_window,

@@ -877,6 +877,7 @@ dependencies = [
  "libc",
  "msedge-tts",
  "notify",
+ "objc2",
  "objc2-foundation",
  "openssl",
  "percent-encoding",

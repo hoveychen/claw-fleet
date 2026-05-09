@@ -197,7 +197,14 @@ function App() {
     const apply = () => {
       const resolved = resolveTheme(theme);
       document.documentElement.setAttribute("data-theme", resolved);
-      getCurrentWindow().setTheme(resolved === "dark" ? "dark" : "light").catch(() => {});
+      // setTheme triggers an NSAppearance change on macOS, which makes
+      // AppKit relayout the standard window buttons back to the system
+      // default — overriding our trafficLightPosition. Nudging the
+      // content view forces tao to re-apply the inset on next draw.
+      getCurrentWindow()
+        .setTheme(resolved === "dark" ? "dark" : "light")
+        .then(() => invoke("nudge_traffic_lights"))
+        .catch(() => {});
     };
     apply();
 

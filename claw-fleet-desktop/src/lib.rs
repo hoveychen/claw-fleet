@@ -12,6 +12,7 @@ mod gui;
 pub mod local_backend;
 pub mod region;
 pub mod remote;
+pub mod traffic_lights;
 pub mod tunnel;
 pub mod version_check;
 
