@@ -199,11 +199,13 @@ body {
   font-synthesis: none;
 }
 
-/* macOS vibrancy: make html/body transparent so the native frosted glass shows through */
+/* macOS: keep the body solid so the chrome zone (drag bar, area above/around
+   the floating sidebar) blends with the main content. The floating sidebar
+   gets its own card color in SessionList.module.css so it stays distinct. */
 [data-platform="macos"],
 [data-platform="macos"] body,
 [data-platform="macos"] #root {
-  background: transparent !important;
+  background: var(--color-bg) !important;
 }
 
 input, button {
