@@ -1369,6 +1369,8 @@
     "attach_title": "Choose files or images",
     "attachment_pasted": "Pasted",
     "attachment_remove": "Remove attachment",
+    "attachment_zoom": "Click to enlarge",
+    "lightbox_close": "Close",
     "attach_failed": "Attachment upload failed",
     "attach_too_large": "Attachment is too large (max 50 MiB)",
     "send": "Send (⌘/Ctrl+Enter)"

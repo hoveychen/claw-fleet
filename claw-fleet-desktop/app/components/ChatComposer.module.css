@@ -58,6 +58,29 @@
   max-width: 260px;
 }
 
+.thumb_btn {
+  flex: 0 0 auto;
+  display: block;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: zoom-in;
+  line-height: 0;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.thumb_btn:hover {
+  opacity: 0.85;
+  transform: scale(1.04);
+}
+
+.thumb_btn:focus-visible {
+  outline: 2px solid #2b6cb0;
+  outline-offset: 2px;
+}
+
 .thumb {
   flex: 0 0 auto;
   width: 36px;
