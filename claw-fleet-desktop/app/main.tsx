@@ -31,10 +31,9 @@ async function boot() {
 
   const { default: App } = await import("./App");
 
-  // In mock + lite, auto-accept a local connection so the ConnectionDialog
-  // doesn't block the lite layout. Done after App import so the store module
-  // is initialized.
-  if (isMockMode && forceLite) {
+  // In mock mode, auto-accept a local connection so the ConnectionDialog
+  // doesn't block the layout we want to iterate on.
+  if (isMockMode) {
     const { useConnectionStore } = await import("./store");
     useConnectionStore.getState().setConnection({ type: "local" });
   }

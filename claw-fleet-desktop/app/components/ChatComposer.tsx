@@ -10,6 +10,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
+import { ImageLightbox } from "./ImageLightbox";
 import styles from "./ChatComposer.module.css";
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
@@ -127,6 +128,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
+  const [previewing, setPreviewing] = useState<{ src: string; alt: string } | null>(null);
 
   useImperativeHandle(
     ref,
@@ -275,12 +277,22 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
                 title={a.path}
               >
                 {hasThumb && (
-                  <img
-                    src={a.previewUrl}
-                    alt=""
-                    className={styles.thumb}
-                    draggable={false}
-                  />
+                  <button
+                    type="button"
+                    className={styles.thumb_btn}
+                    onClick={() =>
+                      setPreviewing({ src: a.previewUrl as string, alt: a.name })
+                    }
+                    title={t("composer.attachment_zoom", "Click to enlarge")}
+                    aria-label={t("composer.attachment_zoom", "Click to enlarge")}
+                  >
+                    <img
+                      src={a.previewUrl}
+                      alt=""
+                      className={styles.thumb}
+                      draggable={false}
+                    />
+                  </button>
                 )}
                 <div className={styles.meta}>
                   <span className={styles.name}>{a.name}</span>
@@ -395,6 +407,13 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           </button>
         )}
       </div>
+      {previewing && (
+        <ImageLightbox
+          src={previewing.src}
+          alt={previewing.alt}
+          onClose={() => setPreviewing(null)}
+        />
+      )}
     </div>
   );
 });

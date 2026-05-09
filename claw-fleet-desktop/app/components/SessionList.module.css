@@ -96,45 +96,87 @@
   font-weight: 600;
 }
 
-/* macOS vibrancy: transparent sidebar lets native frosted glass show through */
+/* macOS Liquid Glass: floating slab — sidebar detaches from window edges,
+   gains rounded corners + hairline shadow so it reads as a glass panel
+   floating above the content layer. The slab stays flush with the top of
+   the window so the traffic-light buttons sit inside the sidebar, matching
+   Finder / Mail in macOS Tahoe. */
 :global([data-platform="macos"]) .sidebar {
-  background: transparent;
-  border-right-color: rgba(255, 255, 255, 0.1);
+  background: var(--color-bg-card);
+  border-right: none;
+  margin: 8px 0 8px 8px;
+  height: calc(100vh - 16px);
+  border-radius: 14px;
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.18),
+    0 12px 32px rgba(0, 0, 0, 0.22);
 }
 :global([data-platform="macos"][data-theme="light"]) .sidebar {
-  border-right-color: rgba(0, 0, 0, 0.12);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.06),
+    0 1px 2px rgba(0, 0, 0, 0.06),
+    0 10px 28px rgba(0, 0, 0, 0.08);
 }
 
-/* Semi-transparent backgrounds for sidebar elements on macOS vibrancy */
+/* Collapsed rail is too narrow to wrap the traffic-light buttons, so slide
+   it down past the title-bar row instead — the traffic lights then sit on
+   the bare window background. Expanded sidebar still wraps around them. */
+:global([data-platform="macos"]) .sidebar_collapsed {
+  margin-top: 44px;
+  height: calc(100vh - 52px);
+}
+:global([data-platform="macos"]) .sidebar_collapsed .header {
+  display: none;
+}
+
+/* Liquid Glass: hover & active states are full-width capsule pills.
+   Active gets a slightly tinted glass tone + 0.5px hairline highlight that
+   reads as a soft bevel — matches Tahoe's Mail/Settings selection language. */
+:global([data-platform="macos"]) .nav_item {
+  border-radius: 10px;
+}
 :global([data-platform="macos"]) .nav_item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
 }
 :global([data-platform="macos"]) .nav_active {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+:global([data-platform="macos"]) .nav_active:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 :global([data-platform="macos"]) .footer_card:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
 }
 :global([data-platform="macos"]) .separator {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
 }
 :global([data-platform="macos"][data-theme="light"]) .nav_item:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.04);
 }
 :global([data-platform="macos"][data-theme="light"]) .nav_active {
+  background: rgba(0, 0, 0, 0.08);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.05),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+:global([data-platform="macos"][data-theme="light"]) .nav_active:hover {
   background: rgba(0, 0, 0, 0.1);
 }
 :global([data-platform="macos"][data-theme="light"]) .footer_card:hover {
-  background: rgba(0, 0, 0, 0.06);
+  background: rgba(0, 0, 0, 0.04);
 }
 :global([data-platform="macos"][data-theme="light"]) .separator {
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(0, 0, 0, 0.06);
 }
 :global([data-platform="macos"]) .footer {
-  border-top-color: rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(255, 255, 255, 0.06);
 }
 :global([data-platform="macos"][data-theme="light"]) .footer {
-  border-top-color: rgba(0, 0, 0, 0.1);
+  border-top-color: rgba(0, 0, 0, 0.08);
 }
 
 /* ── Header ──────────────────────────────────────────────────────────────── */
@@ -148,6 +190,8 @@
   position: relative;
 }
 
+/* Sidebar wraps around the traffic-light buttons, so the header still needs
+   to leave room for them on the left. */
 :global([data-platform="macos"]) .header {
   padding: 0 16px 0 80px;
   height: 38px;
@@ -155,8 +199,9 @@
 }
 
 .title {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--color-text);
   margin: 0;
   flex: 1;
@@ -168,24 +213,25 @@
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px 8px 8px;
+  gap: 1px;
+  padding: 6px 10px 10px;
   flex-shrink: 0;
 }
 
 .nav_item {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 7px 10px;
-  border-radius: 8px;
+  gap: 10px;
+  padding: 7px 12px;
+  border-radius: 10px;
   border: none;
   background: none;
   cursor: pointer;
   color: var(--color-text-dim);
   font-size: 13px;
   font-weight: 500;
-  transition: background 0.12s, color 0.12s;
+  letter-spacing: -0.005em;
+  transition: background 0.14s ease, color 0.14s ease;
   width: 100%;
   text-align: left;
 }
@@ -203,10 +249,19 @@
 
 .nav_icon {
   font-size: 15px;
-  width: 20px;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-align: center;
   flex-shrink: 0;
   line-height: 1;
+  opacity: 0.85;
+}
+
+.nav_active .nav_icon {
+  opacity: 1;
 }
 
 .nav_label {
@@ -229,8 +284,9 @@
 .nav_divider {
   height: 1px;
   background: var(--color-border);
-  margin: 6px 10px;
+  margin: 8px 10px;
   flex-shrink: 0;
+  opacity: 0.7;
 }
 
 /* ── Project nav row + expand list ───────────────────────────────────────── */
@@ -372,15 +428,17 @@
 .footer {
   flex-shrink: 0;
   border-top: 1px solid var(--color-border);
+  padding: 6px;
 }
 
 .footer_card {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.14s ease;
   border: none;
   background: none;
   width: 100%;
@@ -392,8 +450,8 @@
 }
 
 .footer_avatar {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 8px;
   background: var(--color-bg-secondary);
   display: flex;
@@ -401,7 +459,12 @@
   justify-content: center;
   flex-shrink: 0;
   overflow: hidden;
-  font-size: 18px;
+  font-size: 16px;
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+}
+
+:global([data-theme="light"]) .footer_avatar {
+  box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.06);
 }
 
 .footer_info {
@@ -413,8 +476,9 @@
 }
 
 .footer_name {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
+  letter-spacing: -0.005em;
   color: var(--color-text);
   white-space: nowrap;
   overflow: hidden;
@@ -442,14 +506,16 @@
 }
 
 .footer_gear {
-  font-size: 16px;
+  font-size: 14px;
   color: var(--color-text-dim);
+  opacity: 0.7;
   flex-shrink: 0;
-  transition: color 0.12s, transform 0.3s;
+  transition: color 0.12s, opacity 0.12s, transform 0.3s;
 }
 
 .footer_card:hover .footer_gear {
   color: var(--color-text);
+  opacity: 1;
   transform: rotate(45deg);
 }
 
@@ -458,20 +524,22 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border: none;
   background: none;
   color: var(--color-text-dim);
   cursor: pointer;
   border-radius: 6px;
   flex-shrink: 0;
-  transition: background 0.12s, color 0.12s;
+  opacity: 0.75;
+  transition: background 0.14s, color 0.14s, opacity 0.14s;
 }
 
 .footer_mobile_btn:hover {
   background: var(--color-bg-secondary);
   color: var(--color-text);
+  opacity: 1;
 }
 
 .footer_mobile_active {
@@ -577,6 +645,13 @@
   cursor: col-resize;
   z-index: 10;
   transition: background 0.15s;
+}
+
+/* Floating sidebar clips its overflow, so pull the handle inside the panel
+   to keep the full hit-area usable. */
+:global([data-platform="macos"]) .resize_handle {
+  right: 0;
+  width: 6px;
 }
 
 .resize_handle:hover,
