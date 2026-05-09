@@ -52,9 +52,12 @@ base64 = "0.22"
 # and AskUserQuestion/guard hook CLIs delete the pending request and fall
 # back to Claude Code's native UI (user sees DecisionPanel vanish).
 # objc2 / objc2-foundation are already pulled in transitively by Tauri;
-# declaring them explicitly just lets us call NSProcessInfo.beginActivity.
+# declaring them explicitly lets us call NSProcessInfo.beginActivity (App
+# Nap) and use msg_send! to nudge the content view after a theme switch
+# so traffic lights snap back to the configured trafficLightPosition.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString"] }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString", "NSGeometry", "objc2-core-foundation"] }
 
 [features]
 default = []
