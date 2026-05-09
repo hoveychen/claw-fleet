@@ -64,6 +64,10 @@ export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms 
             td: ({ children }) => <td>{highlight(children)}</td>,
             th: ({ children }) => <th>{highlight(children)}</th>,
           } : {}),
+          // The fenced-code branch below renders its own <pre>; unwrap the
+          // outer <pre> so the resulting HTML stays valid (no nested <pre>)
+          // and clipboard pastes preserve newlines.
+          pre: ({ children }) => <>{children}</>,
           // Code blocks with syntax highlighting
           code({ node, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");
@@ -83,7 +87,7 @@ export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms 
                   <SyntaxHighlighter
                     style={oneDark}
                     language={match[1]}
-                    PreTag="div"
+                    PreTag="pre"
                     customStyle={{
                       margin: 0,
                       borderRadius: "0 0 6px 6px",
