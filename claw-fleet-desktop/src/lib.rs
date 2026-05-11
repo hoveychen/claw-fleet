@@ -220,30 +220,6 @@ impl Backend for NullBackend {
     fn ensure_fleet_cli_link(&self, _: &str) -> Result<(), String> {
         Err("backend not ready".into())
     }
-    fn list_directory(&self, _: &str) -> Result<Vec<claw_fleet_core::project::FileEntry>, String> {
-        Err("backend not ready".into())
-    }
-    fn move_path(&self, _: &str, _: &str) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn copy_path(&self, _: &str, _: &str) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn rename_path(&self, _: &str, _: &str) -> Result<String, String> {
-        Err("backend not ready".into())
-    }
-    fn delete_path(&self, _: &str, _: bool) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn mkdir(&self, _: &str, _: &str) -> Result<String, String> {
-        Err("backend not ready".into())
-    }
-    fn duplicate_path(&self, _: &str) -> Result<String, String> {
-        Err("backend not ready".into())
-    }
-    fn read_file_bytes(&self, _: &str, _: u64) -> Result<Vec<u8>, String> {
-        Err("backend not ready".into())
-    }
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         vec![]
     }

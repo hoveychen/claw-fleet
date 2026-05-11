@@ -1,9 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useDetailStore, useProjectsStore, useSessionsStore, useUIStore, type KanbanColumn, type Project } from "../store";
-import { FileBrowserView, type FileBrowserSelection } from "./FileBrowserView";
+import { useProjectsStore, type KanbanColumn, type Project } from "../store";
 import { KanbanView } from "./KanbanView";
 import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import styles from "./ProjectsView.module.css";
@@ -216,318 +215,42 @@ function ProjectDetail({
   onProjectChanged: () => void;
   t: (k: string, opts?: Record<string, unknown>) => string;
 }) {
-  const inspectorCollapsed = useUIStore((s) => s.projectInspectorCollapsed);
-  const inspectorWidth = useUIStore((s) => s.projectInspectorWidth);
-  const setInspectorCollapsed = useUIStore((s) => s.setProjectInspectorCollapsed);
-  const setInspectorWidth = useUIStore((s) => s.setProjectInspectorWidth);
-  const kanbanHeight = useUIStore((s) => s.projectKanbanHeight);
-  const setKanbanHeight = useUIStore((s) => s.setProjectKanbanHeight);
-  const [selection, setSelection] = useState<FileBrowserSelection>({ paths: [], entries: [] });
-  const handleSelection = useCallback(
-    (s: FileBrowserSelection) => setSelection(s),
-    [],
-  );
-
   return (
-    <div className={styles.workspace_split}>
-      <div className={styles.main_pane}>
-        <div className={styles.detail_main}>
-          <div className={styles.detail_header}>
-            <button
-              type="button"
-              className={styles.list_toggle}
-              onClick={onToggleList}
-              title={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
-              aria-label={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
-            >
-              {listCollapsed ? "›" : "‹"}
+    <div className={styles.main_pane}>
+      <div className={styles.detail_main}>
+        <div className={styles.detail_header}>
+          <button
+            type="button"
+            className={styles.list_toggle}
+            onClick={onToggleList}
+            title={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
+            aria-label={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
+          >
+            {listCollapsed ? "›" : "‹"}
+          </button>
+          <h3 className={styles.detail_title}>{project.name}</h3>
+          <div className={styles.detail_actions}>
+            <button type="button" onClick={onNewSession}>+ {t("launcher.new_session")}</button>
+            <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
+            <button type="button" onClick={onDelete} className={styles.danger}>
+              {t("projects.delete")}
             </button>
-            <h3 className={styles.detail_title}>{project.name}</h3>
-            <div className={styles.detail_actions}>
-              <button type="button" onClick={onNewSession}>+ {t("launcher.new_session")}</button>
-              <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
-              <button type="button" onClick={onDelete} className={styles.danger}>
-                {t("projects.delete")}
-              </button>
-              {inspectorCollapsed && (
-                <button
-                  type="button"
-                  className={styles.inspector_show_btn}
-                  onClick={() => setInspectorCollapsed(false)}
-                  title={t("projects.inspector_show")}
-                >
-                  ⊟ {t("projects.inspector")}
-                </button>
-              )}
-            </div>
           </div>
-          <dl className={styles.kv} style={{ marginBottom: 8 }}>
-            <dt>{t("projects.workspace")}</dt>
-            <dd>{project.workspace}</dd>
-            <dt>{t("projects.concurrency")}</dt>
-            <dd>{project.concurrency}</dd>
-            <dt>{t("projects.session_count")}</dt>
-            <dd>{sessionCount}</dd>
-          </dl>
         </div>
-        <FileBrowserView
-          projectId={project.id}
-          workspace={project.workspace}
-          onSelectionChange={handleSelection}
-        />
-        <KanbanResizer height={kanbanHeight} onHeight={setKanbanHeight} />
-        <div className={styles.kanban_pane} style={{ height: kanbanHeight }}>
-          <KanbanView project={project} onProjectChanged={onProjectChanged} compact />
-        </div>
+        <dl className={styles.kv} style={{ marginBottom: 8 }}>
+          <dt>{t("projects.workspace")}</dt>
+          <dd>{project.workspace}</dd>
+          <dt>{t("projects.concurrency")}</dt>
+          <dd>{project.concurrency}</dd>
+          <dt>{t("projects.session_count")}</dt>
+          <dd>{sessionCount}</dd>
+        </dl>
       </div>
-      {!inspectorCollapsed && (
-        <>
-          <InspectorResizer width={inspectorWidth} onWidth={setInspectorWidth} />
-          <aside className={styles.inspector_pane} style={{ width: inspectorWidth }}>
-            <Inspector
-              selection={selection}
-              onCollapse={() => setInspectorCollapsed(true)}
-              t={t}
-            />
-          </aside>
-        </>
-      )}
-    </div>
-  );
-}
-
-function InspectorResizer({
-  width,
-  onWidth,
-}: {
-  width: number;
-  onWidth: (px: number) => void;
-}) {
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
-  const [active, setActive] = useState(false);
-
-  useEffect(() => {
-    if (!active) return;
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current) return;
-      const dx = dragRef.current.startX - e.clientX;
-      onWidth(dragRef.current.startWidth + dx);
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      setActive(false);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [active, onWidth]);
-
-  return (
-    <div
-      className={`${styles.inspector_resizer} ${active ? styles.inspector_resizer_active : ""}`}
-      onMouseDown={(e) => {
-        dragRef.current = { startX: e.clientX, startWidth: width };
-        setActive(true);
-      }}
-    />
-  );
-}
-
-function KanbanResizer({
-  height,
-  onHeight,
-}: {
-  height: number;
-  onHeight: (px: number) => void;
-}) {
-  const dragRef = useRef<{ startY: number; startHeight: number } | null>(null);
-  const [active, setActive] = useState(false);
-
-  useEffect(() => {
-    if (!active) return;
-    const onMove = (e: MouseEvent) => {
-      if (!dragRef.current) return;
-      const dy = dragRef.current.startY - e.clientY;
-      onHeight(dragRef.current.startHeight + dy);
-    };
-    const onUp = () => {
-      dragRef.current = null;
-      setActive(false);
-    };
-    window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      window.removeEventListener("mouseup", onUp);
-    };
-  }, [active, onHeight]);
-
-  return (
-    <div
-      className={`${styles.kanban_resizer} ${active ? styles.kanban_resizer_active : ""}`}
-      onMouseDown={(e) => {
-        dragRef.current = { startY: e.clientY, startHeight: height };
-        setActive(true);
-      }}
-    />
-  );
-}
-
-function Inspector({
-  selection,
-  onCollapse,
-  t,
-}: {
-  selection: FileBrowserSelection;
-  onCollapse: () => void;
-  t: (k: string, opts?: Record<string, unknown>) => string;
-}) {
-  const fleetSessionEntry =
-    selection.entries.length === 1 && selection.entries[0].isFleetsession
-      ? selection.entries[0]
-      : null;
-  const singleFile =
-    !fleetSessionEntry && selection.entries.length === 1 && !selection.entries[0].isDir
-      ? selection.entries[0]
-      : null;
-
-  let title = t("projects.inspector");
-  if (fleetSessionEntry) title = t("projects.inspector_session_title");
-  else if (singleFile) title = t("projects.inspector_file_title");
-  else if (selection.entries.length > 1) title = t("projects.inspector_selection_title");
-
-  return (
-    <>
-      <div className={styles.inspector_header}>
-        <span className={styles.inspector_header_title}>{title}</span>
-        <button
-          type="button"
-          className={styles.inspector_close_btn}
-          onClick={onCollapse}
-          title={t("projects.inspector_hide")}
-          aria-label={t("projects.inspector_hide")}
-        >
-          ›
-        </button>
+      <div className={styles.kanban_pane}>
+        <KanbanView project={project} onProjectChanged={onProjectChanged} compact />
       </div>
-      <div className={styles.inspector_body}>
-        {fleetSessionEntry ? (
-          <FleetSessionInspector entry={fleetSessionEntry} t={t} />
-        ) : singleFile ? (
-          <FileInfoInspector entry={singleFile} t={t} />
-        ) : selection.entries.length > 1 ? (
-          <SelectionSummaryInspector selection={selection} t={t} />
-        ) : (
-          <p className={styles.inspector_placeholder}>
-            {t("projects.inspector_placeholder")}
-          </p>
-        )}
-      </div>
-    </>
-  );
-}
-
-function FleetSessionInspector({
-  entry,
-  t,
-}: {
-  entry: { name: string; path: string; fleetSessionId: string | null };
-  t: (k: string, opts?: Record<string, unknown>) => string;
-}) {
-  const live = useSessionsStore((s) =>
-    entry.fleetSessionId
-      ? s.sessions.find((info) => info.id === entry.fleetSessionId) ?? null
-      : null,
-  );
-  const open = () => {
-    if (live) useDetailStore.getState().open(live);
-  };
-  return (
-    <div className={styles.inspector_section}>
-      <h4 className={styles.inspector_section_title}>{t("projects.inspector_session_title")}</h4>
-      <dl className={styles.inspector_kv}>
-        <dt>{t("projects.inspector_name")}</dt>
-        <dd>{entry.name}</dd>
-        <dt>{t("projects.inspector_session_id")}</dt>
-        <dd style={{ fontFamily: "var(--font-mono, monospace)" }}>
-          {entry.fleetSessionId ? entry.fleetSessionId.slice(0, 8) : "—"}
-        </dd>
-        <dt>{t("projects.inspector_status")}</dt>
-        <dd>{live?.status ?? t("projects.inspector_session_not_started")}</dd>
-        {live?.aiTitle && (
-          <>
-            <dt>{t("projects.inspector_title")}</dt>
-            <dd>{live.aiTitle}</dd>
-          </>
-        )}
-      </dl>
-      <button
-        type="button"
-        className={styles.inspector_open_btn}
-        disabled={!live}
-        onClick={open}
-      >
-        {t("projects.inspector_open_session")}
-      </button>
     </div>
   );
-}
-
-function FileInfoInspector({
-  entry,
-  t,
-}: {
-  entry: { name: string; path: string; sizeBytes: number; modifiedMs: number };
-  t: (k: string, opts?: Record<string, unknown>) => string;
-}) {
-  return (
-    <div className={styles.inspector_section}>
-      <h4 className={styles.inspector_section_title}>{t("projects.inspector_file_title")}</h4>
-      <dl className={styles.inspector_kv}>
-        <dt>{t("projects.inspector_name")}</dt>
-        <dd>{entry.name}</dd>
-        <dt>{t("projects.inspector_size")}</dt>
-        <dd>{formatBytes(entry.sizeBytes)}</dd>
-        <dt>{t("projects.inspector_modified")}</dt>
-        <dd>{new Date(entry.modifiedMs).toLocaleString()}</dd>
-        <dt>{t("projects.inspector_path")}</dt>
-        <dd>{entry.path}</dd>
-      </dl>
-    </div>
-  );
-}
-
-function SelectionSummaryInspector({
-  selection,
-  t,
-}: {
-  selection: FileBrowserSelection;
-  t: (k: string, opts?: Record<string, unknown>) => string;
-}) {
-  const totalBytes = selection.entries.reduce((acc, e) => acc + e.sizeBytes, 0);
-  const dirCount = selection.entries.filter((e) => e.isDir).length;
-  const fileCount = selection.entries.length - dirCount;
-  return (
-    <div className={styles.inspector_section}>
-      <h4 className={styles.inspector_section_title}>{t("projects.inspector_selection_title")}</h4>
-      <dl className={styles.inspector_kv}>
-        <dt>{t("projects.inspector_count")}</dt>
-        <dd>{t("projects.inspector_count_value", { files: fileCount, dirs: dirCount })}</dd>
-        <dt>{t("projects.inspector_total_size")}</dt>
-        <dd>{formatBytes(totalBytes)}</dd>
-      </dl>
-    </div>
-  );
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }
 
 function ProjectFormDialog({

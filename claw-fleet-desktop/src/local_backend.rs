@@ -1478,38 +1478,6 @@ impl Backend for LocalBackend {
         crate::supervisor::ensure_fleet_cli_link(fleet_path)
     }
 
-    fn list_directory(&self, dir_path: &str) -> Result<Vec<crate::project::FileEntry>, String> {
-        crate::project::list_directory(dir_path)
-    }
-
-    fn move_path(&self, from: &str, to: &str) -> Result<(), String> {
-        crate::project::move_path(from, to)
-    }
-
-    fn copy_path(&self, from: &str, to: &str) -> Result<(), String> {
-        crate::project::copy_path(from, to)
-    }
-
-    fn rename_path(&self, path: &str, new_name: &str) -> Result<String, String> {
-        crate::project::rename_path(path, new_name)
-    }
-
-    fn delete_path(&self, path: &str, to_trash: bool) -> Result<(), String> {
-        crate::project::delete_path(path, to_trash)
-    }
-
-    fn mkdir(&self, parent: &str, name: &str) -> Result<String, String> {
-        crate::project::mkdir(parent, name)
-    }
-
-    fn duplicate_path(&self, path: &str) -> Result<String, String> {
-        crate::project::duplicate_path(path)
-    }
-
-    fn read_file_bytes(&self, path: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
-        crate::project::read_file_bytes(path, max_bytes)
-    }
-
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         crate::skills::read_skill_file(path)
     }

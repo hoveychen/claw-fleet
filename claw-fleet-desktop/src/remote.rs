@@ -516,67 +516,6 @@ impl crate::backend::Backend for RemoteBackend {
         Err("ensure_fleet_cli_link is local-only".into())
     }
 
-    fn list_directory(&self, dir_path: &str) -> Result<Vec<claw_fleet_core::project::FileEntry>, String> {
-        self.probe.get(&format!("/list_directory?path={}", encode_path(dir_path)))
-    }
-
-    fn move_path(&self, from: &str, to: &str) -> Result<(), String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> { from: &'a str, to: &'a str }
-        self.probe.post_json_ok("/files/move", &Req { from, to })
-    }
-
-    fn copy_path(&self, from: &str, to: &str) -> Result<(), String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> { from: &'a str, to: &'a str }
-        self.probe.post_json_ok("/files/copy", &Req { from, to })
-    }
-
-    fn rename_path(&self, path: &str, new_name: &str) -> Result<String, String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> { path: &'a str, new_name: &'a str }
-        #[derive(serde::Deserialize)]
-        struct Resp { path: String }
-        let r: Resp = self.probe.post_json("/files/rename", &Req { path, new_name })?;
-        Ok(r.path)
-    }
-
-    fn delete_path(&self, path: &str, to_trash: bool) -> Result<(), String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> { path: &'a str, to_trash: bool }
-        self.probe.post_json_ok("/files/delete", &Req { path, to_trash })
-    }
-
-    fn mkdir(&self, parent: &str, name: &str) -> Result<String, String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> { parent: &'a str, name: &'a str }
-        #[derive(serde::Deserialize)]
-        struct Resp { path: String }
-        let r: Resp = self.probe.post_json("/files/mkdir", &Req { parent, name })?;
-        Ok(r.path)
-    }
-
-    fn duplicate_path(&self, path: &str) -> Result<String, String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> { path: &'a str }
-        #[derive(serde::Deserialize)]
-        struct Resp { path: String }
-        let r: Resp = self.probe.post_json("/files/duplicate", &Req { path })?;
-        Ok(r.path)
-    }
-
-    fn read_file_bytes(&self, path: &str, max_bytes: u64) -> Result<Vec<u8>, String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> { path: &'a str, max_bytes: u64 }
-        #[derive(serde::Deserialize)]
-        struct Resp { bytes_base64: String }
-        let r: Resp = self.probe.post_json("/files/read_bytes", &Req { path, max_bytes })?;
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD
-            .decode(&r.bytes_base64)
-            .map_err(|e| format!("invalid base64 from probe: {e}"))
-    }
-
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
         self.probe.get(&format!("/skill_content?path={}", encode_path(path)))
     }
