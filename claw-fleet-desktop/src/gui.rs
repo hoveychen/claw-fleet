@@ -1482,6 +1482,54 @@ fn set_fleet_session_status(
         .set_fleet_session_status(&session_id, &status, note.as_deref())
 }
 
+// ── Tasks (task-as-unit V1) ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn create_task(
+    state: tauri::State<AppState>,
+    input: claw_fleet_core::task::TaskInput,
+) -> Result<claw_fleet_core::task::Task, String> {
+    state.backend.read().unwrap().create_task(input)
+}
+
+#[tauri::command]
+fn get_task(
+    state: tauri::State<AppState>,
+    task_id: String,
+) -> Result<claw_fleet_core::task::Task, String> {
+    state.backend.read().unwrap().get_task(&task_id)
+}
+
+#[tauri::command]
+fn list_tasks(
+    state: tauri::State<AppState>,
+    project_id: Option<String>,
+) -> Vec<claw_fleet_core::task::Task> {
+    state.backend.read().unwrap().list_tasks(project_id.as_deref())
+}
+
+#[tauri::command]
+fn update_task_plan(
+    state: tauri::State<AppState>,
+    task_id: String,
+    plan: claw_fleet_core::plan::DagPlan,
+) -> Result<(), String> {
+    state.backend.read().unwrap().update_plan(&task_id, plan)
+}
+
+#[tauri::command]
+fn start_task(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
+    state.backend.read().unwrap().start_task(&task_id)
+}
+
+#[tauri::command]
+fn subscribe_task_events(
+    state: tauri::State<AppState>,
+    task_id: String,
+) -> Result<String, String> {
+    state.backend.read().unwrap().subscribe_task_events(&task_id)
+}
+
 #[tauri::command]
 fn is_fleet_daemon_installed(state: tauri::State<AppState>) -> bool {
     state.backend.read().unwrap().is_fleet_daemon_installed()
@@ -3088,6 +3136,12 @@ pub fn run() {
             cancel_fleet_session,
             resume_fleet_session,
             set_fleet_session_status,
+            create_task,
+            get_task,
+            list_tasks,
+            update_task_plan,
+            start_task,
+            subscribe_task_events,
             is_fleet_daemon_installed,
             install_fleet_daemon,
             uninstall_fleet_daemon,

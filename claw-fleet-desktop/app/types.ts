@@ -561,3 +561,100 @@ export interface DailyReportStats {
   totalToolCalls: number;
   totalProjects: number;
 }
+
+// ── Task-as-Unit V1 (matches claw_fleet_core::{task,plan,pitem,dag}) ──────────
+
+export type PItemStatus =
+  | "waitDeps"
+  | "waitResource"
+  | "running"
+  | "waitHumanGate"
+  | "done"
+  | "skipped"
+  | { failed: FailReason };
+
+export type FailReason =
+  | "buildFailed"
+  | "testsFailed"
+  | "acceptanceRejected"
+  | "upstreamFailed"
+  | "userRejected"
+  | "aborted"
+  | { custom: string };
+
+export type AcceptanceCriterion =
+  | "builds"
+  | "humanReview"
+  | { testsPass: string }
+  | { custom: string };
+
+export type ArtifactKind = "fileList" | "gitDiff" | "testOutput" | "manualNote";
+
+export type SkipCondition =
+  | { noChangesIn: string[] }
+  | { custom: string };
+
+export interface PItem {
+  id: string;
+  desc: string;
+  touches: string[];
+  dependsOn: string[];
+  resources: string[];
+  estimateSecs?: number | null;
+  acceptance: AcceptanceCriterion[];
+  artifacts: ArtifactKind[];
+  skippable?: SkipCondition | null;
+  humanGate: boolean;
+  status: PItemStatus;
+  agentSessionId?: string | null;
+  startedAt?: number | null;
+  completedAt?: number | null;
+  outputSummary?: string | null;
+}
+
+export interface DagPlan {
+  items: Record<string, PItem>;
+}
+
+export type TaskStatus =
+  | "drafting"
+  | "planning"
+  | "ready"
+  | "running"
+  | "paused"
+  | "done"
+  | "abandoned";
+
+export type MediaKind = "document" | "image" | "screenshot" | "other";
+
+export type Material =
+  | { kind: "file"; path: string; media: MediaKind; addedAt: number }
+  | { kind: "text"; content: string; addedAt: number };
+
+export interface Task {
+  id: string;
+  projectId: string;
+  title: string;
+  description: string;
+  inboxMaterials: Material[];
+  plan: DagPlan;
+  status: TaskStatus;
+  createdAt: number;
+  startedAt?: number | null;
+  completedAt?: number | null;
+  taskBranch?: string | null;
+  masterSessionId?: string | null;
+}
+
+export interface TaskInput {
+  projectId: string;
+  title: string;
+  description?: string;
+}
+
+/** Helper: extract `Done`/`Skipped`/`Failed`/`Running` from a PItemStatus
+ * (the failed variant has a payload, so structural narrowing is awkward
+ * without a helper). */
+export function pItemStatusKey(s: PItemStatus): string {
+  return typeof s === "string" ? s : "failed";
+}

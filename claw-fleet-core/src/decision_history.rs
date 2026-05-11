@@ -461,10 +461,11 @@ fn parse_user_prompt_line(line: &str, session_id: &str) -> Option<UserPromptReco
 mod tests {
     use super::*;
     use crate::elicitation::{ElicitationOption, ElicitationQuestion, ElicitationRequest};
-    use std::sync::Mutex;
 
     // real_home_dir() reads $FLEET_HOME, so tests must serialize and override it.
-    static FLEET_HOME_LOCK: Mutex<()> = Mutex::new(());
+    // Uses the crate-wide `crate::session::fleet_home_lock` so tests in
+    // different modules don't race on the global env. The shared lock is
+    // poison-tolerant: panics inside the critical section don't cascade.
 
     struct FleetHomeOverride {
         prev: Option<std::ffi::OsString>,
@@ -579,7 +580,7 @@ mod tests {
 
     #[test]
     fn append_then_list_roundtrips() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("roundtrip");
         let _home = FleetHomeOverride::new(&tmp);
 
@@ -681,7 +682,7 @@ mod tests {
 
     #[test]
     fn sync_user_prompts_appends_and_dedups() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("syncprompts");
         let _home = FleetHomeOverride::new(&tmp);
 
@@ -712,7 +713,7 @@ mod tests {
 
     #[test]
     fn list_with_jsonl_merges_sorted() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("merge");
         let _home = FleetHomeOverride::new(&tmp);
 
@@ -748,7 +749,7 @@ mod tests {
 
     #[test]
     fn malformed_line_is_skipped() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let tmp = temp_dir("malformed");
         let _home = FleetHomeOverride::new(&tmp);
 

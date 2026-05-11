@@ -286,6 +286,73 @@ enum Commands {
         #[command(subcommand)]
         action: SessionCommands,
     },
+    /// Manage task-as-unit V1 tasks (master's tool surface + user controls).
+    ///
+    /// Master subcommands (used by the master agent's SYSTEM prompt):
+    /// `get-plan`, `get-dispatchable`, `dispatch`, `read-output`, `mark-done`,
+    /// `mark-failed`, `update-plan`. User-only subcommands (NOT in the
+    /// master's tools list): `pause`, `resume`, `clear`.
+    Task {
+        #[command(subcommand)]
+        action: TaskCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum TaskCommands {
+    /// Print the task's current plan as YAML. Master tool.
+    GetPlan {
+        task_id: String,
+    },
+    /// Print the IDs of P-items the scheduler can dispatch right now.
+    /// Master tool.
+    GetDispatchable {
+        task_id: String,
+        /// Output raw JSON instead of one-id-per-line.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Request the supervisor to dispatch a worker for `p_id`. Master tool.
+    Dispatch {
+        task_id: String,
+        p_id: String,
+    },
+    /// Print the worker's stdout/stderr for `p_id`. Master tool. V1 stub —
+    /// emits "no worker session yet" until P7 wires real subprocess.
+    ReadOutput {
+        task_id: String,
+        p_id: String,
+    },
+    /// Mark a P-item Done with an acceptance-audit summary. Master tool.
+    MarkDone {
+        task_id: String,
+        p_id: String,
+        #[arg(long)]
+        summary: String,
+    },
+    /// Mark a P-item Failed; releases the resource lock immediately. Master tool.
+    MarkFailed {
+        task_id: String,
+        p_id: String,
+        #[arg(long)]
+        reason: String,
+    },
+    /// Replace the task's plan with a new YAML document. Reads from stdin
+    /// when `--from-stdin`, otherwise from `--file <path>`. Master tool.
+    UpdatePlan {
+        task_id: String,
+        #[arg(long)]
+        from_stdin: bool,
+        #[arg(long)]
+        file: Option<std::path::PathBuf>,
+    },
+    /// Pause the task: master + worker subprocesses SIGSTOP. **User-only.**
+    Pause { task_id: String },
+    /// Resume a paused task. **User-only.**
+    Resume { task_id: String },
+    /// Delete a task — removes its json + materials dir + releases all
+    /// resources. **User-only.**
+    Clear { task_id: String },
 }
 
 #[derive(Subcommand)]
@@ -370,6 +437,122 @@ fn main() {
             SessionCommands::Idle => cmd_session_idle(),
             SessionCommands::Resume => cmd_session_resume(),
         },
+        Commands::Task { action } => cmd_task(action),
+    }
+}
+
+// ── Task subcommand dispatcher ────────────────────────────────────────────────
+
+fn cmd_task(action: TaskCommands) {
+    use std::collections::HashSet;
+
+    fn die(msg: String) -> ! {
+        eprintln!("error: {msg}");
+        std::process::exit(1);
+    }
+
+    match action {
+        TaskCommands::GetPlan { task_id } => {
+            let task = claw_fleet_core::task::get_task(&task_id).unwrap_or_else(|e| die(e));
+            // Convert plan JSON → YAML so the master can read it cleanly.
+            let json = serde_json::to_value(&task.plan).unwrap_or(serde_json::Value::Null);
+            match serde_yaml::to_string(&json) {
+                Ok(s) => print!("{s}"),
+                Err(e) => die(format!("yaml encode: {e}")),
+            }
+        }
+        TaskCommands::GetDispatchable { task_id, json } => {
+            let task = claw_fleet_core::task::get_task(&task_id).unwrap_or_else(|e| die(e));
+            // CLI doesn't track in-flight resource locks (the supervisor does).
+            // For V1: assume nothing is held, return the scheduler's answer
+            // given only plan state. P7/P19 integration will plumb the
+            // live resource set through.
+            let dispatch =
+                claw_fleet_core::scheduler::dispatchable(&task.plan, &HashSet::new());
+            if let Some(e) = &dispatch.error {
+                die(e.clone());
+            }
+            if json {
+                println!("{}", serde_json::to_string(&dispatch.ready).unwrap_or_default());
+            } else {
+                for id in dispatch.ready {
+                    println!("{id}");
+                }
+            }
+        }
+        TaskCommands::Dispatch { task_id, p_id } => {
+            claw_fleet_core::task::dispatch_pitem(&task_id, &p_id).unwrap_or_else(|e| die(e));
+            println!("dispatched");
+        }
+        TaskCommands::ReadOutput { task_id: _, p_id: _ } => {
+            // V1 stub. P7 (Worker executor) will plumb worker stdout/stderr
+            // through the Claude Code session jsonl tail.
+            println!("(no worker session yet — P7 worker executor not wired)");
+        }
+        TaskCommands::MarkDone {
+            task_id,
+            p_id,
+            summary,
+        } => {
+            claw_fleet_core::task::mark_done(&task_id, &p_id, &summary)
+                .unwrap_or_else(|e| die(e));
+            println!("done");
+        }
+        TaskCommands::MarkFailed {
+            task_id,
+            p_id,
+            reason,
+        } => {
+            let fr = claw_fleet_core::pitem::FailReason::Custom(reason);
+            let skipped = claw_fleet_core::task::mark_failed(&task_id, &p_id, fr)
+                .unwrap_or_else(|e| die(e));
+            println!("failed");
+            for s in skipped {
+                println!("propagated skip: {s}");
+            }
+        }
+        TaskCommands::UpdatePlan {
+            task_id,
+            from_stdin,
+            file,
+        } => {
+            let yaml_text = if from_stdin {
+                let mut buf = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
+                    .unwrap_or_else(|e| die(format!("stdin: {e}")));
+                buf
+            } else if let Some(p) = file {
+                std::fs::read_to_string(&p).unwrap_or_else(|e| die(format!("read {}: {e}", p.display())))
+            } else {
+                die("provide --from-stdin or --file <path>".into());
+            };
+            // YAML → JSON Value → DagPlan (sidesteps serde_yaml's external-
+            // tagged-enum tuple-variant gotcha, same trick as the skill
+            // examples integration test).
+            let yv: serde_yaml::Value =
+                serde_yaml::from_str(&yaml_text).unwrap_or_else(|e| die(format!("yaml parse: {e}")));
+            let jv: serde_json::Value =
+                serde_json::to_value(&yv).unwrap_or_else(|e| die(format!("yaml → json: {e}")));
+            let plan: claw_fleet_core::plan::DagPlan = serde_json::from_value(jv)
+                .unwrap_or_else(|e| die(format!("plan schema: {e}")));
+            if let Err(e) = plan.validate() {
+                die(format!("plan validation: {e:?}"));
+            }
+            claw_fleet_core::task::update_plan(&task_id, plan).unwrap_or_else(|e| die(e));
+            println!("plan updated");
+        }
+        TaskCommands::Pause { task_id } => {
+            claw_fleet_core::task::pause_task(&task_id).unwrap_or_else(|e| die(e));
+            println!("paused");
+        }
+        TaskCommands::Resume { task_id } => {
+            claw_fleet_core::task::resume_task(&task_id).unwrap_or_else(|e| die(e));
+            println!("resumed");
+        }
+        TaskCommands::Clear { task_id } => {
+            claw_fleet_core::task::clear_task(&task_id).unwrap_or_else(|e| die(e));
+            println!("cleared");
+        }
     }
 }
 
@@ -2273,6 +2456,185 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         let _ = request.respond(
                             tiny_http::Response::from_string(body)
                                 .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            // ── Tasks (task-as-unit V1) ──────────────────────────────────────
+            "/tasks/list" if request.method() == &tiny_http::Method::Get => {
+                let project_filter = query.get("project_id").map(String::as_str);
+                let items = claw_fleet_core::task::list_tasks(project_filter);
+                let body = serde_json::to_string(&items).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/tasks/get" if request.method() == &tiny_http::Method::Get => {
+                let id = query.get("id").cloned().unwrap_or_default();
+                if id.is_empty() {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(r#"{"error":"missing id"}"#)
+                            .with_status_code(400)
+                            .with_header(json_header),
+                    );
+                    continue;
+                }
+                match claw_fleet_core::task::get_task(&id) {
+                    Ok(t) => {
+                        let body = serde_json::to_string(&t).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(404)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/tasks/create" if request.method() == &tiny_http::Method::Post => {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<claw_fleet_core::task::TaskInput, _> =
+                    serde_json::from_str(&buf);
+                match parsed {
+                    Ok(input) => match claw_fleet_core::task::create_task(input) {
+                        Ok(t) => {
+                            let body = serde_json::to_string(&t).unwrap_or_default();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body).with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({ "error": e }).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e.to_string() }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/tasks/update-plan" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Body {
+                    task_id: String,
+                    plan: claw_fleet_core::plan::DagPlan,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<Body, _> = serde_json::from_str(&buf);
+                match parsed {
+                    Ok(b) => match claw_fleet_core::task::update_plan(&b.task_id, b.plan) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({ "error": e }).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e.to_string() }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/tasks/start" if request.method() == &tiny_http::Method::Post => {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase")]
+                struct Body {
+                    task_id: String,
+                }
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                let parsed: Result<Body, _> = serde_json::from_str(&buf);
+                match parsed {
+                    Ok(b) => match claw_fleet_core::task::start_task(&b.task_id) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({ "error": e }).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e.to_string() }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/tasks/events" if request.method() == &tiny_http::Method::Get => {
+                // V1 stub: returns the task id as the subscription handle. The
+                // master runtime (P19) + event router (P21) hook in here to
+                // push semantic TaskEvent values over SSE. For now: validate
+                // the task exists, return an `ok` so RemoteBackend can finish
+                // its handshake.
+                let id = query.get("id").cloned().unwrap_or_default();
+                if id.is_empty() {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(r#"{"error":"missing id"}"#)
+                            .with_status_code(400)
+                            .with_header(json_header),
+                    );
+                    continue;
+                }
+                match claw_fleet_core::task::get_task(&id) {
+                    Ok(_) => {
+                        let body = serde_json::json!({ "subscriptionId": id }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(404)
                                 .with_header(json_header),
                         );
                     }

@@ -1409,7 +1409,9 @@ mod tests {
     /// concurrent `url_verification_*` test would then read those creds
     /// instead of its own env.  Mutex-serializing the env-var-touching tests
     /// is the lightest fix.
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // Shared with all other modules via `crate::session::fleet_home_lock()`
+    // so we don't race against decision_history / supervisor / master tests
+    // that also mutate $FLEET_HOME.
     fn isolate_creds_file(slot: &str) {
         let dir = std::env::temp_dir().join(format!("claw-fleet-feishu-{slot}"));
         let _ = std::fs::remove_dir_all(&dir);
@@ -1418,7 +1420,7 @@ mod tests {
 
     #[test]
     fn url_verification_echoes_challenge() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _g = crate::session::fleet_home_lock();
         isolate_creds_file("echo");
         std::env::set_var("FEISHU_APP_ID", "tst");
         std::env::set_var("FEISHU_APP_SECRET", "tst");
@@ -1436,7 +1438,7 @@ mod tests {
 
     #[test]
     fn url_verification_rejects_bad_token() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _g = crate::session::fleet_home_lock();
         isolate_creds_file("bad-token");
         std::env::set_var("FEISHU_APP_ID", "tst");
         std::env::set_var("FEISHU_APP_SECRET", "tst");
@@ -1460,7 +1462,7 @@ mod tests {
 
     #[test]
     fn encrypted_payload_is_rejected() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _g = crate::session::fleet_home_lock();
         isolate_creds_file("enc-rejected");
         std::env::set_var("FEISHU_APP_ID", "tst");
         std::env::set_var("FEISHU_APP_SECRET", "tst");
@@ -1474,7 +1476,7 @@ mod tests {
 
     #[test]
     fn stored_creds_round_trip() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+        let _g = crate::session::fleet_home_lock();
         isolate_creds_file("round-trip");
         let c = StoredCreds {
             app_id: "id_x".into(),

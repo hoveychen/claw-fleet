@@ -661,11 +661,10 @@ fn kill_pid(_pid: u32) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
 
     // real_home_dir() reads $FLEET_HOME globally, so tests that mutate it
-    // must serialize. Mirrors the helper pattern used in decision_history.
-    static FLEET_HOME_LOCK: Mutex<()> = Mutex::new(());
+    // must serialize. Uses the crate-wide `crate::session::fleet_home_lock`
+    // so tests in different modules don't race on the global env.
 
     struct FleetHomeOverride {
         prev: Option<std::ffi::OsString>,
@@ -728,7 +727,7 @@ mod tests {
     /// `clear_idle`, the sid must drop out of the set.
     #[test]
     fn idle_sentinel_appears_in_pending_session_ids() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("idle-pending");
         let _override = FleetHomeOverride::new(&home);
 
@@ -762,7 +761,7 @@ mod tests {
     /// has neither a sentinel nor a guard/elicitation request.
     #[test]
     fn idle_sentinel_only_affects_its_own_session() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("idle-isolate");
         let _override = FleetHomeOverride::new(&home);
 
@@ -838,7 +837,7 @@ mod tests {
         // `final_by_agent = false` so the user can still pop the card and
         // confirm. Only sessions whose agent or user has *proactively*
         // marked final (via fleet-cli or the card buttons) are filtered.
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("pending-input-final-by-agent");
         let _override = FleetHomeOverride::new(&home);
 
@@ -873,7 +872,7 @@ mod tests {
 
     #[test]
     fn pending_input_skips_sessions_outside_known_projects() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("pending-input-orphan");
         let _override = FleetHomeOverride::new(&home);
 
@@ -887,7 +886,7 @@ mod tests {
 
     #[test]
     fn pending_input_lists_terminal_columns_in_order() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("pending-input-cols");
         let _override = FleetHomeOverride::new(&home);
 
@@ -929,7 +928,7 @@ mod tests {
 
     #[test]
     fn session_pending_requests_includes_prompt_preview_and_since_ms() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("pending-input-wire");
         let _override = FleetHomeOverride::new(&home);
 
@@ -992,7 +991,7 @@ mod tests {
 
     #[test]
     fn set_status_stamps_completed_at_and_final_by_agent_for_terminal_column() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("set-status-terminal");
         let _override = FleetHomeOverride::new(&home);
 
@@ -1031,7 +1030,7 @@ mod tests {
         // Both `idle` sentinel and `final_by_agent` flag must be reset so the
         // card watcher won't keep emitting the (now stale) card and the next
         // end-of-turn can again fire a fresh card.
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("resume-clears-sentinel");
         let _override = FleetHomeOverride::new(&home);
 
@@ -1062,7 +1061,7 @@ mod tests {
 
     #[test]
     fn migrate_zombie_running_recovers_pidless_running_and_pending() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("migrate-zombie");
         let _override = FleetHomeOverride::new(&home);
 
@@ -1103,7 +1102,7 @@ mod tests {
 
     #[test]
     fn migrate_zombie_running_handles_dead_pid() {
-        let _g = FLEET_HOME_LOCK.lock().unwrap();
+        let _g = crate::session::fleet_home_lock();
         let home = fresh_tmp_home("migrate-zombie-deadpid");
         let _override = FleetHomeOverride::new(&home);
 

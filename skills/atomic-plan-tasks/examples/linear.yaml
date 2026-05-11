@@ -1,0 +1,54 @@
+# Linear plan — no parallelism, each step strictly blocks the next.
+# Shape: p1 → p2 → p3 → build-all
+# Use when each P-item builds on the previous one's output (e.g. step-by-step refactor).
+
+plan:
+  - id: p1
+    desc: "Define the new ConfigV2 struct with serde + builder. No call sites yet."
+    touches:
+      - claw-fleet-core/src/config/v2.rs
+      - claw-fleet-core/src/config/mod.rs
+    dependsOn: []
+    estimateSecs: 600
+    acceptance:
+      - builds
+      - testsPass: "cargo test -p claw-fleet-core config::v2"
+    artifacts:
+      - fileList
+      - gitDiff
+
+  - id: p2
+    desc: "Migrate the loader to read ConfigV2 with a fallback path for legacy ConfigV1 files."
+    touches:
+      - claw-fleet-core/src/config/loader.rs
+      - claw-fleet-core/src/config/mod.rs
+    dependsOn: [p1]
+    estimateSecs: 900
+    acceptance:
+      - builds
+      - testsPass: "cargo test -p claw-fleet-core config::loader"
+    artifacts:
+      - fileList
+      - gitDiff
+
+  - id: p3
+    desc: "Update every call site to read from ConfigV2; remove ConfigV1 imports."
+    touches:
+      - claw-fleet-desktop/src/main.rs
+      - fleet-cli/src/main.rs
+    dependsOn: [p2]
+    estimateSecs: 1200
+    acceptance:
+      - builds
+    artifacts:
+      - fileList
+      - gitDiff
+
+  - id: build-all
+    desc: "Workspace build + test sweep."
+    touches: []
+    dependsOn: [p3]
+    resources: [build, test]
+    acceptance:
+      - builds
+      - testsPass: "cargo test --workspace"

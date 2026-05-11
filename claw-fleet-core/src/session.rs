@@ -167,6 +167,30 @@ pub fn get_fleet_dir() -> Option<PathBuf> {
     real_home_dir().map(|h| h.join(".fleet"))
 }
 
+#[cfg(test)]
+mod test_lock {
+    use std::sync::{Mutex, MutexGuard, OnceLock};
+
+    fn lock_inner() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    /// Acquire the cross-module `FLEET_HOME` mutex, tolerating poison from a
+    /// prior test's panic (the panic is a logic failure inside the critical
+    /// section, not data corruption — recovering is safe and lets the rest
+    /// of the suite still serialise).
+    pub fn fleet_home_lock() -> MutexGuard<'static, ()> {
+        match lock_inner().lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) use test_lock::fleet_home_lock;
+
 #[cfg(unix)]
 pub fn is_process_alive(pid: u32) -> bool {
     let ret = unsafe { libc::kill(pid as libc::pid_t, 0) };
