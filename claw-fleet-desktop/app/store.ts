@@ -178,7 +178,11 @@ export interface Project {
   kanbanColumns: KanbanColumn[];
   createdAt: number;
   updatedAt: number;
+  /** Project-wide "force human gate on every P-item" toggle (PRD §5.x). */
+  manualReviewAll?: boolean;
 }
+
+export type FleetSessionKind = "regular" | "master" | "worker";
 
 export interface FleetSession {
   id: string;
@@ -194,6 +198,15 @@ export interface FleetSession {
   completedAt: number | null;
   pid: number | null;
   expedited: boolean;
+  /** Task-as-unit V1: regular kanban session, master, or worker. Older
+   *  persisted sessions without this field default to "regular". */
+  sessionKind?: FleetSessionKind;
+  /** For master/worker: the owning Task.id. */
+  taskId?: string | null;
+  /** For worker: the PItemId being executed. */
+  pItemId?: string | null;
+  systemPrompt?: string | null;
+  model?: string | null;
 }
 
 interface ProjectsState {

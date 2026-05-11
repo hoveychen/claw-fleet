@@ -396,6 +396,31 @@
   color: #16a34a;
 }
 
+.nav_task_group {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nav_task_group_label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--color-text-dim);
+  padding: 4px 8px 2px;
+  opacity: 0.75;
+}
+
+.nav_task_icon {
+  font-size: 10px;
+  width: 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
 :global([data-platform="macos"]) .nav_divider {
   background: rgba(255, 255, 255, 0.08);
 }

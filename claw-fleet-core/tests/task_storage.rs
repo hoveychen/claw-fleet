@@ -110,6 +110,7 @@ fn full_lifecycle_create_update_material_start() {
         name: "demo".into(),
         workspace: workspace.to_string_lossy().to_string(),
         concurrency: Some(1),
+            manual_review_all: None,
     })
     .expect("create_project");
 
@@ -216,6 +217,7 @@ fn master_mutations_flip_p_item_statuses_correctly() {
         name: "demo".into(),
         workspace: workspace.to_string_lossy().to_string(),
         concurrency: Some(1),
+            manual_review_all: None,
     })
     .unwrap();
     let t = task::create_task(TaskInput {
@@ -302,6 +304,7 @@ fn pause_resume_clear_full_cycle() {
         name: "demo".into(),
         workspace: workspace.to_string_lossy().to_string(),
         concurrency: Some(1),
+            manual_review_all: None,
     })
     .unwrap();
     let t = task::create_task(TaskInput {
@@ -329,6 +332,214 @@ fn pause_resume_clear_full_cycle() {
 }
 
 #[test]
+fn start_task_enqueues_master_session_and_records_master_session_id() {
+    let _g = FLEET_HOME_LOCK.lock().unwrap();
+    let home = fresh_tmp("master-spawn");
+    let _override = FleetHomeOverride::new(&home);
+
+    let workspace = fresh_tmp("master-spawn-ws");
+    git_init_repo(&workspace);
+    let proj = project::create_project(ProjectInput {
+        name: "demo".into(),
+        workspace: workspace.to_string_lossy().to_string(),
+        concurrency: Some(1),
+            manual_review_all: None,
+    })
+    .unwrap();
+    let t = task::create_task(TaskInput {
+        project_id: proj.id,
+        title: "master spawn check".into(),
+        description: "".into(),
+    })
+    .unwrap();
+
+    task::start_task(&t.id).expect("start_task");
+    let after = task::get_task(&t.id).unwrap();
+    let master_sid = after
+        .master_session_id
+        .as_ref()
+        .expect("master_session_id must be set after start_task");
+
+    // Persisted FleetSession should be the Master kind, queued, with task linkage.
+    let sessions = project::list_fleet_sessions();
+    let s = sessions
+        .iter()
+        .find(|s| s.id == *master_sid)
+        .expect("master session persisted");
+    assert!(matches!(s.session_kind, project::SessionKind::Master));
+    assert_eq!(s.task_id.as_deref(), Some(t.id.as_str()));
+    assert_eq!(s.status, project::DEFAULT_COLUMN_QUEUED);
+    assert!(s.system_prompt.is_some(), "system_prompt must be filled");
+    assert_eq!(s.model.as_deref(), Some("claude-sonnet-4-6"));
+    // Master is expedited so it doesn't compete with regular kanban queue.
+    assert!(s.expedited);
+}
+
+#[test]
+fn dispatch_pitem_enqueues_worker_session_and_records_agent_session_id() {
+    let _g = FLEET_HOME_LOCK.lock().unwrap();
+    let home = fresh_tmp("worker-spawn");
+    let _override = FleetHomeOverride::new(&home);
+
+    let workspace = fresh_tmp("worker-spawn-ws");
+    git_init_repo(&workspace);
+    let proj = project::create_project(ProjectInput {
+        name: "demo".into(),
+        workspace: workspace.to_string_lossy().to_string(),
+        concurrency: Some(1),
+            manual_review_all: None,
+    })
+    .unwrap();
+    let t = task::create_task(TaskInput {
+        project_id: proj.id,
+        title: "worker spawn check".into(),
+        description: "".into(),
+    })
+    .unwrap();
+    let plan = DagPlan::from_items(vec![PItem {
+        id: "p1".into(),
+        desc: "wire it up".into(),
+        touches: vec![],
+        depends_on: vec![],
+        resources: vec![],
+        estimate_secs: None,
+        acceptance: vec![],
+        artifacts: vec![],
+        skippable: None,
+        human_gate: false,
+        status: PItemStatus::WaitDeps,
+        agent_session_id: None,
+        started_at: None,
+        completed_at: None,
+        output_summary: None,
+    }]);
+    task::update_plan(&t.id, plan).unwrap();
+
+    task::dispatch_pitem(&t.id, "p1").unwrap();
+    let after = task::get_task(&t.id).unwrap();
+    let worker_sid = after
+        .plan
+        .get("p1")
+        .unwrap()
+        .agent_session_id
+        .as_ref()
+        .expect("agent_session_id must be set after dispatch");
+
+    let sessions = project::list_fleet_sessions();
+    let s = sessions
+        .iter()
+        .find(|s| s.id == *worker_sid)
+        .expect("worker session persisted");
+    assert!(matches!(s.session_kind, project::SessionKind::Worker));
+    assert_eq!(s.task_id.as_deref(), Some(t.id.as_str()));
+    assert_eq!(s.p_item_id.as_deref(), Some("p1"));
+    assert!(s.system_prompt.is_some());
+    assert_eq!(s.model.as_deref(), Some("claude-sonnet-4-6"));
+}
+
+#[test]
+fn clear_task_terminates_linked_sessions_and_marks_complete() {
+    let _g = FLEET_HOME_LOCK.lock().unwrap();
+    let home = fresh_tmp("clear-terminate");
+    let _override = FleetHomeOverride::new(&home);
+
+    let workspace = fresh_tmp("clear-terminate-ws");
+    git_init_repo(&workspace);
+    let proj = project::create_project(ProjectInput {
+        name: "demo".into(),
+        workspace: workspace.to_string_lossy().to_string(),
+        concurrency: Some(1),
+            manual_review_all: None,
+    })
+    .unwrap();
+    let t = task::create_task(TaskInput {
+        project_id: proj.id,
+        title: "terminate test".into(),
+        description: "".into(),
+    })
+    .unwrap();
+    task::start_task(&t.id).expect("start_task");
+    let master_sid = task::get_task(&t.id).unwrap().master_session_id.unwrap();
+
+    task::clear_task(&t.id).expect("clear_task");
+
+    // task json gone.
+    assert!(task::get_task(&t.id).is_err());
+    // master FleetSession marked complete with task-cleared note.
+    let sessions = project::list_fleet_sessions();
+    let s = sessions.iter().find(|s| s.id == master_sid).expect("session still recorded");
+    assert_eq!(s.status, project::DEFAULT_COLUMN_COMPLETE);
+    assert!(s.note.as_deref().unwrap_or("").contains("task cleared"));
+    assert!(s.pid.is_none());
+}
+
+#[test]
+fn reconcile_flips_task_to_done_when_master_exited_and_plan_terminal() {
+    let _g = FLEET_HOME_LOCK.lock().unwrap();
+    let home = fresh_tmp("reconcile");
+    let _override = FleetHomeOverride::new(&home);
+
+    let workspace = fresh_tmp("reconcile-ws");
+    git_init_repo(&workspace);
+    let proj = project::create_project(ProjectInput {
+        name: "demo".into(),
+        workspace: workspace.to_string_lossy().to_string(),
+        concurrency: Some(1),
+            manual_review_all: None,
+    })
+    .unwrap();
+    let t = task::create_task(TaskInput {
+        project_id: proj.id,
+        title: "done check".into(),
+        description: "".into(),
+    })
+    .unwrap();
+    let plan = DagPlan::from_items(vec![PItem {
+        id: "p1".into(),
+        desc: "x".into(),
+        touches: vec![],
+        depends_on: vec![],
+        resources: vec![],
+        estimate_secs: None,
+        acceptance: vec![],
+        artifacts: vec![],
+        skippable: None,
+        human_gate: false,
+        status: PItemStatus::WaitDeps,
+        agent_session_id: None,
+        started_at: None,
+        completed_at: None,
+        output_summary: None,
+    }]);
+    task::update_plan(&t.id, plan).unwrap();
+    task::start_task(&t.id).expect("start_task");
+    // Pretend the worker ran and master finished its audit.
+    task::mark_done(&t.id, "p1", "ok").unwrap();
+    let master_sid = task::get_task(&t.id).unwrap().master_session_id.unwrap();
+
+    // Reconcile is a no-op while master FleetSession is still queued.
+    let n = task::reconcile_task_completion().expect("reconcile");
+    assert_eq!(n, 0);
+    assert!(matches!(task::get_task(&t.id).unwrap().status, TaskStatus::Running));
+
+    // Simulate master subprocess exit: mark its FleetSession complete + pid None.
+    let mut sessions = project::list_fleet_sessions();
+    for s in sessions.iter_mut() {
+        if s.id == master_sid {
+            s.status = project::DEFAULT_COLUMN_COMPLETE.into();
+            s.pid = None;
+        }
+    }
+    project::save_fleet_sessions(&sessions).unwrap();
+
+    let n = task::reconcile_task_completion().expect("reconcile");
+    assert_eq!(n, 1);
+    let after = task::get_task(&t.id).unwrap();
+    assert!(matches!(after.status, TaskStatus::Done));
+    assert!(after.completed_at.is_some());
+}
+
+#[test]
 fn start_task_picks_unique_branch_when_slug_collides() {
     let _g = FLEET_HOME_LOCK.lock().unwrap();
     let home = fresh_tmp("dedupe");
@@ -340,6 +551,7 @@ fn start_task_picks_unique_branch_when_slug_collides() {
         name: "demo".into(),
         workspace: workspace.to_string_lossy().to_string(),
         concurrency: Some(1),
+            manual_review_all: None,
     })
     .unwrap();
 

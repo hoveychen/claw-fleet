@@ -3,7 +3,14 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
-import { useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
+import {
+  useDecisionStore,
+  useDetailStore,
+  useProjectsStore,
+  useSessionsStore,
+  useTasksStore,
+  useUIStore,
+} from "../store";
 import { safeMarkdownComponents } from "../markdown/safeLinks";
 import type {
   DecisionHistoryRecord,
@@ -19,6 +26,47 @@ import styles from "./DecisionPanel.module.css";
 
 function shortId(id: string): string {
   return id.length > 8 ? id.slice(0, 8) : id;
+}
+
+// ── Master / Worker context chip ───────────────────────────────────────────
+//
+// When the elicitation / guard request came from a Master or Worker session
+// (per `session_kind` on the persisted FleetSession), render a small chip
+// alongside the workspaceName so the user knows *which task's master* is
+// asking. PRD §5.x / TASKS P14.
+
+function useTaskContextForSession(sessionId: string | null | undefined) {
+  const fleetSessions = useProjectsStore((s) => s.fleetSessions);
+  const tasks = useTasksStore((s) => s.tasks);
+  return useMemo(() => {
+    if (!sessionId) return null;
+    const fs = fleetSessions.find((s) => s.id === sessionId);
+    if (!fs || !fs.sessionKind || fs.sessionKind === "regular") return null;
+    const task = fs.taskId ? tasks.find((t) => t.id === fs.taskId) : undefined;
+    return {
+      kind: fs.sessionKind,
+      taskTitle: task?.title ?? null,
+      pItemId: fs.pItemId ?? null,
+    };
+  }, [fleetSessions, sessionId, tasks]);
+}
+
+function TaskMasterChip({ sessionId }: { sessionId: string | null | undefined }) {
+  const { t } = useTranslation();
+  const ctx = useTaskContextForSession(sessionId);
+  if (!ctx) return null;
+  const role = ctx.kind === "master" ? t("master.chip_master", "Master") : t("master.chip_worker", "Worker");
+  const titleLabel = ctx.taskTitle
+    ? `Task ${ctx.taskTitle} · ${role}`
+    : `Task · ${role}`;
+  const fullLabel = ctx.kind === "worker" && ctx.pItemId
+    ? `${titleLabel} · ${ctx.pItemId}`
+    : titleLabel;
+  return (
+    <span className={styles.master_chip} title={fullLabel}>
+      {fullLabel}
+    </span>
+  );
 }
 
 // ── Guard card renderer ────────────────────────────────────────────────────
@@ -53,6 +101,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         {req.workspaceName && (
           <span className={styles.card_workspace}>{req.workspaceName}</span>
         )}
+        <TaskMasterChip sessionId={req.sessionId ?? null} />
       </div>
 
       {req.aiTitle && (
@@ -208,6 +257,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
         {request.workspaceName && (
           <span className={styles.card_workspace}>{request.workspaceName}</span>
         )}
+        <TaskMasterChip sessionId={request.sessionId ?? null} />
       </div>
 
       {request.aiTitle && (

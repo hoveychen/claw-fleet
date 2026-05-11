@@ -2,7 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useProjectsStore, type KanbanColumn, type Project } from "../store";
+import {
+  useProjectsStore,
+  useTasksStore,
+  useUIStore,
+  type KanbanColumn,
+  type Project,
+} from "../store";
 import { KanbanView } from "./KanbanView";
 import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import styles from "./ProjectsView.module.css";
@@ -152,6 +158,7 @@ export function ProjectsView() {
                 workspace: input.workspace,
                 concurrency: input.concurrency ?? dialog.project.concurrency,
                 kanbanColumns: input.kanbanColumns ?? dialog.project.kanbanColumns,
+                manualReviewAll: input.manualReviewAll ?? dialog.project.manualReviewAll,
               };
               await invoke("update_project", { project: updated });
               setDialog(null);
@@ -215,6 +222,47 @@ function ProjectDetail({
   onProjectChanged: () => void;
   t: (k: string, opts?: Record<string, unknown>) => string;
 }) {
+  const tasks = useTasksStore((s) => s.tasks);
+  const refreshTasks = useTasksStore((s) => s.refresh);
+  const setSelectedTaskId = useTasksStore((s) => s.setSelectedTaskId);
+  const setViewMode = useUIStore((s) => s.setViewMode);
+
+  useEffect(() => {
+    refreshTasks(project.id);
+  }, [project.id, refreshTasks]);
+
+  const projectTasks = tasks.filter((tk) => tk.projectId === project.id);
+  const activeCount = projectTasks.filter(
+    (tk) => tk.status !== "done" && tk.status !== "abandoned",
+  ).length;
+  const oneWeekAgo = Date.now() / 1000 - 7 * 24 * 3600;
+  const doneThisWeek = projectTasks.filter(
+    (tk) => tk.status === "done" && (tk.completedAt ?? 0) >= oneWeekAgo,
+  ).length;
+  const completedDurations = projectTasks
+    .filter((tk) => tk.status === "done" && tk.startedAt && tk.completedAt)
+    .map((tk) => (tk.completedAt ?? 0) - (tk.startedAt ?? 0));
+  const avgDurationSecs = completedDurations.length
+    ? Math.round(
+        completedDurations.reduce((acc, n) => acc + n, 0) / completedDurations.length,
+      )
+    : null;
+  const now = Date.now() / 1000;
+  const longestRunningSecs = projectTasks
+    .filter((tk) => tk.status === "running" && tk.startedAt)
+    .reduce((max, tk) => Math.max(max, now - (tk.startedAt ?? 0)), 0);
+  const formatDuration = (s: number) => {
+    if (s < 60) return `${Math.round(s)}s`;
+    if (s < 3600) return `${Math.round(s / 60)}m`;
+    if (s < 86400) return `${Math.round(s / 360) / 10}h`;
+    return `${Math.round(s / 8640) / 10}d`;
+  };
+
+  const openTask = (taskId: string) => {
+    setSelectedTaskId(taskId);
+    setViewMode("tasks");
+  };
+
   return (
     <div className={styles.main_pane}>
       <div className={styles.detail_main}>
@@ -245,6 +293,46 @@ function ProjectDetail({
           <dt>{t("projects.session_count")}</dt>
           <dd>{sessionCount}</dd>
         </dl>
+        <div className={styles.project_metrics}>
+          <div className={styles.metric}>
+            <div className={styles.metric_value}>{activeCount}</div>
+            <div className={styles.metric_label}>{t("projects.metric_active_tasks")}</div>
+          </div>
+          <div className={styles.metric}>
+            <div className={styles.metric_value}>{doneThisWeek}</div>
+            <div className={styles.metric_label}>{t("projects.metric_done_this_week")}</div>
+          </div>
+          <div className={styles.metric}>
+            <div className={styles.metric_value}>{avgDurationSecs != null ? formatDuration(avgDurationSecs) : "—"}</div>
+            <div className={styles.metric_label}>{t("projects.metric_avg_duration")}</div>
+          </div>
+          <div className={styles.metric}>
+            <div className={styles.metric_value}>{longestRunningSecs ? formatDuration(longestRunningSecs) : "—"}</div>
+            <div className={styles.metric_label}>{t("projects.metric_longest_running")}</div>
+          </div>
+        </div>
+        {projectTasks.length > 0 && (
+          <div className={styles.project_tasks}>
+            <h4 className={styles.project_tasks_title}>{t("projects.tasks_in_project")}</h4>
+            <ul className={styles.project_tasks_list}>
+              {projectTasks.slice(0, 10).map((tk) => (
+                <li key={tk.id}>
+                  <button
+                    type="button"
+                    className={styles.project_task_row}
+                    onClick={() => openTask(tk.id)}
+                    title={tk.title}
+                  >
+                    <span className={`${styles.project_task_status} ${styles[`project_task_status_${tk.status}`] ?? ""}`}>
+                      {tk.status}
+                    </span>
+                    <span className={styles.project_task_title}>{tk.title}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
       <div className={styles.kanban_pane}>
         <KanbanView project={project} onProjectChanged={onProjectChanged} compact />
@@ -269,6 +357,7 @@ function ProjectFormDialog({
     workspace: string;
     concurrency?: number;
     kanbanColumns?: KanbanColumn[];
+    manualReviewAll?: boolean;
   }) => void;
   error: string | null;
   t: (k: string, opts?: Record<string, unknown>) => string;
@@ -276,6 +365,9 @@ function ProjectFormDialog({
   const [name, setName] = useState(initial?.name ?? "");
   const [workspace, setWorkspace] = useState(initial?.workspace ?? "");
   const [concurrency, setConcurrency] = useState(initial?.concurrency ?? 1);
+  const [manualReviewAll, setManualReviewAll] = useState(
+    initial?.manualReviewAll ?? false,
+  );
   const [kanbanColumns, setKanbanColumns] = useState<KanbanColumn[]>(() =>
     initial?.kanbanColumns
       ? [...initial.kanbanColumns].sort((a, b) => a.order - b.order)
@@ -373,6 +465,20 @@ function ProjectFormDialog({
           />
         </label>
 
+        <label className={styles.field}>
+          <span>{t("projects.manual_review_all")}</span>
+          <div className={styles.field_row}>
+            <input
+              type="checkbox"
+              checked={manualReviewAll}
+              onChange={(e) => setManualReviewAll(e.target.checked)}
+            />
+            <span className={styles.hint}>
+              {t("projects.manual_review_all_hint")}
+            </span>
+          </div>
+        </label>
+
         {mode === "edit" && (
           <div className={styles.field}>
             <span>{t("projects.kanban_columns")}</span>
@@ -456,6 +562,7 @@ function ProjectFormDialog({
                 name: name.trim(),
                 workspace: workspace.trim(),
                 concurrency,
+                manualReviewAll,
                 kanbanColumns:
                   mode === "edit"
                     ? kanbanColumns.map((c) => ({ ...c, name: c.name.trim() || c.id }))

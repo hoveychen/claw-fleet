@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useUIStore } from "../store";
+import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useTasksStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
@@ -55,10 +55,32 @@ export function SessionList() {
   const [projectsExpanded, setProjectsExpanded] = useState<boolean>(
     () => getItem("nav-projects-expanded") === "true",
   );
+  const [tasksExpanded, setTasksExpanded] = useState<boolean>(
+    () => getItem("nav-tasks-expanded") !== "false",
+  );
   const projects = useProjectsStore((s) => s.projects);
   const fleetSessions = useProjectsStore((s) => s.fleetSessions);
+  const tasks = useTasksStore((s) => s.tasks);
   const setSelectedProjectId = useProjectsStore((s) => s.setSelectedProjectId);
+  const setSelectedTaskId = useTasksStore((s) => s.setSelectedTaskId);
+  const refreshTasks = useTasksStore((s) => s.refresh);
   const usageRing = useUsageRing();
+
+  // Active tasks for the sidebar drill-down: anything NOT in a terminal
+  // state (Done / Abandoned). PRD §5.x / TASKS P9.
+  const activeTasks = tasks.filter(
+    (t) => t.status !== "done" && t.status !== "abandoned",
+  );
+  // Group by project name for the sidebar list. Stable per-call.
+  const tasksByProject = (() => {
+    const m = new Map<string, typeof activeTasks>();
+    for (const tk of activeTasks) {
+      const list = m.get(tk.projectId) ?? [];
+      list.push(tk);
+      m.set(tk.projectId, list);
+    }
+    return m;
+  })();
 
   const projectCounts = (() => {
     const total = new Map<string, number>();
@@ -79,6 +101,22 @@ export function SessionList() {
       return next;
     });
   }, []);
+
+  const toggleTasksExpanded = useCallback(() => {
+    setTasksExpanded((prev) => {
+      const next = !prev;
+      setItem("nav-tasks-expanded", next ? "true" : "false");
+      return next;
+    });
+  }, []);
+
+  const openTask = useCallback(
+    (taskId: string) => {
+      setSelectedTaskId(taskId);
+      setViewMode("tasks");
+    },
+    [setSelectedTaskId, setViewMode],
+  );
 
   const openProject = useCallback(
     (projectId: string) => {
@@ -110,6 +148,16 @@ export function SessionList() {
     }, 5000);
     return () => clearInterval(interval);
   }, []);
+
+  // Same for the tasks store — sidebar shows the active-task drill-down even
+  // when TasksView itself isn't mounted, so we poll independently.
+  useEffect(() => {
+    refreshTasks();
+    const interval = setInterval(() => {
+      useTasksStore.getState().refresh();
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [refreshTasks]);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
@@ -287,13 +335,96 @@ export function SessionList() {
 
         {/* Navigation */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
-          <button
-            className={`${styles.nav_item} ${viewMode === "tasks" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("tasks")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 3.5h11v3h-11zM2.5 9.5h7v3h-7zM11 9.5l2.5 1.5L11 12.5z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_tasks", "Tasks")}</span>
-          </button>
+          <div className={styles.nav_project_row}>
+            <button
+              className={`${styles.nav_item} ${styles.nav_item_with_chevron} ${viewMode === "tasks" ? styles.nav_active : ""}`}
+              onClick={() => setViewMode("tasks")}
+            >
+              <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 3.5h11v3h-11zM2.5 9.5h7v3h-7zM11 9.5l2.5 1.5L11 12.5z"/></svg></span>
+              <span className={styles.nav_label}>{t("view_tasks", "Tasks")}</span>
+              {activeTasks.length > 0 && (
+                <span className={`${styles.nav_project_chip} ${styles.nav_project_chip_running}`} title={t("tasks.active_count", "active tasks")}>
+                  {activeTasks.length}
+                </span>
+              )}
+            </button>
+            {!sidebarCollapsed && activeTasks.length > 0 && (
+              <button
+                type="button"
+                className={styles.nav_chevron}
+                onClick={toggleTasksExpanded}
+                title={tasksExpanded ? t("sidebar.tasks_collapse", "Collapse active tasks") : t("sidebar.tasks_expand", "Expand active tasks")}
+                aria-label={tasksExpanded ? t("sidebar.tasks_collapse", "Collapse active tasks") : t("sidebar.tasks_expand", "Expand active tasks")}
+                aria-expanded={tasksExpanded}
+              >
+                <svg
+                  width="10"
+                  height="10"
+                  viewBox="0 0 10 10"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  style={{
+                    transform: tasksExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                    transition: "transform 0.15s",
+                  }}
+                >
+                  <polyline points="3,2 7,5 3,8" />
+                </svg>
+              </button>
+            )}
+          </div>
+          {!sidebarCollapsed && tasksExpanded && activeTasks.length > 0 && (
+            <ul className={styles.nav_project_list}>
+              {Array.from(tasksByProject.entries()).map(([projectId, projectTasks]) => {
+                const project = projects.find((p) => p.id === projectId);
+                const projectName = project?.name ?? projectId;
+                return (
+                  <li key={projectId} className={styles.nav_task_group}>
+                    <div className={styles.nav_task_group_label}>{projectName}</div>
+                    {projectTasks.map((tk) => {
+                      const items = Object.values(tk.plan.items ?? {});
+                      const total = items.length;
+                      const done = items.filter(
+                        (it) => {
+                          if (typeof it.status === "string") {
+                            return it.status === "done" || it.status === "skipped";
+                          }
+                          return false;
+                        }
+                      ).length;
+                      const statusIcon =
+                        tk.status === "running" ? "▶" :
+                        tk.status === "paused" ? "⏸" :
+                        tk.status === "ready" ? "○" :
+                        tk.status === "planning" ? "✎" :
+                        tk.status === "drafting" ? "✎" :
+                        "•";
+                      return (
+                        <button
+                          key={tk.id}
+                          type="button"
+                          className={styles.nav_project_item}
+                          onClick={() => openTask(tk.id)}
+                          title={`${tk.title} — ${tk.status}`}
+                        >
+                          <span className={styles.nav_task_icon}>{statusIcon}</span>
+                          <span className={styles.nav_project_name}>{tk.title}</span>
+                          {total > 0 && (
+                            <span className={styles.nav_project_chip} title={t("tasks.progress", "p-items done / total")}>
+                              {done}/{total}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
           <div className={styles.nav_project_row}>
             <button
               className={`${styles.nav_item} ${styles.nav_item_with_chevron} ${viewMode === "projects" ? styles.nav_active : ""}`}

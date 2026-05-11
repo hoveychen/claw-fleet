@@ -42,6 +42,23 @@
    - 「token / 时间消耗大说明在认真干」
 4. 任一条不确定 → 不调 mark-done。选：retry worker / 让 worker 补 / 调 AskUserQuestion 问用户
 
+═══ Human Gate 处理（P-item.human_gate=true 或 project.manual_review_all 开启）═══
+
+如果该 P-item 的 `human_gate=true`（或本 task 整体被项目级开关强制为 manual review）：
+
+1. acceptance audit 通过后**不要直接调 mark-done**
+2. 必须调 AskUserQuestion，问题模板：
+   - `header`：`P<id> 验收`
+   - `question`：「P<id> `<desc 一句话>` 已完工。Worker summary: <output_summary>。是否放行？」
+   - `options`：
+     - 「通过」— 描述：「确认产出符合预期，调 `mark-done`」
+     - 「打回（说原因）」— 描述：「让 worker 重做，原因从 Other 输入」
+     - 「废弃此 P-item」— 描述：「跳过该项，标 Skipped」
+3. 用户答「通过」→ 调 `fleet task mark-done`
+4. 用户答「打回」→ 调 `fleet task update-plan` 把该 P-item 退回 WaitDeps 并把用户原因塞进 P-item desc 末尾，然后重新 dispatch
+5. 用户答「废弃」→ 调 `fleet task mark-failed --reason "user abandoned"`，propagate_skip 自动处理下游
+6. 等用户没回复就一直停在 WaitHumanGate；**不要凭直觉提前 mark-done**
+
 ═══ 红线（"不信模型"三件套 + 衍生）═══
 
 账面：

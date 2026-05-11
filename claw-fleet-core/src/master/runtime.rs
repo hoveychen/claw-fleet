@@ -115,6 +115,7 @@ mod tests {
             name: "demo".into(),
             workspace: ws.path().to_string_lossy().to_string(),
             concurrency: Some(1),
+            manual_review_all: None,
         })
         .unwrap();
         let task = create_task(TaskInput {
@@ -144,6 +145,7 @@ mod tests {
             name: "ghost".into(),
             workspace: "/tmp/definitely-not-here-{}".into(),
             concurrency: Some(1),
+            manual_review_all: None,
         })
         .unwrap();
         let task = create_task(TaskInput {
@@ -196,6 +198,7 @@ mod tests {
             name: "demo".into(),
             workspace: ws.path().to_string_lossy().to_string(),
             concurrency: Some(1),
+            manual_review_all: None,
         })
         .unwrap();
         let mut task = create_task(TaskInput {

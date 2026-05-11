@@ -334,6 +334,15 @@
   border-color: #d69e2e;
 }
 
+.gate_pending {
+  font-size: 11px;
+  color: #b7791f;
+  background: rgba(214, 158, 46, 0.12);
+  padding: 4px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
 .task_detail_footer {
   display: flex;
   gap: 12px;
