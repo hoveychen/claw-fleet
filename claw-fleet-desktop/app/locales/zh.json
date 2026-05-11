@@ -105,7 +105,14 @@
     "column_move_down": "下移",
     "column_new_default": "新列",
     "show_list": "显示项目列表",
-    "hide_list": "隐藏项目列表"
+    "hide_list": "隐藏项目列表",
+    "manual_review_all": "每个 P-item 强制人工审核",
+    "manual_review_all_hint": "勾上后，该项目所有 task 启动时把每个 P-item 都改为 human_gate=true，master 必须先弹用户审核才能 mark-done。",
+    "metric_active_tasks": "活跃 task",
+    "metric_done_this_week": "本周完成",
+    "metric_avg_duration": "平均时长",
+    "metric_longest_running": "最长卡时间",
+    "tasks_in_project": "本项目的 task"
   },
   "gallery_show_all": "全部显示",
   "gallery_show_active": "仅活跃",
@@ -1065,7 +1072,24 @@
     "collapse": "折叠侧边栏",
     "expand": "展开侧边栏",
     "projects_collapse": "折叠项目列表",
-    "projects_expand": "展开项目列表"
+    "projects_expand": "展开项目列表",
+    "tasks_collapse": "折叠活跃 task",
+    "tasks_expand": "展开活跃 task"
+  },
+  "master": {
+    "chip_master": "Master",
+    "chip_worker": "Worker"
+  },
+  "tasks": {
+    "title": "任务",
+    "filter_by_project": "按项目筛选",
+    "all_projects": "全部项目",
+    "new_task": "新任务",
+    "create_project_first": "先创建一个项目",
+    "active_count": "活跃 task 数",
+    "progress": "已完成 / 总 P-item",
+    "human_gate_required": "需要人工审核",
+    "waiting_for_user_review": "等待用户审核 — 请在 Decision Panel 处理"
   },
   "settings": {
     "title": "设置",

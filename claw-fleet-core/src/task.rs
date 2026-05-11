@@ -301,9 +301,17 @@ pub fn add_task_material(
 }
 
 /// Transition a Drafting / Planning / Ready task to Running. Creates a fresh
-/// `fleet/<slug>` git branch in the project workspace, stamps `started_at`,
+/// `fleet/<slug>` git branch in the project workspace, spawns the Master
+/// session (PRD §5.7 / TASKS P19), stamps `started_at` + `master_session_id`,
 /// and persists `task_branch`. Idempotent: returns `Ok` immediately if the
 /// task is already running.
+///
+/// **Master spawn integration** (TASKS P19 follow-up):
+/// On the happy path this also calls `supervisor::enqueue_master` so a
+/// Sonnet-4.6 Claude Code subprocess starts on next tick. If the spawn enqueue
+/// fails, the task still transitions to Running (branch is created, plan is
+/// editable) but `master_session_id` stays None and the caller surfaces the
+/// error — recovery is `pause` + `resume` once the underlying issue is fixed.
 pub fn start_task(task_id: &str) -> Result<(), String> {
     let lock = task_write_lock(task_id);
     let _g = lock.lock().expect("task write mutex poisoned");
@@ -322,7 +330,28 @@ pub fn start_task(task_id: &str) -> Result<(), String> {
     task.task_branch = Some(branch);
     task.status = TaskStatus::Running;
     task.started_at = Some(chrono::Utc::now().timestamp());
-    write_task_atomic(&task)
+    // PRD §5.x / TASKS P14: if the project has manual_review_all on, force
+    // every P-item to require human gate so the master pauses for user
+    // confirmation before marking any P-item Done.
+    if project.manual_review_all {
+        for item in task.plan.items.values_mut() {
+            item.human_gate = true;
+        }
+    }
+    // Persist the Running + branch state first so `enqueue_master`'s
+    // internal `get_task` sees the up-to-date task (it reads from disk).
+    write_task_atomic(&task)?;
+    // Spawn the master. Failure here is non-fatal to the state transition —
+    // the task is Running with a branch; user can pause/resume to retry.
+    let spec = crate::master::spawn_spec_from_task(&task)?;
+    match crate::supervisor::enqueue_master(&spec) {
+        Ok(master_sid) => {
+            task.master_session_id = Some(master_sid);
+            write_task_atomic(&task)?;
+            Ok(())
+        }
+        Err(e) => Err(format!("master enqueue failed: {e}")),
+    }
 }
 
 // ── Master-callable mutations ────────────────────────────────────────────────
@@ -379,10 +408,10 @@ pub fn mark_failed(
 }
 
 /// Master tool — request the supervisor to dispatch worker for `p_item_id`.
-/// V1 minimum: flips the P-item's status to `Running` and stamps
-/// `started_at`. The actual worker subprocess spawn is wired in by P7
-/// (Worker executor). The Master agent sees the status change in subsequent
-/// `get-plan` calls and proceeds with audit accordingly.
+/// Flips the P-item's status to `Running`, stamps `started_at`, and spawns
+/// a fresh Worker session via `supervisor::enqueue_worker`. The Master
+/// agent sees the status change + `agent_session_id` in subsequent
+/// `get-plan` / `read-output` calls.
 pub fn dispatch_pitem(task_id: &str, p_item_id: &str) -> Result<(), String> {
     let lock = task_write_lock(task_id);
     let _g = lock.lock().expect("task write mutex poisoned");
@@ -399,7 +428,8 @@ pub fn dispatch_pitem(task_id: &str, p_item_id: &str) -> Result<(), String> {
                 item.started_at = Some(now);
             }
             crate::pitem::PItemStatus::Running => {
-                // Idempotent — already running.
+                // Idempotent — already running. Don't double-spawn.
+                return Ok(());
             }
             other => {
                 return Err(format!(
@@ -408,14 +438,30 @@ pub fn dispatch_pitem(task_id: &str, p_item_id: &str) -> Result<(), String> {
             }
         }
     }
+    // Persist Running state first so the worker's spawn read sees it on disk.
+    write_task_atomic(&task)?;
+    // Build worker spawn spec from the task + project workspace.
+    let project = crate::project::list_projects()
+        .into_iter()
+        .find(|p| p.id == task.project_id)
+        .ok_or_else(|| format!("project {} not found for task {task_id}", task.project_id))?;
+    let cwd = PathBuf::from(&project.workspace);
+    let spec = crate::worker_executor::worker_spawn_spec(&task, p_item_id, cwd)?;
+    let worker_sid = crate::supervisor::enqueue_worker(&spec)?;
+    // Stamp the worker session id on the P-item so the master can locate
+    // the transcript via `fleet task read-output`.
+    if let Some(item) = task.plan.get_mut(p_item_id) {
+        item.agent_session_id = Some(worker_sid);
+    }
     write_task_atomic(&task)
 }
 
 // ── User-only operations (master has no tools for these) ─────────────────────
 
-/// Pause a running task. V1 minimum: flips Task.status to `Paused` and
-/// persists. Supervisor-level SIGSTOP of master + worker subprocesses lands
-/// with P7/P19 integration.
+/// Pause a running task. Flips Task.status to `Paused`, persists, and asks
+/// supervisor to SIGSTOP the master + any in-flight workers (TASKS P20).
+/// Signal failures are non-fatal — the disk state still flips, and the
+/// supervisor's next tick reconciles.
 pub fn pause_task(task_id: &str) -> Result<(), String> {
     let lock = task_write_lock(task_id);
     let _g = lock.lock().expect("task write mutex poisoned");
@@ -430,10 +476,12 @@ pub fn pause_task(task_id: &str) -> Result<(), String> {
         ));
     }
     task.status = TaskStatus::Paused;
-    write_task_atomic(&task)
+    write_task_atomic(&task)?;
+    let _ = crate::supervisor::pause_task_sessions(task_id);
+    Ok(())
 }
 
-/// Resume a paused task.
+/// Resume a paused task — SIGCONT master + workers, flip Running.
 pub fn resume_task(task_id: &str) -> Result<(), String> {
     let lock = task_write_lock(task_id);
     let _g = lock.lock().expect("task write mutex poisoned");
@@ -448,15 +496,20 @@ pub fn resume_task(task_id: &str) -> Result<(), String> {
         ));
     }
     task.status = TaskStatus::Running;
-    write_task_atomic(&task)
+    write_task_atomic(&task)?;
+    let _ = crate::supervisor::resume_task_sessions(task_id);
+    Ok(())
 }
 
-/// Clear (delete) a task — removes both the task json and the materials dir.
-/// Frees all resource locks at supervisor level (when P7 integration lands).
+/// Clear (delete) a task — terminates master + workers, removes both the
+/// task json and the materials dir. Frees all resource locks immediately.
 pub fn clear_task(task_id: &str) -> Result<(), String> {
     let lock = task_write_lock(task_id);
     let _g = lock.lock().expect("task write mutex poisoned");
-    // Mark Abandoned first so any in-flight supervisor reads see the
+    // Tear down running subprocesses first so they don't keep writing to a
+    // workspace that's about to be unbound from any task record.
+    let _ = crate::supervisor::terminate_task_sessions(task_id);
+    // Mark Abandoned next so any in-flight supervisor reads see the
     // intent before the file vanishes.
     if let Ok(mut task) = get_task(task_id) {
         task.status = TaskStatus::Abandoned;
@@ -472,6 +525,53 @@ pub fn clear_task(task_id: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Reconcile Task status against its master FleetSession on disk. Called by
+/// the supervisor tick: if the master session has exited (status=complete
+/// or pid no longer alive) AND the task's plan is fully terminal, flip the
+/// task to Done and stamp `completed_at`. Returns the number of tasks that
+/// transitioned.
+///
+/// This is the disk-only reconciler — the actual master subprocess exit
+/// detection lives in `supervisor::tick`. Separating the two keeps tests
+/// hermetic (no real subprocesses).
+pub fn reconcile_task_completion() -> Result<usize, String> {
+    let sessions = crate::project::list_fleet_sessions();
+    let tasks = list_tasks(None);
+    let mut transitioned = 0usize;
+    for task in tasks {
+        if !matches!(task.status, TaskStatus::Running) {
+            continue;
+        }
+        let Some(master_sid) = task.master_session_id.as_deref() else {
+            continue;
+        };
+        let Some(master) = sessions.iter().find(|s| s.id == master_sid) else {
+            continue;
+        };
+        let master_finished =
+            master.status == crate::project::DEFAULT_COLUMN_COMPLETE && master.pid.is_none();
+        if !master_finished {
+            continue;
+        }
+        if !task.is_plan_finished() {
+            continue;
+        }
+        let lock = task_write_lock(&task.id);
+        let _g = lock.lock().expect("task write mutex poisoned");
+        // Re-read in case another writer raced ahead.
+        let Ok(mut latest) = get_task(&task.id) else { continue };
+        if matches!(latest.status, TaskStatus::Running) && latest.is_plan_finished() {
+            latest.status = TaskStatus::Done;
+            latest.completed_at = Some(chrono::Utc::now().timestamp());
+            if write_task_atomic(&latest).is_ok() {
+                transitioned += 1;
+            }
+        }
+    }
+    Ok(transitioned)
+}
+
 
 fn slugify_title(title: &str) -> String {
     let mut slug: String = title

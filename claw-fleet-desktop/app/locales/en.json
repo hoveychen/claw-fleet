@@ -105,7 +105,14 @@
     "column_move_down": "Move down",
     "column_new_default": "New column",
     "show_list": "Show project list",
-    "hide_list": "Hide project list"
+    "hide_list": "Hide project list",
+    "manual_review_all": "Manual review every P-item",
+    "manual_review_all_hint": "When on, every task started in this project requires user approval before each P-item is marked Done (forces human_gate).",
+    "metric_active_tasks": "active tasks",
+    "metric_done_this_week": "done this week",
+    "metric_avg_duration": "avg duration",
+    "metric_longest_running": "longest running",
+    "tasks_in_project": "Tasks in this project"
   },
   "gallery_show_all": "Show All",
   "gallery_show_active": "Active Only",
@@ -1068,7 +1075,24 @@
     "collapse": "Collapse sidebar",
     "expand": "Expand sidebar",
     "projects_collapse": "Collapse project list",
-    "projects_expand": "Expand project list"
+    "projects_expand": "Expand project list",
+    "tasks_collapse": "Collapse active tasks",
+    "tasks_expand": "Expand active tasks"
+  },
+  "master": {
+    "chip_master": "Master",
+    "chip_worker": "Worker"
+  },
+  "tasks": {
+    "title": "Tasks",
+    "filter_by_project": "Filter by project",
+    "all_projects": "All projects",
+    "new_task": "New task",
+    "create_project_first": "Create a project first",
+    "active_count": "active tasks",
+    "progress": "p-items done / total",
+    "human_gate_required": "Human gate required",
+    "waiting_for_user_review": "Waiting for user review — handle in Decision Panel"
   },
   "settings": {
     "title": "Settings",

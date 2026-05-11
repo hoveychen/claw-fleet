@@ -311,6 +311,7 @@ function KanbanColumn({
 }
 
 function PItemCard({ pitem }: { pitem: PItem }) {
+  const { t } = useTranslation();
   const statusKey = pItemStatusKey(pitem.status);
   const icon = pItemIcon(pitem.status);
   return (
@@ -319,12 +320,17 @@ function PItemCard({ pitem }: { pitem: PItem }) {
         <span className={styles.card_icon}>{icon}</span>
         <span className={styles.card_id}>{pitem.id}</span>
         {pitem.humanGate && (
-          <span className={styles.gate_chip} title="Human gate">
+          <span className={styles.gate_chip} title={t("tasks.human_gate_required", "Human gate required")}>
             👁
           </span>
         )}
       </div>
       <div className={styles.card_desc}>{pitem.desc}</div>
+      {statusKey === "waitHumanGate" && (
+        <div className={styles.gate_pending}>
+          {t("tasks.waiting_for_user_review", "等待用户审核 — 请在 Decision Panel 处理")}
+        </div>
+      )}
       {pitem.touches.length > 0 && (
         <div className={styles.card_touches}>
           {pitem.touches.slice(0, 3).map((t) => (

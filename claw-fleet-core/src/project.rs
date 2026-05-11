@@ -79,6 +79,14 @@ pub struct Project {
     pub kanban_columns: Vec<KanbanColumn>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// When `true`, every P-item of every task in this project gets
+    /// `human_gate = true` on task start, forcing the Master to call
+    /// `AskUserQuestion` before flipping any P-item to Done. PRD §5.x /
+    /// TASKS P14 — "manual review all" project-wide toggle. Per-task
+    /// override happens at planner time. Defaults to `false` (legacy
+    /// behavior).
+    #[serde(default)]
+    pub manual_review_all: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -87,6 +95,8 @@ pub struct ProjectInput {
     pub name: String,
     pub workspace: String,
     pub concurrency: Option<u32>,
+    #[serde(default)]
+    pub manual_review_all: Option<bool>,
 }
 
 /// Frontend → spawn API input. Used by `crate::supervisor::enqueue`.
@@ -103,6 +113,23 @@ pub struct LauncherForm {
     /// the top-nav launcher). `Some(dir)` = write `<dir>/<sid>.fleetsession`.
     #[serde(default)]
     pub fleetsession_dir: Option<String>,
+}
+
+/// What flavour of Claude Code session this is. `Regular` is the legacy
+/// fleet-managed session (one-shot prompt → kanban). `Master` and `Worker`
+/// are the task-as-unit V1 cluster: Master coordinates a Task's lifecycle and
+/// runs `fleet task *` tools; Worker is dispatched per-P-item with a
+/// scoped SYSTEM prompt and a `touches`-gated edit hook.
+///
+/// `#[serde(default)]` on the FleetSession field keeps legacy persisted
+/// sessions (no `sessionKind`) deserialising as `Regular`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SessionKind {
+    #[default]
+    Regular,
+    Master,
+    Worker,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -139,6 +166,25 @@ pub struct FleetSession {
     /// deserialising as `false`.
     #[serde(default)]
     pub final_by_agent: bool,
+    /// Discriminator for the task-as-unit cluster (Master / Worker) vs the
+    /// legacy fleet-managed launcher sessions (Regular).
+    #[serde(default)]
+    pub session_kind: SessionKind,
+    /// For Master/Worker: the owning `Task.id`. None for Regular sessions.
+    #[serde(default)]
+    pub task_id: Option<String>,
+    /// For Worker: the `PItemId` this worker is executing. None otherwise.
+    #[serde(default)]
+    pub p_item_id: Option<String>,
+    /// `--append-system-prompt` payload for Master/Worker sessions. The
+    /// composed Layer-1/2/3 prompt lives here at spawn time so we don't have
+    /// to re-derive it across supervisor restarts.
+    #[serde(default)]
+    pub system_prompt: Option<String>,
+    /// Override model for Master/Worker (`claude-sonnet-4-6`). None →
+    /// supervisor uses the CLI default.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 // ── Storage paths ───────────────────────────────────────────────────────────
@@ -207,6 +253,7 @@ pub fn create_project(input: ProjectInput) -> Result<Project, String> {
         kanban_columns: default_kanban_columns(),
         created_at: now,
         updated_at: now,
+        manual_review_all: input.manual_review_all.unwrap_or(false),
     };
     projects.push(new_project.clone());
     save_projects(&projects)?;
@@ -294,6 +341,7 @@ mod tests {
             kanban_columns: columns,
             created_at: 0,
             updated_at: 0,
+            manual_review_all: false,
         }
     }
 
@@ -367,6 +415,7 @@ mod tests {
             name: "x".into(),
             workspace: "  ".into(),
             concurrency: None,
+            manual_review_all: None,
         });
         assert!(r.is_err());
     }
@@ -377,6 +426,7 @@ mod tests {
             name: "x".into(),
             workspace: "relative/path".into(),
             concurrency: None,
+            manual_review_all: None,
         });
         assert!(r.is_err());
     }

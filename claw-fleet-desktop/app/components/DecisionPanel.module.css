@@ -354,6 +354,20 @@
   flex-shrink: 0;
 }
 
+.master_chip {
+  font-size: 11px;
+  color: var(--color-accent, #6366f1);
+  background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
+  padding: 2px 8px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  font-weight: 500;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .card_subtitle {
   font-size: 12px;
   color: var(--color-text);

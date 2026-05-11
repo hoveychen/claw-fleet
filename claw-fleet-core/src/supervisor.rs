@@ -90,10 +90,126 @@ pub fn enqueue(form: LauncherForm) -> Result<FleetSession, String> {
         pid: None,
         expedited: form.expedited,
         final_by_agent: false,
+        session_kind: project::SessionKind::Regular,
+        task_id: None,
+        p_item_id: None,
+        system_prompt: None,
+        model: None,
     };
     sessions.push(new.clone());
     project::save_fleet_sessions(&sessions)?;
     Ok(new)
+}
+
+/// Enqueue a **Master** session for `task_id` using the prebuilt
+/// `MasterSpawnSpec`. The session id is pre-allocated, persisted to disk in
+/// status=queued, and the supervisor's next `tick()` will spawn the actual
+/// Claude Code subprocess via `--append-system-prompt` + `--model`.
+///
+/// Returns the freshly-allocated FleetSession id — callers should also store
+/// it into the `Task.master_session_id` field via `task::set_master_session`.
+///
+/// PRD §5.7 / TASKS P19 — Master cwd is the task's `fleet/<slug>` working
+/// tree (carried in the spec), expedited so the master starts even when the
+/// project's concurrency slot is full of regular kanban sessions.
+pub fn enqueue_master(spec: &crate::master::MasterSpawnSpec) -> Result<String, String> {
+    let projects = project::list_projects();
+    let task = crate::task::get_task(&spec.task_id)?;
+    let proj = projects
+        .iter()
+        .find(|p| p.id == task.project_id)
+        .ok_or_else(|| format!("project {} not found for task {}", task.project_id, task.id))?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let initial_prompt = format!(
+        "Task `{}` ({}) is starting. Inspect the plan with `fleet task get-plan`, \
+         pick the first dispatchable P-item via `fleet task get-dispatchable`, and \
+         proceed per the Acceptance Audit Protocol.",
+        task.title, task.id
+    );
+    let session = FleetSession {
+        id: id.clone(),
+        project_id: proj.id.clone(),
+        workspace: spec.cwd.to_string_lossy().to_string(),
+        fleetsession_path: None,
+        prompt: initial_prompt,
+        context_files: vec![],
+        status: DEFAULT_COLUMN_QUEUED.into(),
+        note: Some(format!("master: task {}", task.id)),
+        created_at: now_ms(),
+        started_at: None,
+        completed_at: None,
+        pid: None,
+        // Master must start even when project concurrency is saturated by
+        // legacy kanban sessions — the master IS the slot manager for its
+        // task's worker cluster.
+        expedited: true,
+        final_by_agent: false,
+        session_kind: project::SessionKind::Master,
+        task_id: Some(task.id.clone()),
+        p_item_id: None,
+        system_prompt: Some(spec.system_prompt.clone()),
+        model: Some(spec.model.to_string()),
+    };
+    let mut sessions = project::list_fleet_sessions();
+    sessions.push(session);
+    project::save_fleet_sessions(&sessions)?;
+    Ok(id)
+}
+
+/// Enqueue a **Worker** session for `(task_id, p_item_id)` using the prebuilt
+/// `WorkerSpawnSpec`. Same pattern as `enqueue_master`: pre-allocate the
+/// session id, persist queued, supervisor tick spawns the subprocess.
+///
+/// Callers should also stamp the returned id into
+/// `task.plan.items[p_item_id].agent_session_id` so the master's
+/// `read-output` tool can locate the worker's transcript.
+pub fn enqueue_worker(spec: &crate::worker_executor::WorkerSpawnSpec) -> Result<String, String> {
+    let projects = project::list_projects();
+    let task = crate::task::get_task(&spec.task_id)?;
+    let proj = projects
+        .iter()
+        .find(|p| p.id == task.project_id)
+        .ok_or_else(|| format!("project {} not found for task {}", task.project_id, task.id))?;
+    let id = uuid::Uuid::new_v4().to_string();
+    let pitem = task.plan.get(&spec.p_item_id).ok_or_else(|| {
+        format!(
+            "p-item {} not found in task {} plan",
+            spec.p_item_id, task.id
+        )
+    })?;
+    let session = FleetSession {
+        id: id.clone(),
+        project_id: proj.id.clone(),
+        workspace: spec.cwd.to_string_lossy().to_string(),
+        fleetsession_path: None,
+        prompt: format!(
+            "Execute P-item `{}` per the SYSTEM prompt above. When you are done, \
+             stop the process; the master will run the acceptance audit.\n\n\
+             Your goal:\n{}",
+            spec.p_item_id, pitem.desc
+        ),
+        context_files: vec![],
+        status: DEFAULT_COLUMN_QUEUED.into(),
+        note: Some(format!("worker: {}/{}", task.id, spec.p_item_id)),
+        created_at: now_ms(),
+        started_at: None,
+        completed_at: None,
+        pid: None,
+        // Workers race the master's dispatch decision, not the kanban queue —
+        // expedited so a fleet workspace with full concurrency doesn't starve
+        // them.
+        expedited: true,
+        final_by_agent: false,
+        session_kind: project::SessionKind::Worker,
+        task_id: Some(task.id.clone()),
+        p_item_id: Some(spec.p_item_id.clone()),
+        system_prompt: Some(spec.system_prompt.clone()),
+        model: Some(spec.model.to_string()),
+    };
+    let mut sessions = project::list_fleet_sessions();
+    sessions.push(session);
+    project::save_fleet_sessions(&sessions)?;
+    Ok(id)
 }
 
 /// Cancel a fleet session by id. SIGTERMs the process if still running, then
@@ -354,7 +470,18 @@ fn tick_macos() -> Result<(), String> {
         // Drop any stale idle sentinel from a previous run before respawning,
         // otherwise Pass 1.5 would immediately flip the new run back to pending.
         crate::idle::clear_idle(&s.id);
-        match spawn_claude(&s.id, &s.workspace, &s.prompt, &s.context_files, is_resume) {
+        match spawn_claude(
+            &s.id,
+            &s.workspace,
+            &s.prompt,
+            &s.context_files,
+            is_resume,
+            s.system_prompt.as_deref(),
+            s.model.as_deref(),
+            s.session_kind.clone(),
+            s.task_id.as_deref(),
+            s.p_item_id.as_deref(),
+        ) {
             Ok(pid) => {
                 s.pid = Some(pid);
                 s.status = DEFAULT_COLUMN_RUNNING.into();
@@ -378,16 +505,26 @@ fn tick_macos() -> Result<(), String> {
     if changed {
         project::save_fleet_sessions(&sessions)?;
     }
+    // Pass 4: reconcile task-as-unit completions — any Running task whose
+    // master subprocess just exited AND whose plan is fully terminal now
+    // flips to Done. Best-effort; an error here doesn't fail the tick.
+    let _ = crate::task::reconcile_task_completion();
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
+#[allow(clippy::too_many_arguments)]
 fn spawn_claude(
     session_id: &str,
     workspace: &str,
     prompt: &str,
     context_files: &[String],
     is_resume: bool,
+    system_prompt: Option<&str>,
+    model: Option<&str>,
+    kind: project::SessionKind,
+    task_id: Option<&str>,
+    p_item_id: Option<&str>,
 ) -> Result<u32, String> {
     let claude = crate::claude_binary::resolve(None).ok_or("claude CLI not found")?;
     let mut full_prompt = prompt.to_string();
@@ -407,8 +544,35 @@ fn spawn_claude(
     } else {
         cmd.arg("--session-id").arg(session_id);
     }
+    if let Some(sp) = system_prompt {
+        cmd.arg("--append-system-prompt").arg(sp);
+    }
+    if let Some(m) = model {
+        cmd.arg("--model").arg(m);
+    }
     cmd.arg(&full_prompt)
         .env("FLEET_SESSION_ID", session_id);
+
+    // Task-as-unit cluster env: workers consult FLEET_TASK_ID +
+    // FLEET_P_ITEM_ID inside the Edit/Write touches hook (P8). Master
+    // sessions only need FLEET_TASK_ID so they can route `[event]` /
+    // `[user]` messages and acceptance-audit by id.
+    if matches!(kind, project::SessionKind::Master | project::SessionKind::Worker) {
+        if let Some(tid) = task_id {
+            cmd.env("FLEET_TASK_ID", tid);
+        }
+        if let Some(pid) = p_item_id {
+            cmd.env("FLEET_P_ITEM_ID", pid);
+        }
+        cmd.env(
+            "FLEET_SESSION_KIND",
+            match kind {
+                project::SessionKind::Master => "master",
+                project::SessionKind::Worker => "worker",
+                project::SessionKind::Regular => "regular",
+            },
+        );
+    }
 
     // Prepend ~/.claude/fleet/bin to PATH so `fleet session status` is
     // discoverable from inside the agent (the symlink is created in P6 by
@@ -658,6 +822,109 @@ fn kill_pid(_pid: u32) -> Result<(), String> {
     Err("kill not supported on this platform".into())
 }
 
+#[cfg(unix)]
+fn signal_pid(pid: u32, signal: i32) -> Result<(), String> {
+    let r = unsafe { libc::kill(pid as libc::pid_t, signal) };
+    if r == 0 {
+        Ok(())
+    } else {
+        Err(format!("signal {signal}: {}", std::io::Error::last_os_error()))
+    }
+}
+
+#[cfg(not(unix))]
+fn signal_pid(_pid: u32, _signal: i32) -> Result<(), String> {
+    Err("signal not supported on this platform".into())
+}
+
+// ── Task-as-unit signal helpers ──────────────────────────────────────────────
+
+/// SIGSTOP every live fleet session attached to `task_id` (the Master plus
+/// any in-flight Workers). Used by `task::pause_task` per TASKS P20 — user
+/// hits pause, master + worker subprocesses freeze in place until `resume`.
+///
+/// Sessions without a live pid are silently skipped (already terminal or
+/// not yet spawned). Returns the count of sessions signalled.
+pub fn pause_task_sessions(task_id: &str) -> Result<usize, String> {
+    #[cfg(unix)]
+    {
+        let mut n = 0usize;
+        for s in project::list_fleet_sessions() {
+            if s.task_id.as_deref() != Some(task_id) {
+                continue;
+            }
+            if let Some(pid) = s.pid {
+                if pid_alive(pid) {
+                    // Best-effort: a missed signal isn't fatal — user can
+                    // re-issue pause and the supervisor's next tick will
+                    // try again on still-running pids.
+                    let _ = signal_pid(pid, libc::SIGSTOP);
+                    n += 1;
+                }
+            }
+        }
+        Ok(n)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = task_id;
+        Ok(0)
+    }
+}
+
+/// SIGCONT counterpart to `pause_task_sessions`.
+pub fn resume_task_sessions(task_id: &str) -> Result<usize, String> {
+    #[cfg(unix)]
+    {
+        let mut n = 0usize;
+        for s in project::list_fleet_sessions() {
+            if s.task_id.as_deref() != Some(task_id) {
+                continue;
+            }
+            if let Some(pid) = s.pid {
+                if pid_alive(pid) {
+                    let _ = signal_pid(pid, libc::SIGCONT);
+                    n += 1;
+                }
+            }
+        }
+        Ok(n)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = task_id;
+        Ok(0)
+    }
+}
+
+/// SIGTERM every live fleet session attached to `task_id` AND mark the
+/// session records `complete` with note="task cleared". Used by
+/// `task::clear_task`. The next supervisor tick reaps the pids; this
+/// function eagerly marks the records so the UI updates without waiting.
+pub fn terminate_task_sessions(task_id: &str) -> Result<usize, String> {
+    let mut sessions = project::list_fleet_sessions();
+    let mut n = 0usize;
+    for s in sessions.iter_mut() {
+        if s.task_id.as_deref() != Some(task_id) {
+            continue;
+        }
+        if let Some(pid) = s.pid {
+            if pid_alive(pid) {
+                let _ = kill_pid(pid);
+                n += 1;
+            }
+            s.pid = None;
+        }
+        if s.status != DEFAULT_COLUMN_COMPLETE {
+            s.status = DEFAULT_COLUMN_COMPLETE.into();
+            s.completed_at = Some(now_ms());
+            s.note = Some("task cleared".into());
+        }
+    }
+    project::save_fleet_sessions(&sessions)?;
+    Ok(n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -786,6 +1053,7 @@ mod tests {
             kanban_columns: cols,
             created_at: 0,
             updated_at: 0,
+            manual_review_all: false,
         };
         let json = serde_json::to_string_pretty(&vec![p.clone()]).unwrap();
         std::fs::write(dir.join("projects.json"), json).unwrap();
@@ -825,6 +1093,11 @@ mod tests {
             pid: None,
             expedited: false,
             final_by_agent,
+            session_kind: project::SessionKind::Regular,
+            task_id: None,
+            p_item_id: None,
+            system_prompt: None,
+            model: None,
         });
         let json = serde_json::to_string_pretty(&existing).unwrap();
         std::fs::write(dir.join("fleet-sessions.json"), json).unwrap();
@@ -1129,6 +1402,11 @@ mod tests {
             pid: Some(i32::MAX as u32 - 1),
             expedited: false,
             final_by_agent: false,
+            session_kind: project::SessionKind::Regular,
+            task_id: None,
+            p_item_id: None,
+            system_prompt: None,
+            model: None,
         };
         let json = serde_json::to_string_pretty(&vec![s]).unwrap();
         std::fs::write(dir.join("fleet-sessions.json"), json).unwrap();
