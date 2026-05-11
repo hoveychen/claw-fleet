@@ -1456,6 +1456,38 @@ impl Backend for LocalBackend {
         crate::supervisor::set_status(session_id, status, note.map(String::from))
     }
 
+    // ── Tasks (task-as-unit V1) ──────────────────────────────────────────────
+
+    fn create_task(&self, input: crate::task::TaskInput) -> Result<crate::task::Task, String> {
+        crate::task::create_task(input)
+    }
+
+    fn get_task(&self, task_id: &str) -> Result<crate::task::Task, String> {
+        crate::task::get_task(task_id)
+    }
+
+    fn list_tasks(&self, project_id: Option<&str>) -> Vec<crate::task::Task> {
+        crate::task::list_tasks(project_id)
+    }
+
+    fn update_plan(&self, task_id: &str, plan: crate::plan::DagPlan) -> Result<(), String> {
+        crate::task::update_plan(task_id, plan)
+    }
+
+    fn start_task(&self, task_id: &str) -> Result<(), String> {
+        crate::task::start_task(task_id)
+    }
+
+    fn subscribe_task_events(&self, task_id: &str) -> Result<String, String> {
+        // Verify the task exists; reuse the id as the subscription handle.
+        // Actual TaskEvent push lands with P19 (master runtime) + P21 (event
+        // router). For V1's first slice, the frontend re-fetches via
+        // `get_task` after each user action, which is sufficient because no
+        // background agent is mutating task state yet.
+        let _ = crate::task::get_task(task_id)?;
+        Ok(task_id.to_string())
+    }
+
     fn is_fleet_daemon_installed(&self) -> bool {
         crate::launchd::is_installed()
     }

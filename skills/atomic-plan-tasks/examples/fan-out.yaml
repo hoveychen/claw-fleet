@@ -1,0 +1,76 @@
+# Fan-out plan — one schema P-item unlocks 3 parallel feature P-items, then a merge phase.
+# Shape:
+#   schema → endpoint-a ─┐
+#          → endpoint-b ─┤→ build-all → test-all
+#          → endpoint-c ─┘
+# Use when a common foundation feeds N independent consumers.
+
+plan:
+  - id: schema
+    desc: "Add the User.preferences field to the API schema + database migration."
+    touches:
+      - claw-fleet-core/src/api/schema.rs
+      - claw-fleet-core/migrations/0042_user_preferences.sql
+    dependsOn: []
+    estimateSecs: 1200
+    acceptance:
+      - builds
+      - testsPass: "cargo test -p claw-fleet-core api::schema"
+    artifacts:
+      - fileList
+      - gitDiff
+
+  - id: endpoint-get
+    desc: "Implement GET /users/:id/preferences."
+    touches:
+      - claw-fleet-core/src/api/users/preferences_get.rs
+    dependsOn: [schema]
+    estimateSecs: 600
+    acceptance:
+      - builds
+      - testsPass: "cargo test -p claw-fleet-core preferences_get"
+    artifacts:
+      - fileList
+      - gitDiff
+
+  - id: endpoint-put
+    desc: "Implement PUT /users/:id/preferences with validation."
+    touches:
+      - claw-fleet-core/src/api/users/preferences_put.rs
+    dependsOn: [schema]
+    estimateSecs: 900
+    acceptance:
+      - builds
+      - testsPass: "cargo test -p claw-fleet-core preferences_put"
+    artifacts:
+      - fileList
+      - gitDiff
+
+  - id: endpoint-reset
+    desc: "Implement DELETE /users/:id/preferences (resets to defaults)."
+    touches:
+      - claw-fleet-core/src/api/users/preferences_reset.rs
+    dependsOn: [schema]
+    estimateSecs: 600
+    acceptance:
+      - builds
+      - testsPass: "cargo test -p claw-fleet-core preferences_reset"
+    artifacts:
+      - fileList
+      - gitDiff
+
+  - id: build-all
+    desc: "Workspace build sanity."
+    touches: []
+    dependsOn: [endpoint-get, endpoint-put, endpoint-reset]
+    resources: [build]
+    acceptance:
+      - builds
+
+  - id: test-all
+    desc: "Workspace + integration test sweep."
+    touches: []
+    dependsOn: [build-all]
+    resources: [test]
+    acceptance:
+      - testsPass: "cargo test --workspace"

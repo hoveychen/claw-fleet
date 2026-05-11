@@ -43,7 +43,7 @@ export async function openSettingsWindow(): Promise<void> {
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills" | "plugins" | "projects";
+export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills" | "plugins" | "projects" | "tasks";
 
 interface UIState {
   theme: Theme;
@@ -204,6 +204,54 @@ interface ProjectsState {
   setSelectedProjectId: (id: string | null) => void;
   refresh: () => Promise<void>;
 }
+
+// ── Tasks store (task-as-unit V1) ────────────────────────────────────────────
+//
+// Lightweight: load on demand (`refresh`), create through `create_task` Tauri
+// command, transition through `start_task` / `update_task_plan`. The full
+// realtime event stream from `subscribe_task_events` lands once the master
+// runtime starts pushing semantic events (P19/P21 integration); for V1 the
+// frontend re-fetches after every user action.
+
+import type { Task, TaskInput } from "./types";
+
+interface TasksState {
+  tasks: Task[];
+  selectedTaskId: string | null;
+  loaded: boolean;
+  setSelectedTaskId: (id: string | null) => void;
+  refresh: (projectId?: string) => Promise<void>;
+  createTask: (input: TaskInput) => Promise<Task>;
+  startTask: (taskId: string) => Promise<void>;
+}
+
+export const useTasksStore = create<TasksState>((set, get) => ({
+  tasks: [],
+  selectedTaskId: null,
+  loaded: false,
+  setSelectedTaskId: (id) => set({ selectedTaskId: id }),
+  refresh: async (projectId) => {
+    try {
+      const tasks = await invoke<Task[]>("list_tasks", { projectId: projectId ?? null });
+      set({ tasks, loaded: true });
+    } catch {
+      set({ loaded: true });
+    }
+  },
+  createTask: async (input) => {
+    const task = await invoke<Task>("create_task", { input });
+    set({ tasks: [task, ...get().tasks] });
+    return task;
+  },
+  startTask: async (taskId) => {
+    await invoke("start_task", { taskId });
+    // Refetch — start_task flips status + sets task_branch.
+    const fresh = await invoke<Task>("get_task", { taskId });
+    set({
+      tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
+    });
+  },
+}));
 
 export const useProjectsStore = create<ProjectsState>((set) => ({
   projects: [],

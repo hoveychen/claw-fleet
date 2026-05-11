@@ -457,6 +457,64 @@ impl crate::backend::Backend for RemoteBackend {
             .post_json_ok("/projects/delete", &Req { project_id })
     }
 
+    // ── Tasks (task-as-unit V1) ───────────────────────────────────────────
+
+    fn create_task(
+        &self,
+        input: claw_fleet_core::task::TaskInput,
+    ) -> Result<claw_fleet_core::task::Task, String> {
+        self.probe.post_json("/tasks/create", &input)
+    }
+
+    fn get_task(&self, task_id: &str) -> Result<claw_fleet_core::task::Task, String> {
+        self.probe
+            .get(&format!("/tasks/get?id={}", encode_path(task_id)))
+    }
+
+    fn list_tasks(&self, project_id: Option<&str>) -> Vec<claw_fleet_core::task::Task> {
+        let path = match project_id {
+            Some(p) => format!("/tasks/list?project_id={}", encode_path(p)),
+            None => "/tasks/list".to_string(),
+        };
+        self.probe.get(&path).unwrap_or_default()
+    }
+
+    fn update_plan(
+        &self,
+        task_id: &str,
+        plan: claw_fleet_core::plan::DagPlan,
+    ) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Req<'a> {
+            task_id: &'a str,
+            plan: claw_fleet_core::plan::DagPlan,
+        }
+        self.probe
+            .post_json_ok("/tasks/update-plan", &Req { task_id, plan })
+    }
+
+    fn start_task(&self, task_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Req<'a> {
+            task_id: &'a str,
+        }
+        self.probe.post_json_ok("/tasks/start", &Req { task_id })
+    }
+
+    fn subscribe_task_events(&self, task_id: &str) -> Result<String, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Resp {
+            subscription_id: String,
+        }
+        let resp: Resp = self
+            .probe
+            .get(&format!("/tasks/events?id={}", encode_path(task_id)))?;
+        Ok(resp.subscription_id)
+    }
+
     fn list_fleet_sessions(&self) -> Vec<claw_fleet_core::project::FleetSession> {
         self.probe.get("/fleet_sessions").unwrap_or_default()
     }

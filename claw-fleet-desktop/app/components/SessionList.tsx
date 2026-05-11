@@ -13,6 +13,7 @@ import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
 import { PluginsView } from "./PluginsView";
 import { ProjectsView } from "./ProjectsView";
+import { TasksView } from "./TasksView";
 import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
@@ -286,6 +287,13 @@ export function SessionList() {
 
         {/* Navigation */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
+          <button
+            className={`${styles.nav_item} ${viewMode === "tasks" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("tasks")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 3.5h11v3h-11zM2.5 9.5h7v3h-7zM11 9.5l2.5 1.5L11 12.5z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_tasks", "Tasks")}</span>
+          </button>
           <div className={styles.nav_project_row}>
             <button
               className={`${styles.nav_item} ${styles.nav_item_with_chevron} ${viewMode === "projects" ? styles.nav_active : ""}`}
@@ -568,6 +576,8 @@ export function SessionList() {
         <PluginsView />
       ) : viewMode === "projects" ? (
         <ProjectsView />
+      ) : viewMode === "tasks" ? (
+        <TasksView />
       ) : (
         <ReportView />
       )}

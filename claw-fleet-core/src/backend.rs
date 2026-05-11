@@ -329,6 +329,51 @@ pub trait Backend: Send + Sync {
         note: Option<&str>,
     ) -> Result<(), String>;
 
+    // ── Tasks (task-as-unit V1 — see design/task-as-unit-redesign.md) ────────
+    //
+    // Six methods front the new task system. Default impls return
+    // `Err("task system not implemented in this backend yet")` so the trait
+    // compiles before LocalBackend (P3) and RemoteBackend (P4) provide real
+    // implementations. Once both backends override, the defaults can be
+    // removed.
+    //
+    /// Create a new task in `Drafting` status. Materials get attached after
+    /// creation via `add_task_material` (lands in P3).
+    fn create_task(&self, _input: crate::task::TaskInput) -> Result<crate::task::Task, String> {
+        Err("task system not implemented in this backend yet".into())
+    }
+    /// Read a single task by id. `Err` if not found.
+    fn get_task(&self, _task_id: &str) -> Result<crate::task::Task, String> {
+        Err("task system not implemented in this backend yet".into())
+    }
+    /// List tasks, optionally filtered by project. `None` returns every task.
+    fn list_tasks(&self, _project_id: Option<&str>) -> Vec<crate::task::Task> {
+        Vec::new()
+    }
+    /// Replace the task's `plan` (master tool — see PRD §5.7 / P20).
+    /// Caller must hold the per-task write mutex (master runtime owns this in
+    /// production); the LocalBackend impl will acquire it internally.
+    fn update_plan(
+        &self,
+        _task_id: &str,
+        _plan: crate::plan::DagPlan,
+    ) -> Result<(), String> {
+        Err("task system not implemented in this backend yet".into())
+    }
+    /// Transition a `Ready` task to `Running`: auto-create `fleet/<slug>` git
+    /// branch, spawn the master session, flip status. No-op once the task is
+    /// already running. See PRD §5.2 / P3.
+    fn start_task(&self, _task_id: &str) -> Result<(), String> {
+        Err("task system not implemented in this backend yet".into())
+    }
+    /// Start an SSE stream of task events. Events arrive as Tauri events on
+    /// the `task-event` channel (LocalBackend) or HTTP-relayed (RemoteBackend).
+    /// Returns the channel id the caller can later pass to
+    /// `unsubscribe_task_events`. P4 wires the HTTP side.
+    fn subscribe_task_events(&self, _task_id: &str) -> Result<String, String> {
+        Err("task system not implemented in this backend yet".into())
+    }
+
     /// Whether the macOS LaunchAgent plist for `fleet serve` is installed.
     /// Always returns `false` on non-macOS.
     fn is_fleet_daemon_installed(&self) -> bool;
