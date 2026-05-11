@@ -843,7 +843,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "claw-fleet-core"
-version = "0.0.260509-dev.1778326020"
+version = "0.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -867,9 +867,8 @@ dependencies = [
 
 [[package]]
 name = "claw-fleet-desktop"
-version = "0.0.260509-dev.1778326020"
+version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
  "chrono",
  "claw-fleet-core",
  "futures",
@@ -1638,9 +1637,8 @@ dependencies = [
 
 [[package]]
 name = "fleet-cli"
-version = "0.0.260509-dev.1778326020"
+version = "0.0.0"
 dependencies = [
- "base64 0.22.1",
  "chrono",
  "clap",
  "claw-fleet-core",
