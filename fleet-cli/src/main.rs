@@ -4372,11 +4372,12 @@ fn cmd_skill_install() {
 
 fn cmd_guard() {
     use claw_fleet_core::consumer_heartbeat;
+    use claw_fleet_core::decision_panel_config::DecisionPanelConfig;
     use claw_fleet_core::guard::{
         self, GuardClassification, GuardDecision, GuardRequest, HookInput,
     };
     use std::io::Read;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     // Read hook JSON from stdin.
     let mut input = String::new();
@@ -4403,7 +4404,8 @@ fn cmd_guard() {
             // No live consumer (Fleet app not running / no SSE client on
             // `fleet serve`) — fall through silently so Claude isn't blocked
             // by a request nobody will answer.
-            let liveness_window = Duration::from_secs(30);
+            let cfg = DecisionPanelConfig::load();
+            let liveness_window = cfg.heartbeat_window();
             let status = consumer_heartbeat::consumer_status(liveness_window);
             if !status.is_alive() {
                 claw_fleet_core::log_debug(&format!(
@@ -4443,10 +4445,10 @@ fn cmd_guard() {
                 return;
             }
 
-            // Poll for response (up to 600s), bailing out early if the
-            // consumer dies mid-flight.
-            let timeout = Duration::from_secs(600);
-            let poll_interval = Duration::from_millis(200);
+            // Poll for response (configured wait_seconds, default 600s),
+            // bailing out early if the consumer dies mid-flight.
+            let timeout = cfg.wait_duration();
+            let poll_interval = cfg.poll_duration();
             let start = Instant::now();
             loop {
                 if let Some(resp) = guard::try_read_response(&request_id) {
@@ -4496,10 +4498,11 @@ fn cmd_elicitation() {
     use claw_fleet_core::decision_history::{
         self, DecisionHistoryRecord, ElicitationOutcome, build_elicitation_record,
     };
+    use claw_fleet_core::decision_panel_config::DecisionPanelConfig;
     use claw_fleet_core::elicitation::{self, ElicitationRequest};
     use claw_fleet_core::guard::{self, HookInput};
     use std::io::Read;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     // Read hook JSON from stdin.
     let mut input = String::new();
@@ -4541,7 +4544,8 @@ fn cmd_elicitation() {
 
     // No live consumer — fall through silently; Claude Code will use its
     // native AskUserQuestion UI.
-    let liveness_window = Duration::from_secs(30);
+    let cfg = DecisionPanelConfig::load();
+    let liveness_window = cfg.heartbeat_window();
     let startup_status = consumer_heartbeat::consumer_status(liveness_window);
     if !startup_status.is_alive() {
         claw_fleet_core::log_debug(&format!(
@@ -4580,10 +4584,11 @@ fn cmd_elicitation() {
         return;
     }
 
-    // Poll for response (up to 600s), bailing out early if the consumer
-    // dies mid-flight so Claude Code can take over with its native UI.
-    let timeout = Duration::from_secs(600);
-    let poll_interval = Duration::from_millis(200);
+    // Poll for response (configured wait_seconds, default 600s), bailing out
+    // early if the consumer dies mid-flight so Claude Code can take over
+    // with its native UI.
+    let timeout = cfg.wait_duration();
+    let poll_interval = cfg.poll_duration();
     let start = Instant::now();
     let resp = loop {
         if let Some(r) = elicitation::try_read_response(&request_id) {
@@ -4692,10 +4697,11 @@ fn cmd_plan_approval() {
     use claw_fleet_core::decision_history::{
         self, DecisionHistoryRecord, PlanApprovalOutcome, build_plan_approval_record,
     };
+    use claw_fleet_core::decision_panel_config::DecisionPanelConfig;
     use claw_fleet_core::guard::{self, HookInput};
     use claw_fleet_core::plan_approval::{self, PlanApprovalRequest};
     use std::io::Read;
-    use std::time::{Duration, Instant};
+    use std::time::Instant;
 
     // Read hook JSON from stdin.
     let mut input = String::new();
@@ -4734,7 +4740,8 @@ fn cmd_plan_approval() {
 
     // No live consumer — fall through silently so Claude Code keeps its
     // native plan-approval UI as a fallback.
-    let liveness_window = Duration::from_secs(30);
+    let cfg = DecisionPanelConfig::load();
+    let liveness_window = cfg.heartbeat_window();
     let startup_status = consumer_heartbeat::consumer_status(liveness_window);
     if !startup_status.is_alive() {
         claw_fleet_core::log_debug(&format!(
@@ -4774,10 +4781,11 @@ fn cmd_plan_approval() {
         return;
     }
 
-    // Poll for response (up to 10 minutes), bailing out early if the consumer
-    // dies mid-flight so Claude Code can take over with its native UI.
-    let timeout = Duration::from_secs(600);
-    let poll_interval = Duration::from_millis(200);
+    // Poll for response (configured wait_seconds, default 600s), bailing out
+    // early if the consumer dies mid-flight so Claude Code can take over
+    // with its native UI.
+    let timeout = cfg.wait_duration();
+    let poll_interval = cfg.poll_duration();
     let start = Instant::now();
     let resp = loop {
         if let Some(r) = plan_approval::try_read_response(&request_id) {

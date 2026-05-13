@@ -14,6 +14,7 @@ pub mod cursor;
 pub mod dag;
 pub mod daily_report;
 pub mod decision_history;
+pub mod decision_panel_config;
 pub mod elicitation;
 pub mod feishu;
 pub mod guard;

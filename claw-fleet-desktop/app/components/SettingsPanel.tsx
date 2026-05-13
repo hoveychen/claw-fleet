@@ -358,6 +358,75 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
+  // ── Decision panel timeouts (cross-process, persists to ~/.fleet) ─────
+  interface DecisionPanelConfig {
+    wait_seconds: number;
+    poll_ms: number;
+    heartbeat_window_seconds: number;
+  }
+  const [timeouts, setTimeouts] = useState<DecisionPanelConfig | null>(null);
+  // Edit-then-commit-on-blur pattern: free typing during editing, persist
+  // (and clamp via Rust) only when the input loses focus. Avoids saving
+  // mid-keystroke values like "6" while the user is heading toward "600".
+  const [timeoutsDraft, setTimeoutsDraft] = useState<{
+    wait_seconds: string;
+    poll_ms: string;
+    heartbeat_window_seconds: string;
+  } | null>(null);
+
+  useEffect(() => {
+    invoke<DecisionPanelConfig>("get_decision_panel_config")
+      .then((cfg) => {
+        setTimeouts(cfg);
+        setTimeoutsDraft({
+          wait_seconds: String(cfg.wait_seconds),
+          poll_ms: String(cfg.poll_ms),
+          heartbeat_window_seconds: String(cfg.heartbeat_window_seconds),
+        });
+      })
+      .catch(() => {});
+  }, []);
+
+  const commitTimeoutField = useCallback(
+    async (field: keyof DecisionPanelConfig) => {
+      if (!timeouts || !timeoutsDraft) return;
+      const raw = timeoutsDraft[field];
+      const parsed = parseInt(raw, 10);
+      if (!Number.isFinite(parsed)) {
+        // Bad input — revert to last good value.
+        setTimeoutsDraft({
+          wait_seconds: String(timeouts.wait_seconds),
+          poll_ms: String(timeouts.poll_ms),
+          heartbeat_window_seconds: String(timeouts.heartbeat_window_seconds),
+        });
+        return;
+      }
+      const next = { ...timeouts, [field]: parsed };
+      try {
+        // Rust clamps to valid range and returns the clamped value; sync
+        // both state and draft so the UI shows what's actually on disk.
+        const saved = await invoke<DecisionPanelConfig>(
+          "set_decision_panel_config",
+          { cfg: next },
+        );
+        setTimeouts(saved);
+        setTimeoutsDraft({
+          wait_seconds: String(saved.wait_seconds),
+          poll_ms: String(saved.poll_ms),
+          heartbeat_window_seconds: String(saved.heartbeat_window_seconds),
+        });
+      } catch (e) {
+        console.error("set_decision_panel_config failed:", e);
+        setTimeoutsDraft({
+          wait_seconds: String(timeouts.wait_seconds),
+          poll_ms: String(timeouts.poll_ms),
+          heartbeat_window_seconds: String(timeouts.heartbeat_window_seconds),
+        });
+      }
+    },
+    [timeouts, timeoutsDraft],
+  );
+
   // ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────
   type FeishuConnection =
     | { kind: "not_connected" }
@@ -1024,7 +1093,107 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
             {/* ── Interaction ── */}
             {activeTab === "interaction" && (
               <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.guard")}</div>
+                <div className={styles.section_title}>{t("settings.timeouts_section_title")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.timeouts_desc")}
+                  </span>
+                </div>
+                {timeoutsDraft && (
+                  <>
+                    <div className={styles.row}>
+                      <span className={styles.row_label}>
+                        {t("settings.timeouts_wait")}
+                        <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                          {t("settings.timeouts_unit_seconds")} · 60–3600
+                        </span>
+                      </span>
+                      <input
+                        type="number"
+                        min={60}
+                        max={3600}
+                        value={timeoutsDraft.wait_seconds}
+                        onChange={(e) =>
+                          setTimeoutsDraft((d) => (d ? { ...d, wait_seconds: e.target.value } : d))
+                        }
+                        onBlur={() => commitTimeoutField("wait_seconds")}
+                        style={{
+                          width: 90,
+                          padding: "4px 6px",
+                          background: "var(--color-bg-soft, #1a1a1a)",
+                          border: "1px solid var(--color-border, #333)",
+                          borderRadius: 4,
+                          color: "var(--color-text, #eee)",
+                          fontFamily: "monospace",
+                          fontSize: 12,
+                          textAlign: "right",
+                        }}
+                      />
+                    </div>
+                    <div className={styles.row}>
+                      <span className={styles.row_label}>
+                        {t("settings.timeouts_poll")}
+                        <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                          {t("settings.timeouts_unit_ms")} · 50–1000
+                        </span>
+                      </span>
+                      <input
+                        type="number"
+                        min={50}
+                        max={1000}
+                        value={timeoutsDraft.poll_ms}
+                        onChange={(e) =>
+                          setTimeoutsDraft((d) => (d ? { ...d, poll_ms: e.target.value } : d))
+                        }
+                        onBlur={() => commitTimeoutField("poll_ms")}
+                        style={{
+                          width: 90,
+                          padding: "4px 6px",
+                          background: "var(--color-bg-soft, #1a1a1a)",
+                          border: "1px solid var(--color-border, #333)",
+                          borderRadius: 4,
+                          color: "var(--color-text, #eee)",
+                          fontFamily: "monospace",
+                          fontSize: 12,
+                          textAlign: "right",
+                        }}
+                      />
+                    </div>
+                    <div className={styles.row}>
+                      <span className={styles.row_label}>
+                        {t("settings.timeouts_heartbeat")}
+                        <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                          {t("settings.timeouts_unit_seconds")} · 5–60
+                        </span>
+                      </span>
+                      <input
+                        type="number"
+                        min={5}
+                        max={60}
+                        value={timeoutsDraft.heartbeat_window_seconds}
+                        onChange={(e) =>
+                          setTimeoutsDraft((d) =>
+                            d ? { ...d, heartbeat_window_seconds: e.target.value } : d,
+                          )
+                        }
+                        onBlur={() => commitTimeoutField("heartbeat_window_seconds")}
+                        style={{
+                          width: 90,
+                          padding: "4px 6px",
+                          background: "var(--color-bg-soft, #1a1a1a)",
+                          border: "1px solid var(--color-border, #333)",
+                          borderRadius: 4,
+                          color: "var(--color-text, #eee)",
+                          fontFamily: "monospace",
+                          fontSize: 12,
+                          textAlign: "right",
+                        }}
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.guard")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                     {t("settings.guard_desc")}
