@@ -238,8 +238,16 @@ mod tests {
 
     #[test]
     fn save_then_load_roundtrips() {
+        // Serialise against any other test that mutates FLEET_HOME — without
+        // the lock, a concurrent test's override could leak in between our
+        // save() and load() and steer load() to a different directory.
+        let _g = crate::session::fleet_home_lock();
+
         // Use a private home dir so this test doesn't stomp on the user's
-        // real `~/.fleet/decision-panel.json`.
+        // real `~/.fleet/decision-panel.json`. Override FLEET_HOME (rather
+        // than HOME) because real_home_dir() checks FLEET_HOME first on
+        // every platform; HOME is ignored on Windows (dirs::home_dir() uses
+        // the Known Folder API) and on macOS (we call getpwuid).
         let dir = std::env::temp_dir().join(format!(
             "fleet-decision-panel-cfg-test-{}-{}",
             std::process::id(),
@@ -250,14 +258,9 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
 
-        // SAFETY: `crate::session::real_home_dir()` reads `HOME` on Unix;
-        // overriding it gives us a private sandbox for the duration of the
-        // test. The previous HOME is restored at the end. This test is not
-        // safe to run concurrently with other tests that depend on `HOME`,
-        // but the rest of the suite doesn't touch real_home_dir.
-        let prev_home = std::env::var_os("HOME");
+        let prev_fleet_home = std::env::var_os("FLEET_HOME");
         unsafe {
-            std::env::set_var("HOME", &dir);
+            std::env::set_var("FLEET_HOME", &dir);
         }
 
         let mut cfg = DecisionPanelConfig {
@@ -270,9 +273,9 @@ mod tests {
         assert_eq!(loaded, cfg);
 
         unsafe {
-            match prev_home {
-                Some(v) => std::env::set_var("HOME", v),
-                None => std::env::remove_var("HOME"),
+            match prev_fleet_home {
+                Some(v) => std::env::set_var("FLEET_HOME", v),
+                None => std::env::remove_var("FLEET_HOME"),
             }
         }
         let _ = fs::remove_dir_all(&dir);
