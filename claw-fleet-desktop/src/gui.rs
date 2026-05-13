@@ -427,6 +427,22 @@ pub(crate) fn play_tts_for_notification(app: &tauri::AppHandle, summary: &str) {
 }
 
 
+// ── Decision panel timeouts ──────────────────────────────────────────────────
+
+#[tauri::command]
+fn get_decision_panel_config() -> claw_fleet_core::decision_panel_config::DecisionPanelConfig {
+    claw_fleet_core::decision_panel_config::load()
+}
+
+#[tauri::command]
+fn set_decision_panel_config(
+    cfg: claw_fleet_core::decision_panel_config::DecisionPanelConfig,
+) -> Result<claw_fleet_core::decision_panel_config::DecisionPanelConfig, String> {
+    let mut cfg = cfg;
+    claw_fleet_core::decision_panel_config::save(&mut cfg).map_err(|e| e.to_string())?;
+    Ok(cfg)
+}
+
 // ── Notification mode ────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -3189,6 +3205,8 @@ pub fn run() {
             restart_app,
             get_notification_mode,
             set_notification_mode,
+            get_decision_panel_config,
+            set_decision_panel_config,
             get_user_title,
             set_user_title,
             open_notification_settings,
