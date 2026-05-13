@@ -1077,7 +1077,11 @@
     "projects_collapse": "Collapse project list",
     "projects_expand": "Expand project list",
     "tasks_collapse": "Collapse active tasks",
-    "tasks_expand": "Expand active tasks"
+    "tasks_expand": "Expand active tasks",
+    "tab_strip": "Sidebar tab",
+    "tab_monitor": "Monitor",
+    "tab_projects": "Projects",
+    "no_active_tasks": "No active tasks"
   },
   "master": {
     "chip_master": "Master",
