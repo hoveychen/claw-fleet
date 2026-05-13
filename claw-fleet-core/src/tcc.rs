@@ -7,6 +7,7 @@
 use std::path::Path;
 
 /// TCC-protected directories under the user's home.
+#[cfg(target_os = "macos")]
 const TCC_PROTECTED_DIRS: &[&str] = &[
     "Desktop", "Documents", "Downloads", "Music", "Pictures", "Movies",
 ];

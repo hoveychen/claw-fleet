@@ -22,6 +22,7 @@
 //! `tick` is a no-op and `enqueue` still writes the queued record (so
 //! Linux/Windows users see queued items but never get spawned).
 
+#[cfg(target_os = "macos")]
 use std::process::{Command, Stdio};
 
 use serde::{Deserialize, Serialize};
@@ -776,6 +777,7 @@ pub fn fleet_sessions_needing_input() -> Vec<PendingFleetSession> {
 /// elicitation request awaiting user response, OR an idle sentinel touched by
 /// the agent's Stop hook (turn ended, awaiting next user prompt). Used by
 /// `tick_macos` to flip running↔pending for our fleet sessions.
+#[cfg(any(target_os = "macos", test))]
 fn pending_session_ids() -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new();
     for id in crate::guard::list_pending_requests() {
@@ -832,10 +834,8 @@ fn signal_pid(pid: u32, signal: i32) -> Result<(), String> {
     }
 }
 
-#[cfg(not(unix))]
-fn signal_pid(_pid: u32, _signal: i32) -> Result<(), String> {
-    Err("signal not supported on this platform".into())
-}
+// signal_pid has no non-unix stub: every caller is itself inside
+// `#[cfg(unix)]`, so a Windows stub would just be unreachable dead code.
 
 // ── Task-as-unit signal helpers ──────────────────────────────────────────────
 

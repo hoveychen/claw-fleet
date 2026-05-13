@@ -972,6 +972,7 @@ fn cmd_stop(id_prefix: &str, force: bool) {
 
     #[cfg(not(unix))]
     {
+        let _ = (force, pid);
         eprintln!("Stop is not supported on this platform.");
         std::process::exit(1);
     }
@@ -1802,6 +1803,7 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
                 #[cfg(not(unix))]
                 {
+                    let _ = (pid, force);
                     let _ = request.respond(tiny_http::Response::empty(400));
                 }
             }
