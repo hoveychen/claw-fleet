@@ -471,14 +471,14 @@
 }
 
 .tab_btn_active {
-  background: var(--color-text);
-  color: var(--color-bg);
-  border-color: var(--color-text);
+  background: var(--color-bg-card-selected);
+  color: var(--color-text);
+  border-color: var(--color-accent);
 }
 
 .tab_btn_active:hover {
-  color: var(--color-bg);
-  border-color: var(--color-text);
+  color: var(--color-text);
+  border-color: var(--color-accent);
 }
 
 .tab_chip {
@@ -494,8 +494,8 @@
 }
 
 .tab_btn_active .tab_chip {
-  background: rgba(255, 255, 255, 0.2);
-  color: inherit;
+  background: rgba(217, 119, 87, 0.18);
+  color: var(--color-accent);
 }
 
 .nav_task_icon {
