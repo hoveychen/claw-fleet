@@ -140,10 +140,16 @@ mod tests {
         let home = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(home.path());
 
-        // Project workspace points at a nonexistent directory.
+        // Project workspace points at a nonexistent absolute path.
+        // Use TempDir then drop it so the path is absolute on both Unix and
+        // Windows but guaranteed not to exist by the time we spawn.
+        let ghost_path = {
+            let td = TempDir::new().unwrap();
+            td.path().to_path_buf()
+        };
         let proj = create_project(ProjectInput {
             name: "ghost".into(),
-            workspace: "/tmp/definitely-not-here-{}".into(),
+            workspace: ghost_path.to_string_lossy().into_owned(),
             concurrency: Some(1),
             manual_review_all: None,
         })
