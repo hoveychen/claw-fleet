@@ -45,12 +45,27 @@ export async function openSettingsWindow(): Promise<void> {
 export type Theme = "dark" | "light" | "system";
 export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills" | "plugins" | "projects" | "tasks";
 
+/** Top-level segmented sidebar tab. "monitor" = the legacy observe-only
+ *  world (list / gallery / audit / report / charts / session search).
+ *  "projects" = the task-as-unit world ( + New task / per-project task
+ *  groups / project drill-down ). */
+export type SidebarTab = "monitor" | "projects";
+
 interface UIState {
   theme: Theme;
   viewMode: ViewMode;
+  sidebarTab: SidebarTab;
   liteMode: boolean;
   sidebarCollapsed: boolean;
   showMobileAccess: boolean;
+  /** Transient "I want to create a new task" flag. Set by the sidebar's
+   *  "+ New task" button; consumed by TasksView on mount/update to open the
+   *  InboxDialog and immediately reset. Lets cross-component CTAs trigger
+   *  a dialog that's owned by a different component. */
+  showInboxRequested: boolean;
+  /** Same pattern for the "+ New project" CTA → ProjectsView opens the
+   *  ProjectFormDialog in create mode. */
+  showNewProjectRequested: boolean;
   // Lite-mode hop from the active DecisionPanel into a dedicated decision-
   // history view. Holds the session id whose history is being viewed, or null
   // when the view is closed. Takes precedence over DecisionPanel and the
@@ -58,9 +73,12 @@ interface UIState {
   liteDecisionHistorySessionId: string | null;
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
+  setSidebarTab: (t: SidebarTab) => void;
   setLiteMode: (on: boolean) => void;
   setSidebarCollapsed: (on: boolean) => void;
   setShowMobileAccess: (v: boolean) => void;
+  setShowInboxRequested: (v: boolean) => void;
+  setShowNewProjectRequested: (v: boolean) => void;
   setLiteDecisionHistorySessionId: (id: string | null) => void;
 }
 
@@ -72,12 +90,25 @@ export function resolveTheme(theme: Theme): "dark" | "light" {
   return theme === "system" ? getSystemTheme() : theme;
 }
 
-export const useUIStore = create<UIState>((set) => ({
+/** Map a viewMode back to the sidebar tab that owns it. Used at startup to
+ *  pick the right tab when the saved viewMode wins, e.g. user reloaded
+ *  while looking at TasksView. */
+function tabForViewMode(m: ViewMode): SidebarTab {
+  if (m === "projects" || m === "tasks") return "projects";
+  return "monitor";
+}
+
+export const useUIStore = create<UIState>((set, get) => ({
   theme: (getItem("theme") as Theme) ?? "system",
   viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
+  sidebarTab:
+    (getItem("sidebar-tab") as SidebarTab | null) ??
+    tabForViewMode((getItem("viewMode") as ViewMode) ?? "gallery"),
   liteMode: getItem("liteMode") === "true",
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   showMobileAccess: false,
+  showInboxRequested: false,
+  showNewProjectRequested: false,
   liteDecisionHistorySessionId: null,
   setTheme: (t) => {
     setItem("theme", t);
@@ -86,7 +117,30 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setViewMode: (m) => {
     setItem("viewMode", m);
-    set({ viewMode: m });
+    const nextTab = tabForViewMode(m);
+    if (nextTab !== get().sidebarTab) {
+      setItem("sidebar-tab", nextTab);
+      set({ viewMode: m, sidebarTab: nextTab });
+    } else {
+      set({ viewMode: m });
+    }
+  },
+  setSidebarTab: (tab) => {
+    setItem("sidebar-tab", tab);
+    // Switching tabs jumps to that tab's default view so the main pane
+    // doesn't strand on the previous tab's last-selected viewMode.
+    const cur = get().viewMode;
+    if (tab === "monitor" && (cur === "projects" || cur === "tasks")) {
+      const fallback: ViewMode = "list";
+      setItem("viewMode", fallback);
+      set({ sidebarTab: tab, viewMode: fallback });
+    } else if (tab === "projects" && cur !== "projects" && cur !== "tasks") {
+      const fallback: ViewMode = "tasks";
+      setItem("viewMode", fallback);
+      set({ sidebarTab: tab, viewMode: fallback });
+    } else {
+      set({ sidebarTab: tab });
+    }
   },
   setLiteMode: (on) => {
     setItem("liteMode", on ? "true" : "false");
@@ -98,6 +152,8 @@ export const useUIStore = create<UIState>((set) => ({
     set({ sidebarCollapsed: on });
   },
   setShowMobileAccess: (v) => set({ showMobileAccess: v }),
+  setShowInboxRequested: (v) => set({ showInboxRequested: v }),
+  setShowNewProjectRequested: (v) => set({ showNewProjectRequested: v }),
   setLiteDecisionHistorySessionId: (id) =>
     set({ liteDecisionHistorySessionId: id }),
 }));

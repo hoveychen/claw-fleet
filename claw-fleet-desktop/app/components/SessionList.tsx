@@ -42,7 +42,19 @@ export function SessionList() {
   const { t } = useTranslation();
   const { sessions, refresh, setSessions, scanReady, setScanReady } = useSessionsStore();
   const { session: viewedSession, open } = useDetailStore();
-  const { viewMode, setViewMode, setLiteMode, sidebarCollapsed, setSidebarCollapsed, showMobileAccess, setShowMobileAccess } = useUIStore();
+  const {
+    viewMode,
+    setViewMode,
+    sidebarTab,
+    setSidebarTab,
+    setLiteMode,
+    sidebarCollapsed,
+    setSidebarCollapsed,
+    showMobileAccess,
+    setShowMobileAccess,
+    setShowInboxRequested,
+    setShowNewProjectRequested,
+  } = useUIStore();
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const [filter, setFilter] = useState("");
@@ -52,26 +64,19 @@ export function SessionList() {
   const [isDragging, setIsDragging] = useState(false);
   const [isWindows, setIsWindows] = useState(false);
   const [mobileActive, setMobileActive] = useState(false);
-  const [projectsExpanded, setProjectsExpanded] = useState<boolean>(
-    () => getItem("nav-projects-expanded") === "true",
-  );
-  const [tasksExpanded, setTasksExpanded] = useState<boolean>(
-    () => getItem("nav-tasks-expanded") !== "false",
-  );
   const projects = useProjectsStore((s) => s.projects);
-  const fleetSessions = useProjectsStore((s) => s.fleetSessions);
   const tasks = useTasksStore((s) => s.tasks);
   const setSelectedProjectId = useProjectsStore((s) => s.setSelectedProjectId);
   const setSelectedTaskId = useTasksStore((s) => s.setSelectedTaskId);
   const refreshTasks = useTasksStore((s) => s.refresh);
   const usageRing = useUsageRing();
 
-  // Active tasks for the sidebar drill-down: anything NOT in a terminal
+  // Active tasks for the Projects-tab drill-down: anything NOT in a terminal
   // state (Done / Abandoned). PRD §5.x / TASKS P9.
   const activeTasks = tasks.filter(
     (t) => t.status !== "done" && t.status !== "abandoned",
   );
-  // Group by project name for the sidebar list. Stable per-call.
+  // Group by project id for the sidebar list. Stable per-call.
   const tasksByProject = (() => {
     const m = new Map<string, typeof activeTasks>();
     for (const tk of activeTasks) {
@@ -81,34 +86,6 @@ export function SessionList() {
     }
     return m;
   })();
-
-  const projectCounts = (() => {
-    const total = new Map<string, number>();
-    const running = new Map<string, number>();
-    for (const fs of fleetSessions) {
-      total.set(fs.projectId, (total.get(fs.projectId) ?? 0) + 1);
-      if (fs.status === "running") {
-        running.set(fs.projectId, (running.get(fs.projectId) ?? 0) + 1);
-      }
-    }
-    return { total, running };
-  })();
-
-  const toggleProjectsExpanded = useCallback(() => {
-    setProjectsExpanded((prev) => {
-      const next = !prev;
-      setItem("nav-projects-expanded", next ? "true" : "false");
-      return next;
-    });
-  }, []);
-
-  const toggleTasksExpanded = useCallback(() => {
-    setTasksExpanded((prev) => {
-      const next = !prev;
-      setItem("nav-tasks-expanded", next ? "true" : "false");
-      return next;
-    });
-  }, []);
 
   const openTask = useCallback(
     (taskId: string) => {
@@ -333,68 +310,127 @@ export function SessionList() {
           </div>
         )}
 
-        {/* Navigation */}
-        <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
-          <div className={styles.nav_project_row}>
+        {/* Top-level segmented tab: Monitor vs Projects. */}
+        {!sidebarCollapsed && (
+          <div className={styles.tab_strip} role="tablist" aria-label={t("sidebar.tab_strip", "Sidebar tab")}>
             <button
-              className={`${styles.nav_item} ${styles.nav_item_with_chevron} ${viewMode === "tasks" ? styles.nav_active : ""}`}
-              onClick={() => setViewMode("tasks")}
+              type="button"
+              role="tab"
+              aria-selected={sidebarTab === "monitor"}
+              className={`${styles.tab_btn} ${sidebarTab === "monitor" ? styles.tab_btn_active : ""}`}
+              onClick={() => setSidebarTab("monitor")}
             >
-              <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 3.5h11v3h-11zM2.5 9.5h7v3h-7zM11 9.5l2.5 1.5L11 12.5z"/></svg></span>
-              <span className={styles.nav_label}>{t("view_tasks", "Tasks")}</span>
+              {t("sidebar.tab_monitor", "Monitor")}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sidebarTab === "projects"}
+              className={`${styles.tab_btn} ${sidebarTab === "projects" ? styles.tab_btn_active : ""}`}
+              onClick={() => setSidebarTab("projects")}
+            >
+              {t("sidebar.tab_projects", "Projects")}
               {activeTasks.length > 0 && (
-                <span className={`${styles.nav_project_chip} ${styles.nav_project_chip_running}`} title={t("tasks.active_count", "active tasks")}>
-                  {activeTasks.length}
-                </span>
+                <span className={styles.tab_chip}>{activeTasks.length}</span>
               )}
             </button>
-            {!sidebarCollapsed && activeTasks.length > 0 && (
-              <button
-                type="button"
-                className={styles.nav_chevron}
-                onClick={toggleTasksExpanded}
-                title={tasksExpanded ? t("sidebar.tasks_collapse", "Collapse active tasks") : t("sidebar.tasks_expand", "Expand active tasks")}
-                aria-label={tasksExpanded ? t("sidebar.tasks_collapse", "Collapse active tasks") : t("sidebar.tasks_expand", "Expand active tasks")}
-                aria-expanded={tasksExpanded}
-              >
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{
-                    transform: tasksExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                    transition: "transform 0.15s",
-                  }}
-                >
-                  <polyline points="3,2 7,5 3,8" />
-                </svg>
-              </button>
-            )}
           </div>
-          {!sidebarCollapsed && tasksExpanded && activeTasks.length > 0 && (
-            <ul className={styles.nav_project_list}>
-              {Array.from(tasksByProject.entries()).map(([projectId, projectTasks]) => {
+        )}
+
+        {/* Navigation — branched by sidebarTab. */}
+        <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
+          {sidebarTab === "monitor" ? (
+            <>
+              <button
+                className={`${styles.nav_item} ${viewMode === "list" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("list")}
+              >
+                <span className={styles.nav_icon}>☰</span>
+                <span className={styles.nav_label}>{t("view_list")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "gallery" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("gallery")}
+              >
+                <span className={styles.nav_icon}>⊞</span>
+                <span className={styles.nav_label}>{t("view_gallery")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("audit")}
+              >
+                <span className={styles.nav_icon}>⛨</span>
+                <span className={styles.nav_label}>{t("view_audit")}</span>
+                {unreadCriticalCount > 0 && (
+                  <span className={styles.nav_badge}>{unreadCriticalCount}</span>
+                )}
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("report")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
+                <span className={styles.nav_label}>{t("view_report")}</span>
+              </button>
+              <div className={styles.nav_divider} />
+              <button
+                className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("memory")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
+                <span className={styles.nav_label}>{t("view_memory")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("skills")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
+                <span className={styles.nav_label}>{t("view_skills")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("plugins")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
+                <span className={styles.nav_label}>{t("view_plugins")}</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                className={`${styles.nav_item} ${styles.nav_cta_primary}`}
+                onClick={() => {
+                  setShowInboxRequested(true);
+                  setViewMode("tasks");
+                }}
+                disabled={projects.length === 0}
+                title={projects.length === 0 ? t("tasks.create_project_first", "Create a project first") : t("tasks.new_task", "New task")}
+              >
+                <span className={styles.nav_icon}>+</span>
+                <span className={styles.nav_label}>{t("tasks.new_task", "New task")}</span>
+              </button>
+              {!sidebarCollapsed && Array.from(tasksByProject.entries()).map(([projectId, projectTasks]) => {
                 const project = projects.find((p) => p.id === projectId);
                 const projectName = project?.name ?? projectId;
                 return (
-                  <li key={projectId} className={styles.nav_task_group}>
-                    <div className={styles.nav_task_group_label}>{projectName}</div>
+                  <div key={projectId} className={styles.nav_task_group}>
+                    <button
+                      type="button"
+                      className={styles.nav_task_group_label}
+                      onClick={() => openProject(projectId)}
+                      title={`${projectName} — ${t("projects.title")}`}
+                    >
+                      {projectName}
+                    </button>
                     {projectTasks.map((tk) => {
                       const items = Object.values(tk.plan.items ?? {});
                       const total = items.length;
-                      const done = items.filter(
-                        (it) => {
-                          if (typeof it.status === "string") {
-                            return it.status === "done" || it.status === "skipped";
-                          }
-                          return false;
+                      const done = items.filter((it) => {
+                        if (typeof it.status === "string") {
+                          return it.status === "done" || it.status === "skipped";
                         }
-                      ).length;
+                        return false;
+                      }).length;
                       const statusIcon =
                         tk.status === "running" ? "▶" :
                         tk.status === "paused" ? "⏸" :
@@ -420,155 +456,71 @@ export function SessionList() {
                         </button>
                       );
                     })}
-                  </li>
+                  </div>
                 );
               })}
-            </ul>
-          )}
-          <div className={styles.nav_project_row}>
-            <button
-              className={`${styles.nav_item} ${styles.nav_item_with_chevron} ${viewMode === "projects" ? styles.nav_active : ""}`}
-              onClick={() => setViewMode("projects")}
-            >
-              <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4.5h4.5l1.5 1.5h6V12a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 12V4.5Z"/></svg></span>
-              <span className={styles.nav_label}>{t("view_projects")}</span>
-            </button>
-            {!sidebarCollapsed && projects.length > 0 && (
+              {!sidebarCollapsed && activeTasks.length === 0 && projects.length > 0 && (
+                <div className={styles.nav_empty}>{t("sidebar.no_active_tasks", "No active tasks")}</div>
+              )}
+              <div className={styles.nav_divider} />
               <button
-                type="button"
-                className={styles.nav_chevron}
-                onClick={toggleProjectsExpanded}
-                title={projectsExpanded ? t("sidebar.projects_collapse") : t("sidebar.projects_expand")}
-                aria-label={projectsExpanded ? t("sidebar.projects_collapse") : t("sidebar.projects_expand")}
-                aria-expanded={projectsExpanded}
+                className={styles.nav_item}
+                onClick={() => {
+                  setShowNewProjectRequested(true);
+                  setViewMode("projects");
+                }}
+                title={t("projects.new")}
               >
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 10 10"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  style={{
-                    transform: projectsExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                    transition: "transform 0.15s",
-                  }}
-                >
-                  <polyline points="3,2 7,5 3,8" />
-                </svg>
+                <span className={styles.nav_icon}>+</span>
+                <span className={styles.nav_label}>{t("projects.new")}</span>
               </button>
-            )}
-          </div>
-          {!sidebarCollapsed && projectsExpanded && projects.length > 0 && (
-            <ul className={styles.nav_project_list}>
-              {projects.map((p) => {
-                const total = projectCounts.total.get(p.id) ?? 0;
-                const running = projectCounts.running.get(p.id) ?? 0;
-                return (
-                  <li key={p.id}>
-                    <button
-                      type="button"
-                      className={styles.nav_project_item}
-                      onClick={() => openProject(p.id)}
-                      title={p.name}
-                    >
-                      <span className={styles.nav_project_name}>{p.name}</span>
-                      {running > 0 && (
-                        <span className={`${styles.nav_project_chip} ${styles.nav_project_chip_running}`} title={t("active")}>
-                          {running}
-                        </span>
-                      )}
-                      <span className={styles.nav_project_chip} title={t("recent")}>
-                        {total}
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
+              <button
+                className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("memory")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
+                <span className={styles.nav_label}>{t("view_memory")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("skills")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
+                <span className={styles.nav_label}>{t("view_skills")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("plugins")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
+                <span className={styles.nav_label}>{t("view_plugins")}</span>
+              </button>
+            </>
           )}
-          <button
-            className={styles.nav_item}
-            onClick={() => setLauncherInitial({})}
-            title={t("launcher.title")}
-          >
-            <span className={styles.nav_icon}>+</span>
-            <span className={styles.nav_label}>{t("launcher.new_session")}</span>
-          </button>
-          <div className={styles.nav_divider} />
-          <button
-            className={`${styles.nav_item} ${viewMode === "list" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("list")}
-          >
-            <span className={styles.nav_icon}>☰</span>
-            <span className={styles.nav_label}>{t("view_list")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "gallery" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("gallery")}
-          >
-            <span className={styles.nav_icon}>⊞</span>
-            <span className={styles.nav_label}>{t("view_gallery")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("audit")}
-          >
-            <span className={styles.nav_icon}>⛨</span>
-            <span className={styles.nav_label}>{t("view_audit")}</span>
-            {unreadCriticalCount > 0 && (
-              <span className={styles.nav_badge}>{unreadCriticalCount}</span>
-            )}
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("report")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
-            <span className={styles.nav_label}>{t("view_report")}</span>
-          </button>
-          <div className={styles.nav_divider} />
-          <button
-            className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("memory")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
-            <span className={styles.nav_label}>{t("view_memory")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("skills")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_skills")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("plugins")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_plugins")}</span>
-          </button>
         </nav>
 
         <div className={styles.separator} />
 
-        {/* Scrollable sidebar content */}
+        {/* Scrollable sidebar content — charts + usage live in the Monitor
+            tab only. Projects tab gets a cleaner, task-focused rail. */}
         <div className={styles.sidebar_content}>
-          {/* Token Speed Chart */}
-          <div data-wizard="token-speed">
-            <TokenSpeedChart collapsed={sidebarCollapsed} />
-          </div>
+          {sidebarTab === "monitor" && (
+            <>
+              {/* Token Speed Chart */}
+              <div data-wizard="token-speed">
+                <TokenSpeedChart collapsed={sidebarCollapsed} />
+              </div>
 
-          {/* Cost Speed Chart (collapsed by default) — hidden in narrow rail */}
-          {!sidebarCollapsed && <CostSpeedChart />}
+              {/* Cost Speed Chart (collapsed by default) — hidden in narrow rail */}
+              {!sidebarCollapsed && <CostSpeedChart />}
 
-          {/* Usage panel */}
-          <UsagePanel collapsed={sidebarCollapsed} />
+              {/* Usage panel */}
+              <UsagePanel collapsed={sidebarCollapsed} />
+            </>
+          )}
 
-          {/* Mascot — hidden in narrow rail */}
+          {/* Mascot is global — sits at the bottom of both tabs (it draws
+              on global usage). Skipped in collapsed rail. */}
           {!sidebarCollapsed && (
             <MascotEyes
               dashboardMode

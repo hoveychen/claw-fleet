@@ -1074,7 +1074,11 @@
     "projects_collapse": "折叠项目列表",
     "projects_expand": "展开项目列表",
     "tasks_collapse": "折叠活跃 task",
-    "tasks_expand": "展开活跃 task"
+    "tasks_expand": "展开活跃 task",
+    "tab_strip": "侧边栏 tab",
+    "tab_monitor": "Monitor",
+    "tab_projects": "Projects",
+    "no_active_tasks": "暂无活跃 task"
   },
   "master": {
     "chip_master": "Master",

@@ -30,6 +30,8 @@ export function ProjectsView() {
   const [error, setError] = useState<string | null>(null);
   const [launcherInitial, setLauncherInitial] = useState<SessionLauncherProps["initial"]>(null);
   const [listCollapsed, setListCollapsed] = useState(false);
+  const showNewProjectRequested = useUIStore((s) => s.showNewProjectRequested);
+  const setShowNewProjectRequested = useUIStore((s) => s.setShowNewProjectRequested);
 
   const load = useCallback(async () => {
     await useProjectsStore.getState().refresh();
@@ -38,6 +40,15 @@ export function ProjectsView() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Sidebar "+ New project" CTA hands off via a transient store flag.
+  useEffect(() => {
+    if (showNewProjectRequested) {
+      setError(null);
+      setDialog({ type: "create" });
+      setShowNewProjectRequested(false);
+    }
+  }, [showNewProjectRequested, setShowNewProjectRequested]);
 
   const selected = useMemo(
     () => projects.find((p) => p.id === selectedId) ?? null,

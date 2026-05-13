@@ -32,6 +32,7 @@ import { InboxDialog } from "./InboxDialog";
 import {
   useProjectsStore,
   useTasksStore,
+  useUIStore,
   type Project,
 } from "../store";
 import type { PItem, PItemStatus, Task, TaskStatus } from "../types";
@@ -51,11 +52,21 @@ export function TasksView() {
 
   const [filter, setFilter] = useState<string>("");
   const [showInbox, setShowInbox] = useState(false);
+  const showInboxRequested = useUIStore((s) => s.showInboxRequested);
+  const setShowInboxRequested = useUIStore((s) => s.setShowInboxRequested);
 
   useEffect(() => {
     refreshProjects();
     refresh(filter || undefined);
   }, [refreshProjects, refresh, filter]);
+
+  // Sidebar "+ New task" → InboxDialog opens immediately on mount/update.
+  useEffect(() => {
+    if (showInboxRequested) {
+      setShowInbox(true);
+      setShowInboxRequested(false);
+    }
+  }, [showInboxRequested, setShowInboxRequested]);
 
   const visibleTasks = tasks;
   const selected = useMemo(
