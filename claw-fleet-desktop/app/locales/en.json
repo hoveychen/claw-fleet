@@ -1078,10 +1078,10 @@
     "projects_expand": "Expand project list",
     "tasks_collapse": "Collapse active tasks",
     "tasks_expand": "Expand active tasks",
-    "tab_strip": "Sidebar tab",
-    "tab_monitor": "Monitor",
-    "tab_projects": "Projects",
-    "no_active_tasks": "No active tasks"
+    "no_active_tasks": "No active tasks",
+    "no_projects": "No projects yet — create one",
+    "manage_projects": "Manage projects",
+    "new_task_for_project": "New task for {{name}}"
   },
   "master": {
     "chip_master": "Master",
@@ -1096,7 +1096,20 @@
     "active_count": "active tasks",
     "progress": "p-items done / total",
     "human_gate_required": "Human gate required",
-    "waiting_for_user_review": "Waiting for user review — handle in Decision Panel"
+    "waiting_for_user_review": "Waiting for user review — handle in Decision Panel",
+    "count_summary": "{{total}} tasks · {{running}} running",
+    "back_to_list": "Back to task list",
+    "unknown_project": "Unknown project",
+    "col_pending": "Pending",
+    "col_active": "Active",
+    "col_resolved": "Resolved",
+    "complete": "complete",
+    "failed": "failed",
+    "start": "Start",
+    "already_running": "Task is already running or done.",
+    "no_plan_yet": "No plan yet. The planner runs once you draft the task description and attach materials.",
+    "detail_empty": "Pick a task on the left to see its plan.",
+    "empty": "No tasks yet — click + New task to start one."
   },
   "settings": {
     "title": "Settings",
