@@ -503,6 +503,41 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/tasks/start", &Req { task_id })
     }
 
+    fn add_task_material(
+        &self,
+        task_id: &str,
+        filename: &str,
+        bytes: Vec<u8>,
+        media: claw_fleet_core::task::MediaKind,
+    ) -> Result<std::path::PathBuf, String> {
+        if bytes.len() as u64 > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
+            return Err(format!(
+                "attachment too large: {} bytes (max {})",
+                bytes.len(),
+                claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
+            ));
+        }
+        let media_str = match serde_json::to_value(&media) {
+            Ok(serde_json::Value::String(s)) => s,
+            _ => return Err("internal: media kind not a string".into()),
+        };
+        let encoded_name = utf8_percent_encode(filename, NON_ALPHANUMERIC).to_string();
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            path: String,
+        }
+        let resp: Resp = self.probe.post_bytes(
+            &format!(
+                "/tasks/upload-material?task_id={}&name={}&media={}",
+                encode_path(task_id),
+                encoded_name,
+                media_str
+            ),
+            bytes,
+        )?;
+        Ok(std::path::PathBuf::from(resp.path))
+    }
+
     fn subscribe_task_events(&self, task_id: &str) -> Result<String, String> {
         #[derive(serde::Deserialize)]
         #[serde(rename_all = "camelCase")]

@@ -1,26 +1,42 @@
-// P11 — Inbox dialog: the entry point for creating a new task.
+// Inbox dialog: entry point for creating a new task.
 //
-// Users pick a project, type a title + description, drop optional materials
-// (files / text). Hitting "Start drafting" creates the task in `Drafting`
-// status; the user can then run the planner / edit the plan / start it.
-//
-// V1 minimum: title + description + project picker only. File drop and
-// planner-button arrive later (file upload command + atomic-plan-tasks skill
-// invocation are downstream P-items). Hooks for those slots are reserved in
-// the layout so the V2 add is a swap, not a rewrite.
+// Users pick a project, type a title + description, optionally drop /
+// paste / pick files as inbox materials. Hitting "Create task" creates
+// the task in `Drafting` status and uploads each pending material before
+// handing the task back to the parent.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import styles from "./InboxDialog.module.css";
 import type { Project } from "../store";
-import type { Task, TaskInput } from "../types";
+import type { MediaKind, Task, TaskInput } from "../types";
 
 interface Props {
   projects: Project[];
   defaultProjectId?: string;
   onCreated: (task: Task) => void;
   onCancel: () => void;
+}
+
+interface PendingMaterial {
+  id: string;
+  file: File;
+  media: MediaKind;
+  previewUrl?: string;
+}
+
+function inferMedia(file: File, fromPaste: boolean): MediaKind {
+  if (file.type.startsWith("image/")) {
+    return fromPaste ? "screenshot" : "image";
+  }
+  return "document";
+}
+
+let pmCounter = 0;
+function nextPmId(): string {
+  pmCounter += 1;
+  return `pm-${Date.now()}-${pmCounter}`;
 }
 
 export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }: Props) {
@@ -30,9 +46,12 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
   );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [materials, setMaterials] = useState<PendingMaterial[]>([]);
+  const [dragOver, setDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const titleRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     titleRef.current?.focus();
@@ -46,7 +65,65 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
     return () => window.removeEventListener("keydown", onKey);
   }, [onCancel, submitting]);
 
+  // Revoke object URLs created for image previews when materials change /
+  // the dialog unmounts. The previewUrl is only set for image MIME types.
+  useEffect(() => {
+    return () => {
+      materials.forEach((m) => {
+        if (m.previewUrl) URL.revokeObjectURL(m.previewUrl);
+      });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const canSubmit = projectId && title.trim().length > 0 && !submitting;
+
+  const addFiles = (files: FileList | File[], fromPaste: boolean) => {
+    const incoming: PendingMaterial[] = [];
+    for (const f of Array.from(files)) {
+      const media = inferMedia(f, fromPaste);
+      const previewUrl = f.type.startsWith("image/")
+        ? URL.createObjectURL(f)
+        : undefined;
+      incoming.push({ id: nextPmId(), file: f, media, previewUrl });
+    }
+    if (incoming.length === 0) return;
+    setMaterials((prev) => [...prev, ...incoming]);
+  };
+
+  const removeMaterial = (id: string) => {
+    setMaterials((prev) => {
+      const victim = prev.find((m) => m.id === id);
+      if (victim?.previewUrl) URL.revokeObjectURL(victim.previewUrl);
+      return prev.filter((m) => m.id !== id);
+    });
+  };
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (submitting) return;
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      addFiles(e.dataTransfer.files, false);
+    }
+  };
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    if (submitting) return;
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const pasted: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.kind === "file") {
+        const f = item.getAsFile();
+        if (f) pasted.push(f);
+      }
+    }
+    if (pasted.length > 0) {
+      e.preventDefault();
+      addFiles(pasted, true);
+    }
+  };
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -59,6 +136,36 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
         description: description.trim(),
       };
       const task = await invoke<Task>("create_task", { input });
+
+      const failures: string[] = [];
+      for (const m of materials) {
+        try {
+          const buf = await m.file.arrayBuffer();
+          const bytes = Array.from(new Uint8Array(buf));
+          await invoke<string>("add_task_material", {
+            taskId: task.id,
+            filename: m.file.name,
+            bytes,
+            media: m.media,
+          });
+        } catch (e) {
+          failures.push(`${m.file.name}: ${String(e)}`);
+        }
+      }
+
+      if (failures.length > 0) {
+        setError(
+          t("inbox.materials_upload_failed", {
+            defaultValue:
+              "Task created, but {{count}} material(s) failed: {{detail}}",
+            count: failures.length,
+            detail: failures.join("; "),
+          }),
+        );
+        setSubmitting(false);
+        return;
+      }
+
       onCreated(task);
     } catch (e) {
       setError(String(e));
@@ -66,9 +173,21 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
     }
   };
 
+  const materialsLabel = useMemo(
+    () =>
+      t("inbox.materials_label", {
+        defaultValue: "Materials (optional)",
+      }),
+    [t],
+  );
+
   return (
     <div className={styles.overlay} onClick={() => !submitting && onCancel()}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={styles.dialog}
+        onClick={(e) => e.stopPropagation()}
+        onPaste={onPaste}
+      >
         <h2 className={styles.title}>{t("inbox.title", "New task")}</h2>
 
         {projects.length > 1 && (
@@ -118,14 +237,76 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
           />
         </label>
 
-        <div className={styles.materials_slot}>
-          {/* V2: drag-drop file / paste-image surface lands here. */}
-          <span className={styles.materials_hint}>
-            {t(
-              "inbox.materials_v2",
-              "File / screenshot upload arrives in a follow-up.",
+        <div className={styles.field}>
+          <span className={styles.label}>{materialsLabel}</span>
+          <div
+            className={`${styles.materials_drop} ${
+              dragOver ? styles.materials_drop_active : ""
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (!submitting) setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={onDrop}
+          >
+            {materials.length === 0 ? (
+              <span className={styles.materials_hint}>
+                {t(
+                  "inbox.materials_drop_hint",
+                  "Drag files, paste a screenshot, or click + below",
+                )}
+              </span>
+            ) : (
+              <ul className={styles.materials_list}>
+                {materials.map((m) => (
+                  <li key={m.id} className={styles.material_chip}>
+                    {m.previewUrl ? (
+                      <img
+                        src={m.previewUrl}
+                        alt={m.file.name}
+                        className={styles.material_thumb}
+                      />
+                    ) : (
+                      <span className={styles.material_icon}>📄</span>
+                    )}
+                    <span className={styles.material_name} title={m.file.name}>
+                      {m.file.name}
+                    </span>
+                    <button
+                      type="button"
+                      className={styles.material_remove}
+                      onClick={() => removeMaterial(m.id)}
+                      disabled={submitting}
+                      aria-label={t("inbox.material_remove", "Remove")}
+                    >
+                      ×
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
-          </span>
+            <button
+              type="button"
+              className={styles.materials_add}
+              onClick={() => fileInputRef.current?.click()}
+              disabled={submitting}
+            >
+              {t("inbox.materials_add", "+ Add file")}
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              multiple
+              className={styles.file_input_hidden}
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  addFiles(e.target.files, false);
+                }
+                e.target.value = "";
+              }}
+            />
+          </div>
         </div>
 
         {error && <div className={styles.error}>{error}</div>}

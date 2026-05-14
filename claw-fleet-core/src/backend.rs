@@ -338,8 +338,21 @@ pub trait Backend: Send + Sync {
     // removed.
     //
     /// Create a new task in `Drafting` status. Materials get attached after
-    /// creation via `add_task_material` (lands in P3).
+    /// creation via `add_task_material`.
     fn create_task(&self, _input: crate::task::TaskInput) -> Result<crate::task::Task, String> {
+        Err("task system not implemented in this backend yet".into())
+    }
+    /// Append a file material to the task's inbox. Returns the persisted
+    /// absolute path on the storage host (LocalBackend: same machine;
+    /// RemoteBackend: path on the probe host). Bytes are bounded by
+    /// `MAX_ATTACHMENT_BYTES` (50 MiB); larger payloads must be rejected.
+    fn add_task_material(
+        &self,
+        _task_id: &str,
+        _filename: &str,
+        _bytes: Vec<u8>,
+        _media: crate::task::MediaKind,
+    ) -> Result<std::path::PathBuf, String> {
         Err("task system not implemented in this backend yet".into())
     }
     /// Read a single task by id. `Err` if not found.
