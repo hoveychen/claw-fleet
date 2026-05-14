@@ -1,32 +1,18 @@
-// P10 / P12 — Task-as-Unit V1 main view.
+// Task-as-Unit V2 — single-column tasks view.
 //
-// Layout:
-//   ┌─ TasksView ────────────────────────────────────────────────┐
-//   │  [+ New task]  project filter ▾                            │
-//   │  ┌─ TaskList ─────┐  ┌─ TaskDetail (kanban) ─────────────┐ │
-//   │  │ • Task A  ▶    │  │  ▼ Plan (5 items)   [✎][▶ start]  │ │
-//   │  │   Task B  ⏸    │  │  ┌──────────┬──────────┬────────┐ │ │
-//   │  │   Task C  ✓    │  │  │ pending  │ running  │  done  │ │ │
-//   │  │                │  │  │ p1 ⏳    │ p2 ▶     │ p3 ✓   │ │ │
-//   │  │                │  │  └──────────┴──────────┴────────┘ │ │
-//   │  └────────────────┘  └────────────────────────────────────┘ │
-//   └────────────────────────────────────────────────────────────┘
+// Two phases, gated on selectedTaskId:
+//   - selectedTaskId == null → render a card list of tasks scoped by the
+//     sidebar's selectedProjectId (the project entry was clicked).
+//   - selectedTaskId != null → render TaskDetailView for that task
+//     (P-item Kanban, back button to clear selection).
 //
-// V1 scope:
-// - List tasks (filter by project)
-// - Open a task → see its plan items in a 3-column kanban (pending / running / done)
-// - "Start task" button transitions a Drafting/Ready task to Running
-// - Inbox dialog ("+ New task")
-//
-// Out of scope for V1 minimum (lands as polish):
-// - DAG matrix editor (P14 V2)
-// - Inline plan edit (P11 polish)
-// - Worker output stream (P10 detail drawer — depends on P7 integration)
-// - Human-gate inline approval (P15 — exists via DecisionPanel handoff)
+// Creation entry is the sidebar's per-project `+` button, which fires an
+// `inboxRequest` carrying the projectId; this view consumes the request,
+// pops the InboxDialog with the projectId pre-filled, and selects the new
+// task afterwards (lands you on the detail phase).
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import styles from "./TasksView.module.css";
 import { InboxDialog } from "./InboxDialog";
 import {
@@ -41,6 +27,7 @@ import { pItemStatusKey } from "../types";
 export function TasksView() {
   const { t } = useTranslation();
   const { projects, refresh: refreshProjects } = useProjectsStore();
+  const selectedProjectId = useProjectsStore((s) => s.selectedProjectId);
   const {
     tasks,
     selectedTaskId,
@@ -50,51 +37,93 @@ export function TasksView() {
     startTask,
   } = useTasksStore();
 
-  const [filter, setFilter] = useState<string>("");
   const [showInbox, setShowInbox] = useState(false);
-  const showInboxRequested = useUIStore((s) => s.showInboxRequested);
-  const setShowInboxRequested = useUIStore((s) => s.setShowInboxRequested);
+  const [pendingInboxProjectId, setPendingInboxProjectId] = useState<string | null>(null);
+  const inboxRequest = useUIStore((s) => s.inboxRequest);
+  const clearInboxRequest = useUIStore((s) => s.clearInboxRequest);
 
   useEffect(() => {
     refreshProjects();
-    refresh(filter || undefined);
-  }, [refreshProjects, refresh, filter]);
+    refresh(selectedProjectId ?? undefined);
+  }, [refreshProjects, refresh, selectedProjectId]);
 
-  // Sidebar "+ New task" → InboxDialog opens immediately on mount/update.
+  // Sidebar's per-project `+` → opens InboxDialog with projectId pre-filled.
   useEffect(() => {
-    if (showInboxRequested) {
+    if (inboxRequest) {
+      setPendingInboxProjectId(inboxRequest.projectId);
       setShowInbox(true);
-      setShowInboxRequested(false);
+      clearInboxRequest();
     }
-  }, [showInboxRequested, setShowInboxRequested]);
+  }, [inboxRequest, clearInboxRequest]);
 
-  const visibleTasks = tasks;
-  const selected = useMemo(
-    () => visibleTasks.find((t) => t.id === selectedTaskId) ?? null,
-    [visibleTasks, selectedTaskId],
+  const project = useMemo(
+    () => projects.find((p) => p.id === selectedProjectId) ?? null,
+    [projects, selectedProjectId],
   );
+
+  const projectTasks = useMemo(
+    () => (selectedProjectId ? tasks.filter((tk) => tk.projectId === selectedProjectId) : tasks),
+    [tasks, selectedProjectId],
+  );
+
+  const selectedTask = useMemo(
+    () => tasks.find((tk) => tk.id === selectedTaskId) ?? null,
+    [tasks, selectedTaskId],
+  );
+
+  // Phase 2 — detail view (P-item kanban for the selected task).
+  if (selectedTask) {
+    const taskProject = projects.find((p) => p.id === selectedTask.projectId) ?? null;
+    return (
+      <div className={styles.root}>
+        <TaskDetailHeader
+          task={selectedTask}
+          project={taskProject}
+          onBack={() => setSelectedTaskId(null)}
+          onStart={() => startTask(selectedTask.id)}
+        />
+        <TaskDetailBody task={selectedTask} />
+        {showInbox && (
+          <InboxDialog
+            projects={projects}
+            defaultProjectId={pendingInboxProjectId ?? selectedProjectId ?? undefined}
+            onCancel={() => setShowInbox(false)}
+            onCreated={async (task) => {
+              setShowInbox(false);
+              setPendingInboxProjectId(null);
+              setSelectedTaskId(task.id);
+              await refresh(selectedProjectId ?? undefined);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
+  // Phase 1 — card list scoped to selectedProjectId.
+  const runningCount = projectTasks.filter((tk) => tk.status === "running").length;
 
   return (
     <div className={styles.root}>
       <header className={styles.header}>
-        <h1 className={styles.title}>{t("tasks.title", "Tasks")}</h1>
+        <div className={styles.header_titles}>
+          <h1 className={styles.title}>
+            {project ? project.name : t("tasks.all_projects", "All projects")}
+          </h1>
+          <div className={styles.subtitle}>
+            {t("tasks.count_summary", "{{total}} tasks · {{running}} running", {
+              total: projectTasks.length,
+              running: runningCount,
+            })}
+          </div>
+        </div>
         <div className={styles.header_right}>
-          <select
-            className={styles.project_filter}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            aria-label={t("tasks.filter_by_project", "Filter by project")}
-          >
-            <option value="">{t("tasks.all_projects", "All projects")}</option>
-            {projects.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
           <button
             className={styles.btn_primary}
-            onClick={() => setShowInbox(true)}
+            onClick={() => {
+              setPendingInboxProjectId(selectedProjectId);
+              setShowInbox(true);
+            }}
             disabled={projects.length === 0}
             title={
               projects.length === 0
@@ -107,48 +136,34 @@ export function TasksView() {
         </div>
       </header>
 
-      <div className={styles.split}>
-        <aside className={styles.task_list}>
-          {!loaded && <div className={styles.empty}>{t("loading", "Loading…")}</div>}
-          {loaded && visibleTasks.length === 0 && (
-            <div className={styles.empty}>
-              {t("tasks.empty", "No tasks yet — click + New task to start one.")}
-            </div>
-          )}
-          {visibleTasks.map((task) => (
-            <TaskListItem
-              key={task.id}
-              task={task}
-              project={projects.find((p) => p.id === task.projectId)}
-              active={task.id === selectedTaskId}
-              onClick={() => setSelectedTaskId(task.id)}
-            />
-          ))}
-        </aside>
-
-        <section className={styles.detail}>
-          {selected ? (
-            <TaskDetail task={selected} onStart={() => startTask(selected.id)} />
-          ) : (
-            <div className={styles.detail_empty}>
-              {t(
-                "tasks.detail_empty",
-                "Pick a task on the left to see its plan.",
-              )}
-            </div>
-          )}
-        </section>
+      <div className={styles.card_list}>
+        {!loaded && <div className={styles.empty}>{t("loading", "Loading…")}</div>}
+        {loaded && projectTasks.length === 0 && (
+          <div className={styles.empty}>
+            {t("tasks.empty", "No tasks yet — click + New task to start one.")}
+          </div>
+        )}
+        {projectTasks.map((task) => (
+          <TaskCard
+            key={task.id}
+            task={task}
+            project={projects.find((p) => p.id === task.projectId)}
+            showProjectChip={!selectedProjectId}
+            onClick={() => setSelectedTaskId(task.id)}
+          />
+        ))}
       </div>
 
       {showInbox && (
         <InboxDialog
           projects={projects}
-          defaultProjectId={filter || undefined}
+          defaultProjectId={pendingInboxProjectId ?? selectedProjectId ?? undefined}
           onCancel={() => setShowInbox(false)}
           onCreated={async (task) => {
             setShowInbox(false);
+            setPendingInboxProjectId(null);
             setSelectedTaskId(task.id);
-            await refresh(filter || undefined);
+            await refresh(selectedProjectId ?? undefined);
           }}
         />
       )}
@@ -156,29 +171,41 @@ export function TasksView() {
   );
 }
 
-function TaskListItem({
+function TaskCard({
   task,
   project,
-  active,
+  showProjectChip,
   onClick,
 }: {
   task: Task;
   project: Project | undefined;
-  active: boolean;
+  showProjectChip: boolean;
   onClick: () => void;
 }) {
   const summary = useMemo(() => summarisePlan(task), [task]);
+  const icon =
+    task.status === "running" ? "▶" :
+    task.status === "paused" ? "⏸" :
+    task.status === "ready" ? "○" :
+    task.status === "planning" ? "✎" :
+    task.status === "drafting" ? "✎" :
+    task.status === "done" ? "✓" :
+    task.status === "abandoned" ? "⤼" :
+    "•";
   return (
-    <button
-      className={`${styles.task_item} ${active ? styles.task_item_active : ""}`}
-      onClick={onClick}
-    >
-      <div className={styles.task_item_top}>
-        <span className={styles.task_item_title}>{task.title}</span>
+    <button className={styles.card_row} onClick={onClick}>
+      <div className={styles.card_row_top}>
+        <span className={styles.card_row_icon}>{icon}</span>
+        <span className={styles.card_row_title}>{task.title}</span>
         <StatusBadge status={task.status} />
       </div>
-      <div className={styles.task_item_meta}>
-        {project && <span className={styles.project_chip}>{project.name}</span>}
+      {task.description && (
+        <div className={styles.card_row_desc}>{task.description}</div>
+      )}
+      <div className={styles.card_row_meta}>
+        {showProjectChip && project && (
+          <span className={styles.project_chip}>{project.name}</span>
+        )}
         <span>
           {summary.done}/{summary.total} ✓
         </span>
@@ -186,19 +213,70 @@ function TaskListItem({
         {summary.failed > 0 && (
           <span className={styles.failed_chip}>{summary.failed} ✗</span>
         )}
+        {task.taskBranch && (
+          <code className={styles.branch_label}>{task.taskBranch}</code>
+        )}
       </div>
     </button>
   );
 }
 
-function TaskDetail({ task, onStart }: { task: Task; onStart: () => void }) {
+function TaskDetailHeader({
+  task,
+  project,
+  onBack,
+  onStart,
+}: {
+  task: Task;
+  project: Project | null;
+  onBack: () => void;
+  onStart: () => void;
+}) {
   const { t } = useTranslation();
-  const summary = useMemo(() => summarisePlan(task), [task]);
   const canStart =
     task.status === "drafting" ||
     task.status === "planning" ||
     task.status === "ready";
+  return (
+    <div className={styles.detail_header}>
+      <div className={styles.detail_header_left}>
+        <button
+          className={styles.back_btn}
+          onClick={onBack}
+          title={t("tasks.back_to_list", "Back to task list")}
+          aria-label={t("tasks.back_to_list", "Back to task list")}
+        >
+          ←
+        </button>
+        <div>
+          <div className={styles.detail_breadcrumb}>
+            {project?.name ?? t("tasks.unknown_project", "Unknown project")}
+          </div>
+          <h2 className={styles.task_detail_title}>{task.title}</h2>
+        </div>
+      </div>
+      <div className={styles.detail_header_right}>
+        <StatusBadge status={task.status} />
+        <button
+          className={styles.btn_primary}
+          onClick={onStart}
+          disabled={!canStart}
+          title={
+            canStart
+              ? ""
+              : t("tasks.already_running", "Task is already running or done.")
+          }
+        >
+          ▶ {t("tasks.start", "Start")}
+        </button>
+      </div>
+    </div>
+  );
+}
 
+function TaskDetailBody({ task }: { task: Task }) {
+  const { t } = useTranslation();
+  const summary = useMemo(() => summarisePlan(task), [task]);
   const items = Object.values(task.plan.items);
 
   // Column buckets per PRD §4.5 "Kanban for P-items":
@@ -214,38 +292,15 @@ function TaskDetail({ task, onStart }: { task: Task; onStart: () => void }) {
     else if (k === "running" || k === "waitHumanGate") active.push(p);
     else resolved.push(p);
   }
-
-  // Stable order — id alpha so layout doesn't churn on refetch.
   for (const arr of [pending, active, resolved]) {
     arr.sort((a, b) => a.id.localeCompare(b.id));
   }
 
   return (
     <div className={styles.task_detail}>
-      <div className={styles.task_detail_header}>
-        <div>
-          <h2 className={styles.task_detail_title}>{task.title}</h2>
-          {task.taskBranch && (
-            <code className={styles.branch_label}>{task.taskBranch}</code>
-          )}
-        </div>
-        <div className={styles.task_detail_actions}>
-          <StatusBadge status={task.status} />
-          <button
-            className={styles.btn_primary}
-            onClick={onStart}
-            disabled={!canStart}
-            title={
-              canStart
-                ? ""
-                : t("tasks.already_running", "Task is already running or done.")
-            }
-          >
-            ▶ {t("tasks.start", "Start")}
-          </button>
-        </div>
-      </div>
-
+      {task.taskBranch && (
+        <code className={styles.branch_label}>{task.taskBranch}</code>
+      )}
       {task.description && (
         <p className={styles.task_description}>{task.description}</p>
       )}
@@ -397,6 +452,3 @@ function summarisePlan(task: Task) {
   }
   return { total, done, failed, running };
 }
-
-// Silence unused-import warning when invoke is needed elsewhere.
-void invoke;

@@ -9,8 +9,6 @@ import {
   type KanbanColumn,
   type Project,
 } from "../store";
-import { KanbanView } from "./KanbanView";
-import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import styles from "./ProjectsView.module.css";
 
 type DialogMode =
@@ -28,7 +26,6 @@ export function ProjectsView() {
   const setSelectedId = useProjectsStore((s) => s.setSelectedProjectId);
   const [dialog, setDialog] = useState<DialogMode>(null);
   const [error, setError] = useState<string | null>(null);
-  const [launcherInitial, setLauncherInitial] = useState<SessionLauncherProps["initial"]>(null);
   const [listCollapsed, setListCollapsed] = useState(false);
   const showNewProjectRequested = useUIStore((s) => s.showNewProjectRequested);
   const setShowNewProjectRequested = useUIStore((s) => s.setShowNewProjectRequested);
@@ -125,9 +122,6 @@ export function ProjectsView() {
                   setError(null);
                   setDialog({ type: "delete", project: selected });
                 }}
-                onNewSession={() => {
-                  setLauncherInitial({ projectId: selected.id });
-                }}
                 onProjectChanged={load}
                 t={t}
               />
@@ -203,11 +197,6 @@ export function ProjectsView() {
         />
       )}
 
-      <SessionLauncher
-        initial={launcherInitial}
-        onClose={() => setLauncherInitial(null)}
-        onSubmitted={() => load()}
-      />
     </div>
   );
 }
@@ -219,8 +208,7 @@ function ProjectDetail({
   onToggleList,
   onEdit,
   onDelete,
-  onNewSession,
-  onProjectChanged,
+  onProjectChanged: _onProjectChanged,
   t,
 }: {
   project: Project;
@@ -229,7 +217,6 @@ function ProjectDetail({
   onToggleList: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onNewSession: () => void;
   onProjectChanged: () => void;
   t: (k: string, opts?: Record<string, unknown>) => string;
 }) {
@@ -289,7 +276,6 @@ function ProjectDetail({
           </button>
           <h3 className={styles.detail_title}>{project.name}</h3>
           <div className={styles.detail_actions}>
-            <button type="button" onClick={onNewSession}>+ {t("launcher.new_session")}</button>
             <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
             <button type="button" onClick={onDelete} className={styles.danger}>
               {t("projects.delete")}
@@ -344,9 +330,6 @@ function ProjectDetail({
             </ul>
           </div>
         )}
-      </div>
-      <div className={styles.kanban_pane}>
-        <KanbanView project={project} onProjectChanged={onProjectChanged} compact />
       </div>
     </div>
   );

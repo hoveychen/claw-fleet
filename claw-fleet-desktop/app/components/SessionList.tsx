@@ -45,14 +45,12 @@ export function SessionList() {
   const {
     viewMode,
     setViewMode,
-    sidebarTab,
-    setSidebarTab,
     setLiteMode,
     sidebarCollapsed,
     setSidebarCollapsed,
     showMobileAccess,
     setShowMobileAccess,
-    setShowInboxRequested,
+    requestInbox,
     setShowNewProjectRequested,
   } = useUIStore();
   const { connection } = useConnectionStore();
@@ -88,19 +86,36 @@ export function SessionList() {
   })();
 
   const openTask = useCallback(
-    (taskId: string) => {
+    (taskId: string, projectId: string) => {
+      setSelectedProjectId(projectId);
       setSelectedTaskId(taskId);
       setViewMode("tasks");
     },
-    [setSelectedTaskId, setViewMode],
+    [setSelectedProjectId, setSelectedTaskId, setViewMode],
   );
 
+  // Click a project in the sidebar → open its task list (cards). Clears
+  // selectedTaskId so TasksView shows the list phase rather than a stale
+  // task detail.
   const openProject = useCallback(
     (projectId: string) => {
       setSelectedProjectId(projectId);
-      setViewMode("projects");
+      setSelectedTaskId(null);
+      setViewMode("tasks");
     },
-    [setSelectedProjectId, setViewMode],
+    [setSelectedProjectId, setSelectedTaskId, setViewMode],
+  );
+
+  // Click the per-project `+` button → open InboxDialog with that project
+  // pre-filled, and land on the project's tasks view.
+  const openProjectInbox = useCallback(
+    (projectId: string) => {
+      setSelectedProjectId(projectId);
+      setSelectedTaskId(null);
+      requestInbox(projectId);
+      setViewMode("tasks");
+    },
+    [setSelectedProjectId, setSelectedTaskId, requestInbox, setViewMode],
   );
 
   // Poll mobile access status for the sidebar indicator.
@@ -310,201 +325,164 @@ export function SessionList() {
           </div>
         )}
 
-        {/* Top-level segmented tab: Monitor vs Projects. */}
-        {!sidebarCollapsed && (
-          <div className={styles.tab_strip} role="tablist" aria-label={t("sidebar.tab_strip", "Sidebar tab")}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidebarTab === "monitor"}
-              className={`${styles.tab_btn} ${sidebarTab === "monitor" ? styles.tab_btn_active : ""}`}
-              onClick={() => setSidebarTab("monitor")}
-            >
-              {t("sidebar.tab_monitor", "Monitor")}
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidebarTab === "projects"}
-              className={`${styles.tab_btn} ${sidebarTab === "projects" ? styles.tab_btn_active : ""}`}
-              onClick={() => setSidebarTab("projects")}
-            >
-              {t("sidebar.tab_projects", "Projects")}
-              {activeTasks.length > 0 && (
-                <span className={styles.tab_chip}>{activeTasks.length}</span>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* Navigation — branched by sidebarTab. */}
+        {/* Unified nav — Monitor views, Projects rail, system tools. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
-          {sidebarTab === "monitor" ? (
-            <>
-              <button
-                className={`${styles.nav_item} ${viewMode === "list" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("list")}
-              >
-                <span className={styles.nav_icon}>☰</span>
-                <span className={styles.nav_label}>{t("view_list")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "gallery" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("gallery")}
-              >
-                <span className={styles.nav_icon}>⊞</span>
-                <span className={styles.nav_label}>{t("view_gallery")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("audit")}
-              >
-                <span className={styles.nav_icon}>⛨</span>
-                <span className={styles.nav_label}>{t("view_audit")}</span>
-                {unreadCriticalCount > 0 && (
-                  <span className={styles.nav_badge}>{unreadCriticalCount}</span>
-                )}
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("report")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
-                <span className={styles.nav_label}>{t("view_report")}</span>
-              </button>
-              <div className={styles.nav_divider} />
-              <button
-                className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("memory")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
-                <span className={styles.nav_label}>{t("view_memory")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("skills")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
-                <span className={styles.nav_label}>{t("view_skills")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("plugins")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
-                <span className={styles.nav_label}>{t("view_plugins")}</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                className={`${styles.nav_item} ${styles.nav_cta_primary}`}
-                onClick={() => {
-                  setShowInboxRequested(true);
-                  setViewMode("tasks");
-                }}
-                disabled={projects.length === 0}
-                title={projects.length === 0 ? t("tasks.create_project_first", "Create a project first") : t("tasks.new_task", "New task")}
-              >
-                <span className={styles.nav_icon}>+</span>
-                <span className={styles.nav_label}>{t("tasks.new_task", "New task")}</span>
-              </button>
-              {!sidebarCollapsed && Array.from(tasksByProject.entries()).map(([projectId, projectTasks]) => {
-                const project = projects.find((p) => p.id === projectId);
-                const projectName = project?.name ?? projectId;
-                return (
-                  <div key={projectId} className={styles.nav_task_group}>
-                    <button
-                      type="button"
-                      className={styles.nav_task_group_label}
-                      onClick={() => openProject(projectId)}
-                      title={`${projectName} — ${t("projects.title")}`}
-                    >
-                      {projectName}
-                    </button>
-                    {projectTasks.map((tk) => {
-                      const items = Object.values(tk.plan.items ?? {});
-                      const total = items.length;
-                      const done = items.filter((it) => {
-                        if (typeof it.status === "string") {
-                          return it.status === "done" || it.status === "skipped";
-                        }
-                        return false;
-                      }).length;
-                      const statusIcon =
-                        tk.status === "running" ? "▶" :
-                        tk.status === "paused" ? "⏸" :
-                        tk.status === "ready" ? "○" :
-                        tk.status === "planning" ? "✎" :
-                        tk.status === "drafting" ? "✎" :
-                        "•";
-                      return (
-                        <button
-                          key={tk.id}
-                          type="button"
-                          className={styles.nav_project_item}
-                          onClick={() => openTask(tk.id)}
-                          title={`${tk.title} — ${tk.status}`}
-                        >
-                          <span className={styles.nav_task_icon}>{statusIcon}</span>
-                          <span className={styles.nav_project_name}>{tk.title}</span>
-                          {total > 0 && (
-                            <span className={styles.nav_project_chip} title={t("tasks.progress", "p-items done / total")}>
-                              {done}/{total}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
-                );
-              })}
-              {!sidebarCollapsed && activeTasks.length === 0 && projects.length > 0 && (
-                <div className={styles.nav_empty}>{t("sidebar.no_active_tasks", "No active tasks")}</div>
-              )}
-              <div className={styles.nav_divider} />
-              <button
-                className={styles.nav_item}
-                onClick={() => {
-                  setShowNewProjectRequested(true);
-                  setViewMode("projects");
-                }}
-                title={t("projects.new")}
-              >
-                <span className={styles.nav_icon}>+</span>
-                <span className={styles.nav_label}>{t("projects.new")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("memory")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
-                <span className={styles.nav_label}>{t("view_memory")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("skills")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
-                <span className={styles.nav_label}>{t("view_skills")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("plugins")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
-                <span className={styles.nav_label}>{t("view_plugins")}</span>
-              </button>
-            </>
+          <button
+            className={`${styles.nav_item} ${viewMode === "list" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("list")}
+          >
+            <span className={styles.nav_icon}>☰</span>
+            <span className={styles.nav_label}>{t("view_list")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "gallery" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("gallery")}
+          >
+            <span className={styles.nav_icon}>⊞</span>
+            <span className={styles.nav_label}>{t("view_gallery")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("audit")}
+          >
+            <span className={styles.nav_icon}>⛨</span>
+            <span className={styles.nav_label}>{t("view_audit")}</span>
+            {unreadCriticalCount > 0 && (
+              <span className={styles.nav_badge}>{unreadCriticalCount}</span>
+            )}
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("report")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
+            <span className={styles.nav_label}>{t("view_report")}</span>
+          </button>
+
+          <div className={styles.nav_divider} />
+
+          {/* Projects rail — one row per project (always all projects, not
+              just those with active tasks, so we never fall back to UUID). */}
+          {!sidebarCollapsed && projects.length === 0 && (
+            <div className={styles.nav_empty}>{t("sidebar.no_projects", "No projects yet")}</div>
           )}
+          {!sidebarCollapsed && projects.map((p) => {
+            const projectTasks = tasksByProject.get(p.id) ?? [];
+            const isProjectActive =
+              viewMode === "tasks" &&
+              useProjectsStore.getState().selectedProjectId === p.id;
+            return (
+              <div key={p.id} className={styles.nav_task_group}>
+                <div className={`${styles.nav_project_row} ${isProjectActive ? styles.nav_project_row_active : ""}`}>
+                  <button
+                    type="button"
+                    className={styles.nav_project_group_name}
+                    onClick={() => openProject(p.id)}
+                    title={p.name}
+                  >
+                    {p.name}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.nav_project_add_btn}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openProjectInbox(p.id);
+                    }}
+                    title={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
+                    aria-label={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
+                  >
+                    +
+                  </button>
+                </div>
+                {projectTasks.map((tk) => {
+                  const items = Object.values(tk.plan.items ?? {});
+                  const total = items.length;
+                  const done = items.filter((it) => {
+                    if (typeof it.status === "string") {
+                      return it.status === "done" || it.status === "skipped";
+                    }
+                    return false;
+                  }).length;
+                  const statusIcon =
+                    tk.status === "running" ? "▶" :
+                    tk.status === "paused" ? "⏸" :
+                    tk.status === "ready" ? "○" :
+                    tk.status === "planning" ? "✎" :
+                    tk.status === "drafting" ? "✎" :
+                    "•";
+                  return (
+                    <button
+                      key={tk.id}
+                      type="button"
+                      className={styles.nav_project_item}
+                      onClick={() => openTask(tk.id, tk.projectId)}
+                      title={`${tk.title} — ${tk.status}`}
+                    >
+                      <span className={styles.nav_task_icon}>{statusIcon}</span>
+                      <span className={styles.nav_project_name}>{tk.title}</span>
+                      {total > 0 && (
+                        <span className={styles.nav_project_chip} title={t("tasks.progress", "p-items done / total")}>
+                          {done}/{total}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })}
+          <button
+            className={styles.nav_item}
+            onClick={() => {
+              setShowNewProjectRequested(true);
+              setViewMode("projects");
+            }}
+            title={t("projects.new")}
+          >
+            <span className={styles.nav_icon}>+</span>
+            <span className={styles.nav_label}>{t("projects.new")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "projects" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("projects")}
+            title={t("sidebar.manage_projects", "Manage projects")}
+          >
+            <span className={styles.nav_icon}>⚙</span>
+            <span className={styles.nav_label}>{t("sidebar.manage_projects", "Manage projects")}</span>
+          </button>
+
+          <div className={styles.nav_divider} />
+
+          <button
+            className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("memory")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
+            <span className={styles.nav_label}>{t("view_memory")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("skills")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_skills")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("plugins")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_plugins")}</span>
+          </button>
         </nav>
 
         <div className={styles.separator} />
 
-        {/* Scrollable sidebar content — charts + usage live in the Monitor
-            tab only. Projects tab gets a cleaner, task-focused rail. */}
+        {/* Scrollable sidebar content — charts + usage hidden for the
+            task-focused views (projects / tasks) to keep that rail clean. */}
         <div className={styles.sidebar_content}>
-          {sidebarTab === "monitor" && (
+          {viewMode !== "projects" && viewMode !== "tasks" && (
             <>
               {/* Token Speed Chart */}
               <div data-wizard="token-speed">

@@ -1075,10 +1075,10 @@
     "projects_expand": "展开项目列表",
     "tasks_collapse": "折叠活跃 task",
     "tasks_expand": "展开活跃 task",
-    "tab_strip": "侧边栏 tab",
-    "tab_monitor": "Monitor",
-    "tab_projects": "Projects",
-    "no_active_tasks": "暂无活跃 task"
+    "no_active_tasks": "暂无活跃 task",
+    "no_projects": "还没有项目，先建一个吧",
+    "manage_projects": "项目管理",
+    "new_task_for_project": "为 {{name}} 新建任务"
   },
   "master": {
     "chip_master": "Master",
@@ -1093,7 +1093,20 @@
     "active_count": "活跃 task 数",
     "progress": "已完成 / 总 P-item",
     "human_gate_required": "需要人工审核",
-    "waiting_for_user_review": "等待用户审核 — 请在 Decision Panel 处理"
+    "waiting_for_user_review": "等待用户审核 — 请在 Decision Panel 处理",
+    "count_summary": "{{total}} 个 task · {{running}} 个运行中",
+    "back_to_list": "返回任务列表",
+    "unknown_project": "未知项目",
+    "col_pending": "待处理",
+    "col_active": "进行中",
+    "col_resolved": "已完成",
+    "complete": "完成",
+    "failed": "失败",
+    "start": "启动",
+    "already_running": "任务已在运行或结束",
+    "no_plan_yet": "还没有计划。等你写完任务描述、挂上素材，planner 就会跑一次。",
+    "detail_empty": "左侧挑一个任务，看它的计划。",
+    "empty": "暂无任务 — 点 + 新任务开始"
   },
   "settings": {
     "title": "设置",
