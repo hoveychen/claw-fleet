@@ -634,9 +634,9 @@ resources:
 ### V2 — 扩展并行能力 + 改进 UX
 
 - DAG graph editor（拖节点拉边）
-- **Worktree per item**（真隔离）— 上线后取消"代码 P-item 不准 build"约束
+- **Worktree per item**（真隔离）— ✅ shipped (PRD `worktree-and-auto-merge` Phase 1)。每个 dispatched P-item 跑在 `~/.fleet/worktrees/<task>/<p>/`，branch `fleet/<task>/<p>`。`mark_done` 走 `merge --ff-only` 回 task branch，成功后 reap worktree。代码 P-item 的「不准 build」约束已解除（worker_executor.rs Layer-1 + CLAUDE.md 同步）。Conflict 当前回 Master 报错；LLM 仲裁见下一项。
+- **LLM 仲裁 auto-merge 失败** — PRD Phase 2 待启动（worktree-and-auto-merge §P9–P13）
 - 自定义 resource locks（端口、simulator、db）
-- LLM 仲裁 auto-merge 失败
 - VS Code 右键菜单「发送到 Fleet」
 - 全局快捷键 Inbox
 - Inbox 单文件/纯文本紧凑布局（补丁 1）

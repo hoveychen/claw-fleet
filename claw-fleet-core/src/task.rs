@@ -359,10 +359,50 @@ pub fn start_task(task_id: &str) -> Result<(), String> {
 /// Mark a P-item Done and persist its acceptance-audit summary. Per PRD §5.7
 /// only the Master should call this — the underlying mutex is the same one
 /// `update_plan` uses, so concurrent calls are serialised.
-pub fn mark_done(task_id: &str, p_item_id: &str, summary: &str) -> Result<(), String> {
+///
+/// V2: also fast-forward-merges the P-item's worktree branch back into the
+/// task branch and reaps the worktree. If the merge cannot fast-forward
+/// (worker branch diverged from task branch), the status flip is rolled
+/// back and a `Conflict` outcome is returned — the master is expected to
+/// react (Phase 2 will plug in LLM mediation here).
+pub fn mark_done(
+    task_id: &str,
+    p_item_id: &str,
+    summary: &str,
+) -> Result<crate::worktree::MergeOutcome, String> {
     let lock = task_write_lock(task_id);
     let _g = lock.lock().expect("task write mutex poisoned");
     let mut task = get_task(task_id)?;
+    let project = crate::project::list_projects()
+        .into_iter()
+        .find(|p| p.id == task.project_id)
+        .ok_or_else(|| format!("project {} not found for task {task_id}", task.project_id))?;
+    let workspace = PathBuf::from(&project.workspace);
+    let task_branch = task
+        .task_branch
+        .clone()
+        .ok_or_else(|| format!("task {task_id} has no task_branch"))?;
+    let outcome = crate::worktree::merge_back(&workspace, &task_branch, task_id, p_item_id)?;
+    // Phase 2 mediation: on a real 3-way conflict, ask Sonnet to produce
+    // resolved content, apply it, and re-commit the merge. If mediation
+    // fails (provider unavailable, response unusable, etc.) bubble the
+    // error to the master so it can retry mark-done or escalate to the
+    // user via AskUserQuestion.
+    let outcome = if let crate::worktree::MergeOutcome::Conflict { files, reason } = outcome {
+        let mediations = crate::merge_mediator::mediate(&files).map_err(|e| {
+            format!(
+                "mediator failed for {n} conflicted file(s) ({reason}): {e}",
+                n = files.len(),
+            )
+        })?;
+        let resolutions: Vec<(PathBuf, String)> = mediations
+            .into_iter()
+            .map(|m| (m.path, m.resolved_content))
+            .collect();
+        crate::worktree::apply_resolutions(&workspace, task_id, p_item_id, &resolutions)?
+    } else {
+        outcome
+    };
     let now = chrono::Utc::now().timestamp();
     {
         let item = task
@@ -376,7 +416,10 @@ pub fn mark_done(task_id: &str, p_item_id: &str, summary: &str) -> Result<(), St
     // After flipping to Done, propagate skip on any newly poisoned downstream
     // (no-op for mark_done since Done unblocks; this is the symmetric place
     // mark_failed runs it).
-    write_task_atomic(&task)
+    write_task_atomic(&task)?;
+    // Worktree's commits are now in task_branch — reap to free disk + branch.
+    let _ = crate::worktree::reap(&workspace, task_id, p_item_id);
+    Ok(outcome)
 }
 
 /// Mark a P-item Failed. Per PRD §5.7 / TASKS P20 this **also releases the
@@ -404,6 +447,16 @@ pub fn mark_failed(
     }
     let newly_skipped = task.plan.propagate_skip();
     write_task_atomic(&task)?;
+    // Reap the failed P-item's worktree so disk doesn't leak. The branch
+    // is preserved by the orphan-branch recovery in `worktree::provision`
+    // if a retry comes around; reap deletes it but provision can rebuild.
+    if let Some(project) = crate::project::list_projects()
+        .into_iter()
+        .find(|p| p.id == task.project_id)
+    {
+        let workspace = PathBuf::from(&project.workspace);
+        let _ = crate::worktree::reap(&workspace, task_id, p_item_id);
+    }
     Ok(newly_skipped)
 }
 
@@ -440,12 +493,18 @@ pub fn dispatch_pitem(task_id: &str, p_item_id: &str) -> Result<(), String> {
     }
     // Persist Running state first so the worker's spawn read sees it on disk.
     write_task_atomic(&task)?;
-    // Build worker spawn spec from the task + project workspace.
+    // Build worker spawn spec from the task + project workspace. V2: each
+    // P-item runs in its own git worktree rooted at the task branch so
+    // parallel workers can build/test without trampling each other.
     let project = crate::project::list_projects()
         .into_iter()
         .find(|p| p.id == task.project_id)
         .ok_or_else(|| format!("project {} not found for task {task_id}", task.project_id))?;
-    let cwd = PathBuf::from(&project.workspace);
+    let workspace = PathBuf::from(&project.workspace);
+    let task_branch = task.task_branch.as_deref().ok_or_else(|| {
+        format!("task {task_id} has no task_branch — call start_task before dispatching P-items")
+    })?;
+    let cwd = crate::worktree::provision(&workspace, task_branch, task_id, p_item_id)?;
     let spec = crate::worker_executor::worker_spawn_spec(&task, p_item_id, cwd)?;
     let worker_sid = crate::supervisor::enqueue_worker(&spec)?;
     // Stamp the worker session id on the P-item so the master can locate

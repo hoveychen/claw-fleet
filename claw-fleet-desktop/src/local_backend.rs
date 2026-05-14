@@ -151,6 +151,20 @@ impl LocalBackend {
         }
         step!("zombie recovery done");
 
+        // Sweep orphan worktrees under ~/.fleet/worktrees/ whose owning
+        // task / P-item is no longer Running. Mirrors the zombie-session
+        // recovery above so a crash-then-restart doesn't leak disk.
+        match crate::supervisor::gc_orphan_worktrees() {
+            Ok(0) => {}
+            Ok(n) => log_debug(&format!(
+                "[BACKEND-INIT] reaped {n} orphan worktree(s)"
+            )),
+            Err(e) => log_debug(&format!(
+                "[BACKEND-INIT] worktree gc failed: {e}"
+            )),
+        }
+        step!("worktree gc done");
+
         // Dedicated indexer thread — receives session lists via channel,
         // coalesces rapid requests, and runs indexing off the scan threads.
         let (index_tx, index_rx) = std::sync::mpsc::channel::<IndexRequest>();

@@ -494,9 +494,24 @@ fn cmd_task(action: TaskCommands) {
             p_id,
             summary,
         } => {
-            claw_fleet_core::task::mark_done(&task_id, &p_id, &summary)
+            let outcome = claw_fleet_core::task::mark_done(&task_id, &p_id, &summary)
                 .unwrap_or_else(|e| die(e));
-            println!("done");
+            match outcome {
+                claw_fleet_core::worktree::MergeOutcome::FastForwarded { commits_merged } => {
+                    println!("done (fast-forwarded {commits_merged} commit(s))");
+                }
+                claw_fleet_core::worktree::MergeOutcome::AutoMerged { commits_merged } => {
+                    println!("done (auto-merged {commits_merged} commit(s))");
+                }
+                claw_fleet_core::worktree::MergeOutcome::NoChanges => {
+                    println!("done (no commits to merge)");
+                }
+                claw_fleet_core::worktree::MergeOutcome::Conflict { .. } => {
+                    // mark_done returns Err on conflict; this arm is
+                    // unreachable but keeps the match exhaustive.
+                    println!("done (conflict)");
+                }
+            }
         }
         TaskCommands::MarkFailed {
             task_id,
@@ -1557,6 +1572,11 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         Ok(0) => {}
         Ok(n) => eprintln!("[fleet serve] recovered {n} zombie session(s) on startup"),
         Err(e) => eprintln!("[fleet serve] zombie recovery failed: {e}"),
+    }
+    match claw_fleet_core::supervisor::gc_orphan_worktrees() {
+        Ok(0) => {}
+        Ok(n) => eprintln!("[fleet serve] reaped {n} orphan worktree(s) on startup"),
+        Err(e) => eprintln!("[fleet serve] worktree gc failed: {e}"),
     }
 
     // ── Supervisor tick thread ─────────────────────────────────────────────

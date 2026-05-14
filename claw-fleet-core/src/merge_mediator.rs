@@ -1,0 +1,342 @@
+//! LLM-driven merge conflict mediator — V2 Phase 2 (PRD §P10).
+//!
+//! When `worktree::merge_back` returns a `Conflict { files, .. }`, the
+//! mediator asks a Sonnet sub-session to produce a clean resolution for
+//! each file. Trade-offs:
+//!
+//! - **Per-file calls**, not one mega-prompt. Smaller blast radius if the
+//!   LLM goes off the rails; one resolution can fail without poisoning the
+//!   others; cache-friendly because each file is short.
+//! - **No tools.** The mediator's output is raw resolved file content,
+//!   nothing more — see `MEDIATOR_PROMPT_TEMPLATE` below.
+//! - **No conflict markers** allowed in the output (sanity check in P11).
+//!
+//! P11 takes `MediationResult` and writes the resolved content back into
+//! the merge's working tree; P12 wraps retry + AskUserQuestion escalation.
+
+use std::time::Duration;
+
+use crate::llm_provider::{self, LlmProvider};
+use crate::worktree::ConflictSpec;
+
+/// Output of one successful mediation. `resolved_content` is the
+/// merged-and-clean version of `path`, with no `<<<<<<<` / `=======` /
+/// `>>>>>>>` markers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MediationResult {
+    pub path: std::path::PathBuf,
+    pub resolved_content: String,
+}
+
+/// Reasons mediation can fail for a single file. The caller (P12) decides
+/// whether to retry, ask the user, or fail the P-item.
+#[derive(Debug, Clone)]
+pub enum MediationError {
+    /// LLM provider couldn't be reached (binary missing, timeout, etc.).
+    ProviderUnavailable,
+    /// LLM returned no usable text.
+    EmptyResponse,
+    /// LLM's response still contained conflict markers — refused.
+    MarkersLeftBehind {
+        path: std::path::PathBuf,
+        first_marker: String,
+    },
+    /// LLM's response didn't contain the expected wrapper tags.
+    MissingWrapper { path: std::path::PathBuf },
+}
+
+impl std::fmt::Display for MediationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ProviderUnavailable => write!(f, "mediator LLM provider unavailable"),
+            Self::EmptyResponse => write!(f, "mediator returned empty response"),
+            Self::MarkersLeftBehind { path, first_marker } => {
+                write!(
+                    f,
+                    "mediator left conflict marker {first_marker:?} in {}",
+                    path.display()
+                )
+            }
+            Self::MissingWrapper { path } => {
+                write!(f, "mediator response for {} missing <resolved> wrapper", path.display())
+            }
+        }
+    }
+}
+
+/// Default model for the mediator. Sonnet — same tier as workers; conflict
+/// resolution is a focused task where Sonnet's quality is sufficient and
+/// the per-call cost stays low.
+pub const MEDIATOR_MODEL: &str = "claude-sonnet-4-6";
+
+/// Wall-clock budget per file. Conflict resolution should be quick; if a
+/// single file blows past this, escalate.
+pub const MEDIATOR_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Prompt template. Filled with the file path + 3-way contents, wrapped so
+/// the LLM's output is easy to extract. The wrapper tags are intentional
+/// — relying on the LLM to emit "just the file" is fragile; the tags let
+/// us strip preamble noise deterministically.
+pub const MEDIATOR_PROMPT_TEMPLATE: &str = "You are resolving a 3-way merge conflict for a single file. \
+You will be given the common ancestor (BASE), the current branch's version (OURS), and \
+the incoming branch's version (THEIRS). Produce a single resolved version that:
+
+1. Preserves every non-conflicting change from both sides.
+2. For changes that overlap, prefer the intent of THEIRS unless OURS clearly supersedes it.
+3. Must contain NO conflict markers (no `<<<<<<<`, `=======`, `>>>>>>>`).
+4. Must be the complete, ready-to-write file content — not a diff, not commentary.
+
+Wrap the resolved file content in exactly these tags so it can be extracted:
+
+<resolved>
+<file content here>
+</resolved>
+
+Path: {PATH}
+
+<base>
+{BASE}
+</base>
+
+<ours>
+{OURS}
+</ours>
+
+<theirs>
+{THEIRS}
+</theirs>
+
+Now emit the resolved file inside <resolved>...</resolved>. Nothing else.";
+
+/// Render the prompt for one conflict. Pure function; testable without an
+/// LLM.
+pub fn render_prompt(spec: &ConflictSpec) -> String {
+    MEDIATOR_PROMPT_TEMPLATE
+        .replace("{PATH}", &spec.path.display().to_string())
+        .replace("{BASE}", &spec.base)
+        .replace("{OURS}", &spec.ours)
+        .replace("{THEIRS}", &spec.theirs)
+}
+
+/// Extract the resolved content from the LLM's response. Returns the inner
+/// text between `<resolved>` and `</resolved>` (newlines trimmed at the
+/// boundaries). Pure function.
+pub fn extract_resolved(response: &str) -> Option<String> {
+    let start = response.find("<resolved>")?;
+    let after_open = &response[start + "<resolved>".len()..];
+    let end = after_open.find("</resolved>")?;
+    let inner = &after_open[..end];
+    // Trim a single leading newline (the prompt asks the LLM to put content
+    // on its own line after the opening tag, so a `\n` is expected there).
+    let trimmed = inner.strip_prefix('\n').unwrap_or(inner);
+    let trimmed = trimmed.strip_suffix('\n').unwrap_or(trimmed);
+    Some(trimmed.to_string())
+}
+
+/// Sanity check: no conflict markers in the resolved content. Returns the
+/// first offending marker if any.
+pub fn first_conflict_marker(content: &str) -> Option<String> {
+    for marker in ["<<<<<<<", "=======", ">>>>>>>"] {
+        for line in content.lines() {
+            if line.starts_with(marker) {
+                return Some(line.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Mediate one conflict via the supplied provider. Caller owns the
+/// provider so tests can swap in fakes.
+pub fn mediate_one(
+    provider: &dyn LlmProvider,
+    spec: &ConflictSpec,
+) -> Result<MediationResult, MediationError> {
+    let prompt = render_prompt(spec);
+    let completion = provider
+        .complete(&prompt, MEDIATOR_MODEL, MEDIATOR_TIMEOUT)
+        .ok_or(MediationError::ProviderUnavailable)?;
+    if completion.text.trim().is_empty() {
+        return Err(MediationError::EmptyResponse);
+    }
+    let Some(resolved) = extract_resolved(&completion.text) else {
+        return Err(MediationError::MissingWrapper {
+            path: spec.path.clone(),
+        });
+    };
+    if let Some(marker) = first_conflict_marker(&resolved) {
+        return Err(MediationError::MarkersLeftBehind {
+            path: spec.path.clone(),
+            first_marker: marker,
+        });
+    }
+    Ok(MediationResult {
+        path: spec.path.clone(),
+        resolved_content: resolved,
+    })
+}
+
+/// Mediate every conflict using `provider`. Pure dependency-injection
+/// variant; useful for tests that need to substitute a fake provider.
+pub fn mediate_with(
+    provider: &dyn LlmProvider,
+    conflicts: &[ConflictSpec],
+) -> Result<Vec<MediationResult>, MediationError> {
+    let mut out = Vec::with_capacity(conflicts.len());
+    for spec in conflicts {
+        out.push(mediate_one(provider, spec)?);
+    }
+    Ok(out)
+}
+
+/// Mediate every conflict. Stops at the first error so the caller (P12)
+/// can decide on a per-file retry policy rather than burning budget on
+/// later files that may depend on the earlier resolution being clean.
+pub fn mediate(
+    conflicts: &[ConflictSpec],
+) -> Result<Vec<MediationResult>, MediationError> {
+    let provider =
+        llm_provider::resolve_provider("claude").ok_or(MediationError::ProviderUnavailable)?;
+    mediate_with(provider.as_ref(), conflicts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::llm_provider::{Completion, CompletionUsage, LlmModel};
+    use std::path::PathBuf;
+    use std::sync::Mutex;
+
+    /// Fake LlmProvider that returns a canned response. Records the prompt
+    /// it was called with so tests can inspect.
+    struct FakeProvider {
+        response: Mutex<Option<String>>,
+        seen_prompts: Mutex<Vec<String>>,
+    }
+
+    impl FakeProvider {
+        fn new(response: Option<String>) -> Self {
+            Self {
+                response: Mutex::new(response),
+                seen_prompts: Mutex::new(vec![]),
+            }
+        }
+    }
+
+    impl LlmProvider for FakeProvider {
+        fn name(&self) -> &str { "fake" }
+        fn display_name(&self) -> &str { "Fake" }
+        fn is_available(&self) -> bool { true }
+        fn list_models(&self) -> Vec<LlmModel> { vec![] }
+        fn default_fast_model(&self) -> &str { "fast" }
+        fn default_standard_model(&self) -> &str { "std" }
+        fn complete(&self, prompt: &str, _model: &str, _timeout: Duration) -> Option<Completion> {
+            self.seen_prompts.lock().unwrap().push(prompt.to_string());
+            self.response.lock().unwrap().clone().map(|text| Completion {
+                text,
+                usage: Some(CompletionUsage::default()),
+            })
+        }
+    }
+
+    fn spec(path: &str, base: &str, ours: &str, theirs: &str) -> ConflictSpec {
+        ConflictSpec {
+            path: PathBuf::from(path),
+            base: base.into(),
+            ours: ours.into(),
+            theirs: theirs.into(),
+        }
+    }
+
+    #[test]
+    fn render_prompt_substitutes_all_placeholders() {
+        let s = spec("src/lib.rs", "fn old() {}\n", "fn ours() {}\n", "fn theirs() {}\n");
+        let p = render_prompt(&s);
+        assert!(p.contains("Path: src/lib.rs"));
+        assert!(p.contains("fn old() {}"));
+        assert!(p.contains("fn ours() {}"));
+        assert!(p.contains("fn theirs() {}"));
+        // No raw placeholders left.
+        assert!(!p.contains("{PATH}"));
+        assert!(!p.contains("{BASE}"));
+        assert!(!p.contains("{OURS}"));
+        assert!(!p.contains("{THEIRS}"));
+    }
+
+    #[test]
+    fn extract_resolved_pulls_inner_content() {
+        let r = "noise before\n<resolved>\nclean line\n</resolved>\nnoise after";
+        assert_eq!(extract_resolved(r).as_deref(), Some("clean line"));
+    }
+
+    #[test]
+    fn extract_resolved_returns_none_when_no_wrapper() {
+        assert!(extract_resolved("no tags here").is_none());
+        assert!(extract_resolved("<resolved>missing close").is_none());
+    }
+
+    #[test]
+    fn extract_resolved_preserves_internal_newlines() {
+        let r = "<resolved>\nline 1\nline 2\nline 3\n</resolved>";
+        assert_eq!(
+            extract_resolved(r).as_deref(),
+            Some("line 1\nline 2\nline 3")
+        );
+    }
+
+    #[test]
+    fn first_conflict_marker_detects_each_kind() {
+        assert!(first_conflict_marker("ok\nok\n").is_none());
+        assert!(first_conflict_marker("<<<<<<< HEAD\nfoo\n").is_some());
+        assert!(first_conflict_marker("foo\n=======\nbar\n").is_some());
+        assert!(first_conflict_marker("foo\n>>>>>>> branch\n").is_some());
+    }
+
+    #[test]
+    fn mediate_one_happy_path() {
+        let prov = FakeProvider::new(Some(
+            "Sure thing!\n<resolved>\nresolved content\n</resolved>".into(),
+        ));
+        let s = spec("a.txt", "base", "ours", "theirs");
+        let result = mediate_one(&prov, &s).unwrap();
+        assert_eq!(result.path, PathBuf::from("a.txt"));
+        assert_eq!(result.resolved_content, "resolved content");
+        // Provider got the rendered prompt.
+        assert_eq!(prov.seen_prompts.lock().unwrap().len(), 1);
+        assert!(prov.seen_prompts.lock().unwrap()[0].contains("Path: a.txt"));
+    }
+
+    #[test]
+    fn mediate_one_rejects_response_with_conflict_markers() {
+        let prov = FakeProvider::new(Some(
+            "<resolved>\nfoo\n<<<<<<< still here\n</resolved>".into(),
+        ));
+        let s = spec("a.txt", "b", "o", "t");
+        let err = mediate_one(&prov, &s).unwrap_err();
+        assert!(matches!(err, MediationError::MarkersLeftBehind { .. }));
+    }
+
+    #[test]
+    fn mediate_one_rejects_response_missing_wrapper() {
+        let prov = FakeProvider::new(Some("here is the file\nwithout tags".into()));
+        let s = spec("a.txt", "b", "o", "t");
+        let err = mediate_one(&prov, &s).unwrap_err();
+        assert!(matches!(err, MediationError::MissingWrapper { .. }));
+    }
+
+    #[test]
+    fn mediate_one_propagates_provider_unavailable() {
+        let prov = FakeProvider::new(None);
+        let s = spec("a.txt", "b", "o", "t");
+        let err = mediate_one(&prov, &s).unwrap_err();
+        assert!(matches!(err, MediationError::ProviderUnavailable));
+    }
+
+    #[test]
+    fn mediate_one_rejects_empty_response() {
+        let prov = FakeProvider::new(Some("   \n  ".into()));
+        let s = spec("a.txt", "b", "o", "t");
+        let err = mediate_one(&prov, &s).unwrap_err();
+        assert!(matches!(err, MediationError::EmptyResponse));
+    }
+}

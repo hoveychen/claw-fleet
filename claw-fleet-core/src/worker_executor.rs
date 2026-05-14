@@ -45,9 +45,9 @@ pub const WORKER_MODEL: &str = "claude-sonnet-4-6";
 /// Build a `WorkerSpawnSpec` for `p_item_id` in `task`. Errors when the
 /// P-item isn't in the plan.
 ///
-/// The supervisor must resolve `cwd` itself (project workspace on the task
-/// branch) and pass it in — this module is intentionally project-agnostic so
-/// the same composer can be reused once V2 lands worktree-per-item.
+/// The supervisor must resolve `cwd` itself (V2: the P-item's worktree
+/// under `~/.fleet/worktrees/<task>/<p>/`, provisioned by `crate::worktree`)
+/// and pass it in — this module is intentionally project-agnostic.
 pub fn worker_spawn_spec(
     task: &Task,
     p_item_id: &str,
@@ -90,14 +90,18 @@ pub fn compose_layer1(project_id: &str) -> String {
          {arch_block}\n\
          ## P-item Execution Constraints\n\n\
          When working on a Fleet P-item:\n\
-         - **Do not** run `cargo build` / `cargo test` / `npm run build` etc.\n\
-           Those are reserved for phase P-items so the shared `target/` cache \
-           isn't trashed by parallel workers.\n\
-         - **Do** run `cargo check --package <crate>` for compile self-checks \
-           on a single crate.\n\
+         - You are running inside an **isolated git worktree** provisioned \
+           for this P-item only. Build and test commands (`cargo build`, \
+           `cargo test`, `npm run build`, `playwright test`, etc.) are \
+           allowed and encouraged for confidence — your `target/` and \
+           `node_modules/` are private to this worktree and won't clash \
+           with parallel workers.\n\
          - Edit only files listed in `touches` of your P-item. Touching any \
            other file gets you SIGSTOPped by the touches hook and escalates \
-           to the master.\n"
+           to the master.\n\
+         - Do **not** `git commit`, `git push`, or change branches manually \
+           — the Master fast-forward-merges your worktree branch back into \
+           the task branch when you finish.\n"
     )
 }
 
@@ -403,12 +407,12 @@ mod tests {
     }
 
     #[test]
-    fn layer1_warns_about_phase_commands() {
+    fn layer1_describes_worktree_isolation_and_constraints() {
         let l1 = compose_layer1("any-project");
-        assert!(l1.contains("Do not"));
-        assert!(l1.contains("cargo build"));
-        assert!(l1.contains("cargo check"));
+        assert!(l1.contains("isolated git worktree"));
+        assert!(l1.contains("allowed and encouraged"));
         assert!(l1.contains("touches"));
+        assert!(l1.contains("Master fast-forward-merges"));
     }
 
     #[test]

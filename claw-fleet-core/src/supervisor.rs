@@ -354,6 +354,31 @@ pub fn migrate_zombie_running() -> Result<usize, String> {
     Ok(migrated)
 }
 
+/// Build the "alive worktree" set from the task store and clean up the
+/// rest. Called at backend startup (LocalBackend::new + `fleet serve`).
+///
+/// Returns the count of orphan worktree dirs that were removed, for
+/// logging.
+pub fn gc_orphan_worktrees() -> Result<usize, String> {
+    let tasks = crate::task::list_tasks(None);
+    let alive: Vec<(String, Vec<String>)> = tasks
+        .iter()
+        .filter(|t| matches!(t.status, crate::task::TaskStatus::Running))
+        .map(|t| {
+            let running_p_ids = t
+                .plan
+                .items
+                .iter()
+                .filter(|(_, p)| matches!(p.status, crate::pitem::PItemStatus::Running))
+                .map(|(id, _)| id.clone())
+                .collect::<Vec<_>>();
+            (t.id.clone(), running_p_ids)
+        })
+        .collect();
+    let reaped = crate::worktree::gc_stale(&alive)?;
+    Ok(reaped.len())
+}
+
 // ── Background tick ──────────────────────────────────────────────────────────
 
 /// One tick of the supervisor loop. Should be called every ~1s by whoever
