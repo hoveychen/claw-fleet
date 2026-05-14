@@ -27,6 +27,7 @@ pub mod llm_provider;
 pub mod master;
 pub mod llm_usage;
 pub mod memory;
+pub mod merge_mediator;
 pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
@@ -49,6 +50,7 @@ pub mod task;
 pub mod tcc;
 pub mod touches_hook;
 pub mod worker_executor;
+pub mod worktree;
 
 use std::fs;
 use session::SessionInfo;
