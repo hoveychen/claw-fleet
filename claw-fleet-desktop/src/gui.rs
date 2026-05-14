@@ -1539,6 +1539,22 @@ fn start_task(state: tauri::State<AppState>, task_id: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn add_task_material(
+    state: tauri::State<AppState>,
+    task_id: String,
+    filename: String,
+    bytes: Vec<u8>,
+    media: claw_fleet_core::task::MediaKind,
+) -> Result<String, String> {
+    let path = state
+        .backend
+        .read()
+        .unwrap()
+        .add_task_material(&task_id, &filename, bytes, media)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
 fn subscribe_task_events(
     state: tauri::State<AppState>,
     task_id: String,
@@ -3157,6 +3173,7 @@ pub fn run() {
             list_tasks,
             update_task_plan,
             start_task,
+            add_task_material,
             subscribe_task_events,
             is_fleet_daemon_installed,
             install_fleet_daemon,

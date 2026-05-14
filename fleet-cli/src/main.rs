@@ -2630,6 +2630,110 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/tasks/upload-material" if request.method() == &tiny_http::Method::Post => {
+                let task_id = match query.get("task_id") {
+                    Some(s) if !s.is_empty() => s.clone(),
+                    _ => {
+                        let body =
+                            serde_json::json!({"error": "missing task_id"}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                        continue;
+                    }
+                };
+                let raw_name = query.get("name").map(|s| s.as_str()).unwrap_or("");
+                let decoded =
+                    percent_decode_str(raw_name).decode_utf8_lossy().to_string();
+                let safe_name: String = std::path::Path::new(&decoded)
+                    .file_name()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| "material.bin".to_string());
+                let media_str = query
+                    .get("media")
+                    .cloned()
+                    .unwrap_or_else(|| "document".to_string());
+                let media: claw_fleet_core::task::MediaKind = match serde_json::from_value(
+                    serde_json::Value::String(media_str.clone()),
+                ) {
+                    Ok(m) => m,
+                    Err(_) => {
+                        let body = serde_json::json!({
+                            "error": format!("invalid media kind: {media_str}")
+                        })
+                        .to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                        continue;
+                    }
+                };
+
+                const MAX: u64 = claw_fleet_core::backend::MAX_ATTACHMENT_BYTES;
+                if let Some(len) = request.body_length() {
+                    if (len as u64) > MAX {
+                        let body = serde_json::json!({
+                            "error": format!("material too large: {len} bytes (max {MAX})")
+                        })
+                        .to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(413)
+                                .with_header(json_header),
+                        );
+                        continue;
+                    }
+                }
+                let mut body_bytes = Vec::new();
+                let mut limited =
+                    std::io::Read::take(request.as_reader(), MAX + 1);
+                let _ =
+                    std::io::Read::read_to_end(&mut limited, &mut body_bytes);
+                if (body_bytes.len() as u64) > MAX {
+                    let body = serde_json::json!({
+                        "error": format!("material too large: >{MAX} bytes")
+                    })
+                    .to_string();
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(body)
+                            .with_status_code(413)
+                            .with_header(json_header),
+                    );
+                    continue;
+                }
+
+                match claw_fleet_core::task::add_task_material(
+                    &task_id,
+                    &safe_name,
+                    &body_bytes,
+                    media,
+                ) {
+                    Ok(path) => {
+                        let body = serde_json::json!({
+                            "path": path.to_string_lossy()
+                        })
+                        .to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/tasks/events" if request.method() == &tiny_http::Method::Get => {
                 // V1 stub: returns the task id as the subscription handle. The
                 // master runtime (P19) + event router (P21) hook in here to

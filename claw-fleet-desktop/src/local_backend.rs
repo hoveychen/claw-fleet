@@ -1476,6 +1476,23 @@ impl Backend for LocalBackend {
         crate::task::create_task(input)
     }
 
+    fn add_task_material(
+        &self,
+        task_id: &str,
+        filename: &str,
+        bytes: Vec<u8>,
+        media: crate::task::MediaKind,
+    ) -> Result<std::path::PathBuf, String> {
+        if bytes.len() as u64 > crate::backend::MAX_ATTACHMENT_BYTES {
+            return Err(format!(
+                "attachment too large: {} bytes (max {})",
+                bytes.len(),
+                crate::backend::MAX_ATTACHMENT_BYTES
+            ));
+        }
+        crate::task::add_task_material(task_id, filename, &bytes, media)
+    }
+
     fn get_task(&self, task_id: &str) -> Result<crate::task::Task, String> {
         crate::task::get_task(task_id)
     }
