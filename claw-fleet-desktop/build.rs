@@ -1,23 +1,9 @@
 fn main() {
-    // FLEET_BUILD_VERSION lets build-local.sh stamp a dev version into the
-    // compiled binary without ever editing Cargo.toml; falls back to the
-    // crate's own CARGO_PKG_VERSION (e.g. CI / cargo build alone).
-    println!("cargo:rerun-if-env-changed=FLEET_BUILD_VERSION");
-    let version = resolve_build_version();
-    println!("cargo:rustc-env=FLEET_BUILD_VERSION={version}");
-
     // Ensure sidecar placeholder binaries exist so `cargo build` works in local dev.
     // In CI, the real fleet binaries are placed in binaries/ before tauri-action runs
     // and automatically overwrite these placeholders.
     ensure_sidecar_placeholders();
     tauri_build::build();
-}
-
-fn resolve_build_version() -> String {
-    std::env::var("FLEET_BUILD_VERSION")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into()))
 }
 
 fn ensure_sidecar_placeholders() {

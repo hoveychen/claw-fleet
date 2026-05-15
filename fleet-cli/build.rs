@@ -1,19 +1,13 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=FLEET_BUILD_VERSION");
-
-    // FLEET_BUILD_VERSION lets build-local.sh stamp a dev version without
-    // editing Cargo.toml; absent it, fall back to the crate's own version.
-    let version = std::env::var("FLEET_BUILD_VERSION")
-        .ok()
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into()));
-    println!("cargo:rustc-env=FLEET_BUILD_VERSION={version}");
+    println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os != "macos" {
         return;
     }
+
+    let version = std::env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR");
     let plist_path = std::path::Path::new(&out_dir).join("Info.plist");
 

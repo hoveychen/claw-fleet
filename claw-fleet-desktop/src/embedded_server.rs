@@ -219,7 +219,7 @@ fn run_server(
     };
     eprintln!(
         "[embedded-server] listening on {addr} (version {})",
-        env!("FLEET_BUILD_VERSION")
+        env!("CARGO_PKG_VERSION")
     );
     let _ = bind_result.send(Ok(()));
 
@@ -331,7 +331,7 @@ fn handle_api_request(
     match path {
         "/health" => {
             json_ok(&serde_json::json!({
-                "version": env!("FLEET_BUILD_VERSION"),
+                "version": env!("CARGO_PKG_VERSION"),
                 "status": "ok",
                 "mode": "embedded"
             }))
