@@ -97,6 +97,9 @@ html, body, #root {
   --mascot-screen-bg: #151818;
   --mascot-screen-fill: #1e2525;
 
+  --scrollbar-thumb: #3a3a3a;
+  --scrollbar-thumb-hover: #4a4a4a;
+
   color-scheme: dark;
 }
 
@@ -124,10 +127,10 @@ html, body, #root {
   --color-text: #1a1a1a;
   --color-text-secondary: #555555;
   --color-text-dim: #8a8a8a;
-  --color-border: #d0d0d0;
+  --color-border: #e0e0e0;
 
-  --color-accent: #c96040;
-  --color-accent-bright: #e07850;
+  --color-accent: #d97757;
+  --color-accent-bright: #e8916f;
   --color-accent-tool: #2563eb;
 
   /* Status badge colors — light */
@@ -186,6 +189,9 @@ html, body, #root {
   --mascot-screen-bg: #d5d5d5;
   --mascot-screen-fill: #e5e5e5;
 
+  --scrollbar-thumb: rgba(0, 0, 0, 0.22);
+  --scrollbar-thumb-hover: rgba(0, 0, 0, 0.34);
+
   color-scheme: light;
 }
 
@@ -243,5 +249,5 @@ input, button {
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #3a3a3a; border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
