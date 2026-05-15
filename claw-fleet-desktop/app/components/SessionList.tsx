@@ -1,7 +1,8 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Menu, Shield, Play, Pause, Circle, Plus } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useTasksStore, useUIStore } from "../store";
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
@@ -347,14 +348,14 @@ export function SessionList() {
               if (!isSessionView) setViewMode(lastSessionViewMode);
             }}
           >
-            <span className={styles.nav_icon}>☰</span>
+            <span className={styles.nav_icon}><Menu size={14} strokeWidth={1.5} /></span>
             <span className={styles.nav_label}>{t("view_sessions")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
             onClick={() => setViewMode("audit")}
           >
-            <span className={styles.nav_icon}>⛨</span>
+            <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
             <span className={styles.nav_label}>{t("view_audit")}</span>
             {unreadCriticalCount > 0 && (
               <span className={styles.nav_badge}>{unreadCriticalCount}</span>
@@ -401,7 +402,7 @@ export function SessionList() {
                     title={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
                     aria-label={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
                   >
-                    +
+                    <Plus size={12} strokeWidth={1.75} />
                   </button>
                 </div>
                 {projectTasks.map((tk) => {
@@ -413,10 +414,10 @@ export function SessionList() {
                     }
                     return false;
                   }).length;
-                  const statusIcon =
-                    tk.status === "running" ? "▶" :
-                    tk.status === "paused" ? "⏸" :
-                    tk.status === "ready" ? "○" :
+                  const statusIcon: ReactNode =
+                    tk.status === "running" ? <Play size={10} strokeWidth={1.75} /> :
+                    tk.status === "paused" ? <Pause size={10} strokeWidth={1.75} /> :
+                    tk.status === "ready" ? <Circle size={10} strokeWidth={1.75} /> :
                     tk.status === "planning" ? "✎" :
                     tk.status === "drafting" ? "✎" :
                     "•";
@@ -450,7 +451,7 @@ export function SessionList() {
               }}
               title={t("projects.new")}
             >
-              <span className={styles.nav_icon}>+</span>
+              <span className={styles.nav_icon}><Plus size={14} strokeWidth={1.5} /></span>
               <span className={styles.nav_label}>{t("projects.new")}</span>
             </button>
           )}

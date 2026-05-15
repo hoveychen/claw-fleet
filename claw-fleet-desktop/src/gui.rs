@@ -3154,21 +3154,6 @@ pub fn run() {
                 });
             }
 
-            // ── macOS vibrancy (frosted glass) ────────────────────────────
-            #[cfg(target_os = "macos")]
-            {
-                use tauri::window::{Color, Effect, EffectState, EffectsBuilder};
-
-                if let Some(main_win) = app.get_webview_window("main") {
-                    let _ = main_win.set_background_color(Some(Color(0, 0, 0, 0)));
-                    let effects = EffectsBuilder::new()
-                        .effect(Effect::Sidebar)
-                        .state(EffectState::Active)
-                        .build();
-                    let _ = main_win.set_effects(effects);
-                }
-            }
-
             // ── Main window minimize watcher ─────────────────────────────────
             // Emit a frontend event whenever the main window's minimized state
             // may have changed, so the decision-float window can be shown /

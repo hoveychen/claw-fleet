@@ -23,7 +23,7 @@
   z-index: 902;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 16px;
   max-width: 280px;
   display: flex;

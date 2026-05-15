@@ -402,7 +402,7 @@
   padding: 1px 4px;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 3px;
+  border-radius: 4px;
   color: var(--color-text-muted);
 }
 
@@ -432,7 +432,7 @@
   color: #b7791f;
   background: rgba(214, 158, 46, 0.12);
   padding: 4px 6px;
-  border-radius: 3px;
+  border-radius: 4px;
   font-weight: 500;
 }
 

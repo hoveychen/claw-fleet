@@ -11,8 +11,9 @@
 // pops the InboxDialog with the projectId pre-filled, and selects the new
 // task afterwards (lands you on the detail phase).
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { Play, Pause, Circle } from "lucide-react";
 import styles from "./TasksView.module.css";
 import { InboxDialog } from "./InboxDialog";
 import {
@@ -187,10 +188,10 @@ function TaskCard({
   onClick: () => void;
 }) {
   const summary = useMemo(() => summarisePlan(task), [task]);
-  const icon =
-    task.status === "running" ? "▶" :
-    task.status === "paused" ? "⏸" :
-    task.status === "ready" ? "○" :
+  const icon: ReactNode =
+    task.status === "running" ? <Play size={11} strokeWidth={1.75} /> :
+    task.status === "paused" ? <Pause size={11} strokeWidth={1.75} /> :
+    task.status === "ready" ? <Circle size={11} strokeWidth={1.75} /> :
     task.status === "planning" ? "✎" :
     task.status === "drafting" ? "✎" :
     task.status === "done" ? "✓" :

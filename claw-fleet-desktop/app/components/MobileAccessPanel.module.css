@@ -93,7 +93,7 @@
 
 .enable_btn {
   padding: 10px 28px;
-  border-radius: 10px;
+  border-radius: 8px;
   border: none;
   background: #6366f1;
   color: #fff;
@@ -170,14 +170,14 @@
   width: 100%;
   height: 6px;
   background: var(--color-bg-secondary);
-  border-radius: 3px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .progress_fill {
   height: 100%;
   background: #6366f1;
-  border-radius: 3px;
+  border-radius: 4px;
   transition: width 0.2s ease;
 }
 

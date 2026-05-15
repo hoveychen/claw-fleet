@@ -59,7 +59,7 @@
   font-size: 0.95em;
   background: var(--color-bg);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 .body pre code { background: transparent; padding: 0; }
 .body ul, .body ol { margin: 0.3em 0; padding-left: 1.4em; }

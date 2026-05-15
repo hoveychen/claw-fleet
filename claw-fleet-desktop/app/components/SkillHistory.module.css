@@ -85,7 +85,7 @@
   color: var(--tag-skill-fg);
   background: var(--tag-skill-bg);
   padding: 0 4px;
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .args {

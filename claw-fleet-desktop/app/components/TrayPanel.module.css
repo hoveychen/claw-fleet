@@ -63,7 +63,7 @@
 }
 .session_list::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 2px;
+  border-radius: 4px;
 }
 
 /* ── Session group (main + its subagents) ────────────────────────────────── */
@@ -166,13 +166,13 @@
   flex: 1;
   height: 3px;
   background: var(--color-bg-secondary);
-  border-radius: 2px;
+  border-radius: 4px;
   overflow: hidden;
 }
 
 .context_bar_fill {
   height: 100%;
-  border-radius: 2px;
+  border-radius: 4px;
   background: var(--color-accent);
   transition: width 0.3s ease;
 }
