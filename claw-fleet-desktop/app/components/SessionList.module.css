@@ -62,38 +62,44 @@
   transform: rotate(45deg);
 }
 
-/* ── Collapse / expand toggle ────────────────────────────────────────────── */
+/* ── Sidebar collapse toggle (top-right) ─────────────────────────────────── */
 
-.collapse_toggle {
-  flex-shrink: 0;
+.sidebar_toggle {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
   border: none;
   background: none;
   color: var(--color-text-dim);
   cursor: pointer;
-  padding: 6px 0;
-  font-size: 14px;
-  line-height: 1;
-  width: 100%;
-  border-top: 1px solid var(--color-border);
-  transition: background 0.12s, color 0.12s;
+  border-radius: 6px;
+  opacity: 0.75;
+  z-index: 5;
+  transition: background 0.14s, color 0.14s, opacity 0.14s;
 }
 
-.collapse_toggle:hover {
+.sidebar_toggle:hover {
   background: var(--color-bg-card-hover);
   color: var(--color-text);
+  opacity: 1;
 }
 
-:global([data-platform="macos"]) .collapse_toggle {
-  border-top-color: rgba(255, 255, 255, 0.08);
+/* macOS expanded: traffic-light row is 38px tall; align the toggle vertically
+   within that strip. */
+:global([data-platform="macos"]) .sidebar_toggle {
+  top: 6px;
+  right: 10px;
 }
 
-:global([data-platform="macos"][data-theme="light"]) .collapse_toggle {
-  border-top-color: rgba(0, 0, 0, 0.08);
-}
-
-.collapse_toggle_glyph {
-  display: inline-block;
-  font-weight: 600;
+/* macOS collapsed: sidebar starts below the traffic lights, the toggle sits
+   inside the 64px rail at top-right. */
+:global([data-platform="macos"]) .sidebar_collapsed .sidebar_toggle {
+  top: 8px;
 }
 
 /* macOS Liquid Glass: floating slab — sidebar detaches from window edges,
@@ -185,7 +191,8 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 14px 16px 10px;
+  padding: 0 16px;
+  min-height: 38px;
   flex-shrink: 0;
   position: relative;
 }
@@ -195,16 +202,6 @@
 :global([data-platform="macos"]) .header {
   padding: 0 16px 0 80px;
   height: 38px;
-  -webkit-app-region: drag;
-}
-
-.title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--color-text);
-  margin: 0;
-  flex: 1;
   -webkit-app-region: drag;
 }
 
