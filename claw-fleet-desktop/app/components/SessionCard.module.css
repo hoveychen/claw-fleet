@@ -414,14 +414,14 @@
   background: rgba(255, 255, 255, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .card {
-  background: rgba(255, 255, 255, 0.3);
+  background: rgba(255, 255, 255, 0.65);
 }
 :global([data-platform="macos"][data-theme="light"]) .card:hover {
-  background: rgba(255, 255, 255, 0.5);
+  background: rgba(255, 255, 255, 0.8);
   border-color: rgba(0, 0, 0, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .card.selected {
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.92);
 }
 :global([data-platform="macos"][data-theme="light"]) .tag_ide,
 :global([data-platform="macos"][data-theme="light"]) .tag_model,
