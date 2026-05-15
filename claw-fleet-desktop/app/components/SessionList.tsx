@@ -20,8 +20,7 @@ import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import { MobileAccessPanel } from "./MobileAccessPanel";
 import styles from "./SessionList.module.css";
-import { TokenSpeedChart } from "./TokenSpeedChart";
-import { CostSpeedChart } from "./CostSpeedChart";
+import { LiveStats } from "./LiveStats";
 import { UsagePanel } from "./UsagePanel";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { getItem, setItem } from "../storage";
@@ -498,30 +497,22 @@ export function SessionList() {
         <div className={styles.sidebar_content}>
           {viewMode !== "projects" && viewMode !== "tasks" && (
             <>
-              {/* Token Speed Chart */}
-              <div data-wizard="token-speed">
-                <TokenSpeedChart collapsed={sidebarCollapsed} />
-              </div>
-
-              {/* Cost Speed Chart (collapsed by default) — hidden in narrow rail */}
-              {!sidebarCollapsed && <CostSpeedChart />}
-
-              {/* Usage panel */}
+              <LiveStats collapsed={sidebarCollapsed} />
               <UsagePanel collapsed={sidebarCollapsed} />
             </>
           )}
 
-          {/* Mascot is global — sits at the bottom of both tabs (it draws
-              on global usage). Skipped in collapsed rail. */}
           {!sidebarCollapsed && (
-            <MascotEyes
-              dashboardMode
-              usageRing={usageRing ? {
-                percent: usageRing.overall,
-                topSource: usageRing.topSource,
-                sources: usageRing.sources,
-              } : null}
-            />
+            <div className={styles.mascot_section}>
+              <MascotEyes
+                dashboardMode
+                usageRing={usageRing ? {
+                  percent: usageRing.overall,
+                  topSource: usageRing.topSource,
+                  sources: usageRing.sources,
+                } : null}
+              />
+            </div>
           )}
         </div>
 

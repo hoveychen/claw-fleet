@@ -366,6 +366,9 @@
     "promote_project": "\u9879\u76ee CLAUDE.md",
     "promote_global": "\u5168\u5c40 CLAUDE.md (~/.claude)"
   },
+  "live": {
+    "section_title": "实时"
+  },
   "chart": {
     "title": "Token 速度",
     "unit": "tok/s",

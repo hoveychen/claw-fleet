@@ -548,6 +548,20 @@
   min-height: 0;
 }
 
+.mascot_section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border);
+}
+
+:global([data-platform="macos"]) .mascot_section {
+  border-top-color: rgba(255, 255, 255, 0.05);
+}
+
+:global([data-platform="macos"][data-theme="light"]) .mascot_section {
+  border-top-color: rgba(0, 0, 0, 0.06);
+}
+
 /* ── Footer card (user profile style) ────────────────────────────────────── */
 
 .footer {

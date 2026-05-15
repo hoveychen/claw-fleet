@@ -36,6 +36,12 @@ function formatLastUpdated(ts: number | null, t: TFunc): string {
 
 // ── Generic usage bar (Claude-style: utilization 0–1) ────────────────────────
 
+function fillClass(pct: number): string {
+  if (pct >= 85) return styles.bar_fill_critical;
+  if (pct >= 60) return styles.bar_fill_warn;
+  return styles.bar_fill;
+}
+
 function UsageBar({ label, stats }: { label: string; stats: UsageStats | null }) {
   const { t } = useTranslation();
   if (!stats) return null;
@@ -62,7 +68,7 @@ function UsageBar({ label, stats }: { label: string; stats: UsageStats | null })
         </span>
       </div>
       <div className={styles.bar_track}>
-        <div className={styles.bar_fill} style={{ width: `${Math.min(pct, 100)}%` }} />
+        <div className={fillClass(pct)} style={{ width: `${Math.min(pct, 100)}%` }} />
         {prev !== null && (
           <div className={styles.bar_prev_marker} style={{ left: `${Math.min(prev, 100)}%` }} />
         )}
@@ -110,7 +116,7 @@ function CursorUsageBar({ item }: { item: CursorUsageItem }) {
       </div>
       {pct !== null && (
         <div className={styles.bar_track}>
-          <div className={styles.bar_fill} style={{ width: `${Math.min(pct, 100)}%` }} />
+          <div className={fillClass(pct)} style={{ width: `${Math.min(pct, 100)}%` }} />
         </div>
       )}
       {item.resetsAt && (
@@ -150,7 +156,7 @@ function CodexWindowBar({ label, window }: { label: string; window: CodexRateLim
         <span className={styles.usage_pct}>{pct}%</span>
       </div>
       <div className={styles.bar_track}>
-        <div className={styles.bar_fill} style={{ width: `${Math.min(pct, 100)}%` }} />
+        <div className={fillClass(pct)} style={{ width: `${Math.min(pct, 100)}%` }} />
       </div>
       {resetIso && (
         <div className={styles.usage_footer}>
@@ -378,7 +384,7 @@ function OpenClawContextBar({ session }: { session: OpenClawSessionUsage }) {
       </div>
       {pct !== null && (
         <div className={styles.bar_track}>
-          <div className={styles.bar_fill} style={{ width: `${Math.min(pct, 100)}%` }} />
+          <div className={fillClass(pct)} style={{ width: `${Math.min(pct, 100)}%` }} />
         </div>
       )}
       <div className={styles.usage_footer}>
