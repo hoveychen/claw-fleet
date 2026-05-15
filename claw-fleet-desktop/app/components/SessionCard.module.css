@@ -17,12 +17,6 @@
   background: var(--color-bg-card-hover);
 }
 
-/* Active (running/thinking/etc.): full-row accent tint, Linear inbox-style.
-   Selected wins on specificity grounds via the next rule. */
-.card.active {
-  background: var(--color-accent-soft);
-}
-
 .card.selected {
   background: var(--color-bg-card-selected);
   box-shadow: inset 2px 0 0 var(--color-accent);
