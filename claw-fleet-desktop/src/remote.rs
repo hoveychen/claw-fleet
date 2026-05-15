@@ -639,6 +639,15 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn delete_skill(&self, skill_path: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            skill_path: &'a str,
+        }
+        self.probe
+            .post_json_ok("/skill_delete", &Req { skill_path })
+    }
+
     fn get_skill_history(
         &self,
         jsonl_path: &str,

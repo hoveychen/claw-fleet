@@ -1415,6 +1415,11 @@ fn list_skill_files(
     state.backend.read().unwrap().list_skill_files(&skill_path)
 }
 
+#[tauri::command]
+fn delete_skill(skill_path: String, state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().delete_skill(&skill_path)
+}
+
 // ── Plugins ──────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -3202,6 +3207,7 @@ pub fn run() {
             list_skills,
             get_skill_content,
             list_skill_files,
+            delete_skill,
             list_plugins,
             set_plugin_enabled,
             install_plugin,

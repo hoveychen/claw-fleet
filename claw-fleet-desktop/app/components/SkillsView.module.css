@@ -117,3 +117,25 @@
 :global([data-platform="macos"][data-theme="light"]) .tree_item_active:hover {
   background: rgba(0, 0, 0, 0.1);
 }
+
+.danger_btn {
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 5px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.danger_btn:hover:not(:disabled) {
+  color: #d05050;
+  border-color: #d05050;
+}
+
+.danger_btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

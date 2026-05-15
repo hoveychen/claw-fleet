@@ -213,7 +213,10 @@
     "read_error": "读取文件失败。",
     "reveal_in_finder": "在 Finder 中显示",
     "filter_files": "过滤文件…",
-    "no_match": "没有匹配的文件。"
+    "no_match": "没有匹配的文件。",
+    "delete": "删除",
+    "delete_confirm": "确认删除 Skill「{{name}}」？该操作会从 ~/.claude/skills/ 移除整个 Skill，无法撤销。",
+    "delete_failed": "删除失败：{{error}}"
   },
   "plugins": {
     "panel_title": "插件",
