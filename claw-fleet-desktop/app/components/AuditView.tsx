@@ -239,6 +239,7 @@ function RulesTab({ lang }: { lang: string }) {
   const [loading, setLoading] = useState(true);
   const [selectedRule, setSelectedRule] = useState<AuditRuleInfo | null>(null);
   const [showSuggest, setShowSuggest] = useState(false);
+  const [query, setQuery] = useState("");
 
   const loadRules = useCallback(async () => {
     setLoading(true);
@@ -254,9 +255,21 @@ function RulesTab({ lang }: { lang: string }) {
 
   useEffect(() => { loadRules(); }, [loadRules]);
 
+  const filteredRules = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return rules;
+    return rules.filter((r) => {
+      if (r.tag.toLowerCase().includes(q)) return true;
+      if (r.descriptionZh && r.descriptionZh.toLowerCase().includes(q)) return true;
+      if (r.descriptionEn && r.descriptionEn.toLowerCase().includes(q)) return true;
+      if (r.patterns.some((p) => p.toLowerCase().includes(q))) return true;
+      return false;
+    });
+  }, [rules, query]);
+
   const grouped = useMemo(() => {
     const map = new Map<string, AuditRuleInfo[]>();
-    for (const r of rules) {
+    for (const r of filteredRules) {
       const cat = r.category || "custom";
       if (!map.has(cat)) map.set(cat, []);
       map.get(cat)!.push(r);
@@ -271,7 +284,7 @@ function RulesTab({ lang }: { lang: string }) {
       if (!sorted.has(cat)) sorted.set(cat, rules);
     }
     return sorted;
-  }, [rules]);
+  }, [filteredRules]);
 
   const handleToggle = async (rule: AuditRuleInfo) => {
     try {
@@ -321,8 +334,15 @@ function RulesTab({ lang }: { lang: string }) {
         <button className={styles.new_rule_btn} onClick={() => setShowSuggest(true)}>
           + {t("audit.new_rule")}
         </button>
+        <input
+          type="text"
+          className={styles.rule_search_input}
+          placeholder={t("audit.rule_search_placeholder")}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <span className={styles.scan_info}>
-          {rules.length} {t("audit.tab_rules").toLowerCase()}
+          {query.trim() ? `${filteredRules.length} / ${rules.length}` : rules.length} {t("audit.tab_rules").toLowerCase()}
         </span>
       </div>
 
@@ -331,6 +351,9 @@ function RulesTab({ lang }: { lang: string }) {
         <div className={styles.event_list}>
           {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
           {!loading && rules.length === 0 && <p className={styles.empty}>{t("audit.no_rules")}</p>}
+          {!loading && rules.length > 0 && filteredRules.length === 0 && (
+            <p className={styles.empty}>{t("audit.no_matching_rules")}</p>
+          )}
           {!loading && Array.from(grouped.entries()).map(([cat, catRules]) => (
             <div key={cat} className={styles.session_group}>
               <div className={styles.category_header}>
@@ -340,18 +363,29 @@ function RulesTab({ lang }: { lang: string }) {
               {catRules.map((rule) => (
                 <div
                   key={rule.id}
-                  className={`${styles.event_row} ${selectedRule?.id === rule.id ? styles.event_row_selected : ""} ${!rule.enabled ? styles.event_row_read : ""}`}
+                  className={`${styles.event_row} ${styles.rule_row_stacked} ${selectedRule?.id === rule.id ? styles.event_row_selected : ""} ${!rule.enabled ? styles.event_row_read : ""}`}
                   onClick={() => setSelectedRule(rule)}
                 >
-                  <span className={styles.risk_badge} style={{ background: `${RISK_COLORS[rule.level]}20`, color: RISK_COLORS[rule.level] }}>
-                    {RISK_LABELS[rule.level]}
-                  </span>
-                  <span className={styles.event_command}>{rule.tag}</span>
-                  {!rule.builtin && <span className={styles.custom_badge}>{t("audit.rule_custom")}</span>}
-                  <label className={styles.toggle} onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={rule.enabled} onChange={() => handleToggle(rule)} />
-                    <span className={styles.toggle_slider} />
-                  </label>
+                  <div className={styles.rule_row_top}>
+                    <span className={styles.risk_badge} style={{ background: `${RISK_COLORS[rule.level]}20`, color: RISK_COLORS[rule.level] }}>
+                      {RISK_LABELS[rule.level]}
+                    </span>
+                    <span className={styles.event_command}>{rule.tag}</span>
+                    {!rule.builtin && <span className={styles.custom_badge}>{t("audit.rule_custom")}</span>}
+                    <label className={styles.toggle} onClick={(e) => e.stopPropagation()}>
+                      <input type="checkbox" checked={rule.enabled} onChange={() => handleToggle(rule)} />
+                      <span className={styles.toggle_slider} />
+                    </label>
+                  </div>
+                  <div className={styles.rule_row_sub}>
+                    <span className={styles.rule_desc_inline}>{desc(rule)}</span>
+                    {rule.patterns[0] && (
+                      <code className={styles.rule_pattern_preview} title={rule.patterns.join("\n")}>
+                        {rule.patterns[0]}
+                        {rule.patterns.length > 1 ? ` +${rule.patterns.length - 1}` : ""}
+                      </code>
+                    )}
+                  </div>
                 </div>
               ))}
             </div>

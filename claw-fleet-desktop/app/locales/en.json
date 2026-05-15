@@ -330,7 +330,9 @@
     "rule_level": "Level",
     "rule_category": "Category",
     "rule_description": "Description",
-    "no_rules": "No rules configured."
+    "no_rules": "No rules configured.",
+    "rule_search_placeholder": "Search rule name, pattern, or description…",
+    "no_matching_rules": "No matching rules."
   },
   "memory": {
     "panel_title": "Memory",

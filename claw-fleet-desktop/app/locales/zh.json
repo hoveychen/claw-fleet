@@ -327,7 +327,9 @@
     "rule_level": "风险等级",
     "rule_category": "分类",
     "rule_description": "说明",
-    "no_rules": "未配置规则。"
+    "no_rules": "未配置规则。",
+    "rule_search_placeholder": "搜索规则名、模式或说明…",
+    "no_matching_rules": "无匹配规则。"
   },
   "memory": {
     "panel_title": "Memory",
