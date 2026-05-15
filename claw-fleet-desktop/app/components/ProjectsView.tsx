@@ -10,6 +10,7 @@ import {
   type Project,
 } from "../store";
 import styles from "./ProjectsView.module.css";
+import { PROJECTS_FEATURE_ENABLED } from "../featureFlags";
 
 type DialogMode =
   | { type: "create" }
@@ -18,6 +19,7 @@ type DialogMode =
   | null;
 
 export function ProjectsView() {
+  if (!PROJECTS_FEATURE_ENABLED) return null;
   const { t } = useTranslation();
   const projects = useProjectsStore((s) => s.projects);
   const fleetSessions = useProjectsStore((s) => s.fleetSessions);
