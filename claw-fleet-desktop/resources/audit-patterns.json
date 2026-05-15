@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "patterns": [
     {
       "level": "critical",
@@ -154,7 +154,7 @@
     {
       "level": "medium",
       "tag": "open-external",
-      "match_mode": "command_start",
+      "match_mode": "contains",
       "patterns": ["open http", "open https", "xdg-open "]
     },
     {

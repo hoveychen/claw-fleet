@@ -22,6 +22,7 @@ import type {
   SessionPendingDecision,
 } from "../types";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
+import { StructuredCommandView } from "./StructuredCommandView";
 import styles from "./DecisionPanel.module.css";
 
 function shortId(id: string): string {
@@ -128,7 +129,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         <div className={styles.card_subtitle}>{req.aiTitle}</div>
       )}
 
-      <div className={styles.command}>{req.command}</div>
+      <StructuredCommandView command={req.command} view={req.structuredCommand} />
 
       {req.riskTags.length > 0 && (
         <div className={styles.tags}>

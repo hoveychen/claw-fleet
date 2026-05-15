@@ -4669,6 +4669,9 @@ fn cmd_guard() {
                 command_summary: guard::truncate_command(&command, 120),
                 risk_tags,
                 timestamp: chrono::Utc::now().to_rfc3339(),
+                structured_command: Some(claw_fleet_core::cmd_ast::extract_structured_view(
+                    &command,
+                )),
             };
 
             // Write request for the desktop app to pick up.

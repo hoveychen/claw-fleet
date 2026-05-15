@@ -40,6 +40,12 @@ pub struct GuardRequest {
     pub command_summary: String,
     pub risk_tags: Vec<String>,
     pub timestamp: String,
+    /// Structured view of `command` (shell AST flattened into a list of
+    /// leaves + connectors) for UI rendering.  Optional: an older CLI may
+    /// not populate it, in which case the front-end falls back to showing
+    /// the raw `command` string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub structured_command: Option<crate::cmd_ast::CommandView>,
 }
 
 /// Written by Fleet desktop app → read by `fleet guard`.
