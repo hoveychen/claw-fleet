@@ -47,7 +47,7 @@ fn check_app_version() -> version_check::VersionCheckResult {
 
 #[tauri::command]
 fn get_app_version() -> String {
-    env!("FLEET_BUILD_VERSION").to_string()
+    env!("CARGO_PKG_VERSION").to_string()
 }
 
 // ── TTS via Microsoft Edge TTS ───────────────────────────────────────────────
@@ -2393,7 +2393,7 @@ fn build_app_menu(
     // ── App submenu (macOS shows as "Claw Fleet"; ignored on Win/Linux) ─
     let about_meta = AboutMetadataBuilder::new()
         .name(Some("Claw Fleet"))
-        .version(Some(env!("FLEET_BUILD_VERSION")))
+        .version(Some(env!("CARGO_PKG_VERSION")))
         .website(Some("https://github.com/hoveychen/claw-fleet"))
         .website_label(Some("GitHub"))
         .build();

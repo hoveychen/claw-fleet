@@ -41,10 +41,13 @@ echo "==> Dev version: $DEV_VERSION"
 
 export OPENSSL_STATIC=1
 
-# Stamp the dev version through env (build.rs picks it up via FLEET_BUILD_VERSION)
-# rather than rewriting Cargo.toml — that kept invalidating cargo's fingerprint
-# and forcing a full rebuild every run.
-export FLEET_BUILD_VERSION="$DEV_VERSION"
+# Patch all Cargo.toml versions and restore on exit
+for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do
+  cp "$toml" "${toml}.bak"
+  sed -i.tmp "s/^version = \".*\"/version = \"${DEV_VERSION}\"/" "$toml"
+  rm -f "${toml}.tmp"
+done
+trap 'for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do mv "${toml}.bak" "$toml"; done' EXIT
 
 # Detect native target triple
 TARGET=$(rustc -vV | sed -n 's|host: ||p')
@@ -170,7 +173,7 @@ if [[ "$NOTARIZE" == true ]]; then
 
   echo "==> Preparing for notarization..."
   NOTARIZE_TMP=$(mktemp -d)
-  trap 'rm -rf "$NOTARIZE_TMP"' EXIT
+  trap 'rm -rf "$NOTARIZE_TMP"; for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do mv "${toml}.bak" "$toml" 2>/dev/null || true; done' EXIT
 
   echo "$APP_STORE_CONNECT_KEY" | base64 --decode > "$NOTARIZE_TMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
 
