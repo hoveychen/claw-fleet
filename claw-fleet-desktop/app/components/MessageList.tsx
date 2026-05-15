@@ -526,7 +526,7 @@ export function MessageList({ messages, isLoading, searchQuery }: Props) {
   const isWaiting = lastAssistant?.message?.stop_reason === "end_turn";
 
   if (isLoading) {
-    return <div className={styles.loading}>Loading…</div>;
+    return <div className={styles.loading}>{t("loading", "Loading…")}</div>;
   }
 
   return (
