@@ -46,6 +46,7 @@ export function SessionList() {
   const {
     viewMode,
     setViewMode,
+    lastSessionViewMode,
     setLiteMode,
     sidebarCollapsed,
     setSidebarCollapsed,
@@ -54,6 +55,7 @@ export function SessionList() {
     requestInbox,
     setShowNewProjectRequested,
   } = useUIStore();
+  const isSessionView = viewMode === "list" || viewMode === "gallery";
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const [filter, setFilter] = useState("");
@@ -61,7 +63,6 @@ export function SessionList() {
   const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
   const [launcherInitial, setLauncherInitial] = useState<SessionLauncherProps["initial"]>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [isWindows, setIsWindows] = useState(false);
   const [mobileActive, setMobileActive] = useState(false);
   const projects = useProjectsStore((s) => s.projects);
   const tasks = useTasksStore((s) => s.tasks);
@@ -155,7 +156,6 @@ export function SessionList() {
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
-    invoke<string>("get_platform").then((p) => setIsWindows(p === "windows"));
     useFleetManagedStore.getState().refresh();
     // Load audit data for the unread critical badge
     invoke<import("../types").AuditSummary>("get_audit_events")
@@ -320,28 +320,35 @@ export function SessionList() {
         className={`${styles.sidebar}${sidebarCollapsed ? ` ${styles.sidebar_collapsed}` : ""}`}
         style={{ width: effectiveWidth }}
       >
-        {/* Header — hidden on Windows (title bar already shows product name) */}
-        {!isWindows && (
-          <div className={styles.header} data-tauri-drag-region>
-            {!sidebarCollapsed && <h1 className={styles.title} data-tauri-drag-region>{t("title")}</h1>}
-          </div>
-        )}
+        {/* Empty header strip — reserves the top-right space for the collapse
+            toggle and provides a drag region around the macOS traffic lights. */}
+        <div className={styles.header} data-tauri-drag-region />
+
+        {/* Collapse / expand toggle — absolute top-right of the sidebar. */}
+        <button
+          type="button"
+          className={styles.sidebar_toggle}
+          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+          title={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+          aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
+        >
+          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
+            <rect x="10" y="2.5" width="4.5" height="11" rx="1.3" fill="currentColor" fillOpacity="0.35" stroke="none" />
+            <line x1="10" y1="2.5" x2="10" y2="13.5" />
+          </svg>
+        </button>
 
         {/* Unified nav — Monitor views, Projects rail, system tools. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
           <button
-            className={`${styles.nav_item} ${viewMode === "list" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("list")}
+            className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
+            onClick={() => {
+              if (!isSessionView) setViewMode(lastSessionViewMode);
+            }}
           >
             <span className={styles.nav_icon}>☰</span>
-            <span className={styles.nav_label}>{t("view_list")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "gallery" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("gallery")}
-          >
-            <span className={styles.nav_icon}>⊞</span>
-            <span className={styles.nav_label}>{t("view_gallery")}</span>
+            <span className={styles.nav_label}>{t("view_sessions")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
@@ -541,11 +548,10 @@ export function SessionList() {
                   onClick={(e) => { e.stopPropagation(); setLiteMode(true); }}
                   title={t("lite.enter")}
                 >
-                  {/* Dock-to-right-strip glyph — distinct from the mobile phone icon */}
+                  {/* Picture-in-picture / mini-window glyph for Lite mode */}
                   <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
-                    <rect x="10" y="2.5" width="4.5" height="11" rx="1.3" fill="currentColor" fillOpacity="0.35" stroke="none" />
-                    <line x1="10" y1="2.5" x2="10" y2="13.5" />
+                    <rect x="8.5" y="7.5" width="5" height="4.5" rx="0.8" fill="currentColor" fillOpacity="0.4" />
                   </svg>
                 </button>
                 <button
@@ -564,17 +570,6 @@ export function SessionList() {
             <span className={styles.footer_gear}>⚙</span>
           </button>
         </div>
-
-        {/* Collapse / expand toggle */}
-        <button
-          type="button"
-          className={styles.collapse_toggle}
-          onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
-          title={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
-          aria-label={sidebarCollapsed ? t("sidebar.expand") : t("sidebar.collapse")}
-        >
-          <span className={styles.collapse_toggle_glyph}>{sidebarCollapsed ? "»" : "«"}</span>
-        </button>
 
         {/* Resize handle — hidden when collapsed */}
         {!sidebarCollapsed && (
