@@ -205,6 +205,35 @@ const EYE_RIGHT_CX = 135;
 const EYE_CY = 40;
 const EYE_COLOR = "var(--color-accent)";   // brand accent color
 
+// ── Window-active gate ──────────────────────────────────────────────────────
+//
+// Returns true while the page is visible AND has window focus. Used to gate
+// idle-time animation timers (blink, gaze, bob, …) so they stop scheduling
+// state-updating ticks when the window is in the background — the WKWebView
+// would otherwise keep doing layout/style work for state nobody is looking at.
+function useIsWindowActive(): boolean {
+  const [active, setActive] = useState(
+    () =>
+      typeof document === "undefined"
+        ? true
+        : document.visibilityState !== "hidden" && document.hasFocus(),
+  );
+  useEffect(() => {
+    function recompute() {
+      setActive(document.visibilityState !== "hidden" && document.hasFocus());
+    }
+    document.addEventListener("visibilitychange", recompute);
+    window.addEventListener("focus", recompute);
+    window.addEventListener("blur", recompute);
+    return () => {
+      document.removeEventListener("visibilitychange", recompute);
+      window.removeEventListener("focus", recompute);
+      window.removeEventListener("blur", recompute);
+    };
+  }, []);
+  return active;
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export interface UsageRingSourceBreakdown {
@@ -227,6 +256,7 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
   const fleetState = useFleetState(sessions);
   const mascotRootRef = useRef<HTMLDivElement | null>(null);
   const [expanded, setExpanded] = useState(true);
+  const isWindowActive = useIsWindowActive();
 
   const [isBlinking, setIsBlinking] = useState(false);
   const [isDoubleBlink, setIsDoubleBlink] = useState(false);
@@ -254,7 +284,11 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
   const clickCooldown = useRef(false);
 
   // ── Blink ──────────────────────────────────────────────────────────────────
+  // All mascot animation effects below short-circuit when !isWindowActive so
+  // we don't burn WebContent layout cycles while the window is in the
+  // background. clearTimeout in the cleanup tears down any in-flight chain.
   useEffect(() => {
+    if (!isWindowActive) return;
     function scheduleBlink() {
       const delay = 2000 + Math.random() * 4000;
       blinkTimer.current = setTimeout(() => {
@@ -272,10 +306,11 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
     }
     scheduleBlink();
     return () => clearTimeout(blinkTimer.current);
-  }, []);
+  }, [isWindowActive]);
 
   // ── Gaze wander (moves entire eye position) ───────────────────────────────
   useEffect(() => {
+    if (!isWindowActive) return;
     const cfg = GAZE_WANDER[mood];
     function scheduleMove() {
       const delay = cfg.interval[0] + Math.random() * (cfg.interval[1] - cfg.interval[0]);
@@ -289,10 +324,11 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
     }
     scheduleMove();
     return () => clearTimeout(gazeTimer.current);
-  }, [mood]);
+  }, [mood, isWindowActive]);
 
   // ── Size pulse (subtle breathing) ──────────────────────────────────────────
   useEffect(() => {
+    if (!isWindowActive) return;
     function schedulePulse() {
       const delay = 3000 + Math.random() * 5000;
       pulseTimer.current = setTimeout(() => {
@@ -304,10 +340,11 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
     }
     schedulePulse();
     return () => clearTimeout(pulseTimer.current);
-  }, [mood]);
+  }, [mood, isWindowActive]);
 
   // ── Eye variant rotation ───────────────────────────────────────────────────
   useEffect(() => {
+    if (!isWindowActive) return;
     setEyeVariant(0);
     function scheduleVariant() {
       const delay = 4000 + Math.random() * 6000;
@@ -318,10 +355,11 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
     }
     scheduleVariant();
     return () => clearTimeout(eyeVarTimer.current);
-  }, [mood]);
+  }, [mood, isWindowActive]);
 
   // ── Quip rotation ──────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!isWindowActive) return;
     setQuipIndex(Math.floor(Math.random() * QUIP_COUNT));
     function rotateQuip() {
       quipTimer.current = setTimeout(() => {
@@ -331,10 +369,11 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
     }
     rotateQuip();
     return () => clearTimeout(quipTimer.current);
-  }, [mood]);
+  }, [mood, isWindowActive]);
 
   // ── Periodic special actions ───────────────────────────────────────────────
   useEffect(() => {
+    if (!isWindowActive) return;
     setSpecialAction("none");
     function scheduleAction() {
       const delay = 10000 + Math.random() * 10000;
@@ -349,10 +388,11 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
     }
     scheduleAction();
     return () => { clearTimeout(actionTimer.current); clearTimeout(actionEndTimer.current); };
-  }, [mood]);
+  }, [mood, isWindowActive]);
 
   // ── Body bob ───────────────────────────────────────────────────────────────
   useEffect(() => {
+    if (!isWindowActive) return;
     let frame = 0;
     function tick() {
       frame++;
@@ -361,7 +401,7 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
     }
     tick();
     return () => clearTimeout(bobTimer.current);
-  }, []);
+  }, [isWindowActive]);
 
   // ── Mood jiggle ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -375,7 +415,7 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
   const nextAttentionId = fleetState.nextAttentionId;
 
   useEffect(() => {
-    if (!dashboardMode || !nextAttentionId) {
+    if (!dashboardMode || !nextAttentionId || !isWindowActive) {
       setDashboardGaze(null);
       return;
     }
@@ -404,7 +444,7 @@ export function MascotEyes({ embedded, onQuip, suppressQuip, dashboardMode, usag
     compute();
     const id = setInterval(compute, 500);
     return () => clearInterval(id);
-  }, [dashboardMode, nextAttentionId]);
+  }, [dashboardMode, nextAttentionId, isWindowActive]);
 
   // ── Dynamic quip generation ────────────────────────────────────────────────
   const fetchQuips = useCallback(async (currentSessions: SessionInfo[]) => {

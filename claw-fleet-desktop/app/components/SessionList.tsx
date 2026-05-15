@@ -66,7 +66,6 @@ export function SessionList() {
   const tasks = useTasksStore((s) => s.tasks);
   const setSelectedProjectId = useProjectsStore((s) => s.setSelectedProjectId);
   const setSelectedTaskId = useTasksStore((s) => s.setSelectedTaskId);
-  const refreshTasks = useTasksStore((s) => s.refresh);
   const usageRing = useUsageRing();
 
   // Active tasks for the Projects-tab drill-down: anything NOT in a terminal
@@ -118,38 +117,30 @@ export function SessionList() {
     [setSelectedProjectId, setSelectedTaskId, requestInbox, setViewMode],
   );
 
-  // Poll mobile access status for the sidebar indicator.
+  // Sidebar 5s coalesced poller: mobile-access status indicator + projects
+  // store + tasks store. Three independent setInterval timers used to fire on
+  // their own 5s cadence (mobile / projects / tasks); merged into a single
+  // tick so the WebContent main thread only does one wave of state updates per
+  // 5s instead of three closely-spaced ones. Skips while the page is hidden.
   useEffect(() => {
-    const check = () => {
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled || document.visibilityState === "hidden") return;
       invoke<{ running: boolean; tunnelUrl: string | null }>("get_mobile_access_status")
-        .then((s) => setMobileActive(s.running && !!s.tunnelUrl))
+        .then((s) => { if (!cancelled) setMobileActive(s.running && !!s.tunnelUrl); })
         .catch(() => {});
-    };
-    check();
-    const interval = setInterval(check, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Keep the projects store fresh so the sidebar nav can show per-project
-  // session counts whether or not the Projects view is mounted.
-  useEffect(() => {
-    const projectsStore = useProjectsStore.getState();
-    projectsStore.refresh();
-    const interval = setInterval(() => {
       useProjectsStore.getState().refresh();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
-  // Same for the tasks store — sidebar shows the active-task drill-down even
-  // when TasksView itself isn't mounted, so we poll independently.
-  useEffect(() => {
-    refreshTasks();
-    const interval = setInterval(() => {
       useTasksStore.getState().refresh();
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [refreshTasks]);
+    };
+    // Kick off once on mount (mobile-status, projects, tasks all want a
+    // first read before the 5s wait).
+    tick();
+    const interval = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
