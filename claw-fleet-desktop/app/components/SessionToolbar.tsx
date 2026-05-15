@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { useUIStore } from "../store";
 import styles from "./SessionToolbar.module.css";
 
 interface SessionToolbarProps {
@@ -25,6 +26,8 @@ export function SessionToolbar({
   searching,
 }: SessionToolbarProps) {
   const { t } = useTranslation();
+  const viewMode = useUIStore((s) => s.viewMode);
+  const setViewMode = useUIStore((s) => s.setViewMode);
 
   return (
     <div className={styles.toolbar} data-tauri-drag-region>
@@ -56,6 +59,28 @@ export function SessionToolbar({
       >
         {showAll ? t("gallery_show_active") : t("gallery_show_all")}
       </button>
+      <div className={styles.view_toggle} role="group" aria-label={t("view_sessions")}>
+        <button
+          type="button"
+          className={`${styles.view_toggle_btn} ${viewMode === "list" ? styles.view_toggle_btn_active : ""}`}
+          onClick={() => setViewMode("list")}
+          title={t("view_mode_list_tooltip")}
+          aria-label={t("view_mode_list_tooltip")}
+          aria-pressed={viewMode === "list"}
+        >
+          ☰
+        </button>
+        <button
+          type="button"
+          className={`${styles.view_toggle_btn} ${viewMode === "gallery" ? styles.view_toggle_btn_active : ""}`}
+          onClick={() => setViewMode("gallery")}
+          title={t("view_mode_gallery_tooltip")}
+          aria-label={t("view_mode_gallery_tooltip")}
+          aria-pressed={viewMode === "gallery"}
+        >
+          ⊞
+        </button>
+      </div>
     </div>
   );
 }

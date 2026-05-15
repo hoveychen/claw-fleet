@@ -162,22 +162,24 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
-  font-size: 11px;
+  padding: 8px 14px;
+  margin-bottom: -1px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--color-text-dim);
   background: none;
   border: none;
   border-bottom: 2px solid transparent;
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.12s, border-color 0.12s;
 }
 .tab:hover {
   color: var(--color-text);
 }
 .tab_active {
-  color: var(--color-text);
-  border-bottom-color: var(--color-accent, #60a5fa);
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
 }
 
 .tab_dot {

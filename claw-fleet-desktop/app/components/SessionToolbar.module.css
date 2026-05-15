@@ -1,9 +1,8 @@
 .toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 16px;
-  padding-top: 16px;
+  gap: 16px;
+  padding: 14px 20px 12px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-sidebar);
   flex-shrink: 0;
@@ -88,4 +87,43 @@
   background: var(--color-accent);
   color: #fff;
   border-color: var(--color-accent);
+}
+
+.view_toggle {
+  display: inline-flex;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.view_toggle_btn {
+  padding: 3px 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s;
+}
+
+.view_toggle_btn + .view_toggle_btn {
+  border-left: 1px solid var(--color-border);
+}
+
+.view_toggle_btn:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.view_toggle_btn_active {
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.view_toggle_btn_active:hover {
+  background: var(--color-accent);
+  color: #fff;
 }

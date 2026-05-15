@@ -1,10 +1,16 @@
-/* Container */
-.container { padding: 24px; overflow-y: auto; height: 100%; flex: 1; min-width: 0; background: var(--color-bg); }
+/* Root — flex column so header stays put while body scrolls. */
+.root { display: flex; flex-direction: column; height: 100%; flex: 1; min-width: 0; background: var(--color-bg); }
 
-/* Tab bar */
-.tab_bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; gap: 12px; }
+/* Banner — unified with other views (14/20/12 padding, 16 gap). */
+.header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px 12px; gap: 16px; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
+
+/* Body — scrolling content area with the original 24px reading gutter. */
+.body { padding: 24px; overflow-y: auto; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+
+/* Tab bar (inside header) */
+.tab_bar { display: flex; align-items: center; gap: 12px; }
 .tab_group { display: flex; gap: 2px; background: var(--color-bg-secondary); border-radius: 8px; padding: 3px; }
-.tab { padding: 6px 14px; border: none; background: transparent; color: var(--color-text-secondary); font-size: 12px; font-weight: 500; border-radius: 6px; cursor: pointer; transition: background 0.12s, color 0.12s; white-space: nowrap; }
+.tab { padding: 5px 12px; border: none; background: transparent; color: var(--color-text-dim); font-size: 12px; font-weight: 500; border-radius: 5px; cursor: pointer; transition: background 0.12s, color 0.12s; white-space: nowrap; }
 .tab:hover { color: var(--color-text); }
 .tab_active { background: var(--color-bg-card); color: var(--color-text); font-weight: 600; }
 
