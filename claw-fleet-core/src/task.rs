@@ -770,29 +770,23 @@ fn pick_unique_branch(workspace: &Path, slug: &str) -> Result<String, String> {
 }
 
 fn git_branch_exists(workspace: &Path, branch: &str) -> Result<bool, String> {
-    let status = std::process::Command::new("git")
-        .arg("-C")
-        .arg(workspace)
-        .args(["show-ref", "--verify", "--quiet"])
-        .arg(format!("refs/heads/{branch}"))
-        .status()
-        .map_err(|e| format!("git show-ref: {e}"))?;
-    Ok(status.success())
+    let repo = git2::Repository::open(workspace)
+        .map_err(|e| format!("open git repo at {}: {}", workspace.display(), e.message()))?;
+    let exists = repo.find_branch(branch, git2::BranchType::Local).is_ok();
+    Ok(exists)
 }
 
 fn git_create_branch(workspace: &Path, branch: &str) -> Result<(), String> {
-    let out = std::process::Command::new("git")
-        .arg("-C")
-        .arg(workspace)
-        .args(["checkout", "-b", branch])
-        .output()
-        .map_err(|e| format!("git checkout -b: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git checkout -b {branch} failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
+    let repo = git2::Repository::open(workspace)
+        .map_err(|e| format!("open git repo at {}: {}", workspace.display(), e.message()))?;
+    let head_commit = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(|e| format!("read HEAD commit: {}", e.message()))?;
+    repo.branch(branch, &head_commit, false)
+        .map_err(|e| format!("create branch {branch}: {}", e.message()))?;
+    repo.set_head(&format!("refs/heads/{branch}"))
+        .map_err(|e| format!("set HEAD to {branch}: {}", e.message()))?;
     Ok(())
 }
 
@@ -987,5 +981,52 @@ mod tests {
         assert!(matches!(t.status, TaskStatus::Ready));
         assert!(t.plan.is_empty());
         assert!(t.inbox_materials.is_empty());
+    }
+
+    fn init_repo_with_first_commit(path: &Path) {
+        let repo = git2::Repository::init(path).expect("init repo");
+        let sig = git2::Signature::now("Test", "test@example.com").expect("sig");
+        let tree_oid = {
+            let tb = repo.treebuilder(None).expect("treebuilder");
+            tb.write().expect("tree write")
+        };
+        let tree = repo.find_tree(tree_oid).expect("find tree");
+        repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+            .expect("initial commit");
+    }
+
+    #[test]
+    fn git_branch_exists_returns_false_for_missing_branch() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        init_repo_with_first_commit(tmp.path());
+        let exists = git_branch_exists(tmp.path(), "nonexistent").unwrap();
+        assert!(!exists);
+    }
+
+    #[test]
+    fn git_create_branch_creates_and_moves_head() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        init_repo_with_first_commit(tmp.path());
+        git_create_branch(tmp.path(), "fleet/demo").unwrap();
+        assert!(git_branch_exists(tmp.path(), "fleet/demo").unwrap());
+        let repo = git2::Repository::open(tmp.path()).unwrap();
+        let head = repo.head().unwrap();
+        assert_eq!(head.shorthand(), Some("fleet/demo"));
+    }
+
+    #[test]
+    fn git_create_branch_errors_on_duplicate() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        init_repo_with_first_commit(tmp.path());
+        git_create_branch(tmp.path(), "fleet/dup").unwrap();
+        let second = git_create_branch(tmp.path(), "fleet/dup");
+        assert!(second.is_err(), "duplicate branch should error");
+    }
+
+    #[test]
+    fn git_branch_exists_errors_when_not_a_repo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let result = git_branch_exists(tmp.path(), "any");
+        assert!(result.is_err());
     }
 }

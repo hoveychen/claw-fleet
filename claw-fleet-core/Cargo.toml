@@ -24,6 +24,7 @@ sha2 = "0.10"
 base64 = "0.22"
 conch-parser = "0.1.1"
 shell-words = "1.1.1"
+git2 = { version = "0.18", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
