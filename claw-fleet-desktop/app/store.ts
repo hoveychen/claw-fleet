@@ -566,8 +566,6 @@ export const useAuditStore = create<AuditState>((set, get) => ({
 
 // ── Report store ────────────────────────────────────────────────────────────
 
-type ReportTab = "insights" | "daily";
-
 interface ReportState {
   currentReport: DailyReport | null;
   heatmapData: DailyReportStats[];
@@ -575,9 +573,8 @@ interface ReportState {
   loading: boolean;
   generatingSummary: boolean;
   generatingLessons: boolean;
-  reportTab: ReportTab;
 
-  // Timeline (insights feed)
+  // Timeline (earlier-days feed below the selected-day detail)
   timelineReports: DailyReport[];
   timelineLoading: boolean;
   timelineHasMore: boolean;
@@ -589,7 +586,6 @@ interface ReportState {
   generateSummary: (date: string) => Promise<void>;
   generateLessons: (date: string) => Promise<void>;
   appendLessonToClaudeMd: (lesson: Lesson) => Promise<void>;
-  setReportTab: (tab: ReportTab) => void;
   loadTimelinePage: () => Promise<void>;
   resetTimeline: () => void;
 }
@@ -609,7 +605,6 @@ export const useReportStore = create<ReportState>((set, get) => ({
   loading: false,
   generatingSummary: false,
   generatingLessons: false,
-  reportTab: "insights",
 
   timelineReports: [],
   timelineLoading: false,
@@ -617,7 +612,7 @@ export const useReportStore = create<ReportState>((set, get) => ({
   timelineCursor: 0,
 
   loadReport: async (date: string) => {
-    set({ loading: true, selectedDate: date, reportTab: "daily" });
+    set({ loading: true, selectedDate: date });
     try {
       const report = await invoke<DailyReport | null>("get_daily_report", { date });
       if (report) {
@@ -687,17 +682,16 @@ export const useReportStore = create<ReportState>((set, get) => ({
     await invoke<void>("append_lesson_to_claude_md", { lesson });
   },
 
-  setReportTab: (tab) => set({ reportTab: tab }),
-
   resetTimeline: () => set({ timelineReports: [], timelineCursor: 0, timelineHasMore: true }),
 
   loadTimelinePage: async () => {
-    const { heatmapData, timelineCursor, timelineLoading, timelineHasMore } = get();
+    const { heatmapData, timelineCursor, timelineLoading, timelineHasMore, selectedDate } = get();
     if (timelineLoading || !timelineHasMore) return;
 
-    // Get dates with data, sorted descending (most recent first)
+    // Get dates with data, strictly before the selected day (which lives in the
+    // detail region above the timeline), sorted descending (most recent first).
     const sortedDates = [...heatmapData]
-      .filter((s) => s.totalTokens > 0 || s.totalSessions > 0)
+      .filter((s) => (s.totalTokens > 0 || s.totalSessions > 0) && s.date < selectedDate)
       .sort((a, b) => b.date.localeCompare(a.date))
       .map((s) => s.date);
 
