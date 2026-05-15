@@ -1194,6 +1194,51 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
     }
 }
 
+// ── Task-title reconciliation helper ──────────────────────────────────────────
+
+impl LocalBackend {
+    /// For each task with `title_auto = true` and a bound `master_session_id`,
+    /// overwrite the in-memory `title` with the master session's `aiTitle`
+    /// when one is available, and persist the change. Tasks where the user
+    /// edited the title (`title_auto = false`) are left untouched.
+    ///
+    /// Cost is O(tasks + sessions): the LocalBackend already holds a cached
+    /// session list, so this does no disk scan. Skipped early when no task
+    /// is auto-titled.
+    fn reconcile_titles_from_master_sessions(&self, tasks: &mut [crate::task::Task]) {
+        if !tasks
+            .iter()
+            .any(|t| t.title_auto && t.master_session_id.is_some())
+        {
+            return;
+        }
+        let sessions = self.sessions.lock().unwrap();
+        let title_by_sid: std::collections::HashMap<&str, &str> = sessions
+            .iter()
+            .filter_map(|s| s.ai_title.as_deref().map(|t| (s.id.as_str(), t)))
+            .collect();
+        for t in tasks.iter_mut() {
+            if !t.title_auto {
+                continue;
+            }
+            let Some(sid) = t.master_session_id.as_deref() else {
+                continue;
+            };
+            let Some(ai) = title_by_sid.get(sid) else {
+                continue;
+            };
+            if t.title == *ai {
+                continue;
+            }
+            // Best-effort persist; on failure keep the disk copy and leave the
+            // in-memory clone alone so the next reconcile retries.
+            if crate::task::set_task_title(&t.id, ai, true).is_ok() {
+                t.title = (*ai).to_string();
+            }
+        }
+    }
+}
+
 // ── Backend impl ──────────────────────────────────────────────────────────────
 
 impl Backend for LocalBackend {
@@ -1494,11 +1539,19 @@ impl Backend for LocalBackend {
     }
 
     fn get_task(&self, task_id: &str) -> Result<crate::task::Task, String> {
-        crate::task::get_task(task_id)
+        let mut task = crate::task::get_task(task_id)?;
+        if task.title_auto {
+            let mut one = vec![task];
+            self.reconcile_titles_from_master_sessions(&mut one);
+            task = one.pop().unwrap();
+        }
+        Ok(task)
     }
 
     fn list_tasks(&self, project_id: Option<&str>) -> Vec<crate::task::Task> {
-        crate::task::list_tasks(project_id)
+        let mut tasks = crate::task::list_tasks(project_id);
+        self.reconcile_titles_from_master_sessions(&mut tasks);
+        tasks
     }
 
     fn update_plan(&self, task_id: &str, plan: crate::plan::DagPlan) -> Result<(), String> {
@@ -1507,6 +1560,10 @@ impl Backend for LocalBackend {
 
     fn start_task(&self, task_id: &str) -> Result<(), String> {
         crate::task::start_task(task_id)
+    }
+
+    fn set_task_title(&self, task_id: &str, new_title: &str) -> Result<(), String> {
+        crate::task::set_task_title(task_id, new_title, false)
     }
 
     fn subscribe_task_events(&self, task_id: &str) -> Result<String, String> {

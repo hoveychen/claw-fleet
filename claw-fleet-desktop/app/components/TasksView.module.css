@@ -1,4 +1,6 @@
 .root {
+  flex: 1;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -211,6 +213,38 @@
   margin: 0;
   font-size: 16px;
   font-weight: 600;
+  cursor: text;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+}
+
+.task_detail_title:hover {
+  border-color: var(--border-subtle, rgba(0, 0, 0, 0.12));
+  background: var(--row-hover-bg, rgba(0, 0, 0, 0.03));
+}
+
+.task_detail_title_input {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: inherit;
+  padding: 1px 4px;
+  border: 1px solid var(--accent, #c97064);
+  border-radius: 4px;
+  background: var(--input-bg, rgba(255, 255, 255, 0.06));
+  color: inherit;
+  min-width: 240px;
+  outline: none;
+}
+
+.title_auto_chip {
+  font-size: 11px;
+  opacity: 0.55;
+  font-weight: 400;
 }
 
 .detail_header_right {
@@ -245,6 +279,18 @@
   text-align: center;
   color: var(--color-text-muted);
   font-size: 12px;
+}
+
+.error {
+  margin: 8px 16px 0;
+  color: #dc2626;
+  font-size: 12px;
+  padding: 6px 10px;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .task_detail {

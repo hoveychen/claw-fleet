@@ -44,6 +44,13 @@ pub struct Task {
     /// task. `None` before start, `Some` once `start_task` spawns master.
     #[serde(default)]
     pub master_session_id: Option<String>,
+    /// `true` if `title` is a system-generated placeholder that should be
+    /// replaced by the master session's `aiTitle` once available. Flips to
+    /// `false` the moment the user edits the title manually. Legacy task
+    /// JSONs (where the field is missing) deserialize to `false` so the
+    /// human-typed title from the old InboxDialog is never overwritten.
+    #[serde(default)]
+    pub title_auto: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -98,6 +105,11 @@ pub enum MediaKind {
 #[serde(rename_all = "camelCase")]
 pub struct TaskInput {
     pub project_id: ProjectId,
+    /// Optional in the wire format. When blank, `create_task` derives a
+    /// placeholder from `description` (or "未命名任务" if both are empty)
+    /// and flags the resulting task `title_auto = true` so the master
+    /// session's aiTitle later overwrites it.
+    #[serde(default)]
     pub title: String,
     #[serde(default)]
     pub description: String,
@@ -159,6 +171,7 @@ impl Task {
             completed_at: None,
             task_branch: None,
             master_session_id: None,
+            title_auto: false,
         }
     }
 
@@ -222,14 +235,80 @@ fn write_task_atomic(task: &Task) -> Result<(), String> {
 
 /// Create a new task in `Drafting` status. Persists `<id>.json` and creates
 /// the `materials/` directory. The `task_id` is a fresh UUID v4.
+///
+/// Title resolution:
+/// - `input.title` is `Some(non-blank)` → use verbatim, `title_auto = false`.
+/// - Otherwise → derive a placeholder from `description` (first line, ≤60
+///   chars), or `"未命名任务"` if both are blank, and set `title_auto = true`
+///   so the master session's aiTitle later overwrites it.
 pub fn create_task(input: TaskInput) -> Result<Task, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
-    let mut task = Task::drafting(id, input.project_id, input.title, now);
+    let (title, title_auto) = resolve_initial_title(&input.title, &input.description);
+    let mut task = Task::drafting(id, input.project_id, title, now);
     task.description = input.description;
+    task.title_auto = title_auto;
     fs::create_dir_all(task_materials_dir(&task.id)?).map_err(|e| format!("mkdir materials: {e}"))?;
     write_task_atomic(&task)?;
     Ok(task)
+}
+
+/// (placeholder_title, title_auto). Trims input, falls back to description
+/// first-line, then to `"未命名任务"`.
+fn resolve_initial_title(user_title: &str, description: &str) -> (String, bool) {
+    let trimmed = user_title.trim();
+    if !trimmed.is_empty() {
+        return (trimmed.to_string(), false);
+    }
+    let from_desc = description
+        .lines()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty())
+        .map(|l| {
+            // Truncate at a char boundary, not a byte boundary — CJK input is common here.
+            let mut end = l.len();
+            if l.chars().count() > 60 {
+                end = l
+                    .char_indices()
+                    .nth(60)
+                    .map(|(i, _)| i)
+                    .unwrap_or(l.len());
+            }
+            l[..end].to_string()
+        });
+    match from_desc {
+        Some(s) => (s, true),
+        None => ("未命名任务".to_string(), true),
+    }
+}
+
+/// Replace a task's title. When `auto` is `false`, also clears `title_auto`
+/// so future ai-title sync passes will not overwrite the new value. When
+/// `auto` is `true`, only writes if `title_auto` is currently `true` — used
+/// by the master-session aiTitle reconcile path to avoid clobbering a
+/// user-edited title.
+pub fn set_task_title(task_id: &str, new_title: &str, auto: bool) -> Result<(), String> {
+    let trimmed = new_title.trim();
+    if trimmed.is_empty() {
+        return Err("title cannot be empty".to_string());
+    }
+    let lock = task_write_lock(task_id);
+    let _g = lock.lock().expect("task write mutex poisoned");
+    let mut task = get_task(task_id)?;
+    if auto {
+        if !task.title_auto {
+            return Ok(());
+        }
+        if task.title == trimmed {
+            return Ok(());
+        }
+        task.title = trimmed.to_string();
+        // Keep title_auto=true so subsequent ai-title revisions still flow through.
+    } else {
+        task.title = trimmed.to_string();
+        task.title_auto = false;
+    }
+    write_task_atomic(&task)
 }
 
 /// Read a single task by id.
@@ -858,6 +937,39 @@ mod tests {
             let back: TaskEvent = serde_json::from_str(&json).unwrap();
             assert_eq!(ev, back);
         }
+    }
+
+    #[test]
+    fn resolve_initial_title_prefers_user_title() {
+        let (title, auto) = resolve_initial_title("My task", "ignored");
+        assert_eq!(title, "My task");
+        assert!(!auto);
+    }
+
+    #[test]
+    fn resolve_initial_title_falls_back_to_description_first_line() {
+        let (title, auto) = resolve_initial_title(
+            "",
+            "实现书签 UI\n详细描述\n第三行",
+        );
+        assert_eq!(title, "实现书签 UI");
+        assert!(auto);
+    }
+
+    #[test]
+    fn resolve_initial_title_truncates_long_description_at_char_boundary() {
+        let desc = "中".repeat(120);
+        let (title, auto) = resolve_initial_title("", &desc);
+        assert_eq!(title.chars().count(), 60);
+        assert!(title.is_char_boundary(title.len()));
+        assert!(auto);
+    }
+
+    #[test]
+    fn resolve_initial_title_defaults_when_all_blank() {
+        let (title, auto) = resolve_initial_title("   ", "\n\n   ");
+        assert_eq!(title, "未命名任务");
+        assert!(auto);
     }
 
     #[test]

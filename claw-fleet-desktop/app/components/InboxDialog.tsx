@@ -1,13 +1,15 @@
 // Inbox dialog: entry point for creating a new task.
 //
-// Users pick a project, type a title + description, optionally drop /
-// paste / pick files as inbox materials. Hitting "Create task" creates
-// the task in `Drafting` status and uploads each pending material before
-// handing the task back to the parent.
+// Users pick a project, type a description, and optionally drop / paste /
+// pick files as inbox materials. The title is not a user input — the
+// backend seeds a placeholder from the description, and the master
+// session's `aiTitle` later overwrites it via the LocalBackend reconcile
+// pass. Renaming happens on the detail page through `update_task_title`.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import styles from "./InboxDialog.module.css";
 import type { Project } from "../store";
 import type { MediaKind, Task, TaskInput } from "../types";
@@ -33,6 +35,31 @@ function inferMedia(file: File, fromPaste: boolean): MediaKind {
   return "document";
 }
 
+const IMAGE_EXTS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "bmp",
+  "svg",
+  "ico",
+  "heic",
+]);
+
+function mimeFromName(name: string): string {
+  const dot = name.lastIndexOf(".");
+  if (dot < 0) return "application/octet-stream";
+  const ext = name.slice(dot + 1).toLowerCase();
+  if (IMAGE_EXTS.has(ext)) return `image/${ext === "jpg" ? "jpeg" : ext}`;
+  return "application/octet-stream";
+}
+
+function basename(p: string): string {
+  const m = p.match(/[^/\\]+$/);
+  return m ? m[0] : p;
+}
+
 let pmCounter = 0;
 function nextPmId(): string {
   pmCounter += 1;
@@ -44,17 +71,15 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
   const [projectId, setProjectId] = useState(
     defaultProjectId ?? projects[0]?.id ?? "",
   );
-  const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [materials, setMaterials] = useState<PendingMaterial[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const titleRef = useRef<HTMLInputElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    titleRef.current?.focus();
+    descriptionRef.current?.focus();
   }, []);
 
   useEffect(() => {
@@ -76,7 +101,7 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const canSubmit = projectId && title.trim().length > 0 && !submitting;
+  const canSubmit = projectId && description.trim().length > 0 && !submitting;
 
   const addFiles = (files: FileList | File[], fromPaste: boolean) => {
     const incoming: PendingMaterial[] = [];
@@ -108,6 +133,32 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
     }
   };
 
+  const pickFiles = async () => {
+    if (submitting) return;
+    const proj = projects.find((p) => p.id === projectId);
+    const defaultPath = proj?.workspace?.trim() || undefined;
+    try {
+      const picked = await openDialog({
+        multiple: true,
+        directory: false,
+        defaultPath,
+      });
+      if (picked == null) return;
+      const paths = Array.isArray(picked) ? picked : [picked];
+      const files: File[] = [];
+      for (const raw of paths) {
+        const path = typeof raw === "string" ? raw : String(raw);
+        const bytes = await invoke<number[]>("read_local_file_bytes", { path });
+        const u8 = new Uint8Array(bytes);
+        const name = basename(path);
+        files.push(new File([u8], name, { type: mimeFromName(name) }));
+      }
+      if (files.length > 0) addFiles(files, false);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
   const onPaste = (e: React.ClipboardEvent) => {
     if (submitting) return;
     const items = e.clipboardData?.items;
@@ -132,7 +183,6 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
     try {
       const input: TaskInput = {
         projectId,
-        title: title.trim(),
         description: description.trim(),
       };
       const task = await invoke<Task>("create_task", { input });
@@ -209,22 +259,11 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
         )}
 
         <label className={styles.field}>
-          <span className={styles.label}>{t("inbox.task_title", "Title")}</span>
-          <input
-            ref={titleRef}
-            className={styles.input}
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder={t("inbox.title_placeholder", "Add bookmarks UI")}
-            disabled={submitting}
-          />
-        </label>
-
-        <label className={styles.field}>
           <span className={styles.label}>
             {t("inbox.description", "What needs to happen?")}
           </span>
           <textarea
+            ref={descriptionRef}
             className={styles.textarea}
             rows={5}
             value={description}
@@ -289,23 +328,11 @@ export function InboxDialog({ projects, defaultProjectId, onCreated, onCancel }:
             <button
               type="button"
               className={styles.materials_add}
-              onClick={() => fileInputRef.current?.click()}
+              onClick={pickFiles}
               disabled={submitting}
             >
               {t("inbox.materials_add", "+ Add file")}
             </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              multiple
-              className={styles.file_input_hidden}
-              onChange={(e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                  addFiles(e.target.files, false);
-                }
-                e.target.value = "";
-              }}
-            />
           </div>
         </div>
 

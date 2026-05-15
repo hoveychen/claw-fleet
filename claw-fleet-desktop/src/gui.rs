@@ -1061,6 +1061,22 @@ fn stage_pasted_attachment(bytes: Vec<u8>, extension: String) -> Result<String, 
     Ok(dest.to_string_lossy().into_owned())
 }
 
+/// Reads the contents of an arbitrary local file path so the renderer can
+/// turn a `plugin-dialog` selection into the same `bytes` payload that the
+/// existing paste / drag-drop path produces.
+#[tauri::command]
+fn read_local_file_bytes(path: String) -> Result<Vec<u8>, String> {
+    let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    if (bytes.len() as u64) > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
+        return Err(format!(
+            "file too large: {} bytes (max {})",
+            bytes.len(),
+            claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
+        ));
+    }
+    Ok(bytes)
+}
+
 // ── Plan approval (ExitPlanMode interception) ───────────────────────────────
 
 #[tauri::command]
@@ -1557,6 +1573,19 @@ fn update_task_plan(
 #[tauri::command]
 fn start_task(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
     state.backend.read().unwrap().start_task(&task_id)
+}
+
+#[tauri::command]
+fn update_task_title(
+    state: tauri::State<AppState>,
+    task_id: String,
+    title: String,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .set_task_title(&task_id, &title)
 }
 
 #[tauri::command]
@@ -3194,6 +3223,7 @@ pub fn run() {
             list_tasks,
             update_task_plan,
             start_task,
+            update_task_title,
             add_task_material,
             subscribe_task_events,
             is_fleet_daemon_installed,
@@ -3221,6 +3251,7 @@ pub fn run() {
             respond_to_elicitation,
             upload_elicitation_attachment,
             stage_pasted_attachment,
+            read_local_file_bytes,
             apply_plan_approval_hook,
             remove_plan_approval_hook,
             list_pending_plan_approvals,

@@ -692,11 +692,17 @@ export interface Task {
   completedAt?: number | null;
   taskBranch?: string | null;
   masterSessionId?: string | null;
+  /** True while `title` is a system-generated placeholder that the master
+   * session's `aiTitle` may still overwrite. Flips to false the moment the
+   * user edits the title via `update_task_title`. */
+  titleAuto?: boolean;
 }
 
 export interface TaskInput {
   projectId: string;
-  title: string;
+  /** Optional. When omitted the backend derives a placeholder from
+   * `description` and flips `titleAuto = true`. */
+  title?: string;
   description?: string;
 }
 

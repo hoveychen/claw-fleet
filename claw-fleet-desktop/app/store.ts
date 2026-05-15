@@ -255,6 +255,7 @@ interface TasksState {
   refresh: (projectId?: string) => Promise<void>;
   createTask: (input: TaskInput) => Promise<Task>;
   startTask: (taskId: string) => Promise<void>;
+  updateTaskTitle: (taskId: string, title: string) => Promise<void>;
 }
 
 export const useTasksStore = create<TasksState>((set, get) => ({
@@ -281,6 +282,14 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     const fresh = await invoke<Task>("get_task", { taskId });
     set({
       tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
+    });
+  },
+  updateTaskTitle: async (taskId, title) => {
+    await invoke("update_task_title", { taskId, title });
+    set({
+      tasks: get().tasks.map((t) =>
+        t.id === taskId ? { ...t, title, titleAuto: false } : t,
+      ),
     });
   },
 }));
