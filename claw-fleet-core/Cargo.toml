@@ -22,6 +22,8 @@ uuid = { version = "1", features = ["v4"] }
 zstd = "0.13"
 sha2 = "0.10"
 base64 = "0.22"
+conch-parser = "0.1.1"
+shell-words = "1.1.1"
 
 [dev-dependencies]
 tempfile = "3"

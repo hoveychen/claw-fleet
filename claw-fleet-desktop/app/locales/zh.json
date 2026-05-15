@@ -1333,7 +1333,7 @@
     "allow": "允许",
     "block": "阻止",
     "always_allow": "始终允许",
-    "always_allow_hint": "今后以 {{prefix}} 开头的命令直接放行不再询问",
+    "always_allow_hint": "今后凡是调用 {{prefix}} 的命令（含 && / ; / | / 子 shell / bash -c 内嵌）直接放行不再询问",
     "queue": "还有 {{count}} 条待处理",
     "allow_rules_title": "始终允许规则",
     "allow_rules_empty": "还没有「始终允许」规则——在 guard 卡上点「始终允许」即可累积。",
@@ -1456,5 +1456,15 @@
     "provider_cloudflare": "Cloudflare",
     "provider_localtunnel": "localtunnel",
     "china_hint": "检测到你在中国大陆：trycloudflare.com 在国内常常慢或不可达，自动模式会优先尝试 localtunnel。"
+  },
+  "command": {
+    "nested": {
+      "bash": "嵌入 bash -c",
+      "sh": "嵌入 sh -c",
+      "zsh": "嵌入 zsh -c",
+      "python": "嵌入 python -c",
+      "node": "嵌入 node -e",
+      "eval": "嵌入 eval"
+    }
   }
 }

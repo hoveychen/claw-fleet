@@ -72,24 +72,18 @@ pub enum MatchMode {
     CommandStart,
 }
 
-/// Returns `true` if `pattern` appears at a shell command boundary inside
-/// `cmd`.  A command boundary is the start of the string or a position
-/// preceded (after trimming whitespace) by a shell metacharacter.
+/// Returns `true` if `pattern` appears at the start of some SimpleCommand
+/// reachable from `cmd`'s shell AST.  The pattern is tokenised with
+/// `shell-words` (so trailing whitespace is harmless) and compared as whole
+/// tokens against each SimpleCommand's argv — including those inside
+/// `&&`/`||`/`;`/`|`, subshells, brace groups, command substitutions, and
+/// the script argument of `bash -c` / `sh -c` / `eval`.
+///
+/// This delegates to [`crate::cmd_ast::cmd_matches_rule`] so the audit-risk
+/// detector and the guard allow-list share one source of truth for "command
+/// X appears in this shell expression".
 fn matches_command_start(cmd: &str, pattern: &str) -> bool {
-    for (i, _) in cmd.match_indices(pattern) {
-        if i == 0 {
-            return true;
-        }
-        let prev = cmd.as_bytes()[i - 1];
-        // The pattern must be preceded by whitespace or a shell metacharacter.
-        // This prevents "nc " from matching inside "func " (preceded by 'u'),
-        // while still allowing "sudo curl " (preceded by space) and
-        // "echo | nc " (preceded by space after pipe).
-        if matches!(prev, b' ' | b'\t' | b'\n' | b'|' | b';' | b'&' | b'(' | b'`') {
-            return true;
-        }
-    }
-    false
+    crate::cmd_ast::cmd_matches_rule(cmd, pattern)
 }
 
 // ── Runtime pattern types ───────────────────────────────────────────────────
@@ -556,7 +550,10 @@ fn builtin_patterns() -> Vec<RuntimeRiskPattern> {
             id: "open-external".into(),
             level: AuditRiskLevel::Medium,
             tag: "open-external".into(),
-            match_mode: MatchMode::CommandStart,
+            // Substring match: AST tokenisation can't see `http` as a prefix of
+            // `https://...`, but the intent of this rule is "opening a URL",
+            // so we keep the original substring behaviour for this one.
+            match_mode: MatchMode::Contains,
             patterns: vec!["open http".into(), "open https".into(), "xdg-open ".into()],
             description_en: "Detects opening URLs or applications externally. An agent could open phishing pages, trigger OAuth flows, or launch unwanted applications.".into(),
             description_zh: "检测在外部打开 URL 或应用程序。代理可能打开钓鱼页面、触发 OAuth 流程或启动不需要的应用。".into(),
@@ -973,15 +970,17 @@ pub fn delete_custom_rule(id: &str) -> Result<(), String> {
 // be unit-tested without touching the filesystem.  The public wrappers below
 // add load/save.
 
-/// Returns `true` if `prefix` matches `cmd` at a whitespace-bounded position:
-/// after trimming leading whitespace, the command must either equal the prefix
-/// or be `prefix` followed by a whitespace character.
+/// Returns `true` if `prefix` matches any `SimpleCommand` parsed out of
+/// `cmd`'s shell AST.  The prefix is tokenised with `shell-words` and
+/// compared token-by-token against the argv of every SimpleCommand reachable
+/// from the input — including those nested inside `&&`/`||`/`;`/`|`, subshells
+/// `( ... )`, brace groups `{ ... }`, command substitutions `$(...)` /
+/// backticks, and the script argument of `bash -c` / `sh -c` / `eval`.
+///
+/// Token boundaries are honoured: prefix `git push` matches `git push origin`
+/// but NOT `git pushdaemon`.
 pub fn guard_prefix_matches(cmd: &str, prefix: &str) -> bool {
-    let trimmed = cmd.trim_start();
-    match trimmed.strip_prefix(prefix) {
-        Some(rest) => rest.is_empty() || rest.starts_with(|c: char| c.is_whitespace()),
-        None => false,
-    }
+    crate::cmd_ast::cmd_matches_rule(cmd, prefix)
 }
 
 /// Find the first guard allow rule whose prefix matches `cmd`, if any.
@@ -1350,8 +1349,18 @@ mod tests {
     use super::*;
 
     /// Reset the pattern cache before each test so we always use builtins.
+    /// Bypasses any user-side `~/.fleet/fleet-audit-patterns.json` by directly
+    /// seeding the cache with `builtin_patterns()` — otherwise tests on a
+    /// developer machine pick up a stale on-disk copy that doesn't reflect
+    /// changes to the builtin source.
     fn reset() {
-        reload_patterns();
+        *PATTERN_CACHE.lock().unwrap() = Some(PatternCache {
+            patterns: builtin_patterns(),
+            python_patterns: builtin_python_patterns(),
+            file_mtime: None,
+            user_rules_mtime: None,
+            last_check: std::time::Instant::now(),
+        });
     }
 
     // ── Command-start matching unit tests ───────────────────────────────────
@@ -1783,6 +1792,33 @@ mod tests {
     fn guard_prefix_no_match_when_different() {
         assert!(!guard_prefix_matches("ls -la", "git push"));
         assert!(!guard_prefix_matches("", "git push"));
+    }
+
+    #[test]
+    fn guard_prefix_matches_through_shell_constructs() {
+        // New AST semantics: a guard rule that names a command should match it
+        // wherever that command appears in a compound shell expression.
+        assert!(guard_prefix_matches(
+            "sleep 2 && git push origin main",
+            "git push"
+        ));
+        assert!(guard_prefix_matches("false || git push", "git push"));
+        assert!(guard_prefix_matches("echo hi; git push", "git push"));
+        assert!(guard_prefix_matches("(git push)", "git push"));
+        assert!(guard_prefix_matches("{ git push; }", "git push"));
+        assert!(guard_prefix_matches(r#"bash -c "git push""#, "git push"));
+        assert!(guard_prefix_matches(r#"eval "git push""#, "git push"));
+        assert!(guard_prefix_matches("echo $(git push)", "git push"));
+    }
+
+    #[test]
+    fn guard_prefix_still_rejects_partial_token_in_compound() {
+        // Even inside a compound, `git pushdaemon` must not be allowed by a
+        // `git push` rule.
+        assert!(!guard_prefix_matches(
+            "sleep 2 && git pushdaemon foo",
+            "git push"
+        ));
     }
 
     #[test]

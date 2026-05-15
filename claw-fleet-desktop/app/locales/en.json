@@ -1336,7 +1336,7 @@
     "allow": "Allow",
     "block": "Block",
     "always_allow": "Always allow",
-    "always_allow_hint": "Future commands starting with {{prefix}} will be allowed without asking",
+    "always_allow_hint": "Any command invoking {{prefix}} will be allowed without asking — including inside &&/;/|, subshells, and bash -c \"...\"",
     "queue": "{{count}} more pending",
     "allow_rules_title": "Always-allow rules",
     "allow_rules_empty": "No always-allow rules yet — click \"Always allow\" on a guard card to add one.",
@@ -1459,5 +1459,15 @@
     "provider_cloudflare": "Cloudflare",
     "provider_localtunnel": "localtunnel",
     "china_hint": "Detected mainland-China region: trycloudflare.com is often slow or blocked here. Auto mode will try localtunnel first."
+  },
+  "command": {
+    "nested": {
+      "bash": "embedded bash -c",
+      "sh": "embedded sh -c",
+      "zsh": "embedded zsh -c",
+      "python": "embedded python -c",
+      "node": "embedded node -e",
+      "eval": "embedded eval"
+    }
   }
 }

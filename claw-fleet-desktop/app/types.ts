@@ -268,6 +268,41 @@ export interface GuardRequest {
   commandSummary: string;
   riskTags: string[];
   timestamp: string;
+  /**
+   * Structured AST view of `command` — supplied by newer CLI / serve versions
+   * so the front-end can render leaves + connectors + nested scripts. When
+   * absent (e.g. legacy remote backend), fall back to displaying `command`.
+   */
+  structuredCommand?: CommandView | null;
+}
+
+// ── Shell command structured view (mirror of claw-fleet-core::cmd_ast) ─────
+
+export type Connector = "and" | "or" | "pipe" | "semi";
+
+export type NestedKind =
+  | "bash-c"
+  | "sh-c"
+  | "zsh-c"
+  | "python-c"
+  | "node-e"
+  | "eval";
+
+export interface NestedScript {
+  kind: NestedKind;
+  raw: string;
+  view: CommandView;
+}
+
+export interface CommandLeaf {
+  argv: string[];
+  nested?: NestedScript | null;
+}
+
+export interface CommandView {
+  leaves: CommandLeaf[];
+  /** `connectors[i]` joins `leaves[i]` to `leaves[i + 1]`. */
+  connectors: Connector[];
 }
 
 /**
