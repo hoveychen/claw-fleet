@@ -33,30 +33,31 @@
 }
 
 
-/* ── Group (main + subagents) ──────────────────────────────────────────────
-   Linear-style: single tone, hairline border, no nested fills, no left strip.
-   Hover & active states use the same alpha-tint vocabulary as the sidebar
-   nav items so the gallery and the rail read as one design system. */
+/* Linear-style lifted tile: single tone, neutral hairline border, a soft
+   drop shadow to peel the card off the board. Active state is conveyed
+   purely by the StatusIcon dot — no accent border, no full-row tint. */
 .group {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border-soft);
   border-radius: 8px;
   overflow: hidden;
+  box-shadow: var(--shadow-card);
   transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .group:hover {
   background: var(--color-bg-card-hover);
   border-color: var(--color-border);
+  box-shadow: var(--shadow-card-hover);
 }
 
-/* Running / waiting / thinking groups: full-accent 1px ring instead of the
-   3px left strip. Same hue, lighter footprint, four-sided so the cue is
-   visible from anywhere on the card while staying within Linear's hairline
-   vocabulary. */
-.group_active,
-.group_active:hover {
-  border-color: var(--color-accent);
+/* Active session hint: keep the Linear hue discipline — neutral only.
+   Active cards earn a slightly stronger hairline and the lifted shadow
+   even at rest, so they read as "alive" among a sea of idle tiles
+   without veering toward the old fire-alarm look. */
+.group[data-active] {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-card-hover);
 }
 
 /* Group header bar — inline with the body, no separate fill, no divider */

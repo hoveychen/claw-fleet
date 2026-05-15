@@ -85,7 +85,7 @@
 }
 
 /* Kanban card — same identity as the gallery .group and standalone SessionCard:
-   lifted single tone, hairline border, no left strip, subtle hover. */
+   lifted single tone, hairline border, soft drop shadow, no left strip. */
 .card {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border-soft);
@@ -93,7 +93,8 @@
   padding: 8px 10px;
   font-size: 12px;
   cursor: pointer;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  box-shadow: var(--shadow-card);
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .card[draggable="true"] {
@@ -103,6 +104,13 @@
 .card:hover {
   background: var(--color-bg-card-hover);
   border-color: var(--color-border);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Active session hint: neutral only, parallels GalleryView .group[data-active]. */
+.card[data-active] {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .card_dragging {
