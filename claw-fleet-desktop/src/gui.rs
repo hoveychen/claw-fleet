@@ -926,8 +926,17 @@ fn remove_guard_hook(state: tauri::State<AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn respond_to_guard(state: tauri::State<AppState>, id: String, allow: bool) -> Result<(), String> {
-    state.backend.read().unwrap().respond_to_guard(&id, allow)
+fn respond_to_guard(
+    state: tauri::State<AppState>,
+    id: String,
+    allow: bool,
+    always_allow: Option<claw_fleet_core::guard::GuardAlwaysAllow>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .respond_to_guard(&id, allow, always_allow)
 }
 
 #[tauri::command]

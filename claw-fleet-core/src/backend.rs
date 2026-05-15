@@ -409,7 +409,12 @@ pub trait Backend: Send + Sync {
     // ── Guard (real-time interception) ───────────────────────────────────────
     fn apply_guard_hook(&self) -> Result<(), String>;
     fn remove_guard_hook(&self) -> Result<(), String>;
-    fn respond_to_guard(&self, id: &str, allow: bool) -> Result<(), String>;
+    fn respond_to_guard(
+        &self,
+        id: &str,
+        allow: bool,
+        always_allow: Option<crate::guard::GuardAlwaysAllow>,
+    ) -> Result<(), String>;
     fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String>;
 
     // ── Elicitation (AskUserQuestion interception) ──────────────────────

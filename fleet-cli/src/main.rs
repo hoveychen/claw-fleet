@@ -269,9 +269,14 @@ enum Commands {
         #[command(subcommand)]
         action: SkillCommands,
     },
-    /// [internal] Guard hook — intercepts critical commands for user approval
+    /// [internal] Guard hook — intercepts critical commands for user approval.
+    /// With no subcommand: runs the hook stub (reads stdin from Claude Code).
+    /// With a subcommand: manage persisted guard allow-list rules.
     #[command(hide = true)]
-    Guard,
+    Guard {
+        #[command(subcommand)]
+        action: Option<GuardCommands>,
+    },
     /// [internal] Elicitation hook — intercepts AskUserQuestion for Fleet UI
     #[command(hide = true)]
     Elicitation,
@@ -361,6 +366,21 @@ enum SkillCommands {
     Install,
 }
 
+#[derive(Subcommand, Debug)]
+enum GuardCommands {
+    /// List persisted "always allow" rules for the Bash guard.
+    ListRules {
+        /// Output raw JSON instead of a table.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove an "always allow" rule by its id (use `list-rules` to find it).
+    RemoveRule {
+        /// The rule id (UUID).
+        id: String,
+    },
+}
+
 #[derive(Subcommand)]
 enum SessionCommands {
     /// Report the current session's status (e.g. complete, in-review, custom-column-name).
@@ -391,7 +411,7 @@ fn main() {
         match &cli.command {
             Commands::Serve { .. }
             | Commands::Skill { .. }
-            | Commands::Guard
+            | Commands::Guard { .. }
             | Commands::Elicitation
             | Commands::PlanApproval
             | Commands::PrdContext => {
@@ -399,7 +419,7 @@ fn main() {
                     match &cli.command {
                         Commands::Serve { .. } => "serve",
                         Commands::Skill { .. } => "skill",
-                        Commands::Guard => "guard",
+                        Commands::Guard { .. } => "guard",
                         Commands::Elicitation => "elicitation",
                         Commands::PlanApproval => "plan-approval",
                         Commands::PrdContext => "prd-context",
@@ -428,7 +448,11 @@ fn main() {
         Commands::Skill { action } => match action {
             SkillCommands::Install => cmd_skill_install(),
         },
-        Commands::Guard => cmd_guard(),
+        Commands::Guard { action } => match action {
+            None => cmd_guard(),
+            Some(GuardCommands::ListRules { json }) => cmd_guard_list_rules(json),
+            Some(GuardCommands::RemoveRule { id }) => cmd_guard_remove_rule(&id),
+        },
         Commands::Elicitation => cmd_elicitation(),
         Commands::PlanApproval => cmd_plan_approval(),
         Commands::PrdContext => cmd_prd_context(),
@@ -3174,8 +3198,26 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             "/guard/respond" => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
-                match serde_json::from_slice::<guard::GuardResponse>(&body_bytes) {
-                    Ok(resp) => {
+                match serde_json::from_slice::<guard::GuardRespondPayload>(&body_bytes) {
+                    Ok(payload) => {
+                        // If the user clicked "Always allow", persist the rule
+                        // before writing the response file so a subsequent
+                        // `fleet guard` invocation already sees the rule.
+                        let allow = matches!(payload.decision, guard::GuardDecision::Allow);
+                        if allow {
+                            if let Some(rule) = payload.always_allow.as_ref() {
+                                if !rule.prefix.trim().is_empty() {
+                                    audit::add_guard_allow_rule(
+                                        rule.prefix.clone(),
+                                        rule.source_tag.clone(),
+                                    );
+                                }
+                            }
+                        }
+                        let resp = guard::GuardResponse {
+                            id: payload.id.clone(),
+                            decision: payload.decision.clone(),
+                        };
                         match guard::write_response(&resp) {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet guard` CLI polls
@@ -4495,6 +4537,36 @@ fn cmd_skill_install() {
 }
 
 // ── Guard CLI (hook entrypoint) ─────────────────────────────────────────────
+
+fn cmd_guard_list_rules(json: bool) {
+    let rules = claw_fleet_core::audit::list_guard_allow_rules();
+    if json {
+        let body = serde_json::to_string_pretty(&rules)
+            .unwrap_or_else(|_| "[]".to_string());
+        println!("{}", body);
+        return;
+    }
+    if rules.is_empty() {
+        println!("No guard allow rules configured.");
+        println!("(They get added when you click \"始终允许\" / \"Always allow\" on a guard card.)");
+        return;
+    }
+    println!("{:<38}  {:<24}  {}", "ID", "SOURCE TAG", "PREFIX");
+    for r in &rules {
+        let tag = r.source_tag.as_deref().unwrap_or("-");
+        println!("{:<38}  {:<24}  {}", r.id, tag, r.prefix);
+    }
+}
+
+fn cmd_guard_remove_rule(id: &str) {
+    match claw_fleet_core::audit::remove_guard_allow_rule(id) {
+        Ok(()) => println!("Removed guard allow rule {}", id),
+        Err(e) => {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
 
 fn cmd_guard() {
     use claw_fleet_core::consumer_heartbeat;

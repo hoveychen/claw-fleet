@@ -727,8 +727,17 @@ interface DecisionState {
    * spawn `claude --resume <sid>`. Removes the decision from the queue.
    */
   submitSessionPendingFollowUp: (id: string) => Promise<void>;
-  /** Respond to a decision (allow/block for guard). Removes it from the queue. */
-  respond: (id: string, allow: boolean) => Promise<void>;
+  /**
+   * Respond to a decision (allow/block for guard). Removes it from the queue.
+   * Pass `alwaysAllow` to also persist a guard allow rule (see
+   * `GuardAlwaysAllow` in claw-fleet-core/src/guard.rs) so future commands
+   * matching the same prefix short-circuit without showing a card.
+   */
+  respond: (
+    id: string,
+    allow: boolean,
+    alwaysAllow?: { prefix: string; sourceTag?: string | null } | null,
+  ) => Promise<void>;
   /** Submit elicitation answers. */
   submitElicitation: (id: string) => Promise<void>;
   /** Decline an elicitation. */
@@ -1135,9 +1144,19 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     emit("decision-peer-dismiss", id).catch(() => {});
   },
 
-  respond: async (id, allow) => {
+  respond: async (id, allow, alwaysAllow) => {
     try {
-      await invoke("respond_to_guard", { id, allow });
+      await invoke("respond_to_guard", {
+        id,
+        allow,
+        alwaysAllow:
+          allow && alwaysAllow && alwaysAllow.prefix.trim().length > 0
+            ? {
+                prefix: alwaysAllow.prefix.trim(),
+                sourceTag: alwaysAllow.sourceTag ?? null,
+              }
+            : null,
+      });
     } catch (e) {
       console.error("respond_to_guard failed:", e);
     }

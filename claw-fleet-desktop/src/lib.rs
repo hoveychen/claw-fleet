@@ -249,7 +249,12 @@ impl Backend for NullBackend {
     fn remove_guard_hook(&self) -> Result<(), String> {
         Err("backend not ready".into())
     }
-    fn respond_to_guard(&self, _: &str, _: bool) -> Result<(), String> {
+    fn respond_to_guard(
+        &self,
+        _: &str,
+        _: bool,
+        _: Option<claw_fleet_core::guard::GuardAlwaysAllow>,
+    ) -> Result<(), String> {
         Err("backend not ready".into())
     }
     fn analyze_guard_command(&self, _: &str, _: &str, _: &str) -> Result<String, String> {
