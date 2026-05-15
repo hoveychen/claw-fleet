@@ -1334,6 +1334,8 @@
     "block": "阻止",
     "always_allow": "始终允许",
     "always_allow_hint": "今后凡是调用 {{prefix}} 的命令（含 && / ; / | / 子 shell / bash -c 内嵌）直接放行不再询问",
+    "always_allow_menu": "始终允许",
+    "always_allow_pick_hint": "选要放行的命令",
     "queue": "还有 {{count}} 条待处理",
     "allow_rules_title": "始终允许规则",
     "allow_rules_empty": "还没有「始终允许」规则——在 guard 卡上点「始终允许」即可累积。",

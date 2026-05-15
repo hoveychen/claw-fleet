@@ -370,6 +370,13 @@ fn strip_wrappers(argv: &[String]) -> &[String] {
 /// The argv is also re-checked after stripping common wrappers (`sudo`,
 /// `env`, `nohup`, `time`, ...) so a `curl` rule fires on `sudo curl ...`.
 ///
+/// Additionally, flag tokens (`-x`, `--verbose`, `-s=clw`) are skipped before
+/// matching so a rule `patchwright-cli eval` fires on argv
+/// `["patchwright-cli", "-s=clw", "eval", ...]`.  This pairs with the
+/// frontend's `computeLeafAllowPrefix`, which builds rule prefixes from
+/// `argv[0]` + the first non-flag token.  A lone `-` is treated as an
+/// argument (stdin/stdout), not a flag.
+///
 /// A `rule_tokens` of length 0 never matches.
 pub fn argv_has_rule_prefix(argv: &[String], rule_tokens: &[String]) -> bool {
     if rule_tokens.is_empty() {
@@ -382,16 +389,40 @@ pub fn argv_has_rule_prefix(argv: &[String], rule_tokens: &[String]) -> bool {
     if stripped.len() != argv.len() && starts_with_tokens(stripped, rule_tokens) {
         return true;
     }
+    let no_flags = strip_flag_tokens(argv);
+    if no_flags.len() != argv.len() && starts_with_tokens(&no_flags, rule_tokens) {
+        return true;
+    }
+    let stripped_no_flags = strip_flag_tokens(stripped);
+    if stripped_no_flags.len() != stripped.len()
+        && starts_with_tokens(&stripped_no_flags, rule_tokens)
+    {
+        return true;
+    }
     false
 }
 
-fn starts_with_tokens(argv: &[String], rule_tokens: &[String]) -> bool {
+/// A flag token is one starting with `-` and at least 2 chars long. A bare
+/// `-` is a stdin/stdout sentinel for many tools (`cat -`), not a flag.
+fn is_flag_token(tok: &str) -> bool {
+    tok.len() > 1 && tok.starts_with('-')
+}
+
+/// Filter out flag tokens; preserve relative order of the remaining tokens.
+/// Note: this is intentionally naive — for `-x value` (flag value as a
+/// separate token) we leave `value` in place. Most modern CLIs accept the
+/// `-x=value` form that this helper handles cleanly.
+fn strip_flag_tokens(argv: &[String]) -> Vec<&String> {
+    argv.iter().filter(|t| !is_flag_token(t)).collect()
+}
+
+fn starts_with_tokens<S: AsRef<str>>(argv: &[S], rule_tokens: &[String]) -> bool {
     if argv.len() < rule_tokens.len() {
         return false;
     }
     argv.iter()
         .zip(rule_tokens.iter())
-        .all(|(a, b)| a == b)
+        .all(|(a, b)| a.as_ref() == b.as_str())
 }
 
 /// Top-level convenience: parse `cmd_str` into SimpleCommands and check
@@ -958,6 +989,66 @@ mod tests {
     fn sudo_rule_still_matches_sudo_invocation() {
         // The sudo audit rule itself must still fire on `sudo X`.
         assert!(cmd_matches_rule("sudo curl https://e.com", "sudo"));
+    }
+
+    // ── Flag-skipping prefix match (guard-always-allow-prefix) ──────────────
+    //
+    // Frontend `computeLeafAllowPrefix` builds the rule from `argv[0]` plus
+    // the first non-flag argv token (so `patchwright-cli -s=clw eval` →
+    // `patchwright-cli eval`). For that rule to actually short-circuit the
+    // next invocation, matching must skip flag tokens in the live argv too.
+
+    #[test]
+    fn rule_matches_when_flag_sits_between_command_and_subcommand() {
+        // The exact case from Boss's screenshot.
+        assert!(cmd_matches_rule(
+            r#"patchwright-cli -s=clw eval "() => ({})""#,
+            "patchwright-cli eval"
+        ));
+    }
+
+    #[test]
+    fn rule_matches_when_multiple_single_token_flags_precede_subcommand() {
+        assert!(cmd_matches_rule(
+            "patchwright-cli --verbose -s=clw eval '({})'",
+            "patchwright-cli eval"
+        ));
+    }
+
+    #[test]
+    fn rule_still_blocks_wrong_subcommand_after_flag() {
+        // Skipping flags must not whitelist a *different* subcommand.
+        assert!(!cmd_matches_rule(
+            "patchwright-cli -s=clw screenshot foo.png",
+            "patchwright-cli eval"
+        ));
+    }
+
+    #[test]
+    fn lone_dash_is_not_a_flag() {
+        // `cat -` reads stdin; the `-` is an argument, not a flag.
+        assert!(cmd_matches_rule("cat -", "cat -"));
+    }
+
+    #[test]
+    fn rule_matches_when_env_var_prefixes_command_with_flag() {
+        // Boss's actual screenshot: env var + flag + subcommand in one leaf.
+        // conch_parser already strips `TASK_ID=...` from argv, then
+        // strip_flag_tokens drops `-s=clw`, leaving ["patchwright-cli","eval",...]
+        // which `patchwright-cli eval` matches.
+        assert!(cmd_matches_rule(
+            r#"TASK_ID=abc123 patchwright-cli -s=clw eval "() => ({})""#,
+            "patchwright-cli eval"
+        ));
+    }
+
+    #[test]
+    fn rule_matches_when_env_vars_and_flags_combine_in_pipeline() {
+        // Multi-leaf pipeline where the env-var-prefixed leaf is in the middle.
+        assert!(cmd_matches_rule(
+            r#"echo go | TASK_ID=abc patchwright-cli -s=clw eval "(...)" | tail -10"#,
+            "patchwright-cli eval"
+        ));
     }
 
     // ── Structured view tests (P8) ─────────────────────────────────────────
