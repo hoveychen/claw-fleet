@@ -44,6 +44,7 @@ export async function openSettingsWindow(): Promise<void> {
 
 export type Theme = "dark" | "light" | "system";
 export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills" | "plugins" | "projects" | "tasks";
+export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
 
 /** Transient "open the InboxDialog for this project" request. Set by the
  *  sidebar's per-project `+` button; consumed by TasksView on mount/update
@@ -55,6 +56,10 @@ export interface InboxRequest {
 interface UIState {
   theme: Theme;
   viewMode: ViewMode;
+  /** Last session-list sub-view (list vs gallery). Used by the unified
+   *  "Sessions" nav entry to restore the user's preferred layout when they
+   *  navigate back from audit/report/etc. */
+  lastSessionViewMode: SessionViewMode;
   liteMode: boolean;
   sidebarCollapsed: boolean;
   showMobileAccess: boolean;
@@ -69,6 +74,7 @@ interface UIState {
   liteDecisionHistorySessionId: string | null;
   setTheme: (t: Theme) => void;
   setViewMode: (m: ViewMode) => void;
+  setLastSessionViewMode: (m: SessionViewMode) => void;
   setLiteMode: (on: boolean) => void;
   setSidebarCollapsed: (on: boolean) => void;
   setShowMobileAccess: (v: boolean) => void;
@@ -89,6 +95,8 @@ export function resolveTheme(theme: Theme): "dark" | "light" {
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
   viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
+  lastSessionViewMode:
+    (getItem("lastSessionViewMode") as SessionViewMode) ?? "gallery",
   liteMode: getItem("liteMode") === "true",
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   showMobileAccess: false,
@@ -102,7 +110,16 @@ export const useUIStore = create<UIState>((set) => ({
   },
   setViewMode: (m) => {
     setItem("viewMode", m);
-    set({ viewMode: m });
+    if (m === "list" || m === "gallery") {
+      setItem("lastSessionViewMode", m);
+      set({ viewMode: m, lastSessionViewMode: m });
+    } else {
+      set({ viewMode: m });
+    }
+  },
+  setLastSessionViewMode: (m) => {
+    setItem("lastSessionViewMode", m);
+    set({ lastSessionViewMode: m });
   },
   setLiteMode: (on) => {
     setItem("liteMode", on ? "true" : "false");

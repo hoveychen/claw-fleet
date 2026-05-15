@@ -54,11 +54,11 @@
   border: none;
   border-bottom: 2px solid transparent;
   padding: 6px 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-dim);
   cursor: pointer;
-  transition: color 0.15s, border-color 0.15s;
+  transition: color 0.12s, border-color 0.12s;
 }
 
 .tab_btn:hover {

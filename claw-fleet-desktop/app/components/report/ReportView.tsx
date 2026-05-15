@@ -44,22 +44,23 @@ export function ReportView() {
   }, [resetTimeline, setReportTab]);
 
   return (
-    <div className={styles.container}>
-      {/* Tab bar */}
-      <div className={styles.tab_bar} data-tauri-drag-region>
-        <div className={styles.tab_group}>
-          <button
-            className={`${styles.tab} ${reportTab === "insights" ? styles.tab_active : ""}`}
-            onClick={switchToInsights}
-          >
-            {t("report.tab_insights")}
-          </button>
-          <button
-            className={`${styles.tab} ${reportTab === "daily" ? styles.tab_active : ""}`}
-            onClick={() => setReportTab("daily")}
-          >
-            {t("report.tab_daily")}
-          </button>
+    <div className={styles.root}>
+      <div className={styles.header} data-tauri-drag-region>
+        <div className={styles.tab_bar}>
+          <div className={styles.tab_group}>
+            <button
+              className={`${styles.tab} ${reportTab === "insights" ? styles.tab_active : ""}`}
+              onClick={switchToInsights}
+            >
+              {t("report.tab_insights")}
+            </button>
+            <button
+              className={`${styles.tab} ${reportTab === "daily" ? styles.tab_active : ""}`}
+              onClick={() => setReportTab("daily")}
+            >
+              {t("report.tab_daily")}
+            </button>
+          </div>
         </div>
         {reportTab === "daily" && (
           <div className={styles.date_nav}>
@@ -76,43 +77,45 @@ export function ReportView() {
         )}
       </div>
 
-      {reportTab === "insights" ? (
-        <>
-          <ContributionsHeatmap />
-          <InsightsTimeline />
-        </>
-      ) : (
-        <>
-          <ContributionsHeatmap />
-          {loading ? (
-            <div className={styles.loading}>{t("report.loading")}</div>
-          ) : !currentReport ? (
-            <div className={styles.empty_state}>
-              <p>{t("report.no_report")}</p>
-              <button className={styles.generate_btn} onClick={() => generateReport(selectedDate)}>
-                {t("report.generate")}
-              </button>
-            </div>
-          ) : (
-            <div className={styles.content}>
-              <MetricsCards metrics={currentReport.metrics} />
-              <div className={styles.charts_row}>
-                <ToolCallChart breakdown={currentReport.metrics.toolCallBreakdown} />
-                <HourlyActivityChart hourly={currentReport.metrics.hourlyActivity} />
+      <div className={styles.body}>
+        {reportTab === "insights" ? (
+          <>
+            <ContributionsHeatmap />
+            <InsightsTimeline />
+          </>
+        ) : (
+          <>
+            <ContributionsHeatmap />
+            {loading ? (
+              <div className={styles.loading}>{t("report.loading")}</div>
+            ) : !currentReport ? (
+              <div className={styles.empty_state}>
+                <p>{t("report.no_report")}</p>
+                <button className={styles.generate_btn} onClick={() => generateReport(selectedDate)}>
+                  {t("report.generate")}
+                </button>
               </div>
-              <AISummaryCard
-                date={currentReport.date}
-                summary={currentReport.aiSummary}
-                metrics={currentReport.metrics}
-              />
-              <LessonsCard
-                date={currentReport.date}
-                lessons={currentReport.lessons}
-              />
-            </div>
-          )}
-        </>
-      )}
+            ) : (
+              <div className={styles.content}>
+                <MetricsCards metrics={currentReport.metrics} />
+                <div className={styles.charts_row}>
+                  <ToolCallChart breakdown={currentReport.metrics.toolCallBreakdown} />
+                  <HourlyActivityChart hourly={currentReport.metrics.hourlyActivity} />
+                </div>
+                <AISummaryCard
+                  date={currentReport.date}
+                  summary={currentReport.aiSummary}
+                  metrics={currentReport.metrics}
+                />
+                <LessonsCard
+                  date={currentReport.date}
+                  lessons={currentReport.lessons}
+                />
+              </div>
+            )}
+          </>
+        )}
+      </div>
     </div>
   );
 }
