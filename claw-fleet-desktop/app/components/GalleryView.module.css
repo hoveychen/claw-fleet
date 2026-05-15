@@ -7,11 +7,13 @@
   background: var(--color-bg);
 }
 
-/* Scrollable outer container */
+/* Scrollable outer container — lateral padding matches the SessionToolbar
+   above (`14px 20px 12px`) so cards line up flush with the toolbar's text
+   and search controls. */
 .grid {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 14px 20px 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -31,33 +33,42 @@
 }
 
 
-/* ── Group (main + subagents) ────────────────────────────────────────────── */
+/* ── Group (main + subagents) ──────────────────────────────────────────────
+   Linear-style: single tone, hairline border, no nested fills, no left strip.
+   Hover & active states use the same alpha-tint vocabulary as the sidebar
+   nav items so the gallery and the rail read as one design system. */
 .group {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-soft);
+  border-radius: 8px;
   overflow: hidden;
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
-.group_active {
-  border-left: 3px solid var(--color-accent);
+.group:hover {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-border);
 }
 
-/* Group header bar */
+/* Running / waiting / thinking groups: full-accent 1px ring instead of the
+   3px left strip. Same hue, lighter footprint, four-sided so the cue is
+   visible from anywhere on the card while staying within Linear's hairline
+   vocabulary. */
+.group_active,
+.group_active:hover {
+  border-color: var(--color-accent);
+}
+
+/* Group header bar — inline with the body, no separate fill, no divider */
 .group_header {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-sidebar);
+  padding: 10px 12px 4px;
+  background: transparent;
   cursor: pointer;
   user-select: none;
-}
-
-.group_header:hover {
-  background: var(--color-bg-tool-hover);
 }
 
 .group_name {
@@ -97,9 +108,9 @@
   opacity: 0.4;
 }
 
-/* Main agent card area */
+/* Main agent card area — header has 4px bottom padding so we only need 6px top */
 .group_body {
-  padding: 10px 12px 8px;
+  padding: 6px 12px 10px;
 }
 
 /* ── Subagent chips ───────────────────────────────────────────────────────── */
@@ -110,25 +121,28 @@
   padding: 0 12px 10px;
 }
 
+/* Linear-style chip: neutral secondary bg, no per-session hue. Identity is
+   carried by the StatusIcon dot (semantic status color) and the `#N` index;
+   color hashing was dropped because Linear's design language uses semantic
+   color only, not ID-derived hue. */
 .chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 9px;
-  border-radius: 20px;
-  border: 1px solid hsl(var(--chip-hue) var(--chip-bd-s) var(--chip-bd-l));
-  background: hsl(var(--chip-hue) var(--chip-bg-s) var(--chip-bg-l));
-  color: hsl(var(--chip-hue) var(--chip-fg-s) var(--chip-fg-l));
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
   font-size: 11px;
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition: filter 0.1s;
+  transition: background 0.12s ease;
   user-select: none;
 }
 
 .chip:hover {
-  filter: brightness(1.2);
+  background: var(--color-bg-card-hover);
 }
 
 /* Active chip: full opacity */
@@ -140,8 +154,9 @@
 
 .chip_index {
   font-size: 10px;
-  font-family: monospace;
-  opacity: 0.6;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-text-secondary);
   flex-shrink: 0;
 }
 
@@ -177,7 +192,7 @@
   background: var(--badge-processing-bg);
   color: var(--badge-processing-fg);
   padding: 1px 4px;
-  border-radius: 3px;
+  border-radius: 4px;
   flex-shrink: 0;
 }
 
