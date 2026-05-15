@@ -17,16 +17,6 @@ function isActive(s: SessionInfo) {
   return ACTIVE_STATUSES.includes(s.status);
 }
 
-// ── Stable chip color from session id ─────────────────────────────────────
-
-const CHIP_HUES = [210, 160, 30, 350, 280, 55, 330, 120, 190, 90];
-
-function chipHue(id: string): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-  return CHIP_HUES[h % CHIP_HUES.length];
-}
-
 // ── SubagentChip ──────────────────────────────────────────────────────────
 
 interface ChipProps {
@@ -38,14 +28,10 @@ interface ChipProps {
 function SubagentChip({ session, index, onSelect }: ChipProps) {
   const { t } = useTranslation();
   const active = isActive(session);
-  const hue = chipHue(session.id);
-
-  const chipStyle = { '--chip-hue': hue } as React.CSSProperties;
 
   return (
     <button
       className={`${styles.chip} ${active ? styles.chip_active : ""}`}
-      style={chipStyle}
       onClick={(e) => { e.stopPropagation(); onSelect(session); }}
       title={session.agentDescription ?? session.agentType ?? t("subagent")}
     >
