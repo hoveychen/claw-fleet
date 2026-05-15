@@ -23,8 +23,10 @@ import {
 } from "../store";
 import type { PItem, PItemStatus, Task, TaskStatus } from "../types";
 import { pItemStatusKey } from "../types";
+import { PROJECTS_FEATURE_ENABLED } from "../featureFlags";
 
 export function TasksView() {
+  if (!PROJECTS_FEATURE_ENABLED) return null;
   const { t } = useTranslation();
   const { projects, refresh: refreshProjects } = useProjectsStore();
   const selectedProjectId = useProjectsStore((s) => s.selectedProjectId);

@@ -24,6 +24,7 @@ import { CostSpeedChart } from "./CostSpeedChart";
 import { UsagePanel } from "./UsagePanel";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { getItem, setItem } from "../storage";
+import { PROJECTS_FEATURE_ENABLED } from "../featureFlags";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
@@ -129,8 +130,10 @@ export function SessionList() {
       invoke<{ running: boolean; tunnelUrl: string | null }>("get_mobile_access_status")
         .then((s) => { if (!cancelled) setMobileActive(s.running && !!s.tunnelUrl); })
         .catch(() => {});
-      useProjectsStore.getState().refresh();
-      useTasksStore.getState().refresh();
+      if (PROJECTS_FEATURE_ENABLED) {
+        useProjectsStore.getState().refresh();
+        useTasksStore.getState().refresh();
+      }
     };
     // Kick off once on mount (mobile-status, projects, tasks all want a
     // first read before the 5s wait).
@@ -141,6 +144,14 @@ export function SessionList() {
       clearInterval(interval);
     };
   }, []);
+  // Projects feature is hidden — bounce returning users off a persisted
+  // `projects` / `tasks` viewMode so they don't land on an inaccessible view.
+  useEffect(() => {
+    if (!PROJECTS_FEATURE_ENABLED && (viewMode === "projects" || viewMode === "tasks")) {
+      setViewMode("gallery");
+    }
+  }, [viewMode, setViewMode]);
+
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
@@ -350,14 +361,14 @@ export function SessionList() {
             <span className={styles.nav_label}>{t("view_report")}</span>
           </button>
 
-          <div className={styles.nav_divider} />
+          {PROJECTS_FEATURE_ENABLED && <div className={styles.nav_divider} />}
 
           {/* Projects rail — one row per project (always all projects, not
               just those with active tasks, so we never fall back to UUID). */}
-          {!sidebarCollapsed && projects.length === 0 && (
+          {PROJECTS_FEATURE_ENABLED && !sidebarCollapsed && projects.length === 0 && (
             <div className={styles.nav_empty}>{t("sidebar.no_projects", "No projects yet")}</div>
           )}
-          {!sidebarCollapsed && projects.map((p) => {
+          {PROJECTS_FEATURE_ENABLED && !sidebarCollapsed && projects.map((p) => {
             const projectTasks = tasksByProject.get(p.id) ?? [];
             const isProjectActive =
               viewMode === "tasks" &&
@@ -423,25 +434,29 @@ export function SessionList() {
               </div>
             );
           })}
-          <button
-            className={styles.nav_item}
-            onClick={() => {
-              setShowNewProjectRequested(true);
-              setViewMode("projects");
-            }}
-            title={t("projects.new")}
-          >
-            <span className={styles.nav_icon}>+</span>
-            <span className={styles.nav_label}>{t("projects.new")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "projects" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("projects")}
-            title={t("sidebar.manage_projects", "Manage projects")}
-          >
-            <span className={styles.nav_icon}>⚙</span>
-            <span className={styles.nav_label}>{t("sidebar.manage_projects", "Manage projects")}</span>
-          </button>
+          {PROJECTS_FEATURE_ENABLED && (
+            <button
+              className={styles.nav_item}
+              onClick={() => {
+                setShowNewProjectRequested(true);
+                setViewMode("projects");
+              }}
+              title={t("projects.new")}
+            >
+              <span className={styles.nav_icon}>+</span>
+              <span className={styles.nav_label}>{t("projects.new")}</span>
+            </button>
+          )}
+          {PROJECTS_FEATURE_ENABLED && (
+            <button
+              className={`${styles.nav_item} ${viewMode === "projects" ? styles.nav_active : ""}`}
+              onClick={() => setViewMode("projects")}
+              title={t("sidebar.manage_projects", "Manage projects")}
+            >
+              <span className={styles.nav_icon}>⚙</span>
+              <span className={styles.nav_label}>{t("sidebar.manage_projects", "Manage projects")}</span>
+            </button>
+          )}
 
           <div className={styles.nav_divider} />
 
@@ -626,9 +641,9 @@ export function SessionList() {
         <SkillsView />
       ) : viewMode === "plugins" ? (
         <PluginsView />
-      ) : viewMode === "projects" ? (
+      ) : viewMode === "projects" && PROJECTS_FEATURE_ENABLED ? (
         <ProjectsView />
-      ) : viewMode === "tasks" ? (
+      ) : viewMode === "tasks" && PROJECTS_FEATURE_ENABLED ? (
         <TasksView />
       ) : (
         <ReportView />
