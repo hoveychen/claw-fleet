@@ -4,6 +4,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  resolveTheme,
   useDecisionStore,
   useDetailStore,
   useProjectsStore,
@@ -543,9 +544,11 @@ function OptionsBlock({
   useEffect(() => {
     if (!compact) return;
     if (hasPreview) {
+      const theme = resolveTheme(useUIStore.getState().theme);
       invoke("open_preview_window", {
         markdown: focusedPreview ?? "",
         title: focusedLabel || null,
+        theme,
       }).catch(() => {});
     } else {
       invoke("close_preview_window").catch(() => {});

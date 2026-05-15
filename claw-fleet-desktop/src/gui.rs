@@ -1818,9 +1818,27 @@ fn quit_app(app: tauri::AppHandle) {
 
 // ── Settings window ──────────────────────────────────────────────────────────
 
+// Theme is applied on the builder so the native title bar starts in the
+// right mode. A freshly-built window otherwise inherits the system
+// NSAppearance, leaving a dark title bar on top of a light app body.
+fn parse_theme(s: Option<&str>) -> Option<tauri::Theme> {
+    match s? {
+        "light" => Some(tauri::Theme::Light),
+        "dark" => Some(tauri::Theme::Dark),
+        _ => None,
+    }
+}
+
 #[tauri::command]
-fn open_settings_window(app: tauri::AppHandle, connection: Option<String>) -> Result<(), String> {
+fn open_settings_window(
+    app: tauri::AppHandle,
+    connection: Option<String>,
+    theme: Option<String>,
+) -> Result<(), String> {
     if let Some(w) = app.get_webview_window("settings") {
+        if let Some(t) = parse_theme(theme.as_deref()) {
+            let _ = w.set_theme(Some(t));
+        }
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();
@@ -1834,7 +1852,7 @@ fn open_settings_window(app: tauri::AppHandle, connection: Option<String>) -> Re
         path.push_str(&utf8_percent_encode(&conn, NON_ALPHANUMERIC).to_string());
     }
 
-    let window = tauri::WebviewWindowBuilder::new(
+    let mut builder = tauri::WebviewWindowBuilder::new(
         &app,
         "settings",
         tauri::WebviewUrl::App(path.into()),
@@ -1842,9 +1860,11 @@ fn open_settings_window(app: tauri::AppHandle, connection: Option<String>) -> Re
     .title("Settings")
     .inner_size(780.0, 640.0)
     .min_inner_size(560.0, 480.0)
-    .center()
-    .build()
-    .map_err(|e| e.to_string())?;
+    .center();
+    if let Some(t) = parse_theme(theme.as_deref()) {
+        builder = builder.theme(Some(t));
+    }
+    let window = builder.build().map_err(|e| e.to_string())?;
 
     // Hide on close instead of destroying the WKWebView: tearing down a secondary
     // webview races with delayed WebKit main-thread work items (observed crash in
@@ -1867,9 +1887,13 @@ fn open_preview_window(
     app: tauri::AppHandle,
     markdown: String,
     title: Option<String>,
+    theme: Option<String>,
 ) -> Result<(), String> {
     // If already open, just push new content via event and bring to front.
     if let Some(w) = app.get_webview_window("preview") {
+        if let Some(t) = parse_theme(theme.as_deref()) {
+            let _ = w.set_theme(Some(t));
+        }
         let _ = w.show();
         let _ = w.unminimize();
         let payload = serde_json::json!({
@@ -1903,6 +1927,9 @@ fn open_preview_window(
     .decorations(true)
     .always_on_top(true)
     .skip_taskbar(true);
+    if let Some(t) = parse_theme(theme.as_deref()) {
+        builder = builder.theme(Some(t));
+    }
 
     // Position beside the main window when we can; otherwise let Tauri pick.
     // Tauri's builder.position() takes logical coords, so convert physical
@@ -2528,7 +2555,16 @@ fn install_app_menu(app: &tauri::AppHandle) {
 fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
     match id {
         "menu-settings" => {
-            let _ = open_settings_window(app.clone(), None);
+            // App menu has no theme context; mirror the main window's current
+            // NSAppearance so the Settings titlebar matches.
+            let theme = app
+                .get_webview_window("main")
+                .and_then(|w| w.theme().ok())
+                .map(|t| match t {
+                    tauri::Theme::Dark => "dark".to_string(),
+                    _ => "light".to_string(),
+                });
+            let _ = open_settings_window(app.clone(), None, theme);
         }
         "menu-check-updates" | "menu-check-updates-help" => {
             if let Some(w) = app.get_webview_window("main") {

@@ -91,20 +91,20 @@ function onWindowResize() {
   }
 }
 
-function buildMenuItem(label: string, onClick: () => void, dark: boolean): HTMLElement {
+function buildMenuItem(label: string, onClick: () => void): HTMLElement {
   const item = document.createElement("div");
   item.textContent = label;
   item.style.cssText = [
     "padding: 6px 14px",
     "font-size: 13px",
-    `color: ${dark ? "#e5e5e5" : "#1f1f1f"}`,
+    "color: var(--color-text)",
     "cursor: default",
     "user-select: none",
     "border-radius: 4px",
     "white-space: nowrap",
   ].join(";");
   item.addEventListener("mouseenter", () => {
-    item.style.background = dark ? "#3a3a3a" : "#e8e8e8";
+    item.style.background = "var(--color-bg-hover)";
   });
   item.addEventListener("mouseleave", () => {
     item.style.background = "";
@@ -134,9 +134,9 @@ function openContextMenu(x: number, y: number) {
     "z-index: 2147483647",
     "min-width: 160px",
     "padding: 4px",
-    `background: ${dark ? "#242424" : "#ffffff"}`,
-    `color: ${dark ? "#e5e5e5" : "#1f1f1f"}`,
-    `border: 1px solid ${dark ? "#2e2e2e" : "#d0d0d0"}`,
+    "background: var(--color-bg-modal)",
+    "color: var(--color-text)",
+    "border: 1px solid var(--color-border)",
     "border-radius: 8px",
     "box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3)",
     "font: 13px -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
@@ -144,23 +144,24 @@ function openContextMenu(x: number, y: number) {
 
   menu.appendChild(
     buildMenuItem(tr("settings"), () => {
-      invoke("open_settings_window").catch((e) => console.error("open_settings_window failed:", e));
-    }, dark),
+      invoke("open_settings_window", { theme: dark ? "dark" : "light" })
+        .catch((e) => console.error("open_settings_window failed:", e));
+    }),
   );
   menu.appendChild(
     buildMenuItem(tr("about"), () => {
       showAboutDialog().catch((e) => console.error("showAboutDialog failed:", e));
-    }, dark),
+    }),
   );
 
   const separator = document.createElement("div");
-  separator.style.cssText = `height:1px;margin:4px 6px;background:${dark ? "#333" : "#e0e0e0"};`;
+  separator.style.cssText = "height:1px;margin:4px 6px;background:var(--color-border);";
   menu.appendChild(separator);
 
   menu.appendChild(
     buildMenuItem(tr("quit"), () => {
       invoke("quit_app").catch((e) => console.error("quit_app failed:", e));
-    }, dark),
+    }),
   );
 
   menu.style.left = `${x}px`;
@@ -194,14 +195,13 @@ async function showAboutDialog() {
     console.warn("get_app_version failed:", e);
   }
 
-  const dark = isDark();
   const overlay = document.createElement("div");
   overlay.setAttribute("data-app-about-overlay", "");
   overlay.style.cssText = [
     "position: fixed",
     "inset: 0",
     "z-index: 2147483646",
-    "background: rgba(0, 0, 0, 0.45)",
+    "background: var(--color-bg-modal-overlay)",
     "display: flex",
     "align-items: center",
     "justify-content: center",
@@ -213,9 +213,9 @@ async function showAboutDialog() {
     "min-width: 280px",
     "max-width: 360px",
     "padding: 20px 22px 16px",
-    `background: ${dark ? "#242424" : "#ffffff"}`,
-    `color: ${dark ? "#e5e5e5" : "#1f1f1f"}`,
-    `border: 1px solid ${dark ? "#2e2e2e" : "#d0d0d0"}`,
+    "background: var(--color-bg-modal)",
+    "color: var(--color-text)",
+    "border: 1px solid var(--color-border)",
     "border-radius: 12px",
     "box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4)",
     "text-align: center",
@@ -229,7 +229,7 @@ async function showAboutDialog() {
   if (version) {
     const versionLine = document.createElement("div");
     versionLine.textContent = `${tr("about_version")} ${version}`;
-    versionLine.style.cssText = `font-size:12px;color:${dark ? "#a8a8a8" : "#666"};margin-bottom:16px;`;
+    versionLine.style.cssText = "font-size:12px;color:var(--color-text-secondary);margin-bottom:16px;";
     panel.appendChild(versionLine);
   }
 
@@ -238,9 +238,9 @@ async function showAboutDialog() {
   button.style.cssText = [
     "padding: 6px 18px",
     "font: inherit",
-    `background: ${dark ? "#3a3a3a" : "#f0f0f0"}`,
-    `color: ${dark ? "#e5e5e5" : "#1f1f1f"}`,
-    `border: 1px solid ${dark ? "#4a4a4a" : "#d0d0d0"}`,
+    "background: var(--color-bg-hover)",
+    "color: var(--color-text)",
+    "border: 1px solid var(--color-border-strong)",
     "border-radius: 6px",
     "cursor: pointer",
   ].join(";");
