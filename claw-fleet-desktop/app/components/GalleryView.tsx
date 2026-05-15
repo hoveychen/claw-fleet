@@ -79,12 +79,11 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
 
   const totalTokens = [main, ...subagents].reduce((sum, s) => sum + s.totalOutputTokens, 0);
   const totalSpeed = [main, ...subagents].reduce((sum, s) => sum + s.tokenSpeed, 0);
-  const groupActive = isActive(main) || activeSubagents.length > 0;
 
   // Solo session (no subagents): same group structure as multi-agent, just no chips
   if (subagents.length === 0) {
     return (
-      <div className={`${styles.group} ${isActive(main) ? styles.group_active : ""}`}>
+      <div className={styles.group} data-active={isActive(main) || undefined}>
         <div className={styles.group_header} onClick={() => onSelect(main)}>
           <span className={styles.group_name}>{main.workspaceName}</span>
           <StatusBadge status={main.status} />
@@ -110,8 +109,10 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
     );
   }
 
+  const groupActive = isActive(main) || activeSubagents.length > 0;
+
   return (
-    <div className={`${styles.group} ${groupActive ? styles.group_active : ""}`}>
+    <div className={styles.group} data-active={groupActive || undefined}>
       {/* Group header */}
       <div className={styles.group_header} onClick={() => onSelect(main)}>
         <span className={styles.group_name}>{main.workspaceName}</span>

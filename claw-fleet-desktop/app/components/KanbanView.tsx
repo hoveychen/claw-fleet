@@ -2,8 +2,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore } from "../store";
-import type { SessionInfo } from "../types";
+import type { SessionInfo, SessionStatus } from "../types";
 import styles from "./KanbanView.module.css";
+
+const ACTIVE_STATUSES: ReadonlySet<SessionStatus> = new Set<SessionStatus>([
+  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating",
+]);
 
 interface KanbanColumn {
   id: string;
@@ -228,9 +232,12 @@ function KanbanCard({
   const dotInlineStyle =
     !liveInfo && column.color ? { background: column.color } : undefined;
 
+  const isActive = liveInfo?.status ? ACTIVE_STATUSES.has(liveInfo.status) : false;
+
   return (
     <div
       className={`${styles.card} ${isDragging ? styles.card_dragging : ""}`}
+      data-active={isActive || undefined}
       draggable={draggable}
       onDragStart={draggable ? handleDragStart : undefined}
       onDragEnd={onDragEnd}
