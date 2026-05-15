@@ -674,15 +674,222 @@ fn visit_simple_for_view(
     let mut argv: Vec<String> = Vec::new();
     for r in &s.redirects_or_cmd_words {
         if let RedirectOrCmdWord::CmdWord(w) = r {
-            argv.push(flatten_top_word(w).unwrap_or_default());
+            argv.push(display_top_word(w));
         }
     }
     if argv.is_empty() {
+        // Pure variable assignment (e.g. `task_id=$(curl ... | jq ...)`).
+        // conch-parser parks the LHS in `redirects_or_env_vars` with no
+        // cmd word, so there's nothing to display as a leaf — but the RHS
+        // command substitution is real work the user needs to see.
+        // Splice its commands into the parent builder so they appear as
+        // first-class leaves with their natural connectors.
+        for r in &s.redirects_or_env_vars {
+            if let RedirectOrEnvVar::EnvVar(_, Some(w)) = r {
+                splice_substs_from_complex(&w.0, b, next);
+            }
+        }
         return;
     }
     let nested = detect_nested(&argv);
     let conn = next.take();
     b.push(CommandLeaf { argv, nested }, conn);
+}
+
+fn splice_substs_from_complex(c: &ComplexT, b: &mut ViewBuilder, next: &mut Option<Connector>) {
+    match c {
+        ComplexWord::Single(w) => splice_substs_from_word(w, b, next),
+        ComplexWord::Concat(words) => {
+            for w in words {
+                splice_substs_from_word(w, b, next);
+            }
+        }
+    }
+}
+
+fn splice_substs_from_word(w: &WordT, b: &mut ViewBuilder, next: &mut Option<Connector>) {
+    match w {
+        Word::Simple(s) => splice_substs_from_simple(s, b, next),
+        Word::SingleQuoted(_) => {}
+        Word::DoubleQuoted(parts) => {
+            for p in parts {
+                splice_substs_from_simple(p, b, next);
+            }
+        }
+    }
+}
+
+fn splice_substs_from_simple(s: &SimpleT, b: &mut ViewBuilder, next: &mut Option<Connector>) {
+    if let SimpleWord::Subst(boxed) = s {
+        if let ParameterSubstitution::Command(cmds) = boxed.as_ref() {
+            for c in cmds {
+                visit_top_for_view(c, b, next);
+                *next = Some(Connector::Semi);
+            }
+        }
+    }
+}
+
+// ── Display-aware flattening: preserve `$VAR` / `$(...)` literally ─────────
+//
+// The matching path (`flatten_top_word`) collapses Param/Subst to "" because
+// it can't know the runtime value.  But for the UI we want the user to *see*
+// the variable interpolation and command substitution that's about to run —
+// otherwise `echo "task=$id"` renders as just `echo task=`, which hides the
+// actual data flow.  These helpers reconstruct the original surface syntax
+// from the AST so the structured view is readable.
+
+fn display_top_word(w: &TopLevelWord<String>) -> String {
+    display_complex(&w.0)
+}
+
+fn display_complex(c: &ComplexT) -> String {
+    match c {
+        ComplexWord::Single(w) => display_word(w),
+        ComplexWord::Concat(words) => {
+            let mut out = String::new();
+            for w in words {
+                out.push_str(&display_word(w));
+            }
+            out
+        }
+    }
+}
+
+fn display_word(w: &WordT) -> String {
+    match w {
+        Word::Simple(s) => display_simple(s),
+        Word::SingleQuoted(s) => s.clone(),
+        Word::DoubleQuoted(parts) => {
+            let mut out = String::new();
+            for p in parts {
+                out.push_str(&display_simple(p));
+            }
+            out
+        }
+    }
+}
+
+fn display_simple(s: &SimpleT) -> String {
+    match s {
+        SimpleWord::Literal(s) | SimpleWord::Escaped(s) => s.clone(),
+        SimpleWord::Param(p) => display_param(p),
+        SimpleWord::Subst(b) => display_subst(b.as_ref()),
+        SimpleWord::Star => "*".into(),
+        SimpleWord::Question => "?".into(),
+        SimpleWord::SquareOpen => "[".into(),
+        SimpleWord::SquareClose => "]".into(),
+        SimpleWord::Tilde => "~".into(),
+        SimpleWord::Colon => ":".into(),
+    }
+}
+
+fn display_param(p: &Parameter<String>) -> String {
+    match p {
+        Parameter::At => "$@".into(),
+        Parameter::Star => "$*".into(),
+        Parameter::Pound => "$#".into(),
+        Parameter::Question => "$?".into(),
+        Parameter::Dash => "$-".into(),
+        Parameter::Dollar => "$$".into(),
+        Parameter::Bang => "$!".into(),
+        Parameter::Positional(n) => format!("${}", n),
+        Parameter::Var(name) => format!("${}", name),
+    }
+}
+
+fn display_subst(s: &SubstT) -> String {
+    fn name_of(p: &Parameter<String>) -> String {
+        let raw = display_param(p);
+        raw.trim_start_matches('$').to_string()
+    }
+    match s {
+        ParameterSubstitution::Command(cmds) => {
+            let mut inner = String::new();
+            for (i, c) in cmds.iter().enumerate() {
+                if i > 0 {
+                    inner.push_str("; ");
+                }
+                inner.push_str(&reconstruct_top_level(c));
+            }
+            format!("$({})", inner)
+        }
+        ParameterSubstitution::Arith(_) => "$((..))".into(),
+        ParameterSubstitution::Len(p) => format!("${{#{}}}", name_of(p)),
+        ParameterSubstitution::Default(colon, p, _) => {
+            format!("${{{}{}-..}}", name_of(p), if *colon { ":" } else { "" })
+        }
+        ParameterSubstitution::Assign(colon, p, _) => {
+            format!("${{{}{}=..}}", name_of(p), if *colon { ":" } else { "" })
+        }
+        ParameterSubstitution::Error(colon, p, _) => {
+            format!("${{{}{}?..}}", name_of(p), if *colon { ":" } else { "" })
+        }
+        ParameterSubstitution::Alternative(colon, p, _) => {
+            format!("${{{}{}+..}}", name_of(p), if *colon { ":" } else { "" })
+        }
+        ParameterSubstitution::RemoveSmallestSuffix(p, _) => format!("${{{}%..}}", name_of(p)),
+        ParameterSubstitution::RemoveLargestSuffix(p, _) => format!("${{{}%%..}}", name_of(p)),
+        ParameterSubstitution::RemoveSmallestPrefix(p, _) => format!("${{{}#..}}", name_of(p)),
+        ParameterSubstitution::RemoveLargestPrefix(p, _) => format!("${{{}##..}}", name_of(p)),
+    }
+}
+
+fn reconstruct_top_level(cmd: &TopLevelCommand<String>) -> String {
+    reconstruct_command(&cmd.0)
+}
+
+fn reconstruct_command(cmd: &Command<AndOrList<DefaultListableCommand>>) -> String {
+    match cmd {
+        Command::Job(list) | Command::List(list) => {
+            let mut out = reconstruct_listable(&list.first);
+            for ao in &list.rest {
+                let (sep, body) = match ao {
+                    AndOr::And(c) => (" && ", c),
+                    AndOr::Or(c) => (" || ", c),
+                };
+                out.push_str(sep);
+                out.push_str(&reconstruct_listable(body));
+            }
+            out
+        }
+    }
+}
+
+fn reconstruct_listable(l: &DefaultListableCommand) -> String {
+    match l {
+        ListableCommand::Single(p) => reconstruct_pipeable(p),
+        ListableCommand::Pipe(_, items) => items
+            .iter()
+            .map(reconstruct_pipeable)
+            .collect::<Vec<_>>()
+            .join(" | "),
+    }
+}
+
+fn reconstruct_pipeable(p: &DefaultPipeableCommand) -> String {
+    match p {
+        PipeableCommand::Simple(s) => reconstruct_simple(s),
+        PipeableCommand::Compound(_) | PipeableCommand::FunctionDef(_, _) => "(..)".into(),
+    }
+}
+
+fn reconstruct_simple(s: &DefaultSimpleCommand) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    for r in &s.redirects_or_env_vars {
+        if let RedirectOrEnvVar::EnvVar(name, value) = r {
+            match value {
+                Some(v) => parts.push(format!("{}={}", name, display_top_word(v))),
+                None => parts.push(format!("{}=", name)),
+            }
+        }
+    }
+    for r in &s.redirects_or_cmd_words {
+        if let RedirectOrCmdWord::CmdWord(w) = r {
+            parts.push(display_top_word(w));
+        }
+    }
+    parts.join(" ")
 }
 
 fn detect_nested(argv: &[String]) -> Option<NestedScript> {
@@ -1160,6 +1367,70 @@ mod tests {
         let json = serde_json::to_string(&v).unwrap();
         let back: CommandView = serde_json::from_str(&json).unwrap();
         assert_eq!(v, back);
+    }
+
+    #[test]
+    fn view_preserves_variable_interpolation() {
+        // Bug A: `echo "task=$id"` used to render as `["echo", "task="]`
+        // because Param flattened to "" in the display path.
+        let v = extract_structured_view(r#"echo "task=$id""#);
+        assert_eq!(view_argvs(&v), vec![vec!["echo".to_string(), "task=$id".into()]]);
+    }
+
+    #[test]
+    fn view_preserves_param_in_unquoted_token() {
+        let v = extract_structured_view(r#"curl -H "Authorization: Bearer $TOKEN" url"#);
+        assert_eq!(
+            view_argvs(&v),
+            vec![vec![
+                "curl".to_string(),
+                "-H".into(),
+                "Authorization: Bearer $TOKEN".into(),
+                "url".into(),
+            ]]
+        );
+    }
+
+    #[test]
+    fn view_preserves_command_substitution_placeholder() {
+        let v = extract_structured_view(r#"echo "today=$(date)""#);
+        let argv = &v.leaves[0].argv;
+        assert_eq!(argv[0], "echo");
+        // The token should preserve the substitution so the user sees that
+        // `date` is part of what runs, not a bare `today=`.
+        assert!(
+            argv[1].contains("$(date)"),
+            "expected $(date) inside token, got {:?}",
+            argv[1]
+        );
+    }
+
+    #[test]
+    fn view_expands_pure_assignment_subst_into_leaves() {
+        // Bug B: `task_id=$(curl ... | jq ...)` is a SimpleCommand with no
+        // cmd word — used to be skipped entirely, hiding curl + jq from the
+        // user.  Now the inner pipeline is spliced in as proper leaves.
+        let v = extract_structured_view(
+            r#"task_id=$(curl -s localhost:9090/x | jq -r .id) ; echo done"#,
+        );
+        let argvs = view_argvs(&v);
+        assert_eq!(argvs.len(), 3, "got leaves: {:?}", argvs);
+        assert_eq!(argvs[0], vec!["curl", "-s", "localhost:9090/x"]);
+        assert_eq!(argvs[1], vec!["jq", "-r", ".id"]);
+        assert_eq!(argvs[2], vec!["echo", "done"]);
+        assert_eq!(v.connectors, vec![Connector::Pipe, Connector::Semi]);
+    }
+
+    #[test]
+    fn view_assignment_before_other_command() {
+        // Make sure a leading assignment followed by another top-level cmd
+        // gets the connectors right: curl, jq joined by Pipe, then Semi to
+        // the echo.
+        let v = extract_structured_view(
+            r#"x=$(curl a | jq .) ; echo done"#,
+        );
+        assert_eq!(v.leaves.len(), 3);
+        assert_eq!(v.connectors, vec![Connector::Pipe, Connector::Semi]);
     }
 
     #[test]
