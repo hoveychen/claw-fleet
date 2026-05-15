@@ -20,9 +20,11 @@ html, body, #root {
   --color-bg: #141414;
   --color-bg-sidebar: var(--color-bg);
   --color-bg-secondary: #222222;
+  --color-bg-tertiary: #1a1a1a;
   --color-bg-card: #1c1c1c;
   --color-bg-card-hover: #262626;
   --color-bg-card-selected: #2a2a2a;
+  --color-bg-hover: var(--color-bg-card-hover);
   --color-bg-tool: #191919;
   --color-bg-tool-hover: #222222;
   --color-bg-user: #1a2838;
@@ -33,11 +35,17 @@ html, body, #root {
   --color-text: #e5e5e5;
   --color-text-secondary: #a8a8a8;
   --color-text-dim: #6e6e6e;
+  --color-text-muted: var(--color-text-dim);
   --color-border: #2e2e2e;
+  --color-border-soft: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.18);
 
   --color-accent: #d97757;
   --color-accent-bright: #f0a070;
   --color-accent-tool: #7dd3fc;
+  --color-accent-hover: #c96040;
+  --color-accent-rgb: 217, 119, 87;
+  --color-accent-soft: rgba(217, 119, 87, 0.18);
 
   /* Status badge colors */
   --badge-thinking-bg: #2a1a4a;    --badge-thinking-fg: #c084fc;
@@ -76,15 +84,19 @@ html, body, #root {
 
   /* Status / semantic colors */
   --color-success: #4ade80;
+  --color-status-active: var(--color-success);
   --color-warning: #fbbf24;
   --color-error-bg: #4a1a1a;
   --color-error-fg: #f87171;
+  --color-error: var(--color-error-fg);
+  --color-status-error: var(--color-error-fg);
   --color-error-result-bg: #1a0d0d;
 
   /* Inline code */
   --color-code-fg: #e2c08d;
 
   --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "Menlo", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, system-ui, sans-serif;
 
   /* Mascot panel */
   --mascot-bg: #1e2228;
@@ -114,9 +126,11 @@ html, body, #root {
   --color-bg: #f0f0f0;
   --color-bg-sidebar: var(--color-bg);
   --color-bg-secondary: #dddddd;
+  --color-bg-tertiary: #e5e5e5;
   --color-bg-card: #ffffff;
   --color-bg-card-hover: #f5f5f5;
   --color-bg-card-selected: #eaeaea;
+  --color-bg-hover: var(--color-bg-card-hover);
   --color-bg-tool: #f5f5f5;
   --color-bg-tool-hover: #ededed;
   --color-bg-user: #e8eeff;
@@ -127,11 +141,17 @@ html, body, #root {
   --color-text: #1a1a1a;
   --color-text-secondary: #555555;
   --color-text-dim: #8a8a8a;
+  --color-text-muted: var(--color-text-dim);
   --color-border: #e0e0e0;
+  --color-border-soft: rgba(0, 0, 0, 0.06);
+  --color-border-strong: rgba(0, 0, 0, 0.14);
 
   --color-accent: #d97757;
   --color-accent-bright: #e8916f;
   --color-accent-tool: #2563eb;
+  --color-accent-hover: #b54a32;
+  --color-accent-rgb: 217, 119, 87;
+  --color-accent-soft: rgba(217, 119, 87, 0.14);
 
   /* Status badge colors — light */
   --badge-thinking-bg: #f3e8ff;    --badge-thinking-fg: #7c3aed;
@@ -170,9 +190,12 @@ html, body, #root {
 
   /* Status / semantic colors — light */
   --color-success: #16a34a;
+  --color-status-active: var(--color-success);
   --color-warning: #d97706;
   --color-error-bg: #fee2e2;
   --color-error-fg: #dc2626;
+  --color-error: var(--color-error-fg);
+  --color-status-error: var(--color-error-fg);
   --color-error-result-bg: #fff5f5;
 
   /* Inline code — light */

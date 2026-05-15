@@ -223,8 +223,8 @@
 }
 
 .task_detail_title:hover {
-  border-color: var(--border-subtle, rgba(0, 0, 0, 0.12));
-  background: var(--row-hover-bg, rgba(0, 0, 0, 0.03));
+  border-color: var(--color-border);
+  background: var(--color-bg-hover);
 }
 
 .task_detail_title_input {
@@ -233,9 +233,9 @@
   font-weight: 600;
   font-family: inherit;
   padding: 1px 4px;
-  border: 1px solid var(--accent, #c97064);
+  border: 1px solid var(--color-accent);
   border-radius: 4px;
-  background: var(--input-bg, rgba(255, 255, 255, 0.06));
+  background: var(--color-bg-input);
   color: inherit;
   min-width: 240px;
   outline: none;
