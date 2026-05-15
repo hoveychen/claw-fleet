@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import "./fonts";
 import "./App.css";
 import { resolveTheme, useSessionsStore, useUIStore } from "./store";
 import type { SessionInfo } from "./types";

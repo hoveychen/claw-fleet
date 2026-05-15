@@ -47,7 +47,7 @@
   padding: 2px 4px 2px 8px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 8px;
   font-size: 12px;
   color: var(--color-text);
 }
@@ -213,7 +213,7 @@
   padding: 6px 8px;
   background: transparent;
   border: none;
-  border-radius: 5px;
+  border-radius: 6px;
   color: var(--color-text);
   font-size: 13px;
   cursor: pointer;

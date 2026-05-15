@@ -1,5 +1,6 @@
 import { useCallback, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import "./fonts";
 import "./App.css";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { resolveTheme, useUIStore } from "./store";

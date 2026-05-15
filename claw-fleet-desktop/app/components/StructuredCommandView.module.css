@@ -5,7 +5,7 @@
   color: var(--color-text);
   background: var(--color-bg-tool);
   border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 8px 10px;
   margin-bottom: 8px;
   display: flex;
@@ -20,7 +20,7 @@
   color: var(--color-text);
   background: var(--color-bg-tool);
   border: 1px solid var(--color-border);
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 8px 10px;
   word-break: break-all;
   white-space: pre-wrap;
@@ -62,7 +62,7 @@
   color: var(--color-text-secondary);
   background: var(--color-bg, transparent);
   border: 1px solid var(--color-border);
-  border-radius: 3px;
+  border-radius: 4px;
   padding: 0 6px;
   letter-spacing: 0.5px;
 }
@@ -85,7 +85,7 @@
   color: var(--color-text-secondary);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 3px;
+  border-radius: 4px;
   padding: 1px 6px;
   align-self: flex-start;
 }

@@ -301,7 +301,7 @@
   inset: 0;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 8px;
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
 }

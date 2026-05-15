@@ -76,7 +76,7 @@
 .dialog {
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 20px 24px;
   max-width: 480px;
   width: 100%;

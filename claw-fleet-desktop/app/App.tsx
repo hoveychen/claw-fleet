@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useCallback, useEffect, useRef, useState } from "react";
+import "./fonts";
 import "./App.css";
 import { ConnectionDialog } from "./components/ConnectionDialog";
 import { LiteApp } from "./components/LiteApp";

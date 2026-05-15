@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Menu, LayoutGrid } from "lucide-react";
 import { useUIStore } from "../store";
 import styles from "./SessionToolbar.module.css";
 
@@ -68,7 +69,7 @@ export function SessionToolbar({
           aria-label={t("view_mode_list_tooltip")}
           aria-pressed={viewMode === "list"}
         >
-          ☰
+          <Menu size={14} strokeWidth={1.5} />
         </button>
         <button
           type="button"
@@ -78,7 +79,7 @@ export function SessionToolbar({
           aria-label={t("view_mode_gallery_tooltip")}
           aria-pressed={viewMode === "gallery"}
         >
-          ⊞
+          <LayoutGrid size={14} strokeWidth={1.5} />
         </button>
       </div>
     </div>

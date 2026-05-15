@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
+import "./fonts";
 import "./App.css";
 import { safeMarkdownComponents } from "./markdown/safeLinks";
 import { resolveTheme, useUIStore } from "./store";
