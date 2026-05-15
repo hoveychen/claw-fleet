@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Play } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
 import { useFleetManagedStore, useSessionsStore } from "../store";
@@ -71,7 +72,7 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
           disabled={resuming}
           title={t("rateLimit.resumeNow")}
         >
-          {resuming ? "…" : "▶"}
+          {resuming ? "…" : <Play size={12} strokeWidth={1.75} />}
         </button>
       )}
     </>
@@ -207,89 +208,15 @@ export function AgentSourceIcon({ source }: { source: string }) {
 
 // ── Status icon ───────────────────────────────────────────────────────────────
 
-export function StatusIcon({ status }: { status: SessionStatus }) {
-  switch (status) {
-    case "thinking":
-      // Chat bubble "..." — "hmm, let me think..."
-      return (
-        <svg className={`${styles.sicon} ${styles.sicon_thinking}`} viewBox="0 0 14 12" fill="currentColor" aria-hidden>
-          <rect x="0.5" y="0.5" width="13" height="8" rx="2.5" opacity="0.2" />
-          <path d="M3.5 8.5 L2 11 L6 8.5" opacity="0.2" />
-          <circle cx="4"  cy="4.5" r="1.3" />
-          <circle cx="7"  cy="4.5" r="1.3" />
-          <circle cx="10" cy="4.5" r="1.3" />
-        </svg>
-      );
-    case "executing":
-      // Lightning bolt — "⚡ on it!"
-      return (
-        <svg className={`${styles.sicon} ${styles.sicon_executing}`} viewBox="0 0 10 14" fill="currentColor" aria-hidden>
-          <polygon points="6.5,0 1.5,8 5,8 3.5,14 8.5,6 5,6" />
-        </svg>
-      );
-    case "streaming":
-      // Sound equalizer bars — writing/speaking
-      return (
-        <svg className={`${styles.sicon} ${styles.sicon_streaming}`} viewBox="0 0 10 8" fill="currentColor" aria-hidden>
-          <rect className={styles.bar1} x="0" y="3" width="2" height="5" rx="1" />
-          <rect className={styles.bar2} x="4" y="0" width="2" height="8" rx="1" />
-          <rect className={styles.bar3} x="8" y="2" width="2" height="6" rx="1" />
-        </svg>
-      );
-    case "processing":
-      // Clock face with spinning hand — "ticking away..."
-      return (
-        <svg className={styles.sicon} viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeLinecap="round" aria-hidden>
-          <circle cx="5" cy="5" r="4" strokeWidth="1.5" />
-          <line className={styles.clock_hand} x1="5" y1="5" x2="5" y2="2" strokeWidth="1.8" />
-        </svg>
-      );
-    case "waitingInput":
-      // Question mark bouncing — "what should I do next?"
-      return (
-        <svg className={`${styles.sicon} ${styles.sicon_question}`} viewBox="0 0 8 12" fill="currentColor" aria-hidden>
-          <path d="M1.5 2.8 Q1.5 0.5 4 0.5 Q6.5 0.5 6.5 2.8 Q6.5 4.8 4 6 L4 7.8"
-                fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          <circle cx="4" cy="10.5" r="1.1" />
-        </svg>
-      );
-    case "active":
-      // Beating heart — "alive and ready"
-      return (
-        <svg className={`${styles.sicon} ${styles.sicon_heart}`} viewBox="0 0 10 9" fill="currentColor" aria-hidden>
-          <path d="M5 8.5 C1 5.5 0 3 0 2 C0 0.5 1.2 0 2.5 0.5 C3.5 0.9 5 2 5 2 C5 2 6.5 0.9 7.5 0.5 C8.8 0 10 0.5 10 2 C10 3 9 5.5 5 8.5Z" />
-        </svg>
-      );
-    case "delegating":
-      // Node broadcasting — sending work out
-      return (
-        <svg className={`${styles.sicon} ${styles.sicon_delegating}`} viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden>
-          <circle cx="2.5" cy="5"   r="1.5" fill="currentColor" stroke="none" />
-          <line   x1="4"  y1="5"   x2="6.5" y2="2.5" className={styles.del_line1} />
-          <line   x1="4"  y1="5"   x2="6.5" y2="7.5" className={styles.del_line2} />
-          <circle cx="8"  cy="2.5" r="1.5" fill="currentColor" stroke="none" className={styles.del_node1} />
-          <circle cx="8"  cy="7.5" r="1.5" fill="currentColor" stroke="none" className={styles.del_node2} />
-        </svg>
-      );
-    case "idle":
-      // Floating Zzz — "taking a nap..."
-      return (
-        <svg className={`${styles.sicon} ${styles.sicon_idle_zzz}`} viewBox="0 0 14 12"
-             fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path className={styles.z1} d="M1 9.5 L5.5 9.5 L1 12 L5.5 12"   strokeWidth="1.6" />
-          <path className={styles.z2} d="M5 5.5 L8.5 5.5 L5 7.8 L8.5 7.8" strokeWidth="1.4" />
-          <path className={styles.z3} d="M8 2 L11 2 L8 4 L11 4"            strokeWidth="1.2" />
-        </svg>
-      );
-    case "rateLimited":
-      // Hourglass — waiting for quota reset.
-      return (
-        <svg className={styles.sicon} viewBox="0 0 10 12"
-             fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.4" aria-hidden>
-          <path d="M1.5 1 L8.5 1 L8.5 3 L5 6 L8.5 9 L8.5 11 L1.5 11 L1.5 9 L5 6 L1.5 3 Z" />
-        </svg>
-      );
-  }
+export function StatusIcon(_props: { status: SessionStatus }) {
+  // Linear-style: a single 6px filled circle. The status hue is carried by
+  // the enclosing .badge_<status> class via `currentColor`; this component
+  // only owns geometry and size.
+  return (
+    <svg className={styles.sicon} viewBox="0 0 6 6" width="6" height="6" fill="currentColor" aria-hidden>
+      <circle cx="3" cy="3" r="3" />
+    </svg>
+  );
 }
 
 // ── Status badge ─────────────────────────────────────────────────────────────
@@ -299,7 +226,7 @@ export function StatusBadge({ status }: { status: SessionStatus }) {
   return (
     <span className={`${styles.badge} ${styles[`badge_${status}`]}`}>
       <StatusIcon status={status} />
-      {t(`status.${status}`)}
+      <span className={styles.badge_label}>{t(`status.${status}`)}</span>
     </span>
   );
 }
