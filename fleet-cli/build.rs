@@ -1,6 +1,6 @@
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=CARGO_PKG_VERSION");
+    println!("cargo:rerun-if-changed=Cargo.toml");
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os != "macos" {
