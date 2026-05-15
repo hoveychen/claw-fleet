@@ -1237,6 +1237,8 @@
     "user_title": "Your title",
     "user_title_desc": "How should the assistant address you?",
     "user_title_placeholder": "Boss",
+    "mascot_visible": "Show mascot",
+    "mascot_visible_desc": "Display the kawaii sidebar mascot. Off by default — flip on to bring it out.",
     "personalized_mascot": "Personalized assistant",
     "personalized_mascot_desc": "Use AI to generate context-aware quips based on your current tasks (uses Claude Haiku)",
     "tts": "Alert Sound",
@@ -1422,7 +1424,11 @@
   "decision_panel": {
     "history_title": "Recent in this session",
     "history_more": "+{{count}} more in session detail",
-    "view_session_history": "View this session's history"
+    "view_session_history": "View this session's history",
+    "collapse": "Collapse panel",
+    "expand": "Expand panel",
+    "collapsed_label": "Decision panel · {{count}} pending",
+    "peek_hint": "Hold Option to peek behind"
   },
   "session_pending": {
     "title": "Session waiting for input",

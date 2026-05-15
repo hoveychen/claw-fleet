@@ -1234,6 +1234,8 @@
     "user_title": "称呼",
     "user_title_desc": "小助手怎么称呼你？",
     "user_title_placeholder": "老板",
+    "mascot_visible": "显示小助手",
+    "mascot_visible_desc": "默认隐藏侧边栏吉祥物，打开后才会出现。",
     "personalized_mascot": "个性化小助手",
     "personalized_mascot_desc": "使用 AI 根据当前任务生成个性化文案（使用 Claude Haiku）",
     "tts": "提示音",
@@ -1419,7 +1421,11 @@
   "decision_panel": {
     "history_title": "本会话最近记录",
     "history_more": "另有 {{count}} 条，可在会话详情中查看",
-    "view_session_history": "查看本会话历史"
+    "view_session_history": "查看本会话历史",
+    "collapse": "折叠面板",
+    "expand": "展开面板",
+    "collapsed_label": "决策面板 · {{count}} 待处理",
+    "peek_hint": "按住 Option 透视"
   },
   "session_pending": {
     "title": "会话等待输入",

@@ -111,9 +111,15 @@ function App() {
         i18n.changeLanguage(e.payload);
       }
     });
+    const unMascotPromise = listen<boolean>("overlay-mascot-visible-changed", (e) => {
+      if (useUIStore.getState().mascotVisible !== e.payload) {
+        useUIStore.setState({ mascotVisible: e.payload });
+      }
+    });
     return () => {
       unThemePromise.then((fn) => fn());
       unLangPromise.then((fn) => fn());
+      unMascotPromise.then((fn) => fn());
     };
   }, []);
 

@@ -612,6 +612,18 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     setItem("personalized-mascot", enabled ? "true" : "false");
   }, []);
 
+  // ── Mascot visibility state ────────────────────────────────────────────
+  const [mascotVisible, setMascotVisibleLocal] = useState(
+    () => getItem("mascot-visible") === "true",
+  );
+
+  const handleToggleMascotVisible = useCallback(async (enabled: boolean) => {
+    setMascotVisibleLocal(enabled);
+    setItem("mascot-visible", enabled ? "true" : "false");
+    const { emit } = await import("@tauri-apps/api/event");
+    await emit("overlay-mascot-visible-changed", enabled).catch(() => {});
+  }, []);
+
   // ── Auto update check state ────────────────────────────────────────────
   const [autoUpdateCheck, setAutoUpdateCheck] = useState(
     () => getItem("auto-update-check") !== "false",
@@ -919,20 +931,38 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </div>
                 <div className={styles.row}>
                   <div>
-                    <span className={styles.row_label}>{t("settings.personalized_mascot")}</span>
+                    <span className={styles.row_label}>{t("settings.mascot_visible")}</span>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.personalized_mascot_desc")}
+                      {t("settings.mascot_visible_desc")}
                     </span>
                   </div>
                   <label className={styles.toggle}>
                     <input
                       type="checkbox"
-                      checked={personalizedMascot}
-                      onChange={(e) => handleTogglePersonalizedMascot(e.target.checked)}
+                      checked={mascotVisible}
+                      onChange={(e) => handleToggleMascotVisible(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>
                 </div>
+                {mascotVisible && (
+                  <div className={styles.row}>
+                    <div>
+                      <span className={styles.row_label}>{t("settings.personalized_mascot")}</span>
+                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                        {t("settings.personalized_mascot_desc")}
+                      </span>
+                    </div>
+                    <label className={styles.toggle}>
+                      <input
+                        type="checkbox"
+                        checked={personalizedMascot}
+                        onChange={(e) => handleTogglePersonalizedMascot(e.target.checked)}
+                      />
+                      <span className={styles.toggle_slider} />
+                    </label>
+                  </div>
+                )}
               </div>
             )}
 

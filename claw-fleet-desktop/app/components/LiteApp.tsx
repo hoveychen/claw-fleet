@@ -44,6 +44,7 @@ export function LiteApp() {
     showMobileAccess,
     setShowMobileAccess,
     liteDecisionHistorySessionId,
+    mascotVisible,
   } = useUIStore();
   const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
   const hasAlerts = useWaitingAlertsStore(
@@ -197,19 +198,21 @@ export function LiteApp() {
             )}
           </div>
 
-          <div className={styles.mascot_slot}>
-            <MascotAlertBubble />
-            <MascotEyes
-              suppressQuip={hasAlerts}
-              dashboardMode
-              usageRing={usageRing ? {
-                percent: usageRing.overall,
-                topSource: usageRing.topSource,
-                sources: usageRing.sources,
-                onClick: () => setShowUsage(true),
-              } : null}
-            />
-          </div>
+          {mascotVisible && (
+            <div className={styles.mascot_slot}>
+              <MascotAlertBubble />
+              <MascotEyes
+                suppressQuip={hasAlerts}
+                dashboardMode
+                usageRing={usageRing ? {
+                  percent: usageRing.overall,
+                  topSource: usageRing.topSource,
+                  sources: usageRing.sources,
+                  onClick: () => setShowUsage(true),
+                } : null}
+              />
+            </div>
+          )}
         </div>
       )}
     </div>

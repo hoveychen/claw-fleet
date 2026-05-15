@@ -22,6 +22,7 @@ const ALL_KEYS = [
   "hooks-banner-dismissed",
   "notification-mode",
   "personalized-mascot",
+  "mascot-visible",
   "tts-mode",
   "chime-sound",
   "tts-voice",
