@@ -1174,7 +1174,7 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
        *    dedicated decision-history view (LiteDecisionHistory). Avoids
        *    stuffing the list into the narrow lite window. */}
       {active.request.sessionId && !compact && (
-        <PastHistoryStrip sessionId={active.request.sessionId} />
+        <PastHistoryStrip key={active.id} sessionId={active.request.sessionId} />
       )}
       {active.request.sessionId && compact && (
         <button
