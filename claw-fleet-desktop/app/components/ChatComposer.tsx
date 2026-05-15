@@ -392,8 +392,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             className={styles.send_btn}
             onClick={onSubmit}
             disabled={submitting || submitDisabled || disabled}
-            title={t("composer.send", "Send (Enter; Shift+Enter for newline)")}
-            aria-label={t("composer.send", "Send (Enter; Shift+Enter for newline)")}
+            title={t("composer.send", "Send (Enter)")}
+            aria-label={t("composer.send", "Send (Enter)")}
           >
             {submitLabel ?? (
               <svg

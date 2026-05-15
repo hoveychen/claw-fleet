@@ -1394,7 +1394,7 @@
     "lightbox_close": "关闭",
     "attach_failed": "附件上传失败",
     "attach_too_large": "附件过大（上限 50 MiB）",
-    "send": "发送（Enter；Shift+Enter 换行）"
+    "send": "发送（Enter）"
   },
   "planApproval": {
     "title": "计划待批准",
