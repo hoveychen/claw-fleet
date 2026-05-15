@@ -65,7 +65,7 @@
     "project": "Project",
     "select_project_placeholder": "— Choose a project —",
     "prompt": "Prompt",
-    "prompt_placeholder": "What should the agent work on? (Cmd/Ctrl+Enter to submit)",
+    "prompt_placeholder": "What should the agent work on? (Enter to submit, Shift+Enter for newline)",
     "context_files": "Context Files",
     "add": "Add",
     "add_files": "Files…",
@@ -1397,7 +1397,7 @@
     "lightbox_close": "Close",
     "attach_failed": "Attachment upload failed",
     "attach_too_large": "Attachment is too large (max 50 MiB)",
-    "send": "Send (⌘/Ctrl+Enter)"
+    "send": "Send (Enter; Shift+Enter for newline)"
   },
   "planApproval": {
     "title": "Plan ready for approval",
@@ -1419,7 +1419,7 @@
     "title": "Session waiting for input",
     "mark_status_tip": "Move this session into {{name}}",
     "open_detail": "Open session detail",
-    "followup_placeholder": "Type a follow-up prompt (⌘/Ctrl+Enter to send)…",
+    "followup_placeholder": "Type a follow-up prompt (Enter to send, Shift+Enter for newline)…",
     "send": "Send follow-up",
     "sending": "Sending…"
   },

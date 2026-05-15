@@ -89,7 +89,7 @@ export interface ChatComposerProps {
   onAddAttachment: (a: ChatComposerStagedAttachment) => void | Promise<void>;
   onRemoveAttachment: (path: string) => void;
   onAttachmentError?: (msg: string) => void;
-  /** Provide to render a send arrow on the right; Cmd/Ctrl+Enter calls it too. */
+  /** Provide to render a send arrow on the right; Enter submits, Shift+Enter inserts a newline. */
   onSubmit?: () => void;
   submitting?: boolean;
   submitDisabled?: boolean;
@@ -247,10 +247,15 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (!onSubmit) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-        e.preventDefault();
-        if (!submitDisabled && !submitting) onSubmit();
-      }
+      // IME composing 中的 Enter（中文/日文/韩文输入法确认候选词）放行给 IME。
+      // keyCode === 229 是 Chromium 在 IME 处理期间的兜底信号，覆盖 React 偶发丢
+      // isComposing 状态的边角场景。
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+      if (e.key !== "Enter") return;
+      // Shift+Enter 留给 textarea 默认换行。
+      if (e.shiftKey) return;
+      e.preventDefault();
+      if (!submitDisabled && !submitting) onSubmit();
     },
     [onSubmit, submitDisabled, submitting],
   );
@@ -387,8 +392,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
             className={styles.send_btn}
             onClick={onSubmit}
             disabled={submitting || submitDisabled || disabled}
-            title={t("composer.send", "Send (⌘/Ctrl+Enter)")}
-            aria-label={t("composer.send", "Send (⌘/Ctrl+Enter)")}
+            title={t("composer.send", "Send (Enter; Shift+Enter for newline)")}
+            aria-label={t("composer.send", "Send (Enter; Shift+Enter for newline)")}
           >
             {submitLabel ?? (
               <svg
