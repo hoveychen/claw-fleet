@@ -271,6 +271,8 @@ pub trait Backend: Send + Sync {
     fn list_skills(&self) -> Vec<SkillItem>;
     fn get_skill_content(&self, path: &str) -> Result<String, String>;
     fn list_skill_files(&self, skill_path: &str) -> Result<Vec<SkillFileEntry>, String>;
+    /// Delete a skill (directory or flat file) under `~/.claude/skills/`.
+    fn delete_skill(&self, skill_path: &str) -> Result<(), String>;
     /// Per-session Skill invocation history. Scans the main jsonl and any
     /// sibling `<sid>/subagents/agent-*.jsonl` files; subagent entries are
     /// flagged with `is_subagent: true`.

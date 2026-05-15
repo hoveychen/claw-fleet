@@ -146,7 +146,13 @@ export function SkillsView() {
 
         <main className={styles.detail_pane}>
           {selected ? (
-            <SkillDetail skill={selected} />
+            <SkillDetail
+              skill={selected}
+              onDeleted={(path) => {
+                setSkills((prev) => prev.filter((s) => s.path !== path));
+                setSelected(null);
+              }}
+            />
           ) : (
             <div className={styles.placeholder}>
               {loaded && skills.length > 0
@@ -162,7 +168,13 @@ export function SkillsView() {
 
 // ── Detail pane ──────────────────────────────────────────────────────────────
 
-function SkillDetail({ skill }: { skill: SkillItem }) {
+function SkillDetail({
+  skill,
+  onDeleted,
+}: {
+  skill: SkillItem;
+  onDeleted: (path: string) => void;
+}) {
   const { t } = useTranslation();
   const isLocal = useConnectionStore(
     (s) => s.connection?.type === "local",
@@ -172,6 +184,7 @@ function SkillDetail({ skill }: { skill: SkillItem }) {
   // Set of `relativePath` values for directories that are currently collapsed.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [fileQuery, setFileQuery] = useState("");
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     setFiles(null);
@@ -250,6 +263,23 @@ function SkillDetail({ skill }: { skill: SkillItem }) {
     }
   }, [activeFile]);
 
+  const handleDelete = useCallback(async () => {
+    if (deleting) return;
+    const confirmed = window.confirm(
+      t("skills.delete_confirm", { name: skill.name }),
+    );
+    if (!confirmed) return;
+    setDeleting(true);
+    try {
+      await invoke("delete_skill", { skillPath: skill.path });
+      onDeleted(skill.path);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      window.alert(t("skills.delete_failed", { error: msg }));
+      setDeleting(false);
+    }
+  }, [deleting, onDeleted, skill.name, skill.path, t]);
+
   return (
     <>
       <div className={styles.detail_header}>
@@ -262,8 +292,8 @@ function SkillDetail({ skill }: { skill: SkillItem }) {
             </>
           )}
         </div>
-        {isLocal && activeFile && (
-          <div className={styles.detail_actions}>
+        <div className={styles.detail_actions}>
+          {isLocal && activeFile && (
             <button
               className={styles.promote_btn}
               onClick={reveal}
@@ -271,8 +301,16 @@ function SkillDetail({ skill }: { skill: SkillItem }) {
             >
               {t("skills.reveal_in_finder")}
             </button>
-          </div>
-        )}
+          )}
+          <button
+            className={skillStyles.danger_btn}
+            onClick={handleDelete}
+            disabled={deleting}
+            title={t("skills.delete")}
+          >
+            {t("skills.delete")}
+          </button>
+        </div>
       </div>
 
       <div className={skillStyles.detail_split}>

@@ -1609,6 +1609,10 @@ impl Backend for LocalBackend {
         crate::skills::list_skill_files(skill_path)
     }
 
+    fn delete_skill(&self, skill_path: &str) -> Result<(), String> {
+        crate::skills::delete_skill(skill_path)
+    }
+
     fn get_skill_history(
         &self,
         jsonl_path: &str,

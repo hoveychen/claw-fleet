@@ -238,6 +238,53 @@ fn walk_skill_dir(root: &Path, dir: &Path, out: &mut Vec<SkillFileEntry>, depth:
 
 // ── Read file content ─────────────────────────────────────────────────────────
 
+// ── Delete a skill ────────────────────────────────────────────────────────────
+
+/// Delete a skill identified by its `skill_path` (the same value carried in
+/// `SkillItem.path`).
+///
+/// * Directory-based skill (`~/.claude/skills/<name>/SKILL.md`) → recursively
+///   removes the parent directory.
+/// * Flat skill (`~/.claude/skills/<name>.md`) → removes the single file.
+///
+/// The path is canonicalized and must resolve inside `~/.claude/skills/` —
+/// anything outside is rejected.
+pub fn delete_skill(skill_path: &str) -> Result<(), String> {
+    let claude_dir = get_claude_dir().ok_or_else(|| "cannot determine home dir".to_string())?;
+    let skills_dir = claude_dir.join("skills");
+    let canonical_skills_dir = fs::canonicalize(&skills_dir).map_err(|e| e.to_string())?;
+
+    let canonical = fs::canonicalize(skill_path).map_err(|e| e.to_string())?;
+    if !canonical.starts_with(&canonical_skills_dir) {
+        return Err("path is outside allowed skills directory".into());
+    }
+    if canonical == canonical_skills_dir {
+        return Err("refusing to delete the skills root".into());
+    }
+
+    if canonical.is_file() {
+        let parent = canonical
+            .parent()
+            .ok_or_else(|| "invalid skill path".to_string())?;
+        if parent == canonical_skills_dir.as_path() {
+            // Flat skill: drop just the file.
+            return fs::remove_file(&canonical).map_err(|e| e.to_string());
+        }
+        // Directory-based skill: drop the whole containing directory.
+        // Sanity: parent must itself be inside skills_dir.
+        if !parent.starts_with(&canonical_skills_dir) {
+            return Err("skill parent escapes skills directory".into());
+        }
+        return fs::remove_dir_all(parent).map_err(|e| e.to_string());
+    }
+
+    if canonical.is_dir() {
+        return fs::remove_dir_all(&canonical).map_err(|e| e.to_string());
+    }
+
+    Err("skill path does not exist".into())
+}
+
 pub fn read_skill_file(path: &str) -> Result<String, String> {
     // Safety: only allow reading from ~/.claude/skills/
     let claude_dir = get_claude_dir().ok_or("cannot determine home dir")?;
@@ -284,5 +331,83 @@ mod tests {
         let (name, desc) = parse_frontmatter(content, path);
         assert_eq!(name, "custom");
         assert_eq!(desc, "");
+    }
+
+    struct FleetHomeOverride {
+        prev: Option<std::ffi::OsString>,
+    }
+
+    impl FleetHomeOverride {
+        fn new(tmp: &Path) -> Self {
+            let prev = std::env::var_os("FLEET_HOME");
+            unsafe { std::env::set_var("FLEET_HOME", tmp) };
+            FleetHomeOverride { prev }
+        }
+    }
+
+    impl Drop for FleetHomeOverride {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prev {
+                    Some(p) => std::env::set_var("FLEET_HOME", p),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+            }
+        }
+    }
+
+    fn make_skills_dir(home: &Path) -> PathBuf {
+        let d = home.join(".claude").join("skills");
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn delete_skill_removes_directory_based_skill() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(tmp.path());
+        let skills_dir = make_skills_dir(tmp.path());
+
+        let skill_dir = skills_dir.join("my-skill");
+        fs::create_dir_all(skill_dir.join("scripts")).unwrap();
+        let skill_md = skill_dir.join("SKILL.md");
+        fs::write(&skill_md, "---\nname: my-skill\n---\nBody").unwrap();
+        fs::write(skill_dir.join("scripts").join("run.sh"), "echo hi").unwrap();
+
+        delete_skill(skill_md.to_str().unwrap()).unwrap();
+        assert!(!skill_dir.exists(), "skill directory should be gone");
+        assert!(skills_dir.exists(), "skills root must remain");
+    }
+
+    #[test]
+    fn delete_skill_removes_flat_md_file() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(tmp.path());
+        let skills_dir = make_skills_dir(tmp.path());
+
+        let flat = skills_dir.join("flat-skill.md");
+        fs::write(&flat, "# flat").unwrap();
+
+        delete_skill(flat.to_str().unwrap()).unwrap();
+        assert!(!flat.exists(), "flat skill file should be gone");
+        assert!(skills_dir.exists(), "skills root must remain");
+    }
+
+    #[test]
+    fn delete_skill_rejects_path_outside_skills_dir() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(tmp.path());
+        let _skills_dir = make_skills_dir(tmp.path());
+
+        // Put a victim file in ~/.claude/ but outside skills/
+        let victim = tmp.path().join(".claude").join("victim.md");
+        fs::write(&victim, "do not delete").unwrap();
+
+        let err = delete_skill(victim.to_str().unwrap()).unwrap_err();
+        assert!(err.contains("outside allowed skills directory"), "got: {err}");
+        assert!(victim.exists(), "victim file must NOT be deleted");
     }
 }

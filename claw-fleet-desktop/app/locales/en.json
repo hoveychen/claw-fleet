@@ -213,7 +213,10 @@
     "read_error": "Failed to read file.",
     "reveal_in_finder": "Reveal in Finder",
     "filter_files": "Filter files…",
-    "no_match": "No files match."
+    "no_match": "No files match.",
+    "delete": "Delete",
+    "delete_confirm": "Delete skill \"{{name}}\"? This removes the entire skill from ~/.claude/skills/ and cannot be undone.",
+    "delete_failed": "Failed to delete skill: {{error}}"
   },
   "plugins": {
     "panel_title": "Plugins",

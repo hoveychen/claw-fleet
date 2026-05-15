@@ -143,6 +143,9 @@ impl Backend for NullBackend {
     fn list_skill_files(&self, _: &str) -> Result<Vec<SkillFileEntry>, String> {
         Err("backend not ready".into())
     }
+    fn delete_skill(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn get_skill_history(
         &self,
         _: &str,
