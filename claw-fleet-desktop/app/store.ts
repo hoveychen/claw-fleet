@@ -33,8 +33,10 @@ export const useConnectionStore = create<ConnectionState>((set) => ({
 /** Open the standalone Settings window, seeding it with the current connection. */
 export async function openSettingsWindow(): Promise<void> {
   const { connection } = useConnectionStore.getState();
+  const { theme } = useUIStore.getState();
   await invoke("open_settings_window", {
     connection: connection ? JSON.stringify(connection) : null,
+    theme: resolveTheme(theme),
   }).catch((e) => {
     console.error("open_settings_window failed:", e);
   });
