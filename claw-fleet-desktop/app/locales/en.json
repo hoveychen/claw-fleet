@@ -369,13 +369,16 @@
     "promote_project": "Project CLAUDE.md",
     "promote_global": "Global CLAUDE.md (~/.claude)"
   },
+  "live": {
+    "section_title": "Live"
+  },
   "chart": {
-    "title": "Token Speed",
+    "title": "Token speed",
     "unit": "tok/s",
     "no_data": "No data yet"
   },
   "cost_chart": {
-    "title": "Cost Speed",
+    "title": "Spend rate",
     "unit": "$/min",
     "window_total": "5-min window: ${{amount}}"
   },
