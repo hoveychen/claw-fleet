@@ -135,12 +135,12 @@
 }
 .close_btn:hover { background: var(--color-bg-secondary); color: var(--color-text); }
 
-/* Tab bar (subagent tabs + view tabs combined) */
+/* Tab bar (agent segmented control + view tabs combined) */
 .tab_bar {
   display: flex;
   align-items: center;
-  gap: 0;
-  padding: 0 12px;
+  gap: 12px;
+  padding: 8px 12px 0;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-sidebar);
   flex-shrink: 0;
@@ -149,37 +149,42 @@
 }
 .tab_bar::-webkit-scrollbar { display: none; }
 
-.tab_separator {
-  display: inline-block;
-  width: 1px;
-  height: 16px;
-  background: var(--color-border);
-  margin: 0 8px;
+/* Agent segmented control — canonical pill spec (matches tab-style-unification
+   PILL: container bg-secondary radius 8 padding 3; segment radius 5 active
+   bg-card). Separates agent identity from the view tabs so they don't read as
+   a single confusing two-layer tab strip. */
+.agent_seg_wrap {
+  display: inline-flex;
+  gap: 2px;
+  background: var(--color-bg-secondary);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 6px;
   flex-shrink: 0;
 }
 
-.tab {
+.agent_seg {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 14px;
-  margin-bottom: -1px;
-  font-size: 12px;
-  font-weight: 600;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 500;
   color: var(--color-text-dim);
-  background: none;
+  background: transparent;
   border: none;
-  border-bottom: 2px solid transparent;
+  border-radius: 5px;
   cursor: pointer;
   white-space: nowrap;
-  transition: color 0.12s, border-color 0.12s;
+  transition: background 0.12s, color 0.12s;
 }
-.tab:hover {
+.agent_seg:hover {
   color: var(--color-text);
 }
-.tab_active {
-  color: var(--color-accent);
-  border-bottom-color: var(--color-accent);
+.agent_seg_active {
+  background: var(--color-bg-card);
+  color: var(--color-text);
+  font-weight: 600;
 }
 
 .tab_dot {
