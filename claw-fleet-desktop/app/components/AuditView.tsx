@@ -2,7 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuditStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
-import type { AuditEvent, AuditRiskLevel, AuditRuleInfo, AuditSummary, SuggestedRule } from "../types";
+import type {
+  AuditEvent,
+  AuditRiskLevel,
+  AuditRuleInfo,
+  AuditSummary,
+  GuardAllowRule,
+  SuggestedRule,
+} from "../types";
 import styles from "./AuditView.module.css";
 
 // ── Risk level helpers ──────────────────────────────────────────────────────
@@ -435,7 +442,115 @@ function RulesTab({ lang }: { lang: string }) {
           </div>
         )}
       </div>
+
+      <GuardAllowRulesSection />
     </>
+  );
+}
+
+// ── Guard Allow Rules Section ───────────────────────────────────────────────
+
+function GuardAllowRulesSection() {
+  const { t, i18n } = useTranslation();
+  const [rules, setRules] = useState<GuardAllowRule[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await invoke<GuardAllowRule[]>("list_guard_allow_rules");
+      setRules(data);
+    } catch (e) {
+      console.error("list_guard_allow_rules failed:", e);
+      setRules([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const handleRemove = async (id: string) => {
+    if (!confirm(t("guard.allow_rules_remove_confirm"))) return;
+    try {
+      await invoke("remove_guard_allow_rule", { id });
+      setRules((prev) => prev.filter((r) => r.id !== id));
+    } catch (e) {
+      console.error("remove_guard_allow_rule failed:", e);
+    }
+  };
+
+  const formatCreated = (iso: string): string => {
+    try {
+      const d = new Date(iso);
+      return d.toLocaleString(i18n.language);
+    } catch {
+      return iso;
+    }
+  };
+
+  return (
+    <section className={styles.allow_rules_section}>
+      <button
+        type="button"
+        className={styles.allow_rules_header}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <span className={styles.allow_rules_chevron}>{expanded ? "▾" : "▸"}</span>
+        <span className={styles.allow_rules_title}>{t("guard.allow_rules_title")}</span>
+        <span className={styles.session_count}>{rules.length}</span>
+      </button>
+
+      {expanded && (
+        <div className={styles.allow_rules_body}>
+          {loading ? (
+            <p className={styles.empty}>{t("audit.scanning")}</p>
+          ) : rules.length === 0 ? (
+            <p className={styles.empty}>{t("guard.allow_rules_empty")}</p>
+          ) : (
+            <table className={styles.allow_rules_table}>
+              <thead>
+                <tr>
+                  <th>{t("guard.allow_rules_col_prefix")}</th>
+                  <th>{t("guard.allow_rules_col_tag")}</th>
+                  <th>{t("guard.allow_rules_col_created")}</th>
+                  <th aria-label="actions" />
+                </tr>
+              </thead>
+              <tbody>
+                {rules.map((r) => (
+                  <tr key={r.id}>
+                    <td>
+                      <code className={styles.allow_rules_prefix}>{r.prefix}</code>
+                    </td>
+                    <td>
+                      {r.sourceTag ? (
+                        <span className={styles.custom_badge}>{r.sourceTag}</span>
+                      ) : (
+                        <span className={styles.empty_inline}>—</span>
+                      )}
+                    </td>
+                    <td className={styles.allow_rules_created}>{formatCreated(r.createdAt)}</td>
+                    <td>
+                      <button
+                        className={styles.delete_btn}
+                        onClick={() => handleRemove(r.id)}
+                      >
+                        {t("guard.allow_rules_remove")}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 

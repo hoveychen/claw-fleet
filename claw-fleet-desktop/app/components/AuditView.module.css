@@ -784,3 +784,81 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* ── Guard allow-rules section ─────────────────────────────────────────── */
+
+.allow_rules_section {
+  border-top: 1px solid var(--color-border);
+  padding: 12px 16px;
+}
+
+.allow_rules_header {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  cursor: pointer;
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.allow_rules_header:hover {
+  color: var(--color-accent);
+}
+
+.allow_rules_chevron {
+  display: inline-block;
+  width: 12px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.allow_rules_title {
+  flex: 0 0 auto;
+}
+
+.allow_rules_body {
+  margin-top: 10px;
+}
+
+.allow_rules_table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.allow_rules_table thead th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.allow_rules_table tbody td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-border-soft, rgba(128, 128, 128, 0.1));
+  vertical-align: middle;
+}
+
+.allow_rules_prefix {
+  background: rgba(43, 108, 176, 0.12);
+  color: var(--color-accent);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+}
+
+.allow_rules_created {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+
+.empty_inline {
+  color: var(--color-text-muted);
+}

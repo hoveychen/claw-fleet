@@ -1668,6 +1668,14 @@ impl Backend for LocalBackend {
         .ok_or_else(|| "LLM analysis timed out or failed".to_string())
     }
 
+    fn list_guard_allow_rules(&self) -> Vec<crate::audit::GuardAllowRule> {
+        crate::audit::list_guard_allow_rules()
+    }
+
+    fn remove_guard_allow_rule(&self, id: &str) -> Result<(), String> {
+        crate::audit::remove_guard_allow_rule(id)
+    }
+
     fn apply_elicitation_hook(&self) -> Result<(), String> {
         crate::hooks::apply_elicitation_hook()
     }
