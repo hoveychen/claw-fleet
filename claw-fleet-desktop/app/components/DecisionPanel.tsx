@@ -71,13 +71,33 @@ function TaskMasterChip({ sessionId }: { sessionId: string | null | undefined })
 
 // ── Guard card renderer ────────────────────────────────────────────────────
 
+/**
+ * Take the first whitespace-separated tokens of the first line as the prefix
+ * we'd remember in an "always allow" rule.  Two tokens covers the common
+ * shape (`git push`, `patchwright-cli eval`, `rm -rf`) without being so broad
+ * that it whitelists a whole tool.  See P4 of the guard-always-allow plan.
+ */
+function computeGuardAllowPrefix(command: string): string {
+  const firstLine = command.split("\n")[0]?.trim() ?? "";
+  if (!firstLine) return "";
+  const tokens = firstLine.split(/\s+/).filter((t) => t.length > 0);
+  return tokens.slice(0, 2).join(" ");
+}
+
 function GuardCard({ decision }: { decision: GuardDecision }) {
   const { t } = useTranslation();
   const { respond } = useDecisionStore();
   const req = decision.request;
 
+  const allowPrefix = useMemo(() => computeGuardAllowPrefix(req.command), [req.command]);
+  const sourceTag = req.riskTags[0] ?? null;
+
   const handleAllow = useCallback(() => respond(decision.id, true), [respond, decision.id]);
   const handleBlock = useCallback(() => respond(decision.id, false), [respond, decision.id]);
+  const handleAlwaysAllow = useCallback(
+    () => respond(decision.id, true, { prefix: allowPrefix, sourceTag }),
+    [respond, decision.id, allowPrefix, sourceTag],
+  );
 
   return (
     <div className={styles.card}>
@@ -130,6 +150,15 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         <button className={`${styles.btn} ${styles.btn_allow}`} onClick={handleAllow}>
           {t("guard.allow", "Allow")}
         </button>
+        {allowPrefix.length > 0 && (
+          <button
+            className={`${styles.btn} ${styles.btn_always_allow}`}
+            onClick={handleAlwaysAllow}
+            title={t("guard.always_allow_hint", "Future commands starting with {{prefix}} will be allowed without asking", { prefix: allowPrefix })}
+          >
+            {t("guard.always_allow", "Always allow")} <code>{allowPrefix}</code>
+          </button>
+        )}
         <button className={`${styles.btn} ${styles.btn_block}`} onClick={handleBlock}>
           {t("guard.block", "Block")}
         </button>

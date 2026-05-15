@@ -149,6 +149,24 @@ fn default_version() -> u32 {
 
 // ── User audit rules (persisted separately from the external patterns file) ──
 
+/// A user-approved "always allow" rule for the Bash guard.  When the guard
+/// classifies an incoming command as Critical, it first checks this list — if
+/// any rule's `prefix` matches the command, the guard short-circuits and the
+/// command runs without showing a decision card.
+///
+/// `prefix` matching is whitespace-bounded: a prefix of `"git push"` matches
+/// `"git push origin main"` but NOT `"git pushdaemon"`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardAllowRule {
+    pub id: String,
+    pub prefix: String,
+    /// The audit tag that originally triggered the guard (for UI/debugging).
+    #[serde(default)]
+    pub source_tag: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
 /// On-disk store for user preferences: which built-in rules are disabled and
 /// what custom rules the user has added.
 ///
@@ -163,6 +181,10 @@ pub struct UserAuditRules {
     /// User-created rules.
     #[serde(default)]
     pub custom_rules: Vec<RuntimeRiskPattern>,
+    /// User-approved "always allow" rules for the Bash guard.  Older files
+    /// don't carry this field — `#[serde(default)]` keeps them loading.
+    #[serde(default)]
+    pub guard_allow_rules: Vec<GuardAllowRule>,
 }
 
 const USER_RULES_FILE: &str = "fleet-audit-user-rules.json";
@@ -945,6 +967,88 @@ pub fn delete_custom_rule(id: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ── Guard allow-list helpers ────────────────────────────────────────────────
+//
+// In-memory pure functions (operate on `&UserAuditRules` directly) so they can
+// be unit-tested without touching the filesystem.  The public wrappers below
+// add load/save.
+
+/// Returns `true` if `prefix` matches `cmd` at a whitespace-bounded position:
+/// after trimming leading whitespace, the command must either equal the prefix
+/// or be `prefix` followed by a whitespace character.
+pub fn guard_prefix_matches(cmd: &str, prefix: &str) -> bool {
+    let trimmed = cmd.trim_start();
+    match trimmed.strip_prefix(prefix) {
+        Some(rest) => rest.is_empty() || rest.starts_with(|c: char| c.is_whitespace()),
+        None => false,
+    }
+}
+
+/// Find the first guard allow rule whose prefix matches `cmd`, if any.
+pub fn match_guard_allow_rule_in<'a>(
+    rules: &'a UserAuditRules,
+    cmd: &str,
+) -> Option<&'a GuardAllowRule> {
+    rules
+        .guard_allow_rules
+        .iter()
+        .find(|r| guard_prefix_matches(cmd, &r.prefix))
+}
+
+/// Add or update a guard allow rule on the given `UserAuditRules`.  Idempotent
+/// by `prefix`: if a rule with the same prefix already exists, return it
+/// unchanged.  Returns the rule that is now in effect (new or existing).
+pub fn upsert_guard_allow_rule_in(
+    rules: &mut UserAuditRules,
+    prefix: String,
+    source_tag: Option<String>,
+) -> GuardAllowRule {
+    let prefix = prefix.trim().to_string();
+    if let Some(existing) = rules.guard_allow_rules.iter().find(|r| r.prefix == prefix) {
+        return existing.clone();
+    }
+    let rule = GuardAllowRule {
+        id: uuid::Uuid::new_v4().to_string(),
+        prefix,
+        source_tag,
+        created_at: chrono::Utc::now(),
+    };
+    rules.guard_allow_rules.push(rule.clone());
+    rule
+}
+
+/// Persistent variant of [`upsert_guard_allow_rule_in`] — loads the user rules
+/// file, upserts the rule, and writes the file back.
+pub fn add_guard_allow_rule(prefix: String, source_tag: Option<String>) -> GuardAllowRule {
+    let mut rules = load_user_rules();
+    let rule = upsert_guard_allow_rule_in(&mut rules, prefix, source_tag);
+    save_user_rules(&rules);
+    rule
+}
+
+/// List all persisted guard allow rules.
+pub fn list_guard_allow_rules() -> Vec<GuardAllowRule> {
+    load_user_rules().guard_allow_rules
+}
+
+/// Remove a guard allow rule by id.  Returns an error if the id is not found.
+pub fn remove_guard_allow_rule(id: &str) -> Result<(), String> {
+    let mut rules = load_user_rules();
+    let before = rules.guard_allow_rules.len();
+    rules.guard_allow_rules.retain(|r| r.id != id);
+    if rules.guard_allow_rules.len() == before {
+        return Err(format!("Guard allow rule '{}' not found", id));
+    }
+    save_user_rules(&rules);
+    Ok(())
+}
+
+/// Check the persisted allow-list and return the matching rule, if any.
+pub fn match_guard_allow_rule(cmd: &str) -> Option<GuardAllowRule> {
+    let rules = load_user_rules();
+    match_guard_allow_rule_in(&rules, cmd).cloned()
+}
+
 /// Build the LLM prompt for rule suggestions based on a user concern.
 pub fn build_suggest_rules_prompt(concern: &str, lang: &str, existing_tags: &[String]) -> String {
     let existing = existing_tags.join(", ");
@@ -1657,4 +1761,82 @@ mod tests {
 
     // ── External JSON loading tests ─────────────────────────────────────────
 
+    // ── Guard allow-list tests ──────────────────────────────────────────────
+
+    #[test]
+    fn guard_prefix_matches_basic() {
+        assert!(guard_prefix_matches("git push origin main", "git push"));
+        assert!(guard_prefix_matches("git push", "git push"));
+        assert!(guard_prefix_matches("  git push origin", "git push"));
+        assert!(guard_prefix_matches("patchwright-cli eval \"...\"", "patchwright-cli eval"));
+    }
+
+    #[test]
+    fn guard_prefix_no_false_partial_word() {
+        // Prefix `git push` must NOT match `git pushdaemon` (unrelated command).
+        assert!(!guard_prefix_matches("git pushdaemon", "git push"));
+        // Prefix `rm` must NOT match `rmdir`.
+        assert!(!guard_prefix_matches("rmdir foo", "rm"));
+    }
+
+    #[test]
+    fn guard_prefix_no_match_when_different() {
+        assert!(!guard_prefix_matches("ls -la", "git push"));
+        assert!(!guard_prefix_matches("", "git push"));
+    }
+
+    #[test]
+    fn user_rules_round_trip_includes_guard_allow_rules() {
+        let mut rules = UserAuditRules::default();
+        upsert_guard_allow_rule_in(&mut rules, "git push".into(), Some("code-push".into()));
+        let json = serde_json::to_string(&rules).unwrap();
+        let decoded: UserAuditRules = serde_json::from_str(&json).unwrap();
+        assert_eq!(decoded.guard_allow_rules.len(), 1);
+        assert_eq!(decoded.guard_allow_rules[0].prefix, "git push");
+        assert_eq!(
+            decoded.guard_allow_rules[0].source_tag.as_deref(),
+            Some("code-push")
+        );
+    }
+
+    #[test]
+    fn user_rules_loads_legacy_file_without_guard_allow_rules() {
+        // Old file shape (pre guard-allow-list): no `guard_allow_rules` field.
+        // Field names are snake_case to match what `save_user_rules` actually
+        // writes (the struct doesn't carry `rename_all = "camelCase"`).
+        let legacy = r#"{"version":1,"disabled_builtin_ids":["sudo"],"custom_rules":[]}"#;
+        let decoded: UserAuditRules = serde_json::from_str(legacy).unwrap();
+        assert_eq!(decoded.disabled_builtin_ids, vec!["sudo".to_string()]);
+        assert!(decoded.guard_allow_rules.is_empty());
+    }
+
+    #[test]
+    fn upsert_guard_allow_rule_idempotent_by_prefix() {
+        let mut rules = UserAuditRules::default();
+        let a = upsert_guard_allow_rule_in(&mut rules, "git push".into(), Some("code-push".into()));
+        let b = upsert_guard_allow_rule_in(&mut rules, "git push".into(), Some("other".into()));
+        // Same prefix → same rule returned, no duplicate appended.
+        assert_eq!(a.id, b.id);
+        assert_eq!(rules.guard_allow_rules.len(), 1);
+    }
+
+    #[test]
+    fn upsert_guard_allow_rule_trims_whitespace() {
+        let mut rules = UserAuditRules::default();
+        let rule = upsert_guard_allow_rule_in(&mut rules, "  git push  ".into(), None);
+        assert_eq!(rule.prefix, "git push");
+    }
+
+    #[test]
+    fn match_guard_allow_rule_in_finds_first_hit() {
+        let mut rules = UserAuditRules::default();
+        upsert_guard_allow_rule_in(&mut rules, "patchwright-cli eval".into(), None);
+        upsert_guard_allow_rule_in(&mut rules, "git push".into(), None);
+
+        let hit = match_guard_allow_rule_in(&rules, "patchwright-cli eval \"foo\"").unwrap();
+        assert_eq!(hit.prefix, "patchwright-cli eval");
+
+        // Different tool → no match.
+        assert!(match_guard_allow_rule_in(&rules, "kubectl get pods").is_none());
+    }
 }

@@ -50,6 +50,32 @@ pub struct GuardResponse {
     pub decision: GuardDecision,
 }
 
+/// Side-channel payload attached to a guard response when the user clicks
+/// "Always allow" — Fleet desktop / `fleet serve` writes a persisted allow
+/// rule (see [`crate::audit::add_guard_allow_rule`]) and then writes the
+/// usual `GuardResponse` so the CLI is unaware of the always-allow concept.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardAlwaysAllow {
+    pub prefix: String,
+    /// The audit tag (e.g. `eval-exec`) that triggered the guard; stored on
+    /// the rule for UI / debugging only.
+    #[serde(default)]
+    pub source_tag: Option<String>,
+}
+
+/// HTTP / Tauri IPC envelope for `respond_to_guard` calls.  The legacy shape
+/// `{ id, decision }` continues to deserialize because `always_allow` defaults
+/// to `None`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardRespondPayload {
+    pub id: String,
+    pub decision: GuardDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub always_allow: Option<GuardAlwaysAllow>,
+}
+
 // ── Paths ────────────────────────────────────────────────────────────────────
 
 pub fn guard_dir() -> Option<PathBuf> {
@@ -205,6 +231,66 @@ mod tests {
         assert_eq!(ids, vec!["still-pending".to_string()]);
         let _ = fs::remove_dir_all(&dir);
     }
+
+    // ── Guard allow-list short-circuit tests ────────────────────────────────
+
+    fn bash_hook(command: &str) -> HookInput {
+        HookInput {
+            session_id: None,
+            tool_name: Some("Bash".into()),
+            tool_input: Some(serde_json::json!({ "command": command })),
+        }
+    }
+
+    #[test]
+    fn classify_short_circuits_when_allow_rule_matches() {
+        // `eval ` (with trailing space) appears as a substring inside
+        // `patchwright-cli eval "..."` — the eval-exec builtin tags it
+        // Critical.  An allow rule for `patchwright-cli eval` must short-circuit.
+        let mut rules = audit::UserAuditRules::default();
+        audit::upsert_guard_allow_rule_in(
+            &mut rules,
+            "patchwright-cli eval".into(),
+            Some("eval-exec".into()),
+        );
+
+        let input = bash_hook(r#"patchwright-cli eval "() => document.title""#);
+        match classify_hook_input_with_rules(&input, &rules) {
+            GuardClassification::Allow => {}
+            GuardClassification::NeedsConfirmation { .. } => {
+                panic!("expected allow-list to short-circuit")
+            }
+        }
+    }
+
+    #[test]
+    fn classify_still_prompts_for_non_matching_prefix() {
+        // Same allow rule, different command — must NOT short-circuit (and
+        // would normally be Allow because it's not Critical, but we verify
+        // the rule didn't fire either).
+        let mut rules = audit::UserAuditRules::default();
+        audit::upsert_guard_allow_rule_in(&mut rules, "patchwright-cli eval".into(), None);
+
+        // `sudo rm -rf /` is Critical and the prefix doesn't match — must
+        // still require confirmation.
+        let input = bash_hook("sudo rm -rf /tmp/foo");
+        match classify_hook_input_with_rules(&input, &rules) {
+            GuardClassification::NeedsConfirmation { risk_tags, .. } => {
+                assert!(risk_tags.contains(&"sudo".to_string()));
+            }
+            GuardClassification::Allow => panic!("expected NeedsConfirmation for unrelated sudo"),
+        }
+    }
+
+    #[test]
+    fn classify_no_rules_still_critical_needs_confirmation() {
+        let rules = audit::UserAuditRules::default();
+        let input = bash_hook("sudo rm -rf /tmp/foo");
+        match classify_hook_input_with_rules(&input, &rules) {
+            GuardClassification::NeedsConfirmation { .. } => {}
+            GuardClassification::Allow => panic!("sudo must require confirmation by default"),
+        }
+    }
 }
 
 // ── Guard logic (used by `fleet guard` CLI) ─────────────────────────────────
@@ -229,7 +315,22 @@ pub enum GuardClassification {
 }
 
 /// Classify a hook input.  Returns whether this needs user confirmation.
+///
+/// Before requesting confirmation for a Critical command, this checks the
+/// user's persisted "always allow" rule list (see
+/// [`audit::match_guard_allow_rule`]) and short-circuits to `Allow` when a
+/// rule's `prefix` matches the command.
 pub fn classify_hook_input(input: &HookInput) -> GuardClassification {
+    let rules = audit::load_user_rules();
+    classify_hook_input_with_rules(input, &rules)
+}
+
+/// Test-friendly variant of [`classify_hook_input`] that takes the user-rules
+/// snapshot as a parameter instead of reading it from disk.
+pub fn classify_hook_input_with_rules(
+    input: &HookInput,
+    user_rules: &audit::UserAuditRules,
+) -> GuardClassification {
     let tool_name = input.tool_name.as_deref().unwrap_or("");
     if tool_name != "Bash" {
         return GuardClassification::Allow;
@@ -247,10 +348,19 @@ pub fn classify_hook_input(input: &HookInput) -> GuardClassification {
     }
 
     match audit::classify_bash_command_pub(command) {
-        Some((AuditRiskLevel::Critical, tags)) => GuardClassification::NeedsConfirmation {
-            command: command.to_string(),
-            risk_tags: tags,
-        },
+        Some((AuditRiskLevel::Critical, tags)) => {
+            if let Some(rule) = audit::match_guard_allow_rule_in(user_rules, command) {
+                eprintln!(
+                    "fleet guard: allowed by user rule {} (prefix={:?})",
+                    rule.id, rule.prefix
+                );
+                return GuardClassification::Allow;
+            }
+            GuardClassification::NeedsConfirmation {
+                command: command.to_string(),
+                risk_tags: tags,
+            }
+        }
         _ => GuardClassification::Allow,
     }
 }

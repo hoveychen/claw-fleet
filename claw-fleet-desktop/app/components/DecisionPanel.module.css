@@ -550,6 +550,27 @@
   border-color: #e53e3e;
 }
 
+.btn_always_allow {
+  background: transparent;
+  color: #2b6cb0;
+  border: 1px solid #2b6cb0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn_always_allow code {
+  background: rgba(43, 108, 176, 0.12);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 11px;
+}
+
+.btn_always_allow:hover {
+  background: rgba(43, 108, 176, 0.1);
+}
+
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;

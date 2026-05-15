@@ -666,13 +666,19 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_ok("/remove_guard_hook")
     }
 
-    fn respond_to_guard(&self, id: &str, allow: bool) -> Result<(), String> {
-        use claw_fleet_core::guard::{GuardDecision, GuardResponse};
-        let resp = GuardResponse {
+    fn respond_to_guard(
+        &self,
+        id: &str,
+        allow: bool,
+        always_allow: Option<claw_fleet_core::guard::GuardAlwaysAllow>,
+    ) -> Result<(), String> {
+        use claw_fleet_core::guard::{GuardDecision, GuardRespondPayload};
+        let payload = GuardRespondPayload {
             id: id.to_string(),
             decision: if allow { GuardDecision::Allow } else { GuardDecision::Block },
+            always_allow: if allow { always_allow } else { None },
         };
-        self.probe.post_json_ok("/guard/respond", &resp)
+        self.probe.post_json_ok("/guard/respond", &payload)
     }
 
     fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String> {

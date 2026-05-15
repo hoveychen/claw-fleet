@@ -1332,6 +1332,8 @@
     "analyzing": "正在分析命令...",
     "allow": "允许",
     "block": "阻止",
+    "always_allow": "始终允许",
+    "always_allow_hint": "今后以 {{prefix}} 开头的命令直接放行不再询问",
     "queue": "还有 {{count}} 条待处理"
   },
   "elicitation": {

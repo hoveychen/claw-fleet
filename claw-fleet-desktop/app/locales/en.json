@@ -1335,6 +1335,8 @@
     "analyzing": "Analyzing command...",
     "allow": "Allow",
     "block": "Block",
+    "always_allow": "Always allow",
+    "always_allow_hint": "Future commands starting with {{prefix}} will be allowed without asking",
     "queue": "{{count}} more pending"
   },
   "elicitation": {

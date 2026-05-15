@@ -1596,8 +1596,30 @@ impl Backend for LocalBackend {
         crate::hooks::remove_guard_hook()
     }
 
-    fn respond_to_guard(&self, id: &str, allow: bool) -> Result<(), String> {
+    fn respond_to_guard(
+        &self,
+        id: &str,
+        allow: bool,
+        always_allow: Option<crate::guard::GuardAlwaysAllow>,
+    ) -> Result<(), String> {
         use crate::guard::{GuardDecision, GuardResponse};
+
+        // Persist the user's "always allow" rule before writing the response
+        // file — that way a later guard invocation for the same prefix already
+        // sees the rule on disk and short-circuits.  Only honour always_allow
+        // when the user actually allowed; a "Block + always allow" combo would
+        // be nonsensical.
+        if allow {
+            if let Some(rule) = always_allow.as_ref() {
+                if !rule.prefix.trim().is_empty() {
+                    crate::audit::add_guard_allow_rule(
+                        rule.prefix.clone(),
+                        rule.source_tag.clone(),
+                    );
+                }
+            }
+        }
+
         let resp = GuardResponse {
             id: id.to_string(),
             decision: if allow {
