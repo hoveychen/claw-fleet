@@ -1467,9 +1467,8 @@
     "generate_lessons": "Generate Lessons",
     "add_to_claude_md": "Add to CLAUDE.md",
     "lesson_added": "Added",
-    "tab_insights": "Insights",
-    "tab_daily": "Daily Report",
-    "no_insights": "No insights yet. Reports will appear here as data is collected."
+    "no_insights": "No insights yet. Reports will appear here as data is collected.",
+    "earlier_section_title": "Earlier"
   },
   "mobile_panel": {
     "scan_hint": "Scan this QR code with the Claw Fleet mobile app",

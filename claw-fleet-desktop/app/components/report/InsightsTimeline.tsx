@@ -119,15 +119,19 @@ function TimelineEntry({ report, onOpenDaily }: { report: DailyReport; onOpenDai
 
 export function InsightsTimeline() {
   const { t } = useTranslation();
-  const { timelineReports, timelineLoading, timelineHasMore, heatmapData, loadTimelinePage, loadReport } = useReportStore();
+  const {
+    timelineReports, timelineLoading, timelineHasMore, heatmapData, selectedDate,
+    loadTimelinePage, resetTimeline, loadReport,
+  } = useReportStore();
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // Load first page when heatmap data is ready and timeline is empty
+  // Reset and reload the timeline whenever the anchor day changes (so the
+  // timeline always shows "earlier than the day pinned at top").
   useEffect(() => {
-    if (heatmapData.length > 0 && timelineReports.length === 0 && !timelineLoading) {
-      loadTimelinePage();
-    }
-  }, [heatmapData, timelineReports.length, timelineLoading, loadTimelinePage]);
+    if (heatmapData.length === 0) return;
+    resetTimeline();
+    loadTimelinePage();
+  }, [selectedDate, heatmapData.length, resetTimeline, loadTimelinePage]);
 
   // Infinite scroll via IntersectionObserver
   const handleIntersect = useCallback(

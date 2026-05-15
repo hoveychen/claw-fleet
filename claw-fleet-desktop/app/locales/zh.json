@@ -1464,9 +1464,8 @@
     "generate_lessons": "生成经验教训",
     "add_to_claude_md": "添加到 CLAUDE.md",
     "lesson_added": "已添加",
-    "tab_insights": "动态",
-    "tab_daily": "日报",
-    "no_insights": "暂无动态。收集到数据后报告会出现在这里。"
+    "no_insights": "暂无动态。收集到数据后报告会出现在这里。",
+    "earlier_section_title": "← 更早"
   },
   "mobile_panel": {
     "scan_hint": "用 Claw Fleet 移动端扫描此二维码连接",

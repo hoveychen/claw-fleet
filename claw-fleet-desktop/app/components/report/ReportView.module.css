@@ -7,13 +7,6 @@
 /* Body — scrolling content area with the original 24px reading gutter. */
 .body { padding: 24px; overflow-y: auto; flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
 
-/* Tab bar (inside header) */
-.tab_bar { display: flex; align-items: center; gap: 12px; }
-.tab_group { display: flex; gap: 2px; background: var(--color-bg-secondary); border-radius: 8px; padding: 3px; }
-.tab { padding: 5px 12px; border: none; background: transparent; color: var(--color-text-dim); font-size: 12px; font-weight: 500; border-radius: 5px; cursor: pointer; transition: background 0.12s, color 0.12s; white-space: nowrap; }
-.tab:hover { color: var(--color-text); }
-.tab_active { background: var(--color-bg-card); color: var(--color-text); font-weight: 600; }
-
 /* Date navigation */
 .date_nav { display: flex; align-items: center; gap: 8px; }
 .date_btn { background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: 6px; padding: 6px 12px; cursor: pointer; color: var(--color-text); }
@@ -123,6 +116,12 @@
 .lesson_add_btn { background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: 5px; padding: 4px 10px; cursor: pointer; color: var(--color-text); font-size: 11px; white-space: nowrap; flex-shrink: 0; }
 .lesson_add_btn:hover { background: var(--color-accent); color: white; border-color: var(--color-accent); }
 .lesson_add_btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── "Earlier" divider between selected-day detail and history timeline ──── */
+.earlier_divider { display: flex; align-items: center; gap: 12px; margin: 32px 0 20px; color: var(--color-text-dim); }
+.earlier_divider::before,
+.earlier_divider::after { content: ""; flex: 1; height: 1px; background: var(--color-border); }
+.earlier_divider_label { font-size: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; padding: 2px 10px; border-radius: 999px; background: var(--color-bg-secondary); color: var(--color-text-secondary); }
 
 /* ── Insights Timeline ─────────────────────────────────────────────────────── */
 .timeline { display: flex; flex-direction: column; gap: 28px; }

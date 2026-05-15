@@ -14,8 +14,8 @@ import styles from "./ReportView.module.css";
 export function ReportView() {
   const { t } = useTranslation();
   const {
-    currentReport, selectedDate, loading, reportTab,
-    loadReport, loadHeatmap, generateReport, setReportTab, resetTimeline,
+    currentReport, selectedDate, loading,
+    loadReport, loadHeatmap, generateReport,
   } = useReportStore();
 
   useEffect(() => {
@@ -24,12 +24,9 @@ export function ReportView() {
     loadHeatmap(from, to);
   }, [loadHeatmap]);
 
-  // Load report when switching to daily tab or changing date
   useEffect(() => {
-    if (reportTab === "daily") {
-      loadReport(selectedDate);
-    }
-  }, [selectedDate, reportTab, loadReport]);
+    loadReport(selectedDate);
+  }, [selectedDate, loadReport]);
 
   const goToDate = useCallback((offset: number) => {
     const d = new Date(selectedDate);
@@ -38,83 +35,55 @@ export function ReportView() {
     s.loadReport(d.toISOString().slice(0, 10));
   }, [selectedDate]);
 
-  const switchToInsights = useCallback(() => {
-    resetTimeline();
-    setReportTab("insights");
-  }, [resetTimeline, setReportTab]);
-
   return (
     <div className={styles.root}>
       <div className={styles.header} data-tauri-drag-region>
-        <div className={styles.tab_bar}>
-          <div className={styles.tab_group}>
-            <button
-              className={`${styles.tab} ${reportTab === "insights" ? styles.tab_active : ""}`}
-              onClick={switchToInsights}
-            >
-              {t("report.tab_insights")}
-            </button>
-            <button
-              className={`${styles.tab} ${reportTab === "daily" ? styles.tab_active : ""}`}
-              onClick={() => setReportTab("daily")}
-            >
-              {t("report.tab_daily")}
-            </button>
-          </div>
+        <div className={styles.date_nav}>
+          <button className={styles.date_btn} onClick={() => goToDate(-1)}>◀</button>
+          <input
+            type="date"
+            className={styles.date_input}
+            value={selectedDate}
+            onChange={(e) => loadReport(e.target.value)}
+          />
+          <button className={styles.date_btn} onClick={() => goToDate(1)}>▶</button>
+          <ReportShareMenu />
         </div>
-        {reportTab === "daily" && (
-          <div className={styles.date_nav}>
-            <button className={styles.date_btn} onClick={() => goToDate(-1)}>◀</button>
-            <input
-              type="date"
-              className={styles.date_input}
-              value={selectedDate}
-              onChange={(e) => loadReport(e.target.value)}
-            />
-            <button className={styles.date_btn} onClick={() => goToDate(1)}>▶</button>
-            <ReportShareMenu />
-          </div>
-        )}
       </div>
 
       <div className={styles.body}>
-        {reportTab === "insights" ? (
-          <>
-            <ContributionsHeatmap />
-            <InsightsTimeline />
-          </>
+        <ContributionsHeatmap />
+        {loading ? (
+          <div className={styles.loading}>{t("report.loading")}</div>
+        ) : !currentReport ? (
+          <div className={styles.empty_state}>
+            <p>{t("report.no_report")}</p>
+            <button className={styles.generate_btn} onClick={() => generateReport(selectedDate)}>
+              {t("report.generate")}
+            </button>
+          </div>
         ) : (
-          <>
-            <ContributionsHeatmap />
-            {loading ? (
-              <div className={styles.loading}>{t("report.loading")}</div>
-            ) : !currentReport ? (
-              <div className={styles.empty_state}>
-                <p>{t("report.no_report")}</p>
-                <button className={styles.generate_btn} onClick={() => generateReport(selectedDate)}>
-                  {t("report.generate")}
-                </button>
-              </div>
-            ) : (
-              <div className={styles.content}>
-                <MetricsCards metrics={currentReport.metrics} />
-                <div className={styles.charts_row}>
-                  <ToolCallChart breakdown={currentReport.metrics.toolCallBreakdown} />
-                  <HourlyActivityChart hourly={currentReport.metrics.hourlyActivity} />
-                </div>
-                <AISummaryCard
-                  date={currentReport.date}
-                  summary={currentReport.aiSummary}
-                  metrics={currentReport.metrics}
-                />
-                <LessonsCard
-                  date={currentReport.date}
-                  lessons={currentReport.lessons}
-                />
-              </div>
-            )}
-          </>
+          <div className={styles.content}>
+            <MetricsCards metrics={currentReport.metrics} />
+            <div className={styles.charts_row}>
+              <ToolCallChart breakdown={currentReport.metrics.toolCallBreakdown} />
+              <HourlyActivityChart hourly={currentReport.metrics.hourlyActivity} />
+            </div>
+            <AISummaryCard
+              date={currentReport.date}
+              summary={currentReport.aiSummary}
+              metrics={currentReport.metrics}
+            />
+            <LessonsCard
+              date={currentReport.date}
+              lessons={currentReport.lessons}
+            />
+          </div>
         )}
+        <div className={styles.earlier_divider}>
+          <span className={styles.earlier_divider_label}>{t("report.earlier_section_title", "Earlier")}</span>
+        </div>
+        <InsightsTimeline />
       </div>
     </div>
   );
