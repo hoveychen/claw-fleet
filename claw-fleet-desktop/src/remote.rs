@@ -1391,7 +1391,7 @@ fn connect_remote_impl(
 
     // ── Step 2: check remote version ─────────────────────────────────────────
     emit_progress(app, "Checking remote fleet version…", false, None);
-    let current_version = env!("CARGO_PKG_VERSION");
+    let current_version = env!("FLEET_BUILD_VERSION");
     let remote_ver_out = ssh_exec(
         &conn,
         &format!("{} --version 2>/dev/null || echo NOT_FOUND", remote_fleet_path()),

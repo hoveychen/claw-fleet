@@ -642,7 +642,7 @@ fn ssh_exec_remote(host: &str, cmd: &str) -> Result<String, String> {
 /// Detect the usable fleet binary path on the remote host, and install/upgrade if needed.
 /// Returns the remote path to use for delegation.
 fn ensure_remote_fleet(host: &str) -> String {
-    let current_version = env!("CARGO_PKG_VERSION");
+    let current_version = env!("FLEET_BUILD_VERSION");
     let install_bin = remote_fleet_install_path();
 
     // One SSH call: detect remote platform, find fleet (PATH first, then install path),
@@ -1585,7 +1585,7 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         println!("FLEET_PROBE_PORT={}", actual_port);
         let _ = std::io::stdout().flush();
     }
-    eprintln!("[fleet serve] listening on 127.0.0.1:{} (version {})", actual_port, env!("CARGO_PKG_VERSION"));
+    eprintln!("[fleet serve] listening on 127.0.0.1:{} (version {})", actual_port, env!("FLEET_BUILD_VERSION"));
 
     // ── Startup zombie recovery ────────────────────────────────────────────
     // If `fleet serve` was killed mid-flight (host crash, log-out, etc.) any
@@ -1798,7 +1798,7 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             "/health" => {
                 let body = format!(
                     r#"{{"version":"{}","status":"ok"}}"#,
-                    env!("CARGO_PKG_VERSION")
+                    env!("FLEET_BUILD_VERSION")
                 );
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
