@@ -1,25 +1,37 @@
-/* Row mode — Linear-style: no card chrome (no border, no bg, no radius). The
-   row reveals a hover bg only on pointer-over, and selected/active states use
-   a 2px inset accent bar on the left edge instead of a full ring. Density
-   targets ~40px row height. Inside a `.group_main` container the row keeps
-   contributing zero chrome — the group owns it. */
+/* Row mode — Linear-style lifted tile: neutral hairline border, single-tone
+   bg, soft drop shadow. Selected rows keep their 2px inset accent strip on
+   the left edge (alongside the lift shadow) so the "I clicked this one" cue
+   stays distinct from the active-session hint. Inside a `.group_main`
+   container the row keeps contributing zero chrome — the group owns it. */
 .card {
   position: relative;
-  padding: 6px 12px;
-  border-radius: 6px;
+  padding: 8px 12px;
+  border-radius: 8px;
   cursor: pointer;
-  background: transparent;
-  transition: background 0.1s, box-shadow 0.1s;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border-soft);
+  box-shadow: var(--shadow-card);
+  transition: background 0.12s, border-color 0.12s, box-shadow 0.12s;
   user-select: none;
 }
 
 .card:hover {
   background: var(--color-bg-card-hover);
+  border-color: var(--color-border);
+  box-shadow: var(--shadow-card-hover);
+}
+
+/* Active session hint: neutral, parallels GalleryView .group[data-active]
+   and KanbanView .card[data-active] — stronger hairline + lifted shadow,
+   no hue. */
+.card.active {
+  border-color: var(--color-border-strong);
+  box-shadow: var(--shadow-card-hover);
 }
 
 .card.selected {
   background: var(--color-bg-card-selected);
-  box-shadow: inset 2px 0 0 var(--color-accent);
+  box-shadow: inset 2px 0 0 var(--color-accent), var(--shadow-card-hover);
 }
 
 /* Inside a group: the .group container owns the bg, border and active ring,
