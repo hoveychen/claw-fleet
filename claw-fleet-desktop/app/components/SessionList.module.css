@@ -89,6 +89,14 @@
   opacity: 1;
 }
 
+/* Collapsed rail is only 64px wide and nav icons below are horizontally
+   centered — center the toggle too so it lines up with the icon column. */
+.sidebar_collapsed .sidebar_toggle {
+  right: auto;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
 /* macOS expanded: traffic-light row is 38px tall; align the toggle vertically
    within that strip. */
 :global([data-platform="macos"]) .sidebar_toggle {
@@ -96,8 +104,8 @@
   right: 10px;
 }
 
-/* macOS collapsed: sidebar starts below the traffic lights, the toggle sits
-   inside the 64px rail at top-right. */
+/* macOS collapsed: sidebar starts below the traffic lights — bump the toggle
+   down a touch; horizontal centering comes from the platform-agnostic rule. */
 :global([data-platform="macos"]) .sidebar_collapsed .sidebar_toggle {
   top: 8px;
 }
@@ -112,7 +120,7 @@
   border-right: none;
   margin: 8px 0 8px 8px;
   height: calc(100vh - 16px);
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow:
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.1),
     0 1px 2px rgba(0, 0, 0, 0.18),
@@ -132,15 +140,20 @@
   margin-top: 44px;
   height: calc(100vh - 52px);
 }
+/* Collapsed rail lives below the traffic-light row, so the header no longer
+   needs the 80px traffic-light padding — but we keep its 38px height as the
+   dedicated row for the absolute-positioned collapse toggle, otherwise the
+   toggle stacks on top of the first nav item (☰ Sessions). */
 :global([data-platform="macos"]) .sidebar_collapsed .header {
-  display: none;
+  padding: 0;
+  -webkit-app-region: no-drag;
 }
 
 /* Liquid Glass: hover & active states are full-width capsule pills.
    Active gets a slightly tinted glass tone + 0.5px hairline highlight that
    reads as a soft bevel — matches Tahoe's Mail/Settings selection language. */
 :global([data-platform="macos"]) .nav_item {
-  border-radius: 10px;
+  border-radius: 8px;
 }
 :global([data-platform="macos"]) .nav_item:hover {
   background: rgba(255, 255, 255, 0.05);
@@ -220,7 +233,7 @@
   align-items: center;
   gap: 10px;
   padding: 7px 12px;
-  border-radius: 10px;
+  border-radius: 8px;
   border: none;
   background: none;
   cursor: pointer;
@@ -680,19 +693,24 @@
   min-width: 0;
 }
 
+/* Page-edge gutter matches the SessionToolbar above (`14px 20px 12px`) and
+   GalleryView's `.grid`, so card edges line up with the toolbar's text and
+   search input rather than bleeding out 4px further. Previously this was
+   `0 6px 12px`, which made list mode the only page where cards ran all the
+   way to the window edge. */
 .list {
   flex: 1;
   overflow-y: auto;
-  padding: 0 6px 12px;
+  padding: 14px 20px 12px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
 
 .list section {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
 }
 
 .group_label {
@@ -701,7 +719,7 @@
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--color-text-dim);
-  padding: 8px 6px 4px;
+  padding: 2px 0 4px;
 }
 
 /* Subagent row: indent and draw an L-bracket connector in the left gutter,

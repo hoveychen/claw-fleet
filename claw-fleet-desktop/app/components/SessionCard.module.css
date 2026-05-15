@@ -1,31 +1,44 @@
+/* Row mode — Linear-style: no card chrome (no border, no bg, no radius). The
+   row reveals a hover bg only on pointer-over, and selected/active states use
+   a 2px inset accent bar on the left edge instead of a full ring. Density
+   targets ~40px row height. Inside a `.group_main` container the row keeps
+   contributing zero chrome — the group owns it. */
 .card {
   position: relative;
-  padding: 10px 12px;
-  border-radius: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
   cursor: pointer;
-  border: 1px solid transparent;
-  background: var(--color-bg-card);
-  transition: background 0.1s, border-color 0.1s;
+  background: transparent;
+  transition: background 0.1s, box-shadow 0.1s;
   user-select: none;
 }
 
 .card:hover {
   background: var(--color-bg-card-hover);
-  border-color: var(--color-border);
+}
+
+/* Active (running/thinking/etc.): full-row accent tint, Linear inbox-style.
+   Selected wins on specificity grounds via the next rule. */
+.card.active {
+  background: var(--color-accent-soft);
 }
 
 .card.selected {
   background: var(--color-bg-card-selected);
-  border-color: var(--color-accent);
+  box-shadow: inset 2px 0 0 var(--color-accent);
 }
 
-.card.active {
-  border-left: 3px solid var(--color-accent);
-}
-
-/* Inside a group: group container owns the accent border */
+/* Inside a group: the .group container owns the bg, border and active ring,
+   so the nested card must contribute no chrome of its own — otherwise we get
+   double-toned nested boxes that fight the Linear-style design language. */
+.card.group_main,
+.card.group_main:hover,
+.card.group_main.selected,
 .card.group_main.active {
-  border-left: 3px solid transparent;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
 }
 
 /* Header */
@@ -59,28 +72,34 @@
   text-overflow: ellipsis;
 }
 
-/* Status badge */
+/* Status badge — Linear-style: drop the filled pill, rely on the animated
+   StatusIcon (which inherits `color` via currentColor) as the chromatic
+   indicator, with a dim label sitting alongside. */
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 10px;
   font-weight: 500;
   white-space: nowrap;
   flex-shrink: 0;
 }
 
-.badge_thinking    { background: var(--badge-thinking-bg);    color: var(--badge-thinking-fg); }
-.badge_executing   { background: var(--badge-executing-bg);   color: var(--badge-executing-fg); }
-.badge_streaming   { background: var(--badge-streaming-bg);   color: var(--badge-streaming-fg); }
-.badge_processing  { background: var(--badge-processing-bg);  color: var(--badge-processing-fg); }
-.badge_waitingInput{ background: var(--badge-waiting-bg);     color: var(--badge-waiting-fg); }
-.badge_active      { background: var(--badge-active-bg);      color: var(--badge-active-fg); }
-.badge_delegating  { background: var(--badge-delegating-bg);  color: var(--badge-delegating-fg); }
-.badge_idle        { background: var(--color-bg-secondary);   color: var(--color-text-dim); }
-.badge_rateLimited { background: #fee2e2;                     color: #b91c1c; }
+.badge_label {
+  color: var(--color-text-secondary);
+}
+
+/* Per-status hue applies to .badge itself, so the StatusIcon's currentColor
+   picks it up. The text label overrides back to the dim secondary tone. */
+.badge_thinking    { color: var(--badge-thinking-fg); }
+.badge_executing   { color: var(--badge-executing-fg); }
+.badge_streaming   { color: var(--badge-streaming-fg); }
+.badge_processing  { color: var(--badge-processing-fg); }
+.badge_waitingInput{ color: var(--badge-waiting-fg); }
+.badge_active      { color: var(--badge-active-fg); }
+.badge_delegating  { color: var(--badge-delegating-fg); }
+.badge_idle        { color: var(--color-text-dim); }
+.badge_rateLimited { color: #b91c1c; }
 
 .rate_limit_countdown {
   display: inline-flex;
@@ -110,106 +129,15 @@
 .resume_btn:hover:not(:disabled) { background: #fecaca; }
 .resume_btn:disabled { opacity: 0.5; cursor: default; }
 
-/* ── Status icons ─────────────────────────────────────────────────────────── */
-
+/* ── Status icon ───────────────────────────────────────────────────────────
+   Linear-style: a single 6px filled circle. Each StatusBadge sets `color`
+   per status, the SVG inherits via `currentColor`. */
 .sicon {
   display: inline-block;
-  width: 10px;
-  height: 10px;
+  width: 6px;
+  height: 6px;
   flex-shrink: 0;
   vertical-align: middle;
-}
-
-/* Streaming: equalizer bars bounce */
-.bar1, .bar2, .bar3 {
-  transform-box: fill-box;
-  transform-origin: bottom;
-  animation: bar_bounce 1s ease-in-out infinite;
-}
-.bar1 { animation-delay: 0s; }
-.bar2 { animation-delay: 0.18s; }
-.bar3 { animation-delay: 0.36s; }
-@keyframes bar_bounce {
-  0%, 100% { transform: scaleY(0.35); }
-  50%       { transform: scaleY(1); }
-}
-
-/* Thinking: chat-bubble dots glow one by one */
-.sicon_thinking circle:nth-child(1) { animation: dot_think 1.8s ease-in-out infinite 0s; }
-.sicon_thinking circle:nth-child(2) { animation: dot_think 1.8s ease-in-out infinite 0.3s; }
-.sicon_thinking circle:nth-child(3) { animation: dot_think 1.8s ease-in-out infinite 0.6s; }
-@keyframes dot_think {
-  0%, 100% { opacity: 0.2; }
-  33%       { opacity: 1; }
-}
-
-/* Executing: lightning bolt occasional flicker */
-.sicon_executing { animation: lightning_flicker 2.5s ease-in-out infinite; }
-@keyframes lightning_flicker {
-  0%, 78%, 100% { opacity: 1; }
-  82%           { opacity: 0.1; }
-  85%           { opacity: 1; }
-  88%           { opacity: 0.3; }
-  91%           { opacity: 1; }
-}
-
-/* Processing: clock hand spinning */
-.clock_hand {
-  transform-box: fill-box;
-  transform-origin: 50% 100%;
-  animation: clock_tick 1s linear infinite;
-}
-@keyframes clock_tick {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
-
-/* WaitingInput: question mark bouncing impatiently */
-.sicon_question {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: q_bounce 2.5s ease-in-out infinite;
-}
-@keyframes q_bounce {
-  0%, 100% { transform: translateY(0); }
-  10%       { transform: translateY(-2px); }
-  20%       { transform: translateY(0); }
-  30%       { transform: translateY(-1.5px); }
-  40%       { transform: translateY(0); }
-}
-
-/* Active: heartbeat double-thump */
-.sicon_heart {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: heartbeat 1.4s ease-in-out infinite;
-}
-@keyframes heartbeat {
-  0%, 100% { transform: scale(1); }
-  14%       { transform: scale(1.3); }
-  28%       { transform: scale(1); }
-  42%       { transform: scale(1.15); }
-  56%       { transform: scale(1); }
-}
-
-/* Delegating: nodes pulse alternately, lines flash */
-.del_node1 { animation: del_node 1.6s ease-in-out infinite 0s; }
-.del_node2 { animation: del_node 1.6s ease-in-out infinite 0.8s; }
-.del_line1 { animation: del_node 1.6s ease-in-out infinite 0s; }
-.del_line2 { animation: del_node 1.6s ease-in-out infinite 0.8s; }
-@keyframes del_node {
-  0%, 100% { opacity: 0.4; }
-  40%       { opacity: 1; }
-}
-
-/* Idle: three Z's floating upward */
-.z1 { animation: z_float 3s ease-in-out infinite 0s; }
-.z2 { animation: z_float 3s ease-in-out infinite 0.8s; }
-.z3 { animation: z_float 3s ease-in-out infinite 1.6s; }
-@keyframes z_float {
-  0%       { opacity: 0;   transform: translateY(1px); }
-  20%, 60% { opacity: 0.75; }
-  100%     { opacity: 0;   transform: translateY(-4px); }
 }
 
 /* Meta row */
@@ -286,7 +214,7 @@
   position: relative;
   flex: 0 0 54px;
   height: 4px;
-  border-radius: 2px;
+  border-radius: 4px;
   background: var(--color-border);
   overflow: hidden;
 }
@@ -394,17 +322,8 @@
   color: var(--badge-executing-fg);
 }
 
-/* macOS vibrancy: semi-transparent card backgrounds in sidebar */
-:global([data-platform="macos"]) .card {
-  background: rgba(255, 255, 255, 0.04);
-}
-:global([data-platform="macos"]) .card:hover {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.1);
-}
-:global([data-platform="macos"]) .card.selected {
-  background: rgba(255, 255, 255, 0.1);
-}
+/* macOS vibrancy: rows stay chrome-less (Linear-style); tags/badges keep
+   their subtle bg so they read against the bare row. */
 :global([data-platform="macos"]) .tag_ide,
 :global([data-platform="macos"]) .tag_model,
 :global([data-platform="macos"]) .tag_source {
@@ -412,16 +331,6 @@
 }
 :global([data-platform="macos"]) .badge_idle {
   background: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"][data-theme="light"]) .card {
-  background: rgba(255, 255, 255, 0.65);
-}
-:global([data-platform="macos"][data-theme="light"]) .card:hover {
-  background: rgba(255, 255, 255, 0.8);
-  border-color: rgba(0, 0, 0, 0.08);
-}
-:global([data-platform="macos"][data-theme="light"]) .card.selected {
-  background: rgba(255, 255, 255, 0.92);
 }
 :global([data-platform="macos"][data-theme="light"]) .tag_ide,
 :global([data-platform="macos"][data-theme="light"]) .tag_model,
