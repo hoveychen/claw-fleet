@@ -36,7 +36,7 @@ fi
 YY=$(date +%y)
 MM=$(date +%m)
 DD=$(date +%d)
-DEV_VERSION="0.0.${YY}${MM}${DD}-dev.$(date +%s)"
+DEV_VERSION="0.0.${YY}${MM}${DD}-dev"
 echo "==> Dev version: $DEV_VERSION"
 
 export OPENSSL_STATIC=1
