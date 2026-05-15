@@ -185,6 +185,7 @@ mod tests {
             completed_at: None,
             task_branch: None,
             master_session_id: None,
+            title_auto: false,
         };
         let path = crate::task::task_json_path(&task.id).unwrap();
         fs::create_dir_all(path.parent().unwrap()).unwrap();

@@ -11,7 +11,7 @@
 // pops the InboxDialog with the projectId pre-filled, and selects the new
 // task afterwards (lands you on the detail phase).
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import styles from "./TasksView.module.css";
 import { InboxDialog } from "./InboxDialog";
@@ -35,6 +35,7 @@ export function TasksView() {
     setSelectedTaskId,
     refresh,
     startTask,
+    updateTaskTitle,
   } = useTasksStore();
 
   const [showInbox, setShowInbox] = useState(false);
@@ -81,6 +82,7 @@ export function TasksView() {
           project={taskProject}
           onBack={() => setSelectedTaskId(null)}
           onStart={() => startTask(selectedTask.id)}
+          onRename={(title) => updateTaskTitle(selectedTask.id, title)}
         />
         <TaskDetailBody task={selectedTask} />
         {showInbox && (
@@ -226,51 +228,161 @@ function TaskDetailHeader({
   project,
   onBack,
   onStart,
+  onRename,
 }: {
   task: Task;
   project: Project | null;
   onBack: () => void;
-  onStart: () => void;
+  onStart: () => Promise<void>;
+  onRename: (title: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const canStart =
-    task.status === "drafting" ||
-    task.status === "planning" ||
-    task.status === "ready";
+    !starting &&
+    (task.status === "drafting" ||
+      task.status === "planning" ||
+      task.status === "ready");
+  const handleStart = async () => {
+    setStarting(true);
+    setStartError(null);
+    try {
+      await onStart();
+    } catch (e) {
+      setStartError(String((e as { message?: string })?.message ?? e));
+    } finally {
+      setStarting(false);
+    }
+  };
   return (
-    <div className={styles.detail_header}>
-      <div className={styles.detail_header_left}>
-        <button
-          className={styles.back_btn}
-          onClick={onBack}
-          title={t("tasks.back_to_list", "Back to task list")}
-          aria-label={t("tasks.back_to_list", "Back to task list")}
-        >
-          ←
-        </button>
-        <div>
-          <div className={styles.detail_breadcrumb}>
-            {project?.name ?? t("tasks.unknown_project", "Unknown project")}
+    <>
+      <div className={styles.detail_header}>
+        <div className={styles.detail_header_left}>
+          <button
+            className={styles.back_btn}
+            onClick={onBack}
+            title={t("tasks.back_to_list", "Back to task list")}
+            aria-label={t("tasks.back_to_list", "Back to task list")}
+          >
+            ←
+          </button>
+          <div>
+            <div className={styles.detail_breadcrumb}>
+              {project?.name ?? t("tasks.unknown_project", "Unknown project")}
+            </div>
+            <EditableTaskTitle task={task} onRename={onRename} />
           </div>
-          <h2 className={styles.task_detail_title}>{task.title}</h2>
+        </div>
+        <div className={styles.detail_header_right}>
+          <StatusBadge status={task.status} />
+          <button
+            className={styles.btn_primary}
+            onClick={handleStart}
+            disabled={!canStart}
+            title={
+              canStart
+                ? ""
+                : t("tasks.already_running", "Task is already running or done.")
+            }
+          >
+            {starting
+              ? t("tasks.starting", "Starting…")
+              : `▶ ${t("tasks.start", "Start")}`}
+          </button>
         </div>
       </div>
-      <div className={styles.detail_header_right}>
-        <StatusBadge status={task.status} />
-        <button
-          className={styles.btn_primary}
-          onClick={onStart}
-          disabled={!canStart}
-          title={
-            canStart
-              ? ""
-              : t("tasks.already_running", "Task is already running or done.")
+      {startError && (
+        <div className={styles.error}>
+          {t("tasks.start_failed", "Start failed: {{message}}", {
+            message: startError,
+          })}
+        </div>
+      )}
+    </>
+  );
+}
+
+function EditableTaskTitle({
+  task,
+  onRename,
+}: {
+  task: Task;
+  onRename: (title: string) => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(task.title);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!editing) setDraft(task.title);
+  }, [task.title, editing]);
+
+  useEffect(() => {
+    if (editing) {
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    }
+  }, [editing]);
+
+  const commit = async () => {
+    const next = draft.trim();
+    if (!next || next === task.title) {
+      setEditing(false);
+      setDraft(task.title);
+      return;
+    }
+    try {
+      await onRename(next);
+    } catch {
+      setDraft(task.title);
+    } finally {
+      setEditing(false);
+    }
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        className={styles.task_detail_title_input}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            void commit();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            setDraft(task.title);
+            setEditing(false);
           }
+        }}
+      />
+    );
+  }
+
+  return (
+    <h2
+      className={styles.task_detail_title}
+      onClick={() => setEditing(true)}
+      title={t("tasks.click_to_rename", "Click to rename")}
+    >
+      {task.title}
+      {task.titleAuto && (
+        <span
+          className={styles.title_auto_chip}
+          title={t(
+            "tasks.title_auto_hint",
+            "Auto-generated title — will be replaced by the AI summary, or click to override.",
+          )}
         >
-          ▶ {t("tasks.start", "Start")}
-        </button>
-      </div>
-    </div>
+          ✎
+        </span>
+      )}
+    </h2>
   );
 }
 

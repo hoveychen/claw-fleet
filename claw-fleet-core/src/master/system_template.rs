@@ -169,6 +169,7 @@ mod tests {
             completed_at: None,
             task_branch: Some("fleet/add-bookmarks-ui".into()),
             master_session_id: None,
+            title_auto: false,
         }
     }
 

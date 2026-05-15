@@ -379,6 +379,12 @@ pub trait Backend: Send + Sync {
     fn start_task(&self, _task_id: &str) -> Result<(), String> {
         Err("task system not implemented in this backend yet".into())
     }
+    /// Manually rename a task. Clears `title_auto` so the master-session
+    /// aiTitle reconcile pass will not overwrite the new value. Trims input
+    /// and rejects empty titles.
+    fn set_task_title(&self, _task_id: &str, _new_title: &str) -> Result<(), String> {
+        Err("task system not implemented in this backend yet".into())
+    }
     /// Start an SSE stream of task events. Events arrive as Tauri events on
     /// the `task-event` channel (LocalBackend) or HTTP-relayed (RemoteBackend).
     /// Returns the channel id the caller can later pass to
