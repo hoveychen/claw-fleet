@@ -113,12 +113,23 @@ async function ensureAudioContext(): Promise<AudioContext> {
   return sharedCtx;
 }
 
-/** Play a chime preset. Returns a promise that resolves after the chime finishes. */
+/** Play a chime preset. Returns a promise that resolves after the chime finishes.
+ *
+ *  After the chime finishes we `suspend()` the shared AudioContext — WKWebView
+ *  routes audio I/O via the GPU process's `RemoteAudioDestinationProxy`, which
+ *  keeps a CoreAudio HAL callback running at the device sample rate as long as
+ *  the destination is "running". Suspending releases the hardware callback
+ *  while preserving the context object, so the next chime can cheaply
+ *  `resume()` (no autoplay-policy dance — the context was already user-gestured
+ *  once on creation). */
 export async function playChime(preset: ChimePreset): Promise<void> {
   try {
     const ctx = await ensureAudioContext();
     CHIME_FNS[preset](ctx);
     await new Promise((r) => setTimeout(r, CHIME_DURATIONS[preset]));
+    if (ctx.state === "running") {
+      ctx.suspend().catch(() => {});
+    }
   } catch (err) {
     console.warn("[audio] playChime failed:", err);
   }

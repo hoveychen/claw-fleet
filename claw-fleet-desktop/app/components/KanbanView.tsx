@@ -67,8 +67,13 @@ export function KanbanView({
     refresh();
     // Poll every 2s while the kanban is open. P3 supervisor mutates
     // fleet-sessions.json from a separate thread / process, so we need to
-    // pull rather than rely on Tauri events.
-    const id = window.setInterval(refresh, 2000);
+    // pull rather than rely on Tauri events. Skip the tick when the page is
+    // hidden so a backgrounded window doesn't keep re-rendering the board.
+    const tick = () => {
+      if (document.visibilityState === "hidden") return;
+      refresh();
+    };
+    const id = window.setInterval(tick, 2000);
     refreshTimer.current = id;
     return () => {
       if (refreshTimer.current != null) window.clearInterval(refreshTimer.current);
