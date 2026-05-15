@@ -1397,7 +1397,7 @@
     "lightbox_close": "Close",
     "attach_failed": "Attachment upload failed",
     "attach_too_large": "Attachment is too large (max 50 MiB)",
-    "send": "Send (Enter; Shift+Enter for newline)"
+    "send": "Send (Enter)"
   },
   "planApproval": {
     "title": "Plan ready for approval",
