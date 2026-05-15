@@ -827,10 +827,13 @@ function SessionPendingCard({ decision }: { decision: SessionPendingDecision }) 
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault();
-        handleFollowUpSubmit();
-      }
+      // IME composing 中的 Enter（中文/日文/韩文输入法确认候选词）放行给 IME。
+      // keyCode === 229 是 Chromium 在 IME 处理期间的兜底信号。
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+      if (e.key !== "Enter") return;
+      if (e.shiftKey) return;
+      e.preventDefault();
+      handleFollowUpSubmit();
     },
     [handleFollowUpSubmit],
   );
@@ -907,7 +910,7 @@ function SessionPendingCard({ decision }: { decision: SessionPendingDecision }) 
         onKeyDown={handleKeyDown}
         placeholder={t(
           "session_pending.followup_placeholder",
-          "Type a follow-up prompt (⌘/Ctrl+Enter to send)…",
+          "Type a follow-up prompt (Enter to send, Shift+Enter for newline)…",
         )}
         rows={3}
         disabled={decision.submitting}

@@ -65,7 +65,7 @@
     "project": "项目",
     "select_project_placeholder": "— 选择项目 —",
     "prompt": "提示词",
-    "prompt_placeholder": "想让 agent 做什么？（Cmd/Ctrl+Enter 提交）",
+    "prompt_placeholder": "想让 agent 做什么？（Enter 提交，Shift+Enter 换行）",
     "context_files": "上下文文件",
     "add": "添加",
     "add_files": "文件…",
@@ -1394,7 +1394,7 @@
     "lightbox_close": "关闭",
     "attach_failed": "附件上传失败",
     "attach_too_large": "附件过大（上限 50 MiB）",
-    "send": "发送（⌘/Ctrl+Enter）"
+    "send": "发送（Enter；Shift+Enter 换行）"
   },
   "planApproval": {
     "title": "计划待批准",
@@ -1416,7 +1416,7 @@
     "title": "会话等待输入",
     "mark_status_tip": "把本会话移到 {{name}}",
     "open_detail": "打开会话详情",
-    "followup_placeholder": "输入下一轮提示词（⌘/Ctrl+Enter 发送）…",
+    "followup_placeholder": "输入下一轮提示词（Enter 发送，Shift+Enter 换行）…",
     "send": "发送下一轮",
     "sending": "发送中…"
   },
