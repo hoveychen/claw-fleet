@@ -50,6 +50,7 @@ export function SessionList() {
     setLiteMode,
     sidebarCollapsed,
     setSidebarCollapsed,
+    mascotVisible,
     showMobileAccess,
     setShowMobileAccess,
     requestInbox,
@@ -502,7 +503,7 @@ export function SessionList() {
             </>
           )}
 
-          {!sidebarCollapsed && (
+          {!sidebarCollapsed && mascotVisible && (
             <div className={styles.mascot_section}>
               <MascotEyes
                 dashboardMode

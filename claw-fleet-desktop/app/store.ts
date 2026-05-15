@@ -64,6 +64,7 @@ interface UIState {
   lastSessionViewMode: SessionViewMode;
   liteMode: boolean;
   sidebarCollapsed: boolean;
+  mascotVisible: boolean;
   showMobileAccess: boolean;
   inboxRequest: InboxRequest | null;
   /** Same pattern for the "+ New project" CTA → ProjectsView opens the
@@ -79,6 +80,7 @@ interface UIState {
   setLastSessionViewMode: (m: SessionViewMode) => void;
   setLiteMode: (on: boolean) => void;
   setSidebarCollapsed: (on: boolean) => void;
+  setMascotVisible: (on: boolean) => void;
   setShowMobileAccess: (v: boolean) => void;
   requestInbox: (projectId: string | null) => void;
   clearInboxRequest: () => void;
@@ -101,6 +103,7 @@ export const useUIStore = create<UIState>((set) => ({
     (getItem("lastSessionViewMode") as SessionViewMode) ?? "gallery",
   liteMode: getItem("liteMode") === "true",
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
+  mascotVisible: getItem("mascot-visible") === "true",
   showMobileAccess: false,
   inboxRequest: null,
   showNewProjectRequested: false,
@@ -131,6 +134,11 @@ export const useUIStore = create<UIState>((set) => ({
   setSidebarCollapsed: (on) => {
     setItem("sidebar-collapsed", on ? "true" : "false");
     set({ sidebarCollapsed: on });
+  },
+  setMascotVisible: (on) => {
+    setItem("mascot-visible", on ? "true" : "false");
+    emit("overlay-mascot-visible-changed", on).catch(() => {});
+    set({ mascotVisible: on });
   },
   setShowMobileAccess: (v) => set({ showMobileAccess: v }),
   requestInbox: (projectId) => set({ inboxRequest: { projectId } }),
