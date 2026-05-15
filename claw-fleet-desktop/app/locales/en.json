@@ -1337,6 +1337,8 @@
     "block": "Block",
     "always_allow": "Always allow",
     "always_allow_hint": "Any command invoking {{prefix}} will be allowed without asking — including inside &&/;/|, subshells, and bash -c \"...\"",
+    "always_allow_menu": "Always allow",
+    "always_allow_pick_hint": "Pick which command to always allow",
     "queue": "{{count}} more pending",
     "allow_rules_title": "Always-allow rules",
     "allow_rules_empty": "No always-allow rules yet — click \"Always allow\" on a guard card to add one.",

@@ -73,16 +73,58 @@ function TaskMasterChip({ sessionId }: { sessionId: string | null | undefined })
 // ── Guard card renderer ────────────────────────────────────────────────────
 
 /**
- * Take the first whitespace-separated tokens of the first line as the prefix
- * we'd remember in an "always allow" rule.  Two tokens covers the common
- * shape (`git push`, `patchwright-cli eval`, `rm -rf`) without being so broad
- * that it whitelists a whole tool.  See P4 of the guard-always-allow plan.
+ * A token is a CLI flag (e.g. `-s=clw`, `--verbose`) — exclude it from the
+ * remembered prefix so `patchwright-cli -s=clw eval ...` becomes
+ * `patchwright-cli eval` and not `patchwright-cli -s=clw`.
  */
-function computeGuardAllowPrefix(command: string): string {
+function isFlagToken(tok: string): boolean {
+  return tok.length > 1 && tok.startsWith("-");
+}
+
+/**
+ * Prefix for a single AST leaf: `argv[0]` plus the first non-flag token after
+ * it (the "subcommand" in the `git push` / `npm test` / `patchwright-cli eval`
+ * sense).  Falls back to just `argv[0]` if every later token is a flag.
+ */
+function computeLeafAllowPrefix(argv: string[]): string {
+  const head = argv[0];
+  if (!head) return "";
+  const sub = argv.slice(1).find((t) => !isFlagToken(t));
+  return sub ? `${head} ${sub}` : head;
+}
+
+/**
+ * Legacy fallback when the backend didn't ship a `structuredCommand` AST
+ * (older RemoteBackend versions).  Same shape as the AST-driven path but
+ * applied to the raw first line.
+ */
+function computeFallbackPrefix(command: string): string {
   const firstLine = command.split("\n")[0]?.trim() ?? "";
   if (!firstLine) return "";
   const tokens = firstLine.split(/\s+/).filter((t) => t.length > 0);
-  return tokens.slice(0, 2).join(" ");
+  return computeLeafAllowPrefix(tokens);
+}
+
+/**
+ * One prefix per AST leaf (deduped, empties dropped).  When the AST is
+ * absent, returns at most one prefix from [`computeFallbackPrefix`].
+ */
+function computeGuardAllowPrefixes(req: GuardDecision["request"]): string[] {
+  const view = req.structuredCommand;
+  if (view && view.leaves.length > 0) {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const leaf of view.leaves) {
+      const p = computeLeafAllowPrefix(leaf.argv);
+      if (p && !seen.has(p)) {
+        seen.add(p);
+        out.push(p);
+      }
+    }
+    if (out.length > 0) return out;
+  }
+  const fallback = computeFallbackPrefix(req.command);
+  return fallback ? [fallback] : [];
 }
 
 function GuardCard({ decision }: { decision: GuardDecision }) {
@@ -90,14 +132,28 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
   const { respond } = useDecisionStore();
   const req = decision.request;
 
-  const allowPrefix = useMemo(() => computeGuardAllowPrefix(req.command), [req.command]);
+  const allowPrefixes = useMemo(() => computeGuardAllowPrefixes(req), [req]);
   const sourceTag = req.riskTags[0] ?? null;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuWrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDocClick = (e: MouseEvent) => {
+      if (!menuWrapRef.current?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [menuOpen]);
 
   const handleAllow = useCallback(() => respond(decision.id, true), [respond, decision.id]);
   const handleBlock = useCallback(() => respond(decision.id, false), [respond, decision.id]);
-  const handleAlwaysAllow = useCallback(
-    () => respond(decision.id, true, { prefix: allowPrefix, sourceTag }),
-    [respond, decision.id, allowPrefix, sourceTag],
+  const handleAlwaysAllowPrefix = useCallback(
+    (prefix: string) => {
+      setMenuOpen(false);
+      respond(decision.id, true, { prefix, sourceTag });
+    },
+    [respond, decision.id, sourceTag],
   );
 
   return (
@@ -151,14 +207,45 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         <button className={`${styles.btn} ${styles.btn_allow}`} onClick={handleAllow}>
           {t("guard.allow", "Allow")}
         </button>
-        {allowPrefix.length > 0 && (
+        {allowPrefixes.length === 1 && (
           <button
             className={`${styles.btn} ${styles.btn_always_allow}`}
-            onClick={handleAlwaysAllow}
-            title={t("guard.always_allow_hint", "Future commands starting with {{prefix}} will be allowed without asking", { prefix: allowPrefix })}
+            onClick={() => handleAlwaysAllowPrefix(allowPrefixes[0]!)}
+            title={t("guard.always_allow_hint", "Future commands starting with {{prefix}} will be allowed without asking", { prefix: allowPrefixes[0] })}
           >
-            {t("guard.always_allow", "Always allow")} <code>{allowPrefix}</code>
+            {t("guard.always_allow", "Always allow")} <code>{allowPrefixes[0]}</code>
           </button>
+        )}
+        {allowPrefixes.length > 1 && (
+          <div className={styles.always_allow_menu_wrap} ref={menuWrapRef}>
+            <button
+              className={`${styles.btn} ${styles.btn_always_allow}`}
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              title={t("guard.always_allow_pick_hint", "Pick which command to always allow")}
+            >
+              {t("guard.always_allow_menu", "Always allow")} <span aria-hidden>▾</span>
+            </button>
+            {menuOpen && (
+              <div className={styles.always_allow_menu_panel} role="menu">
+                <div className={styles.always_allow_menu_title}>
+                  {t("guard.always_allow_pick_hint", "Pick which command to always allow")}
+                </div>
+                {allowPrefixes.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    role="menuitem"
+                    className={styles.always_allow_menu_item}
+                    onClick={() => handleAlwaysAllowPrefix(p)}
+                  >
+                    <code>{p}</code>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
         <button className={`${styles.btn} ${styles.btn_block}`} onClick={handleBlock}>
           {t("guard.block", "Block")}
