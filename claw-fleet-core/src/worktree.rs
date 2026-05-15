@@ -9,7 +9,19 @@
 //! Branch: `fleet/<task_id>/<p_item_id>` (created by `git worktree add -b`).
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
+
+use git2::{
+    build::CheckoutBuilder, BranchType, MergeAnalysis, Repository, WorktreeAddOptions,
+    WorktreePruneOptions,
+};
+
+// libgit2 encodes the merge stage in bits 12-13 of `IndexEntry.flags`.
+const GIT_INDEX_STAGE_SHIFT: u16 = 12;
+const GIT_INDEX_STAGE_MASK: u16 = 0x3000;
+
+fn entry_stage(e: &git2::IndexEntry) -> u16 {
+    (e.flags & GIT_INDEX_STAGE_MASK) >> GIT_INDEX_STAGE_SHIFT
+}
 
 /// Root directory under `~/.fleet/` for all P-item worktrees.
 pub fn worktree_root() -> Result<PathBuf, String> {
@@ -28,6 +40,13 @@ pub fn worktree_branch(task_id: &str, p_item_id: &str) -> String {
     format!("fleet/{task_id}/{p_item_id}")
 }
 
+/// libgit2-internal name for the worktree's `.git/worktrees/<name>/` metadata
+/// dir. Must be unique per repo and contain no path separators.
+fn worktree_meta_name(task_id: &str, p_item_id: &str) -> String {
+    let sanitize = |s: &str| s.replace(['/', '\\', ':'], "_");
+    format!("{}__{}", sanitize(task_id), sanitize(p_item_id))
+}
+
 /// Provision a fresh worktree for `(task_id, p_item_id)` rooted at
 /// `task_branch` inside `project_workspace`. Returns the worktree path.
 ///
@@ -41,8 +60,9 @@ pub fn provision(
     p_item_id: &str,
 ) -> Result<PathBuf, String> {
     let target = worktree_path(task_id, p_item_id)?;
+    let branch = worktree_branch(task_id, p_item_id);
     if target.exists() {
-        // Compare via canonicalized paths — git records absolute, symlink-
+        // Compare via canonicalized paths — libgit2 records absolute, symlink-
         // resolved paths (e.g. macOS `/var/folders/...` ↔ `/private/var/...`).
         let target_canon = std::fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
         let listed = git_worktree_list(project_workspace)?;
@@ -55,32 +75,38 @@ pub fn provision(
         std::fs::remove_dir_all(&target)
             .map_err(|e| format!("remove orphan worktree dir {}: {e}", target.display()))?;
     }
+    let repo = open_repo(project_workspace)?;
     // A previous failed provision may have left the branch behind without a
-    // worktree. Wipe it so `worktree add -b` doesn't fail with "already exists".
-    let branch = worktree_branch(task_id, p_item_id);
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args(["branch", "-D", &branch])
-        .output();
+    // worktree. Wipe it so the new worktree creation doesn't trip on a name
+    // collision. Best-effort: not-found is fine.
+    if let Ok(mut existing) = repo.find_branch(&branch, BranchType::Local) {
+        existing
+            .delete()
+            .map_err(|e| format!("delete stale branch {branch}: {}", e.message()))?;
+    }
     if let Some(parent) = target.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|e| format!("create worktree parent {}: {e}", parent.display()))?;
     }
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args(["worktree", "add", "-b", &branch])
-        .arg(&target)
-        .arg(task_branch)
-        .output()
-        .map_err(|e| format!("git worktree add: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git worktree add failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
+    // Create the worker branch off the task branch, then point a new worktree
+    // at that branch's reference.
+    let task_commit = repo
+        .revparse_single(task_branch)
+        .map_err(|e| format!("revparse {task_branch}: {}", e.message()))?
+        .peel_to_commit()
+        .map_err(|e| format!("peel {task_branch} to commit: {}", e.message()))?;
+    let new_branch = repo
+        .branch(&branch, &task_commit, false)
+        .map_err(|e| format!("create branch {branch}: {}", e.message()))?;
+    let new_ref = new_branch.into_reference();
+    // libgit2 requires a worktree "name" usable as a directory name under
+    // `.git/worktrees/`. It must be unique per repo and contain no slashes,
+    // so derive it from `<task_id>__<p_item_id>` (sanitized).
+    let wt_name = worktree_meta_name(task_id, p_item_id);
+    let mut opts = WorktreeAddOptions::new();
+    opts.reference(Some(&new_ref));
+    repo.worktree(&wt_name, &target, Some(&opts))
+        .map_err(|e| format!("create worktree {}: {}", target.display(), e.message()))?;
     Ok(target)
 }
 
@@ -93,31 +119,52 @@ pub fn reap(
 ) -> Result<(), String> {
     let target = worktree_path(task_id, p_item_id)?;
     let branch = worktree_branch(task_id, p_item_id);
+    let repo = open_repo(project_workspace)?;
+    // Remove the working directory contents first; libgit2's prune doesn't
+    // touch the working tree the way `git worktree remove --force` does.
     if target.exists() {
-        let out = Command::new("git")
-            .arg("-C")
-            .arg(project_workspace)
-            .args(["worktree", "remove", "--force"])
-            .arg(&target)
-            .output()
-            .map_err(|e| format!("git worktree remove: {e}"))?;
-        if !out.status.success() {
-            // git may refuse if the path isn't registered. Fall back to
-            // plain rm so we don't leak disk.
-            std::fs::remove_dir_all(&target).ok();
+        std::fs::remove_dir_all(&target).ok();
+    }
+    // Drop the `.git/worktrees/<name>/` metadata. Try the canonical name we
+    // set during provision; fall back to scanning all worktrees and matching
+    // by path so legacy entries still get cleaned.
+    let wt_name = worktree_meta_name(task_id, p_item_id);
+    let mut pruned = false;
+    if let Ok(wt) = repo.find_worktree(&wt_name) {
+        wt.prune(Some(
+            WorktreePruneOptions::new()
+                .valid(true)
+                .locked(true)
+                .working_tree(true),
+        ))
+        .map_err(|e| format!("prune worktree {wt_name}: {}", e.message()))?;
+        pruned = true;
+    }
+    if !pruned {
+        if let Ok(names) = repo.worktrees() {
+            let target_canon =
+                std::fs::canonicalize(&target).unwrap_or_else(|_| target.clone());
+            for name in names.iter().flatten() {
+                if let Ok(wt) = repo.find_worktree(name) {
+                    let wt_canon = std::fs::canonicalize(wt.path())
+                        .unwrap_or_else(|_| wt.path().to_path_buf());
+                    if wt_canon == target_canon {
+                        let _ = wt.prune(Some(
+                            WorktreePruneOptions::new()
+                                .valid(true)
+                                .locked(true)
+                                .working_tree(true),
+                        ));
+                        break;
+                    }
+                }
+            }
         }
     }
-    // Always sweep stale .git/worktrees metadata.
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args(["worktree", "prune"])
-        .output();
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args(["branch", "-D", &branch])
-        .output();
+    // Drop the fleet branch if present; best-effort.
+    if let Ok(mut b) = repo.find_branch(&branch, BranchType::Local) {
+        let _ = b.delete();
+    }
     Ok(())
 }
 
@@ -181,82 +228,52 @@ pub fn merge_back(
     p_item_id: &str,
 ) -> Result<MergeOutcome, String> {
     let branch = worktree_branch(task_id, p_item_id);
+    let repo = open_repo(project_workspace)?;
     // If the worker branch doesn't exist (e.g. the master marked a P-item
     // Done without ever dispatching a worker), there's nothing to merge.
-    let exists = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args([
-            "show-ref",
-            "--verify",
-            "--quiet",
-            &format!("refs/heads/{branch}"),
-        ])
-        .status()
-        .map_err(|e| format!("git show-ref: {e}"))?;
-    if !exists.success() {
-        return Ok(MergeOutcome::NoChanges);
-    }
+    let worker_branch = match repo.find_branch(&branch, BranchType::Local) {
+        Ok(b) => b,
+        Err(_) => return Ok(MergeOutcome::NoChanges),
+    };
     let count = git_revlist_count(project_workspace, task_branch, &branch)?;
     if count == 0 {
         return Ok(MergeOutcome::NoChanges);
     }
     // Ensure task_branch is the checked-out HEAD in the main workspace.
-    let co = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args(["checkout", task_branch])
-        .output()
-        .map_err(|e| format!("git checkout: {e}"))?;
-    if !co.status.success() {
-        return Err(format!(
-            "git checkout {task_branch} failed: {}",
-            String::from_utf8_lossy(&co.stderr).trim()
-        ));
-    }
+    checkout_branch(&repo, task_branch)?;
+    // Annotated commit for the merge analysis / 3-way merge.
+    let worker_ref = worker_branch.into_reference();
+    let annotated = repo
+        .reference_to_annotated_commit(&worker_ref)
+        .map_err(|e| format!("annotate {branch}: {}", e.message()))?;
+    let (analysis, _pref) = repo
+        .merge_analysis(&[&annotated])
+        .map_err(|e| format!("merge analysis: {}", e.message()))?;
     // First try a fast-forward. Cheapest, most common path: worker branched
     // off task_branch and nothing else moved.
-    let ff = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args(["merge", "--ff-only", &branch])
-        .output()
-        .map_err(|e| format!("git merge --ff-only: {e}"))?;
-    if ff.status.success() {
+    if analysis.contains(MergeAnalysis::ANALYSIS_FASTFORWARD) {
+        fast_forward_to(&repo, task_branch, annotated.id())?;
         return Ok(MergeOutcome::FastForwarded {
             commits_merged: count,
         });
     }
-    // Fall back to a real 3-way merge — let git try to auto-resolve.
-    let merge = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args([
-            "merge",
-            "--no-ff",
-            "--no-edit",
-            "-m",
-            &format!("Merge worktree {branch}"),
-            &branch,
-        ])
-        .output()
-        .map_err(|e| format!("git merge: {e}"))?;
-    if merge.status.success() {
-        return Ok(MergeOutcome::AutoMerged {
-            commits_merged: count,
-        });
+    // Fall back to a real 3-way merge — let libgit2 try to auto-resolve.
+    let msg = format!("Merge worktree {branch}");
+    repo.merge(&[&annotated], None, None)
+        .map_err(|e| format!("merge {branch}: {}", e.message()))?;
+    let mut index = repo
+        .index()
+        .map_err(|e| format!("read index after merge: {}", e.message()))?;
+    if index.has_conflicts() {
+        // Conflict — collect specs then abort to leave workspace clean.
+        let files = collect_conflict_specs(project_workspace)?;
+        let reason = format!("3-way merge of {branch} has conflicts");
+        abort_merge(&repo)?;
+        return Ok(MergeOutcome::Conflict { files, reason });
     }
-    // Conflict — collect specs then abort to leave workspace clean.
-    let files = collect_conflict_specs(project_workspace)?;
-    let stderr_msg = String::from_utf8_lossy(&merge.stderr).trim().to_string();
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args(["merge", "--abort"])
-        .output();
-    Ok(MergeOutcome::Conflict {
-        files,
-        reason: stderr_msg,
+    finish_merge_commit(&repo, &mut index, &msg, annotated.id())?;
+    Ok(MergeOutcome::AutoMerged {
+        commits_merged: count,
     })
 }
 
@@ -282,22 +299,22 @@ pub fn apply_resolutions(
     resolutions: &[(PathBuf, String)],
 ) -> Result<MergeOutcome, String> {
     let branch = worktree_branch(task_id, p_item_id);
-    // Re-do the merge. Exits non-zero on conflict — that's expected; we
-    // catch it after this call and resolve.
-    let _ = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args([
-            "merge",
-            "--no-ff",
-            "--no-commit",
-            "-m",
-            &format!("Merge worktree {branch} (LLM-mediated)"),
-            &branch,
-        ])
-        .output()
-        .map_err(|e| format!("git merge --no-commit: {e}"))?;
-    // Write each resolution onto the working tree, then stage it.
+    let repo = open_repo(project_workspace)?;
+    let worker_branch = repo
+        .find_branch(&branch, BranchType::Local)
+        .map_err(|e| format!("find branch {branch}: {}", e.message()))?;
+    let worker_ref = worker_branch.into_reference();
+    let annotated = repo
+        .reference_to_annotated_commit(&worker_ref)
+        .map_err(|e| format!("annotate {branch}: {}", e.message()))?;
+    // Re-do the merge. Conflicts will surface in the index; we expect them.
+    repo.merge(&[&annotated], None, None)
+        .map_err(|e| format!("merge --no-commit {branch}: {}", e.message()))?;
+    // Write each resolution onto the working tree, then stage it (which
+    // clears its stage 1/2/3 conflict slots).
+    let mut index = repo
+        .index()
+        .map_err(|e| format!("read index: {}", e.message()))?;
     for (rel_path, content) in resolutions {
         let abs = project_workspace.join(rel_path);
         if let Some(parent) = abs.parent() {
@@ -306,97 +323,142 @@ pub fn apply_resolutions(
         }
         std::fs::write(&abs, content.as_bytes())
             .map_err(|e| format!("write {}: {e}", rel_path.display()))?;
-        let add = Command::new("git")
-            .arg("-C")
-            .arg(project_workspace)
-            .args(["add", "--"])
-            .arg(rel_path)
-            .output()
-            .map_err(|e| format!("git add {}: {e}", rel_path.display()))?;
-        if !add.status.success() {
-            let _ = Command::new("git")
-                .arg("-C")
-                .arg(project_workspace)
-                .args(["merge", "--abort"])
-                .output();
-            return Err(format!(
-                "git add {} failed: {}",
-                rel_path.display(),
-                String::from_utf8_lossy(&add.stderr).trim()
-            ));
+        if let Err(e) =
+            index.add_path(rel_path).map_err(|e| format!("index add {}: {}", rel_path.display(), e.message()))
+        {
+            abort_merge(&repo)?;
+            return Err(e);
         }
     }
+    index
+        .write()
+        .map_err(|e| format!("write index: {}", e.message()))?;
     // Any conflicts still unmerged? Abort and tell the caller.
-    let ls = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args(["ls-files", "-u"])
-        .output()
-        .map_err(|e| format!("git ls-files -u: {e}"))?;
-    if !ls.stdout.is_empty() {
-        let _ = Command::new("git")
-            .arg("-C")
-            .arg(project_workspace)
-            .args(["merge", "--abort"])
-            .output();
+    if index.has_conflicts() {
+        let unresolved: std::collections::HashSet<String> = index
+            .iter()
+            .filter(|e| entry_stage(e) > 0)
+            .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+            .collect();
+        let count = unresolved.len();
+        abort_merge(&repo)?;
         return Err(format!(
-            "mediation incomplete — {} file(s) still unmerged after apply",
-            String::from_utf8_lossy(&ls.stdout)
-                .lines()
-                .filter_map(|l| l.split('\t').nth(1))
-                .collect::<std::collections::HashSet<_>>()
-                .len()
+            "mediation incomplete — {count} file(s) still unmerged after apply"
         ));
     }
-    let commit = Command::new("git")
-        .arg("-C")
-        .arg(project_workspace)
-        .args([
-            "commit",
-            "--no-edit",
-            "-m",
-            &format!("auto-merge: {p_item_id} via Sonnet mediation"),
-        ])
-        .output()
-        .map_err(|e| format!("git commit: {e}"))?;
-    if !commit.status.success() {
-        return Err(format!(
-            "git commit (mediated merge) failed: {}",
-            String::from_utf8_lossy(&commit.stderr).trim()
-        ));
-    }
+    let msg = format!("auto-merge: {p_item_id} via Sonnet mediation");
+    finish_merge_commit(&repo, &mut index, &msg, annotated.id())?;
     Ok(MergeOutcome::AutoMerged { commits_merged: 1 })
 }
 
-/// Read the index's stages 1/2/3 for every conflicted path. `git ls-files
-/// -u` lists unmerged entries; we then `git show :<stage>:<path>` to get
-/// each side. Returns an empty vec when there are no conflicts.
+fn checkout_branch(repo: &Repository, branch: &str) -> Result<(), String> {
+    let refname = format!("refs/heads/{branch}");
+    repo.find_reference(&refname)
+        .map_err(|e| format!("find ref {refname}: {}", e.message()))?;
+    repo.set_head(&refname)
+        .map_err(|e| format!("set HEAD to {refname}: {}", e.message()))?;
+    let mut co = CheckoutBuilder::new();
+    co.force();
+    repo.checkout_head(Some(&mut co))
+        .map_err(|e| format!("checkout {branch}: {}", e.message()))?;
+    Ok(())
+}
+
+fn fast_forward_to(repo: &Repository, branch: &str, target: git2::Oid) -> Result<(), String> {
+    let refname = format!("refs/heads/{branch}");
+    let mut reference = repo
+        .find_reference(&refname)
+        .map_err(|e| format!("find ref {refname}: {}", e.message()))?;
+    reference
+        .set_target(target, "fleet: fast-forward")
+        .map_err(|e| format!("ff {refname}: {}", e.message()))?;
+    repo.set_head(&refname)
+        .map_err(|e| format!("set HEAD {refname}: {}", e.message()))?;
+    let mut co = CheckoutBuilder::new();
+    co.force();
+    repo.checkout_head(Some(&mut co))
+        .map_err(|e| format!("checkout fast-forwarded {refname}: {}", e.message()))?;
+    Ok(())
+}
+
+fn abort_merge(repo: &Repository) -> Result<(), String> {
+    // Equivalent to `git merge --abort`: drop MERGE_HEAD etc., then hard-
+    // reset working tree + index to HEAD.
+    repo.cleanup_state()
+        .map_err(|e| format!("cleanup merge state: {}", e.message()))?;
+    let head_obj = repo
+        .head()
+        .and_then(|h| h.peel(git2::ObjectType::Commit))
+        .map_err(|e| format!("read HEAD for abort: {}", e.message()))?;
+    repo.reset(&head_obj, git2::ResetType::Hard, None)
+        .map_err(|e| format!("reset --hard during abort: {}", e.message()))?;
+    Ok(())
+}
+
+fn finish_merge_commit(
+    repo: &Repository,
+    index: &mut git2::Index,
+    msg: &str,
+    theirs_oid: git2::Oid,
+) -> Result<(), String> {
+    let tree_oid = index
+        .write_tree()
+        .map_err(|e| format!("write tree: {}", e.message()))?;
+    let tree = repo
+        .find_tree(tree_oid)
+        .map_err(|e| format!("find tree {tree_oid}: {}", e.message()))?;
+    let head_commit = repo
+        .head()
+        .and_then(|h| h.peel_to_commit())
+        .map_err(|e| format!("peel HEAD: {}", e.message()))?;
+    let theirs_commit = repo
+        .find_commit(theirs_oid)
+        .map_err(|e| format!("find their commit {theirs_oid}: {}", e.message()))?;
+    let sig = repo
+        .signature()
+        .or_else(|_| git2::Signature::now("Fleet", "fleet@local"))
+        .map_err(|e| format!("build signature: {}", e.message()))?;
+    repo.commit(
+        Some("HEAD"),
+        &sig,
+        &sig,
+        msg,
+        &tree,
+        &[&head_commit, &theirs_commit],
+    )
+    .map_err(|e| format!("commit merge: {}", e.message()))?;
+    repo.cleanup_state()
+        .map_err(|e| format!("cleanup after merge commit: {}", e.message()))?;
+    Ok(())
+}
+
+/// Read the index's stages 1/2/3 for every conflicted path via libgit2.
+/// A missing stage (e.g. file added on one side, didn't exist on the
+/// other) yields an empty string for that side, matching the original
+/// CLI behaviour.
 fn collect_conflict_specs(workspace: &Path) -> Result<Vec<ConflictSpec>, String> {
-    let ls = Command::new("git")
-        .arg("-C")
-        .arg(workspace)
-        .args(["ls-files", "-u"])
-        .output()
-        .map_err(|e| format!("git ls-files -u: {e}"))?;
-    if !ls.status.success() {
-        return Err(format!(
-            "git ls-files -u failed: {}",
-            String::from_utf8_lossy(&ls.stderr).trim()
-        ));
-    }
-    let stdout = String::from_utf8_lossy(&ls.stdout);
-    let mut paths: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for line in stdout.lines() {
-        // Format: `<mode> <sha> <stage>\t<path>`.
-        if let Some(tab) = line.find('\t') {
-            paths.insert(line[tab + 1..].to_string());
+    let repo = open_repo(workspace)?;
+    let index = repo
+        .index()
+        .map_err(|e| format!("read index: {}", e.message()))?;
+    let mut by_path: std::collections::BTreeMap<String, [Option<git2::Oid>; 3]> =
+        std::collections::BTreeMap::new();
+    for entry in index.iter() {
+        let stage = entry_stage(&entry);
+        if stage == 0 {
+            continue; // not part of a conflict
+        }
+        let path = String::from_utf8_lossy(&entry.path).into_owned();
+        let slot = by_path.entry(path).or_insert([None, None, None]);
+        if (1..=3).contains(&stage) {
+            slot[(stage - 1) as usize] = Some(entry.id);
         }
     }
-    let mut specs = Vec::with_capacity(paths.len());
-    for path in paths {
-        let base = git_show_stage(workspace, 1, &path).unwrap_or_default();
-        let ours = git_show_stage(workspace, 2, &path).unwrap_or_default();
-        let theirs = git_show_stage(workspace, 3, &path).unwrap_or_default();
+    let mut specs = Vec::with_capacity(by_path.len());
+    for (path, oids) in by_path {
+        let base = blob_to_string(&repo, oids[0])?;
+        let ours = blob_to_string(&repo, oids[1])?;
+        let theirs = blob_to_string(&repo, oids[2])?;
         specs.push(ConflictSpec {
             path: PathBuf::from(&path),
             base,
@@ -407,39 +469,49 @@ fn collect_conflict_specs(workspace: &Path) -> Result<Vec<ConflictSpec>, String>
     Ok(specs)
 }
 
-fn git_show_stage(workspace: &Path, stage: u8, path: &str) -> Result<String, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(workspace)
-        .args(["show", &format!(":{stage}:{path}")])
-        .output()
-        .map_err(|e| format!("git show :{stage}:{path}: {e}"))?;
-    if !out.status.success() {
-        // A missing stage (e.g. file added on one side, didn't exist on the
-        // other) is a legitimate state for delete/modify conflicts. Return
-        // empty so the mediator can reason about it.
-        return Ok(String::new());
+fn blob_to_string(repo: &Repository, oid: Option<git2::Oid>) -> Result<String, String> {
+    match oid {
+        None => Ok(String::new()),
+        Some(o) => {
+            let blob = repo
+                .find_blob(o)
+                .map_err(|e| format!("find blob {o}: {}", e.message()))?;
+            Ok(String::from_utf8_lossy(blob.content()).to_string())
+        }
     }
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
-/// Count of commits in `head` that are not in `base` (`git rev-list --count base..head`).
+/// Count of commits in `head` that are not in `base` (equivalent to
+/// `git rev-list --count base..head`). Uses a libgit2 revwalk so no
+/// subprocess is spawned.
 fn git_revlist_count(workspace: &Path, base: &str, head: &str) -> Result<usize, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(workspace)
-        .args(["rev-list", "--count", &format!("{base}..{head}")])
-        .output()
-        .map_err(|e| format!("git rev-list: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git rev-list failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
+    let repo = open_repo(workspace)?;
+    let head_oid = repo
+        .revparse_single(head)
+        .map_err(|e| format!("revparse {head}: {}", e.message()))?
+        .id();
+    let base_oid = repo
+        .revparse_single(base)
+        .map_err(|e| format!("revparse {base}: {}", e.message()))?
+        .id();
+    let mut walk = repo
+        .revwalk()
+        .map_err(|e| format!("revwalk init: {}", e.message()))?;
+    walk.push(head_oid)
+        .map_err(|e| format!("revwalk push {head}: {}", e.message()))?;
+    walk.hide(base_oid)
+        .map_err(|e| format!("revwalk hide {base}: {}", e.message()))?;
+    let mut count = 0usize;
+    for oid in walk {
+        oid.map_err(|e| format!("revwalk iter: {}", e.message()))?;
+        count += 1;
     }
-    let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    s.parse::<usize>()
-        .map_err(|e| format!("parse rev-list count {s:?}: {e}"))
+    Ok(count)
+}
+
+fn open_repo(workspace: &Path) -> Result<Repository, String> {
+    Repository::open(workspace)
+        .map_err(|e| format!("open git repo at {}: {}", workspace.display(), e.message()))
 }
 
 /// Garbage-collect worktree directories whose task or P-item is no longer
@@ -507,26 +579,19 @@ pub fn gc_stale(alive: &[(String, Vec<String>)]) -> Result<Vec<PathBuf>, String>
     Ok(reaped)
 }
 
-/// Parse `git worktree list --porcelain` to enumerate registered worktree
-/// paths (including the main one).
+/// Enumerate registered worktree paths (including the main one) via libgit2.
 fn git_worktree_list(workspace: &Path) -> Result<Vec<PathBuf>, String> {
-    let out = Command::new("git")
-        .arg("-C")
-        .arg(workspace)
-        .args(["worktree", "list", "--porcelain"])
-        .output()
-        .map_err(|e| format!("git worktree list: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "git worktree list failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
+    let repo = open_repo(workspace)?;
+    let mut paths = vec![repo.workdir().unwrap_or(workspace).to_path_buf()];
+    let names = repo
+        .worktrees()
+        .map_err(|e| format!("list worktrees: {}", e.message()))?;
+    for name in names.iter().flatten() {
+        let wt = repo
+            .find_worktree(name)
+            .map_err(|e| format!("find worktree {name}: {}", e.message()))?;
+        paths.push(wt.path().to_path_buf());
     }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let paths = stdout
-        .lines()
-        .filter_map(|line| line.strip_prefix("worktree ").map(PathBuf::from))
-        .collect();
     Ok(paths)
 }
 
@@ -534,6 +599,7 @@ fn git_worktree_list(workspace: &Path) -> Result<Vec<PathBuf>, String> {
 mod tests {
     use super::*;
     use std::fs;
+    use std::process::Command;
     use tempfile::TempDir;
 
     struct FleetHomeOverride {
