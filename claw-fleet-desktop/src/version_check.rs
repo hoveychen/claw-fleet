@@ -121,7 +121,7 @@ fn fetch_and_cache(path: &PathBuf) -> (String, String) {
 /// Never panics; on any error the `latest_version` field is empty and
 /// `has_update` is false.
 pub fn check_app_version() -> VersionCheckResult {
-    let current_version = env!("CARGO_PKG_VERSION").to_string();
+    let current_version = env!("FLEET_BUILD_VERSION").to_string();
 
     let (latest_version, release_url) = match cache_path() {
         Some(path) => {
