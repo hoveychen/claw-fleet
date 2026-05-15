@@ -3304,6 +3304,46 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/guard/allow-rules" => {
+                let rules = audit::list_guard_allow_rules();
+                let body = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/guard/allow-rules/remove" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct RemoveReq { id: String }
+                match serde_json::from_slice::<RemoveReq>(&body_bytes) {
+                    Ok(req) => match audit::remove_guard_allow_rule(&req.id) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string("{}").with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "\\\""));
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e.to_string().replace('"', "'"));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             // ── Elicitation hook endpoints ───────────────────────────────────
             "/apply_elicitation_hook" => {
                 match hooks::apply_elicitation_hook() {

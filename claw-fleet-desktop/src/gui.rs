@@ -940,6 +940,18 @@ fn respond_to_guard(
 }
 
 #[tauri::command]
+fn list_guard_allow_rules(
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::audit::GuardAllowRule> {
+    state.backend.read().unwrap().list_guard_allow_rules()
+}
+
+#[tauri::command]
+fn remove_guard_allow_rule(state: tauri::State<AppState>, id: String) -> Result<(), String> {
+    state.backend.read().unwrap().remove_guard_allow_rule(&id)
+}
+
+#[tauri::command]
 async fn analyze_guard_command(
     state: tauri::State<'_, AppState>,
     command: String,
@@ -3196,6 +3208,8 @@ pub fn run() {
             apply_guard_hook,
             remove_guard_hook,
             respond_to_guard,
+            list_guard_allow_rules,
+            remove_guard_allow_rule,
             analyze_guard_command,
             get_guard_context,
             apply_elicitation_hook,

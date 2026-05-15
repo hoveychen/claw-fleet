@@ -270,6 +270,19 @@ export interface GuardRequest {
   timestamp: string;
 }
 
+/**
+ * User-approved "always allow" rule for the Bash guard short-circuit path.
+ * Persisted under ~/.fleet/fleet-audit-user-rules.json once the user clicks
+ * "Always allow" on a guard card.  See claw-fleet-core/src/audit.rs.
+ */
+export interface GuardAllowRule {
+  id: string;
+  prefix: string;
+  sourceTag?: string | null;
+  /** ISO 8601 UTC timestamp. */
+  createdAt: string;
+}
+
 // ── Decision panel types (abstract, extensible) ────────────────────────────
 
 /** Guard interception decision — user must allow or block a critical command. */

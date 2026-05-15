@@ -415,6 +415,16 @@ pub trait Backend: Send + Sync {
         allow: bool,
         always_allow: Option<crate::guard::GuardAlwaysAllow>,
     ) -> Result<(), String>;
+    /// List persisted "always allow" rules for the Bash guard short-circuit
+    /// path. Accumulated when the user clicks "Always allow" on a guard card.
+    fn list_guard_allow_rules(&self) -> Vec<crate::audit::GuardAllowRule> {
+        Vec::new()
+    }
+    /// Remove a guard allow rule by its id. Returns an error if the id is
+    /// unknown or the backend doesn't support guard allow-list management.
+    fn remove_guard_allow_rule(&self, _id: &str) -> Result<(), String> {
+        Err("guard allow-list not supported by this backend".into())
+    }
     fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String>;
 
     // ── Elicitation (AskUserQuestion interception) ──────────────────────

@@ -690,6 +690,18 @@ impl crate::backend::Backend for RemoteBackend {
         Ok(resp.analysis)
     }
 
+    fn list_guard_allow_rules(&self) -> Vec<claw_fleet_core::audit::GuardAllowRule> {
+        self.probe
+            .get::<Vec<claw_fleet_core::audit::GuardAllowRule>>("/guard/allow-rules")
+            .unwrap_or_default()
+    }
+
+    fn remove_guard_allow_rule(&self, id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { id: &'a str }
+        self.probe.post_json_ok("/guard/allow-rules/remove", &Req { id })
+    }
+
     fn apply_elicitation_hook(&self) -> Result<(), String> {
         self.probe.post_ok("/apply_elicitation_hook")
     }

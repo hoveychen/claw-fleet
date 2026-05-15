@@ -1334,7 +1334,14 @@
     "block": "阻止",
     "always_allow": "始终允许",
     "always_allow_hint": "今后以 {{prefix}} 开头的命令直接放行不再询问",
-    "queue": "还有 {{count}} 条待处理"
+    "queue": "还有 {{count}} 条待处理",
+    "allow_rules_title": "始终允许规则",
+    "allow_rules_empty": "还没有「始终允许」规则——在 guard 卡上点「始终允许」即可累积。",
+    "allow_rules_col_prefix": "前缀",
+    "allow_rules_col_tag": "来源标签",
+    "allow_rules_col_created": "创建时间",
+    "allow_rules_remove": "删除",
+    "allow_rules_remove_confirm": "确定要删除这条「始终允许」规则吗？删除后下次该前缀命令会重新弹卡。"
   },
   "elicitation": {
     "title": "Agent 提问",

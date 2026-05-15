@@ -1337,7 +1337,14 @@
     "block": "Block",
     "always_allow": "Always allow",
     "always_allow_hint": "Future commands starting with {{prefix}} will be allowed without asking",
-    "queue": "{{count}} more pending"
+    "queue": "{{count}} more pending",
+    "allow_rules_title": "Always-allow rules",
+    "allow_rules_empty": "No always-allow rules yet — click \"Always allow\" on a guard card to add one.",
+    "allow_rules_col_prefix": "Prefix",
+    "allow_rules_col_tag": "Source tag",
+    "allow_rules_col_created": "Created",
+    "allow_rules_remove": "Remove",
+    "allow_rules_remove_confirm": "Remove this always-allow rule? The next command with this prefix will trigger a guard card again."
   },
   "elicitation": {
     "title": "Agent Question",
