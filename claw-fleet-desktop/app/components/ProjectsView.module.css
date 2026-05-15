@@ -266,7 +266,7 @@
   align-items: stretch;
 }
 
-.field_row input {
+.field_row input:not([type="checkbox"]) {
   flex: 1;
   min-width: 0;
   background: var(--color-bg-secondary);
@@ -278,8 +278,18 @@
   outline: none;
 }
 
-.field_row input:focus {
+.field_row input:not([type="checkbox"]):focus {
   border-color: var(--color-accent);
+}
+
+.field_row input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  align-self: center;
 }
 
 .browse_btn {

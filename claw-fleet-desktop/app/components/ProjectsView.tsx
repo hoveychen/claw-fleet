@@ -429,7 +429,7 @@ function ProjectFormDialog({
             <input
               type="text"
               value={workspace}
-              placeholder="/absolute/path/to/workspace"
+              placeholder={t("projects.workspace_placeholder") as string}
               onChange={(e) => setWorkspace(e.target.value)}
             />
             <button
