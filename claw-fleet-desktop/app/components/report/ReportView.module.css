@@ -22,18 +22,18 @@
 /* Content area */
 .content { display: flex; flex-direction: column; gap: 24px; }
 
-/* Metrics cards */
-.metrics_row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-.metric_card { background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: 8px; padding: 16px; text-align: center; }
+/* Metrics cards — Linear-style: bg-tinted blocks, no border. */
+.metrics_row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.metric_card { background: var(--color-bg-card); border-radius: 8px; padding: 16px; text-align: center; }
 .metric_value { font-size: 28px; font-weight: 700; color: var(--color-text); }
 .metric_label { font-size: 12px; color: var(--color-text-secondary); margin-top: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
 .metric_sub { font-size: 11px; color: var(--color-text-dim); margin-top: 2px; }
 
 /* Charts row */
-.charts_row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.charts_row { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 
-/* Chart cards */
-.chart_card { background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: 8px; padding: 16px; }
+/* Chart cards — Linear-style: bg-tinted, no border, taller body for chart breathing room. */
+.chart_card { background: var(--color-bg-card); border-radius: 8px; padding: 16px; min-height: 260px; }
 .chart_title { font-size: 13px; font-weight: 600; margin: 0 0 12px; color: var(--color-text); }
 
 /* Bar chart */
@@ -45,7 +45,7 @@
 .bar_value { font-size: 11px; color: var(--color-text-secondary); width: 36px; text-align: right; flex-shrink: 0; }
 
 /* Hourly chart */
-.hourly_chart { display: flex; gap: 2px; height: 100px; align-items: flex-end; }
+.hourly_chart { display: flex; gap: 2px; height: 200px; align-items: flex-end; }
 .hourly_col { display: flex; flex-direction: column; align-items: center; flex: 1; height: 100%; }
 .hourly_bar_wrapper { flex: 1; width: 100%; display: flex; align-items: flex-end; }
 .hourly_bar { width: 100%; background: var(--color-accent); border-radius: 2px 2px 0 0; min-height: 2px; transition: height 0.3s; }
@@ -56,7 +56,7 @@
 .section_title { font-size: 14px; font-weight: 600; color: var(--color-text); margin: 0 0 12px; }
 
 /* Project breakdown */
-.project_card { background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
+.project_card { background: var(--color-bg-card); border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
 .project_header { display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px 16px; border: none; background: none; cursor: pointer; text-align: left; color: var(--color-text); }
 .project_header:hover { background: var(--color-bg-card-hover); }
 .project_expand { font-size: 10px; color: var(--color-text-secondary); width: 12px; }
@@ -70,7 +70,7 @@
 .subagent_badge { background: var(--color-accent); color: white; font-size: 9px; padding: 1px 5px; border-radius: 4px; font-weight: 500; }
 
 /* AI Summary */
-.summary_card { background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: 8px; overflow: hidden; }
+.summary_card { background: var(--color-bg-card); border-radius: 8px; overflow: hidden; }
 
 /* Hero area */
 .summary_hero { padding: 16px; border-bottom: 1px solid var(--color-border); display: flex; align-items: center; gap: 16px; }
@@ -99,16 +99,16 @@
 .summary_content :global(blockquote) { border-left: 3px solid var(--color-accent); background: var(--color-bg-secondary); padding: 8px 12px; border-radius: 0 6px 6px 0; margin: 8px 0; }
 .summary_content :global(blockquote p) { margin: 0; color: var(--color-text-secondary); font-style: italic; }
 
-.summary_empty { background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: 8px; padding: 24px; text-align: center; color: var(--color-text-secondary); }
+.summary_empty { background: var(--color-bg-card); border-radius: 8px; padding: 24px; text-align: center; color: var(--color-text-secondary); }
 
 /* Share button */
 .share_btn { background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: 6px; padding: 6px 12px; cursor: pointer; color: var(--color-text); font-size: 12px; margin-left: auto; }
 .share_btn:hover { background: var(--color-bg-card-hover); }
 
 /* Lessons */
-.lessons_empty { background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: 8px; padding: 24px; text-align: center; color: var(--color-text-secondary); }
-.lessons_list { display: flex; flex-direction: column; gap: 10px; }
-.lesson_card { background: var(--color-bg-card); border: 1px solid var(--color-border); border-radius: 8px; padding: 14px 16px; display: flex; align-items: flex-start; gap: 12px; }
+.lessons_empty { background: var(--color-bg-card); border-radius: 8px; padding: 24px; text-align: center; color: var(--color-text-secondary); }
+.lessons_list { display: flex; flex-direction: column; gap: 12px; }
+.lesson_card { background: var(--color-bg-card); border-radius: 8px; padding: 14px 16px; display: flex; align-items: flex-start; gap: 12px; }
 .lesson_content { flex: 1; }
 .lesson_text { font-size: 13px; color: var(--color-text); line-height: 1.5; }
 .lesson_reason { font-size: 11px; color: var(--color-text-secondary); margin-top: 4px; }

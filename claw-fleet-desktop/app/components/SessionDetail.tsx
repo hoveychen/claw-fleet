@@ -189,14 +189,14 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
           {/* Path */}
           <div className={styles.path}>{liveSession.workspacePath}</div>
 
-          {/* Combined tab bar: subagent tabs (if any) + view tabs */}
+          {/* Combined tab bar: subagent segmented control (if any) + view tabs */}
           <div className={styles.tab_bar}>
             {tabs.length > 0 && (
-              <>
+              <div className={styles.agent_seg_wrap}>
                 {tabs.map((tab) => (
                   <button
                     key={tab.id}
-                    className={`${styles.tab} ${tab.id === liveSession.id ? styles.tab_active : ""}`}
+                    className={`${styles.agent_seg} ${tab.id === liveSession.id ? styles.agent_seg_active : ""}`}
                     onClick={() => { if (tab.id !== liveSession.id) open(tab); }}
                   >
                     <span
@@ -208,8 +208,7 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
                       : `◈ ${t("main")}`}
                   </button>
                 ))}
-                <span className={styles.tab_separator} aria-hidden="true" />
-              </>
+              </div>
             )}
             <button
               className={`${styles.view_tab} ${viewTab === "decisions" ? styles.view_tab_active : ""}`}

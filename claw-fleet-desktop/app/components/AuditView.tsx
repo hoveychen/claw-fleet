@@ -180,7 +180,7 @@ function EventsTab() {
                     className={`${styles.event_row} ${selectedEvent === event ? styles.event_row_selected : ""} ${read ? styles.event_row_read : ""}`}
                     onClick={() => setSelectedEvent(event)}
                   >
-                    <span className={styles.risk_badge} style={{ background: `${RISK_COLORS[event.riskLevel]}20`, color: RISK_COLORS[event.riskLevel] }}>
+                    <span className={styles.risk_badge} style={{ color: RISK_COLORS[event.riskLevel] }}>
                       {RISK_LABELS[event.riskLevel]}
                     </span>
                     <span className={styles.event_command}>{event.commandSummary}</span>
@@ -198,7 +198,7 @@ function EventsTab() {
         {selectedEvent && (
           <div className={styles.detail_panel}>
             <div className={styles.detail_header}>
-              <span className={styles.risk_badge} style={{ background: `${RISK_COLORS[selectedEvent.riskLevel]}20`, color: RISK_COLORS[selectedEvent.riskLevel] }}>
+              <span className={styles.risk_badge} style={{ color: RISK_COLORS[selectedEvent.riskLevel] }}>
                 {RISK_LABELS[selectedEvent.riskLevel]}
               </span>
               <span className={styles.detail_title}>{selectedEvent.toolName}</span>
@@ -374,7 +374,7 @@ function RulesTab({ lang }: { lang: string }) {
                   onClick={() => setSelectedRule(rule)}
                 >
                   <div className={styles.rule_row_top}>
-                    <span className={styles.risk_badge} style={{ background: `${RISK_COLORS[rule.level]}20`, color: RISK_COLORS[rule.level] }}>
+                    <span className={styles.risk_badge} style={{ color: RISK_COLORS[rule.level] }}>
                       {RISK_LABELS[rule.level]}
                     </span>
                     <span className={styles.event_command}>{rule.tag}</span>
@@ -403,7 +403,7 @@ function RulesTab({ lang }: { lang: string }) {
         {selectedRule && (
           <div className={styles.detail_panel}>
             <div className={styles.detail_header}>
-              <span className={styles.risk_badge} style={{ background: `${RISK_COLORS[selectedRule.level]}20`, color: RISK_COLORS[selectedRule.level] }}>
+              <span className={styles.risk_badge} style={{ color: RISK_COLORS[selectedRule.level] }}>
                 {RISK_LABELS[selectedRule.level]}
               </span>
               <span className={styles.detail_title}>{selectedRule.tag}</span>
@@ -656,7 +656,7 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
             <div key={s.id} className={`${styles.suggest_card} ${selected.has(s.id) ? styles.suggest_card_selected : ""}`} onClick={() => toggleSelect(s.id)}>
               <div className={styles.suggest_card_header}>
                 <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelect(s.id)} onClick={(e) => e.stopPropagation()} />
-                <span className={styles.risk_badge} style={{ background: `${RISK_COLORS[s.level]}20`, color: RISK_COLORS[s.level] }}>
+                <span className={styles.risk_badge} style={{ color: RISK_COLORS[s.level] }}>
                   {RISK_LABELS[s.level]}
                 </span>
                 <span className={styles.suggest_tag}>{s.tag}</span>
