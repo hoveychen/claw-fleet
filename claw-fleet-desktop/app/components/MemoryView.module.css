@@ -8,6 +8,17 @@
   min-width: 0;
 }
 
+/* ── Type color tokens ──────────────────────────────────────────────────── */
+/* Tailwind-style palette, chosen to be distinct from the coral --color-accent. */
+
+.page {
+  --mem-user: 16 185 129;     /* emerald */
+  --mem-feedback: 245 158 11; /* amber */
+  --mem-project: 139 92 246;  /* violet */
+  --mem-reference: 14 165 233;/* sky */
+  --mem-index: 217 119 87;    /* coral (matches accent) */
+}
+
 /* ── Header ──────────────────────────────────────────────────────────────── */
 
 .header {
@@ -64,14 +75,83 @@
 }
 
 .list_pane {
-  width: 300px;
+  width: 340px;
   flex-shrink: 0;
   overflow-y: auto;
   border-right: 1px solid var(--color-border);
-  padding: 8px 10px 16px;
+  padding: 10px 10px 20px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 14px;
+}
+
+/* ── Filter bar ──────────────────────────────────────────────────────────── */
+
+.filter_bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 20px 10px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.chip:hover {
+  color: var(--color-text);
+  border-color: var(--color-text-dim);
+}
+
+.chip_active {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+  border-color: var(--color-text);
+}
+
+.chip_count {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.chip_active .chip_count {
+  color: var(--color-text);
+}
+
+/* Type-tinted chips (when not active, show a colored dot via border-left) */
+.chip.type_user.chip_active {
+  background: rgb(var(--mem-user) / 0.18);
+  border-color: rgb(var(--mem-user) / 0.5);
+  color: rgb(var(--mem-user));
+}
+.chip.type_feedback.chip_active {
+  background: rgb(var(--mem-feedback) / 0.18);
+  border-color: rgb(var(--mem-feedback) / 0.5);
+  color: rgb(var(--mem-feedback));
+}
+.chip.type_project.chip_active {
+  background: rgb(var(--mem-project) / 0.18);
+  border-color: rgb(var(--mem-project) / 0.5);
+  color: rgb(var(--mem-project));
+}
+.chip.type_reference.chip_active {
+  background: rgb(var(--mem-reference) / 0.18);
+  border-color: rgb(var(--mem-reference) / 0.5);
+  color: rgb(var(--mem-reference));
 }
 
 .detail_pane {
@@ -105,6 +185,12 @@
   letter-spacing: 0.04em;
 }
 
+.workspace_count {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
 .badge {
   font-size: 9px;
   padding: 1px 6px;
@@ -128,61 +214,174 @@
   background: rgba(217, 119, 87, 0.35);
 }
 
-.file_list {
+/* ── Memory card list ────────────────────────────────────────────────────── */
+
+.card_list {
   display: flex;
   flex-direction: column;
-  gap: 1px;
+  gap: 4px;
 }
 
-.file_item {
+.card {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 8px;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 10px;
   border-radius: 6px;
+  border: 1px solid transparent;
   cursor: pointer;
   background: none;
-  border: none;
   text-align: left;
   width: 100%;
-  transition: background 0.12s;
+  transition: background 0.12s, border-color 0.12s;
+  min-width: 0;
 }
 
-.file_item:hover {
+.card:hover {
   background: var(--color-bg-secondary);
 }
 
-.file_item_active {
+.card_active {
+  background: var(--color-bg-card-hover);
+  border-color: var(--color-border);
+}
+
+.card_active:hover {
   background: var(--color-bg-card-hover);
 }
 
-.file_item_active:hover {
-  background: var(--color-bg-card-hover);
+.card_index .card_title {
+  font-weight: 700;
 }
 
-.file_icon {
-  font-size: 11px;
-  opacity: 0.6;
-  flex-shrink: 0;
-}
-
-.file_name {
-  font-size: 12px;
-  color: var(--color-text);
+.card_body {
   flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
-.file_name_index {
+.card_title {
+  font-size: 12.5px;
   font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
 }
 
-.file_size {
+.card_hook {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+.card_meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10px;
   color: var(--color-text-dim);
+  margin-top: 2px;
+  font-variant-numeric: tabular-nums;
+}
+
+.card_meta_dot {
+  opacity: 0.6;
+}
+
+/* ── Type badge (on the left of each card) ──────────────────────────────── */
+
+.type_badge {
   flex-shrink: 0;
+  width: 30px;
+  text-align: center;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  padding: 2px 0;
+  border-radius: 4px;
+  margin-top: 1px;
+  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+}
+
+.type_badge.type_user {
+  background: rgb(var(--mem-user) / 0.15);
+  color: rgb(var(--mem-user));
+}
+.type_badge.type_feedback {
+  background: rgb(var(--mem-feedback) / 0.15);
+  color: rgb(var(--mem-feedback));
+}
+.type_badge.type_project {
+  background: rgb(var(--mem-project) / 0.15);
+  color: rgb(var(--mem-project));
+}
+.type_badge.type_reference {
+  background: rgb(var(--mem-reference) / 0.15);
+  color: rgb(var(--mem-reference));
+}
+.type_badge.type_index {
+  background: rgb(var(--mem-index) / 0.15);
+  color: rgb(var(--mem-index));
+}
+.type_badge.type_unknown {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+}
+
+/* ── Unindexed (orphan files) section ───────────────────────────────────── */
+
+.unindexed_section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.unindexed_header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+}
+
+.unindexed_header:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.unindexed_caret {
+  font-size: 9px;
+  opacity: 0.7;
+}
+
+.unindexed_label {
+  flex: 1;
+  text-align: left;
+}
+
+.unindexed_count {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .empty {
@@ -456,23 +655,29 @@
 :global([data-platform="macos"]) .tabs {
   border-bottom-color: rgba(255, 255, 255, 0.08);
 }
-:global([data-platform="macos"]) .file_item:hover {
-  background: rgba(255, 255, 255, 0.08);
+:global([data-platform="macos"]) .filter_bar {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
 }
-:global([data-platform="macos"]) .file_item_active,
-:global([data-platform="macos"]) .file_item_active:hover {
-  background: rgba(255, 255, 255, 0.12);
+:global([data-platform="macos"]) .card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+:global([data-platform="macos"]) .card_active,
+:global([data-platform="macos"]) .card_active:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.12);
 }
 :global([data-platform="macos"][data-theme="light"]) .list_pane,
 :global([data-platform="macos"][data-theme="light"]) .header,
+:global([data-platform="macos"][data-theme="light"]) .filter_bar,
 :global([data-platform="macos"][data-theme="light"]) .detail_header,
 :global([data-platform="macos"][data-theme="light"]) .tabs {
   border-color: rgba(0, 0, 0, 0.08);
 }
-:global([data-platform="macos"][data-theme="light"]) .file_item:hover {
-  background: rgba(0, 0, 0, 0.06);
+:global([data-platform="macos"][data-theme="light"]) .card:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
-:global([data-platform="macos"][data-theme="light"]) .file_item_active,
-:global([data-platform="macos"][data-theme="light"]) .file_item_active:hover {
-  background: rgba(0, 0, 0, 0.1);
+:global([data-platform="macos"][data-theme="light"]) .card_active,
+:global([data-platform="macos"][data-theme="light"]) .card_active:hover {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: rgba(0, 0, 0, 0.1);
 }

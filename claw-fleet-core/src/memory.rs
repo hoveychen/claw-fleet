@@ -2,6 +2,7 @@
 //! `~/.claude/projects/<project>/memory/` and traces their edit history
 //! by scanning session JSONL files for Write/Edit tool calls.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -35,6 +36,21 @@ pub struct MemoryFile {
     pub path: String,
     pub size_bytes: u64,
     pub modified_ms: u64,
+    /// Human-readable title from MEMORY.md index (`- [Title](file.md) — hook`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// One-line hook from MEMORY.md index.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook: Option<String>,
+    /// Memory type from YAML frontmatter `metadata.type` — user/feedback/project/reference.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mem_type: Option<String>,
+    /// One-line description from YAML frontmatter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// True if this file is referenced in MEMORY.md (or is MEMORY.md itself).
+    #[serde(default)]
+    pub in_index: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -114,42 +130,7 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
                 || ws_root.join(".claude").join("CLAUDE.md").exists()
         };
 
-        // Scan memory files
-        let mut files = Vec::new();
-        if let Ok(mem_entries) = fs::read_dir(&memory_dir) {
-            for mem_entry in mem_entries.flatten() {
-                let mem_path = mem_entry.path();
-                if !mem_path.is_file() {
-                    continue;
-                }
-                if let Some(metadata) = fs::metadata(&mem_path).ok() {
-                    let modified_ms = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                        .map(|d| d.as_millis() as u64)
-                        .unwrap_or(0);
-
-                    files.push(MemoryFile {
-                        name: mem_path
-                            .file_name()
-                            .and_then(|n| n.to_str())
-                            .unwrap_or_default()
-                            .to_string(),
-                        path: mem_path.to_string_lossy().to_string(),
-                        size_bytes: metadata.len(),
-                        modified_ms,
-                    });
-                }
-            }
-        }
-
-        // Sort: MEMORY.md first, then alphabetically
-        files.sort_by(|a, b| {
-            let a_is_index = a.name == "MEMORY.md";
-            let b_is_index = b.name == "MEMORY.md";
-            b_is_index.cmp(&a_is_index).then(a.name.cmp(&b.name))
-        });
+        let files = scan_memory_dir(&memory_dir);
 
         results.push(WorkspaceMemory {
             workspace_name,
@@ -166,42 +147,12 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
 
     // Show global entry if it has memory files OR a CLAUDE.md
     if global_memory_dir.is_dir() || global_has_claude_md {
-        let mut files = Vec::new();
-        if global_memory_dir.is_dir() {
-            if let Ok(mem_entries) = fs::read_dir(&global_memory_dir) {
-                for mem_entry in mem_entries.flatten() {
-                    let mem_path = mem_entry.path();
-                    if !mem_path.is_file() {
-                        continue;
-                    }
-                    if let Some(metadata) = fs::metadata(&mem_path).ok() {
-                        let modified_ms = metadata
-                            .modified()
-                            .ok()
-                            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-                            .map(|d| d.as_millis() as u64)
-                            .unwrap_or(0);
-
-                        files.push(MemoryFile {
-                            name: mem_path
-                                .file_name()
-                                .and_then(|n| n.to_str())
-                                .unwrap_or_default()
-                                .to_string(),
-                            path: mem_path.to_string_lossy().to_string(),
-                            size_bytes: metadata.len(),
-                            modified_ms,
-                        });
-                    }
-                }
-            }
-        }
+        let files = if global_memory_dir.is_dir() {
+            scan_memory_dir(&global_memory_dir)
+        } else {
+            Vec::new()
+        };
         if !files.is_empty() || global_has_claude_md {
-            files.sort_by(|a, b| {
-                let a_is_index = a.name == "MEMORY.md";
-                let b_is_index = b.name == "MEMORY.md";
-                b_is_index.cmp(&a_is_index).then(a.name.cmp(&b.name))
-            });
             results.insert(
                 0,
                 WorkspaceMemory {
@@ -227,6 +178,210 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
         results.insert(0, g);
     }
     results
+}
+
+// ── Memory directory scan helper ─────────────────────────────────────────────
+
+#[derive(Debug, Clone, Default)]
+struct MemoryIndexEntry {
+    title: String,
+    hook: String,
+}
+
+#[derive(Debug, Clone, Default)]
+struct MemoryFrontmatter {
+    description: Option<String>,
+    mem_type: Option<String>,
+}
+
+/// Scan a memory directory, parse MEMORY.md index + each file's frontmatter,
+/// and return enriched `MemoryFile` entries sorted with MEMORY.md first.
+fn scan_memory_dir(memory_dir: &Path) -> Vec<MemoryFile> {
+    let index = parse_memory_index(memory_dir);
+    let mut files = Vec::new();
+    let Ok(mem_entries) = fs::read_dir(memory_dir) else {
+        return files;
+    };
+    for mem_entry in mem_entries.flatten() {
+        let mem_path = mem_entry.path();
+        if !mem_path.is_file() {
+            continue;
+        }
+        let Some(metadata) = fs::metadata(&mem_path).ok() else {
+            continue;
+        };
+        let modified_ms = metadata
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+
+        let name = mem_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let is_index_file = name == "MEMORY.md";
+        let idx_entry = index.get(&name);
+        let frontmatter = if is_index_file {
+            None
+        } else {
+            parse_memory_frontmatter(&mem_path)
+        };
+
+        files.push(MemoryFile {
+            name: name.clone(),
+            path: mem_path.to_string_lossy().to_string(),
+            size_bytes: metadata.len(),
+            modified_ms,
+            title: idx_entry.map(|e| e.title.clone()),
+            hook: idx_entry.map(|e| e.hook.clone()),
+            mem_type: frontmatter.as_ref().and_then(|f| f.mem_type.clone()),
+            description: frontmatter.as_ref().and_then(|f| f.description.clone()),
+            in_index: is_index_file || idx_entry.is_some(),
+        });
+    }
+    // Sort: MEMORY.md first, then alphabetically
+    files.sort_by(|a, b| {
+        let a_is_index = a.name == "MEMORY.md";
+        let b_is_index = b.name == "MEMORY.md";
+        b_is_index.cmp(&a_is_index).then(a.name.cmp(&b.name))
+    });
+    files
+}
+
+/// Parse a MEMORY.md file into a map keyed by referenced filename.
+fn parse_memory_index(memory_dir: &Path) -> HashMap<String, MemoryIndexEntry> {
+    let path = memory_dir.join("MEMORY.md");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return HashMap::new();
+    };
+    parse_memory_index_str(&content)
+}
+
+/// Parse MEMORY.md content. Each list item is expected to follow:
+/// `- [Title](file.md) — one-line hook` (em-dash, en-dash, or ASCII dash supported).
+fn parse_memory_index_str(content: &str) -> HashMap<String, MemoryIndexEntry> {
+    let mut map = HashMap::new();
+    for line in content.lines() {
+        let trimmed = line.trim_start();
+        let after_bullet = if let Some(rest) = trimmed.strip_prefix("- ") {
+            rest
+        } else if let Some(rest) = trimmed.strip_prefix("* ") {
+            rest
+        } else {
+            continue;
+        };
+        let Some(open_bracket) = after_bullet.find('[') else {
+            continue;
+        };
+        let Some(rel_close_bracket) = after_bullet[open_bracket..].find(']') else {
+            continue;
+        };
+        let title_end = open_bracket + rel_close_bracket;
+        let title = after_bullet[open_bracket + 1..title_end].trim().to_string();
+        let rest = &after_bullet[title_end + 1..];
+        let Some(rest) = rest.strip_prefix('(') else {
+            continue;
+        };
+        let Some(close_paren) = rest.find(')') else {
+            continue;
+        };
+        let link_target = &rest[..close_paren];
+        let after_paren = rest[close_paren + 1..].trim();
+
+        // Strip the dash separator (em-dash, en-dash, double dash, or ASCII dash).
+        let hook_raw = if let Some(r) = after_paren.strip_prefix('\u{2014}') {
+            r
+        } else if let Some(r) = after_paren.strip_prefix('\u{2013}') {
+            r
+        } else if let Some(r) = after_paren.strip_prefix("--") {
+            r
+        } else if let Some(r) = after_paren.strip_prefix('-') {
+            r
+        } else {
+            after_paren
+        };
+        let hook = hook_raw.trim().to_string();
+
+        let filename = Path::new(link_target)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(link_target)
+            .to_string();
+        if filename.is_empty() {
+            continue;
+        }
+        map.insert(filename, MemoryIndexEntry { title, hook });
+    }
+    map
+}
+
+/// Parse YAML frontmatter at the top of a memory file. Reads the whole file
+/// (frontmatter is at the head so this is cheap in practice) and extracts
+/// `description` and `metadata.type`. Returns `None` if there's no frontmatter.
+fn parse_memory_frontmatter(path: &Path) -> Option<MemoryFrontmatter> {
+    let content = fs::read_to_string(path).ok()?;
+    parse_frontmatter_str(&content)
+}
+
+fn parse_frontmatter_str(s: &str) -> Option<MemoryFrontmatter> {
+    let trimmed = s.trim_start();
+    if !trimmed.starts_with("---") {
+        return None;
+    }
+    // Skip past the opening `---` line.
+    let after_dashes = &trimmed[3..];
+    let first_nl = after_dashes.find('\n')?;
+    let body = &after_dashes[first_nl + 1..];
+    // Find closing `---` line.
+    let close = body.find("\n---").unwrap_or(body.len());
+    let block = &body[..close];
+
+    let mut fm = MemoryFrontmatter::default();
+    let mut current_parent: Option<String> = None;
+    for raw_line in block.lines() {
+        if raw_line.trim().is_empty() {
+            continue;
+        }
+        let leading_ws = raw_line.len() - raw_line.trim_start().len();
+        let line = raw_line.trim();
+
+        if leading_ws == 0 {
+            current_parent = None;
+            if let Some((key, value)) = parse_yaml_kv(line) {
+                if value.is_empty() {
+                    current_parent = Some(key);
+                } else if key == "description" {
+                    fm.description = Some(value);
+                }
+            }
+        } else if current_parent.as_deref() == Some("metadata") {
+            if let Some((key, value)) = parse_yaml_kv(line) {
+                if key == "type" && !value.is_empty() {
+                    fm.mem_type = Some(value);
+                }
+            }
+        }
+    }
+    Some(fm)
+}
+
+fn parse_yaml_kv(line: &str) -> Option<(String, String)> {
+    let colon = line.find(':')?;
+    let key = line[..colon].trim().to_string();
+    let value = line[colon + 1..].trim();
+    let value = if value.len() >= 2
+        && ((value.starts_with('"') && value.ends_with('"'))
+            || (value.starts_with('\'') && value.ends_with('\'')))
+    {
+        value[1..value.len() - 1].to_string()
+    } else {
+        value.to_string()
+    };
+    Some((key, value))
 }
 
 // ── Read a memory file's content ─────────────────────────────────────────────
@@ -861,6 +1016,92 @@ mod tests {
             .last();
         assert!(workspace_name.is_none());
     }
+
+    // ── parse_memory_index_str tests ──────────────────────────────────────
+
+    #[test]
+    fn index_parses_em_dash_form() {
+        let md = "\
+# Index
+
+- [Reference Cursor data](reference_cursor_data_architecture.md) \u{2014} Cursor's data storage layout
+- [TCC investigation](project_tcc_investigation.md) \u{2014} Root cause of macOS TCC dialogs
+";
+        let map = parse_memory_index_str(md);
+        assert_eq!(map.len(), 2);
+        let e = map.get("reference_cursor_data_architecture.md").unwrap();
+        assert_eq!(e.title, "Reference Cursor data");
+        assert_eq!(e.hook, "Cursor's data storage layout");
+        let e2 = map.get("project_tcc_investigation.md").unwrap();
+        assert_eq!(e2.title, "TCC investigation");
+        assert_eq!(e2.hook, "Root cause of macOS TCC dialogs");
+    }
+
+    #[test]
+    fn index_parses_ascii_dash_and_asterisk_bullet() {
+        let md = "* [Build hook bumps](feedback_build_hook.md) - version bumped by hook\n";
+        let map = parse_memory_index_str(md);
+        let e = map.get("feedback_build_hook.md").unwrap();
+        assert_eq!(e.title, "Build hook bumps");
+        assert_eq!(e.hook, "version bumped by hook");
+    }
+
+    #[test]
+    fn index_skips_non_list_lines() {
+        let md = "# Header\n\nSome prose\n- [Real](file.md) \u{2014} hook\n";
+        let map = parse_memory_index_str(md);
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("file.md"));
+    }
+
+    #[test]
+    fn index_strips_path_to_filename() {
+        let md = "- [X](./subdir/file.md) \u{2014} hook\n";
+        let map = parse_memory_index_str(md);
+        assert!(map.contains_key("file.md"));
+    }
+
+    // ── parse_frontmatter_str tests ───────────────────────────────────────
+
+    #[test]
+    fn frontmatter_extracts_description_and_type() {
+        let s = "---\nname: feedback-testing\ndescription: integration tests must hit a real database\nmetadata:\n  type: feedback\n---\n\nBody content";
+        let fm = parse_frontmatter_str(s).unwrap();
+        assert_eq!(fm.description.as_deref(), Some("integration tests must hit a real database"));
+        assert_eq!(fm.mem_type.as_deref(), Some("feedback"));
+    }
+
+    #[test]
+    fn frontmatter_handles_quoted_values() {
+        let s = "---\nname: x\ndescription: \"quoted desc\"\nmetadata:\n  type: 'project'\n---\n";
+        let fm = parse_frontmatter_str(s).unwrap();
+        assert_eq!(fm.description.as_deref(), Some("quoted desc"));
+        assert_eq!(fm.mem_type.as_deref(), Some("project"));
+    }
+
+    #[test]
+    fn frontmatter_returns_none_when_absent() {
+        let s = "# Just a markdown file\n\nNo frontmatter here.";
+        assert!(parse_frontmatter_str(s).is_none());
+    }
+
+    #[test]
+    fn frontmatter_handles_missing_metadata_block() {
+        let s = "---\nname: bare\ndescription: only description\n---\n";
+        let fm = parse_frontmatter_str(s).unwrap();
+        assert_eq!(fm.description.as_deref(), Some("only description"));
+        assert!(fm.mem_type.is_none());
+    }
+
+    #[test]
+    fn frontmatter_ignores_unrelated_top_level_keys() {
+        let s = "---\nname: x\nrandom: value\ndescription: real\nmetadata:\n  type: user\n---\n";
+        let fm = parse_frontmatter_str(s).unwrap();
+        assert_eq!(fm.description.as_deref(), Some("real"));
+        assert_eq!(fm.mem_type.as_deref(), Some("user"));
+    }
+
+    // ── decode_project_key tests (continued) ──────────────────────────────
 
     #[test]
     fn decode_project_key_normal_path() {

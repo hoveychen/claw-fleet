@@ -12,6 +12,26 @@ interface MemoryFile {
   path: string;
   sizeBytes: number;
   modifiedMs: number;
+  title?: string;
+  hook?: string;
+  memType?: string;
+  description?: string;
+  inIndex?: boolean;
+}
+
+type MemType = "user" | "feedback" | "project" | "reference";
+
+const TYPE_CONFIG: Record<MemType, { short: string; cssClass: string }> = {
+  user: { short: "USR", cssClass: "type_user" },
+  feedback: { short: "FB", cssClass: "type_feedback" },
+  project: { short: "PRJ", cssClass: "type_project" },
+  reference: { short: "REF", cssClass: "type_reference" },
+};
+
+const TYPE_ORDER: MemType[] = ["user", "feedback", "project", "reference"];
+
+function isMemType(s: string | undefined): s is MemType {
+  return s === "user" || s === "feedback" || s === "project" || s === "reference";
 }
 
 interface WorkspaceMemory {
@@ -49,6 +69,22 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024).toFixed(1)}K`;
 }
 
+function relativeTime(ms: number): string {
+  if (!ms) return "";
+  const diff = Date.now() - ms;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
+
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -70,6 +106,8 @@ export function MemoryView() {
   const [memories, setMemories] = useState<WorkspaceMemory[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
+  const [filterType, setFilterType] = useState<MemType | "all">("all");
+  const [expandedUnindexed, setExpandedUnindexed] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
 
   const load = useCallback(async () => {
@@ -93,19 +131,52 @@ export function MemoryView() {
     };
   }, [load]);
 
-  // Filter by query — matches workspace name or file name.
+  // Type counts across all workspaces (excludes MEMORY.md itself).
+  const typeCounts = useMemo(() => {
+    const counts: Record<MemType | "all", number> = {
+      all: 0,
+      user: 0,
+      feedback: 0,
+      project: 0,
+      reference: 0,
+    };
+    for (const ws of memories) {
+      for (const f of ws.files) {
+        if (f.name === "MEMORY.md") continue;
+        counts.all++;
+        if (isMemType(f.memType)) counts[f.memType]++;
+      }
+    }
+    return counts;
+  }, [memories]);
+
+  // Filter by query (name/title/hook/description) + by selected type.
+  // MEMORY.md is always kept (it's the index).
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return memories;
     return memories
       .map((ws) => {
-        const wsMatch = ws.workspaceName.toLowerCase().includes(q);
-        const files = wsMatch ? ws.files : ws.files.filter((f) => f.name.toLowerCase().includes(q));
-        if (!wsMatch && files.length === 0) return null;
+        const wsMatch = q && ws.workspaceName.toLowerCase().includes(q);
+        const files = ws.files.filter((f) => {
+          if (f.name === "MEMORY.md") return filterType === "all" && !q;
+          if (filterType !== "all" && f.memType !== filterType) return false;
+          if (!q) return true;
+          if (wsMatch) return true;
+          const hay = [
+            f.name,
+            f.title ?? "",
+            f.hook ?? "",
+            f.description ?? "",
+          ]
+            .join(" ")
+            .toLowerCase();
+          return hay.includes(q);
+        });
+        if (files.length === 0 && !wsMatch) return null;
         return { ...ws, files } satisfies WorkspaceMemory;
       })
       .filter((x): x is WorkspaceMemory => x !== null);
-  }, [memories, query]);
+  }, [memories, query, filterType]);
 
   // Keep selection valid after refresh / filter changes.
   useEffect(() => {
@@ -121,7 +192,16 @@ export function MemoryView() {
     }
   }, [filtered, selection]);
 
-  const totalFiles = memories.reduce((sum, w) => sum + w.files.length, 0);
+  const totalFiles = typeCounts.all;
+
+  const toggleUnindexed = (key: string) => {
+    setExpandedUnindexed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
 
   return (
     <div className={styles.page}>
@@ -137,9 +217,28 @@ export function MemoryView() {
           type="text"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("memory.panel_title")}
+          placeholder={t("memory.search_placeholder")}
         />
       </header>
+
+      <div className={styles.filter_bar}>
+        <FilterChip
+          label={t("memory.filter_all")}
+          count={typeCounts.all}
+          active={filterType === "all"}
+          onClick={() => setFilterType("all")}
+        />
+        {TYPE_ORDER.map((type) => (
+          <FilterChip
+            key={type}
+            label={t(`memory.filter_${type}`)}
+            count={typeCounts[type]}
+            active={filterType === type}
+            typeClass={TYPE_CONFIG[type].cssClass}
+            onClick={() => setFilterType(type)}
+          />
+        ))}
+      </div>
 
       <div className={styles.body}>
         <aside className={styles.list_pane}>
@@ -147,56 +246,88 @@ export function MemoryView() {
           {loaded && filtered.length === 0 && (
             <p className={styles.empty}>{t("memory.no_memories")}</p>
           )}
-          {filtered.map((ws) => (
-            <div key={ws.projectKey} className={styles.workspace_group}>
-              <div className={styles.workspace_header}>
-                <span className={styles.workspace_name}>
-                  {ws.projectKey === "__global__"
-                    ? t("memory.global_label")
-                    : ws.workspaceName}
-                </span>
-                {ws.hasClaudeMd && (
-                  <button
-                    className={`${styles.badge} ${styles.badge_claude} ${
-                      selection?.kind === "claudeMd" &&
-                      selection.workspace.projectKey === ws.projectKey
-                        ? styles.badge_active
-                        : ""
-                    }`}
-                    onClick={() => setSelection({ kind: "claudeMd", workspace: ws })}
-                  >
-                    CLAUDE.md
-                  </button>
-                )}
-              </div>
-              <div className={styles.file_list}>
-                {ws.files.map((f) => {
-                  const active =
-                    selection?.kind === "file" &&
-                    selection.file.path === f.path;
-                  return (
+          {filtered.map((ws) => {
+            const indexed = ws.files.filter(
+              (f) => f.inIndex || f.name === "MEMORY.md",
+            );
+            const unindexed = ws.files.filter(
+              (f) => !f.inIndex && f.name !== "MEMORY.md",
+            );
+            const expanded = expandedUnindexed.has(ws.projectKey);
+            return (
+              <div key={ws.projectKey} className={styles.workspace_group}>
+                <div className={styles.workspace_header}>
+                  <span className={styles.workspace_name}>
+                    {ws.projectKey === "__global__"
+                      ? t("memory.global_label")
+                      : ws.workspaceName}
+                  </span>
+                  <span className={styles.workspace_count}>
+                    {ws.files.length}
+                  </span>
+                  {ws.hasClaudeMd && (
                     <button
-                      key={f.path}
-                      className={`${styles.file_item} ${active ? styles.file_item_active : ""}`}
-                      onClick={() => setSelection({ kind: "file", workspace: ws, file: f })}
+                      className={`${styles.badge} ${styles.badge_claude} ${
+                        selection?.kind === "claudeMd" &&
+                        selection.workspace.projectKey === ws.projectKey
+                          ? styles.badge_active
+                          : ""
+                      }`}
+                      onClick={() => setSelection({ kind: "claudeMd", workspace: ws })}
                     >
-                      <span className={styles.file_icon}>📄</span>
-                      <span
-                        className={`${styles.file_name} ${
-                          f.name === "MEMORY.md" ? styles.file_name_index : ""
-                        }`}
-                      >
-                        {f.name}
+                      CLAUDE.md
+                    </button>
+                  )}
+                </div>
+                <div className={styles.card_list}>
+                  {indexed.map((f) => (
+                    <MemoryCard
+                      key={f.path}
+                      file={f}
+                      active={
+                        selection?.kind === "file" &&
+                        selection.file.path === f.path
+                      }
+                      onClick={() => setSelection({ kind: "file", workspace: ws, file: f })}
+                    />
+                  ))}
+                </div>
+                {unindexed.length > 0 && (
+                  <div className={styles.unindexed_section}>
+                    <button
+                      className={styles.unindexed_header}
+                      onClick={() => toggleUnindexed(ws.projectKey)}
+                    >
+                      <span className={styles.unindexed_caret}>
+                        {expanded ? "▼" : "▶"}
                       </span>
-                      <span className={styles.file_size}>
-                        {formatBytes(f.sizeBytes)}
+                      <span className={styles.unindexed_label}>
+                        {t("memory.unindexed_section")}
+                      </span>
+                      <span className={styles.unindexed_count}>
+                        {unindexed.length}
                       </span>
                     </button>
-                  );
-                })}
+                    {expanded && (
+                      <div className={styles.card_list}>
+                        {unindexed.map((f) => (
+                          <MemoryCard
+                            key={f.path}
+                            file={f}
+                            active={
+                              selection?.kind === "file" &&
+                              selection.file.path === f.path
+                            }
+                            onClick={() => setSelection({ kind: "file", workspace: ws, file: f })}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </aside>
 
         <main className={styles.detail_pane}>
@@ -450,5 +581,86 @@ function ClaudeMdDetail({
         )}
       </div>
     </>
+  );
+}
+
+// ── Filter chip ──────────────────────────────────────────────────────────────
+
+function FilterChip({
+  label,
+  count,
+  active,
+  typeClass,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  typeClass?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`${styles.chip} ${active ? styles.chip_active : ""} ${
+        typeClass ? styles[typeClass] ?? "" : ""
+      }`}
+      onClick={onClick}
+    >
+      <span className={styles.chip_label}>{label}</span>
+      <span className={styles.chip_count}>{count}</span>
+    </button>
+  );
+}
+
+// ── Memory card (single entry in the list) ───────────────────────────────────
+
+function MemoryCard({
+  file,
+  active,
+  onClick,
+}: {
+  file: MemoryFile;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const isIndexFile = file.name === "MEMORY.md";
+  const memType = isMemType(file.memType) ? file.memType : null;
+  const rawTitle = file.title ?? file.name;
+  // MEMORY.md uses filename-as-title when not curated; strip the .md suffix
+  // so cards don't show e.g. "feedback_ddb_fp_artifacts.md" as the title.
+  const title = rawTitle === file.name ? rawTitle.replace(/\.md$/, "") : rawTitle;
+  const subtitle = file.hook ?? file.description ?? "";
+  return (
+    <button
+      className={`${styles.card} ${active ? styles.card_active : ""} ${
+        isIndexFile ? styles.card_index : ""
+      }`}
+      onClick={onClick}
+    >
+      {isIndexFile ? (
+        <span className={`${styles.type_badge} ${styles.type_index}`}>IDX</span>
+      ) : memType ? (
+        <span
+          className={`${styles.type_badge} ${styles[TYPE_CONFIG[memType].cssClass]}`}
+        >
+          {TYPE_CONFIG[memType].short}
+        </span>
+      ) : (
+        <span className={`${styles.type_badge} ${styles.type_unknown}`}>?</span>
+      )}
+      <div className={styles.card_body}>
+        <div className={styles.card_title}>{title}</div>
+        {subtitle && <div className={styles.card_hook}>{subtitle}</div>}
+        <div className={styles.card_meta}>
+          <span>{formatBytes(file.sizeBytes)}</span>
+          {file.modifiedMs > 0 && (
+            <>
+              <span className={styles.card_meta_dot}>·</span>
+              <span>{relativeTime(file.modifiedMs)}</span>
+            </>
+          )}
+        </div>
+      </div>
+    </button>
   );
 }

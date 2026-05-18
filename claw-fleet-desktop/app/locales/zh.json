@@ -364,7 +364,14 @@
     "promote": "\u79fb\u52a8\u5230 CLAUDE.md",
     "promoting": "\u79fb\u52a8\u4e2d\u2026",
     "promote_project": "\u9879\u76ee CLAUDE.md",
-    "promote_global": "\u5168\u5c40 CLAUDE.md (~/.claude)"
+    "promote_global": "\u5168\u5c40 CLAUDE.md (~/.claude)",
+    "search_placeholder": "\u641c\u7d22\u8bb0\u5fc6\u2026",
+    "filter_all": "\u5168\u90e8",
+    "filter_user": "\u7528\u6237",
+    "filter_feedback": "\u53cd\u9988",
+    "filter_project": "\u9879\u76ee",
+    "filter_reference": "\u5f15\u7528",
+    "unindexed_section": "\u672a\u7d22\u5f15"
   },
   "live": {
     "section_title": "实时"
