@@ -49,6 +49,7 @@ pub mod skill_history;
 pub mod skills;
 pub mod task;
 pub mod tcc;
+pub mod token_analysis;
 pub mod touches_hook;
 pub mod worker_executor;
 pub mod worktree;

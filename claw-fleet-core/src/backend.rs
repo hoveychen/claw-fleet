@@ -278,6 +278,18 @@ pub trait Backend: Send + Sync {
     /// flagged with `is_subagent: true`.
     fn get_skill_history(&self, jsonl_path: &str) -> Result<Vec<SkillInvocation>, String>;
 
+    // ── Token spend ──────────────────────────────────────────────────────────
+    /// Token-spend attribution for the task tree rooted at `main_jsonl_path`
+    /// (main session + recursive subagent jsonls). Returns billed totals from
+    /// API usage + estimated source-bucket attribution (chars/4 + disk
+    /// snapshot of CLAUDE.md / memory / skills / fleet reminders). See
+    /// `token_analysis` module for methodology details.
+    fn get_task_token_breakdown(
+        &self,
+        main_jsonl_path: &str,
+        project_root: Option<&str>,
+    ) -> Result<crate::token_analysis::TaskTokenBreakdown, String>;
+
     // ── Plugins ──────────────────────────────────────────────────────────────
     /// Scan `~/.claude/plugins/` for installed Claude Code plugins.
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem>;

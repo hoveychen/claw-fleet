@@ -656,6 +656,18 @@ impl crate::backend::Backend for RemoteBackend {
             .get(&format!("/skill_history?path={}", encode_path(jsonl_path)))
     }
 
+    fn get_task_token_breakdown(
+        &self,
+        main_jsonl_path: &str,
+        project_root: Option<&str>,
+    ) -> Result<claw_fleet_core::token_analysis::TaskTokenBreakdown, String> {
+        let mut url = format!("/token_breakdown?path={}", encode_path(main_jsonl_path));
+        if let Some(root) = project_root {
+            url.push_str(&format!("&project_root={}", encode_path(root)));
+        }
+        self.probe.get(&url)
+    }
+
     fn get_waiting_alerts(&self) -> Vec<crate::backend::WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }

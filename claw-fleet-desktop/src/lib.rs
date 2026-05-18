@@ -152,6 +152,13 @@ impl Backend for NullBackend {
     ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
         Err("backend not ready".into())
     }
+    fn get_task_token_breakdown(
+        &self,
+        _: &str,
+        _: Option<&str>,
+    ) -> Result<claw_fleet_core::token_analysis::TaskTokenBreakdown, String> {
+        Err("backend not ready".into())
+    }
     fn list_plugins(&self) -> Vec<claw_fleet_core::plugins::PluginItem> {
         vec![]
     }
