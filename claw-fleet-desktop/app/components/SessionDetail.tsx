@@ -6,6 +6,7 @@ import type { DecisionHistoryRecord, SessionInfo } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
 import { SkillHistory } from "./SkillHistory";
+import { TokenSpendPanel } from "./TokenSpendPanel";
 import styles from "./SessionDetail.module.css";
 
 const ACTIVE_STATUSES = new Set([
@@ -32,7 +33,7 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
   // or when viewing a subagent (show sibling tabs + parent).
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowing, setIsFollowing] = useState(true);
-  type ViewTab = "decisions" | "skills" | "messages";
+  type ViewTab = "decisions" | "skills" | "messages" | "tokens";
   const [viewTab, setViewTab] = useState<ViewTab>("decisions");
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
@@ -226,6 +227,12 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
             >
               {t("detail.tab_messages")}
             </button>
+            <button
+              className={`${styles.view_tab} ${viewTab === "tokens" ? styles.view_tab_active : ""}`}
+              onClick={() => pickTab("tokens")}
+            >
+              {t("detail.tab_tokens")}
+            </button>
           </div>
 
           {viewTab === "decisions" && (
@@ -236,6 +243,13 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
             <div className={styles.skills_panel}>
               <SkillHistory jsonlPath={liveSession.jsonlPath} mode="tab" />
             </div>
+          )}
+
+          {viewTab === "tokens" && liveSession && (
+            <TokenSpendPanel
+              jsonlPath={liveSession.jsonlPath}
+              workspacePath={liveSession.workspacePath}
+            />
           )}
 
           {viewTab === "messages" && (

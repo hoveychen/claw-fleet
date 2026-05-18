@@ -3010,6 +3010,31 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/token_breakdown" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let project_root = query.get("project_root").map(|s| {
+                    percent_decode_str(s).decode_utf8_lossy().to_string()
+                });
+                let main_path = std::path::Path::new(&file_path);
+                let project_path = project_root.as_deref().map(std::path::Path::new);
+                match claw_fleet_core::token_analysis::aggregate_task(main_path, project_path) {
+                    Ok(t) => {
+                        let body = serde_json::to_string(&t).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(format!("{{\"error\":{}}}", serde_json::to_string(&e).unwrap_or_default()))
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/skill_content" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();

@@ -109,6 +109,65 @@ export interface SkillInvocation {
   isSubagent: boolean;
 }
 
+export interface UsageTotals {
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationTokens: number;
+  cacheReadTokens: number;
+  ephemeral5mTokens: number;
+  ephemeral1hTokens: number;
+}
+
+export interface SourceBuckets {
+  ccBaseSystemPrompt: number;
+  toolDefs: number;
+  userClaudemd: number;
+  projectClaudemd: number;
+  fleetReminders: number;
+  memoryFiles: number;
+  skillsManifest: number;
+  visibleUserText: number;
+  visibleToolResult: number;
+  visibleSystemReminder: number;
+  visiblePrevAssistant: number;
+  visibleCompactSummary: number;
+  ttlRefreshOverhead: number;
+  residualUnexplained: number;
+}
+
+export interface OutputBuckets {
+  outputText: number;
+  outputThinkingVisible: number;
+  outputToolUse: number;
+  outputReasoningInvisible: number;
+}
+
+export interface SessionTokenBreakdown {
+  sessionId: string;
+  jsonlPath: string;
+  model: string | null;
+  isSidechain: boolean;
+  messages: number;
+  bundleLoads: number;
+  ttlRefreshCount: number;
+  estimatedCostUsd: number | null;
+  usage: UsageTotals;
+  sources: SourceBuckets;
+  output: OutputBuckets;
+  fitConfidence: number;
+}
+
+export interface TaskTokenBreakdown {
+  main: SessionTokenBreakdown;
+  subagents: SessionTokenBreakdown[];
+  totalsUsage: UsageTotals;
+  totalsSources: SourceBuckets;
+  totalsOutput: OutputBuckets;
+  totalsEstimatedCostUsd: number | null;
+  baselineLoaded: boolean;
+  bundleSizeTokens: number;
+}
+
 export type SessionTodoStatus = "pending" | "in_progress" | "completed";
 
 export interface SessionTodo {

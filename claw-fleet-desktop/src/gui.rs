@@ -764,6 +764,19 @@ fn get_skill_history(
 }
 
 #[tauri::command]
+fn get_task_token_breakdown(
+    jsonl_path: String,
+    project_root: Option<String>,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::token_analysis::TaskTokenBreakdown, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .get_task_token_breakdown(&jsonl_path, project_root.as_deref())
+}
+
+#[tauri::command]
 fn get_session_todos(
     jsonl_path: String,
     state: tauri::State<AppState>,
@@ -3186,6 +3199,7 @@ pub fn run() {
             get_messages,
             get_messages_tail,
             get_skill_history,
+            get_task_token_breakdown,
             get_session_todos,
             get_audit_events,
             get_audit_rules,

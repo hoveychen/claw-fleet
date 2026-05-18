@@ -1633,6 +1633,16 @@ impl Backend for LocalBackend {
         Ok(out)
     }
 
+    fn get_task_token_breakdown(
+        &self,
+        main_jsonl_path: &str,
+        project_root: Option<&str>,
+    ) -> Result<claw_fleet_core::token_analysis::TaskTokenBreakdown, String> {
+        let main_path = std::path::Path::new(main_jsonl_path);
+        let project_path = project_root.map(std::path::Path::new);
+        claw_fleet_core::token_analysis::aggregate_task(main_path, project_path)
+    }
+
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {
         self.waiting_alerts.lock().unwrap().values().cloned().collect()
     }
