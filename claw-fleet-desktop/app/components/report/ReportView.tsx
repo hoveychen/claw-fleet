@@ -65,12 +65,11 @@ export function ReportView() {
         </div>
       </header>
 
-      <div className={styles.heatmap_banner}>
-        <ContributionsHeatmap />
-      </div>
-
       <div className={styles.body}>
         <aside className={styles.list_pane}>
+          <div className={styles.list_pane_heatmap}>
+            <ContributionsHeatmap compact />
+          </div>
           <DateList />
         </aside>
         <main className={styles.detail_pane}>
@@ -98,12 +97,14 @@ function DateList() {
   } = useReportStore();
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // Reset & reload the timeline whenever the anchor date changes.
+  // Build the timeline once heatmap data is available. The timeline itself is
+  // independent of which day is selected — selection only affects which card
+  // gets the active highlight (and, in the edge case below, a pinned copy).
   useEffect(() => {
     if (heatmapData.length === 0) return;
     resetTimeline();
     loadTimelinePage();
-  }, [selectedDate, heatmapData.length, resetTimeline, loadTimelinePage]);
+  }, [heatmapData.length, resetTimeline, loadTimelinePage]);
 
   // Infinite scroll
   const handleIntersect = useCallback(
@@ -123,14 +124,16 @@ function DateList() {
     return () => observer.disconnect();
   }, [handleIntersect]);
 
-  // Build the displayed list: selected day pinned at top + paginated timeline below.
+  // The selected day is highlighted in place via the active prop. We only pin
+  // a separate copy at the top when the selection isn't in the loaded timeline
+  // yet (e.g. user clicked a heatmap cell that's past the current page).
   const displayed = useMemo<DailyReport[]>(() => {
+    const inTimeline =
+      currentReport != null &&
+      timelineReports.some((r) => r.date === currentReport.date);
     const out: DailyReport[] = [];
-    if (currentReport) out.push(currentReport);
-    for (const r of timelineReports) {
-      if (currentReport && r.date === currentReport.date) continue;
-      out.push(r);
-    }
+    if (currentReport && !inTimeline) out.push(currentReport);
+    for (const r of timelineReports) out.push(r);
     return out;
   }, [currentReport, timelineReports]);
 
