@@ -33,15 +33,6 @@
   gap: 8px;
 }
 
-/* ── Heatmap banner ───────────────────────────────────────────────────────── */
-
-.heatmap_banner {
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-  overflow: hidden;
-}
-
 /* ── Body split ───────────────────────────────────────────────────────────── */
 
 .body {
@@ -52,7 +43,7 @@
 }
 
 .list_pane {
-  width: 340px;
+  width: 360px;
   flex-shrink: 0;
   overflow-y: auto;
   border-right: 1px solid var(--color-border);
@@ -60,6 +51,12 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+.list_pane_heatmap {
+  padding: 6px 4px 12px;
+  margin-bottom: 6px;
+  border-bottom: 1px solid var(--color-border);
 }
 
 .detail_pane {

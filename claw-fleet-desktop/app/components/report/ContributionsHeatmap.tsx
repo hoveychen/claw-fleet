@@ -60,7 +60,7 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
-export function ContributionsHeatmap() {
+export function ContributionsHeatmap({ compact = false }: { compact?: boolean } = {}) {
   const { t } = useTranslation();
   const { heatmapData, loadReport, selectedDate } = useReportStore();
   const [tooltip, setTooltip] = useState<{ date: string; stats: DailyReportStats | null; x: number; y: number } | null>(null);
@@ -94,9 +94,9 @@ export function ContributionsHeatmap() {
   const dayLabels = ["", "Mon", "", "Wed", "", "Fri", ""];
 
   return (
-    <div className={styles.container}>
+    <div className={`${styles.container} ${compact ? styles.compact : ""}`}>
       <div className={styles.header}>
-        <h3 className={styles.title}>{t("report.contributions")}</h3>
+        {!compact && <h3 className={styles.title}>{t("report.contributions")}</h3>}
         <div className={styles.metric_toggle}>
           <button className={metric === "tokens" ? styles.active : ""} onClick={() => setMetric("tokens")}>{t("report.tokens")}</button>
           <button className={metric === "sessions" ? styles.active : ""} onClick={() => setMetric("sessions")}>{t("report.sessions_label")}</button>
@@ -106,7 +106,7 @@ export function ContributionsHeatmap() {
 
       {/* Month labels */}
       <div className={styles.month_labels}>
-        <div className={styles.day_label_spacer} />
+        {!compact && <div className={styles.day_label_spacer} />}
         <div className={styles.month_labels_track}>
           {monthLabels.map((m) => (
             <div key={`${m.label}-${m.col}`} className={styles.month_label} style={{ left: `${(m.col / weeks.length) * 100}%` }}>{m.label}</div>
@@ -116,11 +116,13 @@ export function ContributionsHeatmap() {
 
       {/* Grid */}
       <div className={styles.grid_wrapper}>
-        <div className={styles.day_labels}>
-          {dayLabels.map((l, i) => (
-            <div key={i} className={styles.day_label}>{l}</div>
-          ))}
-        </div>
+        {!compact && (
+          <div className={styles.day_labels}>
+            {dayLabels.map((l, i) => (
+              <div key={i} className={styles.day_label}>{l}</div>
+            ))}
+          </div>
+        )}
         <div className={styles.grid}>
           {weeks.map((week, wi) =>
             week.map((date, di) => {
