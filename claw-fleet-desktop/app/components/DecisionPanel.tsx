@@ -1099,6 +1099,10 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
   const setLiteDecisionHistorySessionId = useUIStore(
     (s) => s.setLiteDecisionHistorySessionId,
   );
+  const decisionPanelCollapsed = useUIStore((s) => s.decisionPanelCollapsed);
+  const setDecisionPanelCollapsed = useUIStore(
+    (s) => s.setDecisionPanelCollapsed,
+  );
 
   // Escape key: block the active guard decision.
   const { respond } = useDecisionStore();
@@ -1114,12 +1118,46 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
     return () => window.removeEventListener("keydown", handler);
   }, [activeDecisionId, decisions, respond]);
 
+  // Hold Option/Alt: temporarily fade the panel + disable pointer events so the
+  // user can peek at content underneath it. Releasing restores. The blur guard
+  // covers the macOS case where Option triggers a window/menu switch and we
+  // never see the keyup event.
+  const [peeking, setPeeking] = useState(false);
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Alt" && !e.repeat) setPeeking(true);
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "Alt") setPeeking(false);
+    };
+    const onBlur = () => setPeeking(false);
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, []);
+
   const cardAreaRef = useRef<HTMLDivElement>(null);
   const [widthTier, setWidthTier] = useState(0);
 
   const active = decisions.length > 0
     ? (decisions.find((d) => d.id === activeDecisionId) ?? decisions[0])
     : null;
+
+  // Guard decisions force-expand the panel — too important to let the user
+  // miss because they collapsed it earlier for an elicitation.
+  useEffect(() => {
+    if (decisionPanelCollapsed && active?.kind === "guard") {
+      setDecisionPanelCollapsed(false);
+    }
+  }, [decisionPanelCollapsed, active?.kind, setDecisionPanelCollapsed]);
+
+  // Lite/compact never collapses — the lite window is already small.
+  const effectiveCollapsed = decisionPanelCollapsed && !compact;
 
   const hasPreview =
     active?.kind === "elicitation" &&
@@ -1166,11 +1204,58 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
 
   const currentWidth = widthTiers[Math.min(widthTier, widthTiers.length - 1)];
 
+  if (effectiveCollapsed) {
+    return (
+      <button
+        type="button"
+        className={`${styles.panel_collapsed_bar} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${peeking ? styles.panel_peeking : ""}`}
+        onClick={() => setDecisionPanelCollapsed(false)}
+        title={t("decision_panel.expand", "Expand panel")}
+        aria-label={t("decision_panel.expand", "Expand panel")}
+      >
+        <svg className={styles.collapsed_bar_icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          {active.kind === "guard" ? (
+            <>
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </>
+          ) : (
+            <>
+              <circle cx="12" cy="12" r="10" />
+              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </>
+          )}
+        </svg>
+        <span className={styles.collapsed_bar_label}>
+          {t("decision_panel.collapsed_label", "Decision panel · {{count}} pending", {
+            count: decisions.length,
+          })}
+        </span>
+        <span className={styles.collapsed_bar_chevron} aria-hidden>▴</span>
+      </button>
+    );
+  }
+
   return (
     <div
-      className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""}`}
+      className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${peeking ? styles.panel_peeking : ""}`}
       style={compact ? undefined : { width: `${currentWidth}px` }}
     >
+      {!compact && (
+        <button
+          type="button"
+          className={styles.collapse_btn}
+          onClick={() => setDecisionPanelCollapsed(true)}
+          title={t("decision_panel.collapse", "Collapse panel")}
+          aria-label={t("decision_panel.collapse", "Collapse panel")}
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="6 9 12 15 18 9" />
+          </svg>
+        </button>
+      )}
       {/* Past-history context.
        *  - Normal mode: collapsible strip lists recent decisions inline.
        *  - Lite mode: a single chip-button swaps the lite body for a

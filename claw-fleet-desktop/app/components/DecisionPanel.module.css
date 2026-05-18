@@ -19,6 +19,7 @@
     0 8px 32px rgba(0, 0, 0, 0.35);
   background: var(--color-bg-sidebar);
   animation: panelSlideIn 0.3s ease;
+  transition: opacity 0.12s ease;
 }
 
 @keyframes panelSlideIn {
@@ -67,6 +68,103 @@
 /* Wide variant: used when the active decision has a preview column to render. */
 .panel_wide {
   width: 820px;
+}
+
+/* Peek variant: user is holding Option/Alt to look at content behind the panel.
+ * Fade nearly out and disable pointer events so clicks pass through. The pulse
+ * glow also fades so it doesn't keep flashing through the see-through panel. */
+.panel_peeking {
+  opacity: 0.08;
+  pointer-events: none;
+  transition: opacity 0.12s ease;
+}
+.panel_peeking::before {
+  opacity: 0;
+}
+
+/* Collapse toggle button: lives in the panel's top-right corner. */
+.collapse_btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.collapse_btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--color-text);
+}
+.collapse_btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Collapsed bar: replaces the full panel when the user collapses it. Same
+ * bottom-center anchor as `.panel`, but only a slim pill with icon + label. */
+.panel_collapsed_bar {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 28px;
+  padding: 0 12px;
+  border-radius: 14px;
+  border: 1.5px solid #2b6cb0;
+  background: var(--color-bg-sidebar);
+  color: var(--color-text);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px rgba(43, 108, 176, 0.15),
+    0 4px 16px rgba(0, 0, 0, 0.25);
+  transition: opacity 0.12s ease, background 0.12s ease;
+  animation: panelSlideIn 0.2s ease;
+}
+.panel_collapsed_bar:hover {
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.04));
+}
+.collapsed_bar_icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.collapsed_bar_label {
+  white-space: nowrap;
+}
+.collapsed_bar_chevron {
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
+
+/* Variant colors for the collapsed bar — compound selectors beat the base
+ * `.panel_collapsed_bar` rule despite coming earlier in the file. */
+.panel_collapsed_bar.panel_guard {
+  border-color: #e53e3e;
+  box-shadow:
+    0 0 0 1px rgba(229, 62, 62, 0.15),
+    0 4px 16px rgba(0, 0, 0, 0.25);
+}
+.panel_collapsed_bar.panel_plan {
+  border-color: #8a5cf6;
+  box-shadow:
+    0 0 0 1px rgba(138, 92, 246, 0.15),
+    0 4px 16px rgba(0, 0, 0, 0.25);
 }
 
 /* ── Card area: scrollable, shows the active decision card ───────────────── */
