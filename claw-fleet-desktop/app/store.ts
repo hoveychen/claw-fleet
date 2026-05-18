@@ -86,6 +86,10 @@ interface UIState {
   clearInboxRequest: () => void;
   setShowNewProjectRequested: (v: boolean) => void;
   setLiteDecisionHistorySessionId: (id: string | null) => void;
+  /** When true, the DecisionPanel renders as a minimized bar at the bottom
+   *  of the screen instead of the full card. Guard decisions force-expand. */
+  decisionPanelCollapsed: boolean;
+  setDecisionPanelCollapsed: (on: boolean) => void;
 }
 
 function getSystemTheme(): "dark" | "light" {
@@ -108,6 +112,7 @@ export const useUIStore = create<UIState>((set) => ({
   inboxRequest: null,
   showNewProjectRequested: false,
   liteDecisionHistorySessionId: null,
+  decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -146,6 +151,10 @@ export const useUIStore = create<UIState>((set) => ({
   setShowNewProjectRequested: (v) => set({ showNewProjectRequested: v }),
   setLiteDecisionHistorySessionId: (id) =>
     set({ liteDecisionHistorySessionId: id }),
+  setDecisionPanelCollapsed: (on) => {
+    setItem("decision-panel-collapsed", on ? "true" : "false");
+    set({ decisionPanelCollapsed: on });
+  },
 }));
 
 // ── Sessions store ───────────────────────────────────────────────────────────
