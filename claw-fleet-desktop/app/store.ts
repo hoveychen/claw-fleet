@@ -395,10 +395,10 @@ interface DetailState {
  * Big enough to cover the active conversation context for the vast majority
  * of sessions, small enough to keep the IPC payload + first React render fast
  * even on multi-megabyte jsonl files. */
-const INITIAL_TAIL = 500;
+export const INITIAL_TAIL = 500;
 
 /** How much further back we go each time the user clicks "load earlier". */
-const LOAD_EARLIER_STEP = 1000;
+export const LOAD_EARLIER_STEP = 1000;
 
 let tailUnlisten: UnlistenFn | null = null;
 
