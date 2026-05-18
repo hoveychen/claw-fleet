@@ -69,6 +69,55 @@
   right: 8px;
 }
 
+/* ── Group-main header strip ───────────────────────────────────────────────
+   Linear-style compact metadata row used when the card sits inside a
+   GalleryRow group. Status dot drives the only chromatic accent (inherited
+   via `currentColor` from the .badge_<status> class on the wrapper); every
+   other token reads as dim text, no chip backgrounds. */
+.gm_header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.gm_status_label {
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+.gm_dim {
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.gm_thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  color: var(--thinking-label, var(--color-text-dim));
+  white-space: nowrap;
+}
+
+.gm_skill {
+  color: var(--tag-skill-fg, var(--color-text-dim));
+  font-family: var(--font-mono);
+  white-space: nowrap;
+}
+
+.gm_sub_count {
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.gm_spacer {
+  flex: 1 1 auto;
+}
+
 .workspace {
   font-weight: 600;
   font-size: 13px;

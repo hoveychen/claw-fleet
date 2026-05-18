@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore } from "../store";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import type { SessionInfo, SessionStatus } from "../types";
-import { SessionCard, StatusBadge, StatusIcon, SubagentTypeIcon, RateLimitControls, formatModel } from "./SessionCard";
+import { SessionCard, StatusIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import styles from "./GalleryView.module.css";
+import sessionStyles from "./SessionCard.module.css";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -17,7 +18,7 @@ function isActive(s: SessionInfo) {
   return ACTIVE_STATUSES.includes(s.status);
 }
 
-// ── SubagentChip ──────────────────────────────────────────────────────────
+// ── SubagentRow ───────────────────────────────────────────────────────────
 
 interface ChipProps {
   session: SessionInfo;
@@ -25,33 +26,32 @@ interface ChipProps {
   onSelect: (s: SessionInfo) => void;
 }
 
-function SubagentChip({ session, index, onSelect }: ChipProps) {
+function SubagentRow({ session, index, onSelect }: ChipProps) {
   const { t } = useTranslation();
   const active = isActive(session);
 
   return (
     <button
-      className={`${styles.chip} ${active ? styles.chip_active : ""}`}
+      className={`${styles.sub_row} ${active ? styles.sub_row_active : styles.sub_row_idle}`}
       onClick={(e) => { e.stopPropagation(); onSelect(session); }}
       title={session.agentDescription ?? session.agentType ?? t("subagent")}
     >
-      <StatusIcon status={session.status} />
-      <span className={styles.chip_index}>#{index}</span>
-      <span className={styles.chip_type_icon}>
+      <span className={sessionStyles[`badge_${session.status}`]}>
+        <StatusIcon status={session.status} />
+      </span>
+      <span className={styles.sub_index}>#{index}</span>
+      <span className={styles.sub_type_icon}>
         <SubagentTypeIcon type={session.agentType} />
       </span>
-      {session.agentDescription && (
-        <span className={styles.chip_desc}>{session.agentDescription}</span>
-      )}
+      <span className={styles.sub_desc}>
+        {session.agentDescription ?? session.agentType ?? t("subagent")}
+      </span>
       {session.model && (
-        <span className={styles.chip_model}>{formatModel(session.model)}</span>
-      )}
-      {session.thinkingLevel && session.thinkingLevel !== "medium" && (
-        <span className={styles.chip_thinking}>{session.thinkingLevel}</span>
+        <span className={styles.sub_model}>{formatModel(session.model)}</span>
       )}
       {session.tokenSpeed >= 0.5 && (
-        <span className={styles.chip_speed}>
-          {session.tokenSpeed.toFixed(1)}{t("tok_s")}
+        <span className={styles.sub_speed}>
+          {session.tokenSpeed.toFixed(1)} {t("tok_s")}
         </span>
       )}
     </button>
@@ -77,64 +77,13 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
   const activeSubagents = subagents.filter(isActive);
   const idleSubagents = subagents.filter((s) => !isActive(s));
 
-  const totalTokens = [main, ...subagents].reduce((sum, s) => sum + s.totalOutputTokens, 0);
-  const totalSpeed = [main, ...subagents].reduce((sum, s) => sum + s.tokenSpeed, 0);
-
-  // Solo session (no subagents): same group structure as multi-agent, just no chips
-  if (subagents.length === 0) {
-    return (
-      <div className={styles.group} data-active={isActive(main) || undefined}>
-        <div className={styles.group_header} onClick={() => onSelect(main)}>
-          <span className={styles.group_name}>{main.workspaceName}</span>
-          <StatusBadge status={main.status} />
-          <RateLimitControls session={main} />
-          <div className={styles.group_stats}>
-            <span className={styles.group_stat}>
-              {main.totalOutputTokens.toLocaleString()} {t("tokens")}
-            </span>
-            {main.tokenSpeed >= 0.5 && (
-              <>
-                <span className={styles.group_divider}>·</span>
-                <span className={`${styles.group_stat} ${styles.group_speed}`}>
-                  {main.tokenSpeed.toFixed(1)} {t("tok_s")}
-                </span>
-              </>
-            )}
-          </div>
-        </div>
-        <div className={styles.group_body}>
-          <SessionCard session={main} isSelected={false} onClick={() => onSelect(main)} variant="group-main" hideHeader />
-        </div>
-      </div>
-    );
-  }
-
   const groupActive = isActive(main) || activeSubagents.length > 0;
 
   return (
     <div className={styles.group} data-active={groupActive || undefined}>
-      {/* Group header */}
+      {/* Group header — minimal: just the workspace name, clickable to open main session */}
       <div className={styles.group_header} onClick={() => onSelect(main)}>
         <span className={styles.group_name}>{main.workspaceName}</span>
-        <StatusBadge status={main.status} />
-        <RateLimitControls session={main} />
-        <div className={styles.group_stats}>
-          <span className={styles.group_stat}>
-            {subagents.length} {t("gallery.subs")}
-          </span>
-          <span className={styles.group_divider}>·</span>
-          <span className={styles.group_stat}>
-            {totalTokens.toLocaleString()} {t("tokens")}
-          </span>
-          {totalSpeed >= 0.5 && (
-            <>
-              <span className={styles.group_divider}>·</span>
-              <span className={`${styles.group_stat} ${styles.group_speed}`}>
-                {totalSpeed.toFixed(1)} {t("tok_s")}
-              </span>
-            </>
-          )}
-        </div>
       </div>
 
       {/* Main agent card */}
@@ -145,14 +94,15 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
           onClick={() => onSelect(main)}
           variant="group-main"
           hideHeader
+          subagentCount={subagents.length}
         />
       </div>
 
       {/* Active subagent chips */}
       {activeSubagents.length > 0 && (
-        <div className={styles.chips_row}>
+        <div className={styles.sub_list}>
           {activeSubagents.map((sub) => (
-            <SubagentChip key={sub.jsonlPath} session={sub} index={subIndexMap.get(sub.id) ?? 0} onSelect={onSelect} />
+            <SubagentRow key={sub.jsonlPath} session={sub} index={subIndexMap.get(sub.id) ?? 0} onSelect={onSelect} />
           ))}
         </div>
       )}
@@ -168,9 +118,9 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
             {t("gallery.idle_subs", { n: idleSubagents.length })}
           </button>
           {idleExpanded && (
-            <div className={styles.chips_row}>
+            <div className={styles.sub_list}>
               {idleSubagents.map((sub) => (
-                <SubagentChip key={sub.jsonlPath} session={sub} index={subIndexMap.get(sub.id) ?? 0} onSelect={onSelect} />
+                <SubagentRow key={sub.jsonlPath} session={sub} index={subIndexMap.get(sub.id) ?? 0} onSelect={onSelect} />
               ))}
             </div>
           )}
