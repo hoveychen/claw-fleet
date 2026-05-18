@@ -66,6 +66,98 @@ function bucketOf(plugin: PluginItem): SectionKey {
   return "catalog";
 }
 
+function PluginCard({
+  plugin,
+  active,
+  onClick,
+}: {
+  plugin: PluginItem;
+  active: boolean;
+  onClick: () => void;
+}) {
+  const installs = formatInstalls(plugin.installCount);
+  const c = plugin.contributes;
+  const hasContrib =
+    c.commands > 0 || c.agents > 0 || c.skills > 0 || c.hooks || c.mcp;
+  const statusClass = plugin.enabled
+    ? pluginStyles.status_enabled
+    : plugin.isDownloaded
+      ? pluginStyles.status_downloaded
+      : pluginStyles.status_catalog;
+  return (
+    <button
+      className={`${styles.card} ${active ? styles.card_active : ""}`}
+      onClick={onClick}
+    >
+      <div className={styles.card_body}>
+        <div className={pluginStyles.card_title_row}>
+          <span className={`${pluginStyles.status_dot} ${statusClass}`} />
+          <span className={styles.card_title}>{plugin.name}</span>
+          {plugin.version && (
+            <span className={pluginStyles.version_chip}>v{plugin.version}</span>
+          )}
+        </div>
+        {plugin.description && (
+          <div className={styles.card_hook}>{plugin.description}</div>
+        )}
+        {hasContrib && (
+          <div className={pluginStyles.contrib_row}>
+            {c.commands > 0 && (
+              <span
+                className={`${pluginStyles.contrib_badge} ${pluginStyles.contrib_command}`}
+              >
+                💬 {c.commands}
+              </span>
+            )}
+            {c.agents > 0 && (
+              <span
+                className={`${pluginStyles.contrib_badge} ${pluginStyles.contrib_agent}`}
+              >
+                🤖 {c.agents}
+              </span>
+            )}
+            {c.skills > 0 && (
+              <span
+                className={`${pluginStyles.contrib_badge} ${pluginStyles.contrib_skill}`}
+              >
+                ⚡ {c.skills}
+              </span>
+            )}
+            {c.hooks && (
+              <span
+                className={`${pluginStyles.contrib_badge} ${pluginStyles.contrib_hook}`}
+              >
+                🎣 hooks
+              </span>
+            )}
+            {c.mcp && (
+              <span
+                className={`${pluginStyles.contrib_badge} ${pluginStyles.contrib_mcp}`}
+              >
+                🔌 MCP
+              </span>
+            )}
+          </div>
+        )}
+        <div className={styles.card_meta}>
+          {plugin.author && <span>{plugin.author}</span>}
+          {plugin.author && <span className={styles.card_meta_dot}>·</span>}
+          <span>
+            {plugin.marketplace}
+            {plugin.sourceKind === "external" ? " · ext" : ""}
+          </span>
+          {installs && (
+            <>
+              <span className={styles.card_meta_dot}>·</span>
+              <span>↓ {installs}</span>
+            </>
+          )}
+        </div>
+      </div>
+    </button>
+  );
+}
+
 export function PluginsView() {
   const { t } = useTranslation();
   const [plugins, setPlugins] = useState<PluginItem[]>([]);
@@ -157,46 +249,14 @@ export function PluginsView() {
           <div className={pluginStyles.section_empty}>{t(emptyKey)}</div>
         )}
         {open &&
-          items.map((plugin) => {
-            const active = selected?.pluginId === plugin.pluginId;
-            const installs = formatInstalls(plugin.installCount);
-            return (
-              <button
-                key={plugin.pluginId}
-                className={`${styles.file_item} ${active ? styles.file_item_active : ""}`}
-                onClick={() => setSelected(plugin)}
-              >
-                <div className={pluginStyles.row_main}>
-                  <span className={pluginStyles.row_name}>{plugin.name}</span>
-                  {plugin.enabled && (
-                    <span
-                      className={`${pluginStyles.chip} ${pluginStyles.chip_enabled}`}
-                    >
-                      {t("plugins.enabled")}
-                    </span>
-                  )}
-                  {!plugin.isDownloaded && (
-                    <span
-                      className={`${pluginStyles.chip} ${pluginStyles.chip_catalog}`}
-                    >
-                      {t("plugins.catalog_only")}
-                    </span>
-                  )}
-                </div>
-                <div className={pluginStyles.row_meta}>
-                  <span className={pluginStyles.marketplace_tag}>
-                    {plugin.marketplace}
-                    {plugin.sourceKind === "external" ? " · ext" : ""}
-                  </span>
-                  {installs && (
-                    <span className={pluginStyles.row_install}>
-                      ↓ {installs}
-                    </span>
-                  )}
-                </div>
-              </button>
-            );
-          })}
+          items.map((plugin) => (
+            <PluginCard
+              key={plugin.pluginId}
+              plugin={plugin}
+              active={selected?.pluginId === plugin.pluginId}
+              onClick={() => setSelected(plugin)}
+            />
+          ))}
       </div>
     );
   };

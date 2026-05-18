@@ -62,6 +62,22 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}M`;
 }
 
+function relativeTime(ms: number): string {
+  if (!ms) return "";
+  const diff = Date.now() - ms;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
+
 function indentLevel(relativePath: string): number {
   if (!relativePath) return 0;
   return relativePath.split("/").length - 1;
@@ -129,19 +145,16 @@ export function SkillsView() {
           {loaded && filtered.length === 0 && (
             <p className={styles.empty}>{t("skills.no_skills")}</p>
           )}
-          {filtered.map((skill) => {
-            const active = selected?.path === skill.path;
-            return (
-              <button
+          <div className={styles.card_list}>
+            {filtered.map((skill) => (
+              <SkillCard
                 key={skill.path}
-                className={`${styles.file_item} ${active ? styles.file_item_active : ""}`}
+                skill={skill}
+                active={selected?.path === skill.path}
                 onClick={() => setSelected(skill)}
-              >
-                <span className={styles.file_icon}>⚡</span>
-                <span className={styles.file_name}>/{skill.name}</span>
-              </button>
-            );
-          })}
+              />
+            ))}
+          </div>
         </aside>
 
         <main className={styles.detail_pane}>
@@ -163,6 +176,42 @@ export function SkillsView() {
         </main>
       </div>
     </div>
+  );
+}
+
+// ── Skill card (single entry in the list) ───────────────────────────────────
+
+function SkillCard({
+  skill,
+  active,
+  onClick,
+}: {
+  skill: SkillItem;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`${styles.card} ${active ? styles.card_active : ""}`}
+      onClick={onClick}
+    >
+      <span className={skillStyles.skill_badge}>⚡</span>
+      <div className={styles.card_body}>
+        <div className={styles.card_title}>{skill.name}</div>
+        {skill.description && (
+          <div className={styles.card_hook}>{skill.description}</div>
+        )}
+        <div className={styles.card_meta}>
+          <span>{formatSize(skill.sizeBytes)}</span>
+          {skill.modifiedMs > 0 && (
+            <>
+              <span className={styles.card_meta_dot}>·</span>
+              <span>{relativeTime(skill.modifiedMs)}</span>
+            </>
+          )}
+        </div>
+      </div>
+    </button>
   );
 }
 
