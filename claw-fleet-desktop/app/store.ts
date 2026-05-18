@@ -704,13 +704,11 @@ export const useReportStore = create<ReportState>((set, get) => ({
   resetTimeline: () => set({ timelineReports: [], timelineCursor: 0, timelineHasMore: true }),
 
   loadTimelinePage: async () => {
-    const { heatmapData, timelineCursor, timelineLoading, timelineHasMore, selectedDate } = get();
+    const { heatmapData, timelineCursor, timelineLoading, timelineHasMore } = get();
     if (timelineLoading || !timelineHasMore) return;
 
-    // Get dates with data, strictly before the selected day (which lives in the
-    // detail region above the timeline), sorted descending (most recent first).
     const sortedDates = [...heatmapData]
-      .filter((s) => (s.totalTokens > 0 || s.totalSessions > 0) && s.date < selectedDate)
+      .filter((s) => s.totalTokens > 0 || s.totalSessions > 0)
       .sort((a, b) => b.date.localeCompare(a.date))
       .map((s) => s.date);
 
