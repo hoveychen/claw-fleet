@@ -1,44 +1,93 @@
-.row_main {
+/* ── Plugin card row ─────────────────────────────────────────────────────── */
+
+.card_title_row {
   display: flex;
   align-items: center;
   gap: 6px;
-  width: 100%;
   min-width: 0;
 }
 
-.row_name {
+.status_dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.status_enabled {
+  background: rgb(16 185 129);
+  box-shadow: 0 0 6px rgb(16 185 129 / 0.5);
+}
+
+.status_downloaded {
+  background: rgb(var(--color-text-dim-rgb, 156 163 175));
+  background: var(--color-text-dim);
+}
+
+.status_catalog {
+  background: transparent;
+  border: 1.5px solid var(--color-text-dim);
+}
+
+.version_chip {
+  font-size: 10px;
   font-weight: 600;
-  font-size: 12px;
-  color: var(--color-text);
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border-radius: 4px;
+  padding: 1px 5px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex: 1;
-  min-width: 0;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.row_meta {
+/* Contribution badges (commands / agents / skills / hooks / mcp) */
+
+.contrib_row {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  flex-wrap: wrap;
+  gap: 4px;
   margin-top: 4px;
-  width: 100%;
 }
 
-.marketplace_tag {
+.contrib_badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 10px;
-  color: var(--color-text-dim);
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 4px;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
 }
 
-.row_install {
-  font-size: 10px;
-  color: var(--color-text-dim);
+.contrib_command {
+  background: rgb(var(--mem-project) / 0.15);
+  color: rgb(var(--mem-project));
 }
 
-/* Status / contribution chips */
+.contrib_agent {
+  background: rgb(var(--mem-user) / 0.15);
+  color: rgb(var(--mem-user));
+}
+
+.contrib_skill {
+  background: rgb(var(--mem-index) / 0.15);
+  color: rgb(var(--mem-index));
+}
+
+.contrib_hook {
+  background: rgb(var(--mem-feedback) / 0.15);
+  color: rgb(var(--mem-feedback));
+}
+
+.contrib_mcp {
+  background: rgb(var(--mem-reference) / 0.15);
+  color: rgb(var(--mem-reference));
+}
+
+/* Status / contribution chips (used by PluginDetail) */
 
 .chip {
   display: inline-flex;
