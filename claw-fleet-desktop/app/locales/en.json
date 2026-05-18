@@ -412,7 +412,7 @@
     "tab_messages": "Messages",
     "tab_tokens": "Tokens"
   },
-  "tokens": {
+  "token_spend": {
     "loading": "Loading token breakdown…",
     "no_data": "No data",
     "kpi_total_billed": "Total billed tokens",

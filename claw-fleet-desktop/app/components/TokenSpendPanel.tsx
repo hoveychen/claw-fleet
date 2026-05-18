@@ -68,9 +68,9 @@ export function TokenSpendPanel({ jsonlPath, workspacePath }: Props) {
     return () => { cancelled = true; };
   }, [jsonlPath, workspacePath]);
 
-  if (loading) return <div className={styles.empty}>{t("tokens.loading") || "Loading…"}</div>;
+  if (loading) return <div className={styles.empty}>{t("token_spend.loading") || "Loading…"}</div>;
   if (error) return <div className={styles.empty}>{error}</div>;
-  if (!data) return <div className={styles.empty}>{t("tokens.no_data") || "No data"}</div>;
+  if (!data) return <div className={styles.empty}>{t("token_spend.no_data") || "No data"}</div>;
 
   return <TokenSpendView data={data} />;
 }
@@ -97,7 +97,7 @@ function TokenSpendView({ data }: { data: TaskTokenBreakdown }) {
       {/* KPI cards */}
       <div className={styles.kpi_row}>
         <KpiCard
-          label={t("tokens.kpi_total_billed") || "Total billed tokens"}
+          label={t("token_spend.kpi_total_billed") || "Total billed tokens"}
           primary={fmtTok(totalBilled)}
           secondary={
             data.totalsEstimatedCostUsd != null
@@ -106,16 +106,16 @@ function TokenSpendView({ data }: { data: TaskTokenBreakdown }) {
           }
         />
         <KpiCard
-          label={t("tokens.kpi_cache_hit") || "Cache hit ratio"}
+          label={t("token_spend.kpi_cache_hit") || "Cache hit ratio"}
           primary={`${(cacheHitRatio * 100).toFixed(1)}%`}
           secondary={`${fmtTok(totals.cacheReadTokens)} / ${fmtTok(totalBilled)}`}
         />
         <KpiCard
-          label={t("tokens.kpi_output") || "Output tokens"}
+          label={t("token_spend.kpi_output") || "Output tokens"}
           primary={fmtTok(totals.outputTokens)}
           secondary={
             output.outputReasoningInvisible > 0
-              ? `${fmtTok(output.outputReasoningInvisible)} ${t("tokens.invisible_reasoning") || "invisible reasoning"}`
+              ? `${fmtTok(output.outputReasoningInvisible)} ${t("token_spend.invisible_reasoning") || "invisible reasoning"}`
               : ""
           }
         />
@@ -123,9 +123,9 @@ function TokenSpendView({ data }: { data: TaskTokenBreakdown }) {
 
       {/* Source attribution stacked bar */}
       <div className={styles.section_label}>
-        {t("tokens.source_attribution") || "Source attribution (input tokens)"}
-        <span className={styles.fit_pill} title={t("tokens.fit_tooltip") || ""}>
-          {t("tokens.fit_confidence") || "fit"} {(data.main.fitConfidence * 100).toFixed(0)}%
+        {t("token_spend.source_attribution") || "Source attribution (input tokens)"}
+        <span className={styles.fit_pill} title={t("token_spend.fit_tooltip") || ""}>
+          {t("token_spend.fit_confidence") || "fit"} {(data.main.fitConfidence * 100).toFixed(0)}%
         </span>
       </div>
       <div className={styles.stacked_bar}>
@@ -149,8 +149,8 @@ function TokenSpendView({ data }: { data: TaskTokenBreakdown }) {
       {/* Legend table */}
       <div className={styles.legend_table}>
         <div className={styles.legend_head}>
-          <span>{t("tokens.col_source") || "Source"}</span>
-          <span className={styles.col_num}>{t("tokens.col_tokens") || "Tokens"}</span>
+          <span>{t("token_spend.col_source") || "Source"}</span>
+          <span className={styles.col_num}>{t("token_spend.col_tokens") || "Tokens"}</span>
           <span className={styles.col_num}>%</span>
         </div>
         {SOURCE_ORDER.map(({ key, colorTag }) => {
@@ -172,19 +172,19 @@ function TokenSpendView({ data }: { data: TaskTokenBreakdown }) {
 
       {/* Per-session breakdown */}
       <div className={styles.section_label}>
-        {t("tokens.per_session") || "Per session"}
+        {t("token_spend.per_session") || "Per session"}
         <span className={styles.fit_pill}>
-          {t("tokens.bundle_size") || "bundle"} {fmtTok(data.bundleSizeTokens)}
+          {t("token_spend.bundle_size") || "bundle"} {fmtTok(data.bundleSizeTokens)}
         </span>
       </div>
       <table className={styles.session_table}>
         <thead>
           <tr>
-            <th>{t("tokens.tbl_agent") || "Agent"}</th>
-            <th className={styles.col_num}>{t("tokens.tbl_msgs") || "Msgs"}</th>
-            <th className={styles.col_num}>{t("tokens.tbl_model") || "Model"}</th>
-            <th className={styles.col_num}>{t("tokens.tbl_billed") || "Billed"}</th>
-            <th className={styles.col_num}>{t("tokens.tbl_cost") || "Cost"}</th>
+            <th>{t("token_spend.tbl_agent") || "Agent"}</th>
+            <th className={styles.col_num}>{t("token_spend.tbl_msgs") || "Msgs"}</th>
+            <th className={styles.col_num}>{t("token_spend.tbl_model") || "Model"}</th>
+            <th className={styles.col_num}>{t("token_spend.tbl_billed") || "Billed"}</th>
+            <th className={styles.col_num}>{t("token_spend.tbl_cost") || "Cost"}</th>
             <th className={styles.col_num}>TTL refr.</th>
           </tr>
         </thead>
@@ -216,7 +216,7 @@ function TokenSpendView({ data }: { data: TaskTokenBreakdown }) {
 
       {/* Caveats */}
       <div className={styles.caveat}>
-        {t("tokens.caveat") ||
+        {t("token_spend.caveat") ||
           "Estimates use chars/4 (text) heuristic. Disk-snapshot bundle was read at analysis time — if CLAUDE.md / memory / skills changed since the session ran, numbers can drift ±20%. The TTL refresh bucket lumps full cache-creation events; the actual content underneath is the same as the bundle counted on first load. See /tmp/token_spend_spike/fit_report.md."}
       </div>
     </div>
@@ -237,20 +237,20 @@ function KpiCard({
 
 function labelFor(t: (k: string) => string, key: BucketKey): string {
   const map: Record<BucketKey, string> = {
-    ccBaseSystemPrompt: t("tokens.b.cc_base_system_prompt") || "CC system prompt",
-    toolDefs: t("tokens.b.tool_defs") || "Tool definitions",
-    userClaudemd: t("tokens.b.user_claudemd") || "User CLAUDE.md",
-    projectClaudemd: t("tokens.b.project_claudemd") || "Project CLAUDE.md",
-    fleetReminders: t("tokens.b.fleet_reminders") || "Fleet reminders",
-    memoryFiles: t("tokens.b.memory_files") || "Memory files",
-    skillsManifest: t("tokens.b.skills_manifest") || "Skills manifest",
-    visibleUserText: t("tokens.b.visible_user_text") || "User text",
-    visibleToolResult: t("tokens.b.visible_tool_result") || "Tool results",
-    visibleSystemReminder: t("tokens.b.visible_system_reminder") || "System reminders",
-    visiblePrevAssistant: t("tokens.b.visible_prev_assistant") || "Prior assistant output",
-    visibleCompactSummary: t("tokens.b.visible_compact_summary") || "Compact summary",
-    ttlRefreshOverhead: t("tokens.b.ttl_refresh_overhead") || "TTL cache refresh",
-    residualUnexplained: t("tokens.b.residual_unexplained") || "Unexplained residual",
+    ccBaseSystemPrompt: t("token_spend.b.cc_base_system_prompt") || "CC system prompt",
+    toolDefs: t("token_spend.b.tool_defs") || "Tool definitions",
+    userClaudemd: t("token_spend.b.user_claudemd") || "User CLAUDE.md",
+    projectClaudemd: t("token_spend.b.project_claudemd") || "Project CLAUDE.md",
+    fleetReminders: t("token_spend.b.fleet_reminders") || "Fleet reminders",
+    memoryFiles: t("token_spend.b.memory_files") || "Memory files",
+    skillsManifest: t("token_spend.b.skills_manifest") || "Skills manifest",
+    visibleUserText: t("token_spend.b.visible_user_text") || "User text",
+    visibleToolResult: t("token_spend.b.visible_tool_result") || "Tool results",
+    visibleSystemReminder: t("token_spend.b.visible_system_reminder") || "System reminders",
+    visiblePrevAssistant: t("token_spend.b.visible_prev_assistant") || "Prior assistant output",
+    visibleCompactSummary: t("token_spend.b.visible_compact_summary") || "Compact summary",
+    ttlRefreshOverhead: t("token_spend.b.ttl_refresh_overhead") || "TTL cache refresh",
+    residualUnexplained: t("token_spend.b.residual_unexplained") || "Unexplained residual",
   };
   return map[key];
 }
