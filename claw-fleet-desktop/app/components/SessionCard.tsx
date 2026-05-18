@@ -307,6 +307,8 @@ interface Props {
   onClick: () => void;
   variant?: "default" | "group-main";
   hideHeader?: boolean;
+  /** Number of subagents attached to this main session (group-main only). */
+  subagentCount?: number;
 }
 
 export function useMultiSource() {
@@ -317,7 +319,7 @@ export function useMultiSource() {
   }, [sessions]);
 }
 
-export function SessionCard({ session, isSelected, onClick, variant, hideHeader }: Props) {
+export function SessionCard({ session, isSelected, onClick, variant, hideHeader, subagentCount }: Props) {
   const { t } = useTranslation();
   const multiSource = useMultiSource();
   const fleetManagedIds = useFleetManagedStore((s) => s.managedIds);
@@ -364,74 +366,114 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader 
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && onClick()}
     >
-      {/* Header row */}
-      <div className={`${styles.header} ${hideHeader ? styles.header_compact : ""}`}>
-        {!hideHeader && <span className={styles.workspace}>{session.workspaceName}</span>}
-        {!hideHeader && isFleetManaged && (
-          <span
-            title={t("session_badge.fleet_managed_tip")}
-            style={{
-              display: "inline-block",
-              padding: "1px 6px",
-              borderRadius: 4,
-              background: "var(--color-accent)",
-              color: "var(--color-bg)",
-              fontSize: 10,
-              fontWeight: 700,
-              lineHeight: 1.4,
-            }}
-          >
-            {t("session_badge.fleet_managed")}
-          </span>
-        )}
-        {!hideHeader && <StatusBadge status={session.status} />}
-        {!hideHeader && <RateLimitControls session={session} />}
-        {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
-          <button
-            className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
-            onClick={handleStop}
-            title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
-            disabled={killing}
-          >
-            ■
-          </button>
-        )}
-      </div>
-
-      {/* Meta row */}
-      <div className={styles.meta}>
-        {session.isSubagent ? (
-          <span className={styles.tag_subagent} title={session.agentType ?? t("subagent")}>
-            <SubagentTypeIcon type={session.agentType} />
-            <span className={styles.tag_subagent_label}>
-              {session.agentType ?? t("subagent")}
+      {/* Header row — group-main uses the compact Linear-style strip, default keeps the workspace/badge layout */}
+      {variant === "group-main" ? (
+        <div className={`${styles.gm_header} ${styles[`badge_${session.status}`]}`}>
+          <StatusIcon status={session.status} />
+          <span className={styles.gm_status_label}>{t(`status.${session.status}`)}</span>
+          {session.model && (
+            <span className={styles.gm_dim} title={t("card.tip_model", { model: session.model })}>
+              {formatModel(session.model)}
             </span>
-          </span>
-        ) : (
-          <span className={styles.tag_main} title={t("card.tip_main")}>◈ {t("main")}</span>
-        )}
-        <span className={styles.tag_source} title={session.agentSource}>
-          <AgentSourceIcon source={session.agentSource} />
-        </span>
-        {session.model && (
-          <span className={styles.tag_model} title={t("card.tip_model", { model: session.model })}>{formatModel(session.model)}</span>
-        )}
-        {session.thinkingLevel && session.thinkingLevel !== "medium" && (
-          <span className={styles.tag_thinking} title={t("card.tip_thinking", { level: session.thinkingLevel })}>
-            <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
-              <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
-              <line x1="2.5" y1="9.7" x2="5.5" y2="9.7" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" />
-              <line x1="3"   y1="10.5" x2="5"  y2="10.5" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" />
-            </svg>
-          </span>
-        )}
-        {session.lastSkill && (
-          <span className={styles.tag_skill} title={t("card.tip_skill", { skill: session.lastSkill })}>/{session.lastSkill}</span>
-        )}
-        {session.slug && (
-          <span className={styles.slug} title={t("card.tip_slug", { slug: session.slug })}>{session.slug}</span>
-        )}
-      </div>
+          )}
+          {session.thinkingLevel && session.thinkingLevel !== "medium" && (
+            <span className={styles.gm_thinking} title={t("card.tip_thinking", { level: session.thinkingLevel })}>
+              <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
+                <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
+              </svg>
+              {session.thinkingLevel}
+            </span>
+          )}
+          {session.lastSkill && (
+            <span className={styles.gm_skill} title={t("card.tip_skill", { skill: session.lastSkill })}>/{session.lastSkill}</span>
+          )}
+          {(subagentCount ?? 0) > 0 && (
+            <span className={styles.gm_sub_count}>+{subagentCount} sub</span>
+          )}
+          <span className={styles.gm_spacer} />
+          <RateLimitControls session={session} />
+          {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
+            <button
+              className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
+              onClick={handleStop}
+              title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
+              disabled={killing}
+            >
+              ■
+            </button>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className={`${styles.header} ${hideHeader ? styles.header_compact : ""}`}>
+            {!hideHeader && <span className={styles.workspace}>{session.workspaceName}</span>}
+            {!hideHeader && isFleetManaged && (
+              <span
+                title={t("session_badge.fleet_managed_tip")}
+                style={{
+                  display: "inline-block",
+                  padding: "1px 6px",
+                  borderRadius: 4,
+                  background: "var(--color-accent)",
+                  color: "var(--color-bg)",
+                  fontSize: 10,
+                  fontWeight: 700,
+                  lineHeight: 1.4,
+                }}
+              >
+                {t("session_badge.fleet_managed")}
+              </span>
+            )}
+            {!hideHeader && <StatusBadge status={session.status} />}
+            {!hideHeader && <RateLimitControls session={session} />}
+            {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
+              <button
+                className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
+                onClick={handleStop}
+                title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
+                disabled={killing}
+              >
+                ■
+              </button>
+            )}
+          </div>
+
+          {/* Meta row */}
+          <div className={styles.meta}>
+            {session.isSubagent ? (
+              <span className={styles.tag_subagent} title={session.agentType ?? t("subagent")}>
+                <SubagentTypeIcon type={session.agentType} />
+                <span className={styles.tag_subagent_label}>
+                  {session.agentType ?? t("subagent")}
+                </span>
+              </span>
+            ) : (
+              <span className={styles.tag_main} title={t("card.tip_main")}>◈ {t("main")}</span>
+            )}
+            <span className={styles.tag_source} title={session.agentSource}>
+              <AgentSourceIcon source={session.agentSource} />
+            </span>
+            {session.model && (
+              <span className={styles.tag_model} title={t("card.tip_model", { model: session.model })}>{formatModel(session.model)}</span>
+            )}
+            {session.thinkingLevel && session.thinkingLevel !== "medium" && (
+              <span className={styles.tag_thinking} title={t("card.tip_thinking", { level: session.thinkingLevel })}>
+                <svg viewBox="0 0 8 11" width="9" height="9" fill="currentColor" aria-hidden>
+                  <path d="M4 0.5 C1.2 0.5 0.5 2.8 0.5 4.5 C0.5 6.3 1.8 7.4 2.3 8 L2.3 9.3 L5.7 9.3 L5.7 8 C6.2 7.4 7.5 6.3 7.5 4.5 C7.5 2.8 6.8 0.5 4 0.5Z" />
+                  <line x1="2.5" y1="9.7" x2="5.5" y2="9.7" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" />
+                  <line x1="3"   y1="10.5" x2="5"  y2="10.5" stroke="currentColor" strokeWidth="0.9" strokeLinecap="round" />
+                </svg>
+              </span>
+            )}
+            {session.lastSkill && (
+              <span className={styles.tag_skill} title={t("card.tip_skill", { skill: session.lastSkill })}>/{session.lastSkill}</span>
+            )}
+            {session.slug && (
+              <span className={styles.slug} title={t("card.tip_slug", { slug: session.slug })}>{session.slug}</span>
+            )}
+          </div>
+        </>
+      )}
 
       {/* AI Title (main session) or agent description (subagent) */}
       {(session.aiTitle || (session.isSubagent && session.agentDescription)) && (

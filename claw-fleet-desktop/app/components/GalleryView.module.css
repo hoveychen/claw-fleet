@@ -60,12 +60,11 @@
   box-shadow: var(--shadow-card-hover);
 }
 
-/* Group header bar — inline with the body, no separate fill, no divider */
+/* Group header bar — minimal: workspace name only, sits inline with the body */
 .group_header {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 8px;
+  gap: 6px;
   padding: 10px 12px 4px;
   background: transparent;
   cursor: pointer;
@@ -79,34 +78,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  width: 100%;
-  flex-shrink: 1;
+  flex: 1 1 auto;
   min-width: 0;
-}
-
-.group_stats {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-left: auto;
-  flex-shrink: 0;
-}
-
-.group_stat {
-  font-size: 11px;
-  color: var(--color-text-dim);
-  white-space: nowrap;
-}
-
-.group_speed {
-  color: var(--color-speed);
-  font-weight: 500;
-}
-
-.group_divider {
-  font-size: 11px;
-  color: var(--color-text-dim);
-  opacity: 0.4;
 }
 
 /* Main agent card area — header has 4px bottom padding so we only need 6px top */
@@ -114,86 +87,79 @@
   padding: 6px 12px 10px;
 }
 
-/* ── Subagent chips ───────────────────────────────────────────────────────── */
-.chips_row {
+/* ── Subagent inline rows ─────────────────────────────────────────────────
+   Linear "sub-issue" style: each subagent renders as a full-width row that
+   matches the main card's typographic rhythm (status dot + #N + icon +
+   description on the left, model/speed right-aligned). No chip background,
+   no rounded pill — visual continuity with the main card is the goal. */
+.sub_list {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0 12px 10px;
+  flex-direction: column;
+  padding: 0 12px 6px;
 }
 
-/* Linear-style chip: neutral secondary bg, no per-session hue. Identity is
-   carried by the StatusIcon dot (semantic status color) and the `#N` index;
-   color hashing was dropped because Linear's design language uses semantic
-   color only, not ID-derived hue. */
-.chip {
-  display: inline-flex;
+.sub_row {
+  display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: var(--color-bg-secondary);
-  color: var(--color-text);
+  gap: 6px;
+  padding: 5px 4px 5px 16px;
+  margin: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  text-align: left;
   font-size: 11px;
-  font-weight: 500;
-  line-height: 1;
+  line-height: 1.4;
+  color: var(--color-text);
   cursor: pointer;
   transition: background 0.12s ease;
   user-select: none;
 }
 
-.chip:hover {
+.sub_row:hover {
   background: var(--color-bg-card-hover);
 }
 
-/* Active chip: full opacity */
-.chip_active { opacity: 1; }
+.sub_row_active { opacity: 1; }
+.sub_row_idle   { opacity: 0.55; }
 
-/* Idle chip: dimmed */
-.chip:not(.chip_active) { opacity: 0.5; }
-
-
-.chip_index {
+.sub_index {
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 600;
-  color: var(--color-text-secondary);
+  color: var(--color-text-dim);
   flex-shrink: 0;
 }
 
-.chip_type_icon {
+.sub_type_icon {
   display: inline-flex;
   align-items: center;
   flex-shrink: 0;
-  opacity: 0.85;
+  color: var(--color-text-secondary);
 }
 
-.chip_desc {
-  max-width: 160px;
+.sub_desc {
+  flex: 1 1 auto;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  color: var(--color-text);
 }
 
-.chip_speed {
-  opacity: 0.75;
-  font-weight: 400;
+.sub_model {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
-.chip_model {
-  font-family: monospace;
+.sub_speed {
   font-size: 10px;
-  opacity: 0.7;
-  flex-shrink: 0;
-}
-
-.chip_thinking {
-  font-size: 10px;
-  background: var(--badge-processing-bg);
-  color: var(--badge-processing-fg);
-  padding: 1px 4px;
-  border-radius: 4px;
+  color: var(--color-speed);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
   flex-shrink: 0;
 }
 
@@ -202,7 +168,7 @@
   padding: 0 12px 10px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .idle_toggle {
@@ -211,11 +177,12 @@
   gap: 5px;
   background: none;
   border: none;
-  padding: 2px 0;
+  padding: 2px 12px 2px 4px;
   font-size: 11px;
   color: var(--color-text-dim);
   cursor: pointer;
   user-select: none;
+  align-self: flex-start;
 }
 
 .idle_toggle:hover {
