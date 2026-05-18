@@ -72,7 +72,9 @@ if [[ "$(uname)" == "Linux" ]]; then
 fi
 
 # 3. Build Tauri app (run from claw-fleet-desktop/ where package.json lives)
-echo "==> Building Tauri app..."
+#    本地构建启用 Projects/Tasks feature flag（线上 release.yml 不设此变量，保持隐藏）
+export VITE_PROJECTS_ENABLED=true
+echo "==> Building Tauri app... (VITE_PROJECTS_ENABLED=$VITE_PROJECTS_ENABLED)"
 (cd claw-fleet-desktop && npx tauri build --bundles app)
 
 # 4. Sign with entitlements (macOS only)
