@@ -342,6 +342,12 @@ fn parse_frontmatter_str(s: &str) -> Option<MemoryFrontmatter> {
 
     let mut fm = MemoryFrontmatter::default();
     let mut current_parent: Option<String> = None;
+    // Track flat (top-level `type:`) and nested (`metadata.type`) separately
+    // since real-world files use the flat form even though the spec specifies
+    // the nested form. Nested wins when both are present.
+    let mut flat_type: Option<String> = None;
+    let mut nested_type: Option<String> = None;
+
     for raw_line in block.lines() {
         if raw_line.trim().is_empty() {
             continue;
@@ -356,16 +362,19 @@ fn parse_frontmatter_str(s: &str) -> Option<MemoryFrontmatter> {
                     current_parent = Some(key);
                 } else if key == "description" {
                     fm.description = Some(value);
+                } else if key == "type" {
+                    flat_type = Some(value);
                 }
             }
         } else if current_parent.as_deref() == Some("metadata") {
             if let Some((key, value)) = parse_yaml_kv(line) {
                 if key == "type" && !value.is_empty() {
-                    fm.mem_type = Some(value);
+                    nested_type = Some(value);
                 }
             }
         }
     }
+    fm.mem_type = nested_type.or(flat_type);
     Some(fm)
 }
 
@@ -1068,6 +1077,25 @@ mod tests {
         let s = "---\nname: feedback-testing\ndescription: integration tests must hit a real database\nmetadata:\n  type: feedback\n---\n\nBody content";
         let fm = parse_frontmatter_str(s).unwrap();
         assert_eq!(fm.description.as_deref(), Some("integration tests must hit a real database"));
+        assert_eq!(fm.mem_type.as_deref(), Some("feedback"));
+    }
+
+    #[test]
+    fn frontmatter_extracts_flat_type_field() {
+        // Real-world memory files (originSessionId-style) put `type:` at the
+        // top level instead of nested under `metadata:`. Both forms must work.
+        let s = "---\nname: feedback-x\ndescription: top-level type field\ntype: feedback\noriginSessionId: abc123\n---\n\nBody";
+        let fm = parse_frontmatter_str(s).unwrap();
+        assert_eq!(fm.description.as_deref(), Some("top-level type field"));
+        assert_eq!(fm.mem_type.as_deref(), Some("feedback"));
+    }
+
+    #[test]
+    fn frontmatter_nested_type_wins_over_flat() {
+        // If both forms appear (unlikely but possible), the spec-compliant
+        // nested `metadata.type` takes precedence.
+        let s = "---\nname: x\ntype: project\nmetadata:\n  type: feedback\n---\n";
+        let fm = parse_frontmatter_str(s).unwrap();
         assert_eq!(fm.mem_type.as_deref(), Some("feedback"));
     }
 
