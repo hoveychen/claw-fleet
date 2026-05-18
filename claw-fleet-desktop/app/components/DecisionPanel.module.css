@@ -70,6 +70,36 @@
   width: 820px;
 }
 
+/* With-detail variant: panel becomes a 2-column flex row — left is an inline
+ * SessionDetail column, right is the normal panel body (history strip + card
+ * + tab bar). Inline-style sets the overall width; the children divide it. */
+.panel_with_detail {
+  flex-direction: row;
+  align-items: stretch;
+  max-height: calc(100vh - 24px);
+  height: 80vh;
+}
+
+.detail_column {
+  flex: 1 1 640px;
+  min-width: 420px;
+  display: flex;
+  overflow: hidden;
+  border-right: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  /* The embedded SessionDetail is column-flex with its own scrollable area;
+   * give it a stable height by stretching to the panel's. */
+  align-self: stretch;
+}
+
+.main_column {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 460px;
+  min-width: 380px;
+  min-height: 0;
+  overflow: hidden;
+}
+
 /* Peek variant: user is holding Option/Alt to look at content behind the panel.
  * Fade nearly out and disable pointer events so clicks pass through. The pulse
  * glow also fades so it doesn't keep flashing through the see-through panel. */

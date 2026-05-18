@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { useDetailStore, useSessionsStore } from "../store";
-import type { DecisionHistoryRecord, SessionInfo } from "../types";
+import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useSessionsStore } from "../store";
+import type { DecisionHistoryRecord, RawMessage, SessionInfo } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
 import { SkillHistory } from "./SkillHistory";
@@ -18,10 +18,105 @@ function shortId(id: string) {
   return id.slice(0, 8);
 }
 
-export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
+export function SessionDetail({
+  lite = false,
+  inline = false,
+  sessionInfo = null,
+}: {
+  lite?: boolean;
+  inline?: boolean;
+  /** When set, the component runs in standalone mode: its own local
+   *  session/messages state, independent from the global useDetailStore.
+   *  Used by DecisionPanel's inline detail column so it doesn't fight the
+   *  KanbanView drawer over the singleton store. No live tail in this mode —
+   *  messages are a snapshot (pending decisions block the agent anyway). */
+  sessionInfo?: SessionInfo | null;
+} = {}) {
   const { t } = useTranslation();
-  const { session, messages, isLoading, searchQuery, fullyLoaded, close, open, loadEarlier } =
-    useDetailStore();
+  const isStandalone = sessionInfo != null;
+  const global = useDetailStore();
+
+  // Local mirror state for standalone mode.
+  const [localSession, setLocalSession] = useState<SessionInfo | null>(sessionInfo ?? null);
+  const [localMessages, setLocalMessages] = useState<RawMessage[]>([]);
+  const [localLoading, setLocalLoading] = useState(false);
+  const [localFullyLoaded, setLocalFullyLoaded] = useState(false);
+  const [localTail, setLocalTail] = useState<number>(INITIAL_TAIL);
+
+  // External sessionInfo prop changed → reset local state and refetch.
+  useEffect(() => {
+    if (!isStandalone) return;
+    if (sessionInfo && sessionInfo.id !== localSession?.id) {
+      setLocalSession(sessionInfo);
+      setLocalMessages([]);
+      setLocalTail(INITIAL_TAIL);
+      setLocalFullyLoaded(false);
+    }
+  }, [isStandalone, sessionInfo?.id]);
+
+  // Fetch initial tail when localSession.jsonlPath changes.
+  useEffect(() => {
+    if (!isStandalone || !localSession) return;
+    let cancelled = false;
+    setLocalLoading(true);
+    invoke<RawMessage[]>("get_messages_tail", {
+      jsonlPath: localSession.jsonlPath,
+      tail: INITIAL_TAIL,
+    })
+      .then((msgs) => {
+        if (cancelled) return;
+        setLocalMessages(msgs);
+        setLocalFullyLoaded(msgs.length < INITIAL_TAIL);
+        setLocalLoading(false);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setLocalLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isStandalone, localSession?.jsonlPath]);
+
+  const standaloneLoadEarlier = useCallback(async () => {
+    if (!isStandalone || !localSession || localFullyLoaded) return;
+    const nextTail = localTail + LOAD_EARLIER_STEP;
+    setLocalLoading(true);
+    setLocalTail(nextTail);
+    try {
+      const msgs = await invoke<RawMessage[]>("get_messages_tail", {
+        jsonlPath: localSession.jsonlPath,
+        tail: nextTail,
+      });
+      setLocalMessages(msgs);
+      setLocalFullyLoaded(msgs.length < nextTail);
+    } finally {
+      setLocalLoading(false);
+    }
+  }, [isStandalone, localSession?.jsonlPath, localTail, localFullyLoaded]);
+
+  // Resolved values — flip between local mirror and global store based on mode.
+  const session = isStandalone ? localSession : global.session;
+  const messages = isStandalone ? localMessages : global.messages;
+  const isLoading = isStandalone ? localLoading : global.isLoading;
+  const fullyLoaded = isStandalone ? localFullyLoaded : global.fullyLoaded;
+  const searchQuery = isStandalone ? null : global.searchQuery;
+  const close = global.close;
+  const open = useCallback(
+    (s: SessionInfo) => {
+      if (isStandalone) {
+        setLocalSession(s);
+        setLocalMessages([]);
+        setLocalTail(INITIAL_TAIL);
+        setLocalFullyLoaded(false);
+      } else {
+        global.open(s);
+      }
+    },
+    [isStandalone, global.open],
+  );
+  const loadEarlier = isStandalone ? standaloneLoadEarlier : global.loadEarlier;
+
   const sessions = useSessionsStore((s) => s.sessions);
   const liveSession = useMemo(() => {
     if (!session) return null;
@@ -123,7 +218,7 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
   }, [liveSession, sessions]);
 
   return (
-      <div className={`${styles.root} ${liveSession ? styles.open : ""} ${lite ? styles.lite : ""}`}>
+      <div className={`${styles.root} ${liveSession ? styles.open : ""} ${lite ? styles.lite : ""} ${inline ? styles.inline : ""}`}>
         {liveSession && (
           <>
           {/* Header */}
@@ -141,9 +236,11 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
                   <span className={styles.tag_main}>◈ {t("main")}</span>
                 )}
               </div>
-              <button className={styles.close_btn} onClick={close} title={t("common.close") || "Close"}>
-                ✕
-              </button>
+              {!inline && (
+                <button className={styles.close_btn} onClick={close} title={t("common.close") || "Close"}>
+                  ✕
+                </button>
+              )}
             </div>
             {liveSession.aiTitle && (
               <div className={styles.ai_title}>{liveSession.aiTitle}</div>

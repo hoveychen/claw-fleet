@@ -23,6 +23,7 @@ import type {
   SessionPendingDecision,
 } from "../types";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
+import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
 import styles from "./DecisionPanel.module.css";
 
@@ -985,10 +986,22 @@ function recordTime(rec: DecisionHistoryRecord): string {
 
 const HISTORY_VISIBLE_LIMIT = 5;
 
-function PastHistoryStrip({ sessionId }: { sessionId: string }) {
+function PastHistoryStrip({
+  sessionId,
+  expanded,
+  onToggle,
+  showBriefList = false,
+}: {
+  sessionId: string;
+  expanded: boolean;
+  onToggle: () => void;
+  /** Legacy inline brief list (compact / no-inline-column scenarios). The
+   *  normal-mode flow now drives a full SessionDetail column in the panel
+   *  instead and leaves this false. */
+  showBriefList?: boolean;
+}) {
   const { t } = useTranslation();
   const [records, setRecords] = useState<DecisionHistoryRecord[]>([]);
-  const [expanded, setExpanded] = useState(false);
 
   useEffect(() => {
     if (!sessionId) {
@@ -1023,7 +1036,7 @@ function PastHistoryStrip({ sessionId }: { sessionId: string }) {
       <button
         type="button"
         className={styles.history_header}
-        onClick={() => setExpanded((v) => !v)}
+        onClick={onToggle}
         aria-expanded={expanded}
       >
         <span className={styles.history_chevron}>{expanded ? "▾" : "▸"}</span>
@@ -1032,7 +1045,7 @@ function PastHistoryStrip({ sessionId }: { sessionId: string }) {
         </span>
         <span className={styles.history_count}>{records.length}</span>
       </button>
-      {expanded && (
+      {expanded && showBriefList && (
         <div className={styles.history_list}>
           {recent.map((rec) => {
             const isUser = rec.kind === "user-prompt";
@@ -1103,6 +1116,8 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
   const setDecisionPanelCollapsed = useUIStore(
     (s) => s.setDecisionPanelCollapsed,
   );
+  const sessionsList = useSessionsStore((s) => s.sessions);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   // Escape key: block the active guard decision.
   const { respond } = useDecisionStore();
@@ -1182,6 +1197,25 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
     setWidthTier(0);
   }, [active?.id]);
 
+  // Always start with history collapsed when the active decision changes;
+  // each decision deserves a fresh, focused panel state.
+  useEffect(() => {
+    setHistoryOpen(false);
+  }, [active?.id]);
+
+  // SessionInfo for the active decision's session, looked up live so status
+  // updates (e.g. running → done) reach the inline detail column.
+  const activeSessionId = active?.request.sessionId ?? null;
+  const activeSessionInfo = useMemo(
+    () => (activeSessionId ? sessionsList.find((s) => s.id === activeSessionId) ?? null : null),
+    [sessionsList, activeSessionId],
+  );
+
+  // Inline detail column is normal-mode only; lite has its own chip flow.
+  // SessionDetail in standalone mode owns its own state (no shared store with
+  // the KanbanView drawer), so the two can coexist on different sessions.
+  const inlineDetailActive = !compact && historyOpen && !!activeSessionInfo;
+
   // Bump tier when the card area overflows vertically, until no overflow or
   // we hit the maximum tier.
   useEffect(() => {
@@ -1238,59 +1272,81 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
     );
   }
 
+  // Detail column adds a fixed slab to the panel's overall width; clamp the
+  // combined size to the viewport so the panel never escapes the screen.
+  const DETAIL_COLUMN_WIDTH = 640;
+  const targetTotalWidth = inlineDetailActive
+    ? DETAIL_COLUMN_WIDTH + currentWidth
+    : currentWidth;
+  const vpClamp =
+    typeof window !== "undefined" ? window.innerWidth - 24 : targetTotalWidth;
+  const panelWidth = Math.min(targetTotalWidth, vpClamp);
+
   return (
     <div
-      className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${peeking ? styles.panel_peeking : ""}`}
-      style={compact ? undefined : { width: `${currentWidth}px` }}
+      className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${peeking ? styles.panel_peeking : ""} ${inlineDetailActive ? styles.panel_with_detail : ""}`}
+      style={compact ? undefined : { width: `${panelWidth}px` }}
     >
-      {!compact && (
-        <button
-          type="button"
-          className={styles.collapse_btn}
-          onClick={() => setDecisionPanelCollapsed(true)}
-          title={t("decision_panel.collapse", "Collapse panel")}
-          aria-label={t("decision_panel.collapse", "Collapse panel")}
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="6 9 12 15 18 9" />
-          </svg>
-        </button>
+      {inlineDetailActive && (
+        <div className={styles.detail_column}>
+          <SessionDetail inline sessionInfo={activeSessionInfo} />
+        </div>
       )}
-      {/* Past-history context.
-       *  - Normal mode: collapsible strip lists recent decisions inline.
-       *  - Lite mode: a single chip-button swaps the lite body for a
-       *    dedicated decision-history view (LiteDecisionHistory). Avoids
-       *    stuffing the list into the narrow lite window. */}
-      {active.request.sessionId && !compact && (
-        <PastHistoryStrip key={active.id} sessionId={active.request.sessionId} />
-      )}
-      {active.request.sessionId && compact && (
-        <button
-          type="button"
-          className={styles.history_jump}
-          onClick={() => {
-            const sid = active.request.sessionId;
-            if (!sid) return;
-            setLiteDecisionHistorySessionId(sid);
-          }}
-        >
-          <span className={styles.history_jump_chevron}>↗</span>
-          <span className={styles.history_jump_label}>
-            {t(
-              "decision_panel.view_session_history",
-              "View this session's history",
-            )}
-          </span>
-        </button>
-      )}
+      <div className={styles.main_column}>
+        {!compact && (
+          <button
+            type="button"
+            className={styles.collapse_btn}
+            onClick={() => setDecisionPanelCollapsed(true)}
+            title={t("decision_panel.collapse", "Collapse panel")}
+            aria-label={t("decision_panel.collapse", "Collapse panel")}
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="6 9 12 15 18 9" />
+            </svg>
+          </button>
+        )}
+        {/* Past-history context.
+         *  - Normal mode: header toggles the inline SessionDetail column
+         *    (managed by DecisionPanel state).
+         *  - Lite mode: a single chip-button swaps the lite body for a
+         *    dedicated decision-history view (LiteDecisionHistory). Avoids
+         *    stuffing the list into the narrow lite window. */}
+        {active.request.sessionId && !compact && (
+          <PastHistoryStrip
+            key={active.id}
+            sessionId={active.request.sessionId}
+            expanded={historyOpen}
+            onToggle={() => setHistoryOpen((v) => !v)}
+          />
+        )}
+        {active.request.sessionId && compact && (
+          <button
+            type="button"
+            className={styles.history_jump}
+            onClick={() => {
+              const sid = active.request.sessionId;
+              if (!sid) return;
+              setLiteDecisionHistorySessionId(sid);
+            }}
+          >
+            <span className={styles.history_jump_chevron}>↗</span>
+            <span className={styles.history_jump_label}>
+              {t(
+                "decision_panel.view_session_history",
+                "View this session's history",
+              )}
+            </span>
+          </button>
+        )}
 
-      {/* Card area — scrollable, shows the active decision */}
-      <div className={styles.card_area} ref={cardAreaRef}>
-        <DecisionCard key={active.id} decision={active} compact={compact} />
-      </div>
+        {/* Card area — scrollable, shows the active decision */}
+        <div className={styles.card_area} ref={cardAreaRef}>
+          <DecisionCard key={active.id} decision={active} compact={compact} />
+        </div>
 
-      {/* Tab bar — always at the bottom */}
-      <div className={styles.tab_bar}>
+        {/* Tab bar — always at the bottom */}
+        <div className={styles.tab_bar}>
         {decisions.map((d) => (
           <button
             key={d.id}
@@ -1324,6 +1380,7 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
             )}
           </button>
         ))}
+        </div>
       </div>
     </div>
   );
