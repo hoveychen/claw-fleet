@@ -152,19 +152,19 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
                 <span className={styles.slug}>{liveSession.slug}</span>
               )}
               {liveSession.ideName && (
-                <span className={styles.ide}>{liveSession.ideName}</span>
+                <span className={styles.meta_chip}>{liveSession.ideName}</span>
               )}
-              <span className={styles.tokens} title={t("tokens_out")}>
+              <span className={styles.meta_chip} title={t("tokens_out")}>
                 {liveSession.totalOutputTokens.toLocaleString()} {t("tokens_out")}
               </span>
               {(liveSession.totalCostUsd ?? 0) >= 0.005 && (
-                <span className={styles.cost} title={t("card.tip_cost")}>
+                <span className={styles.meta_chip} title={t("card.tip_cost")}>
                   ${liveSession.totalCostUsd.toFixed(2)}
                 </span>
               )}
               {(liveSession.compactCount ?? 0) > 0 && (
                 <span
-                  className={styles.compact_chip}
+                  className={styles.meta_chip}
                   title={t("card.tip_compact", {
                     count: liveSession.compactCount ?? 0,
                     pre: (liveSession.compactPreTokens ?? 0).toLocaleString(),
@@ -177,17 +177,15 @@ export function SessionDetail({ lite = false }: { lite?: boolean } = {}) {
               )}
               {liveSession.contextPercent != null && (
                 <span
-                  className={`${styles.context} ${liveSession.contextPercent >= 0.8 ? styles.context_high : ""}`}
+                  className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
                   title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
                 >
                   ctx {Math.round(liveSession.contextPercent * 100)}%
                 </span>
               )}
             </div>
+            <div className={styles.path} title={liveSession.workspacePath}>{liveSession.workspacePath}</div>
           </div>
-
-          {/* Path */}
-          <div className={styles.path}>{liveSession.workspacePath}</div>
 
           {/* Combined tab bar: subagent segmented control (if any) + view tabs */}
           <div className={styles.tab_bar}>
