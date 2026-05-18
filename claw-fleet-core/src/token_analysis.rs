@@ -21,6 +21,7 @@
 //!   - Output: walk assistant content blocks; assign text/thinking/tool_use
 //!     chars; residual = `output_reasoning_invisible` (Opus extended thinking).
 
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -502,6 +503,7 @@ fn analyze_messages(
     let mut assistant_idx: u32 = 0;
     let mut bundle_loads: u32 = 0;
     let mut ttl_refresh_count: u32 = 0;
+    let mut seen_msg_ids: HashSet<String> = HashSet::new();
 
     for msg in messages {
         let msg_type = msg.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -535,6 +537,18 @@ fn analyze_messages(
 
         if msg_type != "assistant" { continue; }
         let Some(inner) = msg.get("message") else { continue };
+        // Only count finalized turns; streaming half-turns have `stop_reason`
+        // missing or null. Matches `compute_session_stats` in session.rs so the
+        // Token tab agrees with the header cost chip.
+        if inner.get("stop_reason").map_or(true, |s| s.is_null()) {
+            continue;
+        }
+        // Dedup retried writes by `id`. Matches session.rs behaviour.
+        if let Some(id) = inner.get("id").and_then(|v| v.as_str()) {
+            if !id.is_empty() && !seen_msg_ids.insert(id.to_string()) {
+                continue;
+            }
+        }
         if model.is_none() {
             model = inner.get("model").and_then(|v| v.as_str()).map(String::from);
         }
@@ -654,21 +668,22 @@ fn analyze_messages(
     }
 }
 
-/// Anthropic public pricing (USD per million tokens). Returns 0 for unknown
-/// models. Pricing snapshot: 2026-05-18.
+/// Delegates to [`crate::model_cost::turn_cost_usd`] so the Token Spend tab
+/// agrees with the per-turn cost the session header chip already shows. An
+/// unknown model falls back to the same Opus 4.5/4.6 tier `get_model_costs`
+/// uses.
 fn estimate_cost_usd(u: &UsageTotals, model: Option<&str>) -> f64 {
-    // Default to Opus rates; downshift if model is haiku.
-    let (input_rate, cc_5m_rate, cc_1h_rate, cr_rate, out_rate) = match model {
-        Some(m) if m.contains("haiku") => (1.0, 1.25, 2.0, 0.10, 5.0),
-        Some(m) if m.contains("sonnet") => (3.0, 3.75, 6.0, 0.30, 15.0),
-        _ => (15.0, 18.75, 30.0, 1.50, 75.0), // opus default
-    };
-    let m = 1_000_000.0;
-    (u.input_tokens as f64 / m) * input_rate
-        + (u.ephemeral_5m_tokens as f64 / m) * cc_5m_rate
-        + (u.ephemeral_1h_tokens as f64 / m) * cc_1h_rate
-        + (u.cache_read_tokens as f64 / m) * cr_rate
-        + (u.output_tokens as f64 / m) * out_rate
+    use crate::model_cost::{turn_cost_usd, TurnUsage};
+    turn_cost_usd(
+        model.unwrap_or(""),
+        &TurnUsage {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cache_creation_tokens: u.cache_creation_tokens,
+            cache_read_tokens: u.cache_read_tokens,
+            web_search_requests: 0,
+        },
+    )
 }
 
 // ----------------------------------------------------------------------------
@@ -792,6 +807,7 @@ mod tests {
                 "type":"assistant",
                 "message":{
                     "model":"claude-opus-4-7",
+                    "stop_reason":"end_turn",
                     "content":[{"type":"text","text":"hello"}],
                     "usage":{
                         "input_tokens": 1,
@@ -829,21 +845,21 @@ mod tests {
             serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"x"}]}}),
             serde_json::json!({
                 "type":"assistant",
-                "message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"y"}],
+                "message":{"model":"claude-opus-4-7","stop_reason":"end_turn","content":[{"type":"text","text":"y"}],
                     "usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":12000,"cache_read_input_tokens":0}}
             }),
             // Turn 2: tiny — steady state, no TTL
             serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"x2"}]}}),
             serde_json::json!({
                 "type":"assistant",
-                "message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"y2"}],
+                "message":{"model":"claude-opus-4-7","stop_reason":"end_turn","content":[{"type":"text","text":"y2"}],
                     "usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":200,"cache_read_input_tokens":12000}}
             }),
             // Turn 3: BIG cache_creation → TTL refresh
             serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"x3"}]}}),
             serde_json::json!({
                 "type":"assistant",
-                "message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"y3"}],
+                "message":{"model":"claude-opus-4-7","stop_reason":"end_turn","content":[{"type":"text","text":"y3"}],
                     "usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":50000,"cache_read_input_tokens":0}}
             }),
         ];
@@ -861,14 +877,14 @@ mod tests {
             serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"x"}]}}),
             serde_json::json!({
                 "type":"assistant",
-                "message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"y"}],
+                "message":{"model":"claude-opus-4-7","stop_reason":"end_turn","content":[{"type":"text","text":"y"}],
                     "usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":15000,"cache_read_input_tokens":0}}
             }),
             serde_json::json!({"type":"system","subtype":"compact_boundary","content":"Conversation compacted"}),
             serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"text","text": synthetic}]}}),
             serde_json::json!({
                 "type":"assistant",
-                "message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"after"}],
+                "message":{"model":"claude-opus-4-7","stop_reason":"end_turn","content":[{"type":"text","text":"after"}],
                     "usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":2000,"cache_read_input_tokens":0}}
             }),
         ];
@@ -880,6 +896,104 @@ mod tests {
     }
 
     #[test]
+    fn analyze_skips_streaming_half_turns_and_duplicate_ids() {
+        // Aligns token_analysis with session.rs:921 — must skip messages where
+        // `stop_reason` is null/missing, and dedup by `id`. Without these
+        // filters, streaming partials and retried turns inflate the totals.
+        let baseline = baseline_with(0, 0, 0);
+        let usage = serde_json::json!({
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "cache_creation_input_tokens": 0,
+            "cache_read_input_tokens": 0,
+        });
+        let messages = vec![
+            serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"q"}]}}),
+            // Streaming half-turn: stop_reason missing -> must be skipped.
+            serde_json::json!({
+                "type":"assistant",
+                "message":{
+                    "id":"msg_alpha",
+                    "model":"claude-opus-4-7",
+                    "content":[{"type":"text","text":"partial"}],
+                    "usage": usage,
+                }
+            }),
+            // Finalized turn (same id as the partial above — also tests dedup
+            // against the partial, even though the partial would have already
+            // been dropped by the stop_reason filter).
+            serde_json::json!({
+                "type":"assistant",
+                "message":{
+                    "id":"msg_alpha",
+                    "model":"claude-opus-4-7",
+                    "stop_reason":"end_turn",
+                    "content":[{"type":"text","text":"final"}],
+                    "usage": usage,
+                }
+            }),
+            // Duplicate of the finalized turn (e.g. retry write) — same id,
+            // must be skipped.
+            serde_json::json!({
+                "type":"assistant",
+                "message":{
+                    "id":"msg_alpha",
+                    "model":"claude-opus-4-7",
+                    "stop_reason":"end_turn",
+                    "content":[{"type":"text","text":"final"}],
+                    "usage": usage,
+                }
+            }),
+        ];
+        let f = write_jsonl(&messages);
+        let s = analyze_session_with_baseline(f.path(), &baseline).expect("analyze");
+        assert_eq!(s.messages, 1, "should count exactly one assistant turn");
+        assert_eq!(s.usage.input_tokens, 100, "must not double-count usage");
+        assert_eq!(s.usage.output_tokens, 10);
+    }
+
+    #[test]
+    fn estimate_cost_matches_model_cost_pricing_table() {
+        // Regression guard: `estimate_cost_usd` and `model_cost::turn_cost_usd`
+        // must agree, otherwise the Token Spend tab disagrees with the session
+        // header chip (header uses model_cost.rs, Token tab uses this fn).
+        use crate::model_cost::{turn_cost_usd, TurnUsage};
+
+        let u = UsageTotals {
+            input_tokens: 1_000_000,
+            output_tokens: 100_000,
+            cache_creation_tokens: 1_000_000,
+            cache_read_tokens: 10_000_000,
+            ephemeral_5m_tokens: 0,
+            ephemeral_1h_tokens: 0,
+        };
+        let turn = TurnUsage {
+            input_tokens: u.input_tokens,
+            output_tokens: u.output_tokens,
+            cache_creation_tokens: u.cache_creation_tokens,
+            cache_read_tokens: u.cache_read_tokens,
+            web_search_requests: 0,
+        };
+
+        for model in [
+            "claude-opus-4-7",
+            "claude-opus-4-6-20251101",
+            "claude-opus-4-1-20250805",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+            "claude-haiku-3-5",
+        ] {
+            let estimated = estimate_cost_usd(&u, Some(model));
+            let billed = turn_cost_usd(model, &turn);
+            assert!(
+                (estimated - billed).abs() < 1e-6,
+                "model={} estimated=${:.4} billed=${:.4} delta=${:.4}",
+                model, estimated, billed, estimated - billed,
+            );
+        }
+    }
+
+    #[test]
     fn aggregate_task_sums_main_plus_subagents() {
         // We don't have subagent files on disk; test the per-session totals
         // path with main only.
@@ -888,7 +1002,7 @@ mod tests {
             serde_json::json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"x"}]}}),
             serde_json::json!({
                 "type":"assistant",
-                "message":{"model":"claude-opus-4-7","content":[{"type":"text","text":"y"}],
+                "message":{"model":"claude-opus-4-7","stop_reason":"end_turn","content":[{"type":"text","text":"y"}],
                     "usage":{"input_tokens":1,"output_tokens":1,"cache_creation_input_tokens":15000,"cache_read_input_tokens":0}}
             }),
         ];
