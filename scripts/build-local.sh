@@ -41,13 +41,17 @@ echo "==> Dev version: $DEV_VERSION"
 
 export OPENSSL_STATIC=1
 
-# Patch all Cargo.toml versions and restore on exit
+# Patch all Cargo.toml versions and restore on exit.
+# Cargo.lock is also backed up because `cargo build` rewrites it to match the
+# patched Cargo.toml versions; restoring only the toml files would leave the
+# lock pointing at the dev version.
 for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do
   cp "$toml" "${toml}.bak"
   sed -i.tmp "s/^version = \".*\"/version = \"${DEV_VERSION}\"/" "$toml"
   rm -f "${toml}.tmp"
 done
-trap 'for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do mv "${toml}.bak" "$toml"; done' EXIT
+cp Cargo.lock Cargo.lock.bak
+trap 'for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do mv "${toml}.bak" "$toml"; done; mv Cargo.lock.bak Cargo.lock' EXIT
 
 # Detect native target triple
 TARGET=$(rustc -vV | sed -n 's|host: ||p')
@@ -175,7 +179,7 @@ if [[ "$NOTARIZE" == true ]]; then
 
   echo "==> Preparing for notarization..."
   NOTARIZE_TMP=$(mktemp -d)
-  trap 'rm -rf "$NOTARIZE_TMP"; for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do mv "${toml}.bak" "$toml" 2>/dev/null || true; done' EXIT
+  trap 'rm -rf "$NOTARIZE_TMP"; for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do mv "${toml}.bak" "$toml" 2>/dev/null || true; done; mv Cargo.lock.bak Cargo.lock 2>/dev/null || true' EXIT
 
   echo "$APP_STORE_CONNECT_KEY" | base64 --decode > "$NOTARIZE_TMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
 
