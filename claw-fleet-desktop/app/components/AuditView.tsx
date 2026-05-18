@@ -14,16 +14,16 @@ import styles from "./AuditView.module.css";
 
 // ── Risk level helpers ──────────────────────────────────────────────────────
 
-const RISK_COLORS: Record<AuditRiskLevel, string> = {
-  critical: "#ef4444",
-  high: "#f97316",
-  medium: "#eab308",
-};
-
 const RISK_LABELS: Record<AuditRiskLevel, string> = {
   critical: "CRIT",
   high: "HIGH",
   medium: "MED",
+};
+
+const RISK_CLASS: Record<AuditRiskLevel, string> = {
+  critical: "risk_critical",
+  high: "risk_high",
+  medium: "risk_medium",
 };
 
 const CATEGORY_ORDER = [
@@ -52,10 +52,11 @@ export function AuditView() {
   const [tab, setTab] = useState<AuditTab>("events");
 
   return (
-    <div className={styles.container}>
-      {/* Header with tabs */}
-      <div className={styles.header} data-tauri-drag-region>
-        <h2 className={styles.title}>{t("audit.panel_title")}</h2>
+    <div className={styles.page}>
+      <header className={styles.header} data-tauri-drag-region>
+        <div className={styles.title_row}>
+          <h1 className={styles.title}>{t("audit.panel_title")}</h1>
+        </div>
         <div className={styles.tab_bar}>
           <button
             className={`${styles.tab_btn} ${tab === "events" ? styles.tab_active : ""}`}
@@ -70,13 +71,13 @@ export function AuditView() {
             {t("audit.tab_rules")}
           </button>
         </div>
-      </div>
+      </header>
       {tab === "events" ? <EventsTab /> : <RulesTab lang={i18n.language} />}
     </div>
   );
 }
 
-// ── Events Tab (original audit view) ────────────────────────────────────────
+// ── Events Tab ──────────────────────────────────────────────────────────────
 
 function EventsTab() {
   const { t } = useTranslation();
@@ -87,7 +88,8 @@ function EventsTab() {
   const { sessions } = useSessionsStore();
   const { open } = useDetailStore();
   const { setViewMode } = useUIStore();
-  const { isRead, markAsRead, getEventKey, setCriticalEvents } = useAuditStore();
+  const { isRead, markAsRead, getEventKey, setCriticalEvents, markAllCriticalAsRead, unreadCriticalCount } =
+    useAuditStore();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -105,15 +107,18 @@ function EventsTab() {
   useEffect(() => { load(); }, [load]);
 
   const filtered = summary?.events.filter(
-    (e) => filter === "all" || e.riskLevel === filter
+    (e) => filter === "all" || e.riskLevel === filter,
   ) ?? [];
 
-  const grouped = new Map<string, AuditEvent[]>();
-  for (const e of filtered) {
-    const key = e.sessionId;
-    if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(e);
-  }
+  const grouped = useMemo(() => {
+    const map = new Map<string, AuditEvent[]>();
+    for (const e of filtered) {
+      const key = e.sessionId;
+      if (!map.has(key)) map.set(key, []);
+      map.get(key)!.push(e);
+    }
+    return map;
+  }, [filtered]);
 
   const counts: Record<AuditRiskLevel, number> = { critical: 0, high: 0, medium: 0 };
   for (const e of summary?.events ?? []) {
@@ -131,26 +136,34 @@ function EventsTab() {
   return (
     <>
       {/* Filter bar */}
-      <div className={styles.filter_row}>
-        <div className={styles.filter_bar}>
-          {(["all", "critical", "high", "medium"] as const).map((level) => {
-            const count = level === "all"
-              ? (summary?.events.length ?? 0)
-              : counts[level];
-            return (
-              <button
-                key={level}
-                className={`${styles.filter_btn} ${filter === level ? styles.filter_active : ""}`}
-                onClick={() => setFilter(level)}
-                style={level !== "all" ? { color: RISK_COLORS[level] } : undefined}
-              >
-                {level === "all" ? t("audit.all") : RISK_LABELS[level]}
-                {count > 0 && ` (${count})`}
-              </button>
-            );
-          })}
-        </div>
-        <button className={styles.refresh_btn} onClick={load} title={t("audit.refresh")}>
+      <div className={styles.filter_bar}>
+        <FilterChip
+          label={t("audit.all")}
+          count={summary?.events.length ?? 0}
+          active={filter === "all"}
+          onClick={() => setFilter("all")}
+        />
+        {(["critical", "high", "medium"] as const).map((level) => (
+          <FilterChip
+            key={level}
+            label={RISK_LABELS[level]}
+            count={counts[level]}
+            active={filter === level}
+            tone={RISK_CLASS[level]}
+            onClick={() => setFilter(level)}
+          />
+        ))}
+        <div className={styles.filter_spacer} />
+        {unreadCriticalCount > 0 && (
+          <button
+            className={styles.action_btn}
+            onClick={markAllCriticalAsRead}
+            title={t("audit.mark_all_read")}
+          >
+            ✓ {t("audit.mark_all_read")}
+          </button>
+        )}
+        <button className={styles.icon_btn} onClick={load} title={t("audit.refresh")}>
           ↻
         </button>
         {summary && (
@@ -160,48 +173,84 @@ function EventsTab() {
         )}
       </div>
 
-      {/* Body: event list + detail panel */}
+      {/* Body: list + detail */}
       <div className={styles.body}>
-        <div className={styles.event_list}>
+        <aside className={styles.list_pane}>
           {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
           {!loading && filtered.length === 0 && <p className={styles.empty}>{t("audit.no_events")}</p>}
           {!loading && Array.from(grouped.entries()).map(([sessionId, events]) => (
-            <div key={sessionId} className={styles.session_group}>
-              <div className={styles.session_header} onClick={() => navigateToSession(events[0].jsonlPath)}>
-                <span className={styles.session_name}>{events[0].workspaceName}</span>
-                <span className={styles.session_source}>{events[0].agentSource}</span>
-                <span className={styles.session_count}>{events.length}</span>
+            <div key={sessionId} className={styles.workspace_group}>
+              <button
+                className={styles.workspace_header}
+                onClick={() => navigateToSession(events[0].jsonlPath)}
+                title={t("audit.go_to_session")}
+              >
+                <span className={styles.workspace_name}>{events[0].workspaceName}</span>
+                <span className={styles.workspace_source}>{events[0].agentSource}</span>
+                <span className={styles.workspace_count}>{events.length}</span>
+              </button>
+              <div className={styles.card_list}>
+                {events.map((event, i) => {
+                  const read = event.riskLevel === "critical" && isRead(event);
+                  const active = selectedEvent === event;
+                  return (
+                    <button
+                      key={`${sessionId}-${i}`}
+                      className={`${styles.card} ${active ? styles.card_active : ""} ${read ? styles.card_read : ""}`}
+                      onClick={() => setSelectedEvent(event)}
+                    >
+                      <span className={`${styles.risk_badge} ${styles[RISK_CLASS[event.riskLevel]]}`}>
+                        {RISK_LABELS[event.riskLevel]}
+                      </span>
+                      <div className={styles.card_body}>
+                        <div className={styles.card_title}>{event.commandSummary}</div>
+                        <div className={styles.card_meta}>
+                          {event.timestamp && <span>{formatTime(event.timestamp)}</span>}
+                          {event.riskTags.length > 0 && (
+                            <>
+                              <span className={styles.meta_dot}>·</span>
+                              <span className={styles.card_tags_inline}>{event.riskTags.join(" · ")}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      {event.riskLevel === "critical" && !read && (
+                        <span
+                          role="button"
+                          tabIndex={0}
+                          className={styles.read_btn}
+                          title={t("audit.mark_read")}
+                          onClick={(e) => { e.stopPropagation(); markAsRead(getEventKey(event)); }}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              markAsRead(getEventKey(event));
+                            }
+                          }}
+                        >
+                          ✓
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
-              {events.map((event, i) => {
-                const read = event.riskLevel === "critical" && isRead(event);
-                return (
-                  <div
-                    key={`${sessionId}-${i}`}
-                    className={`${styles.event_row} ${selectedEvent === event ? styles.event_row_selected : ""} ${read ? styles.event_row_read : ""}`}
-                    onClick={() => setSelectedEvent(event)}
-                  >
-                    <span className={styles.risk_badge} style={{ color: RISK_COLORS[event.riskLevel] }}>
-                      {RISK_LABELS[event.riskLevel]}
-                    </span>
-                    <span className={styles.event_command}>{event.commandSummary}</span>
-                    {event.riskLevel === "critical" && !read && (
-                      <button className={styles.read_btn} title={t("audit.mark_read")} onClick={(e) => { e.stopPropagation(); markAsRead(getEventKey(event)); }}>✓</button>
-                    )}
-                    {event.timestamp && <span className={styles.event_time}>{formatTime(event.timestamp)}</span>}
-                  </div>
-                );
-              })}
             </div>
           ))}
-        </div>
+        </aside>
 
         {selectedEvent && (
-          <div className={styles.detail_panel}>
+          <main className={styles.detail_pane}>
             <div className={styles.detail_header}>
-              <span className={styles.risk_badge} style={{ color: RISK_COLORS[selectedEvent.riskLevel] }}>
-                {RISK_LABELS[selectedEvent.riskLevel]}
-              </span>
-              <span className={styles.detail_title}>{selectedEvent.toolName}</span>
+              <div className={styles.detail_title}>
+                <span className={`${styles.risk_badge} ${styles[RISK_CLASS[selectedEvent.riskLevel]]}`}>
+                  {RISK_LABELS[selectedEvent.riskLevel]}
+                </span>
+                <span className={styles.detail_workspace}>{selectedEvent.workspaceName}</span>
+                <span className={styles.detail_sep}>/</span>
+                <span className={styles.detail_name}>{selectedEvent.toolName}</span>
+              </div>
               <button className={styles.detail_close} onClick={() => setSelectedEvent(null)}>✕</button>
             </div>
             <div className={styles.detail_body}>
@@ -231,7 +280,7 @@ function EventsTab() {
                 </button>
               </div>
             </div>
-          </div>
+          </main>
         )}
       </div>
     </>
@@ -281,12 +330,10 @@ function RulesTab({ lang }: { lang: string }) {
       if (!map.has(cat)) map.set(cat, []);
       map.get(cat)!.push(r);
     }
-    // Sort by predefined order
     const sorted = new Map<string, AuditRuleInfo[]>();
     for (const cat of CATEGORY_ORDER) {
       if (map.has(cat)) sorted.set(cat, map.get(cat)!);
     }
-    // Append any unknown categories
     for (const [cat, rules] of map) {
       if (!sorted.has(cat)) sorted.set(cat, rules);
     }
@@ -337,76 +384,82 @@ function RulesTab({ lang }: { lang: string }) {
   return (
     <>
       {/* Action bar */}
-      <div className={styles.filter_row}>
-        <button className={styles.new_rule_btn} onClick={() => setShowSuggest(true)}>
+      <div className={styles.filter_bar}>
+        <button className={styles.primary_btn} onClick={() => setShowSuggest(true)}>
           + {t("audit.new_rule")}
         </button>
         <input
           type="text"
-          className={styles.rule_search_input}
+          className={styles.search_input}
           placeholder={t("audit.rule_search_placeholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <div className={styles.filter_spacer} />
         <span className={styles.scan_info}>
           {query.trim() ? `${filteredRules.length} / ${rules.length}` : rules.length} {t("audit.tab_rules").toLowerCase()}
         </span>
       </div>
 
       <div className={styles.body}>
-        {/* Left: rule list grouped by category */}
-        <div className={styles.event_list}>
+        <aside className={styles.list_pane}>
           {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
           {!loading && rules.length === 0 && <p className={styles.empty}>{t("audit.no_rules")}</p>}
           {!loading && rules.length > 0 && filteredRules.length === 0 && (
             <p className={styles.empty}>{t("audit.no_matching_rules")}</p>
           )}
           {!loading && Array.from(grouped.entries()).map(([cat, catRules]) => (
-            <div key={cat} className={styles.session_group}>
-              <div className={styles.category_header}>
-                <span className={styles.session_name}>{catLabel(cat)}</span>
-                <span className={styles.session_count}>{catRules.length}</span>
+            <div key={cat} className={styles.workspace_group}>
+              <div className={styles.workspace_header_static}>
+                <span className={styles.workspace_name}>{catLabel(cat)}</span>
+                <span className={styles.workspace_count}>{catRules.length}</span>
               </div>
-              {catRules.map((rule) => (
-                <div
-                  key={rule.id}
-                  className={`${styles.event_row} ${styles.rule_row_stacked} ${selectedRule?.id === rule.id ? styles.event_row_selected : ""} ${!rule.enabled ? styles.event_row_read : ""}`}
-                  onClick={() => setSelectedRule(rule)}
-                >
-                  <div className={styles.rule_row_top}>
-                    <span className={styles.risk_badge} style={{ color: RISK_COLORS[rule.level] }}>
-                      {RISK_LABELS[rule.level]}
-                    </span>
-                    <span className={styles.event_command}>{rule.tag}</span>
-                    {!rule.builtin && <span className={styles.custom_badge}>{t("audit.rule_custom")}</span>}
-                    <label className={styles.toggle} onClick={(e) => e.stopPropagation()}>
-                      <input type="checkbox" checked={rule.enabled} onChange={() => handleToggle(rule)} />
-                      <span className={styles.toggle_slider} />
-                    </label>
-                  </div>
-                  <div className={styles.rule_row_sub}>
-                    <span className={styles.rule_desc_inline}>{desc(rule)}</span>
-                    {rule.patterns[0] && (
-                      <code className={styles.rule_pattern_preview} title={rule.patterns.join("\n")}>
-                        {rule.patterns[0]}
-                        {rule.patterns.length > 1 ? ` +${rule.patterns.length - 1}` : ""}
-                      </code>
-                    )}
-                  </div>
-                </div>
-              ))}
+              <div className={styles.card_list}>
+                {catRules.map((rule) => {
+                  const active = selectedRule?.id === rule.id;
+                  return (
+                    <button
+                      key={rule.id}
+                      className={`${styles.card} ${active ? styles.card_active : ""} ${!rule.enabled ? styles.card_read : ""}`}
+                      onClick={() => setSelectedRule(rule)}
+                    >
+                      <span className={`${styles.risk_badge} ${styles[RISK_CLASS[rule.level]]}`}>
+                        {RISK_LABELS[rule.level]}
+                      </span>
+                      <div className={styles.card_body}>
+                        <div className={styles.card_title_row}>
+                          <span className={styles.card_title}>{rule.tag}</span>
+                          {!rule.builtin && <span className={styles.custom_badge}>{t("audit.rule_custom")}</span>}
+                        </div>
+                        <div className={styles.card_hook}>{desc(rule)}</div>
+                        {rule.patterns[0] && (
+                          <code className={styles.rule_pattern_preview} title={rule.patterns.join("\n")}>
+                            {rule.patterns[0]}
+                            {rule.patterns.length > 1 ? ` +${rule.patterns.length - 1}` : ""}
+                          </code>
+                        )}
+                      </div>
+                      <label className={styles.toggle} onClick={(e) => e.stopPropagation()}>
+                        <input type="checkbox" checked={rule.enabled} onChange={() => handleToggle(rule)} />
+                        <span className={styles.toggle_slider} />
+                      </label>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           ))}
-        </div>
+        </aside>
 
-        {/* Right: rule detail */}
         {selectedRule && (
-          <div className={styles.detail_panel}>
+          <main className={styles.detail_pane}>
             <div className={styles.detail_header}>
-              <span className={styles.risk_badge} style={{ color: RISK_COLORS[selectedRule.level] }}>
-                {RISK_LABELS[selectedRule.level]}
-              </span>
-              <span className={styles.detail_title}>{selectedRule.tag}</span>
+              <div className={styles.detail_title}>
+                <span className={`${styles.risk_badge} ${styles[RISK_CLASS[selectedRule.level]]}`}>
+                  {RISK_LABELS[selectedRule.level]}
+                </span>
+                <span className={styles.detail_name}>{selectedRule.tag}</span>
+              </div>
               <button className={styles.detail_close} onClick={() => setSelectedRule(null)}>✕</button>
             </div>
             <div className={styles.detail_body}>
@@ -439,7 +492,7 @@ function RulesTab({ lang }: { lang: string }) {
                 )}
               </div>
             </div>
-          </div>
+          </main>
         )}
       </div>
 
@@ -502,7 +555,7 @@ function GuardAllowRulesSection() {
       >
         <span className={styles.allow_rules_chevron}>{expanded ? "▾" : "▸"}</span>
         <span className={styles.allow_rules_title}>{t("guard.allow_rules_title")}</span>
-        <span className={styles.session_count}>{rules.length}</span>
+        <span className={styles.workspace_count}>{rules.length}</span>
       </button>
 
       {expanded && (
@@ -636,7 +689,7 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
           rows={3}
         />
         <button
-          className={styles.suggest_generate_btn}
+          className={styles.primary_btn}
           onClick={handleGenerate}
           disabled={loading || !concern.trim()}
         >
@@ -656,7 +709,7 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
             <div key={s.id} className={`${styles.suggest_card} ${selected.has(s.id) ? styles.suggest_card_selected : ""}`} onClick={() => toggleSelect(s.id)}>
               <div className={styles.suggest_card_header}>
                 <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggleSelect(s.id)} onClick={(e) => e.stopPropagation()} />
-                <span className={styles.risk_badge} style={{ color: RISK_COLORS[s.level] }}>
+                <span className={`${styles.risk_badge} ${styles[RISK_CLASS[s.level]]}`}>
                   {RISK_LABELS[s.level]}
                 </span>
                 <span className={styles.suggest_tag}>{s.tag}</span>
@@ -673,7 +726,7 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
           ))}
 
           <button
-            className={styles.suggest_add_btn}
+            className={styles.primary_btn}
             disabled={selected.size === 0 || added}
             onClick={handleAddSelected}
           >
@@ -682,6 +735,32 @@ function SuggestView({ lang, onClose }: { lang: string; onClose: () => void }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── Filter chip ──────────────────────────────────────────────────────────────
+
+function FilterChip({
+  label,
+  count,
+  active,
+  tone,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  tone?: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={`${styles.chip} ${active ? styles.chip_active : ""} ${tone ? styles[tone] ?? "" : ""}`}
+      onClick={onClick}
+    >
+      <span className={styles.chip_label}>{label}</span>
+      <span className={styles.chip_count}>{count}</span>
+    </button>
   );
 }
 

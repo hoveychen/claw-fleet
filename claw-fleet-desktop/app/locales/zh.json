@@ -308,6 +308,7 @@
     "full_command": "完整命令",
     "go_to_session": "跳转到会话",
     "mark_read": "标记已读",
+    "mark_all_read": "全部标记已读",
     "tab_events": "事件",
     "tab_rules": "规则",
     "rules_title": "审计规则",

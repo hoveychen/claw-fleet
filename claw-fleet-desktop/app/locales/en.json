@@ -311,6 +311,7 @@
     "full_command": "Full Command",
     "go_to_session": "Go to Session",
     "mark_read": "Mark as Read",
+    "mark_all_read": "Mark all read",
     "tab_events": "Events",
     "tab_rules": "Rules",
     "rules_title": "Audit Rules",
