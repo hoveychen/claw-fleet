@@ -367,7 +367,14 @@
     "promote": "Move to CLAUDE.md",
     "promoting": "Moving\u2026",
     "promote_project": "Project CLAUDE.md",
-    "promote_global": "Global CLAUDE.md (~/.claude)"
+    "promote_global": "Global CLAUDE.md (~/.claude)",
+    "search_placeholder": "Search memories\u2026",
+    "filter_all": "All",
+    "filter_user": "User",
+    "filter_feedback": "Feedback",
+    "filter_project": "Project",
+    "filter_reference": "Reference",
+    "unindexed_section": "Unindexed"
   },
   "live": {
     "section_title": "Live"
