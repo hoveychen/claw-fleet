@@ -1450,6 +1450,7 @@
   },
   "view_report": "日报",
   "report": {
+    "panel_title": "日报",
     "loading": "加载报告中...",
     "no_report": "该日期没有报告。",
     "generate": "生成报告",

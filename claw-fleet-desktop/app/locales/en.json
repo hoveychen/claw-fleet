@@ -1453,6 +1453,7 @@
   },
   "view_report": "Report",
   "report": {
+    "panel_title": "Daily Report",
     "loading": "Loading report...",
     "no_report": "No report for this date.",
     "generate": "Generate Report",
