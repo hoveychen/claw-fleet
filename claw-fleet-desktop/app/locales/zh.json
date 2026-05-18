@@ -409,7 +409,7 @@
     "tab_messages": "对话",
     "tab_tokens": "Token"
   },
-  "tokens": {
+  "token_spend": {
     "loading": "正在分析 token 花销…",
     "no_data": "无数据",
     "kpi_total_billed": "叫费 token 总量",
