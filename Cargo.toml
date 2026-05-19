@@ -1,5 +1,5 @@
 [workspace]
-members = ["claw-fleet-core", "claw-fleet-desktop", "fleet-cli"]
+members = ["claw-fleet-core", "claw-fleet-desktop", "claw-fleet-task", "fleet-cli"]
 resolver = "2"
 
 [profile.release]

@@ -11,7 +11,7 @@
 
 use std::path::PathBuf;
 
-use crate::session::get_fleet_dir;
+use crate::paths::get_fleet_dir;
 use crate::task::ProjectId;
 
 /// `~/.fleet/projects/<project_id>/architecture.md` if it exists, else None.
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn load_returns_none_when_file_absent() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(tmp.path());
         let result = load_for_project(&"unknown".to_string()).unwrap();
@@ -103,7 +103,7 @@ mod tests {
 
     #[test]
     fn load_reads_existing_file() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(tmp.path());
         let proj = "proj-123".to_string();
@@ -116,7 +116,7 @@ mod tests {
 
     #[test]
     fn load_treats_empty_file_as_none() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(tmp.path());
         let proj = "empty".to_string();
@@ -128,7 +128,7 @@ mod tests {
 
     #[test]
     fn render_layer1_block_includes_arch_when_present() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(tmp.path());
         let proj = "demo".to_string();
@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn render_layer1_block_falls_back_when_missing() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(tmp.path());
         let rendered = render_layer1_block(&"missing".to_string());

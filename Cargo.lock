@@ -848,6 +848,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
+ "claw-fleet-task",
  "conch-parser",
  "dirs 5.0.1",
  "futures",
@@ -899,6 +900,20 @@ dependencies = [
  "tauri-plugin-store",
  "tiny_http",
  "tokio",
+]
+
+[[package]]
+name = "claw-fleet-task"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "dirs 5.0.1",
+ "git2",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "uuid",
 ]
 
 [[package]]

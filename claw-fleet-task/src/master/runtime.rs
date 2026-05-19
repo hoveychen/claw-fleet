@@ -1,6 +1,6 @@
 //! Master spawn-spec builder. Pure data — the actual subprocess
 //! lifecycle (Claude Code spawn, SIGSTOP, destroy) lives in
-//! `crate::supervisor` / `claw-fleet-desktop::local_backend`.
+//! `claw_fleet_core::supervisor` / `claw-fleet-desktop::local_backend`.
 //!
 //! Why pure: the spawn spec is testable from any thread without root or
 //! Claude CLI installed, and the supervisor can mock different specs in
@@ -11,17 +11,17 @@
 //! - **Model**: `claude-sonnet-4-6` (PRD §5.7 — Sonnet 4.6 by default; user
 //!   can override via Fleet's existing model-selection settings later).
 //! - **cwd**: the project workspace root on the task's `fleet/<slug>` branch
-//!   (PRD §5.7 — "Master cwd = task 主 branch working tree").
+//!   (PRD §5.7 — "Master cwd = task 主 branch working tree"). The caller
+//!   supplies this path explicitly — this crate has no knowledge of Project.
 //! - **SYSTEM prompt**: rendered by `system_template::compose_system_prompt`.
 
 use std::path::PathBuf;
 
 use crate::master::system_template::compose_system_prompt;
-use crate::project::list_projects;
-use crate::task::{get_task, Task, TaskId};
+use crate::task::{Task, TaskId};
 
 /// Everything a caller needs to actually launch a master session. Returned
-/// by `spawn_spec_for_task` and consumed by the supervisor's spawn layer.
+/// by `spawn_spec_from_task` and consumed by the supervisor's spawn layer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MasterSpawnSpec {
     pub task_id: TaskId,
@@ -38,33 +38,21 @@ pub struct MasterSpawnSpec {
 /// hunt through code paths.
 pub const MASTER_MODEL: &str = "claude-sonnet-4-6";
 
-/// Build a `MasterSpawnSpec` for `task_id`. Errors when:
-/// - the task doesn't exist on disk
-/// - the task has no project_id reachable (orphaned)
-/// - the project has no `workspace` path on disk
-pub fn spawn_spec_for_task(task_id: &str) -> Result<MasterSpawnSpec, String> {
-    let task = get_task(task_id)?;
-    spawn_spec_from_task(&task)
-}
-
-/// Same as `spawn_spec_for_task` but for callers that already loaded the
-/// `Task` (e.g. supervisor reads it while transitioning to Running).
-pub fn spawn_spec_from_task(task: &Task) -> Result<MasterSpawnSpec, String> {
-    let project = list_projects()
-        .into_iter()
-        .find(|p| p.id == task.project_id)
-        .ok_or_else(|| format!("project {} not found for task {}", task.project_id, task.id))?;
-    let cwd = PathBuf::from(&project.workspace);
-    if !cwd.is_dir() {
+/// Build a `MasterSpawnSpec` for a loaded `Task`, given the project's
+/// workspace path (the caller resolves Project → workspace, since this
+/// crate doesn't know about Project). Errors when:
+/// - the workspace path is missing or not a directory
+pub fn spawn_spec_from_task(task: &Task, workspace: PathBuf) -> Result<MasterSpawnSpec, String> {
+    if !workspace.is_dir() {
         return Err(format!(
             "project workspace does not exist or is not a directory: {}",
-            cwd.display()
+            workspace.display()
         ));
     }
     let system_prompt = compose_system_prompt(task);
     Ok(MasterSpawnSpec {
         task_id: task.id.clone(),
-        cwd,
+        cwd: workspace,
         system_prompt,
         model: MASTER_MODEL,
     })
@@ -76,9 +64,7 @@ mod tests {
     use crate::pitem::PItem;
     use crate::pitem::PItemStatus;
     use crate::plan::DagPlan;
-    use crate::project::{create_project, ProjectInput};
-    use crate::task::{create_task, MediaKind, Task, TaskInput, TaskStatus};
-    use std::fs;
+    use crate::task::{create_task, MediaKind, TaskInput, TaskStatus};
     use tempfile::TempDir;
 
     struct FleetHomeOverride {
@@ -106,26 +92,19 @@ mod tests {
 
     #[test]
     fn spawn_spec_carries_task_cwd_and_filled_prompt() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let home = TempDir::new().unwrap();
         let ws = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(home.path());
 
-        let proj = create_project(ProjectInput {
-            name: "demo".into(),
-            workspace: ws.path().to_string_lossy().to_string(),
-            concurrency: Some(1),
-            manual_review_all: None,
-        })
-        .unwrap();
         let task = create_task(TaskInput {
-            project_id: proj.id.clone(),
+            project_id: "demo".into(),
             title: "demo".into(),
             description: "do it".into(),
         })
         .unwrap();
 
-        let spec = spawn_spec_for_task(&task.id).unwrap();
+        let spec = spawn_spec_from_task(&task, ws.path().to_path_buf()).unwrap();
         assert_eq!(spec.task_id, task.id);
         assert_eq!(spec.cwd, ws.path());
         assert_eq!(spec.model, MASTER_MODEL);
@@ -135,81 +114,36 @@ mod tests {
     }
 
     #[test]
-    fn spawn_spec_errors_when_project_workspace_missing() {
-        let _g = crate::session::fleet_home_lock();
+    fn spawn_spec_errors_when_workspace_missing() {
+        let _g = crate::paths::fleet_home_lock();
         let home = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(home.path());
 
-        // Project workspace points at a nonexistent absolute path.
-        // Use TempDir then drop it so the path is absolute on both Unix and
-        // Windows but guaranteed not to exist by the time we spawn.
+        // Workspace points at an absolute path guaranteed not to exist.
         let ghost_path = {
             let td = TempDir::new().unwrap();
             td.path().to_path_buf()
         };
-        let proj = create_project(ProjectInput {
-            name: "ghost".into(),
-            workspace: ghost_path.to_string_lossy().into_owned(),
-            concurrency: Some(1),
-            manual_review_all: None,
-        })
-        .unwrap();
         let task = create_task(TaskInput {
-            project_id: proj.id,
+            project_id: "ghost".into(),
             title: "x".into(),
             description: String::new(),
         })
         .unwrap();
 
-        let err = spawn_spec_for_task(&task.id).unwrap_err();
+        let err = spawn_spec_from_task(&task, ghost_path).unwrap_err();
         assert!(err.contains("workspace does not exist"));
     }
 
     #[test]
-    fn spawn_spec_errors_when_project_orphaned() {
-        let _g = crate::session::fleet_home_lock();
-        let home = TempDir::new().unwrap();
-        let _override = FleetHomeOverride::new(home.path());
-
-        // Hand-roll a task json that points at a project id no one created.
-        let task = Task {
-            id: "orphan".into(),
-            project_id: "nope".into(),
-            title: "x".into(),
-            description: String::new(),
-            inbox_materials: vec![],
-            plan: DagPlan::default(),
-            status: TaskStatus::Drafting,
-            created_at: 0,
-            started_at: None,
-            completed_at: None,
-            task_branch: None,
-            master_session_id: None,
-            title_auto: false,
-        };
-        let path = crate::task::task_json_path(&task.id).unwrap();
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, serde_json::to_string(&task).unwrap()).unwrap();
-
-        let err = spawn_spec_for_task(&task.id).unwrap_err();
-        assert!(err.contains("project nope not found"));
-    }
-
-    #[test]
     fn spawn_spec_includes_plan_for_running_task() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let home = TempDir::new().unwrap();
         let ws = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(home.path());
-        let proj = create_project(ProjectInput {
-            name: "demo".into(),
-            workspace: ws.path().to_string_lossy().to_string(),
-            concurrency: Some(1),
-            manual_review_all: None,
-        })
-        .unwrap();
+
         let mut task = create_task(TaskInput {
-            project_id: proj.id,
+            project_id: "demo".into(),
             title: "t".into(),
             description: String::new(),
         })
@@ -232,11 +166,9 @@ mod tests {
             output_summary: None,
         }]);
         crate::task::update_plan(&task.id, task.plan.clone()).unwrap();
-        // Suppress unused-var warning for materials placeholder. MediaKind
-        // is referenced so we keep its import meaningful.
-        let _ = MediaKind::Document;
+        let _ = (MediaKind::Document, TaskStatus::Drafting);
 
-        let spec = spawn_spec_for_task(&task.id).unwrap();
+        let spec = spawn_spec_from_task(&task, ws.path().to_path_buf()).unwrap();
         assert!(spec.system_prompt.contains("feat-x"));
         assert!(spec.system_prompt.contains("total=1"));
     }
