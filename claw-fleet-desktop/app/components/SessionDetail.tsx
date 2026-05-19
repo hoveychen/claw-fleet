@@ -187,6 +187,65 @@ export function SessionDetail({
     return () => el.removeEventListener("scroll", checkFollow);
   }, [checkFollow, session, viewTab]);
 
+  // Auto-scroll bookkeeping for the messages tab.
+  const initialScrollDoneRef = useRef(false);
+  const firstMessageKeyRef = useRef<string | null>(null);
+  const lastMessageKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    initialScrollDoneRef.current = false;
+    firstMessageKeyRef.current = null;
+    lastMessageKeyRef.current = null;
+  }, [liveSession?.id, viewTab]);
+
+  // First mount with content: jump to bottom and sync isFollowing with reality
+  // (the initial `true` default is wrong when the freshly mounted scroll area
+  // already overflows but no user-scroll has fired yet).
+  useEffect(() => {
+    if (viewTab !== "messages") return;
+    if (initialScrollDoneRef.current) return;
+    if (messages.length === 0) return;
+    if (!scrollRef.current) return;
+    const id = requestAnimationFrame(() => {
+      const e = scrollRef.current;
+      if (!e) return;
+      e.scrollTop = e.scrollHeight;
+      initialScrollDoneRef.current = true;
+      checkFollow();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [viewTab, messages.length, checkFollow]);
+
+  // Live tail: on new trailing messages (not load-earlier), follow if user is
+  // already at the bottom. Skip when the first message changed — that means
+  // load-earlier prepended history and we must preserve the read position.
+  useEffect(() => {
+    if (viewTab !== "messages") return;
+    if (!initialScrollDoneRef.current) return;
+    if (messages.length === 0) {
+      firstMessageKeyRef.current = null;
+      lastMessageKeyRef.current = null;
+      return;
+    }
+    const firstKey = messages[0]?.uuid ?? messages[0]?.timestamp ?? null;
+    const last = messages[messages.length - 1];
+    const lastKey = last?.uuid ?? last?.timestamp ?? null;
+    const prevFirst = firstMessageKeyRef.current;
+    const prevLast = lastMessageKeyRef.current;
+    firstMessageKeyRef.current = firstKey;
+    lastMessageKeyRef.current = lastKey;
+    if (firstKey !== prevFirst) return;
+    if (lastKey === prevLast) return;
+    if (!isFollowing) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    requestAnimationFrame(() => {
+      const e = scrollRef.current;
+      if (!e) return;
+      e.scrollTop = e.scrollHeight;
+    });
+  }, [messages, viewTab, isFollowing]);
+
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
