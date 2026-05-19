@@ -8,3 +8,4 @@ pub mod master;
 pub mod architecture_overview;
 pub mod worker;
 pub mod runner;
+pub mod actions;
