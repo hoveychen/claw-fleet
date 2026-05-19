@@ -12,9 +12,42 @@ concurrency:
 
 jobs:
   # ═══════════════════════════════════════════════════════════════════════════
-  # Step 1 — Test + build fleet-cli for all platforms
+  # Non-tag push / PR — quick single-platform test only. Saves Actions usage by
+  # skipping the multi-platform CLI + desktop bundles below until a release tag.
+  # ═══════════════════════════════════════════════════════════════════════════
+  test:
+    if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+    name: Test (Linux x64)
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run unit tests
+        run: cargo test --release -p fleet-cli -p claw-fleet-core
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Tag push only — Step 1: test + build fleet-cli for all platforms
   # ═══════════════════════════════════════════════════════════════════════════
   cli-build:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     name: CLI — ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -131,10 +164,11 @@ jobs:
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Step 2 — Build desktop apps (unsigned). Tag-time signing happens in
-  # release.yml, which downloads these artifacts.
+  # Tag push only — Step 2: Build desktop apps (unsigned). Tag-time signing
+  # happens in release.yml, which downloads these artifacts.
   # ═══════════════════════════════════════════════════════════════════════════
   desktop-build:
+    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     needs: cli-build
     name: Desktop — ${{ matrix.name }}
     strategy:
