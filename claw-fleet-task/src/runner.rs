@@ -33,6 +33,29 @@ pub trait TaskLifecycleHost {
     fn terminate_task_sessions(&self, task_id: &str) -> Result<usize, String>;
 }
 
+/// LLM-driven merge conflict mediation. Implemented in claw-fleet-core by
+/// `SupervisorHost` (delegating to `merge_mediator::mediate`); fleet-task's
+/// `LocalHost` ships a stub for Phase 2 — wiring it to a real provider is
+/// Phase 3 work.
+pub trait LlmMediator {
+    fn resolve_conflicts(
+        &self,
+        files: &[crate::worktree::ConflictSpec],
+    ) -> Result<Vec<Resolution>, String>;
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Resolution {
+    pub path: std::path::PathBuf,
+    pub resolved_content: String,
+}
+
+/// Combined host trait used by the business `actions::*` functions. A blanket
+/// impl makes any `TaskLifecycleHost + LlmMediator` automatically a `TaskHost`,
+/// so callers don't need to implement an extra trait.
+pub trait TaskHost: TaskLifecycleHost + LlmMediator {}
+impl<T: TaskLifecycleHost + LlmMediator + ?Sized> TaskHost for T {}
+
 /// Outcome of a single `TaskRunner::step` call.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunnerStep {
