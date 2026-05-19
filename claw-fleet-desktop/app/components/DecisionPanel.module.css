@@ -94,10 +94,17 @@
 .main_column {
   display: flex;
   flex-direction: column;
-  flex: 1 1 460px;
-  min-width: 380px;
   min-height: 0;
   overflow: hidden;
+}
+
+/* In row-flex (with-detail) mode, give main_column a width basis so the two
+ * columns divide the panel width predictably. In the default column-flex
+ * panel, this same basis would clamp the panel's HEIGHT to 460px and stop
+ * it from sizing to content — which is why it's scoped to the row variant. */
+.panel_with_detail .main_column {
+  flex: 1 1 460px;
+  min-width: 380px;
 }
 
 /* Peek variant: user is holding Option/Alt to look at content behind the panel.
