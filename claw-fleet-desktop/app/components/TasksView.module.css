@@ -48,8 +48,8 @@
 .btn_primary {
   padding: 6px 14px;
   border-radius: 6px;
-  border: 1px solid var(--color-accent, #3182ce);
-  background: var(--color-accent, #3182ce);
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent);
   color: #fff;
   font-size: 12px;
   cursor: pointer;
@@ -322,7 +322,7 @@
 }
 
 .column_active {
-  border-color: var(--color-accent, #3182ce);
+  border-color: var(--color-accent);
 }
 
 .column_header {
@@ -407,7 +407,7 @@
 }
 
 .card_running {
-  border-color: var(--color-accent, #3182ce);
+  border-color: var(--color-accent);
 }
 
 .card_done {
@@ -461,9 +461,9 @@
 }
 
 .status_running {
-  background: rgba(49, 130, 206, 0.15);
-  border-color: #3182ce;
-  color: #3182ce;
+  background: rgba(var(--color-accent-rgb), 0.15);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .status_paused {

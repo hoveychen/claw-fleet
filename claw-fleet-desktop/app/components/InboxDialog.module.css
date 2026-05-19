@@ -71,8 +71,8 @@
 }
 
 .materials_drop_active {
-  border-color: var(--color-accent, #3182ce);
-  background: rgba(49, 130, 206, 0.06);
+  border-color: var(--color-accent);
+  background: rgba(var(--color-accent-rgb), 0.06);
 }
 
 .materials_hint {
@@ -210,9 +210,9 @@
 }
 
 .btn_primary {
-  background: var(--color-accent, #3182ce);
+  background: var(--color-accent);
   color: #fff;
-  border-color: var(--color-accent, #3182ce);
+  border-color: var(--color-accent);
 }
 
 .btn_primary:hover:not(:disabled) {

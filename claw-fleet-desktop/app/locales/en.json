@@ -1285,6 +1285,8 @@
     "user_title_placeholder": "Boss",
     "mascot_visible": "Show mascot",
     "mascot_visible_desc": "Display the kawaii sidebar mascot. Off by default — flip on to bring it out.",
+    "floating_decision_panel": "Always use the standalone decision window",
+    "floating_decision_panel_desc": "When on, pending decisions always pop in a separate float window; the in-app DecisionPanel is hidden.",
     "personalized_mascot": "Personalized assistant",
     "personalized_mascot_desc": "Use AI to generate context-aware quips based on your current tasks (uses Claude Haiku)",
     "tts": "Alert Sound",
