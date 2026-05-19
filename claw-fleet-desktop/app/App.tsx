@@ -39,10 +39,12 @@ function App() {
   useDecisionEvents();
   useDecisionPeerSync();
 
-  // Bridge: when the main window is minimized and there are pending decisions,
-  // pop a floating decision window on the cursor's monitor bottom-center.
+  // Bridge: pop the floating decision window when the user can't see the in-app
+  // DecisionPanel — either because the main window is minimized, or because the
+  // user toggled "always use the standalone window" in Settings.
   const [mainMinimized, setMainMinimized] = useState(false);
   const decisions = useDecisionStore((s) => s.decisions);
+  const floatingDecisionPanel = useUIStore((s) => s.floatingDecisionPanel);
   const prevShouldShow = useRef(false);
 
   useEffect(() => {
@@ -59,14 +61,15 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const shouldShow = mainMinimized && decisions.length > 0;
+    const shouldShow =
+      (mainMinimized || floatingDecisionPanel) && decisions.length > 0;
     if (shouldShow && !prevShouldShow.current) {
       invoke("show_decision_float", { snapshot: decisions }).catch(() => {});
     } else if (!shouldShow && prevShouldShow.current) {
       invoke("hide_decision_float").catch(() => {});
     }
     prevShouldShow.current = shouldShow;
-  }, [mainMinimized, decisions]);
+  }, [mainMinimized, floatingDecisionPanel, decisions]);
 
   const [isMacOS, setIsMacOS] = useState(false);
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
@@ -116,10 +119,19 @@ function App() {
         useUIStore.setState({ mascotVisible: e.payload });
       }
     });
+    const unFloatingDecisionPromise = listen<boolean>(
+      "overlay-floating-decision-panel-changed",
+      (e) => {
+        if (useUIStore.getState().floatingDecisionPanel !== e.payload) {
+          useUIStore.setState({ floatingDecisionPanel: e.payload });
+        }
+      },
+    );
     return () => {
       unThemePromise.then((fn) => fn());
       unLangPromise.then((fn) => fn());
       unMascotPromise.then((fn) => fn());
+      unFloatingDecisionPromise.then((fn) => fn());
     };
   }, []);
 
@@ -276,7 +288,7 @@ function App() {
         <SessionList />
         <SessionDetail />
       </div>
-      <DecisionPanel />
+      {!floatingDecisionPanel && <DecisionPanel />}
       <WaitingAlerts />
       <UpdateNotice />
     </div>

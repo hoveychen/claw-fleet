@@ -2004,11 +2004,20 @@ const DECISION_FLOAT_LABEL: &str = "decision-float";
 const DECISION_FLOAT_W: f64 = 480.0;
 const DECISION_FLOAT_H: f64 = 380.0;
 const DECISION_FLOAT_BOTTOM_MARGIN: f64 = 64.0;
+const DECISION_FLOAT_MIN_W: f64 = 360.0;
+const DECISION_FLOAT_MIN_H: f64 = 200.0;
+const DECISION_FLOAT_MAX_H_RATIO: f64 = 0.7;
+const DECISION_FLOAT_MAX_W_RATIO: f64 = 0.9;
 
-/// Logical top-left of the decision float window placed at the bottom-center
-/// of whichever monitor currently contains the cursor. Falls back to the
-/// primary monitor, then to (120, 120).
-fn decision_float_target_position(app: &tauri::AppHandle) -> (f64, f64) {
+/// Logical top-left position that anchors a `w × h` window at the bottom-center
+/// of the monitor under the cursor, plus that monitor's logical width/height
+/// so callers can clamp size against the screen. Falls back to the primary
+/// monitor, then to (120, 120) with screen size None.
+fn decision_float_target_position_for(
+    app: &tauri::AppHandle,
+    w: f64,
+    h: f64,
+) -> (f64, f64, Option<(f64, f64)>) {
     let cursor = app.cursor_position().ok();
     let monitors = app.available_monitors().unwrap_or_default();
 
@@ -2030,12 +2039,17 @@ fn decision_float_target_position(app: &tauri::AppHandle) -> (f64, f64) {
         let mon_y = mon.position().y as f64 / scale;
         let mon_w = mon.size().width as f64 / scale;
         let mon_h = mon.size().height as f64 / scale;
-        let x = mon_x + (mon_w - DECISION_FLOAT_W) / 2.0;
-        let y = mon_y + mon_h - DECISION_FLOAT_H - DECISION_FLOAT_BOTTOM_MARGIN;
-        (x, y)
+        let x = mon_x + (mon_w - w) / 2.0;
+        let y = mon_y + mon_h - h - DECISION_FLOAT_BOTTOM_MARGIN;
+        (x, y, Some((mon_w, mon_h)))
     } else {
-        (120.0, 120.0)
+        (120.0, 120.0, None)
     }
+}
+
+fn decision_float_target_position(app: &tauri::AppHandle) -> (f64, f64) {
+    let (x, y, _) = decision_float_target_position_for(app, DECISION_FLOAT_W, DECISION_FLOAT_H);
+    (x, y)
 }
 
 #[tauri::command]
@@ -2082,6 +2096,45 @@ fn hide_decision_float(app: tauri::AppHandle, state: tauri::State<AppState>) {
     if let Some(w) = app.get_webview_window(DECISION_FLOAT_LABEL) {
         let _ = w.hide();
     }
+}
+
+/// Resize the decision-float window to fit content. Either dimension may be
+/// omitted (keeps current). Both are clamped against the min size and against
+/// `MAX_*_RATIO` of the current monitor's logical extent. Re-anchors the
+/// window to bottom-center so the float stays glued to the screen edge.
+#[tauri::command]
+fn resize_decision_float(
+    app: tauri::AppHandle,
+    width: Option<f64>,
+    height: Option<f64>,
+) -> Result<(), String> {
+    let Some(window) = app.get_webview_window(DECISION_FLOAT_LABEL) else {
+        return Ok(());
+    };
+
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let current = window.inner_size().map_err(|e| e.to_string())?;
+    let cur_w = current.width as f64 / scale;
+    let cur_h = current.height as f64 / scale;
+
+    let mut new_w = width.unwrap_or(cur_w);
+    let mut new_h = height.unwrap_or(cur_h);
+
+    // Probe the cursor monitor for clamp bounds (also gives us the anchor pos).
+    let (_, _, screen) = decision_float_target_position_for(&app, new_w, new_h);
+    if let Some((mon_w, mon_h)) = screen {
+        new_w = new_w.min((mon_w * DECISION_FLOAT_MAX_W_RATIO).round());
+        new_h = new_h.min((mon_h * DECISION_FLOAT_MAX_H_RATIO).round());
+    }
+    new_w = new_w.max(DECISION_FLOAT_MIN_W);
+    new_h = new_h.max(DECISION_FLOAT_MIN_H);
+
+    let _ = window.set_size(tauri::Size::Logical(tauri::LogicalSize::new(new_w, new_h)));
+
+    let (x, y, _) = decision_float_target_position_for(&app, new_w, new_h);
+    let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition::new(x, y)));
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -3333,6 +3386,7 @@ pub fn run() {
             close_preview_window,
             show_decision_float,
             hide_decision_float,
+            resize_decision_float,
             get_decision_float_snapshot,
             is_main_window_minimized,
             get_tts_voices,

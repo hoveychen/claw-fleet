@@ -90,6 +90,11 @@ interface UIState {
    *  of the screen instead of the full card. Guard decisions force-expand. */
   decisionPanelCollapsed: boolean;
   setDecisionPanelCollapsed: (on: boolean) => void;
+  /** When true, pending decisions are always presented in the standalone
+   *  decision-float window instead of the in-app DecisionPanel, regardless
+   *  of whether the main window is minimized. */
+  floatingDecisionPanel: boolean;
+  setFloatingDecisionPanel: (on: boolean) => void;
 }
 
 function getSystemTheme(): "dark" | "light" {
@@ -113,6 +118,7 @@ export const useUIStore = create<UIState>((set) => ({
   showNewProjectRequested: false,
   liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
+  floatingDecisionPanel: getItem("floating-decision-panel") === "true",
   setTheme: (t) => {
     setItem("theme", t);
     emit("overlay-theme-changed", t).catch(() => {});
@@ -154,6 +160,11 @@ export const useUIStore = create<UIState>((set) => ({
   setDecisionPanelCollapsed: (on) => {
     setItem("decision-panel-collapsed", on ? "true" : "false");
     set({ decisionPanelCollapsed: on });
+  },
+  setFloatingDecisionPanel: (on) => {
+    setItem("floating-decision-panel", on ? "true" : "false");
+    emit("overlay-floating-decision-panel-changed", on).catch(() => {});
+    set({ floatingDecisionPanel: on });
   },
 }));
 
