@@ -1,6 +1,6 @@
 pub mod account;
 pub mod agent_source;
-pub mod architecture_overview;
+pub use claw_fleet_task::architecture_overview;
 pub mod audit;
 pub mod auto_resume;
 pub mod backend;
@@ -12,7 +12,7 @@ pub mod cmd_ast;
 pub mod codex_source;
 pub mod consumer_heartbeat;
 pub mod cursor;
-pub mod dag;
+pub use claw_fleet_task::dag;
 pub mod daily_report;
 pub mod decision_history;
 pub mod decision_panel_config;
@@ -25,7 +25,7 @@ pub mod interaction_mode;
 pub mod jsonl_tail;
 pub mod launchd;
 pub mod llm_provider;
-pub mod master;
+pub use claw_fleet_task::master;
 pub mod llm_usage;
 pub mod memory;
 pub mod merge_mediator;
@@ -33,8 +33,8 @@ pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
 pub mod phase_detector;
-pub mod pitem;
-pub mod plan;
+pub use claw_fleet_task::pitem;
+pub use claw_fleet_task::plan;
 pub mod plan_approval;
 pub mod plugins;
 pub mod prd_discipline;
@@ -47,12 +47,19 @@ pub mod session;
 pub mod session_todos;
 pub mod skill_history;
 pub mod skills;
-pub mod task;
+mod task_actions;
+pub mod lifecycle_host;
+pub mod task {
+    pub use claw_fleet_task::task::*;
+    pub use super::task_actions::*;
+}
 pub mod tcc;
 pub mod token_analysis;
 pub mod touches_hook;
-pub mod worker_executor;
-pub mod worktree;
+pub mod worker_executor {
+    pub use claw_fleet_task::worker::*;
+}
+pub use claw_fleet_task::worktree;
 
 use std::fs;
 use session::SessionInfo;

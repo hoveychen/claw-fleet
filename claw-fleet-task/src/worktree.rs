@@ -25,7 +25,7 @@ fn entry_stage(e: &git2::IndexEntry) -> u16 {
 
 /// Root directory under `~/.fleet/` for all P-item worktrees.
 pub fn worktree_root() -> Result<PathBuf, String> {
-    crate::session::get_fleet_dir()
+    crate::paths::get_fleet_dir()
         .map(|h| h.join("worktrees"))
         .ok_or_else(|| "home directory not resolvable".to_string())
 }
@@ -651,7 +651,7 @@ mod tests {
 
     #[test]
     fn worktree_path_lives_under_fleet_home() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp.path());
         let p = worktree_path("task-x", "p1").unwrap();
@@ -666,7 +666,7 @@ mod tests {
 
     #[test]
     fn provision_creates_worktree_with_branch_and_initial_content() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -696,7 +696,7 @@ mod tests {
 
     #[test]
     fn provision_is_idempotent_when_worktree_already_registered() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -709,7 +709,7 @@ mod tests {
 
     #[test]
     fn provision_recovers_from_orphan_branch() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -723,7 +723,7 @@ mod tests {
 
     #[test]
     fn provision_recovers_from_orphan_dir() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -742,7 +742,7 @@ mod tests {
 
     #[test]
     fn reap_removes_worktree_dir_and_branch() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -770,7 +770,7 @@ mod tests {
 
     #[test]
     fn reap_is_noop_when_nothing_to_reap() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -781,7 +781,7 @@ mod tests {
 
     #[test]
     fn list_for_task_returns_each_provisioned_worktree() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -799,7 +799,7 @@ mod tests {
 
     #[test]
     fn list_for_task_returns_empty_for_unknown_task() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp.path());
         let listed = list_for_task("nope").unwrap();
@@ -814,7 +814,7 @@ mod tests {
 
     #[test]
     fn merge_back_no_changes_when_worker_did_nothing() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -827,7 +827,7 @@ mod tests {
 
     #[test]
     fn merge_back_fast_forwards_worker_commits() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -846,7 +846,7 @@ mod tests {
 
     #[test]
     fn merge_back_reports_conflict_with_specs_when_same_line_changed() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -889,7 +889,7 @@ mod tests {
 
     #[test]
     fn gc_stale_removes_unknown_tasks() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         // Fabricate two orphan worktree dirs on disk; no git involvement.
@@ -911,7 +911,7 @@ mod tests {
 
     #[test]
     fn gc_stale_keeps_only_currently_running_p_items() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let root = worktree_root().unwrap();
@@ -931,7 +931,7 @@ mod tests {
 
     #[test]
     fn gc_stale_empty_alive_set_clears_everything() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let root = worktree_root().unwrap();
@@ -944,7 +944,7 @@ mod tests {
 
     #[test]
     fn gc_stale_noop_when_root_missing() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         // worktree_root doesn't exist yet — should not error.
@@ -954,7 +954,7 @@ mod tests {
 
     #[test]
     fn apply_resolutions_resolves_a_real_conflict_and_commits() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -1006,7 +1006,7 @@ mod tests {
 
     #[test]
     fn apply_resolutions_errors_when_resolution_set_misses_a_file() {
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();
@@ -1039,7 +1039,7 @@ mod tests {
     fn merge_back_auto_merges_disjoint_file_diverge() {
         // main moves on a different file → not fast-forwardable but git's
         // auto-merger resolves the divergence into a merge commit.
-        let _g = crate::session::fleet_home_lock();
+        let _g = crate::paths::fleet_home_lock();
         let fh = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(fh.path());
         let repo = TempDir::new().unwrap();

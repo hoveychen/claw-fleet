@@ -16,5 +16,5 @@ pub mod system_template;
 pub use event_router::{
     dispatchable_changed, format_event, format_user, EventDebouncer, MasterEvent, UserMessage,
 };
-pub use runtime::{spawn_spec_for_task, spawn_spec_from_task, MasterSpawnSpec};
+pub use runtime::{spawn_spec_from_task, MasterSpawnSpec};
 pub use system_template::{compose_system_prompt, MASTER_SYSTEM_TEMPLATE};

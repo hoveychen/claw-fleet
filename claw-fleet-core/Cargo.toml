@@ -25,6 +25,7 @@ base64 = "0.22"
 conch-parser = "0.1.1"
 shell-words = "1.1.1"
 git2 = { version = "0.18", default-features = false }
+claw-fleet-task = { path = "../claw-fleet-task" }
 
 [dev-dependencies]
 tempfile = "3"
