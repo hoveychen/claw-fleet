@@ -1,23 +1,22 @@
 #!/usr/bin/env bash
-# Build Claw Fleet locally (GUI app + fleet CLI sidecar).
-# Usage: ./scripts/build-local.sh [--debug] [--notarize]
+# Build a local *development* version of Claw Fleet and install it to /Applications.
+#
+# This is debug-profile only so cargo can use incremental compilation across
+# runs. Cargo.toml is NOT mutated — the in-app version reads 0.0.0 from the
+# committed manifest. DMG/PKG filenames carry a date stamp so successive builds
+# don't clobber each other.
+#
+# Real releases happen via GitHub CI on tag push (see .github/workflows/{ci,release}.yml).
+# This script is intentionally not a release tool.
+#
+# Usage: ./scripts/build-local.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$ROOT_DIR"
 
-MODE="release"
-CARGO_FLAG="--release"
-NOTARIZE=false
-
-for arg in "$@"; do
-  case "$arg" in
-    --debug)    MODE="debug"; CARGO_FLAG="" ;;
-    --notarize) NOTARIZE=true ;;
-  esac
-done
-
-# ── Load signing config ──────────────────────────────────────────────────────
+# ── Load signing config (optional) ───────────────────────────────────────────
 SIGNING_CONF="$SCRIPT_DIR/signing.local"
 APPLE_SIGNING_IDENTITY=""
 APPLE_INSTALLER_IDENTITY=""
@@ -26,230 +25,148 @@ if [[ -f "$SIGNING_CONF" ]]; then
   echo "==> Signing identity: $APPLE_SIGNING_IDENTITY"
   [[ -n "$APPLE_INSTALLER_IDENTITY" ]] && echo "==> Installer identity: $APPLE_INSTALLER_IDENTITY"
 else
-  echo "==> No scripts/signing.local found — will use ad-hoc signing (no sandbox, no notarization)"
+  echo "==> No scripts/signing.local — using ad-hoc signing"
 fi
 
-# ── Generate dev version ──────────────────────────────────────────────────────
-# Keep the numeric major/minor at 0.0 so macOS pkg installers never treat this
-# dev build as newer than an official SemVer release (e.g. 1.5.9). The date
-# lives in the patch segment so the version is still human-readable.
-YY=$(date +%y)
-MM=$(date +%m)
-DD=$(date +%d)
-DEV_VERSION="0.0.${YY}${MM}${DD}-dev.$(date +%s)"
-echo "==> Dev version: $DEV_VERSION"
+# Human-readable stamp for DMG/PKG filenames so you can tell builds apart.
+# NOT sed'd into Cargo.toml — that would invalidate cargo's fingerprint cache
+# on every run and force a full recompile.
+BUILD_STAMP="$(date +%y%m%d-%H%M%S)"
+echo "==> Build stamp: $BUILD_STAMP (debug)"
 
 export OPENSSL_STATIC=1
 
-# Patch all Cargo.toml versions and restore on exit.
-# Cargo.lock is also backed up because `cargo build` rewrites it to match the
-# patched Cargo.toml versions; restoring only the toml files would leave the
-# lock pointing at the dev version.
-for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do
-  cp "$toml" "${toml}.bak"
-  sed -i.tmp "s/^version = \".*\"/version = \"${DEV_VERSION}\"/" "$toml"
-  rm -f "${toml}.tmp"
-done
-cp Cargo.lock Cargo.lock.bak
-trap 'for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do mv "${toml}.bak" "$toml"; done; mv Cargo.lock.bak Cargo.lock' EXIT
-
 # Detect native target triple
 TARGET=$(rustc -vV | sed -n 's|host: ||p')
-echo "==> Target: $TARGET  (mode: $MODE)"
+echo "==> Target: $TARGET"
 
-# 1. Build fleet CLI sidecar
-echo "==> Building fleet CLI (native)..."
-cargo build $CARGO_FLAG -p fleet-cli
+# 1. Build fleet CLI sidecar (debug)
+echo "==> Building fleet CLI..."
+cargo build -p fleet-cli
 
-# 2. Copy compiled binary into binaries/ so Tauri bundles the real binary
+# 2. Copy compiled binary into binaries/ so Tauri bundles the real binary.
+#    Only update if content differs — Tauri's externalBin watcher invalidates
+#    the desktop crate's build script on any mtime change in binaries/,
+#    which forces a recompile even when nothing actually changed.
 mkdir -p claw-fleet-desktop/binaries
-SRC="target/$MODE/fleet-cli"
+SRC="target/debug/fleet-cli"
 DST="claw-fleet-desktop/binaries/fleet-$TARGET"
-cp "$SRC" "$DST"
-chmod +x "$DST"
-echo "==> Copied fleet CLI → $DST"
+if [[ ! -f "$DST" ]] || ! cmp -s "$SRC" "$DST"; then
+  cp "$SRC" "$DST"
+  chmod +x "$DST"
+  echo "==> Copied fleet CLI → $DST"
+else
+  echo "==> fleet CLI sidecar unchanged at $DST (skip copy)"
+fi
 
 # Linux: deb.files needs a generic fleet-linux name
 if [[ "$(uname)" == "Linux" ]]; then
-  cp "$DST" "claw-fleet-desktop/binaries/fleet-linux"
-  chmod +x "claw-fleet-desktop/binaries/fleet-linux"
+  LINUX_DST="claw-fleet-desktop/binaries/fleet-linux"
+  if [[ ! -f "$LINUX_DST" ]] || ! cmp -s "$DST" "$LINUX_DST"; then
+    cp "$DST" "$LINUX_DST"
+    chmod +x "$LINUX_DST"
+  fi
 fi
 
-# 3. Build Tauri app (run from claw-fleet-desktop/ where package.json lives)
+# 3. Build Tauri app (debug)
 #    本地构建启用 Projects/Tasks feature flag（线上 release.yml 不设此变量，保持隐藏）
 export VITE_PROJECTS_ENABLED=true
 echo "==> Building Tauri app... (VITE_PROJECTS_ENABLED=$VITE_PROJECTS_ENABLED)"
-(cd claw-fleet-desktop && npx tauri build --bundles app)
+(cd claw-fleet-desktop && npx tauri build --debug --bundles app)
 
 # 4. Sign with entitlements (macOS only)
 #    Sign the fleet CLI sidecar FIRST with its own (non-sandbox) entitlements,
-#    then sign the outer app bundle.  Using --deep would overwrite the sidecar
+#    then sign the outer app bundle. Using --deep would overwrite the sidecar
 #    signature with the app's sandbox entitlements, causing SIGTRAP when the
 #    sidecar is invoked externally (e.g. by Claude Code hooks).
-APP_BUNDLE="target/$MODE/bundle/macos/Claw Fleet.app"
+APP_BUNDLE="target/debug/bundle/macos/Claw Fleet.app"
 SIDECAR="$APP_BUNDLE/Contents/MacOS/fleet"
-if [[ -d "$APP_BUNDLE" ]]; then
-  if [[ -n "$APPLE_SIGNING_IDENTITY" ]]; then
-    echo "==> Signing sidecar (fleet CLI) with non-sandbox entitlements..."
-    codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
-      --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
-      --options runtime \
-      "$SIDECAR"
-    echo "==> Signing app bundle with sandbox entitlements..."
-    codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
-      --entitlements claw-fleet-desktop/entitlements.plist \
-      --options runtime \
-      "$APP_BUNDLE"
-  else
-    echo "==> Ad-hoc signing sidecar with non-sandbox entitlements..."
-    codesign --force --sign - \
-      --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
-      "$SIDECAR"
-    echo "==> Ad-hoc signing app bundle with entitlements..."
-    codesign --force --sign - \
-      --entitlements claw-fleet-desktop/entitlements.plist \
-      "$APP_BUNDLE"
-  fi
-
-  # 5. Create DMG
-  DMG_DIR="target/$MODE/bundle/dmg"
-  mkdir -p "$DMG_DIR"
-  DMG_NAME="claw-fleet-${DEV_VERSION}.dmg"
-  echo "==> Creating DMG..."
-  DMG_STAGING=$(mktemp -d)
-  cp -R "$APP_BUNDLE" "$DMG_STAGING/"
-  ln -s /Applications "$DMG_STAGING/Applications"
-  hdiutil create -volname "Claw Fleet" \
-    -srcfolder "$DMG_STAGING" \
-    -ov -format UDZO \
-    "$DMG_DIR/$DMG_NAME"
-  rm -rf "$DMG_STAGING"
-  echo "==> DMG: $DMG_DIR/$DMG_NAME"
-
-  # 6. Build PKG installer
-  PKG_DIR="target/$MODE/bundle/pkg"
-  mkdir -p "$PKG_DIR"
-  PKG_NAME="claw-fleet-${DEV_VERSION}.pkg"
-  echo "==> Building PKG installer..."
-
-  # Generate a component plist that disables two PackageKit defaults that
-  # break local dev installs:
-  #   - BundleIsRelocatable: macOS would otherwise redirect the install to
-  #     the first matching bundle registered in LaunchServices (e.g. the
-  #     app still sitting in target/release/bundle/macos/), silently
-  #     ignoring --install-location.
-  #   - BundleIsVersionChecked: the 0.0.* dev version is numerically lower
-  #     than any released 1.x.y, so without this PackageKit would skip the
-  #     component with "version X.Y.Z is already installed" and leave the
-  #     installed release bundle untouched.
-  PKG_STAGING=$(mktemp -d)
-  cp -R "$APP_BUNDLE" "$PKG_STAGING/"
-  COMPONENT_PLIST="$PKG_STAGING/component.plist"
-  pkgbuild --analyze --root "$PKG_STAGING" "$COMPONENT_PLIST"
-  /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
-  /usr/libexec/PlistBuddy -c "Set :0:BundleIsVersionChecked false" "$COMPONENT_PLIST"
-
-  if [[ -n "$APPLE_INSTALLER_IDENTITY" ]]; then
-    pkgbuild --root "$PKG_STAGING" \
-      --component-plist "$COMPONENT_PLIST" \
-      --identifier "com.hoveychen.claw-fleet" \
-      --version "$DEV_VERSION" \
-      --install-location "/Applications" \
-      --sign "$APPLE_INSTALLER_IDENTITY" \
-      "$PKG_DIR/$PKG_NAME"
-  else
-    pkgbuild --root "$PKG_STAGING" \
-      --component-plist "$COMPONENT_PLIST" \
-      --identifier "com.hoveychen.claw-fleet" \
-      --version "$DEV_VERSION" \
-      --install-location "/Applications" \
-      "$PKG_DIR/$PKG_NAME"
-  fi
-  rm -rf "$PKG_STAGING"
-  echo "==> PKG: $PKG_DIR/$PKG_NAME"
-  open "$PKG_DIR/$PKG_NAME"
+if [[ ! -d "$APP_BUNDLE" ]]; then
+  echo "==> App bundle not produced at $APP_BUNDLE — skipping macOS post-steps."
+  echo "Done! Build stamp: $BUILD_STAMP"
+  exit 0
 fi
 
-# 7. Notarize (optional)
-if [[ "$NOTARIZE" == true ]]; then
-  if [[ -z "${APP_STORE_CONNECT_KEY:-}" ]]; then
-    echo "ERROR: --notarize requires APP_STORE_CONNECT_KEY in scripts/signing.local"
-    exit 1
-  fi
-
-  echo "==> Preparing for notarization..."
-  NOTARIZE_TMP=$(mktemp -d)
-  trap 'rm -rf "$NOTARIZE_TMP"; for toml in claw-fleet-core/Cargo.toml claw-fleet-desktop/Cargo.toml fleet-cli/Cargo.toml; do mv "${toml}.bak" "$toml" 2>/dev/null || true; done; mv Cargo.lock.bak Cargo.lock 2>/dev/null || true' EXIT
-
-  echo "$APP_STORE_CONNECT_KEY" | base64 --decode > "$NOTARIZE_TMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8"
-
-  echo "==> Creating zip for notarization..."
-  ditto -c -k --keepParent "$APP_BUNDLE" "$NOTARIZE_TMP/app.zip"
-
-  echo "==> Submitting to Apple notary service..."
-  xcrun notarytool submit "$NOTARIZE_TMP/app.zip" \
-    --key "$NOTARIZE_TMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" \
-    --key-id "$APP_STORE_CONNECT_KEY_ID" \
-    --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
-    --wait --timeout 15m
-
-  echo "==> Stapling notarization ticket to app..."
-  xcrun stapler staple "$APP_BUNDLE"
-
-  echo "==> Re-creating DMG with notarized app..."
-  rm -f "$DMG_DIR"/*.dmg
-  DMG_NAME="claw-fleet-${DEV_VERSION}.dmg"
-  DMG_STAGING=$(mktemp -d)
-  cp -R "$APP_BUNDLE" "$DMG_STAGING/"
-  ln -s /Applications "$DMG_STAGING/Applications"
-  hdiutil create -volname "Claw Fleet" \
-    -srcfolder "$DMG_STAGING" \
-    -ov -format UDZO \
-    "$DMG_DIR/$DMG_NAME"
-  rm -rf "$DMG_STAGING"
-
-  echo "==> Re-creating PKG with notarized app..."
-  rm -f "$PKG_DIR"/*.pkg
-  PKG_NAME="claw-fleet-${DEV_VERSION}.pkg"
-
-  PKG_STAGING=$(mktemp -d)
-  cp -R "$APP_BUNDLE" "$PKG_STAGING/"
-  COMPONENT_PLIST="$PKG_STAGING/component.plist"
-  pkgbuild --analyze --root "$PKG_STAGING" "$COMPONENT_PLIST"
-  /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
-  /usr/libexec/PlistBuddy -c "Set :0:BundleIsVersionChecked false" "$COMPONENT_PLIST"
-
-  if [[ -n "${APPLE_INSTALLER_IDENTITY:-}" ]]; then
-    pkgbuild --root "$PKG_STAGING" \
-      --component-plist "$COMPONENT_PLIST" \
-      --identifier "com.hoveychen.claw-fleet" \
-      --version "$DEV_VERSION" \
-      --install-location "/Applications" \
-      --sign "$APPLE_INSTALLER_IDENTITY" \
-      "$PKG_DIR/$PKG_NAME"
-  else
-    pkgbuild --root "$PKG_STAGING" \
-      --component-plist "$COMPONENT_PLIST" \
-      --identifier "com.hoveychen.claw-fleet" \
-      --version "$DEV_VERSION" \
-      --install-location "/Applications" \
-      "$PKG_DIR/$PKG_NAME"
-  fi
-  rm -rf "$PKG_STAGING"
-
-  echo "==> Notarizing PKG..."
-  xcrun notarytool submit "$PKG_DIR/$PKG_NAME" \
-    --key "$NOTARIZE_TMP/AuthKey_${APP_STORE_CONNECT_KEY_ID}.p8" \
-    --key-id "$APP_STORE_CONNECT_KEY_ID" \
-    --issuer "$APP_STORE_CONNECT_ISSUER_ID" \
-    --wait --timeout 15m
-
-  xcrun stapler staple "$PKG_DIR/$PKG_NAME"
-  echo "==> PKG notarized: $PKG_DIR/$PKG_NAME"
-
-  echo "==> Notarization complete!"
+if [[ -n "$APPLE_SIGNING_IDENTITY" ]]; then
+  echo "==> Signing sidecar (fleet CLI) with non-sandbox entitlements..."
+  codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
+    --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
+    --options runtime \
+    "$SIDECAR"
+  echo "==> Signing app bundle with sandbox entitlements..."
+  codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
+    --entitlements claw-fleet-desktop/entitlements.plist \
+    --options runtime \
+    "$APP_BUNDLE"
+else
+  echo "==> Ad-hoc signing sidecar with non-sandbox entitlements..."
+  codesign --force --sign - \
+    --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
+    "$SIDECAR"
+  echo "==> Ad-hoc signing app bundle with entitlements..."
+  codesign --force --sign - \
+    --entitlements claw-fleet-desktop/entitlements.plist \
+    "$APP_BUNDLE"
 fi
+
+# 5. Create DMG
+DMG_DIR="target/debug/bundle/dmg"
+mkdir -p "$DMG_DIR"
+DMG_NAME="claw-fleet-dev-${BUILD_STAMP}.dmg"
+echo "==> Creating DMG..."
+DMG_STAGING=$(mktemp -d)
+cp -R "$APP_BUNDLE" "$DMG_STAGING/"
+ln -s /Applications "$DMG_STAGING/Applications"
+hdiutil create -volname "Claw Fleet" \
+  -srcfolder "$DMG_STAGING" \
+  -ov -format UDZO \
+  "$DMG_DIR/$DMG_NAME"
+rm -rf "$DMG_STAGING"
+echo "==> DMG: $DMG_DIR/$DMG_NAME"
+
+# 6. Build PKG installer
+PKG_DIR="target/debug/bundle/pkg"
+mkdir -p "$PKG_DIR"
+PKG_NAME="claw-fleet-dev-${BUILD_STAMP}.pkg"
+echo "==> Building PKG installer..."
+
+# Disable two PackageKit defaults that break local dev installs:
+#   - BundleIsRelocatable: macOS would otherwise redirect the install to
+#     the first matching bundle registered in LaunchServices (e.g. the
+#     app still sitting in target/debug/bundle/macos/), silently
+#     ignoring --install-location.
+#   - BundleIsVersionChecked: the 0.0.0 dev version is numerically lower
+#     than any released 1.x.y, so without this PackageKit would skip the
+#     component with "version X.Y.Z is already installed" and leave the
+#     installed release bundle untouched.
+PKG_STAGING=$(mktemp -d)
+cp -R "$APP_BUNDLE" "$PKG_STAGING/"
+COMPONENT_PLIST="$PKG_STAGING/component.plist"
+pkgbuild --analyze --root "$PKG_STAGING" "$COMPONENT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$COMPONENT_PLIST"
+/usr/libexec/PlistBuddy -c "Set :0:BundleIsVersionChecked false" "$COMPONENT_PLIST"
+
+PKG_VERSION="0.0.0-dev.${BUILD_STAMP}"
+if [[ -n "$APPLE_INSTALLER_IDENTITY" ]]; then
+  pkgbuild --root "$PKG_STAGING" \
+    --component-plist "$COMPONENT_PLIST" \
+    --identifier "com.hoveychen.claw-fleet" \
+    --version "$PKG_VERSION" \
+    --install-location "/Applications" \
+    --sign "$APPLE_INSTALLER_IDENTITY" \
+    "$PKG_DIR/$PKG_NAME"
+else
+  pkgbuild --root "$PKG_STAGING" \
+    --component-plist "$COMPONENT_PLIST" \
+    --identifier "com.hoveychen.claw-fleet" \
+    --version "$PKG_VERSION" \
+    --install-location "/Applications" \
+    "$PKG_DIR/$PKG_NAME"
+fi
+rm -rf "$PKG_STAGING"
+echo "==> PKG: $PKG_DIR/$PKG_NAME"
+open "$PKG_DIR/$PKG_NAME"
 
 echo ""
-echo "Done! Version: $DEV_VERSION"
-echo "App bundle: target/$MODE/bundle/"
+echo "Done! Build stamp: $BUILD_STAMP"
+echo "App bundle: target/debug/bundle/"
