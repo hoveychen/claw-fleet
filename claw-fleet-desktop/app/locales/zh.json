@@ -1282,6 +1282,8 @@
     "user_title_placeholder": "老板",
     "mascot_visible": "显示小助手",
     "mascot_visible_desc": "默认隐藏侧边栏吉祥物，打开后才会出现。",
+    "floating_decision_panel": "始终用独立窗口显示决策",
+    "floating_decision_panel_desc": "打开后 pending decision 总会弹独立浮窗，主窗口里不再嵌内嵌的 DecisionPanel。",
     "personalized_mascot": "个性化小助手",
     "personalized_mascot_desc": "使用 AI 根据当前任务生成个性化文案（使用 Claude Haiku）",
     "tts": "提示音",

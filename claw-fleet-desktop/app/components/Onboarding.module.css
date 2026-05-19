@@ -504,7 +504,7 @@
 .mock_icon_question {
   width: 14px;
   height: 14px;
-  color: #2b6cb0;
+  color: var(--color-accent);
   flex-shrink: 0;
 }
 
@@ -598,8 +598,8 @@
 }
 
 .mock_option_selected {
-  border-color: #2b6cb0;
-  background: rgba(43, 108, 176, 0.08);
+  border-color: var(--color-accent);
+  background: rgba(var(--color-accent-rgb), 0.08);
 }
 
 .mock_actions {
@@ -614,8 +614,9 @@
   font-weight: 500;
   padding: 3px 10px;
   border-radius: 4px;
-  background: #2b6cb0;
-  color: #fff;
+  background: transparent;
+  color: var(--color-accent);
+  border: 1px solid var(--color-accent);
 }
 
 .mock_btn_block {
@@ -623,8 +624,9 @@
   font-weight: 500;
   padding: 3px 10px;
   border-radius: 4px;
-  background: #c53030;
-  color: #fff;
+  background: transparent;
+  color: #e53e3e;
+  border: 1px solid #e53e3e;
 }
 
 .mock_btn_secondary {

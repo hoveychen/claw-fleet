@@ -952,53 +952,16 @@ function DecisionCard({ decision, compact }: { decision: PendingDecision; compac
   }
 }
 
-// ── Past-history strip (context shown above the active card) ────────────
-
-function recordKindKey(rec: DecisionHistoryRecord): string {
-  if (rec.kind === "user-prompt") return "decision_history.kind_user";
-  if (rec.kind === "plan-approval") return "decision_history.kind_plan";
-  return "decision_history.kind_ask";
-}
-
-function recordSummaryShort(rec: DecisionHistoryRecord): string {
-  if (rec.kind === "user-prompt") {
-    return rec.text.replace(/\s+/g, " ").trim().slice(0, 60);
-  }
-  if (rec.kind === "elicitation") {
-    const first = rec.questions[0];
-    if (!first) return "AskUserQuestion";
-    const body = first.question;
-    const m = body.match(/^\s*---\s*$/m);
-    return (m && m.index !== undefined ? body.slice(0, m.index) : body)
-      .trim()
-      .slice(0, 60);
-  }
-  return rec.aiTitle ?? rec.workspaceName ?? "Plan approval";
-}
-
-function recordTime(rec: DecisionHistoryRecord): string {
-  const iso = rec.kind === "user-prompt" ? rec.sentAt : rec.requestedAt;
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-const HISTORY_VISIBLE_LIMIT = 5;
+// ── Past-history handle (vertical tab toggling the inline SessionDetail) ──
 
 function PastHistoryStrip({
   sessionId,
   expanded,
   onToggle,
-  showBriefList = false,
 }: {
   sessionId: string;
   expanded: boolean;
   onToggle: () => void;
-  /** Legacy inline brief list (compact / no-inline-column scenarios). The
-   *  normal-mode flow now drives a full SessionDetail column in the panel
-   *  instead and leaves this false. */
-  showBriefList?: boolean;
 }) {
   const { t } = useTranslation();
   const [records, setRecords] = useState<DecisionHistoryRecord[]>([]);
@@ -1026,58 +989,35 @@ function PastHistoryStrip({
 
   if (records.length === 0) return null;
 
-  // Backend returns oldest-first. Keep the most recent HISTORY_VISIBLE_LIMIT
-  // entries, but render them chronologically within that window so the strip
-  // reads in the same direction as the Decisions tab.
-  const recent = records.slice(-HISTORY_VISIBLE_LIMIT);
+  const fullTitle = t(
+    "decision_panel.history_title",
+    "Recent in this session",
+  );
 
   return (
-    <div className={`${styles.history} ${expanded ? styles.history_open : ""}`}>
-      <button
-        type="button"
-        className={styles.history_header}
-        onClick={onToggle}
-        aria-expanded={expanded}
+    <button
+      type="button"
+      className={`${styles.history_handle} ${expanded ? styles.history_handle_open : ""}`}
+      onClick={onToggle}
+      aria-expanded={expanded}
+      aria-label={fullTitle}
+      title={fullTitle}
+    >
+      <svg
+        className={styles.history_handle_icon}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
       >
-        <span className={styles.history_chevron}>{expanded ? "▾" : "▸"}</span>
-        <span className={styles.history_title}>
-          {t("decision_panel.history_title", "Recent in this session")}
-        </span>
-        <span className={styles.history_count}>{records.length}</span>
-      </button>
-      {expanded && showBriefList && (
-        <div className={styles.history_list}>
-          {recent.map((rec) => {
-            const isUser = rec.kind === "user-prompt";
-            const isPlan = rec.kind === "plan-approval";
-            const kindClass = isUser
-              ? styles.history_kind_user
-              : isPlan
-              ? styles.history_kind_plan
-              : styles.history_kind_ask;
-            return (
-              <div key={rec.id} className={styles.history_row}>
-                <span className={`${styles.history_kind} ${kindClass}`}>
-                  {t(recordKindKey(rec))}
-                </span>
-                <span className={styles.history_summary}>
-                  {recordSummaryShort(rec) || ""}
-                </span>
-                <span className={styles.history_time}>{recordTime(rec)}</span>
-              </div>
-            );
-          })}
-          {records.length > HISTORY_VISIBLE_LIMIT && (
-            <div className={styles.history_more}>
-              {t("decision_panel.history_more", {
-                count: records.length - HISTORY_VISIBLE_LIMIT,
-                defaultValue: "+{{count}} more in session detail",
-              })}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+      <span className={styles.history_handle_count}>{records.length}</span>
+    </button>
   );
 }
 
@@ -1102,7 +1042,15 @@ function tabLabel(d: PendingDecision): string {
 
 // ── Main panel ───────────────────────────────────────────────────────────
 
-export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
+export function DecisionPanel({
+  compact = false,
+  onInlineDetailChange,
+}: {
+  compact?: boolean;
+  /** Fired when the inline SessionDetail column toggles. The standalone
+   *  decision-float window uses this to widen itself when detail expands. */
+  onInlineDetailChange?: (open: boolean) => void;
+} = {}) {
   const { t } = useTranslation();
   const {
     decisions,
@@ -1215,6 +1163,10 @@ export function DecisionPanel({ compact = false }: { compact?: boolean } = {}) {
   // SessionDetail in standalone mode owns its own state (no shared store with
   // the KanbanView drawer), so the two can coexist on different sessions.
   const inlineDetailActive = !compact && historyOpen && !!activeSessionInfo;
+
+  useEffect(() => {
+    onInlineDetailChange?.(inlineDetailActive);
+  }, [inlineDetailActive, onInlineDetailChange]);
 
   // Bump tier when the card area overflows vertically, until no overflow or
   // we hit the maximum tier.
