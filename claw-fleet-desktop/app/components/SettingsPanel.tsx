@@ -624,6 +624,18 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     await emit("overlay-mascot-visible-changed", enabled).catch(() => {});
   }, []);
 
+  // ── Floating decision panel state ──────────────────────────────────────
+  const [floatingDecisionPanel, setFloatingDecisionPanelLocal] = useState(
+    () => getItem("floating-decision-panel") === "true",
+  );
+
+  const handleToggleFloatingDecisionPanel = useCallback(async (enabled: boolean) => {
+    setFloatingDecisionPanelLocal(enabled);
+    setItem("floating-decision-panel", enabled ? "true" : "false");
+    const { emit } = await import("@tauri-apps/api/event");
+    await emit("overlay-floating-decision-panel-changed", enabled).catch(() => {});
+  }, []);
+
   // ── Auto update check state ────────────────────────────────────────────
   const [autoUpdateCheck, setAutoUpdateCheck] = useState(
     () => getItem("auto-update-check") !== "false",
@@ -1122,6 +1134,25 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
 
             {/* ── Interaction ── */}
             {activeTab === "interaction" && (
+              <>
+              <div className={styles.section}>
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.floating_decision_panel")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.floating_decision_panel_desc")}
+                    </span>
+                  </div>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={floatingDecisionPanel}
+                      onChange={(e) => handleToggleFloatingDecisionPanel(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+              </div>
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.timeouts_section_title")}</div>
                 <div className={styles.row}>
@@ -1413,6 +1444,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </div>
                 )}
               </div>
+              </>
             )}
 
             {/* ── Mobile Access ── */}
