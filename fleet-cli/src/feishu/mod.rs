@@ -14,4 +14,5 @@ pub mod card;
 pub mod client;
 pub mod oauth;
 
+#[allow(unused_imports)]
 pub use claw_fleet_core::feishu::{disconnect, poll_oauth, start_oauth, status};

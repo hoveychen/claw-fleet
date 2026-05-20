@@ -22,6 +22,7 @@ import {
   useUIStore,
   type Project,
 } from "../store";
+import { useRuntimeTasksStore } from "../runtimeTasksStore";
 import type { PItem, PItemStatus, Task, TaskStatus } from "../types";
 import { pItemStatusKey } from "../types";
 import { PROJECTS_FEATURE_ENABLED } from "../featureFlags";
@@ -188,6 +189,7 @@ function TaskCard({
   onClick: () => void;
 }) {
   const summary = useMemo(() => summarisePlan(task), [task]);
+  const isLive = useRuntimeTasksStore((s) => Boolean(s.byTaskId[task.id]));
   const icon: ReactNode =
     task.status === "running" ? <Play size={11} strokeWidth={1.75} /> :
     task.status === "paused" ? <Pause size={11} strokeWidth={1.75} /> :
@@ -203,6 +205,7 @@ function TaskCard({
         <span className={styles.card_row_icon}>{icon}</span>
         <span className={styles.card_row_title}>{task.title}</span>
         <StatusBadge status={task.status} />
+        {isLive && <LiveDot />}
       </div>
       {task.description && (
         <div className={styles.card_row_desc}>{task.description}</div>
@@ -223,6 +226,33 @@ function TaskCard({
         )}
       </div>
     </button>
+  );
+}
+
+function LiveDot() {
+  return (
+    <span
+      title="Backed by a live fleet-task process"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        fontSize: 10,
+        color: "var(--text-muted, #888)",
+        marginLeft: 4,
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: 999,
+          background: "#22c55e",
+          boxShadow: "0 0 6px #22c55e80",
+        }}
+      />
+      live
+    </span>
   );
 }
 
@@ -279,6 +309,7 @@ function TaskDetailHeader({
         </div>
         <div className={styles.detail_header_right}>
           <StatusBadge status={task.status} />
+          {useRuntimeTasksStore.getState().byTaskId[task.id] && <LiveDot />}
           <button
             className={styles.btn_primary}
             onClick={handleStart}

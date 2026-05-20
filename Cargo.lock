@@ -1754,11 +1754,13 @@ dependencies = [
  "chrono",
  "clap",
  "claw-fleet-core",
+ "git2",
  "libc",
  "percent-encoding",
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
  "tiny_http",
  "ureq",
 ]
@@ -1769,7 +1771,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "clap",
- "libc",
+ "claw-fleet-core",
 ]
 
 [[package]]
