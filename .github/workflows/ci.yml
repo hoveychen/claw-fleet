@@ -41,7 +41,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run unit tests
-        run: cargo test --release -p fleet-cli -p claw-fleet-core
+        run: cargo test --release -p fleet-cli -p claw-fleet-core -p claw-fleet-task -p fleet-task
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Tag push only — Step 1: test + build fleet-cli for all platforms
@@ -127,8 +127,9 @@ jobs:
           # cargo test must run on the host triple — cross-compiled binaries
           # can't execute. fleet-cli + claw-fleet-core have unit tests; skip
           # claw-fleet-desktop (Tauri/webkit deps) — its build is exercised in
-          # the desktop-build job.
-          cargo test --release -p fleet-cli -p claw-fleet-core
+          # the desktop-build job. fleet-task is included because fleet-cli's
+          # e2e test spawns the fleet-task binary.
+          cargo test --release -p fleet-cli -p claw-fleet-core -p claw-fleet-task -p fleet-task
 
       - name: Build fleet-cli
         shell: bash
