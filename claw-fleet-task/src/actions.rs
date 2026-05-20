@@ -56,6 +56,9 @@ pub fn start_task(task_id: &str, host: &dyn TaskHost, opts: StartOpts) -> Result
     let branch = pick_unique_branch(&workspace, &slug)?;
     git_create_branch(&workspace, &branch)?;
     task.task_branch = Some(branch);
+    // Phase 3: persist workspace so out-of-process tools (fleet-cli, master
+    // tool calls) can find the working tree without a project table lookup.
+    task.workspace = Some(workspace.clone());
     task.status = TaskStatus::Running;
     task.started_at = Some(chrono::Utc::now().timestamp());
     if opts.force_human_gate_all {

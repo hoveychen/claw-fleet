@@ -12,7 +12,6 @@ use clap::{Parser, Subcommand};
 
 mod http;
 mod local_host;
-mod registry;
 mod runtime;
 mod sse;
 mod tui;

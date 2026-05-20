@@ -9,3 +9,4 @@ pub mod architecture_overview;
 pub mod worker;
 pub mod runner;
 pub mod actions;
+pub mod registry;

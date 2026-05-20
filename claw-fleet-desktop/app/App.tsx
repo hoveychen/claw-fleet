@@ -15,6 +15,7 @@ import { UpdateNotice } from "./components/UpdateNotice";
 import { Wizard } from "./components/Wizard";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
+import { useRuntimeTasksStore } from "./runtimeTasksStore";
 import { type Connection, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
@@ -132,6 +133,22 @@ function App() {
       unLangPromise.then((fn) => fn());
       unMascotPromise.then((fn) => fn());
       unFloatingDecisionPromise.then((fn) => fn());
+    };
+  }, []);
+
+  // Phase 3: hydrate + subscribe to the fleet-task runtime registry so the
+  // app can show which tasks are currently backed by a live process.
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    useRuntimeTasksStore.getState().refresh();
+    useRuntimeTasksStore
+      .getState()
+      .subscribe()
+      .then((unsub) => {
+        unsubscribe = unsub;
+      });
+    return () => {
+      unsubscribe?.();
     };
   }, []);
 

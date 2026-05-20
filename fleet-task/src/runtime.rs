@@ -16,9 +16,10 @@ use claw_fleet_task::task::{
     create_task, get_task, write_task_atomic, TaskInput, TaskStatus,
 };
 
+use claw_fleet_task::registry::{self, RegistryEntry};
+
 use crate::http::{self, HttpHandle, ServerConfig};
 use crate::local_host::{LocalHost, ProcessLauncher};
-use crate::registry::{self, RegistryEntry};
 use crate::sse::SseBroadcaster;
 
 /// Synthetic project id used when `fleet-task` boots without a desktop-side
@@ -97,10 +98,14 @@ fn finish_boot(
     master_sid: String,
 ) -> Result<Bootstrap, String> {
     let broadcaster = SseBroadcaster::new();
+    let dispatcher: Arc<dyn http::DispatchTrigger> = Arc::new(LocalDispatcher {
+        task_id: task_id.clone(),
+        host: host.clone(),
+    });
     let cfg = ServerConfig {
         task_id: task_id.clone(),
         broadcaster: broadcaster.clone(),
-        dispatcher: None,
+        dispatcher: Some(dispatcher),
     };
     let http_handle = http::spawn(cfg).map_err(|e| format!("http: {e}"))?;
     registry::write(&RegistryEntry {
@@ -121,6 +126,21 @@ fn finish_boot(
 
 pub fn shutdown(boot: Bootstrap) {
     shutdown_with_deadline(boot, std::time::Duration::from_secs(30));
+}
+
+/// Bridge that lets the HTTP server reach back into the LocalHost owning
+/// this task's pid map. Per Phase 3 P8: `POST /p-items/<id>/dispatch` no
+/// longer returns 503 — it routes here and `actions::dispatch_pitem` flips
+/// the P-item to Running + spawns a Worker via LocalHost.
+struct LocalDispatcher {
+    task_id: String,
+    host: Arc<LocalHost>,
+}
+
+impl http::DispatchTrigger for LocalDispatcher {
+    fn trigger(&self, p_item_id: &str) -> Result<(), String> {
+        claw_fleet_task::actions::dispatch_pitem(&self.task_id, p_item_id, &*self.host)
+    }
 }
 
 /// Graceful shutdown with a hard wall clock:

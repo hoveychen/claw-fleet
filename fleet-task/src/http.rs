@@ -19,10 +19,12 @@ use tiny_http::{Header, Method, Response, Server};
 
 use crate::sse::SseBroadcaster;
 
-/// Wired by `P7` once the runtime loop owns a real `TaskRunner`. Until then,
-/// `/p-items/:id/dispatch` returns 503.
+/// Wired by Phase 3 P8: `fleet-task`'s runtime supplies a dispatcher that
+/// routes incoming `POST /p-items/<id>/dispatch` to
+/// `claw_fleet_task::actions::dispatch_pitem` with its own LocalHost so the
+/// worker subprocess gets tracked by fleet-task's pid HashMap.
 pub trait DispatchTrigger: Send + Sync {
-    fn trigger(&self) -> Result<(), String>;
+    fn trigger(&self, p_item_id: &str) -> Result<(), String>;
 }
 
 #[derive(Clone)]
@@ -221,7 +223,7 @@ fn handle_request(cfg: &ServerConfig, req: tiny_http::Request) {
                         }
                     }
                     (Method::Post, true) => match &cfg.dispatcher {
-                        Some(d) => match d.trigger() {
+                        Some(d) => match d.trigger(p_id) {
                             Ok(()) => {
                                 let _ = req.respond(
                                     Response::from_string("ok").with_status_code(202),
@@ -467,7 +469,7 @@ mod tests {
 
         struct CountTrigger(Arc<AtomicU32>);
         impl DispatchTrigger for CountTrigger {
-            fn trigger(&self) -> Result<(), String> {
+            fn trigger(&self, _p_item_id: &str) -> Result<(), String> {
                 self.0.fetch_add(1, AOrdering::SeqCst);
                 Ok(())
             }

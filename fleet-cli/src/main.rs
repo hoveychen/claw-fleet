@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod feishu;
+mod fleet_cli_host;
 
 use claw_fleet_core::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
 use claw_fleet_core::agent_source::{self, build_sources, find_source_for_path};
@@ -505,8 +506,27 @@ fn cmd_task(action: TaskCommands) {
             }
         }
         TaskCommands::Dispatch { task_id, p_id } => {
-            claw_fleet_core::task::dispatch_pitem(&task_id, &p_id).unwrap_or_else(|e| die(e));
-            println!("dispatched");
+            // Phase 3: dispatch belongs to the fleet-task runtime's LocalHost
+            // so the spawned worker is tracked by fleet-task's pid HashMap
+            // (otherwise SIGSTOP/CONT/TERM wouldn't reach it). Route via the
+            // HTTP endpoint on the live fleet-task process; error if no
+            // process is serving this task.
+            match crate::fleet_cli_host::lookup_task_port(&task_id) {
+                Some(port) => {
+                    let url = format!("http://127.0.0.1:{port}/p-items/{p_id}/dispatch");
+                    let resp = ureq::post(&url).call().unwrap_or_else(|e| {
+                        die(format!("dispatch http: {e}"));
+                    });
+                    let status = resp.status();
+                    if !(200..300).contains(&status) {
+                        die(format!("dispatch returned http {status}"));
+                    }
+                    println!("dispatched");
+                }
+                None => die(format!(
+                    "no fleet-task process for task {task_id} (no runtime registry entry)"
+                )),
+            }
         }
         TaskCommands::ReadOutput { task_id: _, p_id: _ } => {
             // V1 stub. P7 (Worker executor) will plumb worker stdout/stderr
@@ -518,8 +538,17 @@ fn cmd_task(action: TaskCommands) {
             p_id,
             summary,
         } => {
-            let outcome = claw_fleet_core::task::mark_done(&task_id, &p_id, &summary)
-                .unwrap_or_else(|e| die(e));
+            // Phase 3: route through FleetCliHost so we read `task.workspace`
+            // (persisted on `start_task`) instead of relying on the project
+            // table — fleet-task spawns tasks with the synthetic
+            // `fleet-task-local` project that has no entry.
+            let outcome = claw_fleet_core::actions::mark_done(
+                &task_id,
+                &p_id,
+                &summary,
+                &crate::fleet_cli_host::FleetCliHost,
+            )
+            .unwrap_or_else(|e| die(e));
             match outcome {
                 claw_fleet_core::worktree::MergeOutcome::FastForwarded { commits_merged } => {
                     println!("done (fast-forwarded {commits_merged} commit(s))");
@@ -543,8 +572,13 @@ fn cmd_task(action: TaskCommands) {
             reason,
         } => {
             let fr = claw_fleet_core::pitem::FailReason::Custom(reason);
-            let skipped = claw_fleet_core::task::mark_failed(&task_id, &p_id, fr)
-                .unwrap_or_else(|e| die(e));
+            let skipped = claw_fleet_core::actions::mark_failed(
+                &task_id,
+                &p_id,
+                fr,
+                &crate::fleet_cli_host::FleetCliHost,
+            )
+            .unwrap_or_else(|e| die(e));
             println!("failed");
             for s in skipped {
                 println!("propagated skip: {s}");
@@ -1603,15 +1637,13 @@ fn cmd_serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         Err(e) => eprintln!("[fleet serve] worktree gc failed: {e}"),
     }
 
-    // ── Supervisor tick thread ─────────────────────────────────────────────
-    // On macOS this loop spawns queued fleet sessions, reaps finished pids,
-    // and persists state. On other platforms `tick()` is a no-op.
-    std::thread::spawn(|| loop {
-        std::thread::sleep(std::time::Duration::from_secs(1));
-        if let Err(e) = claw_fleet_core::supervisor::tick() {
-            eprintln!("[fleet serve] supervisor tick error: {e}");
-        }
-    });
+    // ── Supervisor tick thread (REMOVED in Phase 3) ─────────────────────────
+    // The legacy `supervisor::tick` loop spawned queued fleet sessions and
+    // reaped exited pids out of `fleet-sessions.json`. Phase 3 retires that
+    // path: the `fleet-task` standalone binary owns task lifecycle now, and
+    // `fleet serve` is reduced to hook endpoints (guard / elicitation /
+    // plan-approval / accounts / llm / feishu / daily_report / search /
+    // audit). Killing fleet serve no longer interrupts running tasks.
 
     // ── Background SSE broadcaster thread ──────────────────────────────────
     // Polls for session changes, waiting alerts, guard/elicitation requests

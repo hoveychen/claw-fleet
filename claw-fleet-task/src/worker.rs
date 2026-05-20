@@ -383,6 +383,7 @@ mod tests {
             started_at: None,
             completed_at: None,
             task_branch: Some("fleet/add-bookmarks".into()),
+            workspace: None,
             master_session_id: None,
             title_auto: false,
         }

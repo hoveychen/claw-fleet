@@ -1,0 +1,14 @@
+[package]
+name = "fleet-hooks-server"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "fleet-hooks-server"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+libc = "0.2"

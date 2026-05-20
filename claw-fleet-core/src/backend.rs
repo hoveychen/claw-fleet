@@ -407,6 +407,31 @@ pub trait Backend: Send + Sync {
         Err("task system not implemented in this backend yet".into())
     }
 
+    /// Phase 3: snapshot of live `fleet-task` processes from the runtime
+    /// registry. LocalBackend serves this from its `RuntimeRegistryWatcher`;
+    /// RemoteBackend returns an empty list until Phase 3 wires the SSH probe.
+    fn runtime_tasks(&self) -> Vec<crate::registry::RegistryEntry> {
+        Vec::new()
+    }
+
+    /// Phase 3: query a live fleet-task's `/state` endpoint. Returns the raw
+    /// JSON the binary published. Errors when no fleet-task process is
+    /// serving this task_id (caller can fall back to `get_task`).
+    fn fleet_task_state(&self, _task_id: &str) -> Result<serde_json::Value, String> {
+        Err("no fleet-task process serving this task in this backend".into())
+    }
+
+    /// Phase 3: trigger a worker dispatch on a live fleet-task's runtime
+    /// loop. Returns the same error as `fleet_task_state` when the task has
+    /// no associated process.
+    fn fleet_task_dispatch(
+        &self,
+        _task_id: &str,
+        _p_item_id: &str,
+    ) -> Result<(), String> {
+        Err("no fleet-task process serving this task in this backend".into())
+    }
+
     /// Whether the macOS LaunchAgent plist for `fleet serve` is installed.
     /// Always returns `false` on non-macOS.
     fn is_fleet_daemon_installed(&self) -> bool;

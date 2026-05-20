@@ -55,7 +55,7 @@ impl From<serde_json::Error> for RegistryError {
 }
 
 pub fn runtime_dir() -> Result<PathBuf, RegistryError> {
-    let fleet = claw_fleet_task::paths::get_fleet_dir().ok_or(RegistryError::NoFleetHome)?;
+    let fleet = crate::paths::get_fleet_dir().ok_or(RegistryError::NoFleetHome)?;
     Ok(fleet.join("runtime"))
 }
 
@@ -195,7 +195,7 @@ fn pid_alive(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use claw_fleet_task::paths::fleet_home_lock;
+    use crate::paths::fleet_home_lock;
 
     struct FleetHomeOverride {
         prev: Option<std::ffi::OsString>,
