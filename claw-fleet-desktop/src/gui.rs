@@ -1594,6 +1594,34 @@ fn start_task(state: tauri::State<AppState>, task_id: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn list_runtime_tasks(
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::registry::RegistryEntry> {
+    state.backend.read().unwrap().runtime_tasks()
+}
+
+#[tauri::command]
+fn fleet_task_state(
+    state: tauri::State<AppState>,
+    task_id: String,
+) -> Result<serde_json::Value, String> {
+    state.backend.read().unwrap().fleet_task_state(&task_id)
+}
+
+#[tauri::command]
+fn fleet_task_dispatch(
+    state: tauri::State<AppState>,
+    task_id: String,
+    p_item_id: String,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .fleet_task_dispatch(&task_id, &p_item_id)
+}
+
+#[tauri::command]
 fn update_task_title(
     state: tauri::State<AppState>,
     task_id: String,
@@ -3083,15 +3111,13 @@ pub fn run() {
                 });
             }
 
-            // ── Supervisor daemon auto-install (macOS) ───────────────────
-            // Without this, the `fleet serve` LaunchAgent never gets loaded,
-            // supervisor::tick() never fires, and queued FleetSession entries
-            // sit forever in `~/.claude/fleet/fleet-sessions.json`.
-            // Idempotent and fast; run on a background thread anyway so a
-            // slow `launchctl bootstrap` can't stall startup.
-            std::thread::spawn(|| {
-                crate::daemon_autostart::ensure_supervisor_daemon();
-            });
+            // ── Supervisor daemon auto-install (REMOVED in Phase 3) ──────
+            // The legacy `fleet serve` LaunchAgent existed because the
+            // supervisor::tick loop had to be alive to spawn queued sessions.
+            // Phase 3 retired that path: the `fleet-task` standalone binary
+            // owns task lifecycle now, and the remaining hook endpoints
+            // (`fleet-hooks-server` — split out in Phase 3 P7) are launched
+            // on demand. No more auto-install at startup.
 
             // Truncate the hook events file if it has grown too large.
             hooks::maybe_truncate_events_file();
@@ -3317,6 +3343,9 @@ pub fn run() {
             list_tasks,
             update_task_plan,
             start_task,
+            list_runtime_tasks,
+            fleet_task_state,
+            fleet_task_dispatch,
             update_task_title,
             add_task_material,
             subscribe_task_events,

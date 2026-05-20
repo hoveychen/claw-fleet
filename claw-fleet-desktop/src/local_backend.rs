@@ -70,6 +70,9 @@ pub struct LocalBackend {
     /// running, and every one of them emits the same `elicitation-request` /
     /// `guard-request` event, producing duplicate decision tabs.
     running: Arc<AtomicBool>,
+    /// Phase 3: tracks live `fleet-task` subprocesses by polling
+    /// `~/.fleet/runtime/`. Pushes `runtime-task-*` events to the frontend.
+    pub runtime_registry: Arc<crate::runtime_registry::RuntimeRegistryWatcher>,
 }
 
 impl Drop for LocalBackend {
@@ -719,6 +722,9 @@ impl LocalBackend {
 
         step!("threads spawned, constructing result");
 
+        let runtime_registry =
+            Arc::new(crate::runtime_registry::RuntimeRegistryWatcher::start(app.clone()));
+
         let result = LocalBackend {
             app,
             sources,
@@ -735,6 +741,7 @@ impl LocalBackend {
             llm_config,
             _watcher: watcher,
             running,
+            runtime_registry,
         };
         step!("LocalBackend::new() complete");
         result
@@ -1559,7 +1566,29 @@ impl Backend for LocalBackend {
     }
 
     fn start_task(&self, task_id: &str) -> Result<(), String> {
-        crate::task::start_task(task_id)
+        // Phase 3 hard-cut: spawn the fleet-task binary instead of going
+        // through the legacy supervisor path. The binary creates the master
+        // session in-process and publishes a runtime registry entry; we
+        // block briefly until that entry shows up so the GUI immediately
+        // sees the task as "live".
+        let task = crate::task::get_task(task_id)?;
+        let project = crate::project::list_projects()
+            .into_iter()
+            .find(|p| p.id == task.project_id)
+            .ok_or_else(|| {
+                format!(
+                    "project {} not found for task {task_id}",
+                    task.project_id
+                )
+            })?;
+        let workspace = std::path::PathBuf::from(&project.workspace);
+        crate::fleet_task_spawn::spawn_fleet_task_resume(
+            task_id,
+            &workspace,
+            std::time::Duration::from_secs(10),
+        )
+        .map(|_| ())
+        .map_err(|e| e.to_string())
     }
 
     fn set_task_title(&self, task_id: &str, new_title: &str) -> Result<(), String> {
@@ -1574,6 +1603,30 @@ impl Backend for LocalBackend {
         // background agent is mutating task state yet.
         let _ = crate::task::get_task(task_id)?;
         Ok(task_id.to_string())
+    }
+
+    fn runtime_tasks(&self) -> Vec<crate::registry::RegistryEntry> {
+        self.runtime_registry.snapshot()
+    }
+
+    fn fleet_task_state(&self, task_id: &str) -> Result<serde_json::Value, String> {
+        let entry = crate::registry::read(task_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("no fleet-task process for task {task_id}"))?;
+        let client = crate::fleet_task_client::FleetTaskClient::new(entry.port);
+        client.state().map_err(|e| e.to_string())
+    }
+
+    fn fleet_task_dispatch(
+        &self,
+        task_id: &str,
+        p_item_id: &str,
+    ) -> Result<(), String> {
+        let entry = crate::registry::read(task_id)
+            .map_err(|e| e.to_string())?
+            .ok_or_else(|| format!("no fleet-task process for task {task_id}"))?;
+        let client = crate::fleet_task_client::FleetTaskClient::new(entry.port);
+        client.dispatch(p_item_id).map_err(|e| e.to_string())
     }
 
     fn is_fleet_daemon_installed(&self) -> bool {

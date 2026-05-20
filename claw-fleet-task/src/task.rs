@@ -40,6 +40,12 @@ pub struct Task {
     pub completed_at: Option<i64>,
     #[serde(default)]
     pub task_branch: Option<String>,
+    /// Phase 3: workspace path persisted at `start_task` time so out-of-process
+    /// tools (fleet-cli, master tool calls) can resolve the working tree
+    /// without consulting the project table. Legacy tasks (pre-Phase-3) leave
+    /// this `None` and fall back to the project lookup.
+    #[serde(default)]
+    pub workspace: Option<PathBuf>,
     /// `claw-fleet-core::session::SessionId` of the master agent running this
     /// task. `None` before start, `Some` once `start_task` spawns master.
     #[serde(default)]
@@ -170,6 +176,7 @@ impl Task {
             started_at: None,
             completed_at: None,
             task_branch: None,
+            workspace: None,
             master_session_id: None,
             title_auto: false,
         }

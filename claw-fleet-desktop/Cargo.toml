@@ -62,3 +62,6 @@ objc2-foundation = { version = "0.3", features = ["NSProcessInfo", "NSString", "
 default = []
 # Compile OpenSSL from source — only needed for macOS universal cross-compilation.
 vendored-ssl = ["openssl"]
+
+[dev-dependencies]
+tempfile = "3"

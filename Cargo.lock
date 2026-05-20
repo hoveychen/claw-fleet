@@ -910,6 +910,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-store",
+ "tempfile",
  "tiny_http",
  "tokio",
 ]
@@ -1759,6 +1760,16 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "tiny_http",
+ "ureq",
+]
+
+[[package]]
+name = "fleet-hooks-server"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "libc",
 ]
 
 [[package]]
