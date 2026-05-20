@@ -20,6 +20,7 @@ pub mod elicitation;
 pub mod feishu;
 pub mod guard;
 pub mod hooks;
+pub mod hooks_server;
 pub mod idle;
 pub mod interaction_mode;
 pub mod jsonl_tail;
