@@ -1144,10 +1144,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
       );
     }
     markFeaturesSeen([...ONBOARDING_FEATURES]);
+    onDismiss();
     if (sourcesChanged.current) {
       invoke("restart_app");
-    } else {
-      onDismiss();
     }
   }, [onDismiss, guardEnabled, elicitationEnabled]);
 
