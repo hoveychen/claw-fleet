@@ -76,11 +76,18 @@ sequential subtasks (P1, P2, ..., Pn — or numbered todos, or any equivalent). 
 Once you are inside such a plan, the following rules apply until the plan is \
 fully done:\n\
 \n\
-- **DO NOT proactively propose `git commit`.** Not after P1, not after P2, \
-not at any \"natural checkpoint\" you sense. The plan is the unit of work, \
-not the individual P-task.\n\
-- **DO NOT actually run `git commit` either**, except in the two cases below.\n\
-- **You MAY commit only when:**\n\
+**Scope of \"commit\" in this rule.** Throughout Rule 1, \"commit\" means \
+commits on the **main / default branch**. Commits on a worktree feature \
+branch (`prd/<plan-id>`) are governed by Rule 3 and are explicitly allowed \
+at every P-task boundary — they do NOT count as Rule 1 violations and do \
+NOT need to be flagged as a conflict with this rule.\n\
+\n\
+- **DO NOT proactively propose `git commit` on main.** Not after P1, not \
+after P2, not at any \"natural checkpoint\" you sense. The plan is the unit \
+of work, not the individual P-task.\n\
+- **DO NOT actually run `git commit` on main either**, except in the two \
+cases below.\n\
+- **You MAY commit on main only when:**\n\
   1. {title} explicitly asks for a commit in this turn, OR\n\
   2. You have just finished the **last** P-task in the plan (i.e. all items \
      in TASKS.md are checked) AND you have surfaced that the plan is complete \
@@ -837,6 +844,32 @@ mod tests {
         assert!(
             tooling_body.contains("$GOMODCACHE") || tooling_body.contains("GOMODCACHE"),
             "tooling section must note Go's global module cache so agents don't second-guess Go projects"
+        );
+    }
+
+    #[test]
+    fn render_rule_1_pins_commit_scope_to_main_branch() {
+        let g = render_guidance("Boss", "en");
+        let r1_pos = g.find("## Rule 1").expect("Rule 1 section must exist");
+        let r2_pos = g.find("## Rule 2").expect("Rule 2 section must exist");
+        let r1_body = &g[r1_pos..r2_pos];
+        assert!(
+            r1_body.contains("Scope of \"commit\""),
+            "Rule 1 must carry a top-level scope clarifier so agents read it before the DO NOTs"
+        );
+        assert!(
+            r1_body.contains("main / default branch"),
+            "Rule 1 scope clarifier must name 'main / default branch' so worktree commits are clearly out of scope"
+        );
+        assert!(
+            r1_body.contains("governed by Rule 3"),
+            "Rule 1 scope clarifier must point at Rule 3 so worktree commits don't trigger false conflict reports"
+        );
+        assert!(
+            r1_body.contains("propose `git commit` on main")
+                && r1_body.contains("run `git commit` on main")
+                && r1_body.contains("commit on main only when"),
+            "all three DO NOT/MAY clauses in Rule 1 must say 'on main' so the scope is unambiguous even read in isolation"
         );
     }
 
