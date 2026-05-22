@@ -251,6 +251,10 @@ mod tests {
         assert!(read("task-b").unwrap().is_none());
     }
 
+    // Unix-only: the Windows pid_alive stub always returns false, so the
+    // "live pid stays in the list" / "only the dead one gets pruned" assertions
+    // can't be expressed on Windows without a real GetProcessHandle probe.
+    #[cfg(unix)]
     #[test]
     fn list_alive_filters_dead_pids() {
         let _g = fleet_home_lock();
@@ -271,6 +275,7 @@ mod tests {
         assert!(!ids.contains(&"task-dead".to_string()));
     }
 
+    #[cfg(unix)]
     #[test]
     fn prune_stale_removes_dead_files() {
         let _g = fleet_home_lock();
