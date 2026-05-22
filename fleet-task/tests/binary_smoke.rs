@@ -3,6 +3,9 @@
 //! "claude" call is replaced with a long-running `sleep` — no real Claude CLI
 //! required in CI.
 //!
+//! Unix-only: relies on the `sleep` shell command (invoked by fleet-task's
+//! fake launcher) and SIGTERM-based shutdown.
+//!
 //! What we verify:
 //! 1. `fleet-task new --no-tui` boots successfully (process stays alive).
 //! 2. The runtime registry has an entry pointing at a port.
@@ -10,6 +13,8 @@
 //! 4. `GET /state` returns the persisted task.
 //! 5. SIGTERM the subprocess → exits within a few seconds.
 //! 6. After the subprocess exits, the runtime registry entry is gone.
+
+#![cfg(unix)]
 
 use std::io::Read;
 use std::net::TcpStream;
