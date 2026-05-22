@@ -520,6 +520,111 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     }
   }, []);
 
+  // ── QA mode diagnostics ───────────────────────────────────────────────
+  type DiagnosticCheck = {
+    id: string;
+    label: string;
+    status: "pass" | "warn" | "fail" | "unknown";
+    detail: string;
+    fixAction?: "reinstall_interaction_mode" | "enable_elicitation_hook";
+  };
+  type TestRunResult = {
+    kind: string;
+    requestId?: string;
+    message: string;
+    claudeOutput?: string;
+  };
+  const TEST_WORKSPACE_MARKER = "[QA Diagnostic Test]";
+
+  const [interactionChecks, setInteractionChecks] = useState<DiagnosticCheck[]>([]);
+  const [frontendListenerCheck, setFrontendListenerCheck] = useState<{
+    status: "pass" | "unknown";
+    detail: string;
+  }>({ status: "unknown", detail: "" });
+  const [testingKind, setTestingKind] = useState<null | "frontend" | "e2e" | "cli">(null);
+  const [lastTestResult, setLastTestResult] = useState<TestRunResult | null>(null);
+
+  const refreshInteractionDiagnostics = useCallback(async () => {
+    try {
+      const checks = await invoke<DiagnosticCheck[]>("get_interaction_diagnostics");
+      setInteractionChecks(checks);
+    } catch (e) {
+      console.error("get_interaction_diagnostics failed:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab !== "interaction") return;
+    refreshInteractionDiagnostics();
+  }, [activeTab, refreshInteractionDiagnostics]);
+
+  // The frontend listener row can only be verified by observing one of our
+  // test cards actually arrive on the elicitation-request channel — there's
+  // no backend-side signal for "listener attached". Keep this mounted at all
+  // times so a test triggered on one tab still records when the event hits.
+  useEffect(() => {
+    let unlistenFn: (() => void) | undefined;
+    (async () => {
+      const { listen } = await import("@tauri-apps/api/event");
+      unlistenFn = await listen<{ workspaceName?: string }>(
+        "elicitation-request",
+        (event) => {
+          if (event.payload?.workspaceName === TEST_WORKSPACE_MARKER) {
+            setFrontendListenerCheck({
+              status: "pass",
+              detail: `Last test card received ${new Date().toLocaleTimeString()}`,
+            });
+          }
+        },
+      );
+    })();
+    return () => unlistenFn?.();
+  }, []);
+
+  const runDiagnosticTest = useCallback(
+    async (kind: "frontend" | "e2e" | "cli") => {
+      setTestingKind(kind);
+      setLastTestResult(null);
+      const cmd =
+        kind === "frontend"
+          ? "test_decision_frontend_only"
+          : kind === "e2e"
+            ? "test_decision_end_to_end"
+            : "test_decision_via_claude_cli";
+      try {
+        const r = await invoke<TestRunResult>(cmd);
+        setLastTestResult(r);
+      } catch (e: unknown) {
+        setLastTestResult({
+          kind,
+          message: typeof e === "string" ? e : String(e),
+        });
+      } finally {
+        setTestingKind(null);
+      }
+    },
+    [],
+  );
+
+  const handleInteractionFix = useCallback(
+    async (action: "reinstall_interaction_mode" | "enable_elicitation_hook") => {
+      try {
+        if (action === "reinstall_interaction_mode") {
+          await invoke("apply_interaction_mode");
+        } else {
+          await invoke("apply_elicitation_hook");
+        }
+        await refreshInteractionDiagnostics();
+      } catch (e) {
+        console.error("fix failed:", e);
+      }
+    },
+    [refreshInteractionDiagnostics],
+  );
+
+  const statusIcon = (s: DiagnosticCheck["status"]) =>
+    s === "pass" ? "✅" : s === "warn" ? "⚠️" : s === "fail" ? "❌" : "❓";
+
   type FeishuStoredCreds = {
     app_id: string;
     app_secret: string;
@@ -1390,6 +1495,138 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <span className={styles.toggle_slider} />
                   </label>
                 </div>
+
+                <div
+                  className={styles.section_title}
+                  style={{
+                    marginTop: 18,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <span>{t("settings.interaction_diagnostics")}</span>
+                  <button
+                    type="button"
+                    onClick={refreshInteractionDiagnostics}
+                    style={{ fontSize: 12, padding: "2px 8px" }}
+                  >
+                    {t("settings.interaction_diagnostics_refresh")}
+                  </button>
+                </div>
+                <div className={styles.row}>
+                  <span
+                    className={styles.row_label}
+                    style={{ fontSize: 11, color: "var(--color-text-dim)" }}
+                  >
+                    {t("settings.interaction_diagnostics_desc")}
+                  </span>
+                </div>
+
+                {[
+                  ...interactionChecks,
+                  {
+                    id: "frontend_listener",
+                    label: "Frontend listener",
+                    status: frontendListenerCheck.status,
+                    detail:
+                      frontendListenerCheck.status === "pass"
+                        ? frontendListenerCheck.detail
+                        : t("settings.interaction_diagnostics_frontend_unknown"),
+                  } as DiagnosticCheck,
+                ].map((c) => (
+                  <div key={c.id} className={styles.row} style={{ alignItems: "flex-start" }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span aria-hidden>{statusIcon(c.status)}</span>
+                        <span className={styles.row_label}>
+                          {t(
+                            `settings.interaction_diagnostics_check_${c.id}`,
+                            { defaultValue: c.label },
+                          )}
+                        </span>
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          color: "var(--color-text-dim)",
+                          marginTop: 2,
+                          marginLeft: 22,
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {c.detail}
+                      </div>
+                    </div>
+                    {c.fixAction && (
+                      <button
+                        type="button"
+                        onClick={() => handleInteractionFix(c.fixAction!)}
+                        style={{ fontSize: 12, padding: "2px 10px", whiteSpace: "nowrap" }}
+                      >
+                        {t("settings.interaction_diagnostics_fix")}
+                      </button>
+                    )}
+                  </div>
+                ))}
+
+                <div
+                  className={styles.row}
+                  style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}
+                >
+                  {[
+                    { kind: "frontend" as const, label: "interaction_diagnostics_test_frontend", hint: "interaction_diagnostics_test_frontend_hint" },
+                    { kind: "e2e" as const, label: "interaction_diagnostics_test_e2e", hint: "interaction_diagnostics_test_e2e_hint" },
+                    { kind: "cli" as const, label: "interaction_diagnostics_test_claude_cli", hint: "interaction_diagnostics_test_claude_cli_hint" },
+                  ].map((b) => (
+                    <div key={b.kind} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => runDiagnosticTest(b.kind)}
+                        disabled={testingKind !== null}
+                        style={{ minWidth: 180, padding: "4px 10px", fontSize: 12 }}
+                      >
+                        {testingKind === b.kind
+                          ? t("settings.interaction_diagnostics_test_running")
+                          : t(`settings.${b.label}`)}
+                      </button>
+                      <span
+                        style={{ fontSize: 11, color: "var(--color-text-dim)", flex: 1 }}
+                      >
+                        {t(`settings.${b.hint}`)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                {lastTestResult && (
+                  <div
+                    className={styles.row}
+                    style={{ flexDirection: "column", alignItems: "stretch", gap: 4 }}
+                  >
+                    <div style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                      <b>{t("settings.interaction_diagnostics_last_test")}:</b>{" "}
+                      {lastTestResult.message}
+                    </div>
+                    {lastTestResult.claudeOutput && (
+                      <pre
+                        style={{
+                          margin: 0,
+                          padding: 8,
+                          maxHeight: 200,
+                          overflow: "auto",
+                          fontSize: 10,
+                          background: "var(--color-bg-elevated, rgba(0,0,0,0.04))",
+                          borderRadius: 4,
+                          whiteSpace: "pre-wrap",
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {lastTestResult.claudeOutput}
+                      </pre>
+                    )}
+                  </div>
+                )}
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.prd_mode")}</div>
                 <div className={styles.row}>
