@@ -122,8 +122,17 @@ pub fn run_claude_cli_test(timeout: Duration) -> Result<TestRunResult, String> {
     const PROMPT: &str =
         "诊断测试：请只调用一次 AskUserQuestion，问我「现在心情如何」，提供两个选项（开心 / 一般），不要做其他任何事。";
 
+    // `--allowed-tools "AskUserQuestion"` is load-bearing: without it
+    // the tool isn't in `claude -p`'s default tool list, so the CLAUDE.md
+    // interaction-mode guidance has nothing to call and the model silently
+    // falls back to plain text — making the diagnostic look like a
+    // success when it isn't. Empirically verified 2026-05-22 by running
+    // `claude --output-format=stream-json --verbose --allowed-tools
+    // "AskUserQuestion" -p "<PROMPT>"` and observing the model call
+    // ToolSearch + AskUserQuestion vs. the same command without the
+    // `--allowed-tools` flag returning only plain text.
     let mut child = Command::new(&bin.path)
-        .args(["-p", PROMPT])
+        .args(["--allowed-tools", "AskUserQuestion", "-p", PROMPT])
         .current_dir(&workdir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -172,7 +181,7 @@ pub fn run_claude_cli_test(timeout: Duration) -> Result<TestRunResult, String> {
         kind: "claude_cli".into(),
         request_id: None,
         message: if output.status.success() {
-            "claude -p exited 0 — if no test question popped up, the AskUserQuestion injection is not steering the model".into()
+            "claude -p exited 0 — a test question should have appeared in your Decision Panel. If it did, the AskUserQuestion injection is wired end-to-end; if it didn't, look at the four checks above.".into()
         } else {
             format!("claude -p exited with status {:?}", output.status.code())
         },
