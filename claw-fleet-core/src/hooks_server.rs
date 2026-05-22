@@ -15,6 +15,26 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
 
     use percent_encoding::percent_decode_str;
 
+    // Inject Fleet's permissions allowlist into ~/.claude/settings.json so
+    // fleet guard is the sole audit gate for this serve process. The matching
+    // release() is wired to SIGINT/SIGTERM below; a `kill -9` skips it, and
+    // the next Fleet startup's prune_dead_holders takes care of the stale pid.
+    // The release path is unconditional even when the toggle is off — it's a
+    // no-op when no lock exists, so it self-heals if the user flipped the
+    // toggle off mid-run after we'd already acquired.
+    let serve_pid = std::process::id();
+    if crate::permissions_injector::load_config().enabled {
+        if let Err(e) = crate::permissions_injector::acquire(serve_pid) {
+            eprintln!("[fleet serve] permissions_injector::acquire failed: {e}");
+        }
+    }
+    if let Err(e) = ctrlc::try_set_handler(move || {
+        let _ = crate::permissions_injector::release(serve_pid);
+        std::process::exit(0);
+    }) {
+        eprintln!("[fleet serve] ctrlc handler install failed: {e}");
+    }
+
     use crate::agent_source::{self, build_sources, find_source_for_path};
     use crate::audit;
     use crate::claude_analyze;

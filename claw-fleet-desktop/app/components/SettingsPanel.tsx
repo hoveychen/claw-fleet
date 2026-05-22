@@ -272,6 +272,32 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     setItem("guard-llm-analysis", enabled ? "true" : "false");
   }, []);
 
+  // ── Permissions bypass state (cross-process, persists to ~/.fleet) ────
+  interface PermissionsConfig {
+    enabled: boolean;
+  }
+  const [permissionsBypassEnabled, setPermissionsBypassEnabled] = useState<boolean | null>(
+    null,
+  );
+
+  useEffect(() => {
+    invoke<PermissionsConfig>("get_permissions_config")
+      .then((cfg) => setPermissionsBypassEnabled(cfg.enabled))
+      .catch(() => setPermissionsBypassEnabled(true));
+  }, []);
+
+  const handleTogglePermissionsBypass = useCallback(async (enabled: boolean) => {
+    setPermissionsBypassEnabled(enabled);
+    try {
+      await invoke<PermissionsConfig>("set_permissions_config", {
+        cfg: { enabled },
+      });
+    } catch (e) {
+      console.error("set_permissions_config failed:", e);
+      setPermissionsBypassEnabled(!enabled);
+    }
+  }, []);
+
   // ── Elicitation state ─────────────────────────────────────────────────
   const [elicitationEnabled, setElicitationEnabled] = useState(
     () => getItem("elicitation-enabled") !== "false",
@@ -1279,6 +1305,25 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       checked={guardLlmAnalysis}
                       disabled={!guardEnabled}
                       onChange={(e) => handleToggleGuardLlm(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.permissions_bypass")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.permissions_bypass_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={permissionsBypassEnabled ?? true}
+                      disabled={permissionsBypassEnabled === null}
+                      onChange={(e) => handleTogglePermissionsBypass(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>

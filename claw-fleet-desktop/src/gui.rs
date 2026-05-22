@@ -443,6 +443,34 @@ fn set_decision_panel_config(
     Ok(cfg)
 }
 
+// ── Permissions injector toggle ──────────────────────────────────────────────
+
+#[tauri::command]
+fn get_permissions_config() -> claw_fleet_core::permissions_injector::PermissionsConfig {
+    claw_fleet_core::permissions_injector::load_config()
+}
+
+/// Persist the toggle and immediately apply it to this process:
+///   - flipping to `true`  → acquire(pid) right now
+///   - flipping to `false` → release(pid) right now
+///
+/// A peer `fleet serve` process keeps its own holder slot until its own exit;
+/// the lock's refcount ensures settings.json stays injected as long as any
+/// Fleet process still wants it.
+#[tauri::command]
+fn set_permissions_config(
+    cfg: claw_fleet_core::permissions_injector::PermissionsConfig,
+) -> Result<claw_fleet_core::permissions_injector::PermissionsConfig, String> {
+    claw_fleet_core::permissions_injector::save_config(&cfg).map_err(|e| e.to_string())?;
+    let pid = std::process::id();
+    if cfg.enabled {
+        claw_fleet_core::permissions_injector::acquire(pid).map_err(|e| e.to_string())?;
+    } else {
+        claw_fleet_core::permissions_injector::release(pid).map_err(|e| e.to_string())?;
+    }
+    Ok(cfg)
+}
+
 // ── Notification mode ────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -3085,6 +3113,20 @@ pub fn run() {
                 });
             }
 
+            // Inject Fleet's permissions allowlist into ~/.claude/settings.json
+            // so fleet guard becomes the sole audit gate. prune_dead_holders
+            // inside acquire self-heals when a prior Fleet process died
+            // without releasing.
+            if claw_fleet_core::permissions_injector::load_config().enabled {
+                if let Err(e) =
+                    claw_fleet_core::permissions_injector::acquire(std::process::id())
+                {
+                    claw_fleet_core::log_debug(&format!(
+                        "permissions_injector::acquire failed: {e}"
+                    ));
+                }
+            }
+
             // ── SSE forwarding for mobile access ──────────────────────────
             // Listen for sessions-updated Tauri events and broadcast them to
             // any connected SSE mobile clients.
@@ -3402,6 +3444,8 @@ pub fn run() {
             set_notification_mode,
             get_decision_panel_config,
             set_decision_panel_config,
+            get_permissions_config,
+            set_permissions_config,
             get_user_title,
             set_user_title,
             open_notification_settings,
@@ -3434,6 +3478,15 @@ pub fn run() {
             get_mobile_qr_data,
             is_china_region,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|_app_handle, event| {
+            // Restore the user's ~/.claude/settings.json on every exit path so
+            // the injection is symmetric with the acquire in setup().
+            if matches!(event, tauri::RunEvent::Exit) {
+                let _ = claw_fleet_core::permissions_injector::release(
+                    std::process::id(),
+                );
+            }
+        });
 }
