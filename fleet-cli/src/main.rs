@@ -1713,9 +1713,20 @@ fn cmd_guard() {
                     match resp.decision {
                         GuardDecision::Allow => {}
                         GuardDecision::Block => {
+                            let user_reason = resp
+                                .reason
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty());
+                            let reason_text = match user_reason {
+                                Some(r) => {
+                                    format!("Fleet Guard: blocked by user — {r}")
+                                }
+                                None => "Fleet Guard: blocked by user".to_string(),
+                            };
                             let out = serde_json::json!({
                                 "decision": "block",
-                                "reason": "Fleet Guard: blocked by user"
+                                "reason": reason_text,
                             });
                             println!("{}", out);
                         }

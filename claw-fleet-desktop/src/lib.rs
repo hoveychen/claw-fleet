@@ -267,6 +267,7 @@ impl Backend for NullBackend {
         _: &str,
         _: bool,
         _: Option<claw_fleet_core::guard::GuardAlwaysAllow>,
+        _: Option<String>,
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }

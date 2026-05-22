@@ -1725,6 +1725,7 @@ impl Backend for LocalBackend {
         id: &str,
         allow: bool,
         always_allow: Option<crate::guard::GuardAlwaysAllow>,
+        reason: Option<String>,
     ) -> Result<(), String> {
         use crate::guard::{GuardDecision, GuardResponse};
 
@@ -1751,6 +1752,7 @@ impl Backend for LocalBackend {
             } else {
                 GuardDecision::Block
             },
+            reason: if allow { None } else { reason },
         };
         let result = crate::guard::write_response(&resp);
         let summary = if allow { "✅ Allow" } else { "🚫 Block" };

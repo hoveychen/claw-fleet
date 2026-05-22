@@ -137,6 +137,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
   const allowPrefixes = useMemo(() => computeGuardAllowPrefixes(req), [req]);
   const sourceTag = req.riskTags[0] ?? null;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [blockReason, setBlockReason] = useState("");
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -148,8 +149,14 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [menuOpen]);
 
-  const handleAllow = useCallback(() => respond(decision.id, true), [respond, decision.id]);
-  const handleBlock = useCallback(() => respond(decision.id, false), [respond, decision.id]);
+  const handleAllow = useCallback(
+    () => respond(decision.id, true),
+    [respond, decision.id],
+  );
+  const handleBlock = useCallback(
+    () => respond(decision.id, false, null, blockReason),
+    [respond, decision.id, blockReason],
+  );
   const handleAlwaysAllowPrefix = useCallback(
     (prefix: string) => {
       setMenuOpen(false);
@@ -249,6 +256,26 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
             )}
           </div>
         )}
+        <input
+          type="text"
+          className={styles.block_reason_input}
+          placeholder={t(
+            "guard.block_reason_placeholder",
+            "Reason for AI (optional)",
+          )}
+          value={blockReason}
+          onChange={(e) => setBlockReason(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleBlock();
+            }
+          }}
+          aria-label={t(
+            "guard.block_reason_placeholder",
+            "Reason for AI (optional)",
+          )}
+        />
         <button className={`${styles.btn} ${styles.btn_block}`} onClick={handleBlock}>
           {t("guard.block", "Block")}
         </button>

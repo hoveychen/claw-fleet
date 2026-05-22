@@ -785,6 +785,7 @@ interface DecisionState {
     id: string,
     allow: boolean,
     alwaysAllow?: { prefix: string; sourceTag?: string | null } | null,
+    reason?: string | null,
   ) => Promise<void>;
   /** Submit elicitation answers. */
   submitElicitation: (id: string) => Promise<void>;
@@ -1192,8 +1193,9 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     emit("decision-peer-dismiss", id).catch(() => {});
   },
 
-  respond: async (id, allow, alwaysAllow) => {
+  respond: async (id, allow, alwaysAllow, reason) => {
     try {
+      const trimmedReason = !allow && reason ? reason.trim() : "";
       await invoke("respond_to_guard", {
         id,
         allow,
@@ -1204,6 +1206,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
                 sourceTag: alwaysAllow.sourceTag ?? null,
               }
             : null,
+        reason: trimmedReason.length > 0 ? trimmedReason : null,
       });
     } catch (e) {
       console.error("respond_to_guard failed:", e);
