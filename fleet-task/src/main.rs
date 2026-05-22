@@ -17,10 +17,10 @@ mod sse;
 mod tui;
 
 #[derive(Parser, Debug)]
-#[command(name = "fleet-task", version, about = "Run one task's lifecycle in this process")]
+#[command(name = "fleet-task", version, about = "Run one task's lifecycle in this process. Run with no arguments to open the task picker (resume) — mirrors how `claude` lists recents on bare invocation.")]
 struct Cli {
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -50,11 +50,30 @@ enum Command {
         #[arg(long, default_value_t = false)]
         no_tui: bool,
     },
+    /// Open a TUI picker over all tasks on disk; Enter resumes the
+    /// highlighted task. Uses `task.workspace` (persisted by Phase 3+
+    /// `start_task`); supply `--workspace` to override for older tasks.
+    List {
+        /// Override the workspace path for the resumed task. When omitted,
+        /// fleet-task reads it from `task.workspace`; errors if neither is
+        /// set (legacy task json from before Phase 3).
+        #[arg(long)]
+        workspace: Option<PathBuf>,
+        #[arg(long, default_value_t = false)]
+        no_tui: bool,
+    },
 }
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    match cli.command {
+    // Default behaviour with no subcommand: open the launchpad — a textarea
+    // for entering a new prompt in `$PWD`, with Ctrl-T to switch to the
+    // resume picker. Mirrors `claude`'s bare-invocation UX (prompt waiting +
+    // shortcut to recents).
+    let Some(command) = cli.command else {
+        return run_launchpad();
+    };
+    match command {
         Command::New {
             workspace,
             prompt,
@@ -84,6 +103,73 @@ fn main() -> anyhow::Result<()> {
                 .map_err(anyhow::Error::msg)?,
             no_tui,
         ),
+        Command::List { workspace, no_tui } => {
+            let outcome = tui::run_picker().map_err(anyhow::Error::from)?;
+            match outcome {
+                tui::PickerOutcome::Empty => {
+                    eprintln!("no tasks on disk (~/.fleet/tasks/ is empty)");
+                    Ok(())
+                }
+                tui::PickerOutcome::Quit => Ok(()),
+                tui::PickerOutcome::Selected(task_id) => {
+                    let task = claw_fleet_task::task::get_task(&task_id)
+                        .map_err(anyhow::Error::msg)?;
+                    let ws = workspace.or(task.workspace.clone()).ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "task {} has no persisted workspace (pre-Phase-3); \
+                             pass --workspace to override",
+                            task_id
+                        )
+                    })?;
+                    run_task(
+                        runtime::boot_resume(task_id, ws, Box::new(local_host::ClaudeLauncher))
+                            .map_err(anyhow::Error::msg)?,
+                        no_tui,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/// Bare-invocation entry point: open the launchpad TUI and dispatch on the
+/// user's choice. New tasks default to `$PWD` as workspace.
+fn run_launchpad() -> anyhow::Result<()> {
+    let pwd = std::env::current_dir().map_err(anyhow::Error::from)?;
+    let action = tui::run_launchpad(pwd).map_err(anyhow::Error::from)?;
+    match action {
+        tui::LaunchAction::Quit => Ok(()),
+        tui::LaunchAction::StartNew {
+            workspace,
+            prompt,
+            title,
+        } => run_task(
+            runtime::boot_new_task(
+                runtime::NewTaskArgs {
+                    workspace,
+                    title,
+                    prompt,
+                },
+                Box::new(local_host::ClaudeLauncher),
+            )
+            .map_err(anyhow::Error::msg)?,
+            false,
+        ),
+        tui::LaunchAction::Resume { task_id } => {
+            let task = claw_fleet_task::task::get_task(&task_id)
+                .map_err(anyhow::Error::msg)?;
+            let ws = task.workspace.clone().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "task {task_id} has no persisted workspace (pre-Phase-3); \
+                     use `fleet-task resume {task_id} --workspace=...` instead"
+                )
+            })?;
+            run_task(
+                runtime::boot_resume(task_id, ws, Box::new(local_host::ClaudeLauncher))
+                    .map_err(anyhow::Error::msg)?,
+                false,
+            )
+        }
     }
 }
 

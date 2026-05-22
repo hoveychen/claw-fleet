@@ -23,6 +23,7 @@ uuid = { version = "1", features = ["v4"] }
 chrono = "0.4"
 ratatui = "0.29"
 crossterm = "0.28"
+tui-textarea = "0.7"
 
 [dev-dependencies]
 tempfile = "3"

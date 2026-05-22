@@ -287,12 +287,10 @@ enum Commands {
         #[command(subcommand)]
         action: SessionCommands,
     },
-    /// Manage task-as-unit V1 tasks (master's tool surface + user controls).
-    ///
-    /// Master subcommands (used by the master agent's SYSTEM prompt):
-    /// `get-plan`, `get-dispatchable`, `dispatch`, `read-output`, `mark-done`,
-    /// `mark-failed`, `update-plan`. User-only subcommands (NOT in the
-    /// master's tools list): `pause`, `resume`, `clear`.
+    /// Manage tasks. Master agent tools: `get-plan`, `get-dispatchable`,
+    /// `dispatch`, `mark-done`, `mark-failed`, `update-plan`. Shell utility:
+    /// `list`, `clear`. Process lifecycle (pause/resume/kill) lives with the
+    /// owning fleet-task process — signal its pid or use the TUI.
     Task {
         #[command(subcommand)]
         action: TaskCommands,
@@ -315,12 +313,6 @@ enum TaskCommands {
     },
     /// Request the supervisor to dispatch a worker for `p_id`. Master tool.
     Dispatch {
-        task_id: String,
-        p_id: String,
-    },
-    /// Print the worker's stdout/stderr for `p_id`. Master tool. V1 stub —
-    /// emits "no worker session yet" until P7 wires real subprocess.
-    ReadOutput {
         task_id: String,
         p_id: String,
     },
@@ -347,13 +339,22 @@ enum TaskCommands {
         #[arg(long)]
         file: Option<std::path::PathBuf>,
     },
-    /// Pause the task: master + worker subprocesses SIGSTOP. **User-only.**
-    Pause { task_id: String },
-    /// Resume a paused task. **User-only.**
-    Resume { task_id: String },
-    /// Delete a task — removes its json + materials dir + releases all
-    /// resources. **User-only.**
+    /// Delete a task's json + materials dir. **Does not touch any running
+    /// fleet-task process** — kill that separately (e.g. SIGTERM the pid in
+    /// `~/.fleet/runtime/<task_id>.json`) before clearing if you want a
+    /// clean teardown.
     Clear { task_id: String },
+    /// List all tasks on disk with their status, plan progress, and whether
+    /// they're backed by a live fleet-task process. Shell-friendly: pipe
+    /// `--json` into `jq` to grab task IDs by status.
+    List {
+        /// Only list tasks for this project_id.
+        #[arg(long)]
+        project_id: Option<String>,
+        /// Output raw JSON (one task per record).
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -523,11 +524,6 @@ fn cmd_task(action: TaskCommands) {
                 )),
             }
         }
-        TaskCommands::ReadOutput { task_id: _, p_id: _ } => {
-            // V1 stub. P7 (Worker executor) will plumb worker stdout/stderr
-            // through the Claude Code session jsonl tail.
-            println!("(no worker session yet — P7 worker executor not wired)");
-        }
         TaskCommands::MarkDone {
             task_id,
             p_id,
@@ -609,18 +605,99 @@ fn cmd_task(action: TaskCommands) {
             claw_fleet_core::task::update_plan(&task_id, plan).unwrap_or_else(|e| die(e));
             println!("plan updated");
         }
-        TaskCommands::Pause { task_id } => {
-            claw_fleet_core::task::pause_task(&task_id).unwrap_or_else(|e| die(e));
-            println!("paused");
-        }
-        TaskCommands::Resume { task_id } => {
-            claw_fleet_core::task::resume_task(&task_id).unwrap_or_else(|e| die(e));
-            println!("resumed");
-        }
         TaskCommands::Clear { task_id } => {
-            claw_fleet_core::task::clear_task(&task_id).unwrap_or_else(|e| die(e));
+            // File-only delete: bypass the legacy SupervisorHost terminate
+            // path (it can't reach fleet-task subprocesses anyway). If a
+            // fleet-task process is still serving this task, the user
+            // should SIGTERM it via the pid in `~/.fleet/runtime/<id>.json`
+            // *before* calling clear.
+            let json = claw_fleet_core::task::task_json_path(&task_id)
+                .unwrap_or_else(|e| die(e));
+            if json.exists() {
+                std::fs::remove_file(&json)
+                    .unwrap_or_else(|e| die(format!("remove task json: {e}")));
+            }
+            let materials = claw_fleet_core::task::tasks_dir()
+                .unwrap_or_else(|e| die(e))
+                .join(&task_id);
+            if materials.exists() {
+                std::fs::remove_dir_all(&materials)
+                    .unwrap_or_else(|e| die(format!("remove materials dir: {e}")));
+            }
             println!("cleared");
         }
+        TaskCommands::List { project_id, json } => {
+            cmd_task_list(project_id.as_deref(), json);
+        }
+    }
+}
+
+fn cmd_task_list(project_id: Option<&str>, as_json: bool) {
+    use std::collections::HashMap;
+    use claw_fleet_core::registry;
+
+    let tasks = claw_fleet_core::task::list_tasks(project_id);
+    let runtime: HashMap<String, registry::RegistryEntry> = registry::list_alive()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| (e.task_id.clone(), e))
+        .collect();
+
+    if as_json {
+        let records: Vec<serde_json::Value> = tasks
+            .iter()
+            .map(|t| {
+                let live = runtime.get(&t.id);
+                serde_json::json!({
+                    "id": t.id,
+                    "project_id": t.project_id,
+                    "title": t.title,
+                    "status": format!("{:?}", t.status).to_lowercase(),
+                    "branch": t.task_branch,
+                    "workspace": t.workspace,
+                    "plan_total": t.plan.len(),
+                    "plan_done": t.plan.items.values()
+                        .filter(|p| matches!(p.status, claw_fleet_core::pitem::PItemStatus::Done))
+                        .count(),
+                    "live": live.is_some(),
+                    "port": live.map(|e| e.port),
+                    "pid": live.map(|e| e.pid),
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string(&records).unwrap_or_default());
+        return;
+    }
+
+    if tasks.is_empty() {
+        println!("(no tasks under ~/.fleet/tasks/)");
+        return;
+    }
+
+    // Table: ID(8) | live | status | done/total | title | branch
+    println!(
+        "{:<10} {:<6} {:<10} {:<7} {:<40} {}",
+        "ID", "LIVE", "STATUS", "DONE", "TITLE", "BRANCH"
+    );
+    for t in &tasks {
+        let short = if t.id.len() >= 8 { &t.id[..8] } else { &t.id };
+        let live = if runtime.contains_key(&t.id) { "●" } else { "" };
+        let status = format!("{:?}", t.status).to_lowercase();
+        let total = t.plan.len();
+        let done = t.plan.items.values()
+            .filter(|p| matches!(p.status, claw_fleet_core::pitem::PItemStatus::Done))
+            .count();
+        let title = truncate(&t.title, 38);
+        let branch = t.task_branch.as_deref().unwrap_or("-");
+        println!(
+            "{:<10} {:<6} {:<10} {:<7} {:<40} {}",
+            short,
+            live,
+            status,
+            format!("{done}/{total}"),
+            title,
+            branch
+        );
     }
 }
 
