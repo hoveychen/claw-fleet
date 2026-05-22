@@ -151,13 +151,13 @@ Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You nee
 git clone https://github.com/hoveychen/claw-fleet.git
 cd claw-fleet
 
-npm install
+pnpm install
 
 # Development (hot-reload)
-npm run tauri dev
+pnpm tauri dev
 
 # Production build
-npm run tauri build
+pnpm tauri build
 ```
 
 The output binary and installer are placed under `target/release/bundle/`.
@@ -194,7 +194,7 @@ Beyond the legacy "spawn a session, watch it" launcher, Fleet supports a higher-
 1. **Inbox** — click `+ New task` in the sidebar. Drop files, paste screenshots, or type a description.
 2. **Plan** — the `atomic-plan-tasks` skill drafts a DAG of P-items (with `touches` / `depends_on` / `resources` / `acceptance` / `human_gate`).
 3. **Start** — Fleet creates a `fleet/<title-slug>` git branch and spawns the master session. The master calls `fleet task get-dispatchable` and dispatches workers respecting resource locks.
-4. **Per-item worktree** — every dispatched P-item runs inside its own isolated git worktree at `~/.fleet/worktrees/<task>/<p>/` on branch `fleet/<task>/<p>`. Workers can `cargo build` / `cargo test` / `npm run build` freely without trampling parallel siblings.
+4. **Per-item worktree** — every dispatched P-item runs inside its own isolated git worktree at `~/.fleet/worktrees/<task>/<p>/` on branch `fleet/<task>/<p>`. Workers can `cargo build` / `cargo test` / `pnpm build` freely without trampling parallel siblings.
 5. **Acceptance audit + fast-forward merge** — workers stop on completion; the master verifies `acceptance`, then `mark-done` fast-forward-merges the P-item's worktree branch back into the task branch and reaps the worktree. `human_gate=true` P-items trigger an `AskUserQuestion` via the Decision Panel before mark-done.
 6. **Done** — when every P-item is terminal and the master exits, the task flips to Done and `completed_at` is stamped.
 
