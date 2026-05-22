@@ -5,6 +5,11 @@
 //! Requires both binaries to be built (`cargo build`) — the test resolves
 //! them next to its own test exe under `target/debug/`. Uses
 //! `FLEET_TASK_FAKE_LAUNCHER=1` so neither side needs a real claude CLI.
+//!
+//! Unix-only: the fake launcher invoked inside fleet-task spawns the
+//! `sleep` shell command, and the shutdown path here uses SIGTERM.
+
+#![cfg(unix)]
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
