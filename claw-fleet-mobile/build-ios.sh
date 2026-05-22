@@ -16,7 +16,7 @@ TEAM_ID="6HU93XQG5B"
 # Install dependencies if needed
 if [ ! -d node_modules ]; then
   echo ">>> Installing dependencies..."
-  npm install
+  pnpm install
 fi
 
 # Generate native iOS project if needed

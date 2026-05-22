@@ -23,7 +23,7 @@ fi
 # Install dependencies if needed
 if [ ! -d node_modules ]; then
   echo ">>> Installing dependencies..."
-  npm install
+  pnpm install
 fi
 
 # Generate native Android project if needed
