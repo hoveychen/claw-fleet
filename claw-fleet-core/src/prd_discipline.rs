@@ -333,6 +333,47 @@ P1–P3, want me to review before P4?\", \"P4 is done, shall I continue?\", \
 checkboxes and (under Rule 3) the worktree commits already show progress. \
 The agent's job is to execute the plan, not narrate it.\n\
 \n\
+## Recommended tooling for the worktree workflow\n\
+\n\
+Because Rule 3 develops every plan inside a fresh worktree, each new plan \
+is effectively a clean checkout — including the dependency tree. Tooling \
+that stores packages **per project** (npm's `node_modules/`, pip's per-venv \
+site-packages, yarn classic's `node_modules/`) re-downloads and re-installs \
+everything for every worktree, wasting disk and install time. Tooling with \
+a **global content-addressed cache** shares one copy across all worktrees \
+of all projects, so spinning up a new worktree costs seconds, not minutes.\n\
+\n\
+These are *recommendations*, not hard rules — they're not Rule 5. If \
+{title} explicitly picks a different tool for a specific project, follow \
+that. Recommendations only kick in when {title} has not already made the \
+choice.\n\
+\n\
+**For new projects, prefer the worktree-friendly choice:**\n\
+\n\
+- **Node / TypeScript**: prefer **pnpm** (global store at \
+  `~/.local/share/pnpm/store`, symlinked into each project's \
+  `node_modules/`) over npm or yarn classic. Bun also uses a global cache \
+  and is fine; npm and yarn classic are the ones to avoid for \
+  worktree-heavy work.\n\
+- **Python**: prefer **uv** (global cache + hardlinked venv contents) \
+  over `pip + venv`. Poetry is acceptable if cache sharing is left on, but \
+  uv is noticeably faster on worktree spin-up.\n\
+- **Rust**: `cargo` already shares `~/.cargo/registry` globally, so no \
+  extra action is needed. Each worktree's `target/` stays per-worktree by \
+  design — that's a deliberate trade-off to avoid lock contention; do NOT \
+  try to share `target/` across worktrees.\n\
+- **Go**: `go` already shares `$GOMODCACHE` and `$GOCACHE` globally; \
+  worktrees cost ~nothing on the dependency side. No action needed.\n\
+- **Java / Kotlin**: Gradle and Maven caches (`~/.gradle/caches`, \
+  `~/.m2/repository`) are global by default; no action needed.\n\
+\n\
+**For existing projects, do NOT silently migrate the lockfile or package \
+manager just because you're about to create a worktree.** A \
+`package-lock.json` repo stays on npm until {title} agrees to the switch. \
+Switching package managers is itself a separate plan with its own scope, \
+its own worktree, and its own acceptance gate — surface the \
+cost-vs-migration trade-off to {title} before touching the lockfile.\n\
+\n\
 ## When this mode does NOT apply\n\
 \n\
 - One-shot tasks where decomposition would be ceremony.\n\
@@ -736,6 +777,84 @@ mod tests {
         assert!(
             g.contains("ignore all four rules"),
             "the 'When this mode does NOT apply' summary must escalate to four rules now that Rule 4 exists"
+        );
+    }
+
+    #[test]
+    fn render_includes_tooling_recommendations_section() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("## Recommended tooling"),
+            "guidance must include the tooling-recommendations section paired with Rule 3 worktrees"
+        );
+    }
+
+    #[test]
+    fn render_tooling_section_is_advice_not_rule_5() {
+        let g = render_guidance("Boss", "en");
+        let tooling_pos = g
+            .find("## Recommended tooling")
+            .expect("tooling section must exist");
+        let tooling_body = &g[tooling_pos..];
+        assert!(
+            tooling_body.contains("not Rule 5") || tooling_body.contains("not a Rule"),
+            "tooling section must explicitly disclaim Rule-5 status so agents treat it as advice, not discipline"
+        );
+        assert!(
+            tooling_body.contains("recommendations"),
+            "tooling section must use the word 'recommendations' so the soft nature is unmistakable"
+        );
+    }
+
+    #[test]
+    fn render_recommends_pnpm_and_uv_for_worktree_friendliness() {
+        let g = render_guidance("Boss", "en");
+        let tooling_pos = g
+            .find("## Recommended tooling")
+            .expect("tooling section must exist");
+        let tooling_body = &g[tooling_pos..];
+        assert!(
+            tooling_body.contains("pnpm") && tooling_body.contains("npm"),
+            "tooling section must recommend pnpm and contrast it with npm explicitly"
+        );
+        assert!(
+            tooling_body.contains("uv") && tooling_body.contains("pip"),
+            "tooling section must recommend uv and contrast it with pip explicitly"
+        );
+    }
+
+    #[test]
+    fn render_tooling_notes_rust_and_go_default_global_cache() {
+        let g = render_guidance("Boss", "en");
+        let tooling_pos = g
+            .find("## Recommended tooling")
+            .expect("tooling section must exist");
+        let tooling_body = &g[tooling_pos..];
+        assert!(
+            tooling_body.contains("cargo") && tooling_body.contains("~/.cargo/registry"),
+            "tooling section must reassure agents that cargo is already worktree-friendly so they don't try to 'fix' it"
+        );
+        assert!(
+            tooling_body.contains("$GOMODCACHE") || tooling_body.contains("GOMODCACHE"),
+            "tooling section must note Go's global module cache so agents don't second-guess Go projects"
+        );
+    }
+
+    #[test]
+    fn render_tooling_warns_against_silent_lockfile_migration() {
+        let g = render_guidance("Boss", "en");
+        let tooling_pos = g
+            .find("## Recommended tooling")
+            .expect("tooling section must exist");
+        let tooling_body = &g[tooling_pos..];
+        assert!(
+            tooling_body.contains("do NOT silently migrate")
+                || tooling_body.contains("do not silently migrate"),
+            "tooling section must forbid silent lockfile/package-manager migration on existing projects"
+        );
+        assert!(
+            tooling_body.contains("package-lock.json"),
+            "tooling section must name the lockfile so the rule is concrete, not abstract"
         );
     }
 }
