@@ -79,7 +79,9 @@ not the individual P-task.\n\
   1. {title} explicitly asks for a commit in this turn, OR\n\
   2. You have just finished the **last** P-task in the plan (i.e. all items \
      in TASKS.md are checked) AND you have surfaced that the plan is complete \
-     to {title}.\n\
+     to {title}. When Rule 3 (worktree workflow) is active, this single \
+     allowed commit on main takes the form of `git merge --no-ff` from the \
+     worktree branch — see Rule 3 for the exact procedure.\n\
 - **`git push` is always gated** — never push without {title}'s explicit \
   approval in the current turn, regardless of plan state.\n\
 - **Why:** {title} got tired of being interrupted with \"shall I commit?\" \
@@ -198,14 +200,79 @@ to `.gitignore`**. Do not silently rewrite `.gitignore` — surface the \
 suggestion and let {title} approve. On subsequent edits to an existing \
 TASKS.md, no reminder is needed.\n\
 \n\
+## Rule 3 — Worktree-based feature workflow\n\
+\n\
+A multi-step plan that touches production code MUST be developed inside an \
+isolated git worktree, not directly on the main checkout. The plan's final \
+P-task is fixed: it merges the worktree branch back to main as one atomic step.\n\
+\n\
+**The contract:**\n\
+\n\
+- **Before P1**, create the worktree at `<repo-root>/.worktrees/<plan-id>` on \
+  a fresh branch `prd/<plan-id>` based on the current main:\n\
+\n\
+  ```\n\
+  git worktree add -b prd/<plan-id> .worktrees/<plan-id> main\n\
+  ```\n\
+\n\
+  Use the same `plan-id` you picked for the TASKS.md sentinel block (Rule 2). \
+  All P-tasks except the final one run inside this worktree; the main \
+  checkout stays clean throughout the plan.\n\
+- **Intermediate commits inside the worktree are explicitly allowed and do \
+  NOT violate Rule 1.** Rule 1's \"no proactive commit\" applies to *main*; \
+  commits on `prd/<plan-id>` inside the worktree are progress markers that no \
+  other plan can see. Commit between P-tasks whenever it helps you reason \
+  about the next step (e.g. `git diff HEAD~1` when a later P-task regresses \
+  behaviour). You still do not need to *ask* {title} for permission to \
+  commit inside the worktree — it's free movement on a private branch.\n\
+- **The final P-task is fixed: merge the worktree branch back to main as one \
+  atomic step.** From the main checkout:\n\
+\n\
+  ```\n\
+  git merge --no-ff prd/<plan-id>\n\
+  ```\n\
+\n\
+  The `--no-ff` is mandatory. `--ff-only` and `--squash` are forbidden — we \
+  keep every worktree commit visible in main's history alongside a single \
+  merge commit summarising the feature, so the plan stays auditable at \
+  P-task granularity. This `git merge --no-ff` IS the single Rule-1-allowed \
+  commit on main for the entire plan; do not run any additional `git commit` \
+  before or after it.\n\
+- **After a successful merge, clean up.** Run `git worktree remove \
+  .worktrees/<plan-id>` then `git branch -d prd/<plan-id>`. If the merge \
+  fails (conflict, post-merge build/test regression), resolve in place — do \
+  NOT abandon the worktree, do NOT amend the merge commit, do NOT \
+  `git reset --hard` to wipe the merge. Surface the situation to {title} and \
+  resume after the blocker resolves.\n\
+- **Do NOT push the worktree branch to a remote.** `git push` remains gated \
+  by Rule 1: only {title}'s explicit approval, in the current turn. The \
+  local merge to main is allowed by Rule 1 Case 2; pushing main is a \
+  separate decision {title} owns.\n\
+- **`.worktrees/` must be in `.gitignore`.** Treat it the same as TASKS.md: \
+  the first time you create a worktree in this repo, check `.gitignore`; if \
+  `.worktrees/` is absent, **mention it to {title} and offer to add a \
+  `.worktrees/` line**. Do not silently rewrite `.gitignore`.\n\
+\n\
+### When Rule 3 does NOT apply\n\
+\n\
+Rule 3 covers plans that change production code (features, refactors, \
+non-trivial bug fixes). It does NOT cover:\n\
+- Pure documentation changes (READMEs, docstrings, changelogs).\n\
+- Configuration-only changes (CI YAML, dotfiles, `.gitignore` itself, \
+  formatter configs).\n\
+- Single-step tasks (already exempted by Rule 1).\n\
+- Urgent hotfixes that must land on main before another in-flight worktree \
+  completes — surface the hotfix to {title} first so {title} can decide \
+  whether to pause the active worktree.\n\
+\n\
 ## When this mode does NOT apply\n\
 \n\
 - One-shot tasks where decomposition would be ceremony.\n\
 - Pure conversation / Q&A turns where no code is changing.\n\
 - Tasks {title} explicitly asks you to keep \"informal\" or \"quick\".\n\
 \n\
-In those cases, ignore both rules — no TASKS.md needed, normal commit \
-etiquette applies.\n\
+In those cases, ignore all three rules — no TASKS.md, no worktree, normal \
+commit etiquette applies.\n\
 \n\
 ## Interaction with other modes\n\
 \n\
@@ -422,6 +489,92 @@ mod tests {
         assert!(
             g.contains("offer") || g.contains("mention") || g.contains("ask"),
             "guidance must say to surface the suggestion to the user, not silently edit .gitignore"
+        );
+    }
+
+    #[test]
+    fn render_includes_rule_3_worktree_workflow() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("## Rule 3") && g.contains("Worktree"),
+            "guidance must include the Rule 3 worktree workflow section"
+        );
+        assert!(
+            g.contains("git worktree add"),
+            "guidance must show the exact worktree-creation command so the agent doesn't guess the syntax"
+        );
+    }
+
+    #[test]
+    fn render_mandates_no_ff_merge_and_forbids_squash() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("--no-ff"),
+            "merge strategy must be --no-ff to preserve P-task-granularity history on main"
+        );
+        assert!(
+            g.contains("--squash") && g.contains("forbidden"),
+            "guidance must explicitly forbid --squash so agents don't substitute it for --no-ff"
+        );
+        assert!(
+            g.contains("--ff-only") && g.contains("forbidden"),
+            "guidance must explicitly forbid --ff-only so the merge commit is always materialised"
+        );
+    }
+
+    #[test]
+    fn render_specifies_worktree_path_and_branch_conventions() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains(".worktrees/"),
+            "guidance must pin the worktree directory convention"
+        );
+        assert!(
+            g.contains("prd/<plan-id>"),
+            "guidance must pin the branch-name convention so agents don't invent their own prefix"
+        );
+    }
+
+    #[test]
+    fn render_allows_intermediate_commits_inside_worktree() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("Intermediate commits") || g.contains("intermediate commits"),
+            "guidance must explicitly state that intermediate commits are allowed inside the worktree"
+        );
+        assert!(
+            g.contains("do NOT violate Rule 1") || g.contains("don't violate Rule 1"),
+            "guidance must cross-reference Rule 1 so the agent doesn't second-guess and ask permission"
+        );
+    }
+
+    #[test]
+    fn render_rule_1_cross_references_rule_3() {
+        let g = render_guidance("Boss", "en");
+        let r1_pos = g.find("## Rule 1").expect("Rule 1 section must exist");
+        let r2_pos = g.find("## Rule 2").expect("Rule 2 section must exist");
+        let r1_body = &g[r1_pos..r2_pos];
+        assert!(
+            r1_body.contains("Rule 3") && r1_body.contains("--no-ff"),
+            "Rule 1's allowed-commit clause must point at Rule 3's merge form so the two rules stay coherent"
+        );
+    }
+
+    #[test]
+    fn render_includes_worktrees_gitignore_reminder() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains(".worktrees/") && g.contains(".gitignore"),
+            "guidance must remind the agent to surface a .gitignore entry for .worktrees/"
+        );
+    }
+
+    #[test]
+    fn render_specifies_cleanup_steps_for_completed_worktree() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("git worktree remove") && g.contains("git branch -d"),
+            "guidance must spell out cleanup commands so worktrees don't accumulate"
         );
     }
 }
