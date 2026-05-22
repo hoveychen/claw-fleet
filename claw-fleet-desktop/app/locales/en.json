@@ -1413,6 +1413,7 @@
     "analyzing": "Analyzing command...",
     "allow": "Allow",
     "block": "Block",
+    "block_reason_placeholder": "Reason for AI (optional)",
     "always_allow": "Always allow",
     "always_allow_hint": "Any command invoking {{prefix}} will be allowed without asking — including inside &&/;/|, subshells, and bash -c \"...\"",
     "always_allow_menu": "Always allow",

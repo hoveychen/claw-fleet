@@ -1410,6 +1410,7 @@
     "analyzing": "正在分析命令...",
     "allow": "允许",
     "block": "阻止",
+    "block_reason_placeholder": "原因（可选，告诉 AI）",
     "always_allow": "始终允许",
     "always_allow_hint": "今后凡是调用 {{prefix}} 的命令（含 && / ; / | / 子 shell / bash -c 内嵌）直接放行不再询问",
     "always_allow_menu": "始终允许",

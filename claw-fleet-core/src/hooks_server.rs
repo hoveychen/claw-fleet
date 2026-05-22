@@ -1731,6 +1731,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         let resp = guard::GuardResponse {
                             id: payload.id.clone(),
                             decision: payload.decision.clone(),
+                            reason: payload.reason.clone(),
                         };
                         match guard::write_response(&resp) {
                             Ok(()) => {

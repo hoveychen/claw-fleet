@@ -708,12 +708,14 @@ impl crate::backend::Backend for RemoteBackend {
         id: &str,
         allow: bool,
         always_allow: Option<claw_fleet_core::guard::GuardAlwaysAllow>,
+        reason: Option<String>,
     ) -> Result<(), String> {
         use claw_fleet_core::guard::{GuardDecision, GuardRespondPayload};
         let payload = GuardRespondPayload {
             id: id.to_string(),
             decision: if allow { GuardDecision::Allow } else { GuardDecision::Block },
             always_allow: if allow { always_allow } else { None },
+            reason: if allow { None } else { reason },
         };
         self.probe.post_json_ok("/guard/respond", &payload)
     }

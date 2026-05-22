@@ -944,12 +944,13 @@ fn respond_to_guard(
     id: String,
     allow: bool,
     always_allow: Option<claw_fleet_core::guard::GuardAlwaysAllow>,
+    reason: Option<String>,
 ) -> Result<(), String> {
     state
         .backend
         .read()
         .unwrap()
-        .respond_to_guard(&id, allow, always_allow)
+        .respond_to_guard(&id, allow, always_allow, reason)
 }
 
 #[tauri::command]

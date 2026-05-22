@@ -459,6 +459,7 @@ pub trait Backend: Send + Sync {
         id: &str,
         allow: bool,
         always_allow: Option<crate::guard::GuardAlwaysAllow>,
+        reason: Option<String>,
     ) -> Result<(), String>;
     /// List persisted "always allow" rules for the Bash guard short-circuit
     /// path. Accumulated when the user clicks "Always allow" on a guard card.

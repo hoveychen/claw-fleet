@@ -54,6 +54,12 @@ pub struct GuardRequest {
 pub struct GuardResponse {
     pub id: String,
     pub decision: GuardDecision,
+    /// Optional human-typed reason captured in the Block input field; the
+    /// `fleet guard` CLI forwards it back to Claude Code so the AI knows why
+    /// the user refused. Older responses without this field deserialize as
+    /// `None`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Side-channel payload attached to a guard response when the user clicks
@@ -80,6 +86,8 @@ pub struct GuardRespondPayload {
     pub decision: GuardDecision,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub always_allow: Option<GuardAlwaysAllow>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -296,6 +304,40 @@ mod tests {
             GuardClassification::NeedsConfirmation { .. } => {}
             GuardClassification::Allow => panic!("sudo must require confirmation by default"),
         }
+    }
+
+    #[test]
+    fn guard_response_legacy_json_without_reason_still_parses() {
+        // Older Fleet desktop versions wrote responses without the `reason`
+        // field. The newly-added optional field must default to None so
+        // running CLIs/servers don't break on rollback.
+        let legacy = r#"{"id":"abc","decision":"block"}"#;
+        let parsed: GuardResponse = serde_json::from_str(legacy).expect("legacy parse");
+        assert_eq!(parsed.id, "abc");
+        assert!(matches!(parsed.decision, GuardDecision::Block));
+        assert_eq!(parsed.reason, None);
+    }
+
+    #[test]
+    fn guard_response_round_trips_reason_in_camel_case() {
+        let resp = GuardResponse {
+            id: "xyz".into(),
+            decision: GuardDecision::Block,
+            reason: Some("dangerous on prod".into()),
+        };
+        let json = serde_json::to_string(&resp).unwrap();
+        assert!(json.contains("\"reason\":\"dangerous on prod\""));
+        let parsed: GuardResponse = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.reason.as_deref(), Some("dangerous on prod"));
+    }
+
+    #[test]
+    fn guard_respond_payload_legacy_json_without_reason_still_parses() {
+        let legacy = r#"{"id":"abc","decision":"allow"}"#;
+        let parsed: GuardRespondPayload = serde_json::from_str(legacy).expect("legacy parse");
+        assert!(matches!(parsed.decision, GuardDecision::Allow));
+        assert_eq!(parsed.reason, None);
+        assert!(parsed.always_allow.is_none());
     }
 }
 

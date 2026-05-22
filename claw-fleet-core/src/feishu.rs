@@ -617,6 +617,7 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
                 } else {
                     crate::guard::GuardDecision::Block
                 },
+                reason: None,
             };
             crate::guard::write_response(&resp)?;
             let summary = if allow { "✅ Allow (Feishu)" } else { "🚫 Block (Feishu)" };
