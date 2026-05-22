@@ -214,44 +214,57 @@ TASKS.md, no reminder is needed.\n\
 \n\
 ## Rule 3 — Worktree-based feature workflow\n\
 \n\
-A multi-step plan that touches production code MUST be developed inside an \
-isolated git worktree, not directly on the main checkout. The plan's final \
-P-task is fixed: it merges the worktree branch back to main as one atomic step.\n\
+**Any change that touches production code MUST be developed inside an \
+isolated git worktree** at `<repo-root>/.worktrees/<task-id>` on a fresh \
+branch `prd/<task-id>` — **regardless of whether the work is a multi-step \
+plan (P1..Pn) or a single mechanical change**. Rule 3 is global; it is NOT \
+gated by Rule 1's multi-step plan definition. For multi-step plans, \
+`<task-id>` is the same id you picked for the TASKS.md sentinel block \
+(Rule 2); for single-step changes, pick a short kebab-case identifier on \
+the spot (e.g. `fix-zombie-pid`, `rename-task-fields`).\n\
+\n\
+The work ends by merging the worktree branch back to main as one atomic \
+step. For multi-step plans, that merge is the final P-task; for \
+single-step changes, it is simply the finishing move once tests are green.\n\
 \n\
 **The contract:**\n\
 \n\
-- **Before P1**, create the worktree at `<repo-root>/.worktrees/<plan-id>` on \
-  a fresh branch `prd/<plan-id>` based on the current main:\n\
+- **Before touching any production code**, create the worktree on a fresh \
+  branch based on the current main:\n\
 \n\
   ```\n\
-  git worktree add -b prd/<plan-id> .worktrees/<plan-id> main\n\
+  git worktree add -b prd/<task-id> .worktrees/<task-id> main\n\
   ```\n\
 \n\
-  Use the same `plan-id` you picked for the TASKS.md sentinel block (Rule 2). \
-  All P-tasks except the final one run inside this worktree; the main \
-  checkout stays clean throughout the plan.\n\
+  All code work runs inside this worktree; the main checkout stays clean \
+  throughout. For multi-step plans, P1..P(n-1) happen here and the final \
+  P-task is the merge back to main. For single-step changes, the entire \
+  change happens here and you merge back when tests are green.\n\
 - **Intermediate commits inside the worktree are explicitly allowed and do \
   NOT violate Rule 1.** Rule 1's \"no proactive commit\" applies to *main*; \
-  commits on `prd/<plan-id>` inside the worktree are progress markers that no \
-  other plan can see. Commit between P-tasks whenever it helps you reason \
-  about the next step (e.g. `git diff HEAD~1` when a later P-task regresses \
-  behaviour). You still do not need to *ask* {title} for permission to \
-  commit inside the worktree — it's free movement on a private branch.\n\
-- **The final P-task is fixed: merge the worktree branch back to main as one \
-  atomic step.** From the main checkout:\n\
+  commits on `prd/<task-id>` inside the worktree are progress markers that \
+  no other work can see. For multi-step plans, commit between P-tasks \
+  whenever it helps you reason about the next step (e.g. `git diff HEAD~1` \
+  when a later P-task regresses behaviour). For single-step changes, you \
+  may also break the work into multiple commits inside the worktree if it \
+  helps debugging. You still do not need to *ask* {title} for permission \
+  to commit inside the worktree — it's free movement on a private branch.\n\
+- **The work ends with one atomic merge back to main.** For multi-step \
+  plans this is the final P-task; for single-step changes it is simply the \
+  finishing move once tests are green. From the main checkout:\n\
 \n\
   ```\n\
-  git merge --no-ff prd/<plan-id>\n\
+  git merge --no-ff prd/<task-id>\n\
   ```\n\
 \n\
   The `--no-ff` is mandatory. `--ff-only` and `--squash` are forbidden — we \
   keep every worktree commit visible in main's history alongside a single \
-  merge commit summarising the feature, so the plan stays auditable at \
-  P-task granularity. This `git merge --no-ff` IS the single Rule-1-allowed \
-  commit on main for the entire plan; do not run any additional `git commit` \
+  merge commit summarising the change, so the work stays auditable at \
+  per-commit granularity. This `git merge --no-ff` IS the single \
+  Rule-1-allowed commit on main; do not run any additional `git commit` \
   before or after it.\n\
 - **After a successful merge, clean up.** Run `git worktree remove \
-  .worktrees/<plan-id>` then `git branch -d prd/<plan-id>`. If the merge \
+  .worktrees/<task-id>` then `git branch -d prd/<task-id>`. If the merge \
   fails (conflict, post-merge build/test regression), resolve in place — do \
   NOT abandon the worktree, do NOT amend the merge commit, do NOT \
   `git reset --hard` to wipe the merge. Surface the situation to {title} and \
@@ -267,12 +280,14 @@ P-task is fixed: it merges the worktree branch back to main as one atomic step.\
 \n\
 ### When Rule 3 does NOT apply\n\
 \n\
-Rule 3 covers plans that change production code (features, refactors, \
-non-trivial bug fixes). It does NOT cover:\n\
+Rule 3 covers any change that touches production code, **whether multi-step \
+or single-step**. Single-step changes are NOT an excuse to skip the \
+worktree — the whole point is that even a 50-line mechanical edit gets the \
+same isolation. The actual exemptions are about *what* you're changing, \
+not *how many steps* it takes:\n\
 - Pure documentation changes (READMEs, docstrings, changelogs).\n\
 - Configuration-only changes (CI YAML, dotfiles, `.gitignore` itself, \
   formatter configs).\n\
-- Single-step tasks (already exempted by Rule 1).\n\
 - Urgent hotfixes that must land on main before another in-flight worktree \
   completes — surface the hotfix to {title} first so {title} can decide \
   whether to pause the active worktree.\n\
@@ -383,12 +398,21 @@ cost-vs-migration trade-off to {title} before touching the lockfile.\n\
 \n\
 ## When this mode does NOT apply\n\
 \n\
-- One-shot tasks where decomposition would be ceremony.\n\
-- Pure conversation / Q&A turns where no code is changing.\n\
-- Tasks {title} explicitly asks you to keep \"informal\" or \"quick\".\n\
+Rule 3 (worktree) is **global** for any change to production code. Rules \
+1, 2, and 4 are scoped to multi-step plans. So:\n\
 \n\
-In those cases, ignore all four rules — no TASKS.md, no worktree, no \
-enforced rhythm, normal commit etiquette applies.\n\
+- **Single-step production-code change**: Rule 3 applies (worktree + \
+  merge `--no-ff` back to main). Rules 1, 2, 4 do NOT — no TASKS.md, no \
+  P-tasks, no rhythm enforcement. The whole change happens in the \
+  worktree as a single mechanical edit, then merges back.\n\
+- **Pure conversation / Q&A turns where no code is changing**: none of \
+  the four rules apply. Reply in plain text.\n\
+- **Pure documentation, configuration, or hotfix work** (see Rule 3's \
+  own \"NOT apply\" subsection): all four rules are off unless {title} \
+  explicitly asks to treat the work as a multi-step plan.\n\
+- **{title} explicitly asks to keep the work \"informal\" or \"quick\"**: \
+  all four rules are off; normal commit etiquette applies and {title} \
+  is taking responsibility for the lighter process.\n\
 \n\
 ## Interaction with other modes\n\
 \n\
@@ -646,8 +670,12 @@ mod tests {
             "guidance must pin the worktree directory convention"
         );
         assert!(
+            g.contains("prd/<task-id>"),
+            "Rule 3's worktree branch uses the generic <task-id> placeholder so it works for both multi-step plans and single-step changes"
+        );
+        assert!(
             g.contains("prd/<plan-id>"),
-            "guidance must pin the branch-name convention so agents don't invent their own prefix"
+            "Rule 1/4 cross-references in multi-step contexts continue to use <plan-id> — both forms must coexist"
         );
     }
 
@@ -779,11 +807,66 @@ mod tests {
     }
 
     #[test]
-    fn render_summary_section_references_all_four_rules() {
+    fn render_summary_section_separates_rule_3_from_rules_1_2_4() {
         let g = render_guidance("Boss", "en");
+        let sum_pos = g
+            .find("## When this mode does NOT apply")
+            .expect("summary section must exist");
+        let sum_body = &g[sum_pos..];
         assert!(
-            g.contains("ignore all four rules"),
-            "the 'When this mode does NOT apply' summary must escalate to four rules now that Rule 4 exists"
+            sum_body.contains("Rule 3") && sum_body.contains("global"),
+            "summary must label Rule 3 as global so single-step production-code changes still trigger it"
+        );
+        assert!(
+            sum_body.contains("Single-step production-code change"),
+            "summary must explicitly enumerate the single-step case so agents don't fall back to the old 'single-step → no worktree' interpretation"
+        );
+        assert!(
+            sum_body.contains("Rules 1, 2, 4 do NOT")
+                || sum_body.contains("Rule 1, 2, 4 do NOT")
+                || sum_body.contains("Rules 1/2/4"),
+            "summary must spell out which rules a single-step change is exempt from, to prevent re-emergence of the misread"
+        );
+        assert!(
+            !sum_body.contains("ignore all four rules"),
+            "the old 'ignore all four rules' line must be gone — Rule 3 is no longer in the same bucket"
+        );
+    }
+
+    #[test]
+    fn render_rule_3_applies_to_single_step_changes() {
+        let g = render_guidance("Boss", "en");
+        let r3_pos = g.find("## Rule 3").expect("Rule 3 must exist");
+        let r3_end = g[r3_pos..].find("## Rule 4").expect("Rule 4 must exist");
+        let r3_body = &g[r3_pos..r3_pos + r3_end];
+        assert!(
+            r3_body.contains("single mechanical change")
+                || r3_body.contains("single-step changes"),
+            "Rule 3 must explicitly cover single-step changes in its opening so agents don't infer multi-step gating"
+        );
+        assert!(
+            r3_body.contains("Rule 3 is global"),
+            "Rule 3 must call itself 'global' to overpower Rule 1's multi-step framing when read in isolation"
+        );
+    }
+
+    #[test]
+    fn render_rule_3_not_apply_drops_single_step_exemption() {
+        let g = render_guidance("Boss", "en");
+        let na_pos = g
+            .find("### When Rule 3 does NOT apply")
+            .expect("Rule 3 NOT-apply subsection must exist");
+        let na_end = g[na_pos..]
+            .find("## Rule 4")
+            .expect("Rule 4 must follow the NOT-apply subsection");
+        let na_body = &g[na_pos..na_pos + na_end];
+        assert!(
+            !na_body.contains("Single-step tasks (already exempted by Rule 1)"),
+            "the old 'Single-step tasks → exempted' line must be removed — that wording was the source of the misread"
+        );
+        assert!(
+            na_body.contains("whether multi-step or single-step"),
+            "Rule 3's NOT-apply subsection must affirm both step-counts are covered, killing the loophole at the source"
         );
     }
 
