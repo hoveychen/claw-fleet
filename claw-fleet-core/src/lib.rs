@@ -23,6 +23,8 @@ pub mod hooks;
 pub mod hooks_server;
 pub mod idle;
 pub mod interaction_mode;
+pub mod interaction_mode_diagnostics;
+pub mod interaction_mode_test;
 pub mod jsonl_tail;
 pub mod launchd;
 pub mod llm_provider;

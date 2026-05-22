@@ -1996,6 +1996,56 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/interaction_diagnostics" => {
+                let checks = crate::interaction_mode_diagnostics::run_checks();
+                let body = serde_json::to_string(&checks).unwrap_or_else(|_| "[]".into());
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/test_decision_end_to_end" => {
+                match crate::interaction_mode_test::run_end_to_end_test(
+                    std::time::Duration::from_secs(10),
+                ) {
+                    Ok(r) => {
+                        let body = serde_json::to_string(&r).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/test_decision_via_claude_cli" => {
+                match crate::interaction_mode_test::run_claude_cli_test(
+                    std::time::Duration::from_secs(60),
+                ) {
+                    Ok(r) => {
+                        let body = serde_json::to_string(&r).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             // ── PRD Discipline mode endpoints ────────────────────────────────
             "/apply_prd_mode" => {
                 let mut body_bytes = Vec::new();
