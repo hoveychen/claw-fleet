@@ -21,3 +21,13 @@ When invoked as a **worker** for a single P-item (FLEET_SESSION_KIND=worker), fo
 - **No `fleet task *` mutations.** Only the master may call `mark-done` / `mark-failed` / `update-plan`. You can call `fleet task get-plan` to read shape, but not mutate.
 - **End your turn when the P-item is finished.** Stop the agent; the supervisor reaps the process, the master runs the acceptance audit, and either marks it Done or comes back with a `[user]` follow-up.
 - **No proactive `commit` requests.** The plan owns its own commit cadence — see `~/.claude/fleet-prd-discipline.md`.
+
+## Permissions injector
+
+Fleet manages `~/.claude/settings.json`'s `permissions.allow` while running so `fleet guard` is the sole audit gate for Bash commands (no double-prompting against Claude Code's native permission layer). Implementation: `claw-fleet-core/src/permissions_injector.rs`, lock file `~/.fleet/permissions-lock.json`, toggle config `~/.fleet/permissions-config.json`.
+
+Any new long-lived Fleet process that should participate in this contract must:
+- On startup: `if claw_fleet_core::permissions_injector::load_config().enabled { acquire(std::process::id()) }`
+- On exit: unconditionally call `release(std::process::id())` (no-op when no lock exists, so it self-heals if the toggle was flipped off mid-run)
+
+PID refcount means several Fleet processes can hold the injection at once; the last one out restores the user's original settings.json. `prune_dead_holders` (called inside both `acquire` and `release`) heals stale pids left behind by `kill -9`.
