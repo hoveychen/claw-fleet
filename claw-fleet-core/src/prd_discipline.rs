@@ -56,13 +56,18 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
     format!(
         "# Fleet PRD Discipline (managed by Claude Fleet — do not edit)\n\
 \n\
-This mode locks down two failure modes that hurt long multi-step plans:\n\
+This mode locks down three failure modes that hurt long multi-step plans:\n\
 \n\
 1. **Mid-plan commit nagging.** The agent finishes one P-task, gets a \"should \
 I commit now?\" reflex, and {title} has to keep saying \"no, keep going.\"\n\
 2. **Post-compression task amnesia.** After context compression the agent \
 remembers it just finished P2 but loses the macro state that P3..Pn are still \
 pending.\n\
+3. **Progress-report checkpointing.** The agent finishes a P-task, pauses, \
+and asks \"should I continue with the next one?\" or \"I've made good \
+progress, want to review before P4?\". {title} can already see TASKS.md \
+checkboxes and (when Rule 3 is active) worktree commits — the progress is \
+legible without {title}'s interruption.\n\
 \n\
 ## Rule 1 — Commit discipline during multi-step plans\n\
 \n\
@@ -265,14 +270,77 @@ non-trivial bug fixes). It does NOT cover:\n\
   completes — surface the hotfix to {title} first so {title} can decide \
   whether to pause the active worktree.\n\
 \n\
+## Rule 4 — Plan execution rhythm\n\
+\n\
+A multi-step plan is meant to be carried out in one continuous rhythm, not \
+punctuated by mid-plan reporting checkpoints. The unit of progress is the \
+*plan*, not the P-task — {title} can already see plan state via TASKS.md \
+and (when Rule 3 is active) worktree commits, so explicit progress reports \
+are redundant interruptions.\n\
+\n\
+**The rhythm.** Each non-final P-task follows the same three-step loop, \
+then immediately continues to the next P-task **in the same turn** without \
+pausing for {title}'s confirmation:\n\
+\n\
+1. **Dev** — make the code changes the P-task calls for.\n\
+2. **Test / verify** — run the appropriate validation (unit tests, \
+   `cargo build`, `pnpm build`, Playwright, type check, lint, hand-exercise \
+   the UI — whatever the P-task requires).\n\
+3. **Commit inside the worktree** — when Rule 3 is active, record the \
+   P-task as a commit on `prd/<plan-id>` so later P-tasks have a clean \
+   reference point. Outside Rule 3 (e.g. config-only plans), this step is \
+   skipped.\n\
+\n\
+After step 3, tick the TASKS.md checkbox and **proceed to the next P-task \
+immediately**. Do NOT pause to summarise. Do NOT ask \"should I continue \
+with P2?\" or \"want to review progress before P4?\". Do NOT offer \"I've \
+written quite a few P-tasks now, want me to summarise?\". Those are exactly \
+the proactive progress-report checkpoints Rule 4 exists to eliminate.\n\
+\n\
+### When the rhythm DOES pause\n\
+\n\
+The rhythm pauses ONLY for one of these four cases. \"I've done a lot, want \
+to check in?\" is NEVER one of them.\n\
+\n\
+1. **The final P-task's acceptance gate.** Rule 3's plan ends with \
+   `git merge --no-ff prd/<plan-id>`. Before running the merge, surface a \
+   \"ready to merge\" summary to {title} and wait for explicit go-ahead. \
+   This merge IS the plan's acceptance moment; do NOT solicit acceptance at \
+   intermediate checkpoints.\n\
+2. **A genuine direction-of-work question.** Something where {title}'s \
+   judgement is required because there's a real fork in the road — \"keep \
+   backwards compatibility for X or drop it?\", \"delete or archive this \
+   data?\", \"API design A vs B?\". Quote the choice and the trade-offs; \
+   that's a clarifying question, not a progress report.\n\
+3. **A test/verify red light that survives one repair attempt.** The first \
+   time `cargo build` / unit tests / Playwright / hooks fail inside a \
+   P-task, you MAY try ONE round of diagnosis-and-fix. If that round \
+   doesn't restore the green light, OR if the root cause is unclear before \
+   you start, stop and surface as a blocker — do NOT enter a fix → retry → \
+   fix → retry loop without {title}.\n\
+4. **A destructive operation** (rebase, force-push, branch deletion, \
+   dropping a migration, `git reset --hard`). The existing destructive-\
+   action confirmation requirement still applies; Rule 4 does not override \
+   it.\n\
+\n\
+### Failure mode this rule kills\n\
+\n\
+The interruption mode Rule 4 kills is *not* \"agent asks before destructive \
+things\" or \"agent asks when genuinely stuck\" — those are healthy. What's \
+killed is the **proactive progress-report checkpoint**: \"I've completed \
+P1–P3, want me to review before P4?\", \"P4 is done, shall I continue?\", \
+\"we've made a lot of progress, want me to summarise?\". The plan \
+checkboxes and (under Rule 3) the worktree commits already show progress. \
+The agent's job is to execute the plan, not narrate it.\n\
+\n\
 ## When this mode does NOT apply\n\
 \n\
 - One-shot tasks where decomposition would be ceremony.\n\
 - Pure conversation / Q&A turns where no code is changing.\n\
 - Tasks {title} explicitly asks you to keep \"informal\" or \"quick\".\n\
 \n\
-In those cases, ignore all three rules — no TASKS.md, no worktree, normal \
-commit etiquette applies.\n\
+In those cases, ignore all four rules — no TASKS.md, no worktree, no \
+enforced rhythm, normal commit etiquette applies.\n\
 \n\
 ## Interaction with other modes\n\
 \n\
@@ -575,6 +643,99 @@ mod tests {
         assert!(
             g.contains("git worktree remove") && g.contains("git branch -d"),
             "guidance must spell out cleanup commands so worktrees don't accumulate"
+        );
+    }
+
+    #[test]
+    fn render_header_lists_three_failure_modes() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("three failure modes"),
+            "header must reflect that Rule 4 adds a third failure mode beyond Rule 1/2"
+        );
+        assert!(
+            g.contains("Progress-report checkpointing"),
+            "header must name the third failure mode explicitly so agents recognise it"
+        );
+    }
+
+    #[test]
+    fn render_includes_rule_4_execution_rhythm() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("## Rule 4") && g.contains("rhythm"),
+            "guidance must include Rule 4 — Plan execution rhythm"
+        );
+    }
+
+    #[test]
+    fn render_rule_4_specifies_three_step_loop() {
+        let g = render_guidance("Boss", "en");
+        let r4_pos = g.find("## Rule 4").expect("Rule 4 section must exist");
+        let r4_body = &g[r4_pos..];
+        assert!(
+            r4_body.contains("**Dev**")
+                && r4_body.contains("**Test / verify**")
+                && r4_body.contains("**Commit inside the worktree**"),
+            "Rule 4 must spell out dev / test-verify / commit as the three-step loop, in that order"
+        );
+    }
+
+    #[test]
+    fn render_rule_4_forbids_progress_report_checkpoints() {
+        let g = render_guidance("Boss", "en");
+        let r4_pos = g.find("## Rule 4").expect("Rule 4 section must exist");
+        let r4_body = &g[r4_pos..];
+        assert!(
+            r4_body.contains("should I continue") || r4_body.contains("shall I continue"),
+            "Rule 4 must name the exact prompt pattern it forbids so agents recognise themselves doing it"
+        );
+        assert!(
+            r4_body.contains("review") && r4_body.contains("progress"),
+            "Rule 4 must forbid the `want to review progress` style checkpoint by name"
+        );
+        assert!(
+            r4_body.contains("written quite a few P-tasks") || r4_body.contains("a lot of progress"),
+            "Rule 4 must call out the 'I've done a lot, want to check in?' pattern that Boss reported as the actual failure mode"
+        );
+    }
+
+    #[test]
+    fn render_rule_4_allows_one_repair_attempt_for_test_red() {
+        let g = render_guidance("Boss", "en");
+        let r4_pos = g.find("## Rule 4").expect("Rule 4 section must exist");
+        let r4_body = &g[r4_pos..];
+        assert!(
+            r4_body.contains("ONE round"),
+            "Rule 4 must pin the test-red threshold to exactly one repair attempt (capitalised for emphasis) so agents don't loop indefinitely"
+        );
+        assert!(
+            r4_body.contains("fix → retry → fix → retry") || r4_body.contains("fix -> retry"),
+            "Rule 4 must explicitly forbid the unbounded fix/retry loop"
+        );
+    }
+
+    #[test]
+    fn render_rule_4_acceptance_gate_at_final_merge() {
+        let g = render_guidance("Boss", "en");
+        let r4_pos = g.find("## Rule 4").expect("Rule 4 section must exist");
+        let r4_body = &g[r4_pos..];
+        assert!(
+            r4_body.contains("acceptance gate") || r4_body.contains("acceptance moment"),
+            "Rule 4 must label the final-merge pause point as an acceptance gate so it's the only sign-off moment"
+        );
+        assert!(
+            r4_body.contains("git merge --no-ff"),
+            "Rule 4 must reference Rule 3's exact merge command so the two rules stay aligned"
+        );
+    }
+
+    #[test]
+    fn render_summary_section_references_all_four_rules() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("ignore all four rules"),
+            "the 'When this mode does NOT apply' summary must escalate to four rules now that Rule 4 exists"
         );
     }
 }
