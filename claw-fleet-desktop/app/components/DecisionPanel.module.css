@@ -10,7 +10,9 @@
   flex-direction: column;
   width: 460px;
   max-width: calc(100vw - 24px);
-  max-height: calc(100vh - 24px);
+  /* Reserve 44px at the viewport top so the panel never covers the macOS
+   * traffic lights (the drag bar is 38px); bottom 12px keeps the existing gap. */
+  max-height: calc(100vh - 56px);
   border-radius: 8px;
   border: 1.5px solid var(--color-accent);
   box-shadow:
@@ -76,7 +78,7 @@
 .panel_with_detail {
   flex-direction: row;
   align-items: stretch;
-  max-height: calc(100vh - 24px);
+  max-height: calc(100vh - 56px);
   height: 80vh;
 }
 
@@ -122,11 +124,13 @@
   opacity: 0;
 }
 
-/* Collapse toggle button: lives in the panel's top-right corner. */
+/* Collapse toggle button: lives in the panel's top-right corner. Offset more
+ * than the panel's 8px border-radius so the button + its hover background don't
+ * crowd the rounded accent border. */
 .collapse_btn {
   position: absolute;
-  top: 6px;
-  right: 6px;
+  top: 10px;
+  right: 10px;
   width: 22px;
   height: 22px;
   display: inline-flex;
