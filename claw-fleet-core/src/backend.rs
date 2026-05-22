@@ -510,6 +510,26 @@ pub trait Backend: Send + Sync {
     // ── Interaction mode (global CLAUDE.md guidance) ────────────────────────
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_interaction_mode(&self) -> Result<(), String>;
+    /// QA diagnostics: report on the four backend-observable checkpoints in
+    /// the AskUserQuestion → Decision Card pipeline. The frontend appends a
+    /// fifth row (Tauri listener self-test) it owns.
+    fn interaction_diagnostics(&self) -> Vec<crate::interaction_mode_diagnostics::DiagnosticCheck> {
+        crate::interaction_mode_diagnostics::run_checks()
+    }
+
+    /// Active diagnostic test (depth 2): write a fake ElicitationRequest
+    /// to disk so the watcher picks it up and emits it to the frontend
+    /// exactly like a real AskUserQuestion. Cleanup auto-runs after 10s.
+    fn test_decision_end_to_end(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_end_to_end_test(std::time::Duration::from_secs(10))
+    }
+
+    /// Active diagnostic test (depth 3): spawn `claude -p "<prompt>"` so
+    /// the Agent actually exercises the AskUserQuestion injection from
+    /// CLAUDE.md. Returns when the process exits or after 60s.
+    fn test_decision_via_claude_cli(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_claude_cli_test(std::time::Duration::from_secs(60))
+    }
 
     // ── PRD Discipline mode (commit guard + TASKS.md re-injection hook) ─────
     /// Enable the PRD Discipline mode: install the guidance block in

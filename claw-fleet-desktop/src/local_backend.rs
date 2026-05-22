@@ -1818,6 +1818,24 @@ impl Backend for LocalBackend {
         crate::interaction_mode::remove_interaction_mode()
     }
 
+    fn interaction_diagnostics(
+        &self,
+    ) -> Vec<crate::interaction_mode_diagnostics::DiagnosticCheck> {
+        crate::interaction_mode_diagnostics::run_checks()
+    }
+
+    fn test_decision_end_to_end(
+        &self,
+    ) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_end_to_end_test(std::time::Duration::from_secs(10))
+    }
+
+    fn test_decision_via_claude_cli(
+        &self,
+    ) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_claude_cli_test(std::time::Duration::from_secs(60))
+    }
+
     fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
         crate::prd_discipline::apply_prd_discipline(user_title, locale)?;
         crate::hooks::apply_prd_context_hook()?;

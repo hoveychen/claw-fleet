@@ -825,6 +825,26 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_ok("/remove_interaction_mode")
     }
 
+    fn interaction_diagnostics(
+        &self,
+    ) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {
+        self.probe
+            .get("/interaction_diagnostics")
+            .unwrap_or_default()
+    }
+
+    fn test_decision_end_to_end(
+        &self,
+    ) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
+        self.probe.post_json("/test_decision_end_to_end", &())
+    }
+
+    fn test_decision_via_claude_cli(
+        &self,
+    ) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
+        self.probe.post_json("/test_decision_via_claude_cli", &())
+    }
+
     fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Req<'a> { user_title: &'a str, locale: &'a str }

@@ -1036,6 +1036,49 @@ fn remove_interaction_mode(state: tauri::State<AppState>) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn get_interaction_diagnostics(
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {
+    state.backend.read().unwrap().interaction_diagnostics()
+}
+
+#[tauri::command]
+fn test_decision_frontend_only(
+    app: tauri::AppHandle,
+) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
+    use tauri::Emitter;
+    let req = claw_fleet_core::interaction_mode_test::build_test_request();
+    app.emit("elicitation-request", &req)
+        .map_err(|e| format!("emit elicitation-request: {e}"))?;
+    Ok(claw_fleet_core::interaction_mode_test::TestRunResult {
+        kind: "frontend_only".into(),
+        request_id: Some(req.id),
+        message: "Synthetic event emitted directly to the Tauri listener — no file or SSE involved".into(),
+        claude_output: None,
+    })
+}
+
+#[tauri::command]
+async fn test_decision_end_to_end(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.read().unwrap().test_decision_end_to_end())
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+}
+
+#[tauri::command]
+async fn test_decision_via_claude_cli(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.read().unwrap().test_decision_via_claude_cli())
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+}
+
+#[tauri::command]
 fn apply_prd_mode(state: tauri::State<AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
@@ -3412,6 +3455,10 @@ pub fn run() {
             remove_elicitation_hook,
             apply_interaction_mode,
             remove_interaction_mode,
+            get_interaction_diagnostics,
+            test_decision_frontend_only,
+            test_decision_end_to_end,
+            test_decision_via_claude_cli,
             apply_prd_mode,
             remove_prd_mode,
             respond_to_elicitation,
