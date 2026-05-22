@@ -3,6 +3,14 @@ fn main() {
     println!("cargo:rerun-if-changed=Cargo.toml");
 
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+
+    // libgit2-sys 0.16 (pulled in by the `git2` dev-dependency used by the
+    // cli_e2e integration test) forgets to emit advapi32 on Windows MSVC,
+    // so test link fails on Crypt*/Reg*/GetNamedSecurityInfoW. Add it here.
+    if target_os == "windows" {
+        println!("cargo:rustc-link-lib=advapi32");
+    }
+
     if target_os != "macos" {
         return;
     }
