@@ -738,11 +738,15 @@ fn determine_status(
 // ── Context window helpers ────────────────────────────────────────────────────
 
 /// Whether a Claude model belongs to the family that can be opted in to a
-/// 1M-token context window (Sonnet 4.x and Opus 4.6, per
-/// [`modelSupports1M`](../claude-code-fork/src/utils/context.ts) in
-/// Claude Code). Other Claude families are always 200K.
+/// 1M-token context window (Sonnet 4.x, Opus 4.6, and Opus 4.7+; loosely
+/// mirrors [`modelSupports1M`](../claude-code-fork/src/utils/context.ts) in
+/// Claude Code, with Opus 4.7 added because that family ships with 1M support
+/// even though upstream's whitelist hasn't been updated yet). Other Claude
+/// families are always 200K.
 fn claude_model_supports_1m(model_lower: &str) -> bool {
-    model_lower.contains("sonnet-4") || model_lower.contains("opus-4-6")
+    model_lower.contains("sonnet-4")
+        || model_lower.contains("opus-4-6")
+        || model_lower.contains("opus-4-7")
 }
 
 /// Best-effort lookup of a model's input-context-window size (in tokens).
@@ -2965,6 +2969,20 @@ mod tests {
         // Same model but only 50K observed → conservative 200K.
         assert_eq!(
             context_window_for_model("claude-opus-4-6", 50_000),
+            Some(200_000)
+        );
+    }
+
+    #[test]
+    fn context_window_inferred_1m_for_opus_4_7() {
+        // Opus 4.7 also supports 1M; without this, on-disk transcripts that
+        // don't carry the `[1m]` flag would default the denominator to 200K.
+        assert_eq!(
+            context_window_for_model("claude-opus-4-7", 530_000),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            context_window_for_model("claude-opus-4-7", 50_000),
             Some(200_000)
         );
     }
