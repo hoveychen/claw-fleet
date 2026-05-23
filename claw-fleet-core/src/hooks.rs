@@ -885,6 +885,19 @@ fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
         return Vec::new();
     };
 
+    // Claude Code's hook payloads do NOT carry a "timestamp" field, so the
+    // per-record lookup below almost always misses. Use the file's mtime as
+    // the upper-bound fallback: it equals the time of the most recent
+    // append, which is a safe over-estimate for every record in the file.
+    // The 5-minute freshness gate in `read_hook_states` still expires an
+    // untouched hooks.jsonl correctly.
+    let file_mtime_ms: u64 = fs::metadata(path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+
     let lines: Vec<&str> = content.lines().collect();
     let start = lines.len().saturating_sub(max_lines);
 
@@ -895,7 +908,6 @@ fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
             let session_id = v.get("session_id")?.as_str()?.to_string();
             let event_name = v.get("hook_event_name")?.as_str()?.to_string();
 
-            // Try to get timestamp from the event; fall back to 0.
             let timestamp_ms = v
                 .get("timestamp")
                 .and_then(|t| t.as_str())
@@ -904,7 +916,7 @@ fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
                         .ok()
                         .map(|dt| dt.timestamp_millis() as u64)
                 })
-                .unwrap_or(0);
+                .unwrap_or(file_mtime_ms);
 
             Some(HookEvent {
                 session_id,
@@ -981,6 +993,51 @@ mod tests {
                 "timeout": 5000
             }]
         })
+    }
+
+    #[test]
+    fn read_recent_events_falls_back_to_file_mtime_when_record_lacks_timestamp() {
+        // Regression: Claude Code's hook payloads (PreToolUse / PostToolUse /
+        // Stop / SubagentStop) do NOT contain a "timestamp" field — only
+        // session_id, hook_event_name, cwd, tool_*, etc. Verified live by
+        // inspecting ~/.fleet/hooks.jsonl: 51/51 recent records had no
+        // "timestamp" key. The old code returned timestamp_ms=0, which made
+        // read_hook_states treat every hook event as ">5 min stale" and
+        // discard them, killing the Phase-0 hook override in
+        // determine_status.
+        //
+        // Fix: fall back to the file's mtime when the record lacks a usable
+        // timestamp. File mtime is a strict upper bound on every record in
+        // the file, which is correct for the 5-minute freshness gate (a
+        // long-untouched hooks.jsonl still expires; a recently-written one
+        // keeps its events alive).
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("hooks.jsonl");
+        let mut f = std::fs::File::create(&path).unwrap();
+        writeln!(
+            f,
+            r#"{{"session_id":"sess-1","hook_event_name":"Stop","cwd":"/x"}}"#
+        )
+        .unwrap();
+        writeln!(
+            f,
+            r#"{{"session_id":"sess-2","hook_event_name":"PreToolUse","tool_name":"Bash","cwd":"/y"}}"#
+        )
+        .unwrap();
+        drop(f);
+
+        let events = read_recent_events(&path, 500);
+        assert_eq!(events.len(), 2);
+        for ev in &events {
+            assert!(
+                ev.timestamp_ms > 0,
+                "event must inherit non-zero timestamp from file mtime when \
+                 record itself lacks a timestamp field — got {} for session_id={}",
+                ev.timestamp_ms,
+                ev.session_id
+            );
+        }
     }
 
     #[test]

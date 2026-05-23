@@ -2749,6 +2749,31 @@ mod tests {
         assert_eq!(s.status, SessionStatus::Idle);
     }
 
+    // Regression: card stuck on Thinking forever; restarting Fleet fixes it.
+    // Root cause: when the filesystem watcher drops the jsonl event for the
+    // model's final end_turn message, the session's source stays "clean".
+    // incremental_rescan_and_emit then keeps the cached SessionInfo and only
+    // runs age_out_status on it — and age_out_status is a one-way ladder that
+    // can only downgrade an active status to Idle. It must NEVER promote a
+    // stale Thinking into WaitingInput from age alone, because without
+    // re-reading the JSONL we cannot know whether the turn actually ended.
+    // The fix has to happen elsewhere (re-trigger rescan when hooks.jsonl
+    // grows, or add a periodic full-scan heartbeat). This test locks the
+    // current invariant in place so any future patch makes the upgrade path
+    // explicit rather than smuggling it in here.
+    #[test]
+    fn age_out_thinking_never_upgrades_to_waiting_input() {
+        for age in [0.0_f64, 1.0, 30.0, 60.0, 119.0, 120.0, 200.0, 5000.0] {
+            let mut s = make_session(SessionStatus::Thinking);
+            age_out_status(&mut s, age);
+            assert_ne!(
+                s.status,
+                SessionStatus::WaitingInput,
+                "age_out_status must never produce WaitingInput from Thinking (age={age})"
+            );
+        }
+    }
+
     // ── Bug fix: max_tokens should be WaitingInput ─────────────────────────
 
     #[test]
