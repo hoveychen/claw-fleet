@@ -30,7 +30,12 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     }
     // Mirror the permission injection for the MCP server registration. We are
     // the fleet binary, so current_exe() is the right `command` to publish.
-    if crate::mcp_injector::load_config().enabled {
+    //
+    // Debug-only gate (matches the desktop side in gui.rs): v2 fleet__ask has
+    // UX gaps vs v1 AskUserQuestion that we want fixed before release users
+    // get the tool by default. Release builds skip injection and release()
+    // any stale entry left over by an earlier dev install.
+    if cfg!(debug_assertions) && crate::mcp_injector::load_config().enabled {
         match std::env::current_exe() {
             Ok(p) => {
                 let path_str = p.to_string_lossy().to_string();
@@ -40,6 +45,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
             Err(e) => eprintln!("[fleet serve] current_exe failed, skipping mcp_injector: {e}"),
         }
+    } else if !cfg!(debug_assertions) {
+        let _ = crate::mcp_injector::release(serve_pid);
     }
     if let Err(e) = ctrlc::try_set_handler(move || {
         let _ = crate::permissions_injector::release(serve_pid);
