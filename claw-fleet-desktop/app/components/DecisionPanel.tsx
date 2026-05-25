@@ -17,6 +17,8 @@ import type {
   DecisionHistoryRecord,
   ElicitationAttachment,
   ElicitationDecision,
+  FleetAskDecision,
+  FleetAskFormField,
   GuardDecision,
   PendingDecision,
   PlanApprovalDecision,
@@ -977,6 +979,370 @@ function SessionPendingCard({ decision }: { decision: SessionPendingDecision }) 
   );
 }
 
+// ── fleet__ask card renderer (MCP-tool variant) ─────────────────────────
+//
+// Mirrors the elicitation card: stepped questions, header chip, workspace +
+// AI title chips. Extends it with two optional render hooks per the P3 plan:
+//   * `html` field non-empty → sandboxed `<iframe srcdoc>` between the
+//     question body and the answer controls. `sandbox=""` means: no scripts,
+//     no same-origin, no forms, no top-navigation, no popups. The agent gets
+//     a static preview without an XSS vector.
+//   * `formFields` non-empty → dynamic controls dispatched on `kind`
+//     (text / textarea / number / select / radio / checkbox).
+// `options` still renders the existing button grid. The three sections compose
+// freely — a single question can carry any subset.
+
+function FleetAskFormFieldRow({
+  decisionId,
+  field,
+  value,
+  onChange,
+}: {
+  decisionId: string;
+  field: FleetAskFormField;
+  value: string;
+  onChange: (val: string) => void;
+}) {
+  const { t } = useTranslation();
+  const id = `fa-${decisionId}-${field.name}`;
+  const placeholder = field.placeholder ?? "";
+  switch (field.kind) {
+    case "textarea":
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+          </label>
+          <textarea
+            id={id}
+            value={value}
+            placeholder={placeholder}
+            rows={4}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ width: "100%", resize: "vertical" }}
+          />
+        </div>
+      );
+    case "number":
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+          </label>
+          <input
+            id={id}
+            type="number"
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+    case "select":
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+          </label>
+          <select id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+            <option value="" disabled>
+              {placeholder || t("fleet_ask.select_placeholder", "Select…")}
+            </option>
+            {(field.options ?? []).map((opt) => (
+              <option key={opt} value={opt}>
+                {opt}
+              </option>
+            ))}
+          </select>
+        </div>
+      );
+    case "radio":
+      return (
+        <div className={styles.elicitation_other_block}>
+          <span className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+          </span>
+          {(field.options ?? []).map((opt) => (
+            <label key={opt} style={{ display: "block" }}>
+              <input
+                type="radio"
+                name={id}
+                value={opt}
+                checked={value === opt}
+                onChange={(e) => onChange(e.target.value)}
+              />{" "}
+              {opt}
+            </label>
+          ))}
+        </div>
+      );
+    case "checkbox": {
+      // Checkbox semantics: single boolean. Serialised as "true" / "false" in
+      // the answers map so the agent gets a stable string regardless of
+      // language. Multi-checkbox groups should use kind="radio" with multiple
+      // options or compose multiple checkbox fields — keeping this kind
+      // boolean keeps the wire shape predictable.
+      const checked = value === "true";
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+            <input
+              id={id}
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+            />
+            <span>
+              {field.label}
+              {field.required && <span aria-hidden> *</span>}
+            </span>
+          </label>
+        </div>
+      );
+    }
+    case "text":
+    default:
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+          </label>
+          <input
+            id={id}
+            type="text"
+            value={value}
+            placeholder={placeholder}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+  }
+}
+
+function FleetAskCard({ decision }: { decision: FleetAskDecision }) {
+  const { t } = useTranslation();
+  const {
+    submitFleetAsk,
+    cancelFleetAsk,
+    toggleFleetAskOption,
+    setFleetAskCustomAnswer,
+    setFleetAskFormAnswer,
+    setFleetAskStep,
+  } = useDecisionStore();
+
+  const { step, request, selections, customAnswers, formAnswers } = decision;
+  const total = request.questions.length;
+  const q = request.questions[step];
+  const isLast = step === total - 1;
+
+  const opts = q.options ?? [];
+  const formFields = q.formFields ?? [];
+  const selected = selections[q.question] || [];
+  const customText = customAnswers[q.question] || "";
+
+  // Whether a question is "complete enough" to advance. Form-field required
+  // flags + at least one of (option picked / custom typed / any form field
+  // populated when no options exist).
+  const requiredFormFieldsFilled = formFields.every((f) => {
+    if (!f.required) return true;
+    const v = formAnswers[f.name];
+    return v !== undefined && v !== "";
+  });
+  const hasOptionPick = opts.length === 0 || selected.length > 0 || customText.trim().length > 0;
+  const hasAnswer = requiredFormFieldsFilled && hasOptionPick;
+
+  const allAnswered = request.questions.every((qq) => {
+    const qOpts = qq.options ?? [];
+    const qFormFields = qq.formFields ?? [];
+    const sel = selections[qq.question] || [];
+    const custom = customAnswers[qq.question]?.trim() ?? "";
+    const optsOk = qOpts.length === 0 || sel.length > 0 || custom.length > 0;
+    const formOk = qFormFields.every((f) => {
+      if (!f.required) return true;
+      const v = formAnswers[f.name];
+      return v !== undefined && v !== "";
+    });
+    return optsOk && formOk;
+  });
+
+  const handleBack = useCallback(
+    () => setFleetAskStep(decision.id, step - 1),
+    [setFleetAskStep, decision.id, step],
+  );
+  const handleNext = useCallback(
+    () => setFleetAskStep(decision.id, step + 1),
+    [setFleetAskStep, decision.id, step],
+  );
+  const handleSubmit = useCallback(
+    () => submitFleetAsk(decision.id),
+    [submitFleetAsk, decision.id],
+  );
+  const handleCancel = useCallback(
+    () => cancelFleetAsk(decision.id),
+    [cancelFleetAsk, decision.id],
+  );
+
+  return (
+    <div className={styles.card}>
+      <div className={styles.card_header}>
+        <svg
+          className={styles.card_icon_question}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <circle cx="12" cy="12" r="10" />
+          <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+          <line x1="12" y1="17" x2="12.01" y2="17" />
+        </svg>
+        <span className={styles.card_title}>
+          {t("fleet_ask.title", "Agent Question (fleet__ask)")}
+        </span>
+        {total > 1 && (
+          <span className={styles.elicitation_step_badge}>
+            {step + 1} / {total}
+          </span>
+        )}
+        {request.workspaceName && (
+          <span className={styles.card_workspace}>{request.workspaceName}</span>
+        )}
+        <TaskMasterChip sessionId={request.sessionId ?? null} />
+      </div>
+
+      {request.aiTitle && (
+        <div className={styles.card_subtitle}>{request.aiTitle}</div>
+      )}
+
+      {total > 1 && (
+        <div className={styles.elicitation_dots}>
+          {request.questions.map((_, i) => (
+            <button
+              key={i}
+              className={`${styles.elicitation_dot} ${i === step ? styles.elicitation_dot_active : ""}`}
+              onClick={() => setFleetAskStep(decision.id, i)}
+            />
+          ))}
+        </div>
+      )}
+
+      <div className={styles.elicitation_question}>
+        <div className={styles.elicitation_question_text}>
+          {q.header && (
+            <span className={styles.elicitation_header}>{q.header}</span>
+          )}
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
+        </div>
+
+        {q.html && (
+          <iframe
+            title={`fleet-ask-html-${decision.id}-${step}`}
+            sandbox=""
+            srcDoc={q.html}
+            style={{
+              width: "100%",
+              minHeight: "200px",
+              border: "1px solid var(--decision-card-border, #ccc)",
+              borderRadius: "0.4rem",
+              background: "#fff",
+            }}
+          />
+        )}
+
+        {formFields.length > 0 && (
+          <div className={styles.elicitation_options}>
+            {formFields.map((f) => (
+              <FleetAskFormFieldRow
+                key={f.name}
+                decisionId={decision.id}
+                field={f}
+                value={formAnswers[f.name] ?? ""}
+                onChange={(v) => setFleetAskFormAnswer(decision.id, f.name, v)}
+              />
+            ))}
+          </div>
+        )}
+
+        {opts.length > 0 && (
+          <div className={styles.elicitation_options}>
+            {opts.map((opt) => {
+              const isSelected = selected.includes(opt.label);
+              return (
+                <button
+                  key={opt.label}
+                  type="button"
+                  className={`${styles.elicitation_option} ${isSelected ? styles.elicitation_option_selected : ""}`}
+                  onClick={() =>
+                    toggleFleetAskOption(decision.id, q.question, opt.label, q.multiSelect)
+                  }
+                >
+                  <span className={styles.elicitation_option_label}>{opt.label}</span>
+                  {opt.description && (
+                    <span className={styles.elicitation_option_desc}>{opt.description}</span>
+                  )}
+                </button>
+              );
+            })}
+            <div className={styles.elicitation_other_block}>
+              <span className={styles.elicitation_option_label}>
+                {t("fleet_ask.other", "Other")}
+              </span>
+              <input
+                type="text"
+                value={customText}
+                placeholder={t("fleet_ask.other_placeholder", "Type your answer…")}
+                onChange={(e) => setFleetAskCustomAnswer(decision.id, q.question, e.target.value)}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className={styles.actions}>
+        <button
+          className={`${styles.btn} ${styles.btn_secondary}`}
+          onClick={handleCancel}
+        >
+          {t("fleet_ask.cancel", "Cancel")}
+        </button>
+        <div className={styles.actions_spacer} />
+        {step > 0 && (
+          <button
+            className={`${styles.btn} ${styles.btn_secondary}`}
+            onClick={handleBack}
+          >
+            {t("fleet_ask.back", "Back")}
+          </button>
+        )}
+        {isLast ? (
+          <button
+            className={`${styles.btn} ${styles.btn_allow}`}
+            onClick={handleSubmit}
+            disabled={!allAnswered}
+          >
+            {t("fleet_ask.submit", "Submit")}
+          </button>
+        ) : (
+          <button
+            className={`${styles.btn} ${styles.btn_allow}`}
+            onClick={handleNext}
+            disabled={!hasAnswer}
+          >
+            {t("fleet_ask.next", "Next")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Card dispatcher ──────────────────────────────────────────────────────
 
 function DecisionCard({ decision, compact }: { decision: PendingDecision; compact: boolean }) {
@@ -985,6 +1351,8 @@ function DecisionCard({ decision, compact }: { decision: PendingDecision; compac
       return <GuardCard decision={decision} />;
     case "elicitation":
       return <ElicitationCard decision={decision} compact={compact} />;
+    case "fleet-ask":
+      return <FleetAskCard decision={decision} />;
     case "plan-approval":
       return <PlanApprovalCard decision={decision} />;
     case "session-pending":
