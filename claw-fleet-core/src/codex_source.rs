@@ -139,7 +139,8 @@ fn read_session_content(path: &Path) -> Result<String, String> {
     if name.ends_with(".jsonl.zst") {
         read_zst_file(path)
     } else {
-        fs::read_to_string(path).map_err(|e| format!("Cannot read {}: {e}", path.display()))
+        crate::bom::read_to_string_no_bom(path)
+            .map_err(|e| format!("Cannot read {}: {e}", path.display()))
     }
 }
 

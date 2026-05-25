@@ -4,6 +4,7 @@ pub use claw_fleet_task::architecture_overview;
 pub mod audit;
 pub mod auto_resume;
 pub mod backend;
+pub mod bom;
 pub mod claude_analyze;
 pub mod claude_binary;
 pub mod claude_cli;
