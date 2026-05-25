@@ -64,7 +64,6 @@
   border: 1px solid var(--color-border);
   border-radius: 6px;
   background: var(--color-bg-secondary);
-  cursor: pointer;
 }
 
 .row_open {
@@ -76,6 +75,8 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  cursor: pointer;
+  user-select: none;
 }
 
 .kind_chip {
