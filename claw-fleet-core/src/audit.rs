@@ -1260,10 +1260,17 @@ fn classify_bash_command(cmd: &str) -> Option<(AuditRiskLevel, Vec<String>)> {
 
 fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
-        s.to_string()
-    } else {
-        format!("{}…", &s[..max])
+        return s.to_string();
     }
+    // Round down to the previous char boundary so we never slice through a
+    // multi-byte UTF-8 sequence (CJK is 3 bytes per char). `is_char_boundary`
+    // is true for any `i` in `0..=max` where `i` is on a valid boundary; the
+    // worst case is walking back ≤3 bytes, so this never underflows.
+    let mut end = max;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &s[..end])
 }
 
 // ── Public API ──────────────────────────────────────────────────────────────
@@ -1448,6 +1455,25 @@ mod tests {
             user_rules_mtime: None,
             last_check: std::time::Instant::now(),
         });
+    }
+
+    // ── Regression: CJK truncate must not panic on UTF-8 boundaries ────────
+
+    #[test]
+    fn truncate_handles_utf8_boundary_in_cjk() {
+        // Repro: 119 ASCII bytes followed by "中" (3 bytes, 0xE4 0xB8 0xAD).
+        // `&s[..120]` would land inside "中" (bytes 119..122) and panic in
+        // core::str::slice_error_fail — taking the entire GUI process with it
+        // because the call chain reaches main thread via the
+        // `get_audit_events` Tauri command.
+        let s = format!("{}{}rest", "a".repeat(119), "中");
+        assert_eq!(s.len(), 119 + 3 + 4);
+
+        let out = truncate(&s, 120);
+
+        let prefix = out.strip_suffix('…').expect("must end with ellipsis");
+        assert!(prefix.len() <= 120, "prefix exceeds budget: {}", prefix.len());
+        assert_eq!(prefix, "a".repeat(119), "must stop at the char boundary right before 中");
     }
 
     // ── Command-start matching unit tests ───────────────────────────────────
