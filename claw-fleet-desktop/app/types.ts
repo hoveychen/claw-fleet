@@ -356,6 +356,17 @@ export interface NestedScript {
 export interface CommandLeaf {
   argv: string[];
   nested?: NestedScript | null;
+  /**
+   * Set by the backend when this leaf (taken in isolation) trips the audit
+   * blacklist.  Missing on older `fleet guard` payloads — treat as `false`.
+   */
+  triggering?: boolean;
+  /**
+   * Set by the backend when a user's existing guard allow rule already
+   * covers this leaf's command — meaningful only when `triggering` is true.
+   * Missing on older payloads — treat as `false`.
+   */
+  already_allowed?: boolean;
 }
 
 export interface CommandView {
