@@ -143,16 +143,23 @@ mod tests {
             std::env::remove_var("FLEET_HOME");
         }
     }
-    fn with_temp_home() -> (tempfile::TempDir, EnvGuard, std::sync::MutexGuard<'static, ()>) {
+    // Return order matters: callers destructure as
+    // `let (_lock, _env, _tmp) = with_temp_home();` and Rust drops locals in
+    // reverse declaration order, so `_tmp` is dropped first, then `_env`
+    // clears `FLEET_HOME`, then `_lock` releases the mutex. The previous
+    // `(tmp, env, lock)` shape released the lock first, leaving a race
+    // window where the next test could acquire the lock and `set_var` its
+    // own tempdir before this test's `EnvGuard` cleared `FLEET_HOME`.
+    fn with_temp_home() -> (std::sync::MutexGuard<'static, ()>, EnvGuard, tempfile::TempDir) {
         let lock = fleet_home_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         std::env::set_var("FLEET_HOME", tmp.path());
-        (tmp, EnvGuard, lock)
+        (lock, EnvGuard, tmp)
     }
 
     #[test]
     fn roundtrip_save_load_yields_equal_map() {
-        let (_tmp, _env, _lock) = with_temp_home();
+        let (_lock, _env, _tmp) = with_temp_home();
         let mut cache: HashMap<String, (u64, SessionInfo)> = HashMap::new();
         cache.insert("/a/s1.jsonl".into(), (12_345, sample_info("s1")));
         cache.insert("/b/s2.jsonl".into(), (67_890, sample_info("s2")));
@@ -168,14 +175,14 @@ mod tests {
 
     #[test]
     fn missing_file_returns_empty() {
-        let (_tmp, _env, _lock) = with_temp_home();
+        let (_lock, _env, _tmp) = with_temp_home();
         let loaded = load();
         assert!(loaded.is_empty());
     }
 
     #[test]
     fn corrupt_file_returns_empty() {
-        let (tmp, _env, _lock) = with_temp_home();
+        let (_lock, _env, tmp) = with_temp_home();
         let p = tmp.path().join(CACHE_FILE_NAME);
         fs::write(&p, b"not json").unwrap();
         let loaded = load();
@@ -184,7 +191,7 @@ mod tests {
 
     #[test]
     fn version_mismatch_returns_empty() {
-        let (tmp, _env, _lock) = with_temp_home();
+        let (_lock, _env, tmp) = with_temp_home();
         let p = tmp.path().join(CACHE_FILE_NAME);
         fs::write(&p, br#"{"version":999,"entries":{}}"#).unwrap();
         let loaded = load();
@@ -218,7 +225,7 @@ mod tests {
 
     #[test]
     fn scan_cache_new_seeds_session_cache_from_disk() {
-        let (_tmp, _env, _lock) = with_temp_home();
+        let (_lock, _env, _tmp) = with_temp_home();
         let mut cache: HashMap<String, (u64, SessionInfo)> = HashMap::new();
         cache.insert("/seed/path.jsonl".into(), (42, sample_info("seed")));
         save(&cache).expect("save ok");
