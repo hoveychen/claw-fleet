@@ -250,6 +250,134 @@ If `AskUserQuestion` is not in your toolset this turn — neither directly \
 listed nor present in the deferred-tool list — this file is inert and you \
 respond with plain text exactly as you would without this guidance. A \
 deferred listing does NOT qualify as absent; see the opening section.\n\
+\n\
+## Extended: `fleet__ask` (MCP-tool variant)\n\
+\n\
+When Fleet is running, Claude Code also sees a second tool — `fleet__ask` — \
+registered via MCP (mcpServers.fleet in ~/.claude.json). It is a *superset* \
+of `AskUserQuestion`: anything you could put in `AskUserQuestion`, you can \
+put in `fleet__ask`, plus two new optional per-question fields:\n\
+\n\
+- `html` (string): a static HTML preview. Fleet renders it in a sandboxed \
+  `<iframe sandbox=\"\">` between the question body and the answer controls — \
+  no scripts, no same-origin, no forms, no top-navigation, no popups. Useful \
+  for rich diff previews, screenshot tables, anything HTML can express that \
+  markdown can't.\n\
+- `formFields` (FormField[]): dynamic input fields. Each field has `name`, \
+  `kind`, `label`, optional `placeholder` / `options` / `required` / \
+  `default`. `kind` is one of `text` / `textarea` / `number` / `select` / \
+  `radio` / `checkbox`. The user's answers come back keyed by field name.\n\
+\n\
+**Differences from `AskUserQuestion`.**\n\
+- `AskUserQuestion` is deferred — its schema must be loaded with \
+  `ToolSearch select:AskUserQuestion` before the first call. \
+  `fleet__ask` is *not* deferred — it is registered through MCP at session \
+  start, so its schema is live from turn 1.\n\
+- `AskUserQuestion` returns selected option labels per question. \
+  `fleet__ask` returns a flat `answers` map where both question-text → \
+  option-label entries and form-field-name → value entries coexist.\n\
+- `fleet__ask` shares the same Decision Card surface as `AskUserQuestion`, \
+  the same Speech Summary Divider rule, the same Tone & Language rules. \
+  Treat it as `AskUserQuestion` plus the two extension hooks.\n\
+\n\
+**When to use which.**\n\
+\n\
+| Situation | Tool |\n\
+|-----------|------|\n\
+| Pure preference / branch choice with 2–4 textual options | `AskUserQuestion` |\n\
+| Status report + 1–4 follow-up decisions, all option-based | `AskUserQuestion` |\n\
+| Needs a rendered HTML preview (diff table, formatted artefact, screenshot grid) | `fleet__ask` with `html` |\n\
+| Needs structured form input (commit message draft, multiple typed fields, sliders are not supported — fall back to radio) | `fleet__ask` with `formFields` |\n\
+| Mix of all three (preview + form + options) on one card | `fleet__ask` (composite) |\n\
+\n\
+Default to `AskUserQuestion` for the routine wait-for-input moments \
+documented above. Reach for `fleet__ask` when you genuinely need the html \
+preview or structured form. Both tools render in the same Decision Panel, \
+so {title_en} doesn't see a UX seam.\n\
+\n\
+### `fleet__ask` schema (reference)\n\
+\n\
+Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
+\n\
+`Question` (same fields as `AskUserQuestion`, plus two optional):\n\
+- `question`, `header`, `multiSelect` — identical to `AskUserQuestion`.\n\
+- `options` (Option[], **optional** here): same Option shape as \
+  `AskUserQuestion`; omit entirely when the card is form-only or html-only.\n\
+- `html` (string, optional): HTML body rendered in a sandboxed iframe.\n\
+- `formFields` (FormField[], optional): dynamic input fields. See below.\n\
+\n\
+`FormField`:\n\
+- `name` (string, required): identifier the answers map will use.\n\
+- `kind` (string, required): `text` | `textarea` | `number` | `select` | `radio` | `checkbox`.\n\
+- `label` (string, required): displayed next to the control.\n\
+- `placeholder` (string, optional): for text / textarea / number.\n\
+- `options` (string[], optional): required for `select` and `radio`.\n\
+- `required` (boolean, optional): blocks submit when empty.\n\
+- `default` (any, optional): pre-populates the field.\n\
+\n\
+**Usage examples.**\n\
+\n\
+Pure HTML preview (no form, no options):\n\
+```json\n\
+{{\n\
+  \"questions\": [{{\n\
+    \"question\": \"Here's the diff I'm about to commit.\\n---\\nLooks right?\",\n\
+    \"header\": \"Diff\",\n\
+    \"multiSelect\": false,\n\
+    \"html\": \"<pre style='font-family:monospace'>+ added line\\n- removed line</pre>\",\n\
+    \"options\": [\n\
+      {{\"label\": \"Commit now (Recommended)\", \"description\": \"Run git commit with the message in the body.\"}},\n\
+      {{\"label\": \"Edit message\", \"description\": \"Stop and let me revise the commit message first.\"}}\n\
+    ]\n\
+  }}]\n\
+}}\n\
+```\n\
+\n\
+Pure form (no html, no options):\n\
+```json\n\
+{{\n\
+  \"questions\": [{{\n\
+    \"question\": \"Authoring a commit.\\n---\\nFill in the message and pick a strategy.\",\n\
+    \"header\": \"Commit\",\n\
+    \"multiSelect\": false,\n\
+    \"formFields\": [\n\
+      {{\"name\": \"commit_msg\", \"kind\": \"textarea\", \"label\": \"Message\", \"required\": true}},\n\
+      {{\"name\": \"strategy\", \"kind\": \"radio\", \"label\": \"Strategy\", \"options\": [\"merge\", \"rebase\", \"squash\"], \"default\": \"rebase\"}}\n\
+    ]\n\
+  }}]\n\
+}}\n\
+```\n\
+\n\
+Composite (html preview + form + options):\n\
+```json\n\
+{{\n\
+  \"questions\": [{{\n\
+    \"question\": \"Migration impact report.\\n---\\nReview the table, fill in the rollout note, and pick a window.\",\n\
+    \"header\": \"Migration\",\n\
+    \"multiSelect\": false,\n\
+    \"html\": \"<table><tr><th>table</th><th>rows</th></tr><tr><td>users</td><td>50M</td></tr></table>\",\n\
+    \"formFields\": [\n\
+      {{\"name\": \"rollout_note\", \"kind\": \"textarea\", \"label\": \"Rollout note for status page\"}}\n\
+    ],\n\
+    \"options\": [\n\
+      {{\"label\": \"Tonight 02:00 UTC (Recommended)\", \"description\": \"Lowest-traffic window.\"}},\n\
+      {{\"label\": \"Hold until Monday\", \"description\": \"Wait for additional review.\"}}\n\
+    ]\n\
+  }}]\n\
+}}\n\
+```\n\
+\n\
+The `answers` returned by `fleet__ask` is a flat map. For the composite \
+example above it would look like:\n\
+```json\n\
+{{\n\
+  \"Migration impact report.\\n---\\nReview the table, fill in the rollout note, and pick a window.\": \"Tonight 02:00 UTC (Recommended)\",\n\
+  \"rollout_note\": \"Adding NOT NULL with backfill default.\"\n\
+}}\n\
+```\n\
+(question text → option label, form-field name → value, both in the same \
+map — name collisions are avoided because question text is prose and field \
+names are identifiers.)\n\
 ",
         title_en = title_en,
         title_zh = title_zh,
