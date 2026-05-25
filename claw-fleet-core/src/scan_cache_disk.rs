@@ -192,6 +192,31 @@ mod tests {
     }
 
     #[test]
+    fn should_persist_now_returns_true_when_never_persisted() {
+        use crate::session::should_persist_now;
+        use std::time::{Duration, Instant};
+        assert!(should_persist_now(None, Instant::now(), Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn should_persist_now_returns_false_inside_throttle_window() {
+        use crate::session::should_persist_now;
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        let recent = now - Duration::from_secs(5);
+        assert!(!should_persist_now(Some(recent), now, Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn should_persist_now_returns_true_past_throttle_window() {
+        use crate::session::should_persist_now;
+        use std::time::{Duration, Instant};
+        let now = Instant::now();
+        let long_ago = now - Duration::from_secs(60);
+        assert!(should_persist_now(Some(long_ago), now, Duration::from_secs(30)));
+    }
+
+    #[test]
     fn scan_cache_new_seeds_session_cache_from_disk() {
         let (_tmp, _env, _lock) = with_temp_home();
         let mut cache: HashMap<String, (u64, SessionInfo)> = HashMap::new();
