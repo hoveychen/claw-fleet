@@ -42,6 +42,9 @@ pub mod id {
     pub const GUIDANCE_FILE: &str = "guidance_file";
     pub const ELICITATION_HOOK: &str = "elicitation_hook";
     pub const WATCHER_HEARTBEAT: &str = "watcher_heartbeat";
+    /// fleet__ask MCP-tool injection — `mcpServers.fleet` in ~/.claude.json
+    /// points at an existing executable.
+    pub const MCP_INJECTION: &str = "mcp_injection";
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -62,6 +65,10 @@ pub enum FixAction {
     /// Re-run `hooks::apply_elicitation_hook` to re-install the
     /// `PreToolUse → AskUserQuestion` hook group in settings.json.
     EnableElicitationHook,
+    /// Re-run `mcp_injector::acquire` so `~/.claude.json` carries the
+    /// `mcpServers.fleet` entry that Claude Code uses to launch the MCP
+    /// stdio server exposing `fleet__ask`.
+    EnableMcpInjector,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -92,7 +99,22 @@ pub fn run_checks() -> Vec<DiagnosticCheck> {
         check_guidance_file(read_guidance_file()),
         check_elicitation_hook(hooks::plan_hook_setup().elicitation_installed),
         check_watcher_heartbeat(&consumer_heartbeat::consumer_status(HEARTBEAT_STALE_AFTER)),
+        check_mcp_injection(read_mcp_fleet_command()),
     ]
+}
+
+/// Return the `mcpServers.fleet.command` value from ~/.claude.json, or
+/// `None` if the file / object / key is missing / not a string. Kept pure
+/// so `check_mcp_injection` can be unit-tested without filesystem state.
+fn read_mcp_fleet_command() -> Option<String> {
+    let path = crate::session::real_home_dir()?.join(".claude.json");
+    let raw = fs::read_to_string(&path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    v.get("mcpServers")?
+        .get(crate::mcp_injector::FLEET_SERVER_KEY)?
+        .get("command")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 fn read_guidance_file() -> Option<String> {
@@ -174,6 +196,48 @@ pub fn check_elicitation_hook(installed: bool) -> DiagnosticCheck {
                     .into(),
             fix_action: Some(FixAction::EnableElicitationHook),
         }
+    }
+}
+
+pub fn check_mcp_injection(fleet_command: Option<String>) -> DiagnosticCheck {
+    match fleet_command {
+        Some(cmd) if !cmd.trim().is_empty() => {
+            let exists = std::path::Path::new(&cmd).is_file();
+            if exists {
+                DiagnosticCheck {
+                    id: id::MCP_INJECTION.into(),
+                    label: "mcpServers.fleet in ~/.claude.json".into(),
+                    status: CheckStatus::Pass,
+                    detail: format!(
+                        "Fleet MCP server registered, command → {} (exists)",
+                        cmd
+                    ),
+                    fix_action: None,
+                }
+            } else {
+                DiagnosticCheck {
+                    id: id::MCP_INJECTION.into(),
+                    label: "mcpServers.fleet in ~/.claude.json".into(),
+                    status: CheckStatus::Fail,
+                    detail: format!(
+                        "mcpServers.fleet.command points at {} but no executable found there — \
+                         re-acquire to point at this Fleet's actual binary",
+                        cmd
+                    ),
+                    fix_action: Some(FixAction::EnableMcpInjector),
+                }
+            }
+        }
+        _ => DiagnosticCheck {
+            id: id::MCP_INJECTION.into(),
+            label: "mcpServers.fleet in ~/.claude.json".into(),
+            status: CheckStatus::Fail,
+            detail:
+                "~/.claude.json has no mcpServers.fleet entry — \
+                 the fleet__ask MCP tool will be invisible to Claude Code"
+                    .into(),
+            fix_action: Some(FixAction::EnableMcpInjector),
+        },
     }
 }
 
@@ -302,6 +366,53 @@ mod tests {
         let s = ConsumerStatus::HomeDirUnknown;
         let c = check_watcher_heartbeat(&s);
         assert_eq!(c.status, CheckStatus::Fail);
+    }
+
+    #[test]
+    fn mcp_injection_present_and_executable_passes() {
+        // Use the test binary itself as a stand-in "command" — guaranteed
+        // to exist on disk regardless of CI environment.
+        let exe = std::env::current_exe().unwrap();
+        let c = check_mcp_injection(Some(exe.to_string_lossy().to_string()));
+        assert_eq!(c.id, id::MCP_INJECTION);
+        assert_eq!(c.status, CheckStatus::Pass);
+        assert!(c.fix_action.is_none());
+        assert!(c.detail.contains("registered"));
+    }
+
+    #[test]
+    fn mcp_injection_missing_entry_fails_with_enable_fix() {
+        let c = check_mcp_injection(None);
+        assert_eq!(c.status, CheckStatus::Fail);
+        assert_eq!(c.fix_action, Some(FixAction::EnableMcpInjector));
+        assert!(c.detail.contains("no mcpServers.fleet"));
+    }
+
+    #[test]
+    fn mcp_injection_empty_command_fails_with_enable_fix() {
+        let c = check_mcp_injection(Some("".to_string()));
+        assert_eq!(c.status, CheckStatus::Fail);
+        assert_eq!(c.fix_action, Some(FixAction::EnableMcpInjector));
+    }
+
+    #[test]
+    fn mcp_injection_pointing_at_missing_path_fails_with_enable_fix() {
+        let c = check_mcp_injection(Some(
+            "/tmp/this-binary-definitely-does-not-exist-xyz123".into(),
+        ));
+        assert_eq!(c.status, CheckStatus::Fail);
+        assert_eq!(c.fix_action, Some(FixAction::EnableMcpInjector));
+        assert!(c.detail.contains("no executable found"));
+    }
+
+    #[test]
+    fn enable_mcp_injector_serialises_snake_case() {
+        let c = check_mcp_injection(None);
+        let json = serde_json::to_string(&c).unwrap();
+        assert!(
+            json.contains("\"fixAction\":\"enable_mcp_injector\""),
+            "frontend expects snake_case tag: {json}"
+        );
     }
 
     #[test]
