@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { invoke } from "@tauri-apps/api/core";
 import {
   resolveTheme,
@@ -12,7 +11,7 @@ import {
   useTasksStore,
   useUIStore,
 } from "../store";
-import { safeMarkdownComponents } from "../markdown/safeLinks";
+import { safeMarkdownComponents, safeRemarkPlugins } from "../markdown/safeLinks";
 import type {
   DecisionHistoryRecord,
   ElicitationAttachment,
@@ -223,7 +222,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         <div className={`${styles.analysis} ${decision.analyzing ? styles.analysis_loading : ""}`}>
           {decision.analyzing
             ? t("guard.analyzing", "Analyzing command...")
-            : <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>{decision.analysis ?? ""}</ReactMarkdown>}
+            : <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{decision.analysis ?? ""}</ReactMarkdown>}
         </div>
       )}
 
@@ -448,7 +447,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
         </div>
         <OptionsBlock
           decisionId={decision.id}
@@ -687,7 +686,7 @@ function OptionsBlock({
       {list}
       <div className={styles.elicitation_preview}>
         {focusedPreview ? (
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>{focusedPreview}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{focusedPreview}</ReactMarkdown>
         ) : null}
       </div>
     </div>
@@ -759,7 +758,7 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
         />
       ) : (
         <div className={styles.plan_content}>
-          <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
             {decision.editedPlan ?? req.planContent}
           </ReactMarkdown>
         </div>
@@ -918,7 +917,7 @@ function SessionPendingCard({ decision }: { decision: SessionPendingDecision }) 
       )}
 
       <div className={styles.analysis}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]} components={safeMarkdownComponents}>
+        <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
           {lastMessage || ""}
         </ReactMarkdown>
       </div>
