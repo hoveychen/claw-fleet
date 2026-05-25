@@ -108,15 +108,27 @@ function computeFallbackPrefix(command: string): string {
 }
 
 /**
- * One prefix per AST leaf (deduped, empties dropped).  When the AST is
- * absent, returns at most one prefix from [`computeFallbackPrefix`].
+ * One prefix per AST leaf that actually fired the audit and is not yet
+ * covered by an existing allow rule.  Older `fleet guard` payloads ship
+ * leaves without `triggering` / `already_allowed` set — when none of the
+ * leaves carry `triggering=true`, fall back to "every leaf" so old desktop
+ * + old CLI combinations keep working.
+ *
+ * When the structured AST itself is absent, fall back to a single prefix
+ * derived from the raw command string.
  */
 function computeGuardAllowPrefixes(req: GuardDecision["request"]): string[] {
   const view = req.structuredCommand;
   if (view && view.leaves.length > 0) {
+    const anyTriggering = view.leaves.some((leaf) => leaf.triggering === true);
+    const eligible = anyTriggering
+      ? view.leaves.filter(
+          (leaf) => leaf.triggering === true && leaf.already_allowed !== true,
+        )
+      : view.leaves; // legacy payload — preserve historical behaviour
     const out: string[] = [];
     const seen = new Set<string>();
-    for (const leaf of view.leaves) {
+    for (const leaf of eligible) {
       const p = computeLeafAllowPrefix(leaf.argv);
       if (p && !seen.has(p)) {
         seen.add(p);
@@ -124,6 +136,9 @@ function computeGuardAllowPrefixes(req: GuardDecision["request"]): string[] {
       }
     }
     if (out.length > 0) return out;
+    // All triggering leaves are already covered — don't fall back to the raw
+    // command, because that would defeat the filter the user just enacted.
+    if (anyTriggering) return [];
   }
   const fallback = computeFallbackPrefix(req.command);
   return fallback ? [fallback] : [];
