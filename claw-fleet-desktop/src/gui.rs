@@ -1105,6 +1105,20 @@ fn respond_to_elicitation(
 }
 
 #[tauri::command]
+fn respond_to_fleet_ask(
+    state: tauri::State<AppState>,
+    id: String,
+    cancelled: bool,
+    answers: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .respond_to_fleet_ask(&id, cancelled, answers)
+}
+
+#[tauri::command]
 fn upload_elicitation_attachment(
     state: tauri::State<AppState>,
     source_path: String,
@@ -3462,6 +3476,7 @@ pub fn run() {
             apply_prd_mode,
             remove_prd_mode,
             respond_to_elicitation,
+            respond_to_fleet_ask,
             upload_elicitation_attachment,
             stage_pasted_attachment,
             read_local_file_bytes,

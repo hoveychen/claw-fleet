@@ -616,6 +616,60 @@ impl LocalBackend {
             });
         }
 
+        // fleet__ask directory watcher — polls for new fleet_ask requests from
+        // the `fleet mcp` server. Mirror of the elicitation watcher: same
+        // 500ms cadence, same orphan-filter via `list_pending_requests_checked`,
+        // same `(workspace, ai_title)` resolution from the SessionInfo cache.
+        // Emits `fleet-ask-request` / `fleet-ask-dismissed` Tauri events that
+        // P3 wires up in the frontend.
+        {
+            let app_ask = app.clone();
+            let sess_ask = sessions.clone();
+            let running_ask = running.clone();
+            std::thread::spawn(move || {
+                let mut known: HashSet<String> = HashSet::new();
+                loop {
+                    std::thread::sleep(Duration::from_millis(500));
+                    if !running_ask.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let pending = match claw_fleet_core::mcp_ipc::list_pending_requests_checked() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            crate::log_debug(&format!(
+                                "[fleet-ask watcher] read_dir failed (skipping dismissal step): {e}"
+                            ));
+                            continue;
+                        }
+                    };
+                    for id in &pending {
+                        if known.insert(id.clone()) {
+                            if let Some(mut req) = claw_fleet_core::mcp_ipc::read_request(id) {
+                                let (ws, ai) =
+                                    resolve_session_display(&sess_ask, &req.session_id);
+                                if req.workspace_name.is_empty() {
+                                    req.workspace_name = ws;
+                                }
+                                if req.ai_title.is_none() {
+                                    req.ai_title = ai;
+                                }
+                                crate::log_debug(&format!(
+                                    "[fleet-ask] new request: {} questions={}",
+                                    id,
+                                    req.questions.len()
+                                ));
+                                let _ = app_ask.emit("fleet-ask-request", &req);
+                            }
+                        }
+                    }
+                    for id in known.iter().filter(|id| !pending.contains(*id)) {
+                        let _ = app_ask.emit("fleet-ask-dismissed", id.clone());
+                    }
+                    known.retain(|id| pending.contains(id));
+                }
+            });
+        }
+
         // Plan-approval directory watcher — polls for new ExitPlanMode requests from `fleet plan-approval`.
         {
             let app_plan = app.clone();
@@ -1880,6 +1934,20 @@ impl Backend for LocalBackend {
             &summary,
         );
         result
+    }
+
+    fn respond_to_fleet_ask(
+        &self,
+        id: &str,
+        cancelled: bool,
+        answers: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let resp = claw_fleet_core::mcp_ipc::FleetAskResponse {
+            id: id.to_string(),
+            answers,
+            cancelled,
+        };
+        claw_fleet_core::mcp_ipc::write_response(&resp)
     }
 
     fn apply_plan_approval_hook(&self) -> Result<(), String> {
