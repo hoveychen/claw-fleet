@@ -13,6 +13,9 @@ git2 = { version = "0.18", default-features = false }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_System_Console"] }
+
 [dev-dependencies]
 tempfile = "3"
 git2 = { version = "0.18", default-features = false }
