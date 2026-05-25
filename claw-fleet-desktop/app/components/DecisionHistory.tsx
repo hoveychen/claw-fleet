@@ -2,8 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { safeMarkdownComponents } from "../markdown/safeLinks";
+import { safeMarkdownComponents, safeRemarkPlugins } from "../markdown/safeLinks";
 import type {
   DecisionHistoryRecord,
   ElicitationHistoryRecord,
@@ -73,7 +72,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
           <div key={qi} className={styles.question_block}>
             <div className={styles.question_text}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={safeRemarkPlugins}
                 components={safeMarkdownComponents}
               >
                 {q.question}
@@ -92,7 +91,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                   <span className={styles.option_label}>
                     <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
                     <ReactMarkdown
-                      remarkPlugins={[remarkGfm]}
+                      remarkPlugins={safeRemarkPlugins}
                       components={inlineMarkdownComponents}
                     >
                       {opt.label}
@@ -101,7 +100,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                   {opt.description && (
                     <span className={styles.option_desc}>
                       <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
+                        remarkPlugins={safeRemarkPlugins}
                         components={inlineMarkdownComponents}
                       >
                         {opt.description}
@@ -147,7 +146,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
     <div className={styles.body}>
       <div className={styles.plan_content}>
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={safeRemarkPlugins}
           components={safeMarkdownComponents}
         >
           {rec.planContent}
@@ -160,7 +159,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
           </div>
           <div className={styles.plan_content}>
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={safeRemarkPlugins}
               components={safeMarkdownComponents}
             >
               {rec.editedPlan}

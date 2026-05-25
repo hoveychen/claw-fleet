@@ -1,10 +1,9 @@
 import { memo, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { safeLinkComponent } from "../../markdown/safeLinks";
+import { safeLinkComponent, safeRemarkPlugins } from "../../markdown/safeLinks";
 import styles from "./TextBlock.module.css";
 
 /** Recursively walk React children and highlight matching terms in string nodes. */
@@ -55,7 +54,7 @@ export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms 
   return (
     <div className={styles.root}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={safeRemarkPlugins}
         components={{
           // Search term highlighting in text-bearing elements
           ...(highlight ? {
