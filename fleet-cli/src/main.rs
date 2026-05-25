@@ -4,6 +4,22 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod feishu;
 mod fleet_cli_host;
 
+#[cfg(windows)]
+fn init_windows_console_utf8() {
+    // Windows 中文系统默认 console code page 是 CP 936 (GBK)；fleet 读 CC
+    // transcript 后会输出大量中文/emoji/ANSI，CP 936 解码 UTF-8 会让整段
+    // stdout 错位。这里把当前进程的 console 切到 UTF-8 (CP 65001)。
+    // SAFETY: Win32 Console API 仅读写本进程关联的 console，无内存安全风险。
+    use windows_sys::Win32::System::Console::{SetConsoleCP, SetConsoleOutputCP};
+    unsafe {
+        SetConsoleOutputCP(65001);
+        SetConsoleCP(65001);
+    }
+}
+
+#[cfg(not(windows))]
+fn init_windows_console_utf8() {}
+
 use claw_fleet_core::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
 use claw_fleet_core::agent_source::{build_sources, find_source_for_path};
 use claw_fleet_core::memory;
@@ -402,6 +418,7 @@ enum SessionCommands {
 }
 
 fn main() {
+    init_windows_console_utf8();
     let cli = Cli::parse();
 
     if let Some(ref host) = cli.remote {
