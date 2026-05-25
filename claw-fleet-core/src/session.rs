@@ -1275,7 +1275,7 @@ pub fn parse_session_info(
         return None;
     }
 
-    let content = fs::read_to_string(jsonl_path).ok()?;
+    let content = crate::bom::read_to_string_no_bom(jsonl_path).ok()?;
     let all_lines: Vec<&str> = content.lines().collect();
 
     // Last 100 lines for status

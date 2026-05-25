@@ -1,3 +1,4 @@
+pub mod console;
 pub mod paths;
 pub mod dag;
 pub mod pitem;

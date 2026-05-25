@@ -30,6 +30,7 @@ struct Cli {
 }
 
 fn main() -> anyhow::Result<()> {
+    claw_fleet_core::console::init_utf8();
     let cli = Cli::parse();
     let token = cli.token.unwrap_or_default();
     claw_fleet_core::hooks_server::serve(cli.port, token, cli.port_file);
