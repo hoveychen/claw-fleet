@@ -36,6 +36,7 @@ const ALL_KEYS = [
   "guard-llm-analysis",
   "elicitation-enabled",
   "onboarding-seen-features",
+  "usage-auto-refresh",
 ] as const;
 
 // ── Onboarding feature registry ─────────────────────────────────────────────

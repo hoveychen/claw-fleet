@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { getItem, setItem } from "./storage";
 
 const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const AUTO_REFRESH_STORAGE_KEY = "usage-auto-refresh";
 
 export interface UsageStats {
   utilization: number;
@@ -86,13 +88,31 @@ interface UsageStoreState {
   setAutoRefresh: (source: UsageSourceKey, enabled: boolean) => void;
 }
 
-function initialSource<T>(): SourceState<T> {
+function loadAutoRefreshMap(): Partial<Record<UsageSourceKey, boolean>> {
+  const raw = getItem(AUTO_REFRESH_STORAGE_KEY);
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function persistAutoRefresh(source: UsageSourceKey, enabled: boolean): void {
+  const map = loadAutoRefreshMap();
+  map[source] = enabled;
+  setItem(AUTO_REFRESH_STORAGE_KEY, JSON.stringify(map));
+}
+
+function initialSource<T>(source: UsageSourceKey): SourceState<T> {
+  const persisted = loadAutoRefreshMap();
   return {
     data: null,
     error: null,
     loading: false,
     lastUpdated: null,
-    autoRefresh: true,
+    autoRefresh: persisted[source] ?? true,
   };
 }
 
@@ -116,10 +136,10 @@ async function fetchOne(source: UsageSourceKey): Promise<unknown> {
 }
 
 export const useUsageStore = create<UsageStoreState>((set, get) => ({
-  claude: initialSource<AccountInfoData>(),
-  cursor: initialSource<CursorAccountInfoData>(),
-  codex: initialSource<CodexUsageItem>(),
-  openclaw: initialSource<OpenClawUsageInfo>(),
+  claude: initialSource<AccountInfoData>("claude"),
+  cursor: initialSource<CursorAccountInfoData>("cursor"),
+  codex: initialSource<CodexUsageItem>("codex"),
+  openclaw: initialSource<OpenClawUsageInfo>("openclaw"),
 
   load: (source) => {
     if (inflight[source]) return inflight[source]!;
@@ -150,6 +170,7 @@ export const useUsageStore = create<UsageStoreState>((set, get) => ({
       ...s,
       [source]: { ...s[source], autoRefresh: enabled },
     }) as Partial<UsageStoreState>);
+    persistAutoRefresh(source, enabled);
 
     if (timers[source]) {
       clearInterval(timers[source]!);
@@ -164,9 +185,10 @@ export const useUsageStore = create<UsageStoreState>((set, get) => ({
 }));
 
 // Bootstrap: initial fetch + start auto-refresh timers on first import.
+// Respects the per-source toggle persisted in storage.ts (defaults to on).
 const SOURCES: UsageSourceKey[] = ["claude", "cursor", "codex", "openclaw"];
 for (const src of SOURCES) {
   const store = useUsageStore.getState();
   store.load(src);
-  store.setAutoRefresh(src, true);
+  store.setAutoRefresh(src, store[src].autoRefresh);
 }
