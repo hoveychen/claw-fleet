@@ -4,6 +4,7 @@ import { playDecisionAlert } from "../audio";
 import { useDecisionStore } from "../store";
 import type {
   ElicitationRequest,
+  FleetAskRequest,
   GuardRequest,
   PlanApprovalRequest,
   SessionPendingRequest,
@@ -42,6 +43,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   const silent = options.silent ?? false;
   const addGuardRequest = useDecisionStore((s) => s.addGuardRequest);
   const addElicitationRequest = useDecisionStore((s) => s.addElicitationRequest);
+  const addFleetAskRequest = useDecisionStore((s) => s.addFleetAskRequest);
   const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
   const addSessionPendingRequest = useDecisionStore((s) => s.addSessionPendingRequest);
   const dismiss = useDecisionStore((s) => s.dismiss);
@@ -88,6 +90,28 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   }, [addElicitationRequest, silent]);
 
   useEffect(() => {
+    const unlisten = listen<FleetAskRequest>("fleet-ask-request", (e) => {
+      const r = e.payload;
+      if (!silent && !announcedIds.current.has(r.id)) {
+        announcedIds.current.add(r.id);
+        const body = r.questions[0]?.question ?? "";
+        const [intro, after] = splitOnDivider(body);
+        const followup = after ? lastQuestionSentence(after) : "";
+        const spoken = [r.workspaceName, intro, followup]
+          .filter((s): s is string => !!s && s.length > 0)
+          .join("。");
+        // Reuse the elicitation chime — `fleet__ask` is the same
+        // "agent needs your input" feel as AskUserQuestion.
+        playDecisionAlert("elicitation", spoken);
+      }
+      addFleetAskRequest(r);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addFleetAskRequest, silent]);
+
+  useEffect(() => {
     const unlisten = listen<PlanApprovalRequest>("plan-approval-request", (e) => {
       const r = e.payload;
       if (!silent && !announcedIds.current.has(r.id)) {
@@ -128,6 +152,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     const unlistens = [
       "guard-dismissed",
       "elicitation-dismissed",
+      "fleet-ask-dismissed",
       "plan-approval-dismissed",
       "session-pending-dismissed",
     ].map(

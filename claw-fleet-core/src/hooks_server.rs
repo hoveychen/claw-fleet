@@ -28,8 +28,22 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             eprintln!("[fleet serve] permissions_injector::acquire failed: {e}");
         }
     }
+    // Mirror the permission injection for the MCP server registration. We are
+    // the fleet binary, so current_exe() is the right `command` to publish.
+    if crate::mcp_injector::load_config().enabled {
+        match std::env::current_exe() {
+            Ok(p) => {
+                let path_str = p.to_string_lossy().to_string();
+                if let Err(e) = crate::mcp_injector::acquire(serve_pid, &path_str) {
+                    eprintln!("[fleet serve] mcp_injector::acquire failed: {e}");
+                }
+            }
+            Err(e) => eprintln!("[fleet serve] current_exe failed, skipping mcp_injector: {e}"),
+        }
+    }
     if let Err(e) = ctrlc::try_set_handler(move || {
         let _ = crate::permissions_injector::release(serve_pid);
+        let _ = crate::mcp_injector::release(serve_pid);
         std::process::exit(0);
     }) {
         eprintln!("[fleet serve] ctrlc handler install failed: {e}");
@@ -156,6 +170,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             let mut prev_guard_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_elicit_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_plan_approval_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut prev_fleet_ask_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -288,6 +303,33 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     }
                 }
                 prev_plan_approval_ids.retain(|id| plan_approval_ids.contains(id));
+
+                // Broadcast new fleet__ask requests (MCP tool bridge)
+                let fleet_ask_ids: std::collections::HashSet<String> =
+                    crate::mcp_ipc::list_pending_requests().into_iter().collect();
+                for id in &fleet_ask_ids {
+                    if prev_fleet_ask_ids.insert(id.clone()) {
+                        if let Some(mut req) = crate::mcp_ipc::read_request(id) {
+                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
+                                if req.workspace_name.is_empty() {
+                                    req.workspace_name = s.workspace_name.clone();
+                                }
+                                if req.ai_title.is_none() {
+                                    req.ai_title = s.ai_title.clone();
+                                }
+                            }
+                            if let Ok(json) = serde_json::to_string(&req) {
+                                sse_bg.broadcast("fleet-ask-request", &json);
+                            }
+                        }
+                    }
+                }
+                for id in prev_fleet_ask_ids.difference(&fleet_ask_ids) {
+                    if let Ok(json) = serde_json::to_string(id) {
+                        sse_bg.broadcast("fleet-ask-dismissed", &json);
+                    }
+                }
+                prev_fleet_ask_ids.retain(|id| fleet_ask_ids.contains(id));
             }
         });
     }
@@ -2211,6 +2253,64 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         match elicitation::write_response(&resp) {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet elicitation` CLI
+                                // polls for the response and does cleanup itself.
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/fleet-ask/pending" => {
+                let ids = crate::mcp_ipc::list_pending_requests();
+                let sessions = scan_all_sources(&sources);
+                let mut requests = Vec::new();
+                for id in &ids {
+                    if let Some(mut req) = crate::mcp_ipc::read_request(id) {
+                        if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
+                            if req.workspace_name.is_empty() {
+                                req.workspace_name = s.workspace_name.clone();
+                            }
+                            if req.ai_title.is_none() {
+                                req.ai_title = s.ai_title.clone();
+                            }
+                        }
+                        requests.push(req);
+                    }
+                }
+                let body = serde_json::to_string(&requests).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/fleet-ask/respond" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<crate::mcp_ipc::FleetAskResponse>(&body_bytes) {
+                    Ok(resp) => {
+                        match crate::mcp_ipc::write_response(&resp) {
+                            Ok(()) => {
+                                // Don't cleanup here — the `fleet mcp` server
                                 // polls for the response and does cleanup itself.
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(r#"{"ok":true}"#)
