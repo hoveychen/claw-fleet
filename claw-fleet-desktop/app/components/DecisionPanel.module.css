@@ -124,13 +124,14 @@
   opacity: 0;
 }
 
-/* Collapse toggle button: lives in the panel's top-right corner. Offset more
- * than the panel's 8px border-radius so the button + its hover background don't
- * crowd the rounded accent border. */
+/* Collapse toggle button: lives in the panel's top-left corner, above the
+ * `.history_handle` slot — the left edge already reserves a column for that
+ * handle, so the button gets free breathing room without crowding the rounded
+ * accent border on the right. */
 .collapse_btn {
   position: absolute;
   top: 10px;
-  right: 10px;
+  left: 10px;
   width: 22px;
   height: 22px;
   display: inline-flex;
