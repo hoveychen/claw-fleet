@@ -77,6 +77,12 @@
   flex-wrap: wrap;
   cursor: pointer;
   user-select: none;
+  border-radius: 4px;
+  transition: background 0.12s;
+}
+
+.row_head:hover {
+  background: var(--color-bg-hover);
 }
 
 .kind_chip {
@@ -251,6 +257,9 @@
   padding-left: 18px; /* align under the label text, past the marker */
   word-break: break-word;
   overflow-wrap: anywhere;
+  /* Preserve user-entered newlines in the "Other" free-text answer. Safe for
+   * markdown-rendered descriptions too: ReactMarkdown consumes literal \n. */
+  white-space: pre-wrap;
 }
 
 .plan_content {
