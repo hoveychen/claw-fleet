@@ -3,12 +3,20 @@
 //! Implements JSON-RPC 2.0 over stdin/stdout (line-delimited JSON).
 //! Methods: `initialize`, `notifications/initialized`, `tools/list`, `tools/call`.
 //!
-//! P1 scope: skeleton with a `fleet__ask` placeholder that echoes its arguments.
-//! P2 will wire `tools/call` to the Fleet desktop backend over IPC.
+//! `tools/call` for `fleet__ask` is bridged to Fleet's Decision Panel via the
+//! file-IPC pattern in [`crate::mcp_ipc`]: the request goes to
+//! `~/.fleet/fleet-ask/<id>.json`, the desktop watcher emits a card, the user
+//! resolves it, and the response lands at `<id>.response.json`. The MCP server
+//! polls for that response and converts it into a JSON-RPC tool result.
+//!
+//! Heartbeat-aware: if the Fleet consumer (desktop or `fleet serve`) is not
+//! alive when `tools/call` arrives, the call fails fast with a structured
+//! error so the agent can fall back to the native `AskUserQuestion` flow.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::io::{BufRead, Write};
+use std::time::Instant;
 
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
 pub const SERVER_NAME: &str = "fleet";
@@ -101,9 +109,22 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
 fn fleet_ask_tool_def() -> Value {
     json!({
         "name": "fleet__ask",
-        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus two optional fields: `html` (HTML preview, rendered in a sandboxed iframe) and `formFields` (structured input fields). [P1: dummy echo]",
+        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus two optional fields: `html` (HTML preview, rendered in a sandboxed iframe) and `formFields` (structured input fields).",
         "inputSchema": crate::mcp_ipc::fleet_ask_input_schema(),
     })
+}
+
+/// Default deadline for waiting on a user response — matches the
+/// `decision_panel_config` `wait_seconds` default so `fleet__ask` and the
+/// elicitation bridge time out on the same clock.
+fn fleet_ask_timeout() -> std::time::Duration {
+    crate::decision_panel_config::load().wait_duration()
+}
+
+/// Default heartbeat window for verifying that a consumer (desktop or
+/// `fleet serve`) is alive before we even bother writing the request.
+fn heartbeat_window() -> std::time::Duration {
+    crate::decision_panel_config::load().heartbeat_window()
 }
 
 fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
@@ -115,16 +136,113 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
         });
     }
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
+        match args.get("questions").cloned() {
+            Some(q) => serde_json::from_value(q).map_err(|e| JsonRpcError {
+                code: -32602,
+                message: format!("Invalid `questions` payload: {e}"),
+            })?,
+            None => {
+                return Err(JsonRpcError {
+                    code: -32602,
+                    message: "Missing `questions` argument".into(),
+                });
+            }
+        };
+    if questions.is_empty() {
+        return Err(JsonRpcError {
+            code: -32602,
+            message: "`questions` must not be empty".into(),
+        });
+    }
+
+    // Heartbeat check — if no Fleet consumer is alive, refuse the call so
+    // Claude Code's agent can choose to fall back to AskUserQuestion.
+    let status = crate::consumer_heartbeat::consumer_status(heartbeat_window());
+    if !status.is_alive() {
+        return Ok(tool_error(format!(
+            "Fleet consumer not running (status: {status}). Start the Fleet desktop app or `fleet serve`, or use the native AskUserQuestion tool."
+        )));
+    }
+
+    let request_id = crate::guard::new_request_id();
+    let session_id = std::env::var("CLAUDE_SESSION_ID").unwrap_or_default();
+    let workspace_name = std::env::var("CLAUDE_PROJECT_DIR")
+        .ok()
+        .and_then(|p| {
+            std::path::PathBuf::from(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+        })
+        .unwrap_or_default();
+
+    let req = crate::mcp_ipc::FleetAskRequest {
+        id: request_id.clone(),
+        session_id,
+        workspace_name,
+        ai_title: None,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        questions,
+    };
+
+    if let Err(e) = crate::mcp_ipc::write_request(&req) {
+        return Ok(tool_error(format!("Failed to queue fleet__ask request: {e}")));
+    }
+
+    // Poll for the response, watching the consumer heartbeat so we exit
+    // promptly if the desktop / fleet serve dies mid-flight.
+    let timeout = fleet_ask_timeout();
+    let liveness = heartbeat_window();
+    let poll = std::time::Duration::from_millis(200);
+    let started = Instant::now();
+    let response = loop {
+        if let Some(r) = crate::mcp_ipc::try_read_response(&request_id) {
+            break Some(r);
+        }
+        if started.elapsed() > timeout {
+            break None;
+        }
+        if !crate::consumer_heartbeat::consumer_status(liveness).is_alive() {
+            crate::mcp_ipc::cleanup(&request_id);
+            return Ok(tool_error(
+                "Fleet consumer heartbeat lost while waiting for your answer.".into(),
+            ));
+        }
+        std::thread::sleep(poll);
+    };
+
+    crate::mcp_ipc::cleanup(&request_id);
+
+    let Some(resp) = response else {
+        return Ok(tool_error(format!(
+            "No response from Fleet after {}s.",
+            timeout.as_secs()
+        )));
+    };
+
+    if resp.cancelled {
+        return Ok(tool_error(
+            "User cancelled the fleet__ask Decision Card.".into(),
+        ));
+    }
+
+    // Pack answers as JSON so the agent can parse structured form values.
+    let answers_json = serde_json::to_string(&resp.answers).unwrap_or_else(|_| "{}".into());
     Ok(json!({
         "content": [{
             "type": "text",
-            "text": format!(
-                "[P1 dummy] fleet__ask received: {}",
-                serde_json::to_string(&args).unwrap_or_default()
-            )
+            "text": answers_json,
         }],
-        "isError": false
+        "structuredContent": { "answers": resp.answers },
+        "isError": false,
     }))
+}
+
+fn tool_error(message: String) -> Value {
+    json!({
+        "content": [{ "type": "text", "text": message }],
+        "isError": true,
+    })
 }
 
 #[cfg(test)]
@@ -162,7 +280,22 @@ mod tests {
     }
 
     #[test]
-    fn tools_call_echoes_arguments() {
+    fn tools_call_without_consumer_returns_structured_error() {
+        // Without a live Fleet consumer, tools/call returns isError=true with
+        // a textual hint pointing at the native AskUserQuestion fallback.
+        // Force an empty FLEET_HOME (no heartbeat file) so the consumer-check
+        // resolves to "not alive" regardless of the dev's machine state.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-ask-no-consumer-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock`; no other thread is
+        // touching FLEET_HOME for the duration of this test.
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
         let req = json!({
             "jsonrpc": "2.0",
             "id": 3,
@@ -179,10 +312,55 @@ mod tests {
             }
         });
         let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore prior state under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        // JSON-RPC envelope succeeded (no `error` member); the tool itself
+        // reports the failure via `isError: true` per MCP spec.
+        assert!(resp.get("error").is_none(), "expected ok envelope, got {resp}");
+        assert_eq!(resp["result"]["isError"], true);
         let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("[P1 dummy]"));
-        assert!(text.contains("hi"));
-        assert_eq!(resp["result"]["isError"], false);
+        assert!(
+            text.contains("Fleet consumer"),
+            "expected hint about Fleet consumer, got: {text}"
+        );
+    }
+
+    #[test]
+    fn tools_call_with_missing_questions_field_errors() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__ask",
+                "arguments": {}
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+        assert_eq!(resp["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn tools_call_with_empty_questions_array_errors() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 8,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__ask",
+                "arguments": { "questions": [] }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+        assert_eq!(resp["error"]["code"], -32602);
     }
 
     #[test]
