@@ -11,6 +11,7 @@ pub mod claude_cli;
 pub mod claude_source;
 pub mod cmd_ast;
 pub mod codex_source;
+pub use claw_fleet_task::console;
 pub mod consumer_heartbeat;
 pub mod cursor;
 pub use claw_fleet_task::dag;
