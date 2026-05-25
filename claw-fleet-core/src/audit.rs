@@ -1153,6 +1153,75 @@ pub fn classify_bash_command_pub(cmd: &str) -> Option<(AuditRiskLevel, Vec<Strin
     classify_bash_command(cmd)
 }
 
+// ── Per-leaf classification (for guard UI filtering) ────────────────────────
+
+/// Per-leaf annotation derived from a parsed [`crate::cmd_ast::CommandView`].
+/// Surfaced over `GuardRequest.structured_command` so the desktop "Always
+/// allow" dropdown can hide leaves that did not fire the audit and leaves
+/// already covered by an existing allow rule.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LeafFlags {
+    /// `true` iff `classify_bash_command` reports a hit when this leaf is
+    /// considered in isolation (or any of its nested scripts do).
+    pub triggering: bool,
+    /// `true` iff at least one rule in `allow_rules.guard_allow_rules` already
+    /// matches this leaf's command string.  Only meaningful when `triggering`
+    /// is also `true` — non-triggering leaves never need an allow rule.
+    pub already_allowed: bool,
+}
+
+/// Stringify a leaf's argv with `shell-words` quoting so the audit pattern
+/// engine sees the same surface text it would for a free-standing command.
+fn leaf_to_cmd_str(leaf: &crate::cmd_ast::CommandLeaf) -> String {
+    leaf.argv
+        .iter()
+        .map(|t| shell_words::quote(t).into_owned())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn classify_one_leaf(
+    leaf: &crate::cmd_ast::CommandLeaf,
+    allow_rules: &UserAuditRules,
+) -> LeafFlags {
+    let cmd = leaf_to_cmd_str(leaf);
+
+    let mut triggering = classify_bash_command(&cmd).is_some();
+    if !triggering {
+        if let Some(nested) = leaf.nested.as_ref() {
+            if classify_bash_command(&nested.raw).is_some() {
+                triggering = true;
+            } else {
+                triggering = classify_leaves_with_rules(&nested.view, allow_rules)
+                    .iter()
+                    .any(|f| f.triggering);
+            }
+        }
+    }
+
+    let already_allowed =
+        triggering && match_guard_allow_rule_in(allow_rules, &cmd).is_some();
+
+    LeafFlags {
+        triggering,
+        already_allowed,
+    }
+}
+
+/// Classify every leaf in `view` against the audit-pattern engine and the
+/// user's existing guard allow rules.  Returns one [`LeafFlags`] per
+/// `view.leaves` in order.
+pub fn classify_leaves_with_rules(
+    view: &crate::cmd_ast::CommandView,
+    allow_rules: &UserAuditRules,
+) -> Vec<LeafFlags> {
+    view.leaves
+        .iter()
+        .map(|leaf| classify_one_leaf(leaf, allow_rules))
+        .collect()
+}
+
 fn classify_bash_command(cmd: &str) -> Option<(AuditRiskLevel, Vec<String>)> {
     let trimmed = cmd.trim();
     let (patterns, python_patterns) = get_patterns();
@@ -1874,5 +1943,66 @@ mod tests {
 
         // Different tool → no match.
         assert!(match_guard_allow_rule_in(&rules, "kubectl get pods").is_none());
+    }
+
+    // ── classify_leaves_with_rules tests ────────────────────────────────────
+
+    #[test]
+    fn classify_leaves_flags_only_triggering_leaf() {
+        reset();
+        // Real-world pipeline: only the `... eval "..."` leaf trips the
+        // `eval-exec` pattern; the other leaves are read-only filters.
+        let cmd = r#"playwright-cli -s=mu eval "() => 1" | grep -oE "OK" | head -1"#;
+        let view = crate::cmd_ast::extract_structured_view(cmd);
+        assert!(view.leaves.len() >= 3, "expected 3+ leaves, got {:?}", view.leaves.len());
+
+        let rules = UserAuditRules::default();
+        let flags = classify_leaves_with_rules(&view, &rules);
+        assert_eq!(flags.len(), view.leaves.len(), "one flag per leaf");
+
+        assert!(flags[0].triggering, "the eval leaf must be flagged triggering");
+        assert!(
+            !flags[0].already_allowed,
+            "no allow rules configured, so already_allowed=false"
+        );
+        for (i, f) in flags.iter().enumerate().skip(1) {
+            assert!(!f.triggering, "leaf {i} ({:?}) must not be triggering", view.leaves[i].argv);
+            assert!(!f.already_allowed, "leaf {i} must not be already_allowed");
+        }
+    }
+
+    #[test]
+    fn classify_leaves_marks_already_allowed_when_rule_covers_leaf() {
+        reset();
+        let cmd = r#"playwright-cli -s=mu eval "() => 1" | grep -oE "OK""#;
+        let view = crate::cmd_ast::extract_structured_view(cmd);
+
+        let mut rules = UserAuditRules::default();
+        upsert_guard_allow_rule_in(
+            &mut rules,
+            "playwright-cli eval".into(),
+            Some("eval-exec".into()),
+        );
+
+        let flags = classify_leaves_with_rules(&view, &rules);
+        assert!(flags[0].triggering, "eval leaf still trips audit even when allow-listed");
+        assert!(
+            flags[0].already_allowed,
+            "with `playwright-cli eval` in allow rules, the eval leaf must be marked already_allowed"
+        );
+    }
+
+    #[test]
+    fn classify_leaves_all_false_for_purely_safe_command() {
+        reset();
+        let view = crate::cmd_ast::extract_structured_view("ls -la | head -1");
+        let rules = UserAuditRules::default();
+        let flags = classify_leaves_with_rules(&view, &rules);
+        assert_eq!(flags.len(), view.leaves.len(), "one flag per leaf");
+        assert!(!flags.is_empty(), "parser should produce ≥1 leaf for `ls | head`");
+        for (i, f) in flags.iter().enumerate() {
+            assert!(!f.triggering, "leaf {i} must be safe");
+            assert!(!f.already_allowed);
+        }
     }
 }
