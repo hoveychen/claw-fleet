@@ -244,9 +244,11 @@ export function DecisionHistory({ records, mode = "inline" }: Props) {
               <div
                 key={rec.id}
                 className={`${styles.row} ${open ? styles.row_open : ""}`}
-                onClick={() => setOpenId(open ? null : rec.id)}
               >
-                <div className={styles.row_head}>
+                <div
+                  className={styles.row_head}
+                  onClick={() => setOpenId(open ? null : rec.id)}
+                >
                   <span className={`${styles.kind_chip} ${kindClass}`}>
                     {t(kindKey)}
                   </span>
