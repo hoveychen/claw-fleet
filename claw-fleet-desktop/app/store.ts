@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, SessionPendingRequest, WaitingAlert } from "./types";
+import type { DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, SessionPendingRequest, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -757,6 +757,8 @@ interface DecisionState {
   addGuardRequest: (req: GuardRequest) => void;
   /** Add an elicitation request to the queue. */
   addElicitationRequest: (req: ElicitationRequest) => void;
+  /** Add a fleet__ask MCP-tool request to the queue. */
+  addFleetAskRequest: (req: FleetAskRequest) => void;
   /** Add a plan-approval request to the queue. */
   addPlanApprovalRequest: (req: PlanApprovalRequest) => void;
   /** Add a session-pending request (idle-but-not-final) to the queue. */
@@ -791,6 +793,18 @@ interface DecisionState {
   submitElicitation: (id: string) => Promise<void>;
   /** Decline an elicitation. */
   declineElicitation: (id: string) => Promise<void>;
+  /** Submit fleet__ask answers (options + form fields) back to the MCP server. */
+  submitFleetAsk: (id: string) => Promise<void>;
+  /** Cancel a fleet__ask card (user explicitly dismissed). */
+  cancelFleetAsk: (id: string) => Promise<void>;
+  /** Toggle an option for a fleet__ask question. */
+  toggleFleetAskOption: (id: string, question: string, option: string, multiSelect: boolean) => void;
+  /** Set the "Other" free-text for a fleet__ask question. */
+  setFleetAskCustomAnswer: (id: string, question: string, text: string) => void;
+  /** Update a fleet__ask form-field value by field name. */
+  setFleetAskFormAnswer: (id: string, fieldName: string, value: string) => void;
+  /** Navigate to a specific step in a fleet__ask card. */
+  setFleetAskStep: (id: string, step: number) => void;
   /** Approve a plan (optionally with edited plan text). */
   approvePlan: (id: string, editedPlan?: string | null) => Promise<void>;
   /** Reject a plan (with optional feedback). */
@@ -890,6 +904,37 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     }));
 
     // Play chime to alert user that a decision is waiting
+    playChime("ding_dong").catch(() => {});
+  },
+
+  addFleetAskRequest: (req) => {
+    // Seed form-field defaults so the submit path can always rely on the
+    // map being populated for required-field validation.
+    const formAnswers: Record<string, string> = {};
+    for (const q of req.questions) {
+      for (const f of q.formFields ?? []) {
+        if (f.default !== undefined && f.default !== null) {
+          formAnswers[f.name] = String(f.default);
+        }
+      }
+    }
+    const decision: PendingDecision = {
+      kind: "fleet-ask",
+      id: req.id,
+      request: req,
+      step: 0,
+      selections: {},
+      customAnswers: {},
+      formAnswers,
+      arrivedAt: Date.now(),
+    };
+    set((s) => {
+      if (s.decisions.some((d) => d.id === decision.id)) return s;
+      return {
+        decisions: [...s.decisions, decision],
+        activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
+      };
+    });
     playChime("ding_dong").catch(() => {});
   },
 
@@ -1188,6 +1233,100 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       });
     } catch (e) {
       console.error("respond_to_elicitation (decline) failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
+  },
+
+  toggleFleetAskOption: (id, question, option, multiSelect) =>
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "fleet-ask") return d;
+        const current = d.selections[question] || [];
+        let next: string[];
+        if (multiSelect) {
+          next = current.includes(option)
+            ? current.filter((o) => o !== option)
+            : [...current, option];
+        } else {
+          next = current.includes(option) ? [] : [option];
+        }
+        return { ...d, selections: { ...d.selections, [question]: next } };
+      }),
+    })),
+
+  setFleetAskCustomAnswer: (id, question, text) =>
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "fleet-ask"
+          ? { ...d, customAnswers: { ...d.customAnswers, [question]: text } }
+          : d,
+      ),
+    })),
+
+  setFleetAskFormAnswer: (id, fieldName, value) =>
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "fleet-ask"
+          ? { ...d, formAnswers: { ...d.formAnswers, [fieldName]: value } }
+          : d,
+      ),
+    })),
+
+  setFleetAskStep: (id, step) =>
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "fleet-ask" ? { ...d, step } : d,
+      ),
+    })),
+
+  submitFleetAsk: async (id) => {
+    const decision = get().decisions.find(
+      (d) => d.id === id && d.kind === "fleet-ask",
+    );
+    if (!decision || decision.kind !== "fleet-ask") return;
+    // Build the flat answers map the Rust side expects (BTreeMap<String,String>).
+    // Two key namespaces share the map:
+    //   - question text → selected option label(s) joined by ", " (or custom text)
+    //   - form-field name → user value
+    // Naming collisions are avoided in practice because question text is human
+    // prose ("Pick one") while field names are kebab/snake identifiers.
+    const answers: Record<string, string> = {};
+    for (const q of decision.request.questions) {
+      const custom = decision.customAnswers[q.question]?.trim();
+      if (custom) {
+        answers[q.question] = custom;
+      } else if (q.options && q.options.length > 0) {
+        const sel = decision.selections[q.question] || [];
+        if (sel.length > 0) {
+          answers[q.question] = sel.join(", ");
+        }
+      }
+      for (const f of q.formFields ?? []) {
+        const v = decision.formAnswers[f.name];
+        if (v !== undefined && v !== "") {
+          answers[f.name] = v;
+        }
+      }
+    }
+    try {
+      await invoke("respond_to_fleet_ask", { id, cancelled: false, answers });
+    } catch (e) {
+      console.error("respond_to_fleet_ask failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
+  },
+
+  cancelFleetAsk: async (id) => {
+    try {
+      await invoke("respond_to_fleet_ask", {
+        id,
+        cancelled: true,
+        answers: {},
+      });
+    } catch (e) {
+      console.error("respond_to_fleet_ask (cancel) failed:", e);
     }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
