@@ -1222,6 +1222,24 @@ pub fn classify_leaves_with_rules(
         .collect()
 }
 
+/// Walk `view` and write `triggering` / `already_allowed` directly onto each
+/// leaf (and recursively into any `NestedScript::view`).  Convenience wrapper
+/// for callers that own a mutable `CommandView` they're about to serialize
+/// into a `GuardRequest`.
+pub fn annotate_view_with_flags(
+    view: &mut crate::cmd_ast::CommandView,
+    allow_rules: &UserAuditRules,
+) {
+    let flags = classify_leaves_with_rules(view, allow_rules);
+    for (leaf, flag) in view.leaves.iter_mut().zip(flags.iter()) {
+        leaf.triggering = flag.triggering;
+        leaf.already_allowed = flag.already_allowed;
+        if let Some(nested) = leaf.nested.as_mut() {
+            annotate_view_with_flags(&mut nested.view, allow_rules);
+        }
+    }
+}
+
 fn classify_bash_command(cmd: &str) -> Option<(AuditRiskLevel, Vec<String>)> {
     let trimmed = cmd.trim();
     let (patterns, python_patterns) = get_patterns();
@@ -2003,6 +2021,20 @@ mod tests {
         for (i, f) in flags.iter().enumerate() {
             assert!(!f.triggering, "leaf {i} must be safe");
             assert!(!f.already_allowed);
+        }
+    }
+
+    #[test]
+    fn annotate_view_writes_flags_in_place() {
+        reset();
+        let cmd = r#"playwright-cli -s=mu eval "() => 1" | grep -oE "OK""#;
+        let mut view = crate::cmd_ast::extract_structured_view(cmd);
+        let rules = UserAuditRules::default();
+        annotate_view_with_flags(&mut view, &rules);
+        assert!(view.leaves[0].triggering, "eval leaf must carry triggering=true after annotate");
+        for leaf in view.leaves.iter().skip(1) {
+            assert!(!leaf.triggering);
+            assert!(!leaf.already_allowed);
         }
     }
 }
