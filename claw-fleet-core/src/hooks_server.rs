@@ -28,8 +28,22 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             eprintln!("[fleet serve] permissions_injector::acquire failed: {e}");
         }
     }
+    // Mirror the permission injection for the MCP server registration. We are
+    // the fleet binary, so current_exe() is the right `command` to publish.
+    if crate::mcp_injector::load_config().enabled {
+        match std::env::current_exe() {
+            Ok(p) => {
+                let path_str = p.to_string_lossy().to_string();
+                if let Err(e) = crate::mcp_injector::acquire(serve_pid, &path_str) {
+                    eprintln!("[fleet serve] mcp_injector::acquire failed: {e}");
+                }
+            }
+            Err(e) => eprintln!("[fleet serve] current_exe failed, skipping mcp_injector: {e}"),
+        }
+    }
     if let Err(e) = ctrlc::try_set_handler(move || {
         let _ = crate::permissions_injector::release(serve_pid);
+        let _ = crate::mcp_injector::release(serve_pid);
         std::process::exit(0);
     }) {
         eprintln!("[fleet serve] ctrlc handler install failed: {e}");
