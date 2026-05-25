@@ -3224,7 +3224,16 @@ pub fn run() {
             // permissions injector. Skipped when the fleet sibling binary
             // can't be located (dev runs without a built fleet-cli) — the
             // agent then falls back to native AskUserQuestion only.
-            if claw_fleet_core::mcp_injector::load_config().enabled {
+            //
+            // Debug-only: v2 fleet__ask has known UX gaps vs v1 (no preview,
+            // form-style submit flow, every call prompts Claude Code for
+            // permission, frequently lands as a deferred tool so agents
+            // default to AskUserQuestion anyway). Release builds skip the
+            // injection AND release() any pre-existing entry so users
+            // upgrading from a dev build don't keep a stale mcpServers.fleet.
+            if cfg!(debug_assertions)
+                && claw_fleet_core::mcp_injector::load_config().enabled
+            {
                 match crate::daemon_autostart::resolve_fleet_binary() {
                     Some(p) => {
                         let path_str = p.to_string_lossy().to_string();
@@ -3243,6 +3252,8 @@ pub fn run() {
                         );
                     }
                 }
+            } else if !cfg!(debug_assertions) {
+                let _ = claw_fleet_core::mcp_injector::release(std::process::id());
             }
 
             // ── SSE forwarding for mobile access ──────────────────────────
