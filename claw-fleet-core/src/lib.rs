@@ -32,6 +32,7 @@ pub mod launchd;
 pub mod llm_provider;
 pub use claw_fleet_task::master;
 pub mod llm_usage;
+pub mod mcp_injector;
 pub mod mcp_ipc;
 pub mod mcp_server;
 pub mod memory;

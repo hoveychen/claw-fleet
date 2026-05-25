@@ -3184,6 +3184,33 @@ pub fn run() {
                 }
             }
 
+            // Inject `mcpServers.fleet` into ~/.claude.json so Claude Code's
+            // agent sees the `fleet__ask` MCP tool as soon as Fleet is up.
+            // Same refcount / restore-on-last-release contract as the
+            // permissions injector. Skipped when the fleet sibling binary
+            // can't be located (dev runs without a built fleet-cli) — the
+            // agent then falls back to native AskUserQuestion only.
+            if claw_fleet_core::mcp_injector::load_config().enabled {
+                match crate::daemon_autostart::resolve_fleet_binary() {
+                    Some(p) => {
+                        let path_str = p.to_string_lossy().to_string();
+                        if let Err(e) = claw_fleet_core::mcp_injector::acquire(
+                            std::process::id(),
+                            &path_str,
+                        ) {
+                            claw_fleet_core::log_debug(&format!(
+                                "mcp_injector::acquire failed: {e}"
+                            ));
+                        }
+                    }
+                    None => {
+                        claw_fleet_core::log_debug(
+                            "[mcp_injector] fleet sibling binary not found; skipping injection",
+                        );
+                    }
+                }
+            }
+
             // ── SSE forwarding for mobile access ──────────────────────────
             // Listen for sessions-updated Tauri events and broadcast them to
             // any connected SSE mobile clients.
@@ -3543,10 +3570,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
-            // Restore the user's ~/.claude/settings.json on every exit path so
-            // the injection is symmetric with the acquire in setup().
+            // Restore the user's ~/.claude/settings.json and ~/.claude.json
+            // on every exit path so the injections are symmetric with the
+            // acquires in setup(). Both releases are unconditional — they
+            // no-op when no lock exists, so they self-heal if the toggle
+            // was flipped off mid-run.
             if matches!(event, tauri::RunEvent::Exit) {
                 let _ = claw_fleet_core::permissions_injector::release(
+                    std::process::id(),
+                );
+                let _ = claw_fleet_core::mcp_injector::release(
                     std::process::id(),
                 );
             }
