@@ -65,6 +65,7 @@ enum Command {
 }
 
 fn main() -> anyhow::Result<()> {
+    claw_fleet_task::console::init_utf8();
     let cli = Cli::parse();
     // Default behaviour with no subcommand: open the launchpad — a textarea
     // for entering a new prompt in `$PWD`, with Ctrl-T to switch to the

@@ -402,6 +402,7 @@ enum SessionCommands {
 }
 
 fn main() {
+    claw_fleet_core::console::init_utf8();
     let cli = Cli::parse();
 
     if let Some(ref host) = cli.remote {
