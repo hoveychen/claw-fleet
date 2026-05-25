@@ -483,6 +483,18 @@ pub trait Backend: Send + Sync {
         answers: std::collections::HashMap<String, String>,
     ) -> Result<(), String>;
 
+    // ── fleet__ask MCP tool (mirror of elicitation for the MCP bridge) ──
+    /// Write a fleet_ask response so the polling MCP server (`fleet mcp`)
+    /// can pick it up and return it to the agent. `cancelled = true` signals
+    /// the user dismissed the card; `answers` maps form-field name → value
+    /// (or question text → option label, mirroring elicitation's contract).
+    fn respond_to_fleet_ask(
+        &self,
+        id: &str,
+        cancelled: bool,
+        answers: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String>;
+
     // ── Plan approval (ExitPlanMode interception) ──────────────────────
     fn apply_plan_approval_hook(&self) -> Result<(), String>;
     fn remove_plan_approval_hook(&self) -> Result<(), String>;
