@@ -276,6 +276,9 @@ enum Commands {
     /// [internal] Elicitation hook — intercepts AskUserQuestion for Fleet UI
     #[command(hide = true)]
     Elicitation,
+    /// [internal] MCP server — exposes `fleet__ask` over stdio JSON-RPC
+    #[command(hide = true)]
+    Mcp,
     /// [internal] Plan-approval hook — intercepts ExitPlanMode for Fleet UI
     #[command(hide = true)]
     PlanApproval,
@@ -411,6 +414,7 @@ fn main() {
             | Commands::Skill { .. }
             | Commands::Guard { .. }
             | Commands::Elicitation
+            | Commands::Mcp
             | Commands::PlanApproval
             | Commands::PrdContext => {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
@@ -419,6 +423,7 @@ fn main() {
                         Commands::Skill { .. } => "skill",
                         Commands::Guard { .. } => "guard",
                         Commands::Elicitation => "elicitation",
+                        Commands::Mcp => "mcp",
                         Commands::PlanApproval => "plan-approval",
                         Commands::PrdContext => "prd-context",
                         _ => unreachable!(),
@@ -452,6 +457,7 @@ fn main() {
             Some(GuardCommands::RemoveRule { id }) => cmd_guard_remove_rule(&id),
         },
         Commands::Elicitation => cmd_elicitation(),
+        Commands::Mcp => cmd_mcp(),
         Commands::PlanApproval => cmd_plan_approval(),
         Commands::PrdContext => cmd_prd_context(),
         Commands::Session { action } => match action {
@@ -2035,6 +2041,15 @@ fn cmd_elicitation() {
             });
             println!("{}", out);
         }
+    }
+}
+
+// ── MCP server (stdio JSON-RPC; exposes `fleet__ask`) ──────────────────
+
+fn cmd_mcp() {
+    if let Err(e) = claw_fleet_core::mcp_server::run() {
+        eprintln!("fleet mcp: stdio error: {e}");
+        std::process::exit(1);
     }
 }
 

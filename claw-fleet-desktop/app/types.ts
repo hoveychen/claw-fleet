@@ -463,6 +463,78 @@ export interface ElicitationDecision {
   arrivedAt: number;
 }
 
+// ── fleet__ask (MCP tool) types ───────────────────────────────────────
+//
+// Mirror of Rust's `claw_fleet_core::mcp_ipc` types. Schema is a superset
+// of `Elicitation*`: same questions / options / header / multiSelect, plus
+// two optional extensions — `html` (sandboxed iframe preview) and
+// `formFields` (dynamic form controls).
+
+export interface FleetAskOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export type FleetAskFormFieldKind =
+  | "text"
+  | "textarea"
+  | "number"
+  | "select"
+  | "radio"
+  | "checkbox";
+
+export interface FleetAskFormField {
+  name: string;
+  kind: FleetAskFormFieldKind;
+  label: string;
+  placeholder?: string;
+  options?: string[];
+  required?: boolean;
+  default?: unknown;
+}
+
+export interface FleetAskQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options?: FleetAskOption[];
+  html?: string;
+  formFields?: FleetAskFormField[];
+}
+
+export interface FleetAskRequest {
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  /** AI-generated session title (separate from workspaceName). */
+  aiTitle?: string | null;
+  questions: FleetAskQuestion[];
+  timestamp: string;
+}
+
+/** Agent is asking via the `fleet__ask` MCP tool. */
+export interface FleetAskDecision {
+  kind: "fleet-ask";
+  id: string;
+  request: FleetAskRequest;
+  /** Current step (0-based) into the questions array. */
+  step: number;
+  /**
+   * Selected option labels per question. Question text → array of labels
+   * (single-select picks one; multi-select picks N). Mirrors the
+   * ElicitationDecision contract so the same submit path can flatten them
+   * into the BTreeMap<String, String> the Rust side expects (joined with
+   * `, ` for multi-select).
+   */
+  selections: Record<string, string[]>;
+  /** Free-text answers when the user picks "Other". */
+  customAnswers: Record<string, string>;
+  /** Dynamic form-field values (form_field name → value). */
+  formAnswers: Record<string, string>;
+  arrivedAt: number;
+}
+
 // ── Plan approval types ────────────────────────────────────────────────
 
 export interface PlanApprovalRequest {
@@ -596,6 +668,7 @@ export interface SessionPendingDecision {
 export type PendingDecision =
   | GuardDecision
   | ElicitationDecision
+  | FleetAskDecision
   | PlanApprovalDecision
   | SessionPendingDecision;
 

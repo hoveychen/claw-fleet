@@ -763,6 +763,20 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/elicitation/respond", &resp)
     }
 
+    fn respond_to_fleet_ask(
+        &self,
+        id: &str,
+        cancelled: bool,
+        answers: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let resp = claw_fleet_core::mcp_ipc::FleetAskResponse {
+            id: id.to_string(),
+            answers,
+            cancelled,
+        };
+        self.probe.post_json_ok("/fleet-ask/respond", &resp)
+    }
+
     fn apply_plan_approval_hook(&self) -> Result<(), String> {
         self.probe.post_ok("/apply_plan_approval_hook")
     }
@@ -1937,6 +1951,43 @@ fn connect_remote_start_probe(
                 }
                 for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
                     let _ = app_elicit.emit("elicitation-dismissed", id.clone());
+                }
+                known.retain(|id| pending_ids.contains(id));
+            }
+        });
+    }
+
+    // fleet__ask polling thread — mirror of the elicitation poller for the
+    // MCP tool bridge. Polls `GET /fleet-ask/pending` and emits
+    // `fleet-ask-request` / `-dismissed` Tauri events that P3 wires up.
+    {
+        let app_ask = app.clone();
+        let pr_ask = poller_running.clone();
+        let probe_ask = probe.clone();
+        std::thread::spawn(move || {
+            let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                if !*pr_ask.lock().unwrap() {
+                    break;
+                }
+                let Ok(pending) = probe_ask.get::<Vec<claw_fleet_core::mcp_ipc::FleetAskRequest>>("/fleet-ask/pending") else {
+                    continue;
+                };
+                let pending_ids: std::collections::HashSet<String> =
+                    pending.iter().map(|r| r.id.clone()).collect();
+                for req in &pending {
+                    if known.insert(req.id.clone()) {
+                        claw_fleet_core::log_debug(&format!(
+                            "[remote-fleet-ask] new request: {} questions={}",
+                            req.id,
+                            req.questions.len()
+                        ));
+                        let _ = app_ask.emit("fleet-ask-request", req);
+                    }
+                }
+                for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
+                    let _ = app_ask.emit("fleet-ask-dismissed", id.clone());
                 }
                 known.retain(|id| pending_ids.contains(id));
             }
