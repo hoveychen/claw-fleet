@@ -1,11 +1,11 @@
 //! IPC protocol between the `fleet mcp` server (a Claude Code child process)
 //! and the local `fleet` process (Fleet desktop or `fleet serve`).
 //!
-//! Wire format: line-delimited JSON over a unix socket (macOS/Linux) or
-//! named pipe (Windows) at `~/.fleet/mcp-ipc.sock`. The request/response
-//! shape is identical on Local and Remote backends — what differs is how
-//! the answer gets routed back to Boss's Decision Panel (Local: in-process
-//! emit; Remote: HTTP-pull from `fleet serve` via RemoteBackend).
+//! Wire format: file-based IPC at `~/.fleet/fleet-ask/<id>.json` (request)
+//! and `~/.fleet/fleet-ask/<id>.response.json` (response). Mirrors the
+//! existing `elicitation` / `guard` / `plan_approval` Decision Card patterns
+//! so all four channels can share the same watcher / cleanup / orphan-filter
+//! logic and the desktop polls a single style of directory.
 //!
 //! These types are the single source of truth for the `fleet__ask` schema
 //! advertised over MCP; [`fleet_ask_input_schema`] mirrors them in JSONSchema
@@ -13,11 +13,26 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::fs;
+use std::path::PathBuf;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FleetAskRequest {
     pub id: String,
+    /// Originating Claude Code session id (passed via env var
+    /// `CLAUDE_SESSION_ID` when the MCP server is launched). Used by the
+    /// desktop watcher to resolve workspace + AI title for the Decision
+    /// Card header, exactly like `ElicitationRequest::session_id`.
+    #[serde(default)]
+    pub session_id: String,
+    #[serde(default)]
+    pub workspace_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_title: Option<String>,
+    #[serde(default)]
+    pub timestamp: String,
     pub questions: Vec<FleetAskQuestion>,
 }
 
@@ -72,12 +87,127 @@ pub enum FormFieldKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct FleetAskResponse {
     pub id: String,
     #[serde(default)]
     pub answers: BTreeMap<String, String>,
     #[serde(default)]
     pub cancelled: bool,
+}
+
+// ── File-based IPC (mirror of `elicitation` module) ──────────────────────────
+
+fn fleet_ask_dir() -> Option<PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("fleet-ask"))
+}
+
+fn request_path(id: &str) -> Option<PathBuf> {
+    fleet_ask_dir().map(|d| d.join(format!("{id}.json")))
+}
+
+fn response_path(id: &str) -> Option<PathBuf> {
+    fleet_ask_dir().map(|d| d.join(format!("{id}.response.json")))
+}
+
+/// Write a fleet_ask request file. Called by the MCP server when it handles
+/// a `tools/call` for `fleet__ask`.
+pub fn write_request(req: &FleetAskRequest) -> Result<(), String> {
+    let dir = fleet_ask_dir().ok_or("cannot determine home dir")?;
+    fs::create_dir_all(&dir).map_err(|e| format!("create fleet-ask dir: {e}"))?;
+    let path = request_path(&req.id).unwrap();
+    let json = serde_json::to_string_pretty(req).map_err(|e| format!("serialize: {e}"))?;
+    fs::write(&path, json).map_err(|e| format!("write fleet-ask request: {e}"))
+}
+
+/// Read a pending request file. Called by the desktop watcher when it
+/// notices a new id in the directory listing.
+pub fn read_request(id: &str) -> Option<FleetAskRequest> {
+    let path = request_path(id)?;
+    let content = fs::read_to_string(&path).ok()?;
+    serde_json::from_str(&content).ok()
+}
+
+/// Non-blocking response read.
+pub fn try_read_response(id: &str) -> Option<FleetAskResponse> {
+    let path = response_path(id)?;
+    if !path.exists() {
+        return None;
+    }
+    let content = fs::read_to_string(&path).ok()?;
+    serde_json::from_str::<FleetAskResponse>(&content).ok()
+}
+
+/// Blocking poll for a response. Returns `None` on timeout.
+pub fn poll_response(id: &str, timeout: Duration) -> Option<FleetAskResponse> {
+    let start = std::time::Instant::now();
+    let interval = Duration::from_millis(200);
+    loop {
+        if let Some(r) = try_read_response(id) {
+            return Some(r);
+        }
+        if start.elapsed() > timeout {
+            return None;
+        }
+        std::thread::sleep(interval);
+    }
+}
+
+/// Write a response file. Called by the desktop / fleet serve after the
+/// user resolves the Decision Card.
+pub fn write_response(resp: &FleetAskResponse) -> Result<(), String> {
+    let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
+    let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
+    fs::write(&path, json).map_err(|e| format!("write fleet-ask response: {e}"))
+}
+
+/// Remove the request + response pair. Called by the MCP server once it has
+/// consumed the response.
+pub fn cleanup(id: &str) {
+    if let Some(p) = request_path(id) {
+        let _ = fs::remove_file(p);
+    }
+    if let Some(p) = response_path(id) {
+        let _ = fs::remove_file(p);
+    }
+}
+
+/// Soft list of pending request ids; returns empty on any failure.
+pub fn list_pending_requests() -> Vec<String> {
+    list_pending_requests_checked().unwrap_or_default()
+}
+
+/// Strict list — distinguishes "no requests / missing dir" (`Ok(vec![])`)
+/// from "I/O error reading the directory" (`Err`). The watcher uses the
+/// `Err` to skip the dismissal-emit step so a transient APFS hiccup
+/// doesn't take every active panel down with it.
+pub fn list_pending_requests_checked() -> std::io::Result<Vec<String>> {
+    let Some(dir) = fleet_ask_dir() else {
+        return Ok(Vec::new());
+    };
+    list_pending_in_dir(&dir)
+}
+
+fn list_pending_in_dir(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e),
+    };
+    let mut request_ids: Vec<String> = Vec::new();
+    let mut response_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if let Some(id) = name.strip_suffix(".response.json") {
+            response_ids.insert(id.to_string());
+        } else if let Some(id) = name.strip_suffix(".json") {
+            request_ids.push(id.to_string());
+        }
+    }
+    Ok(request_ids
+        .into_iter()
+        .filter(|id| !response_ids.contains(id))
+        .collect())
 }
 
 /// JSONSchema describing `fleet__ask` arguments. The MCP `tools/list` response
@@ -151,10 +281,32 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn empty_request(id: &str) -> FleetAskRequest {
+        FleetAskRequest {
+            id: id.into(),
+            session_id: String::new(),
+            workspace_name: String::new(),
+            ai_title: None,
+            timestamp: String::new(),
+            questions: vec![FleetAskQuestion {
+                question: "q".into(),
+                header: "h".into(),
+                multi_select: false,
+                options: vec![],
+                html: None,
+                form_fields: vec![],
+            }],
+        }
+    }
+
     #[test]
     fn round_trip_minimal_request() {
         let req = FleetAskRequest {
             id: "abc".into(),
+            session_id: String::new(),
+            workspace_name: String::new(),
+            ai_title: None,
+            timestamp: String::new(),
             questions: vec![FleetAskQuestion {
                 question: "Pick one".into(),
                 header: "Choice".into(),
@@ -172,6 +324,25 @@ mod tests {
         assert!(!s.contains("\"options\""));
         assert!(!s.contains("\"html\""));
         assert!(!s.contains("\"formFields\""));
+    }
+
+    #[test]
+    fn request_carries_session_envelope() {
+        let mut req = empty_request("e1");
+        req.session_id = "sess-123".into();
+        req.workspace_name = "claude-fleet".into();
+        req.ai_title = Some("Implement P2".into());
+        req.timestamp = "2026-05-25T12:00:00Z".into();
+        let s = serde_json::to_string(&req).unwrap();
+        let back: FleetAskRequest = serde_json::from_str(&s).unwrap();
+        assert_eq!(back.session_id, "sess-123");
+        assert_eq!(back.workspace_name, "claude-fleet");
+        assert_eq!(back.ai_title.as_deref(), Some("Implement P2"));
+        assert_eq!(back.timestamp, "2026-05-25T12:00:00Z");
+        // camelCase on the wire — matches elicitation pattern.
+        assert!(s.contains("\"sessionId\""));
+        assert!(s.contains("\"workspaceName\""));
+        assert!(s.contains("\"aiTitle\""));
     }
 
     #[test]
@@ -197,6 +368,54 @@ mod tests {
         assert!(v.get("formFields").is_some(), "formFields (camelCase)");
         assert!(v.get("multi_select").is_none(), "no snake_case bleed");
         assert!(v.get("form_fields").is_none(), "no snake_case bleed");
+    }
+
+    // ── File-IPC tests (mirror of elicitation::tests::list_pending_in_dir_*) ─
+
+    fn fresh_tmp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "fleet-ask-{}-{}-{}",
+            tag,
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
+    }
+
+    #[test]
+    fn list_pending_in_dir_missing_returns_ok_empty() {
+        let dir = fresh_tmp_dir("missing");
+        assert!(!dir.exists());
+        let result = list_pending_in_dir(&dir);
+        assert!(matches!(&result, Ok(v) if v.is_empty()), "got {result:?}");
+    }
+
+    #[test]
+    fn list_pending_in_dir_filters_responses() {
+        let dir = fresh_tmp_dir("filter");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("req-a.json"), "{}").unwrap();
+        std::fs::write(dir.join("req-b.json"), "{}").unwrap();
+        std::fs::write(dir.join("req-a.response.json"), "{}").unwrap();
+        std::fs::write(dir.join("ignored.txt"), "ignore").unwrap();
+        let ids = list_pending_in_dir(&dir).unwrap();
+        assert_eq!(ids, vec!["req-b".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_pending_in_dir_excludes_already_answered() {
+        // Regression: orphaned `<id>.json` paired with `<id>.response.json`
+        // must not re-surface, exactly like the elicitation orphan filter.
+        let dir = fresh_tmp_dir("answered");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("answered.json"), "{}").unwrap();
+        std::fs::write(dir.join("answered.response.json"), "{}").unwrap();
+        let ids = list_pending_in_dir(&dir).unwrap();
+        assert!(ids.is_empty(), "answered orphan leaked: {ids:?}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
