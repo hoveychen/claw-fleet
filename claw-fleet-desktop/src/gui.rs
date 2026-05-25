@@ -1079,6 +1079,26 @@ async fn test_decision_via_claude_cli(
 }
 
 #[tauri::command]
+async fn test_fleet_ask_end_to_end(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.read().unwrap().test_fleet_ask_end_to_end())
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+}
+
+#[tauri::command]
+async fn test_fleet_ask_via_claude_cli(
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
+    let backend = state.backend.clone();
+    tokio::task::spawn_blocking(move || backend.read().unwrap().test_fleet_ask_via_claude_cli())
+        .await
+        .map_err(|e| format!("task join error: {e}"))?
+}
+
+#[tauri::command]
 fn apply_prd_mode(state: tauri::State<AppState>) -> Result<(), String> {
     let title = state.user_title.lock().unwrap().clone();
     let locale = state.locale.lock().unwrap().clone();
@@ -1116,6 +1136,20 @@ fn respond_to_fleet_ask(
         .read()
         .unwrap()
         .respond_to_fleet_ask(&id, cancelled, answers)
+}
+
+/// One-click fix for the `mcp_injection` diagnostic. Resolves the fleet
+/// sibling binary and re-acquires the `mcpServers.fleet` entry in
+/// `~/.claude.json`. Returns an error when the sibling binary can't be
+/// located so the frontend can surface a useful hint.
+#[tauri::command]
+fn apply_mcp_injector(state: tauri::State<AppState>) -> Result<(), String> {
+    let p = crate::daemon_autostart::resolve_fleet_binary()
+        .ok_or("Fleet sibling binary not found near this Fleet desktop process — \
+                 build fleet-cli or install the production sidecar so the MCP \
+                 injector can point at a real `command` path")?;
+    let fleet_path = p.to_string_lossy().to_string();
+    state.backend.read().unwrap().apply_mcp_injector(&fleet_path)
 }
 
 #[tauri::command]
@@ -3500,10 +3534,13 @@ pub fn run() {
             test_decision_frontend_only,
             test_decision_end_to_end,
             test_decision_via_claude_cli,
+            test_fleet_ask_end_to_end,
+            test_fleet_ask_via_claude_cli,
             apply_prd_mode,
             remove_prd_mode,
             respond_to_elicitation,
             respond_to_fleet_ask,
+            apply_mcp_injector,
             upload_elicitation_attachment,
             stage_pasted_attachment,
             read_local_file_bytes,

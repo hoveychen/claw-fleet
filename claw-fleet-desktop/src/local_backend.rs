@@ -1950,6 +1950,11 @@ impl Backend for LocalBackend {
         claw_fleet_core::mcp_ipc::write_response(&resp)
     }
 
+    fn apply_mcp_injector(&self, fleet_path: &str) -> Result<(), String> {
+        claw_fleet_core::mcp_injector::acquire(std::process::id(), fleet_path)
+            .map_err(|e| e.to_string())
+    }
+
     fn apply_plan_approval_hook(&self) -> Result<(), String> {
         crate::hooks::apply_plan_approval_hook()
     }

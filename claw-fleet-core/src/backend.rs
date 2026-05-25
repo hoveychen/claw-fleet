@@ -494,6 +494,16 @@ pub trait Backend: Send + Sync {
         cancelled: bool,
         answers: std::collections::BTreeMap<String, String>,
     ) -> Result<(), String>;
+    /// One-click fix for the `mcp_injection` diagnostic: re-acquire the
+    /// `mcpServers.fleet` entry in `~/.claude.json` with the supplied
+    /// fleet binary path. Mirrors `apply_elicitation_hook` for the MCP
+    /// injection side. Default impl is a no-op error so RemoteBackend
+    /// gets a useful message until a probe-side endpoint is wired (P-task
+    /// follow-up — local-only for now is fine since the diagnostic surface
+    /// only renders in the desktop window).
+    fn apply_mcp_injector(&self, _fleet_path: &str) -> Result<(), String> {
+        Err("apply_mcp_injector is local-only in this build".into())
+    }
 
     // ── Plan approval (ExitPlanMode interception) ──────────────────────
     fn apply_plan_approval_hook(&self) -> Result<(), String>;
@@ -541,6 +551,20 @@ pub trait Backend: Send + Sync {
     /// CLAUDE.md. Returns when the process exits or after 60s.
     fn test_decision_via_claude_cli(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
         crate::interaction_mode_test::run_claude_cli_test(std::time::Duration::from_secs(60))
+    }
+
+    /// fleet__ask depth-2 test: write a fake `FleetAskRequest` so the new
+    /// MCP-side watcher emits `fleet-ask-request` and the frontend renders
+    /// a composite (html + form + options) test card. Cleanup auto-runs.
+    fn test_fleet_ask_end_to_end(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_fleet_ask_end_to_end_test(std::time::Duration::from_secs(10))
+    }
+
+    /// fleet__ask depth-3 test: spawn `claude -p "<prompt>"` with
+    /// `--allowed-tools "mcp__fleet__ask"` so the Agent actually invokes
+    /// the new MCP tool. Mirrors `test_decision_via_claude_cli`.
+    fn test_fleet_ask_via_claude_cli(&self) -> Result<crate::interaction_mode_test::TestRunResult, String> {
+        crate::interaction_mode_test::run_fleet_ask_claude_cli_test(std::time::Duration::from_secs(60))
     }
 
     // ── PRD Discipline mode (commit guard + TASKS.md re-injection hook) ─────
