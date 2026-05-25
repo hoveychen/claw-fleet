@@ -1753,6 +1753,10 @@ fn cmd_guard() {
 
             let request_id = guard::new_request_id();
 
+            let mut structured = claw_fleet_core::cmd_ast::extract_structured_view(&command);
+            let user_rules = claw_fleet_core::audit::load_user_rules();
+            claw_fleet_core::audit::annotate_view_with_flags(&mut structured, &user_rules);
+
             let req = GuardRequest {
                 id: request_id.clone(),
                 session_id,
@@ -1763,9 +1767,7 @@ fn cmd_guard() {
                 command_summary: guard::truncate_command(&command, 120),
                 risk_tags,
                 timestamp: chrono::Utc::now().to_rfc3339(),
-                structured_command: Some(claw_fleet_core::cmd_ast::extract_structured_view(
-                    &command,
-                )),
+                structured_command: Some(structured),
             };
 
             // Write request for the desktop app to pick up.

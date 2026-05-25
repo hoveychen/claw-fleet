@@ -455,11 +455,24 @@ pub struct CommandView {
 /// matching engine sees; `nested` is set when the argv represents an
 /// interpreter invocation (e.g. `bash -c "..."`, `python3 -c "..."`,
 /// `eval "..."`) and the embedded script could itself be parsed.
+///
+/// `triggering` and `already_allowed` are populated by
+/// [`crate::audit::annotate_view_with_flags`] before the view ships in a
+/// `GuardRequest`; default-false leaves stay invisible in JSON so older
+/// desktop clients keep round-tripping the wire format.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct CommandLeaf {
     pub argv: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub nested: Option<NestedScript>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub triggering: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub already_allowed: bool,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -562,7 +575,12 @@ pub fn extract_structured_view(cmd: &str) -> CommandView {
         if !argv.is_empty() {
             builder
                 .leaves
-                .push(CommandLeaf { argv, nested: None });
+                .push(CommandLeaf {
+                    argv,
+                    nested: None,
+                    triggering: false,
+                    already_allowed: false,
+                });
         }
     }
     builder.finish()
@@ -693,7 +711,15 @@ fn visit_simple_for_view(
     }
     let nested = detect_nested(&argv);
     let conn = next.take();
-    b.push(CommandLeaf { argv, nested }, conn);
+    b.push(
+        CommandLeaf {
+            argv,
+            nested,
+            triggering: false,
+            already_allowed: false,
+        },
+        conn,
+    );
 }
 
 fn splice_substs_from_complex(c: &ComplexT, b: &mut ViewBuilder, next: &mut Option<Connector>) {
@@ -933,6 +959,8 @@ fn detect_nested(argv: &[String]) -> Option<NestedScript> {
             leaves: vec![CommandLeaf {
                 argv: vec![script_str.clone()],
                 nested: None,
+                triggering: false,
+                already_allowed: false,
             }],
             connectors: Vec::new(),
         }
@@ -1439,5 +1467,50 @@ mod tests {
         // matches old semantics for users who want the broad rule.
         assert!(cmd_matches_rule("git status", "git"));
         assert!(cmd_matches_rule("git push", "git"));
+    }
+
+    // ── Serde compatibility for triggering / already_allowed flags ──────────
+
+    #[test]
+    fn leaf_default_flags_are_omitted_from_json() {
+        let leaf = CommandLeaf {
+            argv: vec!["ls".into(), "-la".into()],
+            nested: None,
+            triggering: false,
+            already_allowed: false,
+        };
+        let json = serde_json::to_string(&leaf).unwrap();
+        assert!(!json.contains("triggering"), "default-false must skip serializing: {json}");
+        assert!(!json.contains("alreadyAllowed"), "default-false must skip serializing: {json}");
+        assert!(!json.contains("already_allowed"), "default-false must skip serializing: {json}");
+    }
+
+    #[test]
+    fn leaf_truthy_flags_appear_in_json_and_round_trip() {
+        let leaf = CommandLeaf {
+            argv: vec!["eval".into(), "() => 1".into()],
+            nested: None,
+            triggering: true,
+            already_allowed: true,
+        };
+        let json = serde_json::to_string(&leaf).unwrap();
+        assert!(json.contains("\"triggering\":true"), "got {json}");
+        // serde inherits container rename if any; cmd_ast::CommandLeaf has no
+        // rename_all, so the field stays snake_case on the wire.
+        assert!(json.contains("\"already_allowed\":true"), "got {json}");
+
+        let decoded: CommandLeaf = serde_json::from_str(&json).unwrap();
+        assert!(decoded.triggering);
+        assert!(decoded.already_allowed);
+    }
+
+    #[test]
+    fn leaf_legacy_json_without_flags_still_parses() {
+        // Pre-flag CLI versions ship CommandLeaf JSON without these fields.
+        // serde(default) keeps them deserializing as false.
+        let legacy = r#"{"argv":["ls","-la"]}"#;
+        let decoded: CommandLeaf = serde_json::from_str(legacy).unwrap();
+        assert!(!decoded.triggering);
+        assert!(!decoded.already_allowed);
     }
 }

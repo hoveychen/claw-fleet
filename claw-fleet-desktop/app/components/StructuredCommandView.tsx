@@ -70,9 +70,39 @@ function ViewBody({ view }: { view: CommandView }) {
 }
 
 function LeafRow({ leaf }: { leaf: CommandLeaf }) {
+  const { t } = useTranslation();
+  const triggering = leaf.triggering === true;
+  const alreadyAllowed = leaf.already_allowed === true;
+  const className = triggering
+    ? `${styles.leaf} ${styles.leaf_triggering}`
+    : styles.leaf;
   return (
-    <div className={styles.leaf}>
+    <div className={className}>
       <ArgvLine argv={leaf.argv} hasNested={!!leaf.nested} />
+      {triggering && (
+        <span
+          className={
+            alreadyAllowed
+              ? `${styles.trigger_badge} ${styles.trigger_badge_allowed}`
+              : styles.trigger_badge
+          }
+          title={
+            alreadyAllowed
+              ? t(
+                  "guard.triggered_badge_allowed_hint",
+                  "This command is what tripped the audit, but your existing allow rule already covers it.",
+                )
+              : t(
+                  "guard.triggered_badge_hint",
+                  "This command is what tripped the audit.",
+                )
+          }
+        >
+          {alreadyAllowed
+            ? t("guard.triggered_badge_allowed", "audit · already allowed")
+            : t("guard.triggered_badge", "audit")}
+        </span>
+      )}
       {leaf.nested && <NestedBlock nested={leaf.nested} />}
     </div>
   );
