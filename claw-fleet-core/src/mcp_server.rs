@@ -101,43 +101,8 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
 fn fleet_ask_tool_def() -> Value {
     json!({
         "name": "fleet__ask",
-        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus two optional fields: `html` (HTML preview, rendered in a sandboxed iframe) and `form_fields` (structured input fields). [P1: dummy echo]",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "questions": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 4,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "question": { "type": "string" },
-                            "header": { "type": "string" },
-                            "multiSelect": { "type": "boolean" },
-                            "options": {
-                                "type": "array",
-                                "items": {
-                                    "type": "object",
-                                    "properties": {
-                                        "label": { "type": "string" },
-                                        "description": { "type": "string" }
-                                    },
-                                    "required": ["label", "description"]
-                                }
-                            },
-                            "html": { "type": "string" },
-                            "form_fields": {
-                                "type": "array",
-                                "items": { "type": "object" }
-                            }
-                        },
-                        "required": ["question", "header", "multiSelect"]
-                    }
-                }
-            },
-            "required": ["questions"]
-        }
+        "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus two optional fields: `html` (HTML preview, rendered in a sandboxed iframe) and `formFields` (structured input fields). [P1: dummy echo]",
+        "inputSchema": crate::mcp_ipc::fleet_ask_input_schema(),
     })
 }
 
@@ -191,8 +156,8 @@ mod tests {
         let schema = &tools[0]["inputSchema"]["properties"]["questions"]["items"]["properties"];
         assert!(schema.get("html").is_some(), "html field present in schema");
         assert!(
-            schema.get("form_fields").is_some(),
-            "form_fields field present in schema"
+            schema.get("formFields").is_some(),
+            "formFields field present in schema (camelCase)"
         );
     }
 
