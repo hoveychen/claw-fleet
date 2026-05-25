@@ -2521,7 +2521,7 @@ fn detect_waiting_transitions(
 }
 
 fn extract_last_assistant_text(jsonl_path: &str, max_chars: usize) -> Option<String> {
-    let content = fs::read_to_string(jsonl_path).ok()?;
+    let content = claw_fleet_core::bom::read_to_string_no_bom(jsonl_path).ok()?;
     let lines: Vec<&str> = content.lines().rev().take(100).collect();
 
     for line in &lines {
