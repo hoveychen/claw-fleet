@@ -190,4 +190,21 @@ mod tests {
         let loaded = load();
         assert!(loaded.is_empty());
     }
+
+    #[test]
+    fn scan_cache_new_seeds_session_cache_from_disk() {
+        let (_tmp, _env, _lock) = with_temp_home();
+        let mut cache: HashMap<String, (u64, SessionInfo)> = HashMap::new();
+        cache.insert("/seed/path.jsonl".into(), (42, sample_info("seed")));
+        save(&cache).expect("save ok");
+
+        let sc = crate::session::ScanCache::new();
+        let guard = sc.session_cache.lock().unwrap();
+        assert_eq!(guard.len(), 1);
+        assert_eq!(guard.get("/seed/path.jsonl").map(|(m, _)| *m), Some(42));
+        assert_eq!(
+            guard.get("/seed/path.jsonl").map(|(_, i)| i.id.clone()),
+            Some("seed".into())
+        );
+    }
 }

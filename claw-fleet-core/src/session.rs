@@ -1388,7 +1388,7 @@ impl ScanCache {
         // ("overflow when subtracting duration from instant").
         Self {
             process_cache: Mutex::new((None, Vec::new())),
-            session_cache: Mutex::new(HashMap::new()),
+            session_cache: Mutex::new(crate::scan_cache_disk::load()),
         }
     }
 }
