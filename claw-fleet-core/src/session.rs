@@ -1379,6 +1379,23 @@ pub struct ScanCache {
     pub process_cache: Mutex<(Option<Instant>, Vec<CliProcess>)>,
     /// JSONL path → (mtime_ms, SessionInfo).
     pub session_cache: Mutex<HashMap<String, (u64, SessionInfo)>>,
+    /// Last time `session_cache` was flushed to disk via `scan_cache_disk::save`.
+    /// `None` means never persisted in this process.
+    pub last_persisted_at: Mutex<Option<Instant>>,
+}
+
+/// Minimum gap between `scan_cache_disk::save` flushes. The cache is overwritten
+/// completely on each save, so a tighter interval would burn IO without buying
+/// us anything — the disk copy is only consulted at process startup anyway.
+pub const PERSIST_INTERVAL: Duration = Duration::from_secs(30);
+
+/// Pure throttle predicate. Returns `true` when the cache should be persisted
+/// now given the time of the previous save (`None` on the very first call).
+pub fn should_persist_now(last: Option<Instant>, now: Instant, interval: Duration) -> bool {
+    match last {
+        None => true,
+        Some(t) => now.duration_since(t) >= interval,
+    }
 }
 
 impl ScanCache {
@@ -1388,7 +1405,8 @@ impl ScanCache {
         // ("overflow when subtracting duration from instant").
         Self {
             process_cache: Mutex::new((None, Vec::new())),
-            session_cache: Mutex::new(HashMap::new()),
+            session_cache: Mutex::new(crate::scan_cache_disk::load()),
+            last_persisted_at: Mutex::new(None),
         }
     }
 }
@@ -1741,6 +1759,24 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             .cmp(&a_active)
             .then(a.created_at_ms.cmp(&b.created_at_ms))
     });
+
+    // Persist the cleaned cache to disk, throttled. Subsequent process starts
+    // can then seed `session_cache` and bypass the per-file re-parse on the
+    // mtime-equality path inside `check_session_cache`.
+    {
+        let mut last_guard = scan_cache.last_persisted_at.lock().unwrap();
+        let now = Instant::now();
+        if should_persist_now(*last_guard, now, PERSIST_INTERVAL) {
+            *last_guard = Some(now);
+            drop(last_guard);
+            let snapshot = scan_cache.session_cache.lock().unwrap().clone();
+            std::thread::spawn(move || {
+                if let Err(e) = crate::scan_cache_disk::save(&snapshot) {
+                    eprintln!("[session-cache] save failed: {e}");
+                }
+            });
+        }
+    }
 
     sessions
 }

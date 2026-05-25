@@ -51,6 +51,7 @@ pub mod prd_discipline;
 pub mod project;
 pub mod supervisor;
 pub mod rate_limit_parser;
+pub mod scan_cache_disk;
 pub mod scheduler;
 pub mod search_index;
 pub mod session;
