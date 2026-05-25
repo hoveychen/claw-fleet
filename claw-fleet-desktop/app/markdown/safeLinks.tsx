@@ -1,6 +1,11 @@
 import type { Components } from "react-markdown";
+import type { PluggableList } from "unified";
+import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { remarkCjkAutolinkFix } from "./cjkAutolinkFix";
 import styles from "./markdown.module.css";
+
+export const safeRemarkPlugins: PluggableList = [remarkGfm, remarkCjkAutolinkFix];
 
 export function safeLinkComponent(): Components["a"] {
   return function SafeLink({ href, children }) {
