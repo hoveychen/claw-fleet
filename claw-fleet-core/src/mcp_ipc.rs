@@ -73,6 +73,12 @@ pub struct FleetAskFormField {
     pub required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub step: Option<f64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -84,6 +90,10 @@ pub enum FormFieldKind {
     Select,
     Radio,
     Checkbox,
+    Date,
+    Datetime,
+    Time,
+    Range,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,7 +263,7 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                                     "name": { "type": "string" },
                                     "kind": {
                                         "type": "string",
-                                        "enum": ["text", "textarea", "number", "select", "radio", "checkbox"]
+                                        "enum": ["text", "textarea", "number", "select", "radio", "checkbox", "date", "datetime", "time", "range"]
                                     },
                                     "label": { "type": "string" },
                                     "placeholder": { "type": "string" },
@@ -262,7 +272,10 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                                         "items": { "type": "string" }
                                     },
                                     "required": { "type": "boolean" },
-                                    "default": {}
+                                    "default": {},
+                                    "min": { "type": "number", "description": "Range slider lower bound (range kind only)" },
+                                    "max": { "type": "number", "description": "Range slider upper bound (range kind only)" },
+                                    "step": { "type": "number", "description": "Range slider step (range kind only)" }
                                 },
                                 "required": ["name", "kind", "label"]
                             }
@@ -361,6 +374,9 @@ mod tests {
                 options: vec![],
                 required: true,
                 default: None,
+                min: None,
+                max: None,
+                step: None,
             }],
         };
         let v: serde_json::Value = serde_json::to_value(&q).unwrap();
@@ -476,6 +492,92 @@ mod tests {
         let arr = kinds.as_array().expect("enum array");
         assert!(arr.iter().any(|v| v == "textarea"));
         assert!(arr.iter().any(|v| v == "checkbox"));
+    }
+
+    #[test]
+    fn form_field_kind_serialises_new_variants_lowercase() {
+        assert_eq!(
+            serde_json::to_value(FormFieldKind::Date).unwrap(),
+            json!("date")
+        );
+        assert_eq!(
+            serde_json::to_value(FormFieldKind::Datetime).unwrap(),
+            json!("datetime")
+        );
+        assert_eq!(
+            serde_json::to_value(FormFieldKind::Time).unwrap(),
+            json!("time")
+        );
+        assert_eq!(
+            serde_json::to_value(FormFieldKind::Range).unwrap(),
+            json!("range")
+        );
+        let back: FormFieldKind = serde_json::from_value(json!("date")).unwrap();
+        assert_eq!(back, FormFieldKind::Date);
+        let back: FormFieldKind = serde_json::from_value(json!("range")).unwrap();
+        assert_eq!(back, FormFieldKind::Range);
+    }
+
+    #[test]
+    fn form_field_min_max_step_round_trip() {
+        let f = FleetAskFormField {
+            name: "volume".into(),
+            kind: FormFieldKind::Range,
+            label: "Volume".into(),
+            placeholder: None,
+            options: vec![],
+            required: false,
+            default: Some(json!(50)),
+            min: Some(0.0),
+            max: Some(100.0),
+            step: Some(5.0),
+        };
+        let v = serde_json::to_value(&f).unwrap();
+        assert_eq!(v["min"], json!(0.0));
+        assert_eq!(v["max"], json!(100.0));
+        assert_eq!(v["step"], json!(5.0));
+        assert_eq!(v["kind"], json!("range"));
+        let back: FleetAskFormField = serde_json::from_value(v).unwrap();
+        assert_eq!(back.min, Some(0.0));
+        assert_eq!(back.max, Some(100.0));
+        assert_eq!(back.step, Some(5.0));
+        assert_eq!(back.kind, FormFieldKind::Range);
+    }
+
+    #[test]
+    fn form_field_min_max_step_omitted_when_none() {
+        let f = FleetAskFormField {
+            name: "msg".into(),
+            kind: FormFieldKind::Text,
+            label: "Message".into(),
+            placeholder: None,
+            options: vec![],
+            required: false,
+            default: None,
+            min: None,
+            max: None,
+            step: None,
+        };
+        let v = serde_json::to_value(&f).unwrap();
+        assert!(v.get("min").is_none(), "min skipped when None");
+        assert!(v.get("max").is_none(), "max skipped when None");
+        assert!(v.get("step").is_none(), "step skipped when None");
+    }
+
+    #[test]
+    fn schema_advertises_new_kinds_and_range_bounds() {
+        let s = fleet_ask_input_schema();
+        let item_props =
+            &s["properties"]["questions"]["items"]["properties"]["formFields"]["items"]["properties"];
+        let kinds = item_props["kind"]["enum"]
+            .as_array()
+            .expect("enum array");
+        for k in ["date", "datetime", "time", "range"] {
+            assert!(kinds.iter().any(|v| v == k), "kind enum missing {k}");
+        }
+        assert!(item_props.get("min").is_some(), "min advertised");
+        assert!(item_props.get("max").is_some(), "max advertised");
+        assert!(item_props.get("step").is_some(), "step advertised");
     }
 
     #[test]
