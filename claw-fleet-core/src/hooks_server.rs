@@ -56,6 +56,16 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         eprintln!("[fleet serve] ctrlc handler install failed: {e}");
     }
 
+    // Drift watchdog: every 30s, verify both injectors still own their
+    // expected regions of ~/.claude.json and ~/.claude/settings.json. If
+    // a third party (e.g. a CC upgrade) rewrote those files, the
+    // watchdog re-injects. No-ops when no holders are live or the
+    // per-injector toggle is off. Thread runs until process exit.
+    let watchdog_fleet_path = std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "fleet".to_string());
+    crate::injector_watchdog::start(watchdog_fleet_path);
+
     use crate::agent_source::{self, build_sources, find_source_for_path};
     use crate::audit;
     use crate::claude_analyze;

@@ -24,6 +24,7 @@ pub mod guard;
 pub mod hooks;
 pub mod hooks_server;
 pub mod idle;
+pub mod injector_watchdog;
 pub mod interaction_mode;
 pub mod interaction_mode_diagnostics;
 pub mod interaction_mode_test;
