@@ -252,23 +252,7 @@ fn run_cli_test_inner(
         }
     };
 
-    // `--allowed-tools <name>` is load-bearing: without it the tool isn't
-    // in `claude -p`'s default tool list, so the CLAUDE.md interaction-mode
-    // guidance has nothing to call and the model silently falls back to
-    // plain text. `--output-format stream-json --verbose` makes the
-    // captured `claude_output` self-explanatory: Boss can read the stream
-    // and see whether the agent actually called the tool.
-    let mut child = Command::new(&bin.path)
-        .args([
-            "--allowed-tools",
-            allowed_tool,
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "-p",
-            prompt,
-        ])
-        .current_dir(&workdir)
+    let mut child = build_claude_command(std::path::Path::new(&bin.path), allowed_tool, prompt, &workdir)?
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -413,6 +397,48 @@ fn build_cli_message(
     }
 }
 
+/// Build the `claude --allowed-tools <tool> -p <prompt>` command Fleet
+/// spawns from the QA diagnostic. Extracted so it can be unit-tested
+/// without actually running claude — the failure mode this helper exists
+/// to defend against (sandbox-redirected `$HOME` on Tauri release builds)
+/// is invisible to a behavioural test that just spawns the child.
+///
+/// `--allowed-tools <name>` is load-bearing: without it the tool isn't
+/// in `claude -p`'s default tool list, so the CLAUDE.md interaction-mode
+/// guidance has nothing to call and the model silently falls back to
+/// plain text. `--output-format stream-json --verbose` makes the
+/// captured output self-explanatory.
+///
+/// `HOME` is explicitly overridden to `real_home_dir()`. Without it, a
+/// child spawned from a sandboxed Fleet desktop (macOS App Sandbox)
+/// inherits `$HOME=~/Library/Containers/com.hoveychen.claw-fleet/Data/`,
+/// where Claude Code reads an empty container settings.json with no
+/// PreToolUse hook for AskUserQuestion → CC's default permission gate
+/// denies the call in `-p` (non-interactive) mode → permission_denials
+/// fires and the diagnostic reports a false negative.
+pub(crate) fn build_claude_command(
+    claude_bin: &std::path::Path,
+    allowed_tool: &str,
+    prompt: &str,
+    workdir: &std::path::Path,
+) -> Result<std::process::Command, String> {
+    let real_home = crate::session::real_home_dir()
+        .ok_or("cannot determine home directory for HOME override")?;
+    let mut cmd = std::process::Command::new(claude_bin);
+    cmd.args([
+        "--allowed-tools",
+        allowed_tool,
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "-p",
+        prompt,
+    ])
+    .current_dir(workdir)
+    .env("HOME", real_home);
+    Ok(cmd)
+}
+
 /// Claude CLI test for the `fleet__ask` MCP tool: same evidence-based
 /// shape as `run_claude_cli_test`, but steers the model toward
 /// `mcp__fleet__ask` (Claude Code's canonical name for the
@@ -431,6 +457,41 @@ pub fn run_fleet_ask_claude_cli_test(timeout: Duration) -> Result<TestRunResult,
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn claude_command_overrides_home_to_escape_macos_sandbox() {
+        // When Fleet desktop (macOS App Sandbox enabled) spawns
+        // `claude -p`, the child inherits `$HOME=~/Library/Containers/
+        // com.hoveychen.claw-fleet/Data/`. Claude Code then reads an
+        // empty container settings.json with no PreToolUse hook for
+        // AskUserQuestion → CC's default permission gate denies the
+        // tool in `-p` mode and the diagnostic reports a false negative.
+        //
+        // The fix is to explicitly set HOME to `real_home_dir()` on the
+        // Command builder. Pin that with this regression test: the
+        // returned Command must declare a HOME env binding pointing at
+        // the user's real home directory.
+        use std::ffi::OsStr;
+        let expected_home = crate::session::real_home_dir()
+            .expect("self has a home dir");
+        let cmd = build_claude_command(
+            std::path::Path::new("/usr/bin/false"),
+            "AskUserQuestion",
+            "noop",
+            std::path::Path::new("/tmp"),
+        )
+        .expect("build_claude_command should succeed when real_home_dir() resolves");
+        let home_env = cmd
+            .get_envs()
+            .find(|(k, _)| *k == OsStr::new("HOME"))
+            .and_then(|(_, v)| v.map(|os| os.to_owned()));
+        assert_eq!(
+            home_env.as_deref(),
+            Some(expected_home.as_os_str()),
+            "Command must explicitly bind HOME to real_home_dir() to escape \
+             the macOS app sandbox container path"
+        );
+    }
 
     #[test]
     fn build_test_request_marks_workspace_and_title() {
