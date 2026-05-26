@@ -202,6 +202,27 @@ pub fn is_process_alive(pid: u32) -> bool {
     std::io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
 }
 
+/// Read the process start time (seconds since the Unix epoch) for `pid`.
+///
+/// Returns `None` if no live process owns this pid right now. Used together
+/// with [`is_process_alive`] to defend against PID reuse: an entry in a
+/// lock file becomes "stale" if either the pid is dead OR the live process
+/// at that pid was spawned at a different start time than the one
+/// snapshotted on `acquire`. See
+/// `~/.claude/projects/.../memory/project_mcp_injector_pid_reuse.md` for
+/// the diagnosis that motivated this helper.
+pub fn process_start_time(pid: u32) -> Option<u64> {
+    use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    let mut sys = System::new();
+    let target = Pid::from_u32(pid);
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&[target]),
+        true,
+        ProcessRefreshKind::nothing(),
+    );
+    sys.process(target).map(|p| p.start_time())
+}
+
 #[cfg(windows)]
 pub fn is_process_alive(pid: u32) -> bool {
     if pid == 0 {
@@ -3057,6 +3078,28 @@ mod tests {
         let pct =
             compute_context_percent(250_000, Some("claude-opus-4-6"), 530_000).unwrap();
         assert!((pct - 0.25).abs() < 1e-6);
+    }
+
+    #[test]
+    fn process_start_time_returns_value_for_self_and_is_stable() {
+        let pid = std::process::id();
+        let first = super::process_start_time(pid).expect("self should have a start time");
+        // start_time is seconds since epoch — a real process can never report 0
+        // (that would be 1970-01-01) so this also doubles as a "didn't return
+        // a zero-valued sentinel" check.
+        assert!(first > 0, "self start_time should be > 0, got {first}");
+        let second = super::process_start_time(pid).expect("self still alive");
+        assert_eq!(first, second, "start_time must be stable across calls");
+    }
+
+    #[test]
+    fn process_start_time_returns_none_for_clearly_dead_pid() {
+        // PID 0 is reserved on Unix; treat as the "definitely not a real
+        // process" sentinel. macOS sysinfo also reports it as missing.
+        assert!(
+            super::process_start_time(0).is_none(),
+            "pid 0 should never have a start_time"
+        );
     }
 }
 
