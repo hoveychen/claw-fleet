@@ -777,6 +777,22 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/fleet-ask/respond", &resp)
     }
 
+    fn respond_to_a2ui_render(
+        &self,
+        id: &str,
+        cancelled: bool,
+        action_name: Option<String>,
+        action_context: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let resp = claw_fleet_core::mcp_a2ui_ipc::A2uiRenderResponse {
+            id: id.to_string(),
+            action_name,
+            action_context,
+            cancelled,
+        };
+        self.probe.post_json_ok("/a2ui-render/respond", &resp)
+    }
+
     fn apply_plan_approval_hook(&self) -> Result<(), String> {
         self.probe.post_ok("/apply_plan_approval_hook")
     }
@@ -1988,6 +2004,43 @@ fn connect_remote_start_probe(
                 }
                 for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
                     let _ = app_ask.emit("fleet-ask-dismissed", id.clone());
+                }
+                known.retain(|id| pending_ids.contains(id));
+            }
+        });
+    }
+
+    // fleet__render_a2ui polling thread — mirror of the fleet-ask poller for
+    // the A2UI MCP tool. Polls `GET /a2ui-render/pending` and emits the
+    // `a2ui-render-request` / `-dismissed` Tauri events the DecisionPanel
+    // consumes.
+    {
+        let app_a2ui = app.clone();
+        let pr_a2ui = poller_running.clone();
+        let probe_a2ui = probe.clone();
+        std::thread::spawn(move || {
+            let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                if !*pr_a2ui.lock().unwrap() {
+                    break;
+                }
+                let Ok(pending) = probe_a2ui.get::<Vec<claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest>>("/a2ui-render/pending") else {
+                    continue;
+                };
+                let pending_ids: std::collections::HashSet<String> =
+                    pending.iter().map(|r| r.id.clone()).collect();
+                for req in &pending {
+                    if known.insert(req.id.clone()) {
+                        claw_fleet_core::log_debug(&format!(
+                            "[remote-a2ui-render] new request: {}",
+                            req.id,
+                        ));
+                        let _ = app_a2ui.emit("a2ui-render-request", req);
+                    }
+                }
+                for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
+                    let _ = app_a2ui.emit("a2ui-render-dismissed", id.clone());
                 }
                 known.retain(|id| pending_ids.contains(id));
             }

@@ -296,6 +296,15 @@ impl Backend for NullBackend {
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn respond_to_a2ui_render(
+        &self,
+        _: &str,
+        _: bool,
+        _: Option<String>,
+        _: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn apply_plan_approval_hook(&self) -> Result<(), String> {
         Err("backend not ready".into())
     }

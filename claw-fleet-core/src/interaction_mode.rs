@@ -389,6 +389,65 @@ example above it would look like:\n\
 (question text → option label, form-field name → value, both in the same \
 map — name collisions are avoided because question text is prose and field \
 names are identifiers.)\n\
+\n\
+## Extended: `fleet__render_a2ui` (richer agent-driven UI)\n\
+\n\
+When `fleet__ask`'s flat option / formField vocabulary is too narrow — \
+you need tabs, modals, video, audio, cards, or a layout the form can't \
+express — call `fleet__render_a2ui` instead. It hands Fleet a full A2UI \
+v0.9 message tree (`@a2ui/web_core/v0_9` shape, Google's open spec) and \
+returns the resolved `userAction` payload when the user fires an Action \
+component on the rendered surface.\n\
+\n\
+**When to pick which:**\n\
+\n\
+| Situation | Tool |\n\
+|-----------|------|\n\
+| Plain preference picks, simple form, status report | `fleet__ask` |\n\
+| Need Tabs / Modal / Card layout, Image gallery, AudioPlayer / Video, or any A2UI catalog component beyond the flat formField vocabulary | `fleet__render_a2ui` |\n\
+| Need a sandboxed HTML preview without scripts | `fleet__ask` with `html` (cheaper, no extra deps) |\n\
+\n\
+**Schema.** Top-level: `{{ \"messageTree\": <A2UI v0.9 message or message[]> }}`. \
+The `messageTree` is whatever `@a2ui/web_core/v0_9`'s `MessageProcessor.processMessages` \
+accepts — typically a `surfaceUpdate` message containing a `root` component \
+tree (`Card` / `Row` / `Column` / `TextField` / `Slider` / `DateTimeInput` / \
+`ChoicePicker` / `CheckBox` / `Button` / `Modal` / `Tabs` / `Image` / `Video` / \
+`AudioPlayer`). Fleet does NOT validate the tree — invalid trees produce an \
+empty card. See https://github.com/google/A2UI/tree/main/specification/v0_9 \
+for the catalog.\n\
+\n\
+**Answer.** Returned as `{{ \"actionName\": string | null, \"actionContext\": object }}`. \
+`actionName` is the `Button.action.name` (or other Action component's name) \
+the user fired; `null` means the user submitted without acting. \
+`actionContext` is the resolved BoundValue map — Fleet stringifies each value \
+so it's `Record<String, String>` on the wire (same shape as `fleet__ask`'s \
+`answers`). Numbers / booleans are stringified verbatim, structured values \
+JSON-stringified.\n\
+\n\
+**Example.** Minimal rating-and-comment surface:\n\
+```json\n\
+{{\n\
+  \"messageTree\": {{\n\
+    \"surfaceUpdate\": {{\n\
+      \"surfaceId\": \"feedback\",\n\
+      \"root\": {{\n\
+        \"Card\": {{\n\
+          \"id\": \"root\",\n\
+          \"children\": [\n\
+            {{ \"Text\": {{ \"id\": \"q\", \"text\": \"How was the deploy?\" }} }},\n\
+            {{ \"Slider\": {{ \"id\": \"score\", \"min\": 0, \"max\": 10, \"step\": 1, \"value\": 7 }} }},\n\
+            {{ \"TextField\": {{ \"id\": \"note\", \"label\": \"Anything to flag?\" }} }},\n\
+            {{ \"Button\": {{ \"id\": \"ok\", \"label\": \"Submit\", \"action\": {{ \"name\": \"submit\" }} }} }}\n\
+          ]\n\
+        }}\n\
+      }}\n\
+    }}\n\
+  }}\n\
+}}\n\
+```\n\
+\n\
+The user drags the slider, types a note, clicks **Submit** → Fleet replies \
+with `{{ \"actionName\": \"submit\", \"actionContext\": {{ \"score\": \"7\", \"note\": \"…\" }} }}`.\n\
 ",
         title_en = title_en,
         title_zh = title_zh,
