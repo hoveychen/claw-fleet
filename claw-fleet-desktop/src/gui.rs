@@ -1138,6 +1138,21 @@ fn respond_to_fleet_ask(
         .respond_to_fleet_ask(&id, cancelled, answers)
 }
 
+#[tauri::command]
+fn respond_to_a2ui_render(
+    state: tauri::State<AppState>,
+    id: String,
+    cancelled: bool,
+    action_name: Option<String>,
+    action_context: std::collections::BTreeMap<String, String>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .respond_to_a2ui_render(&id, cancelled, action_name, action_context)
+}
+
 /// One-click fix for the `mcp_injection` diagnostic. Resolves the fleet
 /// sibling binary and re-acquires the `mcpServers.fleet` entry in
 /// `~/.claude.json`. Returns an error when the sibling binary can't be
@@ -3551,6 +3566,7 @@ pub fn run() {
             remove_prd_mode,
             respond_to_elicitation,
             respond_to_fleet_ask,
+            respond_to_a2ui_render,
             apply_mcp_injector,
             upload_elicitation_attachment,
             stage_pasted_attachment,

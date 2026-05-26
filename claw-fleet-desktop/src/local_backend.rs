@@ -670,6 +670,57 @@ impl LocalBackend {
             });
         }
 
+        // fleet__render_a2ui watcher — parallel channel to fleet__ask. Polls
+        // `~/.fleet/fleet-render-a2ui/` for new MCP-side A2UI render requests
+        // and emits `a2ui-render-request` / `a2ui-render-dismissed` Tauri
+        // events that the frontend's DecisionPanel consumes.
+        {
+            let app_a2ui = app.clone();
+            let sess_a2ui = sessions.clone();
+            let running_a2ui = running.clone();
+            std::thread::spawn(move || {
+                let mut known: HashSet<String> = HashSet::new();
+                loop {
+                    std::thread::sleep(Duration::from_millis(500));
+                    if !running_a2ui.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let pending = match claw_fleet_core::mcp_a2ui_ipc::list_pending_requests_checked() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            crate::log_debug(&format!(
+                                "[a2ui-render watcher] read_dir failed (skipping dismissal step): {e}"
+                            ));
+                            continue;
+                        }
+                    };
+                    for id in &pending {
+                        if known.insert(id.clone()) {
+                            if let Some(mut req) = claw_fleet_core::mcp_a2ui_ipc::read_request(id) {
+                                let (ws, ai) =
+                                    resolve_session_display(&sess_a2ui, &req.session_id);
+                                if req.workspace_name.is_empty() {
+                                    req.workspace_name = ws;
+                                }
+                                if req.ai_title.is_none() {
+                                    req.ai_title = ai;
+                                }
+                                crate::log_debug(&format!(
+                                    "[a2ui-render] new request: {}",
+                                    id
+                                ));
+                                let _ = app_a2ui.emit("a2ui-render-request", &req);
+                            }
+                        }
+                    }
+                    for id in known.iter().filter(|id| !pending.contains(*id)) {
+                        let _ = app_a2ui.emit("a2ui-render-dismissed", id.clone());
+                    }
+                    known.retain(|id| pending.contains(id));
+                }
+            });
+        }
+
         // Plan-approval directory watcher — polls for new ExitPlanMode requests from `fleet plan-approval`.
         {
             let app_plan = app.clone();
@@ -1948,6 +1999,22 @@ impl Backend for LocalBackend {
             cancelled,
         };
         claw_fleet_core::mcp_ipc::write_response(&resp)
+    }
+
+    fn respond_to_a2ui_render(
+        &self,
+        id: &str,
+        cancelled: bool,
+        action_name: Option<String>,
+        action_context: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String> {
+        let resp = claw_fleet_core::mcp_a2ui_ipc::A2uiRenderResponse {
+            id: id.to_string(),
+            action_name,
+            action_context,
+            cancelled,
+        };
+        claw_fleet_core::mcp_a2ui_ipc::write_response(&resp)
     }
 
     fn apply_mcp_injector(&self, fleet_path: &str) -> Result<(), String> {
