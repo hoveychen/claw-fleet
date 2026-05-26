@@ -30,7 +30,10 @@ use crate::session::{get_claude_dir, get_fleet_dir, is_process_alive};
 /// `Bash(*)` is the load-bearing one — it suppresses Claude Code's built-in
 /// command prompt so `fleet guard` becomes the sole audit gate.  The other
 /// patterns smooth out incidental prompts the user already trusts Fleet to
-/// orchestrate (file IO, web fetch, skills, monitoring).
+/// orchestrate (file IO, web fetch, skills, monitoring). The two `mcp__fleet__*`
+/// rules pre-authorise Fleet's own MCP tools (`fleet__ask` / `fleet__render_a2ui`)
+/// so Claude Code stops prompting on every invocation now that the desktop
+/// already renders + audits them via the Decision Panel.
 pub const INJECT_RULES: &[&str] = &[
     "Bash(*)",
     "Read(*)",
@@ -40,6 +43,8 @@ pub const INJECT_RULES: &[&str] = &[
     "WebSearch(*)",
     "Skill(*)",
     "Monitor(*)",
+    "mcp__fleet__fleet__ask",
+    "mcp__fleet__fleet__render_a2ui",
 ];
 
 const LOCK_FILE_NAME: &str = "permissions-lock.json";
