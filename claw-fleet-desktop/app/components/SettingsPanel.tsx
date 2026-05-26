@@ -541,7 +541,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     status: "pass" | "unknown";
     detail: string;
   }>({ status: "unknown", detail: "" });
-  const [testingKind, setTestingKind] = useState<null | "frontend" | "e2e" | "cli">(null);
+  const [testingKind, setTestingKind] = useState<
+    null | "frontend" | "e2e" | "cli" | "fleet_ask_e2e" | "fleet_ask_cli"
+  >(null);
   const [lastTestResult, setLastTestResult] = useState<TestRunResult | null>(null);
 
   const refreshInteractionDiagnostics = useCallback(async () => {
@@ -582,7 +584,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   }, []);
 
   const runDiagnosticTest = useCallback(
-    async (kind: "frontend" | "e2e" | "cli") => {
+    async (kind: "frontend" | "e2e" | "cli" | "fleet_ask_e2e" | "fleet_ask_cli") => {
       setTestingKind(kind);
       setLastTestResult(null);
       const cmd =
@@ -590,7 +592,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
           ? "test_decision_frontend_only"
           : kind === "e2e"
             ? "test_decision_end_to_end"
-            : "test_decision_via_claude_cli";
+            : kind === "cli"
+              ? "test_decision_via_claude_cli"
+              : kind === "fleet_ask_e2e"
+                ? "test_fleet_ask_end_to_end"
+                : "test_fleet_ask_via_claude_cli";
       try {
         const r = await invoke<TestRunResult>(cmd);
         setLastTestResult(r);
@@ -1578,6 +1584,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     { kind: "frontend" as const, label: "interaction_diagnostics_test_frontend", hint: "interaction_diagnostics_test_frontend_hint" },
                     { kind: "e2e" as const, label: "interaction_diagnostics_test_e2e", hint: "interaction_diagnostics_test_e2e_hint" },
                     { kind: "cli" as const, label: "interaction_diagnostics_test_claude_cli", hint: "interaction_diagnostics_test_claude_cli_hint" },
+                    { kind: "fleet_ask_e2e" as const, label: "interaction_diagnostics_test_fleet_ask_e2e", hint: "interaction_diagnostics_test_fleet_ask_e2e_hint" },
+                    { kind: "fleet_ask_cli" as const, label: "interaction_diagnostics_test_fleet_ask_cli", hint: "interaction_diagnostics_test_fleet_ask_cli_hint" },
                   ].map((b) => (
                     <div key={b.kind} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
                       <button
