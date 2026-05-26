@@ -294,6 +294,45 @@ pub fn release(pid: u32) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Watchdog hook: if the lock still has at least one live holder but
+/// `~/.claude/settings.json`'s `permissions.allow` is missing any of the
+/// rules we should be enforcing (e.g. user / external tool truncated the
+/// list, or Claude Code rewrote the file), re-inject the missing rules
+/// without disturbing user-added entries.
+///
+/// Returns `Ok(true)` if a re-injection actually wrote the file,
+/// `Ok(false)` otherwise. Used by [`crate::injector_watchdog`].
+pub fn verify_and_reinject() -> std::io::Result<bool> {
+    let Some(mut lock) = read_lock() else { return Ok(false) };
+    prune_dead_holders(&mut lock);
+    if lock.holders.is_empty() {
+        return Ok(false);
+    }
+    let (settings, existed) = read_settings()?;
+    let (current_allow, _) = extract_allow(&settings);
+    let any_missing = INJECT_RULES
+        .iter()
+        .any(|rule| !current_allow.iter().any(|s| s == rule));
+    if !any_missing {
+        return Ok(false);
+    }
+    let mut merged = current_allow;
+    for rule in INJECT_RULES {
+        if !merged.iter().any(|s| s == rule) {
+            merged.push((*rule).to_string());
+        }
+    }
+    let mut new_settings = if existed {
+        settings
+    } else {
+        serde_json::Value::Object(Default::default())
+    };
+    set_allow(&mut new_settings, merged);
+    write_settings(&new_settings)?;
+    write_lock(&lock)?;
+    Ok(true)
+}
+
 fn restore_from_snapshot(lock: &PermissionsLock) -> std::io::Result<()> {
     if !lock.original_existed {
         // Settings.json didn't exist before Fleet touched it.  Strip our entries;
