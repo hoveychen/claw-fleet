@@ -1516,6 +1516,10 @@ function tabLabel(d: PendingDecision): string {
     const text = d.request.promptPreview || d.request.workspaceName || "Pending";
     return text.length > 24 ? `${text.slice(0, 24)}…` : text;
   }
+  if (d.kind === "a2ui-render") {
+    const text = d.request.aiTitle || d.request.workspaceName || "A2UI";
+    return text.length > 24 ? `${text.slice(0, 24)}…` : text;
+  }
   const first = d.request.questions[0];
   if (first?.header) return first.header;
   const text = first?.question ?? "Question";

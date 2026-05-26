@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, SessionPendingRequest, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, SessionPendingRequest, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -759,6 +759,18 @@ interface DecisionState {
   addElicitationRequest: (req: ElicitationRequest) => void;
   /** Add a fleet__ask MCP-tool request to the queue. */
   addFleetAskRequest: (req: FleetAskRequest) => void;
+  /** Add a fleet__render_a2ui MCP-tool request to the queue. */
+  addA2uiRenderRequest: (req: A2uiRenderRequest) => void;
+  /** Update the latest userAction payload observed from the A2UI surface. */
+  setA2uiActionPayload: (
+    id: string,
+    name: string | null,
+    context: Record<string, string>,
+  ) => void;
+  /** Submit the latest A2UI userAction back to the MCP server. */
+  submitA2uiRender: (id: string) => Promise<void>;
+  /** Cancel an A2UI render card (user explicitly dismissed). */
+  cancelA2uiRender: (id: string) => Promise<void>;
   /** Add a plan-approval request to the queue. */
   addPlanApprovalRequest: (req: PlanApprovalRequest) => void;
   /** Add a session-pending request (idle-but-not-final) to the queue. */
@@ -936,6 +948,35 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       };
     });
     playChime("ding_dong").catch(() => {});
+  },
+
+  addA2uiRenderRequest: (req) => {
+    const decision: PendingDecision = {
+      kind: "a2ui-render",
+      id: req.id,
+      request: req,
+      actionPayload: null,
+      submitting: false,
+      arrivedAt: Date.now(),
+    };
+    set((s) => {
+      if (s.decisions.some((d) => d.id === decision.id)) return s;
+      return {
+        decisions: [...s.decisions, decision],
+        activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
+      };
+    });
+    playChime("ding_dong").catch(() => {});
+  },
+
+  setA2uiActionPayload: (id, name, context) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.kind === "a2ui-render" && d.id === id
+          ? { ...d, actionPayload: { name, context } }
+          : d,
+      ),
+    }));
   },
 
   addPlanApprovalRequest: (req) => {
@@ -1327,6 +1368,53 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       });
     } catch (e) {
       console.error("respond_to_fleet_ask (cancel) failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
+  },
+
+  submitA2uiRender: async (id) => {
+    const decision = get().decisions.find(
+      (d) => d.id === id && d.kind === "a2ui-render",
+    );
+    if (!decision || decision.kind !== "a2ui-render") return;
+    const payload = decision.actionPayload ?? { name: null, context: {} };
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.kind === "a2ui-render" && d.id === id ? { ...d, submitting: true } : d,
+      ),
+    }));
+    try {
+      await invoke("respond_to_a2ui_render", {
+        id,
+        cancelled: false,
+        actionName: payload.name,
+        actionContext: payload.context,
+      });
+    } catch (e) {
+      console.error("respond_to_a2ui_render failed:", e);
+      // Roll back submitting flag so user can retry instead of stuck card.
+      set((s) => ({
+        decisions: s.decisions.map((d) =>
+          d.kind === "a2ui-render" && d.id === id ? { ...d, submitting: false } : d,
+        ),
+      }));
+      return;
+    }
+    set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
+  },
+
+  cancelA2uiRender: async (id) => {
+    try {
+      await invoke("respond_to_a2ui_render", {
+        id,
+        cancelled: true,
+        actionName: null,
+        actionContext: {},
+      });
+    } catch (e) {
+      console.error("respond_to_a2ui_render (cancel) failed:", e);
     }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});

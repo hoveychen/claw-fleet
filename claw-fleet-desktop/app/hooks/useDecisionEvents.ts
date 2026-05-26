@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { playDecisionAlert } from "../audio";
 import { useDecisionStore } from "../store";
 import type {
+  A2uiRenderRequest,
   ElicitationRequest,
   FleetAskRequest,
   GuardRequest,
@@ -44,6 +45,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   const addGuardRequest = useDecisionStore((s) => s.addGuardRequest);
   const addElicitationRequest = useDecisionStore((s) => s.addElicitationRequest);
   const addFleetAskRequest = useDecisionStore((s) => s.addFleetAskRequest);
+  const addA2uiRenderRequest = useDecisionStore((s) => s.addA2uiRenderRequest);
   const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
   const addSessionPendingRequest = useDecisionStore((s) => s.addSessionPendingRequest);
   const dismiss = useDecisionStore((s) => s.dismiss);
@@ -112,6 +114,25 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   }, [addFleetAskRequest, silent]);
 
   useEffect(() => {
+    const unlisten = listen<A2uiRenderRequest>("a2ui-render-request", (e) => {
+      const r = e.payload;
+      if (!silent && !announcedIds.current.has(r.id)) {
+        announcedIds.current.add(r.id);
+        // A2UI surfaces are opaque to Fleet — speak the workspace + title
+        // only; the actual UI is announced by `@a2ui/react` accessibility.
+        const spoken = [r.workspaceName, r.aiTitle ?? ""]
+          .filter((s): s is string => !!s && s.length > 0)
+          .join("。");
+        playDecisionAlert("elicitation", spoken);
+      }
+      addA2uiRenderRequest(r);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addA2uiRenderRequest, silent]);
+
+  useEffect(() => {
     const unlisten = listen<PlanApprovalRequest>("plan-approval-request", (e) => {
       const r = e.payload;
       if (!silent && !announcedIds.current.has(r.id)) {
@@ -153,6 +174,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
       "guard-dismissed",
       "elicitation-dismissed",
       "fleet-ask-dismissed",
+      "a2ui-render-dismissed",
       "plan-approval-dismissed",
       "session-pending-dismissed",
     ].map(
