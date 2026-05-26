@@ -31,7 +31,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::session::{is_process_alive, real_home_dir};
+use crate::session::{
+    deserialize_holders, prune_dead_holders as prune_holder_entries, real_home_dir, HolderEntry,
+};
 
 const LOCK_FILE_NAME: &str = "mcp-lock.json";
 const CONFIG_FILE_NAME: &str = "mcp-config.json";
@@ -114,9 +116,9 @@ pub struct McpLock {
     /// Whether `~/.claude.json` existed on disk at first acquisition.
     #[serde(default)]
     pub original_existed: bool,
-    /// Live Fleet process ids currently holding the injection.
-    #[serde(default)]
-    pub holders: Vec<u32>,
+    /// Live Fleet process holders currently keeping the injection in place.
+    #[serde(default, deserialize_with = "deserialize_holders")]
+    pub holders: Vec<HolderEntry>,
 }
 
 fn read_lock() -> Option<McpLock> {
@@ -220,9 +222,12 @@ fn strip_mcp_servers(v: &mut serde_json::Value) {
     }
 }
 
-/// Drop holder pids that no longer correspond to live processes.
+/// Thin re-export of [`crate::session::prune_dead_holders`] so callers
+/// inside this module can keep using the historic local name. The shared
+/// helper checks both `is_process_alive(pid)` and a `start_time_secs`
+/// match, defeating PID reuse (see memory `project_mcp_injector_pid_reuse`).
 pub fn prune_dead_holders(lock: &mut McpLock) {
-    lock.holders.retain(|pid| is_process_alive(*pid));
+    prune_holder_entries(&mut lock.holders);
 }
 
 /// Register `pid` as a holder, injecting `mcpServers.fleet` if this is the
@@ -254,8 +259,8 @@ pub fn acquire(pid: u32, fleet_path: &str) -> std::io::Result<()> {
         write_claude_json(&new_json)?;
     }
 
-    if !lock.holders.contains(&pid) {
-        lock.holders.push(pid);
+    if !lock.holders.iter().any(|h| h.pid == pid) {
+        lock.holders.push(HolderEntry::capture(pid));
     }
     write_lock(&lock)?;
     Ok(())
@@ -268,7 +273,7 @@ pub fn acquire(pid: u32, fleet_path: &str) -> std::io::Result<()> {
 pub fn release(pid: u32) -> std::io::Result<()> {
     let Some(mut lock) = read_lock() else { return Ok(()) };
     prune_dead_holders(&mut lock);
-    lock.holders.retain(|p| *p != pid);
+    lock.holders.retain(|h| h.pid != pid);
 
     if !lock.holders.is_empty() {
         return write_lock(&lock);
@@ -277,6 +282,39 @@ pub fn release(pid: u32) -> std::io::Result<()> {
     restore_from_snapshot(&lock)?;
     delete_lock()?;
     Ok(())
+}
+
+/// Watchdog hook: if the lock still has at least one live holder but
+/// `~/.claude.json` no longer carries our `mcpServers.fleet` entry (e.g.
+/// Claude Code upgraded and rewrote the file from scratch), re-write
+/// it. The snapshot already stored in the lock is preserved — we are
+/// not re-acquiring, just restoring our injection on top of whatever
+/// drift happened.
+///
+/// Returns `Ok(true)` if a re-injection actually wrote the file,
+/// `Ok(false)` if nothing was off. Used by [`crate::injector_watchdog`].
+pub fn verify_and_reinject(fleet_path: &str) -> std::io::Result<bool> {
+    let Some(mut lock) = read_lock() else { return Ok(false) };
+    prune_dead_holders(&mut lock);
+    if lock.holders.is_empty() {
+        // No live holders → nothing to enforce. Don't touch the file.
+        return Ok(false);
+    }
+    let (claude_json, existed) = read_claude_json()?;
+    let (current_fleet, _, _) = extract_fleet_entry(&claude_json);
+    let expected = build_fleet_entry(fleet_path);
+    if current_fleet.as_ref() == Some(&expected) {
+        return Ok(false);
+    }
+    let mut new_json = if existed {
+        claude_json
+    } else {
+        serde_json::Value::Object(Default::default())
+    };
+    set_fleet_entry(&mut new_json, expected);
+    write_claude_json(&new_json)?;
+    write_lock(&lock)?;
+    Ok(true)
 }
 
 fn restore_from_snapshot(lock: &McpLock) -> std::io::Result<()> {
@@ -353,6 +391,7 @@ fn restore_from_snapshot(lock: &McpLock) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::process_start_time;
 
     fn with_temp_home<F: FnOnce()>(f: F) {
         let _guard = crate::session::fleet_home_lock();
@@ -513,16 +552,25 @@ mod tests {
 
     #[test]
     fn prune_dead_holders_removes_unknown_pids() {
+        // A current-process holder captured with the matching start_time
+        // must survive; a fake pid with start_time 0 must be pruned because
+        // start_time 0 never matches a real live process.
         let mut lock = McpLock {
-            holders: vec![1, 999_999_999_u32.min(u32::MAX), std::process::id()],
+            holders: vec![
+                HolderEntry { pid: 999_999_999_u32.min(u32::MAX), start_time_secs: 0 },
+                HolderEntry::capture(std::process::id()),
+            ],
             ..Default::default()
         };
         prune_dead_holders(&mut lock);
-        // The current process id must survive; the obviously-fake one must not.
-        assert!(lock.holders.contains(&std::process::id()),
-            "current pid should survive prune");
-        assert!(!lock.holders.iter().any(|p| *p == 999_999_999_u32.min(u32::MAX)),
-            "obviously-dead pid should be pruned");
+        assert!(
+            lock.holders.iter().any(|h| h.pid == std::process::id()),
+            "current pid (captured with real start_time) should survive prune"
+        );
+        assert!(
+            !lock.holders.iter().any(|h| h.pid == 999_999_999_u32.min(u32::MAX)),
+            "obviously-dead pid should be pruned"
+        );
     }
 
     #[test]
@@ -531,7 +579,7 @@ mod tests {
             acquire(55, "/bin/fleet").unwrap();
             acquire(55, "/bin/fleet").unwrap();
             let lock = read_lock().unwrap();
-            assert_eq!(lock.holders.iter().filter(|p| **p == 55).count(), 1,
+            assert_eq!(lock.holders.iter().filter(|h| h.pid == 55).count(), 1,
                 "same pid must not double-register");
         });
     }
@@ -540,6 +588,136 @@ mod tests {
     fn release_unknown_pid_when_no_lock_is_ok() {
         with_temp_home(|| {
             release(987654).unwrap();
+        });
+    }
+
+    #[test]
+    fn legacy_holders_array_of_bare_pids_deserialises() {
+        // Older Fleet builds wrote `holders` as `[1234, 5678]` (a Vec<u32>).
+        // The custom deserializer must accept that shape with start_time=0
+        // so the next `prune_dead_holders` cleans them out without panic.
+        let legacy = r#"{
+            "original_had_fleet": false,
+            "original_fleet_entry": null,
+            "original_had_mcp_servers": false,
+            "original_existed": false,
+            "holders": [1234, 5678]
+        }"#;
+        let mut lock: McpLock = serde_json::from_str(legacy).unwrap();
+        assert_eq!(lock.holders.len(), 2);
+        assert_eq!(lock.holders[0].pid, 1234);
+        assert_eq!(lock.holders[0].start_time_secs, 0);
+        assert_eq!(lock.holders[1].pid, 5678);
+        assert_eq!(lock.holders[1].start_time_secs, 0);
+        // Pruning a legacy lock should drop everything: start_time 0
+        // never matches any real live process.
+        prune_dead_holders(&mut lock);
+        assert!(lock.holders.is_empty(), "legacy holders must prune to empty");
+    }
+
+    #[test]
+    fn prune_drops_holder_whose_pid_was_reused() {
+        // Simulate PID reuse: lock claims a holder at the *current* pid
+        // but with a stale start_time_secs that doesn't match. Even though
+        // is_process_alive(pid) is true, the start_time mismatch must cause
+        // prune_dead_holders to drop the entry.
+        let my_pid = std::process::id();
+        let real_start = process_start_time(my_pid).expect("self has a start_time");
+        let mut lock = McpLock {
+            holders: vec![HolderEntry {
+                pid: my_pid,
+                start_time_secs: real_start.wrapping_add(1), // intentionally wrong
+            }],
+            ..Default::default()
+        };
+        prune_dead_holders(&mut lock);
+        assert!(
+            lock.holders.is_empty(),
+            "holder with mismatched start_time must be pruned even though pid is alive"
+        );
+    }
+
+    #[test]
+    fn acquire_captures_start_time_in_holder_entry() {
+        with_temp_home(|| {
+            let my_pid = std::process::id();
+            let expected_start = process_start_time(my_pid).expect("self has a start_time");
+            acquire(my_pid, "/bin/fleet").unwrap();
+            let lock = read_lock().unwrap();
+            let entry = lock
+                .holders
+                .iter()
+                .find(|h| h.pid == my_pid)
+                .expect("own pid must be in holders");
+            assert_eq!(
+                entry.start_time_secs, expected_start,
+                "acquire must snapshot the live process start_time, not 0"
+            );
+        });
+    }
+
+    #[test]
+    fn legacy_lock_on_disk_self_heals_via_next_acquire() {
+        // End-to-end legacy-migration check: drop a legacy-shape lock on
+        // disk, then call acquire. The legacy holder (start_time 0) must
+        // be pruned and our acquisition must re-snapshot the original
+        // ~/.claude.json — i.e. acquire goes through the "was_empty" branch.
+        with_temp_home(|| {
+            let claude_p = claude_json_path().unwrap();
+            let pre = serde_json::json!({
+                "mcpServers": {
+                    "filesystem": {"command": "fs-mcp", "args": []}
+                }
+            });
+            fs::write(&claude_p, serde_json::to_string_pretty(&pre).unwrap()).unwrap();
+
+            // Seed a legacy lock that thinks some dead pid (no live process
+            // has start_time 0) still holds the injection — but no inject
+            // has actually been written to ~/.claude.json, so the snapshot
+            // also lies. After a self-healing acquire, the snapshot should
+            // reflect the *real* current ~/.claude.json, and Fleet's entry
+            // should be present.
+            let legacy_raw = r#"{
+                "original_had_fleet": true,
+                "original_fleet_entry": {"command": "/wrong/path", "args": ["mcp"]},
+                "original_had_mcp_servers": true,
+                "original_existed": true,
+                "holders": [9991, 9992]
+            }"#;
+            let lock_p = lock_path().unwrap();
+            fs::create_dir_all(lock_p.parent().unwrap()).unwrap();
+            fs::write(&lock_p, legacy_raw).unwrap();
+
+            let my_pid = std::process::id();
+            acquire(my_pid, "/bin/fleet").unwrap();
+
+            // Snapshot must have been rebuilt from the actual claude.json.
+            let lock = read_lock().unwrap();
+            assert!(
+                lock.holders.iter().any(|h| h.pid == my_pid),
+                "current pid registered"
+            );
+            assert!(
+                !lock.holders.iter().any(|h| h.pid == 9991 || h.pid == 9992),
+                "legacy holders pruned"
+            );
+            assert!(
+                lock.original_fleet_entry.is_none(),
+                "snapshot rebuilt — original claude.json had no fleet entry"
+            );
+
+            // And the file has Fleet's entry alongside the unrelated one.
+            let after: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&claude_p).unwrap()).unwrap();
+            assert_eq!(after["mcpServers"][FLEET_SERVER_KEY]["command"], "/bin/fleet");
+            assert_eq!(after["mcpServers"]["filesystem"]["command"], "fs-mcp");
+
+            // Last release restores fully.
+            release(my_pid).unwrap();
+            let restored: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(&claude_p).unwrap()).unwrap();
+            assert!(restored["mcpServers"].get(FLEET_SERVER_KEY).is_none());
+            assert_eq!(restored["mcpServers"]["filesystem"]["command"], "fs-mcp");
         });
     }
 

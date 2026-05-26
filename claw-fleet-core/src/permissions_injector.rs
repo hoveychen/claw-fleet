@@ -23,7 +23,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::session::{get_claude_dir, get_fleet_dir, is_process_alive};
+use crate::session::{
+    deserialize_holders, get_claude_dir, get_fleet_dir,
+    prune_dead_holders as prune_holder_entries, HolderEntry,
+};
 
 /// The full set of tool patterns Fleet injects into `permissions.allow`.
 ///
@@ -112,9 +115,12 @@ pub struct PermissionsLock {
     /// Whether settings.json existed on disk at first acquisition.
     #[serde(default)]
     pub original_existed: bool,
-    /// Live Fleet process ids currently holding the injection.
-    #[serde(default)]
-    pub holders: Vec<u32>,
+    /// Live Fleet process holders currently keeping the injection in place.
+    /// Each entry pairs the holder pid with its `start_time_secs` so
+    /// PID reuse can't fool `prune_dead_holders`. See
+    /// [`crate::session::HolderEntry`].
+    #[serde(default, deserialize_with = "deserialize_holders")]
+    pub holders: Vec<HolderEntry>,
 }
 
 fn lock_path() -> Option<PathBuf> {
@@ -219,9 +225,13 @@ fn strip_permissions(v: &mut serde_json::Value) {
     }
 }
 
-/// Drop holder pids that no longer correspond to live processes.
+/// Drop holder entries whose process is no longer alive **or** whose
+/// `start_time_secs` no longer matches the live process at that pid.
+/// Delegates to [`crate::session::prune_dead_holders`]; the start_time
+/// match is the PID-reuse defence (see memory
+/// `project_mcp_injector_pid_reuse`).
 pub fn prune_dead_holders(lock: &mut PermissionsLock) {
-    lock.holders.retain(|pid| is_process_alive(*pid));
+    prune_holder_entries(&mut lock.holders);
 }
 
 /// Register `pid` as a holder, injecting Fleet's allow rules if this is the
@@ -258,8 +268,8 @@ pub fn acquire(pid: u32) -> std::io::Result<()> {
         write_settings(&new_settings)?;
     }
 
-    if !lock.holders.contains(&pid) {
-        lock.holders.push(pid);
+    if !lock.holders.iter().any(|h| h.pid == pid) {
+        lock.holders.push(HolderEntry::capture(pid));
     }
     write_lock(&lock)?;
     Ok(())
@@ -273,7 +283,7 @@ pub fn acquire(pid: u32) -> std::io::Result<()> {
 pub fn release(pid: u32) -> std::io::Result<()> {
     let Some(mut lock) = read_lock() else { return Ok(()) };
     prune_dead_holders(&mut lock);
-    lock.holders.retain(|p| *p != pid);
+    lock.holders.retain(|h| h.pid != pid);
 
     if !lock.holders.is_empty() {
         return write_lock(&lock);
@@ -282,6 +292,45 @@ pub fn release(pid: u32) -> std::io::Result<()> {
     restore_from_snapshot(&lock)?;
     delete_lock()?;
     Ok(())
+}
+
+/// Watchdog hook: if the lock still has at least one live holder but
+/// `~/.claude/settings.json`'s `permissions.allow` is missing any of the
+/// rules we should be enforcing (e.g. user / external tool truncated the
+/// list, or Claude Code rewrote the file), re-inject the missing rules
+/// without disturbing user-added entries.
+///
+/// Returns `Ok(true)` if a re-injection actually wrote the file,
+/// `Ok(false)` otherwise. Used by [`crate::injector_watchdog`].
+pub fn verify_and_reinject() -> std::io::Result<bool> {
+    let Some(mut lock) = read_lock() else { return Ok(false) };
+    prune_dead_holders(&mut lock);
+    if lock.holders.is_empty() {
+        return Ok(false);
+    }
+    let (settings, existed) = read_settings()?;
+    let (current_allow, _) = extract_allow(&settings);
+    let any_missing = INJECT_RULES
+        .iter()
+        .any(|rule| !current_allow.iter().any(|s| s == rule));
+    if !any_missing {
+        return Ok(false);
+    }
+    let mut merged = current_allow;
+    for rule in INJECT_RULES {
+        if !merged.iter().any(|s| s == rule) {
+            merged.push((*rule).to_string());
+        }
+    }
+    let mut new_settings = if existed {
+        settings
+    } else {
+        serde_json::Value::Object(Default::default())
+    };
+    set_allow(&mut new_settings, merged);
+    write_settings(&new_settings)?;
+    write_lock(&lock)?;
+    Ok(true)
 }
 
 fn restore_from_snapshot(lock: &PermissionsLock) -> std::io::Result<()> {
@@ -444,7 +493,7 @@ mod tests {
             assert!(allow.iter().any(|s| s == rule), "missing rule {rule}");
         }
         let lock = read_lock().expect("lock written");
-        assert!(lock.holders.contains(&1234));
+        assert!(lock.holders.iter().any(|h| h.pid == 1234));
         assert!(!lock.original_existed);
         assert!(!lock.original_had_permissions);
         assert!(lock.original_allow.is_empty());
@@ -495,7 +544,7 @@ mod tests {
         acquire(1234).unwrap();
         assert_eq!(read_settings_for_test().unwrap(), snap);
         let lock = read_lock().unwrap();
-        let count = lock.holders.iter().filter(|p| **p == 1234).count();
+        let count = lock.holders.iter().filter(|h| h.pid == 1234).count();
         assert_eq!(count, 1);
     }
 
@@ -546,7 +595,8 @@ mod tests {
         let allow = allow_of(&read_settings_for_test().unwrap());
         assert!(allow.iter().any(|s| s == "Bash(*)"));
         let lock = read_lock().unwrap();
-        assert_eq!(lock.holders, vec![other]);
+        assert_eq!(lock.holders.len(), 1);
+        assert_eq!(lock.holders[0].pid, other);
         alive.kill().ok();
         alive.wait().ok();
     }
@@ -577,20 +627,21 @@ mod tests {
     #[test]
     fn acquire_prunes_dead_holders_before_adding() {
         let _env = setup();
-        // Seed a lock containing a dead pid.
+        // Seed a lock containing a dead pid (start_time 0 doubles as "stale
+        // marker" — prune drops it either way).
         let dead = dead_pid();
         write_lock(&PermissionsLock {
             original_allow: vec![],
             original_had_permissions: false,
             original_existed: false,
-            holders: vec![dead],
+            holders: vec![HolderEntry { pid: dead, start_time_secs: 0 }],
         })
         .unwrap();
 
         acquire(1234).unwrap();
         let lock = read_lock().unwrap();
-        assert!(!lock.holders.contains(&dead), "dead pid pruned");
-        assert!(lock.holders.contains(&1234));
+        assert!(!lock.holders.iter().any(|h| h.pid == dead), "dead pid pruned");
+        assert!(lock.holders.iter().any(|h| h.pid == 1234));
         // Settings should have been injected (the dead holder didn't prevent cold-start).
         let allow = allow_of(&read_settings_for_test().unwrap());
         assert!(allow.iter().any(|s| s == "Bash(*)"));
@@ -639,6 +690,69 @@ mod tests {
         let allow = allow_of(&read_settings_for_test().unwrap());
         assert!(allow.iter().any(|s| s == "Bash(*)"));
         let lock = read_lock().expect("lock still present");
-        assert_eq!(lock.holders, vec![me]);
+        assert_eq!(lock.holders.len(), 1);
+        assert_eq!(lock.holders[0].pid, me);
+    }
+
+    #[test]
+    fn legacy_holders_array_of_bare_pids_deserialises() {
+        // Older Fleet builds wrote `holders` as `[1234, 5678]`. The
+        // custom deserializer must accept that shape, then prune drops
+        // them because start_time 0 never matches a real process.
+        let legacy = r#"{
+            "original_allow": [],
+            "original_had_permissions": false,
+            "original_existed": false,
+            "holders": [1234, 5678]
+        }"#;
+        let mut lock: PermissionsLock = serde_json::from_str(legacy).unwrap();
+        assert_eq!(lock.holders.len(), 2);
+        assert_eq!(lock.holders[0].pid, 1234);
+        assert_eq!(lock.holders[0].start_time_secs, 0);
+        prune_dead_holders(&mut lock);
+        assert!(
+            lock.holders.is_empty(),
+            "legacy holders must prune to empty under start_time check"
+        );
+    }
+
+    #[test]
+    fn prune_drops_holder_whose_pid_was_reused() {
+        // Even with pid alive, a mismatched start_time must trigger prune
+        // — defeating the OS-recycled-PID-into-a-Fleet-holder scenario.
+        let my_pid = std::process::id();
+        let real_start = crate::session::process_start_time(my_pid)
+            .expect("self has a start_time");
+        let mut lock = PermissionsLock {
+            holders: vec![HolderEntry {
+                pid: my_pid,
+                start_time_secs: real_start.wrapping_add(1),
+            }],
+            ..Default::default()
+        };
+        prune_dead_holders(&mut lock);
+        assert!(
+            lock.holders.is_empty(),
+            "holder with mismatched start_time must be pruned even though pid is alive"
+        );
+    }
+
+    #[test]
+    fn acquire_captures_start_time_in_holder_entry() {
+        let _env = setup();
+        let my_pid = std::process::id();
+        let expected_start =
+            crate::session::process_start_time(my_pid).expect("self has a start_time");
+        acquire(my_pid).unwrap();
+        let lock = read_lock().unwrap();
+        let entry = lock
+            .holders
+            .iter()
+            .find(|h| h.pid == my_pid)
+            .expect("own pid must be in holders");
+        assert_eq!(
+            entry.start_time_secs, expected_start,
+            "acquire must snapshot the live process start_time, not 0"
+        );
     }
 }
