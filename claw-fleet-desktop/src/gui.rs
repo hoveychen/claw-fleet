@@ -3271,6 +3271,22 @@ pub fn run() {
                 let _ = claw_fleet_core::mcp_injector::release(std::process::id());
             }
 
+            // ── Injector drift watchdog ──────────────────────────────────
+            // Every 30s, verify both injections are still present on disk
+            // and re-write them if they've drifted (e.g. a Claude Code
+            // upgrade rewrote ~/.claude.json from scratch). The watchdog
+            // self-disables when there are no live holders, so it's safe
+            // to start unconditionally even when one or both injectors
+            // are toggled off — verify_and_reinject sees an empty holder
+            // list and no-ops. Thread runs until process exit; no handle
+            // to keep.
+            {
+                let fleet_path = crate::daemon_autostart::resolve_fleet_binary()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "fleet".to_string());
+                claw_fleet_core::injector_watchdog::start(fleet_path);
+            }
+
             // ── SSE forwarding for mobile access ──────────────────────────
             // Listen for sessions-updated Tauri events and broadcast them to
             // any connected SSE mobile clients.

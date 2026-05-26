@@ -284,6 +284,39 @@ pub fn release(pid: u32) -> std::io::Result<()> {
     Ok(())
 }
 
+/// Watchdog hook: if the lock still has at least one live holder but
+/// `~/.claude.json` no longer carries our `mcpServers.fleet` entry (e.g.
+/// Claude Code upgraded and rewrote the file from scratch), re-write
+/// it. The snapshot already stored in the lock is preserved — we are
+/// not re-acquiring, just restoring our injection on top of whatever
+/// drift happened.
+///
+/// Returns `Ok(true)` if a re-injection actually wrote the file,
+/// `Ok(false)` if nothing was off. Used by [`crate::injector_watchdog`].
+pub fn verify_and_reinject(fleet_path: &str) -> std::io::Result<bool> {
+    let Some(mut lock) = read_lock() else { return Ok(false) };
+    prune_dead_holders(&mut lock);
+    if lock.holders.is_empty() {
+        // No live holders → nothing to enforce. Don't touch the file.
+        return Ok(false);
+    }
+    let (claude_json, existed) = read_claude_json()?;
+    let (current_fleet, _, _) = extract_fleet_entry(&claude_json);
+    let expected = build_fleet_entry(fleet_path);
+    if current_fleet.as_ref() == Some(&expected) {
+        return Ok(false);
+    }
+    let mut new_json = if existed {
+        claude_json
+    } else {
+        serde_json::Value::Object(Default::default())
+    };
+    set_fleet_entry(&mut new_json, expected);
+    write_claude_json(&new_json)?;
+    write_lock(&lock)?;
+    Ok(true)
+}
+
 fn restore_from_snapshot(lock: &McpLock) -> std::io::Result<()> {
     if !lock.original_existed {
         // ~/.claude.json didn't exist before Fleet touched it. Strip our
