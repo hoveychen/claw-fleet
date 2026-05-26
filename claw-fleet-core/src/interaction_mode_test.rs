@@ -173,100 +173,64 @@ pub fn run_end_to_end_test(timeout: Duration) -> Result<TestRunResult, String> {
 
 /// Claude CLI test: spawn `claude -p "<prompt>"` in a dedicated workspace
 /// under `~/.fleet/diagnostics/` so the Agent actually exercises the
-/// CLAUDE.md interaction-mode injection. Returns either when the process
-/// exits or when `timeout` lapses (in which case we kill it and report —
-/// a timeout is the *expected* outcome when the Decision Panel did receive
-/// the question and is waiting for an answer).
+/// CLAUDE.md interaction-mode injection.
+///
+/// **Evidence-based pass criteria.** Earlier versions declared success
+/// whenever `claude -p` exited 0, which silently passed even when the
+/// agent never called AskUserQuestion (the model can end the turn with
+/// plain text in `-p` mode under various conditions). The new version
+/// polls `elicitation::list_pending_requests()` throughout the spawn
+/// and records whether a `TEST_WORKSPACE_MARKER` request ever appeared.
+/// Combined with exit status, the final message says exactly which leg
+/// failed:
+///
+/// - exit 0 + saw test card → wired end-to-end
+/// - exit 0 + no test card → agent ran but didn't call AskUserQuestion
+///   (look at the captured stream-json)
+/// - timeout + saw test card → success (card landed, agent was waiting
+///   on Boss's answer when we killed it)
+/// - timeout + no test card → infrastructure hung
+/// - non-zero exit → claude itself errored
 pub fn run_claude_cli_test(timeout: Duration) -> Result<TestRunResult, String> {
-    use std::process::{Command, Stdio};
-
-    let bin = crate::claude_binary::resolve(None)
-        .ok_or("No Claude CLI binary discovered (set Claude Binary in Settings)")?;
-
-    let home = crate::session::real_home_dir().ok_or("cannot determine home directory")?;
-    let workdir = home.join(".fleet").join("diagnostics");
-    std::fs::create_dir_all(&workdir)
-        .map_err(|e| format!("create diagnostics workspace: {e}"))?;
-
-    // Keep the prompt tight: ask Claude to do exactly one AskUserQuestion
-    // call and nothing else. The interaction-mode guidance in CLAUDE.md
-    // does most of the steering; this prompt just supplies a topic.
-    const PROMPT: &str =
-        "诊断测试：请只调用一次 AskUserQuestion，问我「现在心情如何」，提供两个选项（开心 / 一般），不要做其他任何事。";
-
-    // `--allowed-tools "AskUserQuestion"` is load-bearing: without it
-    // the tool isn't in `claude -p`'s default tool list, so the CLAUDE.md
-    // interaction-mode guidance has nothing to call and the model silently
-    // falls back to plain text — making the diagnostic look like a
-    // success when it isn't. Empirically verified 2026-05-22 by running
-    // `claude --output-format=stream-json --verbose --allowed-tools
-    // "AskUserQuestion" -p "<PROMPT>"` and observing the model call
-    // ToolSearch + AskUserQuestion vs. the same command without the
-    // `--allowed-tools` flag returning only plain text.
-    let mut child = Command::new(&bin.path)
-        .args(["--allowed-tools", "AskUserQuestion", "-p", PROMPT])
-        .current_dir(&workdir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("spawn claude -p: {e}"))?;
-
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Ok(TestRunResult {
-                        kind: "claude_cli".into(),
-                        request_id: None,
-                        message: format!(
-                            "claude -p ran {}s without exiting — if you saw a test question pop up, that's success (the session was waiting on your answer when we killed it)",
-                            timeout.as_secs()
-                        ),
-                        claude_output: None,
-                    });
-                }
-                std::thread::sleep(Duration::from_millis(200));
-            }
-            Err(e) => return Err(format!("waitpid: {e}")),
-        }
-    }
-
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("collect output: {e}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = if stderr.trim().is_empty() {
-        stdout
-    } else if stdout.trim().is_empty() {
-        format!("[stderr]\n{stderr}")
-    } else {
-        format!("{stdout}\n---stderr---\n{stderr}")
-    };
-
-    Ok(TestRunResult {
-        kind: "claude_cli".into(),
-        request_id: None,
-        message: if output.status.success() {
-            "claude -p exited 0 — a test question should have appeared in your Decision Panel. If it did, the AskUserQuestion injection is wired end-to-end; if it didn't, look at the four checks above.".into()
-        } else {
-            format!("claude -p exited with status {:?}", output.status.code())
-        },
-        claude_output: Some(combined),
-    })
+    run_cli_test_inner(
+        ElicitationKind::AskUserQuestion,
+        "AskUserQuestion",
+        "claude_cli",
+        "诊断测试：请只调用一次 AskUserQuestion，问我「现在心情如何」，提供两个选项（开心 / 一般），不要做其他任何事。",
+        timeout,
+    )
 }
 
-/// Claude CLI test for the `fleet__ask` MCP tool: same shape as
-/// `run_claude_cli_test` but prompts the agent to call `fleet__ask`
-/// instead of `AskUserQuestion`. Steers the model with
-/// `--allowed-tools "mcp__fleet__ask"` (Claude Code's canonical naming
-/// for MCP tools is `mcp__<server>__<tool>`).
-pub fn run_fleet_ask_claude_cli_test(timeout: Duration) -> Result<TestRunResult, String> {
+/// Outcome of polling for the test card during a claude CLI run.
+struct CardPollResult {
+    /// Set when a TEST_WORKSPACE_MARKER request appeared at any point
+    /// during the spawn (even briefly — Boss may have already answered
+    /// by the time the child exited, in which case the request file is
+    /// gone but the test still passed).
+    matched_request_id: Option<String>,
+    /// True if the timeout fired before the child exited; in that case
+    /// the child has been killed in place so the caller's stdio read
+    /// can complete.
+    timed_out: bool,
+}
+
+#[derive(Clone, Copy)]
+enum ElicitationKind {
+    AskUserQuestion,
+    FleetAsk,
+}
+
+/// Shared spawn + poll + report logic for both the v1 (AskUserQuestion)
+/// and v2 (fleet__ask) Claude CLI diagnostics. Keeps the prompt and
+/// `--allowed-tools` value per-variant; everything else is identical.
+fn run_cli_test_inner(
+    kind: ElicitationKind,
+    allowed_tool: &str,
+    test_kind_label: &str,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<TestRunResult, String> {
+    use std::io::Read;
     use std::process::{Command, Stdio};
 
     let bin = crate::claude_binary::resolve(None)
@@ -277,15 +241,32 @@ pub fn run_fleet_ask_claude_cli_test(timeout: Duration) -> Result<TestRunResult,
     std::fs::create_dir_all(&workdir)
         .map_err(|e| format!("create diagnostics workspace: {e}"))?;
 
-    const PROMPT: &str =
-        "诊断测试：请只调用一次 fleet__ask MCP 工具，问我「现在心情如何」，提供两个选项（开心 / 一般），不要做其他任何事。";
+    // Snapshot existing pending request ids so we can identify new
+    // ones the test produced (vs. unrelated cards already in flight).
+    let baseline: std::collections::HashSet<String> = match kind {
+        ElicitationKind::AskUserQuestion => {
+            crate::elicitation::list_pending_requests().into_iter().collect()
+        }
+        ElicitationKind::FleetAsk => {
+            crate::mcp_ipc::list_pending_requests().into_iter().collect()
+        }
+    };
 
+    // `--allowed-tools <name>` is load-bearing: without it the tool isn't
+    // in `claude -p`'s default tool list, so the CLAUDE.md interaction-mode
+    // guidance has nothing to call and the model silently falls back to
+    // plain text. `--output-format stream-json --verbose` makes the
+    // captured `claude_output` self-explanatory: Boss can read the stream
+    // and see whether the agent actually called the tool.
     let mut child = Command::new(&bin.path)
         .args([
             "--allowed-tools",
-            "mcp__fleet__ask",
+            allowed_tool,
+            "--output-format",
+            "stream-json",
+            "--verbose",
             "-p",
-            PROMPT,
+            prompt,
         ])
         .current_dir(&workdir)
         .stdin(Stdio::null())
@@ -294,53 +275,157 @@ pub fn run_fleet_ask_claude_cli_test(timeout: Duration) -> Result<TestRunResult,
         .spawn()
         .map_err(|e| format!("spawn claude -p: {e}"))?;
 
+    let poll = poll_for_test_card(&mut child, timeout, &baseline, kind);
+
+    // Collect whatever stdout/stderr accumulated, even on timeout (we
+    // had piped handles open). Without this, the timeout branch would
+    // leave Boss with no evidence of what the agent did.
+    let mut stdout_buf = String::new();
+    let mut stderr_buf = String::new();
+    if let Some(mut s) = child.stdout.take() {
+        let _ = s.read_to_string(&mut stdout_buf);
+    }
+    if let Some(mut s) = child.stderr.take() {
+        let _ = s.read_to_string(&mut stderr_buf);
+    }
+    let exit_status = child.wait().ok();
+    let combined = combine_streams(&stdout_buf, &stderr_buf);
+
+    let message = build_cli_message(
+        allowed_tool,
+        exit_status.and_then(|s| s.code()),
+        poll.timed_out,
+        poll.matched_request_id.is_some(),
+        timeout,
+    );
+
+    Ok(TestRunResult {
+        kind: test_kind_label.into(),
+        request_id: poll.matched_request_id,
+        message,
+        claude_output: Some(combined),
+    })
+}
+
+/// Tight poll loop: every 200ms, peek `try_wait` and the appropriate
+/// pending-request list. Returns as soon as the child exits or the
+/// timeout lapses; on timeout the child is killed in place so the
+/// caller can collect its captured stdio.
+fn poll_for_test_card(
+    child: &mut std::process::Child,
+    timeout: Duration,
+    baseline: &std::collections::HashSet<String>,
+    kind: ElicitationKind,
+) -> CardPollResult {
     let start = Instant::now();
+    let mut matched: Option<String> = None;
     loop {
+        // Always check pending IDs first so even a sub-200ms-lived card
+        // gets caught.
+        if matched.is_none() {
+            let pending = match kind {
+                ElicitationKind::AskUserQuestion => crate::elicitation::list_pending_requests(),
+                ElicitationKind::FleetAsk => crate::mcp_ipc::list_pending_requests(),
+            };
+            for id in pending {
+                if baseline.contains(&id) {
+                    continue;
+                }
+                let is_test_card = match kind {
+                    ElicitationKind::AskUserQuestion => crate::elicitation::read_request(&id)
+                        .map(|r| r.workspace_name == TEST_WORKSPACE_MARKER)
+                        .unwrap_or(false),
+                    ElicitationKind::FleetAsk => crate::mcp_ipc::read_request(&id)
+                        .map(|r| r.workspace_name == TEST_WORKSPACE_MARKER)
+                        .unwrap_or(false),
+                };
+                if is_test_card {
+                    matched = Some(id);
+                    break;
+                }
+            }
+        }
         match child.try_wait() {
-            Ok(Some(_)) => break,
+            Ok(Some(_)) => {
+                return CardPollResult { matched_request_id: matched, timed_out: false };
+            }
             Ok(None) => {
                 if start.elapsed() > timeout {
                     let _ = child.kill();
                     let _ = child.wait();
-                    return Ok(TestRunResult {
-                        kind: "fleet_ask_claude_cli".into(),
-                        request_id: None,
-                        message: format!(
-                            "claude -p ran {}s without exiting — if you saw a test question pop up, that's success (the session was waiting on your answer when we killed it)",
-                            timeout.as_secs()
-                        ),
-                        claude_output: None,
-                    });
+                    return CardPollResult { matched_request_id: matched, timed_out: true };
                 }
                 std::thread::sleep(Duration::from_millis(200));
             }
-            Err(e) => return Err(format!("waitpid: {e}")),
+            Err(_) => {
+                // try_wait failed (rare); treat as exited so we don't
+                // spin forever, and return whatever we matched.
+                return CardPollResult { matched_request_id: matched, timed_out: false };
+            }
         }
     }
+}
 
-    let output = child
-        .wait_with_output()
-        .map_err(|e| format!("collect output: {e}"))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let combined = if stderr.trim().is_empty() {
-        stdout
+fn combine_streams(stdout: &str, stderr: &str) -> String {
+    if stderr.trim().is_empty() {
+        stdout.to_string()
     } else if stdout.trim().is_empty() {
         format!("[stderr]\n{stderr}")
     } else {
         format!("{stdout}\n---stderr---\n{stderr}")
-    };
+    }
+}
 
-    Ok(TestRunResult {
-        kind: "fleet_ask_claude_cli".into(),
-        request_id: None,
-        message: if output.status.success() {
-            "claude -p exited 0 — a fleet__ask test question should have appeared in your Decision Panel. If it did, the MCP injection is wired end-to-end; if it didn't, look at the mcp_injection diagnostic above.".into()
-        } else {
-            format!("claude -p exited with status {:?}", output.status.code())
-        },
-        claude_output: Some(combined),
-    })
+/// Build the result message from the four orthogonal facts the test
+/// observed. Kept pure so it's straightforward to unit-test each
+/// branch without spawning a real claude binary.
+fn build_cli_message(
+    tool_name: &str,
+    exit_code: Option<i32>,
+    timed_out: bool,
+    saw_test_card: bool,
+    timeout: Duration,
+) -> String {
+    let timeout_secs = timeout.as_secs();
+    match (timed_out, saw_test_card, exit_code) {
+        // Happy paths: card landed, regardless of whether we killed
+        // claude on timeout (which is expected — it was waiting for
+        // Boss's answer).
+        (false, true, Some(0)) => format!(
+            "✅ claude -p exited 0 AND the test {tool_name} card landed in your Decision Panel — wired end-to-end."
+        ),
+        (true, true, _) => format!(
+            "✅ claude -p ran {timeout_secs}s and we killed it, but the test {tool_name} card DID land — wired end-to-end (the agent was waiting on Boss's answer when we killed it)."
+        ),
+        // Smoking-gun failure: claude finished cleanly but never produced a card.
+        (false, false, Some(0)) => format!(
+            "❌ claude -p exited 0 but NO test {tool_name} card landed — the agent ran but never called the tool. Read the stream-json output below: look for `\"name\":\"{tool_name}\"` tool_use blocks (if missing, the CLAUDE.md interaction-mode injection isn't reaching the agent)."
+        ),
+        // Timeout with no card: hung without producing the tool call.
+        (true, false, _) => format!(
+            "❌ claude -p ran {timeout_secs}s, no test {tool_name} card ever landed — agent likely hung without calling the tool. Read the stream-json output below."
+        ),
+        // Non-zero exit.
+        (_, _, Some(code)) => format!(
+            "❌ claude -p exited with status {code}. Read the stream-json output below for the failure."
+        ),
+        (_, _, None) => "❌ claude -p exited without a status code (process error). Read the stream-json output below.".into(),
+    }
+}
+
+/// Claude CLI test for the `fleet__ask` MCP tool: same evidence-based
+/// shape as `run_claude_cli_test`, but steers the model toward
+/// `mcp__fleet__ask` (Claude Code's canonical name for the
+/// `fleet__ask` MCP tool) and watches `mcp_ipc::list_pending_requests()`
+/// for the test card instead of the AskUserQuestion elicitation dir.
+pub fn run_fleet_ask_claude_cli_test(timeout: Duration) -> Result<TestRunResult, String> {
+    run_cli_test_inner(
+        ElicitationKind::FleetAsk,
+        "mcp__fleet__ask",
+        "fleet_ask_claude_cli",
+        "诊断测试：请只调用一次 fleet__ask MCP 工具，问我「现在心情如何」，提供两个选项（开心 / 一般），不要做其他任何事。",
+        timeout,
+    )
 }
 
 #[cfg(test)]
@@ -396,6 +481,58 @@ mod tests {
         let body = &req.questions[0].question;
         let count = body.matches("\n---\n").count();
         assert_eq!(count, 1, "test question needs exactly one TTS divider: {body}");
+    }
+
+    #[test]
+    fn build_cli_message_happy_path_exit_zero_with_card() {
+        let msg = build_cli_message("AskUserQuestion", Some(0), false, true, Duration::from_secs(60));
+        assert!(msg.starts_with("✅"), "expected success marker: {msg}");
+        assert!(msg.contains("exited 0"));
+        assert!(msg.contains("card landed"));
+    }
+
+    #[test]
+    fn build_cli_message_smoking_gun_exit_zero_no_card() {
+        // The most useful failure mode: agent ran cleanly but never
+        // produced the card. Message must call this out clearly.
+        let msg = build_cli_message("AskUserQuestion", Some(0), false, false, Duration::from_secs(60));
+        assert!(msg.starts_with("❌"), "expected failure marker: {msg}");
+        assert!(msg.contains("exited 0 but NO test"));
+        assert!(msg.contains("AskUserQuestion"));
+        assert!(msg.contains("interaction-mode injection"));
+    }
+
+    #[test]
+    fn build_cli_message_timeout_with_card_is_success() {
+        // Card landed but we killed claude on timeout (it was waiting on
+        // Boss's answer). This is the normal happy path when Boss doesn't
+        // click within the window — still wired end-to-end.
+        let msg = build_cli_message("mcp__fleet__ask", None, true, true, Duration::from_secs(60));
+        assert!(msg.starts_with("✅"), "timeout-with-card must be success: {msg}");
+        assert!(msg.contains("60s"));
+        assert!(msg.contains("DID land"));
+    }
+
+    #[test]
+    fn build_cli_message_timeout_no_card() {
+        let msg = build_cli_message("AskUserQuestion", None, true, false, Duration::from_secs(45));
+        assert!(msg.starts_with("❌"));
+        assert!(msg.contains("45s"));
+        assert!(msg.contains("no test"));
+    }
+
+    #[test]
+    fn build_cli_message_nonzero_exit() {
+        let msg = build_cli_message("AskUserQuestion", Some(127), false, false, Duration::from_secs(60));
+        assert!(msg.starts_with("❌"));
+        assert!(msg.contains("status 127"));
+    }
+
+    #[test]
+    fn combine_streams_handles_three_combinations() {
+        assert_eq!(combine_streams("hello\n", ""), "hello\n");
+        assert_eq!(combine_streams("", "boom\n"), "[stderr]\nboom\n");
+        assert!(combine_streams("ok\n", "warn\n").contains("---stderr---"));
     }
 
     #[test]
