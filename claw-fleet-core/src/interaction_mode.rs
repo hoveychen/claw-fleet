@@ -265,8 +265,9 @@ put in `fleet__ask`, plus two new optional per-question fields:\n\
   markdown can't.\n\
 - `formFields` (FormField[]): dynamic input fields. Each field has `name`, \
   `kind`, `label`, optional `placeholder` / `options` / `required` / \
-  `default`. `kind` is one of `text` / `textarea` / `number` / `select` / \
-  `radio` / `checkbox`. The user's answers come back keyed by field name.\n\
+  `default` / `min` / `max` / `step`. `kind` is one of `text` / `textarea` / \
+  `number` / `select` / `radio` / `checkbox` / `date` / `datetime` / `time` \
+  / `range`. The user's answers come back keyed by field name.\n\
 \n\
 **Differences from `AskUserQuestion`.**\n\
 - `AskUserQuestion` is deferred — its schema must be loaded with \
@@ -287,7 +288,7 @@ put in `fleet__ask`, plus two new optional per-question fields:\n\
 | Pure preference / branch choice with 2–4 textual options | `AskUserQuestion` |\n\
 | Status report + 1–4 follow-up decisions, all option-based | `AskUserQuestion` |\n\
 | Needs a rendered HTML preview (diff table, formatted artefact, screenshot grid) | `fleet__ask` with `html` |\n\
-| Needs structured form input (commit message draft, multiple typed fields, sliders are not supported — fall back to radio) | `fleet__ask` with `formFields` |\n\
+| Needs structured form input (commit message, slider, date/time picker, multiple typed fields) | `fleet__ask` with `formFields` |\n\
 | Mix of all three (preview + form + options) on one card | `fleet__ask` (composite) |\n\
 \n\
 Default to `AskUserQuestion` for the routine wait-for-input moments \
@@ -308,12 +309,22 @@ Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
 \n\
 `FormField`:\n\
 - `name` (string, required): identifier the answers map will use.\n\
-- `kind` (string, required): `text` | `textarea` | `number` | `select` | `radio` | `checkbox`.\n\
+- `kind` (string, required): `text` | `textarea` | `number` | `select` | `radio` | `checkbox` | `date` | `datetime` | `time` | `range`.\n\
 - `label` (string, required): displayed next to the control.\n\
 - `placeholder` (string, optional): for text / textarea / number.\n\
 - `options` (string[], optional): required for `select` and `radio`.\n\
 - `required` (boolean, optional): blocks submit when empty.\n\
 - `default` (any, optional): pre-populates the field.\n\
+- `min` / `max` / `step` (number, optional): bounds for `range` (HTML5 defaults 0 / 100 / 1).\n\
+\n\
+**`kind` → answer format the agent receives.**\n\
+- `text` / `textarea` / `select` / `radio` → user's string verbatim.\n\
+- `number` → numeric string (e.g. `\"42\"`).\n\
+- `checkbox` → `\"true\"` or `\"false\"`.\n\
+- `date` → `\"YYYY-MM-DD\"`.\n\
+- `datetime` → `\"YYYY-MM-DDTHH:MM\"` (HTML5 `datetime-local` shape, no timezone).\n\
+- `time` → `\"HH:MM\"` (24-hour).\n\
+- `range` → numeric string within `[min, max]` snapped to `step`.\n\
 \n\
 **Usage examples.**\n\
 \n\
