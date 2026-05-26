@@ -13,6 +13,8 @@
     "tauri:build": "tauri build"
   },
   "dependencies": {
+    "@a2ui/react": "^0.10.0",
+    "@a2ui/web_core": "^0.10.0",
     "@expo/metro-runtime": "^55.0.9",
     "@fontsource/inter": "^5.2.8",
     "@tauri-apps/api": "^2.11.0",
