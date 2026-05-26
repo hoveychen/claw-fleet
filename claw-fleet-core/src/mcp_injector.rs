@@ -31,7 +31,9 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::session::{is_process_alive, process_start_time, real_home_dir};
+use crate::session::{
+    deserialize_holders, prune_dead_holders as prune_holder_entries, real_home_dir, HolderEntry,
+};
 
 const LOCK_FILE_NAME: &str = "mcp-lock.json";
 const CONFIG_FILE_NAME: &str = "mcp-config.json";
@@ -94,57 +96,6 @@ pub fn save_config(cfg: &McpInjectorConfig) -> std::io::Result<()> {
     let json = serde_json::to_string_pretty(cfg)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
     fs::write(&p, json)
-}
-
-/// A single live-process holder of the injection. The pair `(pid,
-/// start_time_secs)` is what defeats PID reuse: when the OS later
-/// recycles `pid` to an unrelated process, its `start_time_secs` will
-/// differ from the value we snapshotted on `acquire`, so
-/// `prune_dead_holders` correctly drops the stale entry.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
-pub struct HolderEntry {
-    pub pid: u32,
-    /// Seconds-since-epoch process start time, read via
-    /// [`crate::session::process_start_time`] at acquire time.
-    /// Older lock files predating this field deserialise as 0 (via the
-    /// legacy-shape branch of `deserialize_holders`); 0 never matches a
-    /// real process's start time, so legacy entries get pruned cleanly.
-    #[serde(default)]
-    pub start_time_secs: u64,
-}
-
-impl HolderEntry {
-    fn capture(pid: u32) -> Self {
-        Self {
-            pid,
-            start_time_secs: process_start_time(pid).unwrap_or(0),
-        }
-    }
-}
-
-/// Accept both the legacy `[u32, ...]` shape and the new
-/// `[{pid, start_time_secs}, ...]` shape, so lock files written by older
-/// Fleet builds round-trip without manual migration. Legacy entries are
-/// loaded with `start_time_secs = 0`, which guarantees `prune_dead_holders`
-/// will drop them (no live process has start_time 0).
-fn deserialize_holders<'de, D>(d: D) -> Result<Vec<HolderEntry>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    #[derive(Deserialize)]
-    #[serde(untagged)]
-    enum Item {
-        Legacy(u32),
-        New(HolderEntry),
-    }
-    let items: Vec<Item> = Vec::deserialize(d)?;
-    Ok(items
-        .into_iter()
-        .map(|i| match i {
-            Item::Legacy(pid) => HolderEntry { pid, start_time_secs: 0 },
-            Item::New(e) => e,
-        })
-        .collect())
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, Clone, PartialEq, Eq)]
@@ -271,19 +222,12 @@ fn strip_mcp_servers(v: &mut serde_json::Value) {
     }
 }
 
-/// Drop holder entries whose process is no longer alive **or** whose
-/// `start_time_secs` no longer matches the process at that pid. The
-/// start-time check is what defends against PID reuse: a dead Fleet
-/// holder's pid that the OS later recycled to an unrelated live process
-/// would survive a naive `is_process_alive` check, leaving `~/.claude.json`
-/// out of sync indefinitely. See memory `project_mcp_injector_pid_reuse`.
+/// Thin re-export of [`crate::session::prune_dead_holders`] so callers
+/// inside this module can keep using the historic local name. The shared
+/// helper checks both `is_process_alive(pid)` and a `start_time_secs`
+/// match, defeating PID reuse (see memory `project_mcp_injector_pid_reuse`).
 pub fn prune_dead_holders(lock: &mut McpLock) {
-    lock.holders.retain(|h| {
-        is_process_alive(h.pid)
-            && process_start_time(h.pid)
-                .map(|t| t == h.start_time_secs)
-                .unwrap_or(false)
-    });
+    prune_holder_entries(&mut lock.holders);
 }
 
 /// Register `pid` as a holder, injecting `mcpServers.fleet` if this is the
@@ -414,6 +358,7 @@ fn restore_from_snapshot(lock: &McpLock) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::session::process_start_time;
 
     fn with_temp_home<F: FnOnce()>(f: F) {
         let _guard = crate::session::fleet_home_lock();

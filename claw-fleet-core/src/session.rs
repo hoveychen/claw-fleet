@@ -223,6 +223,75 @@ pub fn process_start_time(pid: u32) -> Option<u64> {
     sys.process(target).map(|p| p.start_time())
 }
 
+/// A live-process holder of a Fleet lock file (mcp-lock / permissions-lock /
+/// any future sibling). Pairs the holder's pid with its `start_time_secs`
+/// so [`prune_dead_holders`] can defeat PID reuse: when the OS later
+/// recycles `pid` to an unrelated process, the recycled process's
+/// start_time differs from the snapshot, so the entry is correctly pruned.
+///
+/// `start_time_secs = 0` is reserved as the "legacy / unknown" marker — it
+/// never matches a real live process (start_time is seconds-since-epoch),
+/// so legacy lock files (written before this field existed) prune to
+/// empty on first read. See [`deserialize_holders`] for the on-disk
+/// migration path and `project_mcp_injector_pid_reuse` memory for the
+/// original diagnosis.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct HolderEntry {
+    pub pid: u32,
+    #[serde(default)]
+    pub start_time_secs: u64,
+}
+
+impl HolderEntry {
+    /// Build a fresh entry for `pid`, snapshotting its current start_time.
+    /// If the pid no longer resolves (process already gone), the
+    /// snapshot falls back to 0 — and the next `prune_dead_holders` will
+    /// drop the entry on the spot.
+    pub fn capture(pid: u32) -> Self {
+        Self {
+            pid,
+            start_time_secs: process_start_time(pid).unwrap_or(0),
+        }
+    }
+}
+
+/// Drop holder entries whose process is no longer alive **or** whose
+/// recorded `start_time_secs` no longer matches the live process at
+/// that pid. The start_time match is the PID-reuse defence.
+pub fn prune_dead_holders(holders: &mut Vec<HolderEntry>) {
+    holders.retain(|h| {
+        is_process_alive(h.pid)
+            && process_start_time(h.pid)
+                .map(|t| t == h.start_time_secs)
+                .unwrap_or(false)
+    });
+}
+
+/// Custom serde deserializer that accepts both the legacy `[u32, ...]`
+/// shape (written by older Fleet builds) and the new
+/// `[{pid, start_time_secs}, ...]` shape. Legacy entries are mapped to
+/// `HolderEntry { pid, start_time_secs: 0 }` so `prune_dead_holders`
+/// drops them on first read after upgrade.
+pub fn deserialize_holders<'de, D>(d: D) -> Result<Vec<HolderEntry>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Item {
+        Legacy(u32),
+        New(HolderEntry),
+    }
+    let items: Vec<Item> = Vec::deserialize(d)?;
+    Ok(items
+        .into_iter()
+        .map(|i| match i {
+            Item::Legacy(pid) => HolderEntry { pid, start_time_secs: 0 },
+            Item::New(e) => e,
+        })
+        .collect())
+}
+
 #[cfg(windows)]
 pub fn is_process_alive(pid: u32) -> bool {
     if pid == 0 {
@@ -3100,6 +3169,50 @@ mod tests {
             super::process_start_time(0).is_none(),
             "pid 0 should never have a start_time"
         );
+    }
+
+    #[test]
+    fn deserialize_holders_accepts_legacy_and_new_shapes() {
+        // Mixed array: bare pid (legacy) + full object (new). Both must
+        // deserialise without error; the legacy entry gets start_time_secs 0.
+        let mixed = r#"[123, {"pid": 456, "start_time_secs": 99}]"#;
+        let mut d = serde_json::Deserializer::from_str(mixed);
+        let out = super::deserialize_holders(&mut d).unwrap();
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].pid, 123);
+        assert_eq!(out[0].start_time_secs, 0);
+        assert_eq!(out[1].pid, 456);
+        assert_eq!(out[1].start_time_secs, 99);
+    }
+
+    #[test]
+    fn holder_entry_capture_self_records_real_start_time() {
+        let my_pid = std::process::id();
+        let real = super::process_start_time(my_pid).expect("self alive");
+        let entry = super::HolderEntry::capture(my_pid);
+        assert_eq!(entry.pid, my_pid);
+        assert_eq!(
+            entry.start_time_secs, real,
+            "capture must record the live start_time, not 0"
+        );
+    }
+
+    #[test]
+    fn shared_prune_drops_pid_reused_holder() {
+        // Direct test of the helper on a raw Vec<HolderEntry>, independent
+        // of either injector's lock wrapper struct.
+        let my_pid = std::process::id();
+        let real = super::process_start_time(my_pid).expect("self alive");
+        let mut holders = vec![
+            super::HolderEntry::capture(my_pid), // matches → kept
+            super::HolderEntry {                  // pid alive but start_time wrong → pruned
+                pid: my_pid,
+                start_time_secs: real.wrapping_add(1),
+            },
+        ];
+        super::prune_dead_holders(&mut holders);
+        assert_eq!(holders.len(), 1, "exactly the matching entry survives");
+        assert_eq!(holders[0].start_time_secs, real);
     }
 }
 
