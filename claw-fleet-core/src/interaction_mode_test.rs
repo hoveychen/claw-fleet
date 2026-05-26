@@ -100,6 +100,9 @@ pub fn build_test_fleet_ask_request() -> crate::mcp_ipc::FleetAskRequest {
                 options: vec![],
                 required: false,
                 default: None,
+                min: None,
+                max: None,
+                step: None,
             }],
             options: vec![
                 FleetAskOption {

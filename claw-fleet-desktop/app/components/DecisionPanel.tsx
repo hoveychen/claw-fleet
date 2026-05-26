@@ -1103,6 +1103,79 @@ function FleetAskFormFieldRow({
         </div>
       );
     }
+    case "date":
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+          </label>
+          <input
+            id={id}
+            type="date"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+    case "datetime":
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+          </label>
+          <input
+            id={id}
+            type="datetime-local"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+    case "time":
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+          </label>
+          <input
+            id={id}
+            type="time"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </div>
+      );
+    case "range": {
+      // HTML5 range never renders the numeric value itself — surface it next
+      // to the label so the user (and screenshot reviewers) can read what's
+      // selected. Defaults match the HTML5 spec (0–100, step 1).
+      const min = field.min ?? 0;
+      const max = field.max ?? 100;
+      const step = field.step ?? 1;
+      const display = value === "" ? String(field.default ?? min) : value;
+      return (
+        <div className={styles.elicitation_other_block}>
+          <label htmlFor={id} className={styles.elicitation_option_label}>
+            {field.label}
+            {field.required && <span aria-hidden> *</span>}
+            <span style={{ marginLeft: "0.6rem", opacity: 0.7 }}>{display}</span>
+          </label>
+          <input
+            id={id}
+            type="range"
+            min={min}
+            max={max}
+            step={step}
+            value={display}
+            onChange={(e) => onChange(e.target.value)}
+            style={{ width: "100%" }}
+          />
+        </div>
+      );
+    }
     case "text":
     default:
       return (
