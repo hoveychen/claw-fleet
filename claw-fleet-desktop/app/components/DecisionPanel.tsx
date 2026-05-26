@@ -23,6 +23,7 @@ import type {
   PlanApprovalDecision,
   SessionPendingDecision,
 } from "../types";
+import { A2uiRenderCard } from "./A2uiRenderCard";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
@@ -1425,6 +1426,8 @@ function DecisionCard({ decision, compact }: { decision: PendingDecision; compac
       return <ElicitationCard decision={decision} compact={compact} />;
     case "fleet-ask":
       return <FleetAskCard decision={decision} />;
+    case "a2ui-render":
+      return <A2uiRenderCard decision={decision} />;
     case "plan-approval":
       return <PlanApprovalCard decision={decision} />;
     case "session-pending":
@@ -1514,6 +1517,10 @@ function tabLabel(d: PendingDecision): string {
   }
   if (d.kind === "session-pending") {
     const text = d.request.promptPreview || d.request.workspaceName || "Pending";
+    return text.length > 24 ? `${text.slice(0, 24)}…` : text;
+  }
+  if (d.kind === "a2ui-render") {
+    const text = d.request.aiTitle || d.request.workspaceName || "A2UI";
     return text.length > 24 ? `${text.slice(0, 24)}…` : text;
   }
   const first = d.request.questions[0];

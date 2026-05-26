@@ -97,7 +97,9 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
                 "version": env!("CARGO_PKG_VERSION"),
             },
         })),
-        "tools/list" => Ok(json!({ "tools": [fleet_ask_tool_def()] })),
+        "tools/list" => Ok(json!({
+            "tools": [fleet_ask_tool_def(), a2ui_render_tool_def()]
+        })),
         "tools/call" => handle_tool_call(params),
         other => Err(JsonRpcError {
             code: -32601,
@@ -111,6 +113,14 @@ fn fleet_ask_tool_def() -> Value {
         "name": "fleet__ask",
         "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus two optional fields: `html` (HTML preview, rendered in a sandboxed iframe) and `formFields` (structured input fields).",
         "inputSchema": crate::mcp_ipc::fleet_ask_input_schema(),
+    })
+}
+
+fn a2ui_render_tool_def() -> Value {
+    json!({
+        "name": "fleet__render_a2ui",
+        "description": "Render an A2UI v0.9 agent-to-client message tree in Fleet's Decision Panel via the official @a2ui/react renderer, then return the user's Action payload. Reach for this when the UI needs richer layout than fleet__ask's flat formFields (Tabs / Modal / Card / Video / etc.). For simple form or option asks, prefer fleet__ask.",
+        "inputSchema": crate::mcp_a2ui_ipc::a2ui_render_input_schema(),
     })
 }
 
@@ -129,12 +139,17 @@ fn heartbeat_window() -> std::time::Duration {
 
 fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
     let name = params.get("name").and_then(|v| v.as_str()).unwrap_or("");
-    if name != "fleet__ask" {
-        return Err(JsonRpcError {
+    match name {
+        "fleet__ask" => handle_fleet_ask_call(params),
+        "fleet__render_a2ui" => handle_a2ui_render_call(params),
+        other => Err(JsonRpcError {
             code: -32602,
-            message: format!("Unknown tool: {}", name),
-        });
+            message: format!("Unknown tool: {}", other),
+        }),
     }
+}
+
+fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
         match args.get("questions").cloned() {
@@ -238,6 +253,109 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
     }))
 }
 
+fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let message_tree = match args.get("messageTree").cloned() {
+        Some(t) if t.is_object() => t,
+        Some(_) => {
+            return Err(JsonRpcError {
+                code: -32602,
+                message: "`messageTree` must be a JSON object".into(),
+            });
+        }
+        None => {
+            return Err(JsonRpcError {
+                code: -32602,
+                message: "Missing `messageTree` argument".into(),
+            });
+        }
+    };
+
+    // Heartbeat — same fall-back hint as fleet__ask so the agent can pick
+    // AskUserQuestion or a degraded text response when no consumer is up.
+    let status = crate::consumer_heartbeat::consumer_status(heartbeat_window());
+    if !status.is_alive() {
+        return Ok(tool_error(format!(
+            "Fleet consumer not running (status: {status}). Start the Fleet desktop app or `fleet serve`, or fall back to fleet__ask / AskUserQuestion."
+        )));
+    }
+
+    let request_id = crate::guard::new_request_id();
+    let session_id = std::env::var("CLAUDE_SESSION_ID").unwrap_or_default();
+    let workspace_name = std::env::var("CLAUDE_PROJECT_DIR")
+        .ok()
+        .and_then(|p| {
+            std::path::PathBuf::from(p)
+                .file_name()
+                .map(|n| n.to_string_lossy().to_string())
+        })
+        .unwrap_or_default();
+
+    let req = crate::mcp_a2ui_ipc::A2uiRenderRequest {
+        id: request_id.clone(),
+        session_id,
+        workspace_name,
+        ai_title: None,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        message_tree,
+    };
+
+    if let Err(e) = crate::mcp_a2ui_ipc::write_request(&req) {
+        return Ok(tool_error(format!(
+            "Failed to queue fleet__render_a2ui request: {e}"
+        )));
+    }
+
+    let timeout = fleet_ask_timeout();
+    let liveness = heartbeat_window();
+    let poll = std::time::Duration::from_millis(200);
+    let started = Instant::now();
+    let response = loop {
+        if let Some(r) = crate::mcp_a2ui_ipc::try_read_response(&request_id) {
+            break Some(r);
+        }
+        if started.elapsed() > timeout {
+            break None;
+        }
+        if !crate::consumer_heartbeat::consumer_status(liveness).is_alive() {
+            crate::mcp_a2ui_ipc::cleanup(&request_id);
+            return Ok(tool_error(
+                "Fleet consumer heartbeat lost while waiting for your A2UI action.".into(),
+            ));
+        }
+        std::thread::sleep(poll);
+    };
+
+    crate::mcp_a2ui_ipc::cleanup(&request_id);
+
+    let Some(resp) = response else {
+        return Ok(tool_error(format!(
+            "No A2UI action from Fleet after {}s.",
+            timeout.as_secs()
+        )));
+    };
+
+    if resp.cancelled {
+        return Ok(tool_error(
+            "User cancelled the fleet__render_a2ui Decision Card.".into(),
+        ));
+    }
+
+    let payload = json!({
+        "actionName": resp.action_name,
+        "actionContext": resp.action_context,
+    });
+    let text = serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into());
+    Ok(json!({
+        "content": [{
+            "type": "text",
+            "text": text,
+        }],
+        "structuredContent": payload,
+        "isError": false,
+    }))
+}
+
 fn tool_error(message: String) -> Value {
     json!({
         "content": [{ "type": "text", "text": message }],
@@ -265,18 +383,29 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_fleet_ask() {
+    fn tools_list_returns_both_tools() {
         let resp = call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#)
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["name"], "fleet__ask");
-        let schema = &tools[0]["inputSchema"]["properties"]["questions"]["items"]["properties"];
-        assert!(schema.get("html").is_some(), "html field present in schema");
+        assert_eq!(tools.len(), 2, "expected fleet__ask + fleet__render_a2ui");
+        let names: Vec<&str> = tools
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"fleet__ask"));
+        assert!(names.contains(&"fleet__render_a2ui"));
+        let ask = tools.iter().find(|t| t["name"] == "fleet__ask").unwrap();
+        let schema = &ask["inputSchema"]["properties"]["questions"]["items"]["properties"];
+        assert!(schema.get("html").is_some(), "html field present in fleet__ask schema");
         assert!(
             schema.get("formFields").is_some(),
-            "formFields field present in schema (camelCase)"
+            "formFields field present in fleet__ask schema (camelCase)"
         );
+        let a2ui = tools
+            .iter()
+            .find(|t| t["name"] == "fleet__render_a2ui")
+            .unwrap();
+        assert_eq!(a2ui["inputSchema"]["required"][0], "messageTree");
     }
 
     #[test]
@@ -357,6 +486,84 @@ mod tests {
             "params": {
                 "name": "fleet__ask",
                 "arguments": { "questions": [] }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+        assert_eq!(resp["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn tools_call_a2ui_without_consumer_returns_structured_error() {
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-a2ui-no-consumer-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock` (matches fleet__ask sibling test).
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__render_a2ui",
+                "arguments": {
+                    "messageTree": {
+                        "surfaceUpdate": {
+                            "surfaceId": "s",
+                            "root": { "Card": { "id": "c" } }
+                        }
+                    }
+                }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore prior state under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert!(resp.get("error").is_none(), "expected ok envelope, got {resp}");
+        assert_eq!(resp["result"]["isError"], true);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(
+            text.contains("Fleet consumer"),
+            "expected hint about Fleet consumer, got: {text}"
+        );
+    }
+
+    #[test]
+    fn tools_call_a2ui_with_missing_message_tree_errors() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 10,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__render_a2ui",
+                "arguments": {}
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+        assert_eq!(resp["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn tools_call_a2ui_with_non_object_message_tree_errors() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__render_a2ui",
+                "arguments": { "messageTree": "not-an-object" }
             }
         });
         let resp = call(&req.to_string()).expect("response");

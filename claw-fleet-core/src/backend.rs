@@ -494,6 +494,20 @@ pub trait Backend: Send + Sync {
         cancelled: bool,
         answers: std::collections::BTreeMap<String, String>,
     ) -> Result<(), String>;
+
+    // ── fleet__render_a2ui MCP tool (parallel channel to fleet__ask) ──
+    /// Write a fleet__render_a2ui response. `action_name = None` paired with
+    /// `cancelled = true` signals the user dismissed the card without firing
+    /// any Action. `action_context` is the resolved BoundValue map from the
+    /// A2UI surface, stringified per-value by the frontend so the wire stays
+    /// `BTreeMap<String, String>` (same shape as fleet__ask's `answers`).
+    fn respond_to_a2ui_render(
+        &self,
+        id: &str,
+        cancelled: bool,
+        action_name: Option<String>,
+        action_context: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String>;
     /// One-click fix for the `mcp_injection` diagnostic: re-acquire the
     /// `mcpServers.fleet` entry in `~/.claude.json` with the supplied
     /// fleet binary path. Mirrors `apply_elicitation_hook` for the MCP

@@ -671,11 +671,43 @@ export interface SessionPendingDecision {
   arrivedAt: number;
 }
 
+/**
+ * Agent send an A2UI v0.9 message tree via the `fleet__render_a2ui` MCP tool.
+ * The `messageTree` is passed through to `@a2ui/web_core`'s MessageProcessor
+ * on the renderer side; Fleet itself does not interpret it.
+ */
+export interface A2uiRenderRequest {
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  aiTitle?: string | null;
+  /** Opaque A2UI agent→client message tree (`@a2ui/web_core/v0_9` shape). */
+  messageTree: unknown;
+  timestamp: string;
+}
+
+/** Agent is asking via the `fleet__render_a2ui` MCP tool. */
+export interface A2uiRenderDecision {
+  kind: "a2ui-render";
+  id: string;
+  request: A2uiRenderRequest;
+  /**
+   * Last `userAction` payload observed from the rendered A2UI surface, or
+   * `null` until the user fires any Action component. Submit reads this to
+   * decide whether the card is "answered" — `null` means the user hasn't
+   * acted yet.
+   */
+  actionPayload: { name: string | null; context: Record<string, string> } | null;
+  submitting: boolean;
+  arrivedAt: number;
+}
+
 /** Union of all decision types the panel can display. */
 export type PendingDecision =
   | GuardDecision
   | ElicitationDecision
   | FleetAskDecision
+  | A2uiRenderDecision
   | PlanApprovalDecision
   | SessionPendingDecision;
 
