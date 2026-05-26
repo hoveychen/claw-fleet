@@ -1197,7 +1197,13 @@ function FleetAskFormFieldRow({
   }
 }
 
-function FleetAskCard({ decision }: { decision: FleetAskDecision }) {
+function FleetAskCard({
+  decision,
+  compact = false,
+}: {
+  decision: FleetAskDecision;
+  compact?: boolean;
+}) {
   const { t } = useTranslation();
   const {
     submitFleetAsk,
@@ -1217,6 +1223,51 @@ function FleetAskCard({ decision }: { decision: FleetAskDecision }) {
   const formFields = q.formFields ?? [];
   const selected = selections[q.question] || [];
   const customText = customAnswers[q.question] || "";
+
+  // ── Preview pane (mirror of ElicitationCard's OptionsBlock) ─────────────
+  // Only single-select questions trigger the preview pane, per the
+  // AskUserQuestion spec inherited from `fleet__ask`. Multi-select with
+  // preview falls back to the inline list.
+  const hasPreview = useMemo(
+    () => !q.multiSelect && opts.some((o) => o.preview),
+    [q.multiSelect, opts],
+  );
+  const firstWithPreview = useMemo(
+    () => opts.find((o) => o.preview)?.label ?? opts[0]?.label ?? "",
+    [opts],
+  );
+  const [focusedLabel, setFocusedLabel] = useState<string>(firstWithPreview);
+  useEffect(() => {
+    setFocusedLabel(firstWithPreview);
+  }, [firstWithPreview]);
+
+  const focusedPreview = opts.find((o) => o.label === focusedLabel)?.preview;
+
+  // Lite/compact mode: push preview into the floating Tauri subwindow
+  // instead of splitting the narrow main window. Reuses the same Tauri
+  // commands ElicitationCard wires up — see the matching effect there.
+  useEffect(() => {
+    if (!compact) return;
+    if (hasPreview) {
+      const theme = resolveTheme(useUIStore.getState().theme);
+      invoke("open_preview_window", {
+        markdown: focusedPreview ?? "",
+        title: focusedLabel || null,
+        theme,
+      }).catch(() => {});
+    } else {
+      invoke("close_preview_window").catch(() => {});
+    }
+  }, [compact, hasPreview, focusedPreview, focusedLabel]);
+
+  // Tear down the subwindow when the card unmounts or step changes the
+  // visibility of preview content. compact-mode only.
+  useEffect(() => {
+    if (!compact) return;
+    return () => {
+      invoke("close_preview_window").catch(() => {});
+    };
+  }, [compact]);
 
   // Whether a question is "complete enough" to advance. Form-field required
   // flags + at least one of (option picked / custom typed / any form field
@@ -1343,39 +1394,60 @@ function FleetAskCard({ decision }: { decision: FleetAskDecision }) {
           </div>
         )}
 
-        {opts.length > 0 && (
-          <div className={styles.elicitation_options}>
-            {opts.map((opt) => {
-              const isSelected = selected.includes(opt.label);
-              return (
-                <button
-                  key={opt.label}
-                  type="button"
-                  className={`${styles.elicitation_option} ${isSelected ? styles.elicitation_option_selected : ""}`}
-                  onClick={() =>
-                    toggleFleetAskOption(decision.id, q.question, opt.label, q.multiSelect)
-                  }
-                >
-                  <span className={styles.elicitation_option_label}>{opt.label}</span>
-                  {opt.description && (
-                    <span className={styles.elicitation_option_desc}>{opt.description}</span>
-                  )}
-                </button>
-              );
-            })}
-            <div className={styles.elicitation_other_block}>
-              <span className={styles.elicitation_option_label}>
-                {t("fleet_ask.other", "Other")}
-              </span>
-              <input
-                type="text"
-                value={customText}
-                placeholder={t("fleet_ask.other_placeholder", "Type your answer…")}
-                onChange={(e) => setFleetAskCustomAnswer(decision.id, q.question, e.target.value)}
-              />
+        {opts.length > 0 && (() => {
+          const optionsList = (
+            <div className={styles.elicitation_options}>
+              {opts.map((opt) => {
+                const isSelected = selected.includes(opt.label);
+                const isFocused = hasPreview && opt.label === focusedLabel;
+                return (
+                  <button
+                    key={opt.label}
+                    type="button"
+                    className={`${styles.elicitation_option} ${isSelected ? styles.elicitation_option_selected : ""} ${isFocused ? styles.elicitation_option_focused : ""}`}
+                    onClick={() =>
+                      toggleFleetAskOption(decision.id, q.question, opt.label, q.multiSelect)
+                    }
+                    onMouseEnter={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
+                    onFocus={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
+                  >
+                    <span className={styles.elicitation_option_label}>{opt.label}</span>
+                    {opt.description && (
+                      <span className={styles.elicitation_option_desc}>{opt.description}</span>
+                    )}
+                  </button>
+                );
+              })}
+              <div className={styles.elicitation_other_block}>
+                <span className={styles.elicitation_option_label}>
+                  {t("fleet_ask.other", "Other")}
+                </span>
+                <input
+                  type="text"
+                  value={customText}
+                  placeholder={t("fleet_ask.other_placeholder", "Type your answer…")}
+                  onChange={(e) => setFleetAskCustomAnswer(decision.id, q.question, e.target.value)}
+                />
+              </div>
             </div>
-          </div>
-        )}
+          );
+          // Lite/compact mode keeps options inline; preview is in the
+          // floating subwindow. Normal mode with preview content splits
+          // the card into a side-by-side grid.
+          if (!hasPreview || compact) return optionsList;
+          return (
+            <div className={styles.elicitation_options_with_preview}>
+              {optionsList}
+              <div className={styles.elicitation_preview}>
+                {focusedPreview ? (
+                  <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
+                    {focusedPreview}
+                  </ReactMarkdown>
+                ) : null}
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       <div className={styles.actions}>
@@ -1425,7 +1497,7 @@ function DecisionCard({ decision, compact }: { decision: PendingDecision; compac
     case "elicitation":
       return <ElicitationCard decision={decision} compact={compact} />;
     case "fleet-ask":
-      return <FleetAskCard decision={decision} />;
+      return <FleetAskCard decision={decision} compact={compact} />;
     case "a2ui-render":
       return <A2uiRenderCard decision={decision} />;
     case "plan-approval":
@@ -1612,8 +1684,14 @@ export function DecisionPanel({
   const effectiveCollapsed = decisionPanelCollapsed && !compact;
 
   const hasPreview =
-    active?.kind === "elicitation" &&
-    active.request.questions.some((q) => !q.multiSelect && q.options.some((o) => o.preview));
+    (active?.kind === "elicitation" || active?.kind === "fleet-ask") &&
+    active.request.questions.some((q) => {
+      const opts = q.options ?? [];
+      // ElicitationQuestion uses `multiSelect`, FleetAskQuestion shares
+      // the same field name — single check works for both.
+      const multi = (q as { multiSelect?: boolean }).multiSelect ?? false;
+      return !multi && opts.some((o) => o.preview);
+    });
 
   // Build responsive width tiers: if content overflows vertically, widen the
   // panel step-by-step so markdown/long questions reflow wider instead of
