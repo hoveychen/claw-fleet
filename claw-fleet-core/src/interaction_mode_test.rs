@@ -231,7 +231,7 @@ fn run_cli_test_inner(
     timeout: Duration,
 ) -> Result<TestRunResult, String> {
     use std::io::Read;
-    use std::process::{Command, Stdio};
+    use std::process::Stdio;
 
     let bin = crate::claude_binary::resolve(None)
         .ok_or("No Claude CLI binary discovered (set Claude Binary in Settings)")?;
