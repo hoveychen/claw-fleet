@@ -482,7 +482,11 @@ export type FleetAskFormFieldKind =
   | "number"
   | "select"
   | "radio"
-  | "checkbox";
+  | "checkbox"
+  | "date"
+  | "datetime"
+  | "time"
+  | "range";
 
 export interface FleetAskFormField {
   name: string;
@@ -492,6 +496,9 @@ export interface FleetAskFormField {
   options?: string[];
   required?: boolean;
   default?: unknown;
+  min?: number;
+  max?: number;
+  step?: number;
 }
 
 export interface FleetAskQuestion {
