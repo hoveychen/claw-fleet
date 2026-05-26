@@ -211,8 +211,92 @@ pub fn is_process_alive(pid: u32) -> bool {
 /// snapshotted on `acquire`. See
 /// `~/.claude/projects/.../memory/project_mcp_injector_pid_reuse.md` for
 /// the diagnosis that motivated this helper.
+///
+/// **Why not sysinfo?** A previous version used
+/// `sysinfo::refresh_processes_specifics(Some(&[pid]), …)`, but on macOS
+/// that path first calls `libc::proc_listallpids` to enumerate every pid
+/// on the host *before* filtering — and the macOS App Sandbox returns 0
+/// from `proc_listallpids`, so the refresh becomes a no-op, the process
+/// isn't recorded, and `sysinfo.process(pid)` returns `None`. Combined
+/// with `unwrap_or(0)` upstream, every holder in a sandboxed Fleet build
+/// silently captured `start_time_secs = 0`, neutralising the PID-reuse
+/// defence. The macOS branch below therefore calls `libc::proc_pidinfo`
+/// directly for the target pid, which is permitted inside the sandbox.
+#[cfg(target_os = "macos")]
+pub fn process_start_time(pid: u32) -> Option<u64> {
+    use std::mem;
+    if pid == 0 {
+        return None;
+    }
+    let mut info: libc::proc_bsdinfo = unsafe { mem::zeroed() };
+    let size = mem::size_of::<libc::proc_bsdinfo>() as i32;
+    let result = unsafe {
+        libc::proc_pidinfo(
+            pid as i32,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut libc::proc_bsdinfo as *mut std::ffi::c_void,
+            size,
+        )
+    };
+    if result != size {
+        return None;
+    }
+    Some(info.pbi_start_tvsec as u64)
+}
+
+/// Linux equivalent: read `/proc/<pid>/stat` field 22 (`starttime` in
+/// clock ticks since boot) and convert to Unix epoch via `/proc/stat`'s
+/// `btime` line. We do this directly rather than via sysinfo so the
+/// macOS and Linux paths share the same "no global pid enumeration"
+/// shape — handy if Linux ever gains an equivalent sandbox restriction.
+#[cfg(target_os = "linux")]
+pub fn process_start_time(pid: u32) -> Option<u64> {
+    if pid == 0 {
+        return None;
+    }
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // /proc/<pid>/stat format:
+    //   pid (comm) state ppid pgrp ... starttime ...
+    // The comm field can contain spaces and parens, so we slice off
+    // everything up to and including the LAST ')' before parsing the
+    // remaining whitespace-separated fields. After that slice, field
+    // indexes are 1-based starting at `state`; starttime is field 22
+    // overall, i.e. (22 - 2) = 20 fields after the ')'. Zero-based
+    // index 19.
+    let after_comm = stat.rfind(')')?;
+    let rest = &stat[after_comm + 1..];
+    let fields: Vec<&str> = rest.split_whitespace().collect();
+    let ticks: u64 = fields.get(19)?.parse().ok()?;
+    let btime = read_linux_btime()?;
+    let clk_tck = unsafe { libc::sysconf(libc::_SC_CLK_TCK) };
+    if clk_tck <= 0 {
+        return None;
+    }
+    Some(btime + ticks / clk_tck as u64)
+}
+
+#[cfg(target_os = "linux")]
+fn read_linux_btime() -> Option<u64> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    for line in stat.lines() {
+        if let Some(rest) = line.strip_prefix("btime ") {
+            return rest.trim().parse().ok();
+        }
+    }
+    None
+}
+
+/// Windows fallback: there's no app-sandbox blocking pid enumeration in
+/// our Windows distribution, so sysinfo's path remains the simplest
+/// option. If Windows ever gains a similar concern, swap this to
+/// `NtQueryInformationProcess(ProcessTimes)` directly.
+#[cfg(windows)]
 pub fn process_start_time(pid: u32) -> Option<u64> {
     use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
+    if pid == 0 {
+        return None;
+    }
     let mut sys = System::new();
     let target = Pid::from_u32(pid);
     sys.refresh_processes_specifics(
@@ -3168,6 +3252,37 @@ mod tests {
         assert!(
             super::process_start_time(0).is_none(),
             "pid 0 should never have a start_time"
+        );
+    }
+
+    #[test]
+    fn process_start_time_for_fresh_child_is_near_now() {
+        // Spawn a long-lived helper, then assert its captured start_time
+        // sits within a small window around `SystemTime::now()`. Catches
+        // the sandboxed-sysinfo regression mode (returning 0 / None) and
+        // any future drift where we accidentally read a wrong field.
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("clock not before epoch")
+            .as_secs();
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep child");
+        let captured = super::process_start_time(child.id())
+            .expect("freshly-spawned child must have a start_time");
+        let _ = child.kill();
+        let _ = child.wait();
+
+        assert!(captured > 0, "start_time must be a real unix-epoch value, got {captured}");
+        let delta = if captured > now_secs {
+            captured - now_secs
+        } else {
+            now_secs - captured
+        };
+        assert!(
+            delta <= 5,
+            "child captured at {captured} should be within 5s of now {now_secs} (delta = {delta})"
         );
     }
 
