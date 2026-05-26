@@ -23,6 +23,7 @@ import type {
   PlanApprovalDecision,
   SessionPendingDecision,
 } from "../types";
+import { A2uiRenderCard } from "./A2uiRenderCard";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
@@ -1425,6 +1426,8 @@ function DecisionCard({ decision, compact }: { decision: PendingDecision; compac
       return <ElicitationCard decision={decision} compact={compact} />;
     case "fleet-ask":
       return <FleetAskCard decision={decision} />;
+    case "a2ui-render":
+      return <A2uiRenderCard decision={decision} />;
     case "plan-approval":
       return <PlanApprovalCard decision={decision} />;
     case "session-pending":
