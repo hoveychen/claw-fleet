@@ -1509,6 +1509,14 @@
     "send": "发送下一轮",
     "sending": "发送中…"
   },
+  "a2ui_render": {
+    "title": "Agent UI (A2UI)",
+    "waiting": "渲染 A2UI 界面中…",
+    "submit_no_action": "提交（尚未触发动作）",
+    "submit_with_action": "提交（{{action}}）",
+    "submitting": "提交中…",
+    "cancel": "取消"
+  },
   "lite_decision_history": {
     "back": "返回",
     "loading": "加载中…",

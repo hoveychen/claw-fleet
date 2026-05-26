@@ -1512,6 +1512,14 @@
     "send": "Send follow-up",
     "sending": "Sending…"
   },
+  "a2ui_render": {
+    "title": "Agent UI (A2UI)",
+    "waiting": "Rendering A2UI surface…",
+    "submit_no_action": "Submit (no action yet)",
+    "submit_with_action": "Submit ({{action}})",
+    "submitting": "Submitting…",
+    "cancel": "Cancel"
+  },
   "lite_decision_history": {
     "back": "Back",
     "loading": "Loading…",
