@@ -405,6 +405,9 @@ impl Backend for NullBackend {
     ) -> Vec<llm_usage::FleetLlmUsageDailyBucket> {
         vec![]
     }
+    fn usage_history(&self, _: i64, _: i64) -> Vec<account::UsageHistoryPoint> {
+        vec![]
+    }
     fn upload_attachment(&self, _: &std::path::Path) -> Result<String, String> {
         Err("backend not ready".into())
     }

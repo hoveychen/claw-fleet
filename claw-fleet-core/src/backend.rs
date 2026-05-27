@@ -9,7 +9,7 @@ use std::pin::Pin;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::account::AccountInfo;
+use crate::account::{AccountInfo, UsageHistoryPoint};
 use crate::audit::{AuditRuleInfo, AuditSummary, SuggestedRule};
 use crate::daily_report::{DailyReport, DailyReportStats, Lesson};
 use crate::llm_provider::{LlmConfig, LlmProviderInfo};
@@ -634,6 +634,11 @@ pub trait Backend: Send + Sync {
     /// Return daily usage buckets (one per date × scenario) in [from_ms, to_ms].
     fn list_fleet_llm_usage_daily(&self, from_ms: u64, to_ms: u64)
         -> Vec<FleetLlmUsageDailyBucket>;
+
+    // ── Usage occupancy history ─────────────────────────────────────────────
+    /// Return persisted 5h/7d/7d-sonnet occupancy snapshots in [from_ms, to_ms]
+    /// (epoch ms) for the 24h occupancy-trend chart. Sorted ascending by ts.
+    fn usage_history(&self, from_ms: i64, to_ms: i64) -> Vec<UsageHistoryPoint>;
 
     // ── Decision-panel attachments ──────────────────────────────────────────
     /// Make a local file available to the agent process as an absolute path.

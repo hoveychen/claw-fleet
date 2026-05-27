@@ -11,6 +11,7 @@ import {
   type OpenClawSessionUsage,
 } from "../usageStore";
 import { useUsageRing } from "../hooks/useUsageRing";
+import { UsageHistoryChart } from "./UsageHistoryChart";
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -240,6 +241,7 @@ function ClaudeUsageSection() {
         </div>
       )}
       {info && !hasUsage && <p className={styles.dim}>No usage data</p>}
+      {hasUsage && <UsageHistoryChart />}
       <SectionFooter
         lastUpdated={lastUpdated}
         loading={loading}
