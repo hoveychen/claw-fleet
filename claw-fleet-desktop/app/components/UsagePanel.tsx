@@ -11,7 +11,7 @@ import {
   type OpenClawSessionUsage,
 } from "../usageStore";
 import { useUsageRing } from "../hooks/useUsageRing";
-import { UsageHistoryChart } from "./UsageHistoryChart";
+import { UsageHistoryModal } from "./UsageHistoryModal";
 
 type TFunc = (key: string, opts?: Record<string, unknown>) => string;
 
@@ -212,6 +212,7 @@ function ClaudeUsageSection() {
   const load = useUsageStore((s) => s.load);
   const setAutoRefresh = useUsageStore((s) => s.setAutoRefresh);
   const [, setTick] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => setTick((n) => n + 1), 30_000);
@@ -241,7 +242,16 @@ function ClaudeUsageSection() {
         </div>
       )}
       {info && !hasUsage && <p className={styles.dim}>No usage data</p>}
-      {hasUsage && <UsageHistoryChart />}
+      {hasUsage && (
+        <button
+          className={styles.history_btn}
+          onClick={() => setHistoryOpen(true)}
+          title={t("account.occupancy_subtitle")}
+        >
+          {t("account.occupancy_history")}
+        </button>
+      )}
+      {historyOpen && <UsageHistoryModal onClose={() => setHistoryOpen(false)} />}
       <SectionFooter
         lastUpdated={lastUpdated}
         loading={loading}

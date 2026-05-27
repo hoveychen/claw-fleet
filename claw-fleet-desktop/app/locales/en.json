@@ -159,6 +159,7 @@
     "heavy_hint": "Claude sessions whose cumulative cost crosses this amount get a marker at their start time",
     "heavy_marker": "Heavy sessions ×{{n}}",
     "no_history": "No history yet — the sampler keeps recording, check back soon",
+    "occupancy_history": "Usage history →",
     "resets_in": "Resets in {{t}}",
     "resets_soon": "soon",
     "resets_days": "{{n}}d",
