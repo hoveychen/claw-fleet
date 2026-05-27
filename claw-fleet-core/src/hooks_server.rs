@@ -167,6 +167,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         Err(e) => eprintln!("[fleet serve] worktree gc failed: {e}"),
     }
 
+    // ── Usage occupancy sampler ─────────────────────────────────────────────
+    // Sample the Claude usage API every 10 minutes so the 24h occupancy chart
+    // has continuous coverage even when no desktop UI is actively polling. This
+    // is the always-on host for remote setups (the probe machine's usage) and
+    // for local users who run `fleet serve`. Idempotent (once-per-process) and
+    // self-healing — offline / not-logged-in errors are swallowed and retried.
+    crate::account::start_background_sampler(std::time::Duration::from_secs(600));
+
     // ── Supervisor tick thread (REMOVED in Phase 3) ─────────────────────────
     // The legacy `supervisor::tick` loop spawned queued fleet sessions and
     // reaped exited pids out of `fleet-sessions.json`. Phase 3 retires that
@@ -3021,6 +3029,22 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     .unwrap_or(u64::MAX);
                 let buckets = crate::llm_usage::list_usage_daily_buckets(from_ms, to_ms);
                 let body = serde_json::to_string(&buckets).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/usage_history" => {
+                let from_ms = query
+                    .get("from_ms")
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(0);
+                let to_ms = query
+                    .get("to_ms")
+                    .and_then(|s| s.parse::<i64>().ok())
+                    .unwrap_or(i64::MAX);
+                let points = crate::account::load_usage_history(from_ms, to_ms);
+                let body = serde_json::to_string(&points).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
