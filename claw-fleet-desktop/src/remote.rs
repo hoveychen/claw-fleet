@@ -1010,6 +1010,16 @@ impl crate::backend::Backend for RemoteBackend {
             .unwrap_or_default()
     }
 
+    fn usage_history(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Vec<crate::account::UsageHistoryPoint> {
+        self.probe
+            .get(&format!("/usage_history?from_ms={from_ms}&to_ms={to_ms}"))
+            .unwrap_or_default()
+    }
+
     fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String> {
         let meta = std::fs::metadata(source_path).map_err(|e| e.to_string())?;
         if meta.len() > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {

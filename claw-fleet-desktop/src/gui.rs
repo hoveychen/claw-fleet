@@ -1943,6 +1943,15 @@ fn list_fleet_llm_usage_daily(
 }
 
 #[tauri::command]
+fn get_usage_history(
+    from_ms: i64,
+    to_ms: i64,
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::account::UsageHistoryPoint> {
+    state.backend.read().unwrap().usage_history(from_ms, to_ms)
+}
+
+#[tauri::command]
 fn show_main_window(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -3287,6 +3296,17 @@ pub fn run() {
                 claw_fleet_core::injector_watchdog::start(fleet_path);
             }
 
+            // ── Usage occupancy sampler ──────────────────────────────────
+            // Sample the Claude usage API every 10 minutes while the desktop
+            // app is running, regardless of which tab is open or whether the
+            // usage panel's auto-refresh toggle is on. This is the always-on
+            // host for local-only users who never run `fleet serve`, giving the
+            // 24h occupancy chart continuous coverage. Idempotent per process;
+            // errors are swallowed and retried on the next tick.
+            claw_fleet_core::account::start_background_sampler(
+                std::time::Duration::from_secs(600),
+            );
+
             // ── SSE forwarding for mobile access ──────────────────────────
             // Listen for sessions-updated Tauri events and broadcast them to
             // any connected SSE mobile clients.
@@ -3603,6 +3623,7 @@ pub fn run() {
             get_llm_config,
             set_llm_config,
             list_fleet_llm_usage_daily,
+            get_usage_history,
             get_sources_config,
             set_source_enabled,
             list_claude_binaries,
