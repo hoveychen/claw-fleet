@@ -20,6 +20,11 @@ pub struct AccountInfo {
     pub five_hour: Option<UsageStats>,
     pub seven_day: Option<UsageStats>,
     pub seven_day_sonnet: Option<UsageStats>,
+    /// Where the usage numbers came from: "foxy-switcher" when read from a
+    /// running foxy daemon's local API, "anthropic" when fetched directly.
+    /// `#[serde(default)]` keeps older serialized payloads deserializable.
+    #[serde(default)]
+    pub usage_source: String,
 }
 
 // ── Usage snapshot history ────────────────────────────────────────────────────
@@ -350,11 +355,14 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
     // avoids a redundant Anthropic call (and the rate limits that come with it).
     // foxy only exposes email + plan, so full_name falls back to the email and
     // organization_name is left blank. Any failure falls back to the direct API.
-    let (email, full_name, organization_name, plan, mut five_hour, mut seven_day, mut seven_day_sonnet) =
+    let (usage_source, (email, full_name, organization_name, plan, mut five_hour, mut seven_day, mut seven_day_sonnet)) =
         if let Some(f) = crate::foxy::fetch_in_use_account().await {
-            (f.email.clone(), f.email, String::new(), f.plan, f.five_hour, f.seven_day, f.seven_day_sonnet)
+            (
+                "foxy-switcher".to_string(),
+                (f.email.clone(), f.email, String::new(), f.plan, f.five_hour, f.seven_day, f.seven_day_sonnet),
+            )
         } else {
-            fetch_via_anthropic().await?
+            ("anthropic".to_string(), fetch_via_anthropic().await?)
         };
 
     let now_ms = chrono::Utc::now().timestamp_millis();
@@ -399,6 +407,7 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
         five_hour,
         seven_day,
         seven_day_sonnet,
+        usage_source,
     })
 }
 

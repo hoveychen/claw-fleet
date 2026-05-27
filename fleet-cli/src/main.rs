@@ -1182,6 +1182,13 @@ fn print_account(info: &AccountInfo) {
         println!("  {b}{:<16}{r}  {}", "Organization:", info.organization_name);
     }
     println!("  {b}{:<16}{r}  {}", "Plan:", info.plan);
+    let source = match info.usage_source.as_str() {
+        "foxy-switcher" => "Foxy Switcher",
+        "anthropic" => "Anthropic API",
+        other if !other.is_empty() => other,
+        _ => "Anthropic API",
+    };
+    println!("  {b}{:<16}{r}  {}", "Usage source:", source);
 
     let has_usage = info.five_hour.is_some()
         || info.seven_day.is_some()
