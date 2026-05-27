@@ -726,6 +726,7 @@ export const MOCK_ACCOUNT_INFO = {
   organization_name: "Acme Corp",
   plan: "max_5x",
   auth_method: "api_key",
+  usage_source: "anthropic",
   five_hour: {
     utilization: 0.42,
     resets_at: new Date(NOW + 2.5 * HOUR).toISOString(),

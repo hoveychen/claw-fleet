@@ -10,6 +10,7 @@ interface AccountInfoData {
   organization_name: string;
   plan: string;
   auth_method: string;
+  usage_source: string;
   five_hour: unknown;
   seven_day: unknown;
   seven_day_sonnet: unknown;
@@ -183,6 +184,14 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
           <Row label={t("account.email")} value={info.email} />
           <Row label={t("account.org")} value={info.organization_name} />
           <Row label={t("account.plan")} value={info.plan} />
+          <Row
+            label={t("account.usage_source")}
+            value={
+              info.usage_source === "foxy-switcher"
+                ? t("account.usage_source_foxy")
+                : t("account.usage_source_anthropic")
+            }
+          />
         </section>
       )}
 
