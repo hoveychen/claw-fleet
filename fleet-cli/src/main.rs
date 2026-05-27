@@ -2344,27 +2344,27 @@ fn cmd_prd_context() {
         .unwrap_or_else(|| std::path::PathBuf::from("."));
 
     let tasks_path = cwd.join("TASKS.md");
-    let Ok(content) = std::fs::read_to_string(&tasks_path) else {
+    let Ok(body) = std::fs::read_to_string(&tasks_path) else {
         // No TASKS.md → silent no-op. PRD mode just doesn't trigger here.
         return;
     };
 
-    // Cap at 64 KB so a runaway TASKS.md can't blow up every prompt.
-    const MAX_BYTES: usize = 64 * 1024;
-    let body = if content.len() > MAX_BYTES {
-        format!(
-            "{}\n\n… (TASKS.md truncated at {MAX_BYTES} bytes; full file at {})\n",
-            &content[..MAX_BYTES],
-            tasks_path.display(),
-        )
-    } else {
-        content
-    };
-
-    // Pull out every active-plan region between sentinels. Multiple plans
-    // may coexist, each tagged with a unique `id="..."`; legacy unmarked
-    // pairs are still recognised for backwards compatibility.
-    let blocks = extract_prd_blocks(&body);
+    // Read the whole file: an earlier 64 KB cap dropped tail plans once
+    // TASKS.md grew past that. Per-plan distillation below keeps injection
+    // size proportional to *active* work, not total file size.
+    //
+    // Pull out every plan region between sentinels (`id="..."` tagged plus
+    // a legacy anonymous form), then drop plans whose every P-task is `[x]`
+    // — their body is reference history, not actionable context.
+    let blocks: Vec<PrdBlock> = extract_prd_blocks(&body)
+        .into_iter()
+        .filter_map(|b| {
+            distill_active_block(&b.body).map(|distilled| PrdBlock {
+                id: b.id,
+                body: distilled,
+            })
+        })
+        .collect();
     if blocks.is_empty() {
         return;
     }
@@ -2486,6 +2486,35 @@ fn render_prd_blocks(blocks: &[PrdBlock]) -> String {
         out.push_str(b.body.trim());
     }
     out
+}
+
+/// Drop completed plans, keep active ones whole. A plan is "complete" when
+/// no top-level checkbox is still `[ ]`; in that case we return `None` so the
+/// block falls out of the injection. Otherwise we return the body verbatim
+/// (trimmed), because some plans use the block as a living PRD document —
+/// spike conclusions, struct definitions, and architecture lists are real
+/// reference material the agent needs to continue making decisions on the
+/// pending tasks. Plan boundaries are already enforced by the `id="..."`
+/// sentinels in `extract_prd_blocks`; this function just decides keep-or-drop
+/// at that granularity.
+fn distill_active_block(body: &str) -> Option<String> {
+    let has_pending = body.lines().any(|l| is_pending_task_line(l));
+    if !has_pending {
+        return None;
+    }
+    Some(body.trim().to_string())
+}
+
+/// True iff a line is a top-level pending P-task (`- [ ]`). Used to decide
+/// whether a plan block is still active.
+fn is_pending_task_line(line: &str) -> bool {
+    if line.starts_with(' ') || line.starts_with('\t') {
+        return false;
+    }
+    let Some(rest) = line.strip_prefix("- ") else {
+        return false;
+    };
+    rest.starts_with("[ ]")
 }
 
 #[cfg(test)]
@@ -2624,6 +2653,85 @@ trailing notes outside\n";
         );
         // Not a sentinel at all:
         assert_eq!(parse_sentinel_line("# TASKS", "begin"), None);
+    }
+
+    #[test]
+    fn distill_excludes_fully_completed_plan() {
+        let body = "\
+**Plan:** all done\n\
+\n\
+- [x] **P1** — first\n\
+  - detail a\n\
+- [x] **P2** — second\n";
+        assert_eq!(distill_active_block(body), None);
+    }
+
+    #[test]
+    fn distill_keeps_plan_with_pending_task() {
+        let body = "\
+**Plan:** mixed\n\
+\n\
+- [x] **P1** — done\n\
+- [ ] **P2** — todo\n\
+  - actionable detail\n";
+        let out = distill_active_block(body).expect("active plan kept");
+        assert!(out.contains("**Plan:** mixed"));
+        assert!(out.contains("- [ ] **P2** — todo"));
+        assert!(out.contains("actionable detail"));
+    }
+
+    #[test]
+    fn distill_keeps_prd_style_prose_in_active_plan() {
+        // Some plans treat TASKS.md as a living PRD doc — spike conclusions,
+        // struct definitions, and architecture decision lists are reference
+        // material the agent needs to act on the pending tasks. They must
+        // survive the injection filter as long as the plan is still active.
+        let body = "\
+**Plan:** with PRD-style reference material\n\
+\n\
+**Spike 结论：** API X returns 0-100, not 0-1.\n\
+\n\
+```rust\n\
+struct Foo {\n\
+    id: String,\n\
+}\n\
+```\n\
+\n\
+**核心架构决策：**\n\
+- 决策 1：走 Backend trait\n\
+- 决策 2：HTTP 走 fleet serve\n\
+\n\
+- [ ] **P1** — real task\n\
+  - acceptance criterion\n";
+        let out = distill_active_block(body).expect("active");
+        assert!(out.contains("**Plan:** with PRD-style reference material"));
+        assert!(out.contains("Spike 结论"), "spike notes must survive");
+        assert!(out.contains("struct Foo"), "struct definitions must survive");
+        assert!(out.contains("核心架构决策"), "architecture lists must survive");
+        assert!(out.contains("决策 1：走 Backend trait"));
+        assert!(out.contains("- [ ] **P1** — real task"));
+        assert!(out.contains("acceptance criterion"));
+    }
+
+    #[test]
+    fn distill_keeps_completed_task_detail_inside_active_plan() {
+        // Done P-tasks within an active plan keep their full body — the
+        // filter only operates at the plan-block granularity, not at the
+        // per-task granularity. (Per-task collapsing was tried and rolled
+        // back because PRD reference material lives between tasks and got
+        // attributed to whichever task it followed.)
+        let body = "\
+**Plan:** mixed detail\n\
+\n\
+- [x] **P1** — done task\n\
+  - finished detail still useful as reference\n\
+- [ ] **P2** — pending task\n\
+  - still actionable\n";
+        let out = distill_active_block(body).expect("active");
+        assert!(out.contains("- [x] **P1** — done task"));
+        assert!(out.contains("finished detail still useful as reference"));
+        assert!(out.contains("- [ ] **P2** — pending task"));
+        assert!(out.contains("still actionable"));
     }
 }
 
