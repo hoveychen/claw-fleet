@@ -38,6 +38,28 @@ struct SnapshotEntry {
     seven_day_sonnet: Option<MetricSnap>,
 }
 
+/// Snapshots older than this are dropped on each write. Kept at 8 days so the
+/// 7-day "vs previous period" comparison (`find_prev_utilization`) still has a
+/// full window of data plus a day of slack — the 24h occupancy chart only ever
+/// reads the recent tail, but the 7d comparison genuinely needs the long history.
+const HISTORY_RETENTION_MS: i64 = 8 * 24 * 3600 * 1000;
+
+/// One point of the usage-occupancy time series consumed by the "占用率变化"
+/// chart. `utilization` values are the 0–1 fraction (the UI multiplies by 100).
+#[derive(Serialize, Deserialize, Clone, Default)]
+pub struct UsageHistoryPoint {
+    pub ts: i64,
+    pub five_hour: Option<f64>,
+    pub seven_day: Option<f64>,
+    pub seven_day_sonnet: Option<f64>,
+}
+
+/// Drop snapshots older than `HISTORY_RETENTION_MS` relative to `now_ms`.
+fn prune_old_snapshots(history: &mut Vec<SnapshotEntry>, now_ms: i64) {
+    let cutoff = now_ms - HISTORY_RETENTION_MS;
+    history.retain(|e| e.ts >= cutoff);
+}
+
 fn snapshot_path() -> Option<std::path::PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("claw-fleet-usage-history.json"))
 }
@@ -321,10 +343,7 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
             resets_at: s.resets_at.clone(),
         }),
     });
-    if history.len() > 200 {
-        let drain = history.len() - 200;
-        history.drain(0..drain);
-    }
+    prune_old_snapshots(&mut history, now_ms);
     save_snapshots(&history);
 
     if let Some(ref mut s) = five_hour {
@@ -362,5 +381,92 @@ pub fn fetch_account_info_blocking() -> Result<AccountInfo, String> {
         tokio::runtime::Runtime::new()
             .map_err(|e| format!("failed to create tokio runtime: {e}"))?
             .block_on(fetch_account_info())
+    }
+}
+
+/// Load persisted usage snapshots whose timestamp falls within
+/// `[from_ms, to_ms]` (inclusive), projected to just the per-metric
+/// utilization fractions. Sorted ascending by timestamp. Used by the
+/// 24h occupancy chart via the `usage_history` Backend method.
+pub fn load_usage_history(from_ms: i64, to_ms: i64) -> Vec<UsageHistoryPoint> {
+    let mut points: Vec<UsageHistoryPoint> = load_snapshots()
+        .into_iter()
+        .filter(|e| e.ts >= from_ms && e.ts <= to_ms)
+        .map(|e| UsageHistoryPoint {
+            ts: e.ts,
+            five_hour: e.five_hour.map(|m| m.utilization),
+            seven_day: e.seven_day.map(|m| m.utilization),
+            seven_day_sonnet: e.seven_day_sonnet.map(|m| m.utilization),
+        })
+        .collect();
+    points.sort_by_key(|p| p.ts);
+    points
+}
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Guards against spawning more than one sampler thread per process.
+static SAMPLER_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Spawn (once per process) a background thread that samples the Claude usage
+/// API every `interval` and appends a snapshot as a side effect of
+/// `fetch_account_info_blocking`. This gives the 24h occupancy chart continuous
+/// coverage even when the desktop UI's usage tab isn't actively polling.
+///
+/// Idempotent: the second and later calls in the same process are no-ops, so it
+/// is safe to call from both `fleet serve` startup and the desktop app startup.
+/// Errors (offline, not logged in) are swallowed — the loop simply retries on
+/// the next tick. The thread runs until process exit; no handle is kept.
+pub fn start_background_sampler(interval: std::time::Duration) {
+    if SAMPLER_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || loop {
+        let _ = fetch_account_info_blocking();
+        std::thread::sleep(interval);
+    });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn snap_at(ts: i64) -> SnapshotEntry {
+        SnapshotEntry {
+            ts,
+            five_hour: Some(MetricSnap { utilization: 0.5, resets_at: String::new() }),
+            seven_day: None,
+            seven_day_sonnet: None,
+        }
+    }
+
+    #[test]
+    fn prune_drops_only_entries_older_than_retention() {
+        let now = 100 * 24 * 3600 * 1000; // day 100, in ms
+        let day = 24 * 3600 * 1000;
+        let mut history = vec![
+            snap_at(now - 9 * day), // older than 8d → dropped
+            snap_at(now - 8 * day - 1), // just over 8d → dropped
+            snap_at(now - 8 * day + 1), // just under 8d → kept
+            snap_at(now - 1 * day), // recent → kept
+            snap_at(now),           // now → kept
+        ];
+        prune_old_snapshots(&mut history, now);
+        let kept: Vec<i64> = history.iter().map(|e| e.ts).collect();
+        assert_eq!(
+            kept,
+            vec![now - 8 * day + 1, now - 1 * day, now],
+            "only snapshots within 8 days of now should survive"
+        );
+    }
+
+    #[test]
+    fn prune_keeps_a_full_seven_day_window() {
+        // The 7d "vs previous period" comparison needs ≥7 days of history.
+        let now = 100 * 24 * 3600 * 1000;
+        let day = 24 * 3600 * 1000;
+        let mut history = vec![snap_at(now - 7 * day), snap_at(now)];
+        prune_old_snapshots(&mut history, now);
+        assert_eq!(history.len(), 2, "a 7-day-old snapshot must be retained");
     }
 }
