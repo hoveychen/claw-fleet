@@ -2420,6 +2420,14 @@ impl Backend for LocalBackend {
         crate::llm_usage::list_usage_daily_buckets(from_ms, to_ms)
     }
 
+    fn usage_history(
+        &self,
+        from_ms: i64,
+        to_ms: i64,
+    ) -> Vec<crate::account::UsageHistoryPoint> {
+        crate::account::load_usage_history(from_ms, to_ms)
+    }
+
     fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String> {
         // Agent runs on this machine — just hand back the absolute path so the
         // UI can splice `@<path>` into the textarea.
