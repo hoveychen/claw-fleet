@@ -178,12 +178,17 @@ function SectionFooter({
   autoRefresh,
   onAutoRefreshChange,
   onRefresh,
+  hideAutoToggle,
 }: {
   lastUpdated: number | null;
   loading: boolean;
-  autoRefresh: boolean;
-  onAutoRefreshChange: (v: boolean) => void;
+  autoRefresh?: boolean;
+  onAutoRefreshChange?: (v: boolean) => void;
   onRefresh: () => void;
+  // When true the per-section auto-refresh checkbox is omitted; the section's
+  // cadence is managed elsewhere (currently only Claude, where the store
+  // adapts the interval to usage_source \u2014 see armClaudeTimer in usageStore).
+  hideAutoToggle?: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -192,10 +197,16 @@ function SectionFooter({
         <span className={styles.last_updated}>{formatLastUpdated(lastUpdated, t)}</span>
       )}
       <div className={styles.footer_actions}>
-        <label className={styles.auto_toggle}>
-          <input type="checkbox" checked={autoRefresh} onChange={(e) => onAutoRefreshChange(e.target.checked)} />
-          {t("account.auto_5m")}
-        </label>
+        {!hideAutoToggle && onAutoRefreshChange && (
+          <label className={styles.auto_toggle}>
+            <input
+              type="checkbox"
+              checked={autoRefresh ?? false}
+              onChange={(e) => onAutoRefreshChange(e.target.checked)}
+            />
+            {t("account.auto_5m")}
+          </label>
+        )}
         <button className={styles.refresh} onClick={onRefresh} disabled={loading} title={t("account.refresh_now")}>
           {"\u21BB"}
         </button>
@@ -208,9 +219,8 @@ function SectionFooter({
 
 function ClaudeUsageSection() {
   const { t } = useTranslation();
-  const { data: info, error, loading, lastUpdated, autoRefresh } = useUsageStore((s) => s.claude);
+  const { data: info, error, loading, lastUpdated } = useUsageStore((s) => s.claude);
   const load = useUsageStore((s) => s.load);
-  const setAutoRefresh = useUsageStore((s) => s.setAutoRefresh);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -219,13 +229,20 @@ function ClaudeUsageSection() {
   }, []);
 
   const refresh = () => { load("claude"); };
-  const onAutoRefreshChange = (v: boolean) => setAutoRefresh("claude", v);
 
   const hasUsage = info && (info.five_hour || info.seven_day || info.seven_day_sonnet);
 
   return (
     <div className={styles.tool_section}>
-      <div className={styles.tool_header}><ClaudeIcon /> Claude Code</div>
+      <div className={styles.tool_header}>
+        <ClaudeIcon /> Claude Code
+        {info?.plan && <span className={styles.plan_badge}>{info.plan}</span>}
+      </div>
+      {info?.email && (
+        <div className={styles.account_line} title={t("account.email")}>
+          {info.email}
+        </div>
+      )}
       {loading && !info && <p className={styles.dim}>{t("account.loading")}</p>}
       {error && (
         <div className={styles.error}>
@@ -245,9 +262,8 @@ function ClaudeUsageSection() {
       <SectionFooter
         lastUpdated={lastUpdated}
         loading={loading}
-        autoRefresh={autoRefresh}
-        onAutoRefreshChange={onAutoRefreshChange}
         onRefresh={refresh}
+        hideAutoToggle
       />
     </div>
   );
