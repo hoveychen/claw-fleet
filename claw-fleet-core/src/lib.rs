@@ -20,6 +20,7 @@ pub mod decision_history;
 pub mod decision_panel_config;
 pub mod elicitation;
 pub mod feishu;
+pub mod foxy;
 pub mod guard;
 pub mod hooks;
 pub mod hooks_server;
