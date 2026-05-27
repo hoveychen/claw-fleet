@@ -70,6 +70,18 @@
   text-transform: capitalize;
 }
 
+/* Account email shown directly under the Claude tool_header so the user can
+   see which foxy-managed account is currently in use without leaving the
+   usage panel. */
+.account_line {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  margin: 2px 0 6px 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .bars {
   display: flex;
   flex-direction: column;
