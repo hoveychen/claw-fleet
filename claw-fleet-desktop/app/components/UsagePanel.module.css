@@ -275,6 +275,28 @@
   background: rgba(248, 113, 113, 0.25);
 }
 
+/* Entry point that opens the 24h occupancy history modal */
+.history_btn {
+  margin-top: 10px;
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--color-border);
+  color: var(--color-text-dim);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: center;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.history_btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border-color: var(--color-text-dim);
+  border-style: solid;
+}
+
 /* macOS vibrancy: semi-transparent backgrounds */
 :global([data-platform="macos"]) .tool_section {
   background: rgba(255, 255, 255, 0.06);

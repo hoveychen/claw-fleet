@@ -33,15 +33,21 @@ interface HeavyMarker {
   ts: number;
   label: string;
   cost: number;
+  rank: number; // 1 = highest cost (rank caps at MAX_MARKERS)
 }
 
 const WINDOW_MS = 24 * 60 * 60 * 1000;
 const REFRESH_MS = 5 * 60 * 1000;
 const THRESHOLD_KEY = "usage-heavy-threshold-usd";
 const DEFAULT_THRESHOLD = 5;
+const MAX_MARKERS = 5;
 
 const FIVE_HOUR_COLOR = "#f97316"; // orange — matches the 5h pool line
 const SEVEN_DAY_COLOR = "#3b82f6"; // blue — matches the 7d pool line
+
+// Rank-indexed palette (rank 1 = darkest = most expensive session).
+// Same red ramp the rest of the app uses, ordered dark → light.
+const HEAVY_COLORS = ["#b91c1c", "#dc2626", "#ef4444", "#f87171", "#fca5a5"];
 
 function loadThreshold(): number {
   const raw = localStorage.getItem(THRESHOLD_KEY);
@@ -60,7 +66,7 @@ function pct(frac: number | null): number | null {
   return frac == null ? null : Math.round(frac * 1000) / 10;
 }
 
-export function UsageHistoryChart() {
+export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const [points, setPoints] = useState<UsageHistoryPoint[]>([]);
@@ -104,8 +110,10 @@ export function UsageHistoryChart() {
     [points],
   );
 
-  // Heavy markers: Claude sessions whose cumulative cost crossed the threshold,
-  // placed at the moment the session started, within the visible 24h window.
+  // Heavy markers: the top-N (by cumulative cost) Claude sessions whose cost
+  // crossed the threshold, placed at the moment each session started. Ranking
+  // is by cost so the most expensive run always lands the darkest dot; ties
+  // break on earlier start time.
   const markers: HeavyMarker[] = useMemo(() => {
     return sessions
       .filter(
@@ -120,7 +128,9 @@ export function UsageHistoryChart() {
         label: s.aiTitle || s.slug || s.workspaceName || "session",
         cost: s.totalCostUsd,
       }))
-      .sort((a, b) => a.ts - b.ts);
+      .sort((a, b) => b.cost - a.cost || a.ts - b.ts)
+      .slice(0, MAX_MARKERS)
+      .map((m, i) => ({ ...m, rank: i + 1 }));
   }, [sessions, threshold, fromMs, now]);
 
   const onThresholdChange = (raw: string) => {
@@ -159,10 +169,10 @@ export function UsageHistoryChart() {
       {!hasData ? (
         <p className={styles.empty}>{t("account.no_history")}</p>
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={height}>
           <LineChart
             data={data}
-            margin={{ top: 8, right: 12, bottom: 4, left: -16 }}
+            margin={{ top: 16, right: 12, bottom: 4, left: 4 }}
           >
             <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
             <XAxis
@@ -176,9 +186,10 @@ export function UsageHistoryChart() {
             />
             <YAxis
               domain={[0, 100]}
+              ticks={[0, 25, 50, 75, 100]}
               tickFormatter={(v) => `${v}%`}
               tick={{ fontSize: 11 }}
-              width={44}
+              width={48}
             />
             <Tooltip
               labelFormatter={(ts) => formatClock(Number(ts))}
@@ -208,18 +219,43 @@ export function UsageHistoryChart() {
               connectNulls
               isAnimationActive={false}
             />
-            {markers.map((m, i) => (
+            {markers.map((m) => (
               <ReferenceLine
-                key={`${m.ts}-${i}`}
+                key={`${m.ts}-${m.rank}`}
                 x={m.ts}
-                stroke="#ef4444"
-                strokeDasharray="4 3"
-                strokeOpacity={0.7}
-                label={{
-                  value: "▲",
-                  position: "insideTop",
-                  fill: "#ef4444",
-                  fontSize: 10,
+                stroke="transparent"
+                ifOverflow="extendDomain"
+                label={(labelProps: { viewBox?: { x?: number; y?: number } }) => {
+                  const vb = labelProps.viewBox ?? {};
+                  const cx = vb.x ?? 0;
+                  const cy = (vb.y ?? 0) + 9;
+                  const color = HEAVY_COLORS[m.rank - 1] ?? HEAVY_COLORS[HEAVY_COLORS.length - 1];
+                  const tip = `#${m.rank} · ${m.label} · $${m.cost.toFixed(2)} · ${formatClock(m.ts)}`;
+                  return (
+                    <g style={{ cursor: "help" }}>
+                      <title>{tip}</title>
+                      <circle
+                        cx={cx}
+                        cy={cy}
+                        r={8}
+                        fill={color}
+                        stroke="var(--color-bg, #0b0b0b)"
+                        strokeWidth={1.5}
+                      />
+                      <text
+                        x={cx}
+                        y={cy + 0.5}
+                        textAnchor="middle"
+                        dominantBaseline="central"
+                        fontSize={9.5}
+                        fontWeight={700}
+                        fill="#fff"
+                        style={{ pointerEvents: "none" }}
+                      >
+                        {m.rank}
+                      </text>
+                    </g>
+                  );
                 }}
               />
             ))}
@@ -237,8 +273,23 @@ export function UsageHistoryChart() {
           {t("account.seven_day")}
         </span>
         {markers.length > 0 && (
-          <span className={styles.legend_item} title={markers.map((m) => `${formatClock(m.ts)} · ${m.label} · $${m.cost.toFixed(2)}`).join("\n")}>
-            <i style={{ background: "#ef4444" }} />
+          <span
+            className={styles.legend_item}
+            title={markers
+              .map((m) => `#${m.rank} · ${formatClock(m.ts)} · ${m.label} · $${m.cost.toFixed(2)}`)
+              .join("\n")}
+          >
+            <span className={styles.legend_dots}>
+              {markers.map((m) => (
+                <i
+                  key={m.rank}
+                  className={styles.legend_dot}
+                  style={{
+                    background: HEAVY_COLORS[m.rank - 1] ?? HEAVY_COLORS[HEAVY_COLORS.length - 1],
+                  }}
+                />
+              ))}
+            </span>
             {t("account.heavy_marker", { n: markers.length })}
           </span>
         )}
