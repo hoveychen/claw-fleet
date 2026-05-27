@@ -93,3 +93,56 @@
   border-radius: 50%;
   display: inline-block;
 }
+
+/* Shared chart tooltip (recharts content): pool lines + heavy-session rows. */
+.rtt {
+  min-width: 150px;
+  max-width: 260px;
+  background: var(--color-bg-modal, #1b1b1d);
+  border: 1px solid var(--color-border, rgba(128, 128, 128, 0.3));
+  border-radius: 6px;
+  padding: 6px 9px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-text, #e5e5e5);
+}
+
+.rtt_time {
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.rtt_row {
+  font-size: 11px;
+}
+
+.rtt_heavy {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--color-border, rgba(128, 128, 128, 0.25));
+  font-size: 11px;
+}
+
+.rtt_rank {
+  color: #fff;
+  font-weight: 700;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.rtt_heavy_title {
+  flex: 1;
+  word-break: break-word;
+}
+
+.rtt_heavy_cost {
+  font-weight: 600;
+  flex-shrink: 0;
+  opacity: 0.85;
+}

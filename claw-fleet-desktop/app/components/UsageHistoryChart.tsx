@@ -5,11 +5,13 @@ import {
   CartesianGrid,
   Line,
   LineChart,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
+  usePlotArea,
+  useXAxisScale,
+  useYAxisScale,
 } from "recharts";
 import { useSessionsStore } from "../store";
 import styles from "./UsageHistoryChart.module.css";
@@ -64,6 +66,167 @@ function formatClock(ts: number): string {
 
 function pct(frac: number | null): number | null {
   return frac == null ? null : Math.round(frac * 1000) / 10;
+}
+
+// Linear-interpolate the 5h occupancy value at an arbitrary timestamp so a
+// marker can be anchored onto the orange line, even when the session started
+// between two 10-min samples. Clamps to the nearest sample outside the range.
+function fiveHourAt(ts: number, rows: ChartRow[]): number {
+  const pts = rows.filter((r) => r.fiveHour != null) as {
+    ts: number;
+    fiveHour: number;
+  }[];
+  if (pts.length === 0) return 0;
+  if (ts <= pts[0].ts) return pts[0].fiveHour;
+  const last = pts[pts.length - 1];
+  if (ts >= last.ts) return last.fiveHour;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if (ts >= a.ts && ts <= b.ts) {
+      const f = b.ts === a.ts ? 0 : (ts - a.ts) / (b.ts - a.ts);
+      return a.fiveHour + f * (b.fiveHour - a.fiveHour);
+    }
+  }
+  return last.fiveHour;
+}
+
+const SAMPLE_HALF_MS = 5.5 * 60 * 1000; // half the 10-min sample interval (+ slack)
+
+function heavyColor(rank: number): string {
+  return HEAVY_COLORS[rank - 1] ?? HEAVY_COLORS[HEAVY_COLORS.length - 1];
+}
+
+// K-line-style heavy-session markers. Rendered as a child of <LineChart> so it
+// can read the live pixel scales via recharts 3.x hooks: each marker sits as a
+// dot on the 5h line at its start time, with a dashed leader up to a ranked
+// badge pinned near the top. The hover read-out is delivered through the shared
+// recharts <Tooltip> (see HeavyTooltip) so there's a single, instant tooltip.
+function HeavyMarkers({
+  markers,
+  data,
+}: {
+  markers: HeavyMarker[];
+  data: ChartRow[];
+}) {
+  const xScale = useXAxisScale();
+  const yScale = useYAxisScale();
+  const plot = usePlotArea();
+
+  if (!xScale || !yScale || !plot || markers.length === 0) return null;
+
+  const badgeY = plot.y + 9;
+
+  return (
+    <g>
+      {markers.map((m) => {
+        const rawX = xScale(m.ts);
+        if (rawX == null) return null;
+        const px = Number(rawX);
+        const val = fiveHourAt(m.ts, data);
+        const py = Number(yScale(val) ?? plot.y + plot.height);
+        const color = heavyColor(m.rank);
+        return (
+          <g key={m.rank}>
+            {/* dashed leader from the line point up to the badge */}
+            <line
+              x1={px}
+              y1={py}
+              x2={px}
+              y2={badgeY}
+              stroke={color}
+              strokeWidth={1}
+              strokeDasharray="3 3"
+              strokeOpacity={0.65}
+            />
+            {/* anchor dot sitting on the 5h line */}
+            <circle
+              cx={px}
+              cy={py}
+              r={3.5}
+              fill={color}
+              stroke="var(--color-bg, #0b0b0b)"
+              strokeWidth={1.5}
+            />
+            {/* ranked badge near the top */}
+            <circle
+              cx={px}
+              cy={badgeY}
+              r={8}
+              fill={color}
+              stroke="var(--color-bg, #0b0b0b)"
+              strokeWidth={1.5}
+            />
+            <text
+              x={px}
+              y={badgeY + 0.5}
+              textAnchor="middle"
+              dominantBaseline="central"
+              fontSize={9.5}
+              fontWeight={700}
+              fill="#fff"
+              style={{ pointerEvents: "none" }}
+            >
+              {m.rank}
+            </text>
+          </g>
+        );
+      })}
+    </g>
+  );
+}
+
+// Single shared tooltip for the chart: the two pool lines plus, when the hovered
+// time column lands on a heavy session's start, that session's rank/title/cost.
+// Recharts renders this immediately on hover (no native-title delay).
+function HeavyTooltip({
+  active,
+  payload,
+  label,
+  markers,
+}: {
+  active?: boolean;
+  payload?: Array<{
+    name?: string;
+    value?: number | null;
+    color?: string;
+    dataKey?: string | number;
+  }>;
+  label?: number;
+  markers: HeavyMarker[];
+}) {
+  if (!active || !payload || payload.length === 0) return null;
+  const ts = Number(label);
+  const near = markers
+    .filter((m) => Math.abs(m.ts - ts) <= SAMPLE_HALF_MS)
+    .sort((a, b) => a.rank - b.rank);
+
+  return (
+    <div className={styles.rtt}>
+      <div className={styles.rtt_time}>{formatClock(ts)}</div>
+      {payload.map((p) => (
+        <div
+          key={String(p.dataKey)}
+          className={styles.rtt_row}
+          style={{ color: p.color }}
+        >
+          {p.name}: {p.value == null ? "—" : `${p.value}%`}
+        </div>
+      ))}
+      {near.map((m) => (
+        <div key={m.rank} className={styles.rtt_heavy}>
+          <span
+            className={styles.rtt_rank}
+            style={{ background: heavyColor(m.rank) }}
+          >
+            #{m.rank}
+          </span>
+          <span className={styles.rtt_heavy_title}>{m.label}</span>
+          <span className={styles.rtt_heavy_cost}>${m.cost.toFixed(2)}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
@@ -192,12 +355,21 @@ export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
               width={48}
             />
             <Tooltip
-              labelFormatter={(ts) => formatClock(Number(ts))}
-              formatter={(value, name) => [
-                value == null ? "—" : `${value}%`,
-                String(name),
-              ]}
-              contentStyle={{ fontSize: 12 }}
+              content={(props) => (
+                <HeavyTooltip
+                  active={props.active}
+                  payload={
+                    props.payload as unknown as Array<{
+                      name?: string;
+                      value?: number | null;
+                      color?: string;
+                      dataKey?: string | number;
+                    }>
+                  }
+                  label={props.label as number}
+                  markers={markers}
+                />
+              )}
             />
             <Line
               type="monotone"
@@ -219,46 +391,7 @@ export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
               connectNulls
               isAnimationActive={false}
             />
-            {markers.map((m) => (
-              <ReferenceLine
-                key={`${m.ts}-${m.rank}`}
-                x={m.ts}
-                stroke="transparent"
-                ifOverflow="extendDomain"
-                label={(labelProps: { viewBox?: { x?: number; y?: number } }) => {
-                  const vb = labelProps.viewBox ?? {};
-                  const cx = vb.x ?? 0;
-                  const cy = (vb.y ?? 0) + 9;
-                  const color = HEAVY_COLORS[m.rank - 1] ?? HEAVY_COLORS[HEAVY_COLORS.length - 1];
-                  const tip = `#${m.rank} · ${m.label} · $${m.cost.toFixed(2)} · ${formatClock(m.ts)}`;
-                  return (
-                    <g style={{ cursor: "help" }}>
-                      <title>{tip}</title>
-                      <circle
-                        cx={cx}
-                        cy={cy}
-                        r={8}
-                        fill={color}
-                        stroke="var(--color-bg, #0b0b0b)"
-                        strokeWidth={1.5}
-                      />
-                      <text
-                        x={cx}
-                        y={cy + 0.5}
-                        textAnchor="middle"
-                        dominantBaseline="central"
-                        fontSize={9.5}
-                        fontWeight={700}
-                        fill="#fff"
-                        style={{ pointerEvents: "none" }}
-                      >
-                        {m.rank}
-                      </text>
-                    </g>
-                  );
-                }}
-              />
-            ))}
+            <HeavyMarkers markers={markers} data={data} />
           </LineChart>
         </ResponsiveContainer>
       )}
