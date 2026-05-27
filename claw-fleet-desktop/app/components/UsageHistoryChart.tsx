@@ -172,7 +172,7 @@ export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
         <ResponsiveContainer width="100%" height={height}>
           <LineChart
             data={data}
-            margin={{ top: 8, right: 12, bottom: 4, left: -16 }}
+            margin={{ top: 16, right: 12, bottom: 4, left: 4 }}
           >
             <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
             <XAxis
@@ -186,9 +186,10 @@ export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
             />
             <YAxis
               domain={[0, 100]}
+              ticks={[0, 25, 50, 75, 100]}
               tickFormatter={(v) => `${v}%`}
               tick={{ fontSize: 11 }}
-              width={44}
+              width={48}
             />
             <Tooltip
               labelFormatter={(ts) => formatClock(Number(ts))}
