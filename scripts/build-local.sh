@@ -68,13 +68,19 @@ if [[ "$(uname)" == "Linux" ]]; then
   fi
 fi
 
-# 3. Build Tauri app (debug)
+# 3. Install frontend deps (pnpm, matching CI). tauri's beforeBuildCommand runs
+#    `pnpm build`, and `npx tauri` itself resolves @tauri-apps/cli from
+#    node_modules — both need the workspace installed first.
+echo "==> Installing frontend deps (pnpm)..."
+(cd claw-fleet-desktop && pnpm install --frozen-lockfile)
+
+# 4. Build Tauri app (debug)
 #    本地构建启用 Projects/Tasks feature flag（线上 release.yml 不设此变量，保持隐藏）
 export VITE_PROJECTS_ENABLED=true
 echo "==> Building Tauri app... (VITE_PROJECTS_ENABLED=$VITE_PROJECTS_ENABLED)"
 (cd claw-fleet-desktop && npx tauri build --debug --bundles app)
 
-# 4. Sign with entitlements (macOS only)
+# 5. Sign with entitlements (macOS only)
 #    Sign the fleet CLI sidecar FIRST with its own (non-sandbox) entitlements,
 #    then sign the outer app bundle. Using --deep would overwrite the sidecar
 #    signature with the app's sandbox entitlements, causing SIGTRAP when the
@@ -109,7 +115,7 @@ else
     "$APP_BUNDLE"
 fi
 
-# 5. Create DMG
+# 6. Create DMG
 DMG_DIR="target/debug/bundle/dmg"
 mkdir -p "$DMG_DIR"
 DMG_NAME="claw-fleet-dev-${BUILD_STAMP}.dmg"
@@ -124,7 +130,7 @@ hdiutil create -volname "Claw Fleet" \
 rm -rf "$DMG_STAGING"
 echo "==> DMG: $DMG_DIR/$DMG_NAME"
 
-# 6. Build PKG installer
+# 7. Build PKG installer
 PKG_DIR="target/debug/bundle/pkg"
 mkdir -p "$PKG_DIR"
 PKG_NAME="claw-fleet-dev-${BUILD_STAMP}.pkg"
