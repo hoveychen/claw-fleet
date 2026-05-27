@@ -116,62 +116,94 @@ function HeavyMarkers({
   if (!xScale || !yScale || !plot || markers.length === 0) return null;
 
   const badgeY = plot.y + 9;
+  const R = 8; // badge radius
+  const GAP = 2 * R + 4; // min center-to-center spacing between badges
+
+  // True anchor positions: dots stay locked to the 5h line at their real time.
+  // Badge x-positions are dodged horizontally so they never overlap, with the
+  // dashed leader slanting from the line dot up to the (possibly shifted) badge.
+  const items = markers
+    .map((m) => {
+      const rawX = xScale(m.ts);
+      if (rawX == null) return null;
+      const dotX = Number(rawX);
+      return {
+        m,
+        dotX,
+        dotY: Number(yScale(fiveHourAt(m.ts, data)) ?? plot.y + plot.height),
+        badgeX: dotX,
+        color: heavyColor(m.rank),
+      };
+    })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
+    .sort((a, b) => a.dotX - b.dotX);
+
+  // Pass 1 — left→right: push a badge right if it crowds its left neighbour.
+  for (let i = 1; i < items.length; i++) {
+    if (items[i].badgeX < items[i - 1].badgeX + GAP) {
+      items[i].badgeX = items[i - 1].badgeX + GAP;
+    }
+  }
+  // Pass 2 — if the cluster overran the right edge, pack back from the right.
+  const rightLimit = plot.x + plot.width - R;
+  const leftLimit = plot.x + R;
+  if (items.length && items[items.length - 1].badgeX > rightLimit) {
+    items[items.length - 1].badgeX = rightLimit;
+    for (let i = items.length - 2; i >= 0; i--) {
+      if (items[i].badgeX > items[i + 1].badgeX - GAP) {
+        items[i].badgeX = items[i + 1].badgeX - GAP;
+      }
+    }
+    if (items[0].badgeX < leftLimit) items[0].badgeX = leftLimit; // give up if too many to fit
+  }
 
   return (
     <g>
-      {markers.map((m) => {
-        const rawX = xScale(m.ts);
-        if (rawX == null) return null;
-        const px = Number(rawX);
-        const val = fiveHourAt(m.ts, data);
-        const py = Number(yScale(val) ?? plot.y + plot.height);
-        const color = heavyColor(m.rank);
-        return (
-          <g key={m.rank}>
-            {/* dashed leader from the line point up to the badge */}
-            <line
-              x1={px}
-              y1={py}
-              x2={px}
-              y2={badgeY}
-              stroke={color}
-              strokeWidth={1}
-              strokeDasharray="3 3"
-              strokeOpacity={0.65}
-            />
-            {/* anchor dot sitting on the 5h line */}
-            <circle
-              cx={px}
-              cy={py}
-              r={3.5}
-              fill={color}
-              stroke="var(--color-bg, #0b0b0b)"
-              strokeWidth={1.5}
-            />
-            {/* ranked badge near the top */}
-            <circle
-              cx={px}
-              cy={badgeY}
-              r={8}
-              fill={color}
-              stroke="var(--color-bg, #0b0b0b)"
-              strokeWidth={1.5}
-            />
-            <text
-              x={px}
-              y={badgeY + 0.5}
-              textAnchor="middle"
-              dominantBaseline="central"
-              fontSize={9.5}
-              fontWeight={700}
-              fill="#fff"
-              style={{ pointerEvents: "none" }}
-            >
-              {m.rank}
-            </text>
-          </g>
-        );
-      })}
+      {items.map(({ m, dotX, dotY, badgeX, color }) => (
+        <g key={m.rank}>
+          {/* dashed leader from the line dot up to the (dodged) badge */}
+          <line
+            x1={dotX}
+            y1={dotY}
+            x2={badgeX}
+            y2={badgeY}
+            stroke={color}
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            strokeOpacity={0.65}
+          />
+          {/* anchor dot sitting on the 5h line at the true time */}
+          <circle
+            cx={dotX}
+            cy={dotY}
+            r={3.5}
+            fill={color}
+            stroke="var(--color-bg, #0b0b0b)"
+            strokeWidth={1.5}
+          />
+          {/* ranked badge near the top, de-overlapped */}
+          <circle
+            cx={badgeX}
+            cy={badgeY}
+            r={R}
+            fill={color}
+            stroke="var(--color-bg, #0b0b0b)"
+            strokeWidth={1.5}
+          />
+          <text
+            x={badgeX}
+            y={badgeY + 0.5}
+            textAnchor="middle"
+            dominantBaseline="central"
+            fontSize={9.5}
+            fontWeight={700}
+            fill="#fff"
+            style={{ pointerEvents: "none" }}
+          >
+            {m.rank}
+          </text>
+        </g>
+      ))}
     </g>
   );
 }
