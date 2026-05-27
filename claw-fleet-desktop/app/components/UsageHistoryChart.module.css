@@ -79,3 +79,17 @@
   border-radius: 2px;
   display: inline-block;
 }
+
+/* Heavy-session legend row uses round dots (one per rank) instead of a bar. */
+.legend_dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.legend_dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
+}
