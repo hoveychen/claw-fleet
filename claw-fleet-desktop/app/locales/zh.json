@@ -159,6 +159,7 @@
     "heavy_hint": "累计花费超过该金额的 Claude 会话，会在其启动时刻打一个标记",
     "heavy_marker": "重负载会话 ×{{n}}",
     "no_history": "暂无历史数据，采样器会持续记录，稍后再来看",
+    "occupancy_history": "占用率历史 →",
     "resets_in": "{{t}}后重置",
     "resets_soon": "即将",
     "resets_days": "{{n}}天",
