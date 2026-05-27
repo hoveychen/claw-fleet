@@ -237,7 +237,22 @@ fn parse_usage(v: &Value) -> Option<UsageStats> {
 
 // ── Account info fetch ────────────────────────────────────────────────────────
 
-pub async fn fetch_account_info() -> Result<AccountInfo, String> {
+/// Raw account fields before snapshot/prev-utilization processing. Shared
+/// return shape for both the foxy-switcher path and the direct-Anthropic path
+/// so the snapshot tail in `fetch_account_info` runs identically for either.
+type RawAccount = (
+    String,             // email
+    String,             // full_name
+    String,             // organization_name
+    String,             // plan
+    Option<UsageStats>, // five_hour
+    Option<UsageStats>, // seven_day
+    Option<UsageStats>, // seven_day_sonnet
+);
+
+/// Direct path: read keychain credentials and fetch profile + usage straight
+/// from Anthropic. Used as the fallback when foxy-switcher isn't reachable.
+async fn fetch_via_anthropic() -> Result<RawAccount, String> {
     let (token, subscription_type) = read_keychain_credentials()?;
 
     let client = reqwest::Client::new();
@@ -322,9 +337,25 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
         "API / Free".to_string()
     };
 
-    let mut five_hour = usage_body.get("five_hour").and_then(|v| parse_usage(v));
-    let mut seven_day = usage_body.get("seven_day").and_then(|v| parse_usage(v));
-    let mut seven_day_sonnet = usage_body.get("seven_day_sonnet").and_then(|v| parse_usage(v));
+    let five_hour = usage_body.get("five_hour").and_then(|v| parse_usage(v));
+    let seven_day = usage_body.get("seven_day").and_then(|v| parse_usage(v));
+    let seven_day_sonnet = usage_body.get("seven_day_sonnet").and_then(|v| parse_usage(v));
+
+    Ok((email, full_name, org_name, plan, five_hour, seven_day, seven_day_sonnet))
+}
+
+pub async fn fetch_account_info() -> Result<AccountInfo, String> {
+    // Prefer foxy-switcher when its daemon is alive: it already polls Anthropic's
+    // usage endpoint once a minute for the in-use account, so reading from it
+    // avoids a redundant Anthropic call (and the rate limits that come with it).
+    // foxy only exposes email + plan, so full_name falls back to the email and
+    // organization_name is left blank. Any failure falls back to the direct API.
+    let (email, full_name, organization_name, plan, mut five_hour, mut seven_day, mut seven_day_sonnet) =
+        if let Some(f) = crate::foxy::fetch_in_use_account().await {
+            (f.email.clone(), f.email, String::new(), f.plan, f.five_hour, f.seven_day, f.seven_day_sonnet)
+        } else {
+            fetch_via_anthropic().await?
+        };
 
     let now_ms = chrono::Utc::now().timestamp_millis();
     let mut history = load_snapshots();
@@ -362,7 +393,7 @@ pub async fn fetch_account_info() -> Result<AccountInfo, String> {
     Ok(AccountInfo {
         email,
         full_name,
-        organization_name: org_name,
+        organization_name,
         plan,
         auth_method: "claudeai".to_string(),
         five_hour,
