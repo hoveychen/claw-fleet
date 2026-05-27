@@ -17,6 +17,7 @@ export interface AccountInfoData {
   organization_name: string;
   plan: string;
   auth_method: string;
+  usage_source: string;
   five_hour: UsageStats | null;
   seven_day: UsageStats | null;
   seven_day_sonnet: UsageStats | null;
