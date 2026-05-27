@@ -60,7 +60,7 @@ function pct(frac: number | null): number | null {
   return frac == null ? null : Math.round(frac * 1000) / 10;
 }
 
-export function UsageHistoryChart() {
+export function UsageHistoryChart({ height = 200 }: { height?: number } = {}) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const [points, setPoints] = useState<UsageHistoryPoint[]>([]);
@@ -159,7 +159,7 @@ export function UsageHistoryChart() {
       {!hasData ? (
         <p className={styles.empty}>{t("account.no_history")}</p>
       ) : (
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={height}>
           <LineChart
             data={data}
             margin={{ top: 8, right: 12, bottom: 4, left: -16 }}
