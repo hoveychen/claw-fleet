@@ -27,6 +27,39 @@ use crate::session::{SessionInfo, SessionStatus};
 /// Message sent to the dedicated indexer thread.
 type IndexRequest = Vec<(String, String)>; // Vec<(jsonl_path, session_id)>
 
+/// Mutex on "a session scan is in flight". The initial scan thread and the
+/// polling thread share one of these so they never run concurrently — on
+/// Windows with massive Cursor history a single scan can pull GB-sized JSON
+/// blobs into memory; two concurrent scans push the process into pagefile
+/// thrashing and freeze the webview that lives in the same process.
+pub(crate) struct ScanGate(AtomicBool);
+
+impl ScanGate {
+    pub(crate) fn new() -> Self { Self(AtomicBool::new(false)) }
+
+    /// Returns `Some(guard)` if this caller now owns the scan slot.
+    /// Returns `None` when another scan is in flight — the caller should
+    /// skip this round. The slot is released when the returned guard drops
+    /// (including on panic).
+    pub(crate) fn try_enter(&self) -> Option<ScanGuard<'_>> {
+        if self
+            .0
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+        {
+            Some(ScanGuard(&self.0))
+        } else {
+            None
+        }
+    }
+}
+
+pub(crate) struct ScanGuard<'a>(&'a AtomicBool);
+
+impl<'a> Drop for ScanGuard<'a> {
+    fn drop(&mut self) { self.0.store(false, Ordering::SeqCst); }
+}
+
 pub struct LocalBackend {
     app: AppHandle,
     /// Registered agent sources (Claude Code, Cursor, OpenClaw, …).
@@ -191,14 +224,34 @@ impl LocalBackend {
         // so old threads exit when the backend is replaced.
         let running = Arc::new(AtomicBool::new(true));
 
+        // Shared gate so the initial scan thread and the polling thread never
+        // run concurrent scans (see ScanGate doc above).
+        let scan_gate: Arc<ScanGate> = Arc::new(ScanGate::new());
+
         // Initial scan — run in a background thread so the UI appears immediately.
         {
             let app_bg = app.clone();
             let sess_bg = sessions.clone();
             let sources_bg = sources.clone();
             let idx_tx = index_tx.clone();
+            let gate_bg = scan_gate.clone();
             std::thread::spawn(move || {
+                let _slot = match gate_bg.try_enter() {
+                    Some(g) => g,
+                    None => {
+                        log_debug("[BACKEND-INIT] initial scan skipped (another scan already in flight)");
+                        return;
+                    }
+                };
+                let started = Instant::now();
                 let initial = crate::session::scan_all_sources(&sources_bg);
+                let elapsed = started.elapsed();
+                if elapsed > Duration::from_secs(30) {
+                    log_debug(&format!(
+                        "[BACKEND-INIT] initial scan slow: took {}s",
+                        elapsed.as_secs()
+                    ));
+                }
                 *sess_bg.lock().unwrap() = initial.clone();
                 let _ = app_bg.emit("sessions-updated", &initial);
                 let _ = app_bg.emit("scan-ready", true);
@@ -414,6 +467,7 @@ impl LocalBackend {
                 .collect();
 
             let running_poll = running.clone();
+            let gate_poll = scan_gate.clone();
             std::thread::spawn(move || {
                 let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
                 let analyzing = analyzing3;
@@ -433,9 +487,31 @@ impl LocalBackend {
                     if !running_poll.load(Ordering::SeqCst) {
                         break;
                     }
+                    // Skip this round if the initial scan (or a previous poll
+                    // tick) is still running — on Windows with massive Cursor
+                    // history a single scan can take tens of seconds and a
+                    // second concurrent scan pushes the process into pagefile
+                    // thrashing.
+                    let _slot = match gate_poll.try_enter() {
+                        Some(g) => g,
+                        None => {
+                            log_debug(
+                                "[POLL] skip tick: previous scan still in flight",
+                            );
+                            continue;
+                        }
+                    };
+                    let started = Instant::now();
                     incremental_rescan_and_emit(
                         &sources3, &app3, &sess3, &so3, &poll_source_indices,
                     );
+                    let elapsed = started.elapsed();
+                    if elapsed > Duration::from_secs(30) {
+                        log_debug(&format!(
+                            "[POLL] scan slow: took {}s",
+                            elapsed.as_secs()
+                        ));
+                    }
                     detect_waiting_transitions(
                         &sess3,
                         &mut prev_statuses,
@@ -2940,5 +3016,53 @@ mod tests {
                 target
             );
         }
+    }
+
+    // ── ScanGate ────────────────────────────────────────────────────────────
+
+    #[test]
+    fn scan_gate_blocks_second_entrant_until_first_drops() {
+        let gate = ScanGate::new();
+        let first = gate.try_enter().expect("first try_enter must succeed");
+        assert!(
+            gate.try_enter().is_none(),
+            "second try_enter must fail while first guard is held"
+        );
+        drop(first);
+        assert!(
+            gate.try_enter().is_some(),
+            "try_enter must succeed once the prior guard drops"
+        );
+    }
+
+    #[test]
+    fn scan_gate_never_admits_two_at_once_under_contention() {
+        // Mimics the Windows pathology: many threads racing into the gate
+        // while one is already holding it. The contract is "at any instant
+        // ≤ 1 guard exists". We track concurrent guard count and assert
+        // it never exceeds 1 across all racing threads.
+        use std::sync::atomic::AtomicUsize;
+        let gate = Arc::new(ScanGate::new());
+        let concurrent = Arc::new(AtomicUsize::new(0));
+        let peak = Arc::new(AtomicUsize::new(0));
+        let mut handles = Vec::new();
+        for _ in 0..32 {
+            let g = gate.clone();
+            let c = concurrent.clone();
+            let p = peak.clone();
+            handles.push(std::thread::spawn(move || {
+                if let Some(_slot) = g.try_enter() {
+                    let now = c.fetch_add(1, Ordering::SeqCst) + 1;
+                    p.fetch_max(now, Ordering::SeqCst);
+                    std::thread::sleep(Duration::from_millis(20));
+                    c.fetch_sub(1, Ordering::SeqCst);
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(peak.load(Ordering::SeqCst), 1, "gate let two scans run at once");
+        assert!(gate.try_enter().is_some(), "gate must be free after all contenders exit");
     }
 }
