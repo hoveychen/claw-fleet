@@ -219,6 +219,11 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         }
         if !crate::consumer_heartbeat::consumer_status(liveness).is_alive() {
             crate::mcp_ipc::cleanup(&request_id);
+            persist_fleet_ask_history(
+                &req,
+                crate::decision_history::FleetAskOutcome::HeartbeatLost,
+                std::collections::BTreeMap::new(),
+            );
             return Ok(tool_error(
                 "Fleet consumer heartbeat lost while waiting for your answer.".into(),
             ));
@@ -229,6 +234,11 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     crate::mcp_ipc::cleanup(&request_id);
 
     let Some(resp) = response else {
+        persist_fleet_ask_history(
+            &req,
+            crate::decision_history::FleetAskOutcome::Timeout,
+            std::collections::BTreeMap::new(),
+        );
         return Ok(tool_error(format!(
             "No response from Fleet after {}s.",
             timeout.as_secs()
@@ -236,10 +246,21 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     };
 
     if resp.cancelled {
+        persist_fleet_ask_history(
+            &req,
+            crate::decision_history::FleetAskOutcome::Cancelled,
+            std::collections::BTreeMap::new(),
+        );
         return Ok(tool_error(
             "User cancelled the fleet__ask Decision Card.".into(),
         ));
     }
+
+    persist_fleet_ask_history(
+        &req,
+        crate::decision_history::FleetAskOutcome::Answered,
+        resp.answers.clone(),
+    );
 
     // Pack answers as JSON so the agent can parse structured form values.
     let answers_json = serde_json::to_string(&resp.answers).unwrap_or_else(|_| "{}".into());
@@ -251,6 +272,27 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         "structuredContent": { "answers": resp.answers },
         "isError": false,
     }))
+}
+
+/// Best-effort persistence of a resolved fleet__ask card into the per-session
+/// decision history JSONL. Failures only log — the agent's tool response is
+/// the authoritative output and must not block on a disk hiccup.
+fn persist_fleet_ask_history(
+    req: &crate::mcp_ipc::FleetAskRequest,
+    outcome: crate::decision_history::FleetAskOutcome,
+    answers: std::collections::BTreeMap<String, String>,
+) {
+    let rec = crate::decision_history::build_fleet_ask_record(
+        req,
+        outcome,
+        answers,
+        chrono::Utc::now().to_rfc3339(),
+    );
+    if let Err(e) =
+        crate::decision_history::append_record(&crate::decision_history::DecisionHistoryRecord::FleetAsk(rec))
+    {
+        eprintln!("decision_history append (fleet__ask): {e}");
+    }
 }
 
 fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {

@@ -289,9 +289,11 @@
     "kind_ask": "提问",
     "kind_plan": "计划",
     "kind_user": "我说",
+    "kind_fleet_ask": "提问 v2",
     "outcome": {
       "answered": "已回答",
       "declined": "已拒绝",
+      "cancelled": "已取消",
       "timeout": "已超时",
       "heartbeat-lost": "桌面端掉线",
       "approved": "已批准",
@@ -302,6 +304,8 @@
     "edited_plan": "改写后的计划：",
     "feedback": "反馈：{{text}}",
     "has_image": "（含粘贴的截图）",
+    "fleet_ask_html_marker": "［显示过 HTML 预览］",
+    "fleet_ask_attachments": "附件：{{paths}}",
     "empty": "本次会话还没有决策或提示。"
   },
   "audit": {

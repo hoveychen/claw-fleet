@@ -6,6 +6,7 @@ import { safeMarkdownComponents, safeRemarkPlugins } from "../markdown/safeLinks
 import type {
   DecisionHistoryRecord,
   ElicitationHistoryRecord,
+  FleetAskHistoryRecord,
   PlanApprovalHistoryRecord,
   UserPromptHistoryRecord,
 } from "../types";
@@ -46,6 +47,7 @@ function outcomeClass(outcome: string): string {
     case "answered":
       return styles.outcome_answered;
     case "declined":
+    case "cancelled":
       return styles.outcome_declined;
     case "timeout":
       return styles.outcome_timeout;
@@ -176,10 +178,131 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
   );
 }
 
+/**
+ * Render a v2 fleet__ask history record. Mirrors ElicitationBody's shape
+ * (question + option highlight + "Other" treatment) and additionally
+ * surfaces form-field answers and `@path` attachment mentions. The
+ * original `html` field is shown as a plain "[HTML preview was shown]"
+ * marker — we deliberately do NOT re-render it as a sandboxed iframe in
+ * history view to avoid replaying arbitrary HTML the agent emitted.
+ */
+function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
+  const { t } = useTranslation();
+  // Pull `@path` mention suffixes off the answer string so the option
+  // matcher below sees just the option label / "Other" text.
+  const splitAttachments = (raw: string): { core: string; paths: string[] } => {
+    const tokens = raw.trim().split(/\s+/);
+    const paths: string[] = [];
+    const kept: string[] = [];
+    for (const tok of tokens) {
+      if (tok.startsWith("@/") || tok.startsWith("@~")) paths.push(tok.slice(1));
+      else kept.push(tok);
+    }
+    return { core: kept.join(" "), paths };
+  };
+
+  return (
+    <div className={styles.body}>
+      {rec.questions.map((q, qi) => {
+        const rawAnswer = rec.answers[q.question] ?? "";
+        const { core: answerCore, paths } = splitAttachments(rawAnswer);
+        const knownLabels = new Set((q.options ?? []).map((o) => o.label));
+        const selectedLabels = answerCore
+          .split(",")
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+        // "Other" appears when the user typed text that doesn't match any
+        // existing option label (or when there are no options at all and
+        // only formFields / attachments are present).
+        const isOther =
+          answerCore.length > 0 &&
+          (knownLabels.size === 0 || selectedLabels.some((s) => !knownLabels.has(s)));
+
+        return (
+          <div key={qi} className={styles.question_block}>
+            <div className={styles.question_text}>
+              <ReactMarkdown
+                remarkPlugins={safeRemarkPlugins}
+                components={safeMarkdownComponents}
+              >
+                {q.question}
+              </ReactMarkdown>
+            </div>
+            {q.html && (
+              <div className={styles.option_desc}>
+                {t("decision_history.fleet_ask_html_marker", "[HTML preview was shown]")}
+              </div>
+            )}
+            {(q.options ?? []).map((opt, oi) => {
+              const isSelected = !isOther && selectedLabels.includes(opt.label);
+              return (
+                <div
+                  key={oi}
+                  className={`${styles.option} ${isSelected ? styles.option_selected : ""}`}
+                >
+                  <span className={styles.option_label}>
+                    <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
+                    <ReactMarkdown
+                      remarkPlugins={safeRemarkPlugins}
+                      components={inlineMarkdownComponents}
+                    >
+                      {opt.label}
+                    </ReactMarkdown>
+                  </span>
+                  {opt.description && (
+                    <span className={styles.option_desc}>
+                      <ReactMarkdown
+                        remarkPlugins={safeRemarkPlugins}
+                        components={inlineMarkdownComponents}
+                      >
+                        {opt.description}
+                      </ReactMarkdown>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {isOther && answerCore && (
+              <div className={`${styles.option} ${styles.option_selected}`}>
+                <span className={styles.option_label}>
+                  <span className={styles.option_marker}>✓</span>
+                  {t("decision_history.other_label")}
+                </span>
+                <span className={styles.option_desc}>{answerCore}</span>
+              </div>
+            )}
+            {(q.formFields ?? []).map((f, fi) => {
+              const v = rec.answers[f.name];
+              if (v === undefined || v === "") return null;
+              return (
+                <div key={`f-${fi}`} className={`${styles.option} ${styles.option_selected}`}>
+                  <span className={styles.option_label}>
+                    <span className={styles.option_marker}>▸</span>
+                    {f.label || f.name}
+                  </span>
+                  <span className={styles.option_desc}>{v}</span>
+                </div>
+              );
+            })}
+            {paths.length > 0 && (
+              <div className={styles.option_desc}>
+                {t("decision_history.fleet_ask_attachments", {
+                  defaultValue: "Attachments: {{paths}}",
+                  paths: paths.join(", "),
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function recordSummary(rec: DecisionHistoryRecord): string {
-  if (rec.kind === "elicitation") {
+  if (rec.kind === "elicitation" || rec.kind === "fleet-ask") {
     const first = rec.questions[0];
-    if (!first) return "AskUserQuestion";
+    if (!first) return rec.kind === "fleet-ask" ? "fleet__ask" : "AskUserQuestion";
     // Strip the "Speech Summary Divider" preamble if present.
     const body = first.question;
     const m = body.match(/^\s*---\s*$/m);
@@ -229,10 +352,13 @@ export function DecisionHistory({ records, mode = "inline" }: Props) {
             const open = openId === rec.id;
             const isPlan = rec.kind === "plan-approval";
             const isUser = rec.kind === "user-prompt";
+            const isFleetAsk = rec.kind === "fleet-ask";
             const kindKey = isUser
               ? "decision_history.kind_user"
               : isPlan
               ? "decision_history.kind_plan"
+              : isFleetAsk
+              ? "decision_history.kind_fleet_ask"
               : "decision_history.kind_ask";
             const kindClass = isUser
               ? styles.kind_chip_user
@@ -249,13 +375,13 @@ export function DecisionHistory({ records, mode = "inline" }: Props) {
                   onClick={() => setOpenId(open ? null : rec.id)}
                 >
                   <span className={`${styles.kind_chip} ${kindClass}`}>
-                    {t(kindKey)}
+                    {t(kindKey, isFleetAsk ? { defaultValue: "fleet__ask" } : undefined)}
                   </span>
                   {!isUser && (
                     <span
                       className={`${styles.outcome_chip} ${outcomeClass(rec.outcome)}`}
                     >
-                      {t(`decision_history.outcome.${rec.outcome}`)}
+                      {t(`decision_history.outcome.${rec.outcome}`, isFleetAsk && rec.outcome === "cancelled" ? { defaultValue: "Cancelled" } : undefined)}
                     </span>
                   )}
                   <span className={styles.summary}>{recordSummary(rec)}</span>
@@ -264,6 +390,7 @@ export function DecisionHistory({ records, mode = "inline" }: Props) {
                 {open && rec.kind === "elicitation" && <ElicitationBody rec={rec} />}
                 {open && rec.kind === "plan-approval" && <PlanApprovalBody rec={rec} />}
                 {open && rec.kind === "user-prompt" && <UserPromptBody rec={rec} />}
+                {open && rec.kind === "fleet-ask" && <FleetAskBody rec={rec} />}
               </div>
             );
           })}
