@@ -45,7 +45,7 @@ pub mod openclaw_source;
 pub mod pattern_update;
 pub mod permissions_injector;
 pub mod phase_detector;
-pub mod process_util;
+pub use claw_fleet_task::process_util;
 pub use claw_fleet_task::actions;
 pub use claw_fleet_task::paths;
 pub use claw_fleet_task::pitem;

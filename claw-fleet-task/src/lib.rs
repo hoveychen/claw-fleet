@@ -1,4 +1,5 @@
 pub mod console;
+pub mod process_util;
 pub mod paths;
 pub mod dag;
 pub mod pitem;
