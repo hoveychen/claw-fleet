@@ -13,6 +13,7 @@ import { WaitingAlerts } from "./components/WaitingAlerts";
 import { DecisionPanel } from "./components/DecisionPanel";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { Wizard } from "./components/Wizard";
+import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
 import { useRuntimeTasksStore } from "./runtimeTasksStore";
@@ -72,7 +73,6 @@ function App() {
     prevShouldShow.current = shouldShow;
   }, [mainMinimized, floatingDecisionPanel, decisions]);
 
-  const [isMacOS, setIsMacOS] = useState(false);
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
     const dismissed = !!getItem(ONBOARDING_DISMISSED_KEY);
     if (!dismissed) return "full";
@@ -82,10 +82,14 @@ function App() {
   });
   const [showWizard, setShowWizard] = useState(false);
 
+  // Drag bar / caption buttons now switch off the host classes set in
+  // main.tsx (`tauri-host` + `os-windows` / `os-macos`); we still need
+  // backend confirmation of the OS to apply macOS-only window tweaks
+  // (clearing the title, setting [data-platform="macos"] for legacy
+  // module-CSS selectors).
   useEffect(() => {
     invoke<string>("get_platform").then((p) => {
       if (p === "macos") {
-        setIsMacOS(true);
         getCurrentWindow().setTitle("").catch(() => {});
         document.documentElement.setAttribute("data-platform", "macos");
       }
@@ -281,7 +285,7 @@ function App() {
   if (!connection) {
     return (
       <div className="app">
-        {isMacOS && !liteMode && <div className="drag_bar" data-tauri-drag-region />}
+        <WindowsFrameOverlay />
         <ConnectionDialog onConnected={handleConnected} />
       </div>
     );
@@ -290,6 +294,7 @@ function App() {
   if (liteMode) {
     return (
       <div className="app">
+        <WindowsFrameOverlay />
         <LiteApp />
         <WaitingAlerts />
       </div>
@@ -298,7 +303,7 @@ function App() {
 
   return (
     <div className="app">
-      {isMacOS && <div className="drag_bar" data-tauri-drag-region />}
+      <WindowsFrameOverlay />
       {onboardingMode && <Onboarding mode={onboardingMode} onDismiss={finishOnboarding} />}
       {showWizard && <Wizard onDone={dismissWizard} />}
       <div className="app_main">
