@@ -8,7 +8,7 @@
 //! timeout, declined, heartbeat lost) is observed, before the request file is
 //! cleaned up.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::elicitation::{ElicitationOption, ElicitationQuestion, ElicitationRequest};
+use crate::mcp_ipc::{FleetAskQuestion, FleetAskRequest};
 use crate::plan_approval::{PlanApprovalRequest, PlanApprovalResponse};
 
 // ── Outcome enums ────────────────────────────────────────────────────────────
@@ -42,6 +43,20 @@ pub enum PlanApprovalOutcome {
     ApprovedWithEdits,
     Rejected,
     HeartbeatLost,
+    Timeout,
+}
+
+/// Terminal outcome of a fleet__ask card.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum FleetAskOutcome {
+    /// User submitted answers via the Decision Panel. `answers` is populated.
+    Answered,
+    /// User clicked Cancel.
+    Cancelled,
+    /// Desktop consumer disappeared mid-flight.
+    HeartbeatLost,
+    /// Configured wait_seconds elapsed without any response.
     Timeout,
 }
 
@@ -77,6 +92,7 @@ pub enum DecisionHistoryRecord {
     Elicitation(ElicitationRecord),
     PlanApproval(PlanApprovalRecord),
     UserPrompt(UserPromptRecord),
+    FleetAsk(FleetAskRecord),
 }
 
 /// A real user-typed prompt extracted from the session JSONL.
@@ -124,6 +140,36 @@ pub struct ElicitationRecord {
     pub answers: HashMap<String, SelectedOption>,
 }
 
+/// Persisted shape of a resolved `fleet__ask` card. Mirrors the v2 MCP-IPC
+/// `FleetAskRequest` + `FleetAskResponse` so the history view can reconstruct
+/// what the user saw and what they submitted.
+///
+/// `answers` is the same flat map the response file carries: a question's
+/// text → user's option / "Other" string (possibly with `@path` mention
+/// suffixes from attachments), and each form-field's `name` → value. The
+/// namespace overlap is benign in practice because question text is prose
+/// and field names are identifiers.
+///
+/// The card may have shown sandboxed HTML at render time; the original HTML
+/// content is preserved on each question so the record stays self-contained,
+/// but the history viewer must NOT re-render it as an iframe — display only
+/// an "[HTML preview was shown]" marker.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct FleetAskRecord {
+    pub id: String,
+    pub session_id: String,
+    pub workspace_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_title: Option<String>,
+    pub requested_at: String,
+    pub resolved_at: String,
+    pub outcome: FleetAskOutcome,
+    pub questions: Vec<FleetAskQuestion>,
+    #[serde(default)]
+    pub answers: BTreeMap<String, String>,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct PlanApprovalRecord {
@@ -152,6 +198,7 @@ impl DecisionHistoryRecord {
             DecisionHistoryRecord::Elicitation(r) => &r.session_id,
             DecisionHistoryRecord::PlanApproval(r) => &r.session_id,
             DecisionHistoryRecord::UserPrompt(r) => &r.session_id,
+            DecisionHistoryRecord::FleetAsk(r) => &r.session_id,
         }
     }
 
@@ -161,6 +208,7 @@ impl DecisionHistoryRecord {
             DecisionHistoryRecord::Elicitation(r) => &r.id,
             DecisionHistoryRecord::PlanApproval(r) => &r.id,
             DecisionHistoryRecord::UserPrompt(r) => &r.id,
+            DecisionHistoryRecord::FleetAsk(r) => &r.id,
         }
     }
 }
@@ -256,6 +304,34 @@ pub fn build_plan_approval_record(
     }
 }
 
+/// Build a fleet__ask record. `answers` is the flat map from the response
+/// file (empty for non-Answered outcomes). The original request's questions
+/// are cloned so the history view stays self-contained even if the schema
+/// changes later.
+pub fn build_fleet_ask_record(
+    req: &FleetAskRequest,
+    outcome: FleetAskOutcome,
+    answers: BTreeMap<String, String>,
+    resolved_at: String,
+) -> FleetAskRecord {
+    let answers = if matches!(outcome, FleetAskOutcome::Answered) {
+        answers
+    } else {
+        BTreeMap::new()
+    };
+    FleetAskRecord {
+        id: req.id.clone(),
+        session_id: req.session_id.clone(),
+        workspace_name: req.workspace_name.clone(),
+        ai_title: req.ai_title.clone(),
+        requested_at: req.timestamp.clone(),
+        resolved_at,
+        outcome,
+        questions: req.questions.clone(),
+        answers,
+    }
+}
+
 // ── Storage ──────────────────────────────────────────────────────────────────
 
 fn history_dir() -> Option<PathBuf> {
@@ -344,6 +420,7 @@ fn record_sort_ts(r: &DecisionHistoryRecord) -> &str {
         DecisionHistoryRecord::Elicitation(e) => &e.requested_at,
         DecisionHistoryRecord::PlanApproval(p) => &p.requested_at,
         DecisionHistoryRecord::UserPrompt(u) => &u.sent_at,
+        DecisionHistoryRecord::FleetAsk(f) => &f.requested_at,
     }
 }
 
@@ -770,5 +847,162 @@ mod tests {
 
         let records = list_session_records("ssn");
         assert_eq!(records.len(), 1);
+    }
+
+    // ── FleetAsk record fixtures + tests ─────────────────────────────────
+
+    fn sample_fleet_ask_request(session_id: &str, id: &str) -> FleetAskRequest {
+        use crate::mcp_ipc::{FleetAskOption, FormFieldKind};
+        FleetAskRequest {
+            id: id.into(),
+            session_id: session_id.into(),
+            workspace_name: "claude-fleet".into(),
+            ai_title: Some("v2 test".into()),
+            timestamp: "2026-05-28T00:00:00Z".into(),
+            questions: vec![FleetAskQuestion {
+                question: "Pick or fill?".into(),
+                header: "Mix".into(),
+                multi_select: false,
+                options: vec![FleetAskOption {
+                    label: "A".into(),
+                    description: "the first".into(),
+                    preview: None,
+                }],
+                html: Some("<p>preview</p>".into()),
+                form_fields: vec![crate::mcp_ipc::FleetAskFormField {
+                    name: "note".into(),
+                    kind: FormFieldKind::Text,
+                    label: "Note".into(),
+                    placeholder: None,
+                    options: vec![],
+                    required: false,
+                    default: None,
+                    min: None,
+                    max: None,
+                    step: None,
+                }],
+            }],
+        }
+    }
+
+    #[test]
+    fn fleet_ask_record_round_trip_preserves_html_and_form_fields() {
+        let req = sample_fleet_ask_request("ssn", "card-7");
+        let mut answers = BTreeMap::new();
+        answers.insert("Pick or fill?".into(), "A".into());
+        answers.insert("note".into(), "hello world".into());
+        let rec = build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::Answered,
+            answers,
+            "2026-05-28T00:00:05Z".into(),
+        );
+        let wrapped = DecisionHistoryRecord::FleetAsk(rec);
+        let line = serde_json::to_string(&wrapped).unwrap();
+        let back: DecisionHistoryRecord = serde_json::from_str(&line).unwrap();
+        match back {
+            DecisionHistoryRecord::FleetAsk(r) => {
+                assert_eq!(r.id, "card-7");
+                assert_eq!(r.outcome, FleetAskOutcome::Answered);
+                assert_eq!(r.answers.get("note"), Some(&"hello world".to_string()));
+                assert_eq!(r.questions[0].html.as_deref(), Some("<p>preview</p>"));
+                assert_eq!(r.questions[0].form_fields.len(), 1);
+            }
+            other => panic!("expected FleetAsk variant, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fleet_ask_record_drops_answers_on_non_answered_outcome() {
+        let req = sample_fleet_ask_request("ssn", "card-8");
+        let mut answers = BTreeMap::new();
+        answers.insert("Pick or fill?".into(), "A".into());
+        let rec = build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::Cancelled,
+            answers.clone(),
+            "2026-05-28T00:00:06Z".into(),
+        );
+        assert!(rec.answers.is_empty(), "cancelled should not retain answers");
+
+        let rec_hbl = build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::HeartbeatLost,
+            answers.clone(),
+            "2026-05-28T00:00:07Z".into(),
+        );
+        assert!(rec_hbl.answers.is_empty());
+
+        let rec_to = build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::Timeout,
+            answers,
+            "2026-05-28T00:00:08Z".into(),
+        );
+        assert!(rec_to.answers.is_empty());
+    }
+
+    #[test]
+    fn fleet_ask_record_persists_and_lists() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = temp_dir("fleet-ask-persist");
+        let _home = FleetHomeOverride::new(&tmp);
+
+        let req = sample_fleet_ask_request("ssn-v2", "card-9");
+        let mut answers = BTreeMap::new();
+        answers.insert("Pick or fill?".into(), "A".into());
+        let rec = build_fleet_ask_record(
+            &req,
+            FleetAskOutcome::Answered,
+            answers,
+            "2026-05-28T00:00:09Z".into(),
+        );
+        append_record(&DecisionHistoryRecord::FleetAsk(rec)).unwrap();
+
+        let listed = list_session_records("ssn-v2");
+        assert_eq!(listed.len(), 1);
+        match &listed[0] {
+            DecisionHistoryRecord::FleetAsk(r) => assert_eq!(r.id, "card-9"),
+            other => panic!("expected FleetAsk, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn fleet_ask_record_mixes_with_other_kinds_on_timeline() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = temp_dir("fleet-ask-mixed");
+        let _home = FleetHomeOverride::new(&tmp);
+
+        // v1 elicitation first, then a v2 fleet-ask later — both should
+        // come back oldest-first from list_session_records().
+        let elic_req = sample_request("ssn-mix", "elic-1");
+        let elic_rec = build_elicitation_record(
+            &elic_req,
+            ElicitationOutcome::Declined,
+            &HashMap::new(),
+            "2026-05-28T00:00:01Z".into(),
+        );
+        append_record(&DecisionHistoryRecord::Elicitation(elic_rec)).unwrap();
+
+        let fa_req = FleetAskRequest {
+            id: "fa-1".into(),
+            session_id: "ssn-mix".into(),
+            workspace_name: "claude-fleet".into(),
+            ai_title: None,
+            timestamp: "2026-05-28T00:00:02Z".into(),
+            questions: vec![],
+        };
+        let fa_rec = build_fleet_ask_record(
+            &fa_req,
+            FleetAskOutcome::Cancelled,
+            BTreeMap::new(),
+            "2026-05-28T00:00:03Z".into(),
+        );
+        append_record(&DecisionHistoryRecord::FleetAsk(fa_rec)).unwrap();
+
+        let listed = list_session_records("ssn-mix");
+        assert_eq!(listed.len(), 2);
+        assert_eq!(listed[0].id(), "elic-1");
+        assert_eq!(listed[1].id(), "fa-1");
     }
 }
