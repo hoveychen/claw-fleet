@@ -1330,7 +1330,7 @@ fn ssh_exec(conn: &RemoteConnection, remote_cmd: &str) -> Result<String, String>
     let mut args = base_ssh_args(conn);
     args.push(remote_cmd.to_string());
 
-    let mut cmd = std::process::Command::new("ssh");
+    let mut cmd = claw_fleet_core::process_util::command("ssh");
     cmd.args(&args);
     apply_real_home(&mut cmd);
     let output = cmd.output()
@@ -1537,7 +1537,7 @@ fn connect_remote_impl(
             scp_args.push(bin.to_string_lossy().to_string());
             scp_args.push(format!("{}:{}", scp_target(&conn), remote_fleet_path()));
 
-            let mut scp_cmd = std::process::Command::new("scp");
+            let mut scp_cmd = claw_fleet_core::process_util::command("scp");
             scp_cmd.args(&scp_args);
             apply_real_home(&mut scp_cmd);
             let scp_out = scp_cmd.output()
@@ -1672,7 +1672,7 @@ fn connect_remote_start_probe(
         tunnel_args.push(format!("{}@{}", conn.username, conn.host));
     }
 
-    let mut tunnel_cmd = std::process::Command::new("ssh");
+    let mut tunnel_cmd = claw_fleet_core::process_util::command("ssh");
     tunnel_cmd
         .args(&tunnel_args)
         .stdout(std::process::Stdio::null())

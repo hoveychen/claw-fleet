@@ -548,7 +548,7 @@ fn open_notification_settings() {
     }
     #[cfg(target_os = "windows")]
     {
-        let _ = std::process::Command::new("cmd")
+        let _ = claw_fleet_core::process_util::command("cmd")
             .args(["/C", "start", "ms-settings:notifications"])
             .spawn();
     }
