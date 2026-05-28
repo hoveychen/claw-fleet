@@ -298,7 +298,7 @@ fn play_mp3_bytes(bytes: &[u8]) -> Result<(), String> {
 /// Fallback TTS via macOS `say` command.
 fn speak_with_say(text: &str, voice: Option<&str>, locale: Option<&str>) {
     log_debug(&format!("[tts] falling back to macOS say command"));
-    let mut cmd = std::process::Command::new("say");
+    let mut cmd = claw_fleet_core::process_util::command("say");
     if let Some(v) = voice.filter(|v| !v.is_empty()) {
         cmd.args(["--voice", v]);
     } else {
