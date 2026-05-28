@@ -292,9 +292,11 @@
     "kind_ask": "Ask",
     "kind_plan": "Plan",
     "kind_user": "You",
+    "kind_fleet_ask": "Ask v2",
     "outcome": {
       "answered": "answered",
       "declined": "declined",
+      "cancelled": "cancelled",
       "timeout": "timeout",
       "heartbeat-lost": "heartbeat lost",
       "approved": "approved",
@@ -305,6 +307,8 @@
     "edited_plan": "Edited plan:",
     "feedback": "Feedback: {{text}}",
     "has_image": "(includes pasted image)",
+    "fleet_ask_html_marker": "[HTML preview was shown]",
+    "fleet_ask_attachments": "Attachments: {{paths}}",
     "empty": "No decisions or prompts yet for this session."
   },
   "audit": {
