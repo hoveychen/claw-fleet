@@ -13,6 +13,7 @@
   align-items: center;
   gap: 16px;
   padding: 14px 20px 12px;
+  padding-right: calc(20px + var(--win-caption-inset-x));
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
