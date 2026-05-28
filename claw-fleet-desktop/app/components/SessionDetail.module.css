@@ -44,6 +44,14 @@
   gap: 6px;
 }
 
+/* Windows frameless: leave room on the right for the three caption
+   buttons drawn by <WindowsFrameOverlay> (3 × 46px). Skipped for the
+   inline (lite) form because the lite drag bar already accounts for
+   the buttons and SessionDetail then sits below it. */
+.root:not(.inline) .header {
+  padding-right: calc(16px + var(--win-caption-inset-x));
+}
+
 .header_row {
   display: flex;
   align-items: center;
