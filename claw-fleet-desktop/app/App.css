@@ -8,6 +8,14 @@ html, body, #root {
   overflow: hidden;
 }
 
+/* Width to reserve on the right edge of any top toolbar / header so the
+   Windows caption buttons drawn by <WindowsFrameOverlay> never sit on
+   top of an interactive control. 0px everywhere except Windows so the
+   same `padding-right: calc(20px + var(--win-caption-inset-x))` lines
+   in component module CSS stay no-ops on other platforms. */
+:root { --win-caption-inset-x: 0px; }
+html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
+
 /* ── CSS variables (dark theme) ───────────────────────────────────────────── */
 :root,
 [data-theme="dark"] {

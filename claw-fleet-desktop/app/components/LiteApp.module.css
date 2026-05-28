@@ -29,8 +29,8 @@
 
 /* Leave room for Windows caption buttons (3 × 46px) drawn by
    <WindowsFrameOverlay> at top-right. */
-:global(html.os-windows) .drag_bar {
-  padding-right: 144px;
+.drag_bar {
+  padding-right: calc(8px + var(--win-caption-inset-x));
 }
 
 .drag_title {
