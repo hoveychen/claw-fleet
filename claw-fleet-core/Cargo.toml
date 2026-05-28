@@ -28,6 +28,9 @@ ctrlc = { version = "3", features = ["termination"] }
 git2 = { version = "0.18", default-features = false }
 claw-fleet-task = { path = "../claw-fleet-task" }
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
+
 [dev-dependencies]
 tempfile = "3"
 serde_yaml = "0.9"
