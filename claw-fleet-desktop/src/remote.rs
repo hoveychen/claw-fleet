@@ -21,6 +21,7 @@ use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::process_ext::NoWindowExt;
 use crate::session::SessionInfo;
 
 // ── Saved-connection record ───────────────────────────────────────────────────
@@ -1321,7 +1322,7 @@ fn ssh_exec(conn: &RemoteConnection, remote_cmd: &str) -> Result<String, String>
     args.push(remote_cmd.to_string());
 
     let mut cmd = std::process::Command::new("ssh");
-    cmd.args(&args);
+    cmd.no_window().args(&args);
     apply_real_home(&mut cmd);
     let output = cmd.output()
         .map_err(|e| format!("ssh exec failed: {e}"))?;
@@ -1528,7 +1529,7 @@ fn connect_remote_impl(
             scp_args.push(format!("{}:{}", scp_target(&conn), remote_fleet_path()));
 
             let mut scp_cmd = std::process::Command::new("scp");
-            scp_cmd.args(&scp_args);
+            scp_cmd.no_window().args(&scp_args);
             apply_real_home(&mut scp_cmd);
             let scp_out = scp_cmd.output()
                 .map_err(|e| format!("scp failed: {e}"))?;
@@ -1664,6 +1665,7 @@ fn connect_remote_start_probe(
 
     let mut tunnel_cmd = std::process::Command::new("ssh");
     tunnel_cmd
+        .no_window()
         .args(&tunnel_args)
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());

@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
+use claw_fleet_core::process_ext::NoWindowExt;
 use claw_fleet_core::registry;
 
 /// Locate the `fleet-task` binary next to the desktop executable
@@ -66,6 +67,7 @@ pub fn spawn_fleet_task_resume(
 ) -> Result<registry::RegistryEntry, SpawnError> {
     let bin = resolve_fleet_task_binary().ok_or(SpawnError::BinaryMissing)?;
     Command::new(&bin)
+        .no_window()
         .arg("resume")
         .arg(task_id)
         .arg("--workspace")

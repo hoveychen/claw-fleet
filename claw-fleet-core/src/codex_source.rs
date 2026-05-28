@@ -28,6 +28,7 @@ use serde_json::{json, Value};
 
 use crate::agent_source::{AgentSource, WatchStrategy};
 use crate::backend::SourceUsageSummary;
+use crate::process_ext::NoWindowExt;
 use crate::session::{SessionInfo, SessionStatus, compute_context_percent};
 
 /// URI prefix for Codex session identifiers.
@@ -1851,6 +1852,7 @@ fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageIt
     use std::io::{BufRead, BufReader, Write};
 
     let mut child = std::process::Command::new(bin)
+        .no_window()
         .arg("app-server")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

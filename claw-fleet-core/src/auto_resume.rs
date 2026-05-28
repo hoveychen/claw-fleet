@@ -11,6 +11,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::process_ext::NoWindowExt;
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoResumeConfig {
@@ -145,6 +147,7 @@ fn spawn_resume_with_path(
         .map_err(|e| format!("reopen stderr log {}: {}", stderr_log.display(), e))?;
 
     let mut child = std::process::Command::new(claude_path)
+        .no_window()
         .arg("--resume")
         .arg(session_id)
         .arg("-p")

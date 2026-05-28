@@ -19,6 +19,8 @@ use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+use claw_fleet_core::process_ext::NoWindowExt;
+
 // ── Provider abstraction ────────────────────────────────────────────────────
 
 /// A backend that can establish a public-internet tunnel to a local port.
@@ -183,6 +185,7 @@ impl CloudflareTunnel {
         eprintln!("[tunnel] starting: {binary} tunnel --url http://127.0.0.1:{local_port}");
 
         let mut child = Command::new(binary)
+            .no_window()
             .args([
                 "tunnel",
                 "--protocol", "http2",
@@ -301,7 +304,7 @@ fn find_cloudflared() -> Option<String> {
     #[cfg(not(unix))]
     let which = "where";
 
-    match Command::new(which).arg("cloudflared").output() {
+    match Command::new(which).no_window().arg("cloudflared").output() {
         Ok(output) if output.status.success() => {
             // Windows `where` can return multiple lines (one per PATHEXT hit) with CRLF.
             // Take the first non-empty line.

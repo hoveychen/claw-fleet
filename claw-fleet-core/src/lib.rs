@@ -53,6 +53,7 @@ pub use claw_fleet_task::runner;
 pub mod plan_approval;
 pub mod plugins;
 pub mod prd_discipline;
+pub mod process_ext;
 pub mod project;
 pub mod supervisor;
 pub mod rate_limit_parser;
@@ -124,10 +125,11 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
 
     let openclaw = home.as_ref().map_or(false, |h| h.join(".openclaw").is_dir())
         || {
+            use crate::process_ext::NoWindowExt;
             #[cfg(unix)]
-            { std::process::Command::new("which").arg("openclaw").output().map_or(false, |o| o.status.success()) }
+            { std::process::Command::new("which").no_window().arg("openclaw").output().map_or(false, |o| o.status.success()) }
             #[cfg(not(unix))]
-            { std::process::Command::new("where").arg("openclaw").output().map_or(false, |o| o.status.success()) }
+            { std::process::Command::new("where").no_window().arg("openclaw").output().map_or(false, |o| o.status.success()) }
         };
 
     let jetbrains = sessions.iter().any(|s| {
@@ -154,10 +156,11 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
 
     let codex = home.as_ref().map_or(false, |h| h.join(".codex").is_dir())
         || {
+            use crate::process_ext::NoWindowExt;
             #[cfg(unix)]
-            { std::process::Command::new("which").arg("codex").output().map_or(false, |o| o.status.success()) }
+            { std::process::Command::new("which").no_window().arg("codex").output().map_or(false, |o| o.status.success()) }
             #[cfg(not(unix))]
-            { std::process::Command::new("where").arg("codex").output().map_or(false, |o| o.status.success()) }
+            { std::process::Command::new("where").no_window().arg("codex").output().map_or(false, |o| o.status.success()) }
         };
 
     let config = agent_source::SourcesConfig::load();

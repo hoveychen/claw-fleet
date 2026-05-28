@@ -11,6 +11,7 @@ use std::time::Duration;
 use serde::{Deserialize, Serialize};
 
 use crate::log_debug;
+use crate::process_ext::NoWindowExt;
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,6 +104,7 @@ pub fn kill_process(pid: u32) {
     #[cfg(windows)]
     {
         let _ = Command::new("taskkill")
+            .no_window()
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -118,7 +120,7 @@ fn resolve_binary(name: &str, extra_paths: &[&str]) -> Option<String> {
     #[cfg(not(unix))]
     let which = "where";
 
-    if let Ok(output) = Command::new(which).arg(name).output() {
+    if let Ok(output) = Command::new(which).no_window().arg(name).output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -159,6 +161,7 @@ fn run_cli(
     }).collect();
     log_debug(&format!("[{tag}] spawning: {bin} {}", safe_args.join(" ")));
     let child = match Command::new(bin)
+        .no_window()
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -401,7 +404,7 @@ impl LlmProvider for CursorCliProvider {
         //   model-id - Display Name
         //   model-id - Display Name  (default)
         // with ANSI escape codes mixed in.
-        let output = match Command::new(bin).arg("models").output() {
+        let output = match Command::new(bin).no_window().arg("models").output() {
             Ok(o) if o.status.success() => o,
             _ => return Vec::new(),
         };

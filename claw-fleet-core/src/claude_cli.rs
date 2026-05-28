@@ -21,6 +21,7 @@ use std::process::{Command, Stdio};
 use serde::{Deserialize, Serialize};
 
 use crate::claude_binary;
+use crate::process_ext::NoWindowExt;
 
 #[derive(Debug, Clone)]
 pub enum ClaudeCliError {
@@ -152,6 +153,7 @@ pub fn remove_marketplace(name: &str) -> Result<(), ClaudeCliError> {
 
 fn run_claude_silent(bin: &str, args: &[&str]) -> Result<(), ClaudeCliError> {
     let output = Command::new(bin)
+        .no_window()
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -170,6 +172,7 @@ fn run_claude_json<T: serde::de::DeserializeOwned>(
     args: &[&str],
 ) -> Result<T, ClaudeCliError> {
     let output = Command::new(bin)
+        .no_window()
         .args(args)
         .stdin(Stdio::null())
         .output()

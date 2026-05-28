@@ -14,6 +14,7 @@ use serde_json::Value;
 
 use crate::backend::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
+use crate::process_ext::NoWindowExt;
 use crate::session::SessionInfo;
 
 /// How a source should be monitored for changes.
@@ -252,9 +253,9 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
             let home = crate::session::real_home_dir();
             let cli_exists = {
                 #[cfg(unix)]
-                { std::process::Command::new("which").arg("claude").output().map_or(false, |o| o.status.success()) }
+                { std::process::Command::new("which").no_window().arg("claude").output().map_or(false, |o| o.status.success()) }
                 #[cfg(not(unix))]
-                { std::process::Command::new("where").arg("claude").output().map_or(false, |o| o.status.success()) }
+                { std::process::Command::new("where").no_window().arg("claude").output().map_or(false, |o| o.status.success()) }
             };
             cli_exists || home.as_ref().map_or(false, |h| h.join(".claude").is_dir())
         }),
@@ -266,9 +267,9 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
             home.as_ref().map_or(false, |h| h.join(".openclaw").is_dir())
                 || {
                     #[cfg(unix)]
-                    { std::process::Command::new("which").arg("openclaw").output().map_or(false, |o| o.status.success()) }
+                    { std::process::Command::new("which").no_window().arg("openclaw").output().map_or(false, |o| o.status.success()) }
                     #[cfg(not(unix))]
-                    { std::process::Command::new("where").arg("openclaw").output().map_or(false, |o| o.status.success()) }
+                    { std::process::Command::new("where").no_window().arg("openclaw").output().map_or(false, |o| o.status.success()) }
                 }
         }),
         ("codex", {
@@ -276,9 +277,9 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
             home.as_ref().map_or(false, |h| h.join(".codex").is_dir())
                 || {
                     #[cfg(unix)]
-                    { std::process::Command::new("which").arg("codex").output().map_or(false, |o| o.status.success()) }
+                    { std::process::Command::new("which").no_window().arg("codex").output().map_or(false, |o| o.status.success()) }
                     #[cfg(not(unix))]
-                    { std::process::Command::new("where").arg("codex").output().map_or(false, |o| o.status.success()) }
+                    { std::process::Command::new("where").no_window().arg("codex").output().map_or(false, |o| o.status.success()) }
                 }
         }),
     ];

@@ -17,6 +17,7 @@ use tauri::tray::TrayIconBuilder;
 
 use super::account::AccountInfo;
 use super::backend::Backend;
+use super::process_ext::NoWindowExt;
 use super::session::SessionInfo;
 use super::*;
 
@@ -549,6 +550,7 @@ fn open_notification_settings() {
     #[cfg(target_os = "windows")]
     {
         let _ = std::process::Command::new("cmd")
+            .no_window()
             .args(["/C", "start", "ms-settings:notifications"])
             .spawn();
     }

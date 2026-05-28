@@ -17,6 +17,7 @@ use serde_json::Value;
 
 use crate::agent_source::{AgentSource, WatchStrategy};
 use crate::backend::SourceUsageSummary;
+use crate::process_ext::NoWindowExt;
 use crate::session::{SessionInfo, SessionStatus, extract_last_context_usage, compute_context_percent};
 
 /// URI prefix for OpenClaw session identifiers.
@@ -723,7 +724,7 @@ fn find_openclaw_binary() -> Option<PathBuf> {
     #[cfg(not(unix))]
     let cmd = "where";
 
-    if let Ok(output) = std::process::Command::new(cmd).arg("openclaw").output() {
+    if let Ok(output) = std::process::Command::new(cmd).no_window().arg("openclaw").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -794,6 +795,7 @@ pub fn fetch_openclaw_account_blocking() -> Result<OpenClawAccountInfo, String> 
 
 fn fetch_openclaw_account_blocking_impl(bin: &Path) -> Result<OpenClawAccountInfo, String> {
     let output = std::process::Command::new(bin)
+        .no_window()
         .args(["models", "status", "--json"])
         .env("PATH", augmented_path())
         .stdout(std::process::Stdio::piped())
@@ -863,6 +865,7 @@ fn fetch_openclaw_account_blocking_impl(bin: &Path) -> Result<OpenClawAccountInf
 
     // Get version from the CLI
     let version = std::process::Command::new(bin)
+        .no_window()
         .args(["--version"])
         .env("PATH", augmented_path())
         .output()
@@ -894,6 +897,7 @@ pub fn fetch_openclaw_usage_blocking() -> Result<OpenClawUsageInfo, String> {
 
 fn fetch_openclaw_usage_blocking_impl(bin: &Path) -> Result<OpenClawUsageInfo, String> {
     let output = std::process::Command::new(bin)
+        .no_window()
         .args(["status", "--json"])
         .env("PATH", augmented_path())
         .stdout(std::process::Stdio::piped())
