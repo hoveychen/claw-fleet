@@ -75,6 +75,49 @@ fn open_cursor_db() -> Result<rusqlite::Connection, String> {
     Ok(conn)
 }
 
+/// Pull the `composerData:*` rows from cursorDiskKV whose `lastUpdatedAt`
+/// (or `createdAt` as fallback) is at or after `cutoff_ms`.
+///
+/// On Cursor installations with massive history `cursorDiskKV` can be 10 GB+
+/// and contains thousands of historical composers. Pulling them all into
+/// Rust just to throw out everything older than 7 days has caused Windows
+/// boxes to pagefile-thrash for 30+ minutes — the Rust process holds gigs
+/// of JSON strings while the webview (same process) starves. We push the
+/// time-window filter down to SQLite using JSON1's `json_extract` so the
+/// returned `Vec<String>` only contains rows we actually want.
+///
+/// If `json_extract` is unavailable in this SQLite build the function
+/// falls back to the unfiltered query — the caller still applies the same
+/// Rust-side window check, so the worst case matches the old behaviour
+/// rather than dropping recent rows.
+fn query_recent_composer_values(
+    conn: &rusqlite::Connection,
+    cutoff_ms: u64,
+) -> Result<Vec<String>, rusqlite::Error> {
+    const FILTERED_SQL: &str = "SELECT value FROM cursorDiskKV \
+        WHERE key LIKE 'composerData:%' \
+          AND COALESCE(\
+                CAST(json_extract(value, '$.lastUpdatedAt') AS INTEGER), \
+                CAST(json_extract(value, '$.createdAt') AS INTEGER), \
+                0\
+              ) >= ?1";
+    const FALLBACK_SQL: &str =
+        "SELECT value FROM cursorDiskKV WHERE key LIKE 'composerData:%'";
+
+    match conn.prepare(FILTERED_SQL) {
+        Ok(mut stmt) => {
+            let rows = stmt
+                .query_map(rusqlite::params![cutoff_ms as i64], |row| row.get::<_, String>(0))?;
+            Ok(rows.flatten().collect())
+        }
+        Err(_) => {
+            let mut stmt = conn.prepare(FALLBACK_SQL)?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+            Ok(rows.flatten().collect())
+        }
+    }
+}
+
 fn map_cursor_status(status: &str, last_updated_ms: u64) -> SessionStatus {
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -327,19 +370,13 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
         Err(_) => return vec![],
     };
 
-    let mut stmt = match conn.prepare(
-        "SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'"
-    ) {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64;
 
     let seven_days_ms = 7 * 24 * 3600 * 1000u64;
+    let cutoff_ms = now_ms.saturating_sub(seven_days_ms);
 
     // Track subagent IDs and parent mapping
     let mut subagent_ids: HashSet<String> = HashSet::new();
@@ -360,18 +397,10 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
 
     let mut composers: Vec<RawComposer> = Vec::new();
 
-    // Collect all values upfront to release the borrow on stmt/conn
-    let all_values: Vec<String> = {
-        let rows = match stmt.query_map([], |row| {
-            let value: String = row.get(1)?;
-            Ok(value)
-        }) {
-            Ok(r) => r,
-            Err(_) => return vec![],
-        };
-        rows.flatten().collect()
+    let all_values = match query_recent_composer_values(&conn, cutoff_ms) {
+        Ok(v) => v,
+        Err(_) => return vec![],
     };
-    drop(stmt);
     drop(conn);
 
     for row in &all_values {
@@ -1132,5 +1161,107 @@ impl AgentSource for CursorSource {
         let info = fetch_cursor_account_info_blocking().ok()?;
         let val = serde_json::to_value(&info).ok()?;
         Some(SourceUsageSummary::from_cursor(&val))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+
+    /// Build an in-memory cursorDiskKV table and seed it with composer rows.
+    /// `rows` is `(composer_id, last_updated_ms)`. lastUpdatedAt is stored
+    /// as a real JSON number so json_extract returns INTEGER, matching how
+    /// Cursor's better-sqlite3 writes the column.
+    fn seed_db(rows: &[(&str, u64)]) -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)",
+            [],
+        )
+        .unwrap();
+        for (id, last_updated) in rows {
+            let value = format!(
+                r#"{{"composerId":"{id}","status":"completed","createdAt":{last_updated},"lastUpdatedAt":{last_updated}}}"#,
+            );
+            conn.execute(
+                "INSERT INTO cursorDiskKV (key, value) VALUES (?1, ?2)",
+                rusqlite::params![format!("composerData:{id}"), value],
+            )
+            .unwrap();
+        }
+        conn
+    }
+
+    #[test]
+    fn query_recent_composer_values_pushes_window_down_to_sql() {
+        // Seed 100 old (30d ago) + 5 fresh (1d ago) composer rows.
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let one_day = 24 * 3600 * 1000u64;
+        let mut rows: Vec<(String, u64)> = (0..100)
+            .map(|i| (format!("old-{i}"), now_ms.saturating_sub(30 * one_day)))
+            .collect();
+        rows.extend(
+            (0..5).map(|i| (format!("new-{i}"), now_ms.saturating_sub(one_day))),
+        );
+        let row_refs: Vec<(&str, u64)> = rows.iter().map(|(id, ts)| (id.as_str(), *ts)).collect();
+        let conn = seed_db(&row_refs);
+
+        let cutoff = now_ms.saturating_sub(7 * one_day);
+        let returned = query_recent_composer_values(&conn, cutoff).unwrap();
+
+        assert_eq!(
+            returned.len(),
+            5,
+            "SQL-level filter must drop the 100 30-day-old rows; got {} rows back",
+            returned.len()
+        );
+        for v in &returned {
+            assert!(v.contains("\"composerId\":\"new-"), "old row leaked through: {v}");
+        }
+    }
+
+    #[test]
+    fn query_recent_composer_values_includes_row_at_cutoff_boundary() {
+        // Boundary check: a row whose lastUpdatedAt == cutoff must be kept.
+        let now_ms = 1_700_000_000_000u64;
+        let cutoff = 1_699_999_990_000u64;
+        let conn = seed_db(&[("on-boundary", cutoff), ("just-stale", cutoff - 1)]);
+        let returned = query_recent_composer_values(&conn, cutoff).unwrap();
+        assert_eq!(returned.len(), 1, "expected the on-boundary row, got: {returned:?}");
+        assert!(returned[0].contains("on-boundary"));
+        let _ = now_ms;
+    }
+
+    #[test]
+    fn query_recent_composer_values_falls_back_to_created_at_when_last_updated_missing() {
+        // Some composer rows in the wild lack lastUpdatedAt; the helper must
+        // fall back to createdAt (matching the Rust-side filter the caller used to do).
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute(
+            "CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)",
+            [],
+        )
+        .unwrap();
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        let one_day = 24 * 3600 * 1000u64;
+        let recent_created = now_ms.saturating_sub(one_day);
+        let value =
+            format!(r#"{{"composerId":"no-last","status":"completed","createdAt":{recent_created}}}"#);
+        conn.execute(
+            "INSERT INTO cursorDiskKV (key, value) VALUES ('composerData:no-last', ?1)",
+            rusqlite::params![value],
+        )
+        .unwrap();
+
+        let cutoff = now_ms.saturating_sub(7 * one_day);
+        let returned = query_recent_composer_values(&conn, cutoff).unwrap();
+        assert_eq!(returned.len(), 1, "createdAt fallback failed: {returned:?}");
     }
 }
