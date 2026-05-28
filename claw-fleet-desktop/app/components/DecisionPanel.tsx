@@ -452,7 +452,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           )}
           <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
         </div>
-        <OptionsBlock
+        <SharedOptionsBlock
           decisionId={decision.id}
           question={q}
           compact={compact}
@@ -530,9 +530,21 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   );
 }
 
+// Structural question shape that both ElicitationQuestion and FleetAskQuestion
+// satisfy. SharedOptionsBlock reads `question` (used as the store-map key),
+// `multiSelect`, and the options array — nothing else. Keeping the type local
+// means we don't have to widen the option shape across both decision flows.
+interface SharedOptionsQuestion {
+  question: string;
+  multiSelect: boolean;
+  options: Array<{ label: string; description: string; preview?: string }>;
+}
+
 // Renders the option list + "Other" input. Splits into side-by-side layout
 // when any option carries a preview (single-select only, per AskUserQuestion spec).
-function OptionsBlock({
+// Shared between ElicitationCard (v1) and FleetAskCard (v2) — both pass their
+// own store actions in via callbacks, so the same UI surface drives both.
+function SharedOptionsBlock({
   decisionId,
   question,
   compact,
@@ -547,7 +559,7 @@ function OptionsBlock({
   onAttachmentError,
 }: {
   decisionId: string;
-  question: ElicitationDecision["request"]["questions"][number];
+  question: SharedOptionsQuestion;
   compact: boolean;
   effectiveMulti: boolean;
   selected: string[];
@@ -1212,9 +1224,40 @@ function FleetAskCard({
     setFleetAskCustomAnswer,
     setFleetAskFormAnswer,
     setFleetAskStep,
+    setFleetAskMultiSelectOverride,
+    addFleetAskAttachment,
+    removeFleetAskAttachment,
   } = useDecisionStore();
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const errorDismissTimer = useRef<number | null>(null);
+  const showAttachError = useCallback((msg: string) => {
+    setAttachError(msg);
+    if (errorDismissTimer.current) {
+      window.clearTimeout(errorDismissTimer.current);
+    }
+    errorDismissTimer.current = window.setTimeout(() => {
+      setAttachError(null);
+      errorDismissTimer.current = null;
+    }, 6000);
+  }, []);
+  useEffect(
+    () => () => {
+      if (errorDismissTimer.current) {
+        window.clearTimeout(errorDismissTimer.current);
+      }
+    },
+    [],
+  );
 
-  const { step, request, selections, customAnswers, formAnswers } = decision;
+  const {
+    step,
+    request,
+    selections,
+    customAnswers,
+    formAnswers,
+    multiSelectOverrides,
+    attachments,
+  } = decision;
   const total = request.questions.length;
   const q = request.questions[step];
   const isLast = step === total - 1;
@@ -1223,61 +1266,24 @@ function FleetAskCard({
   const formFields = q.formFields ?? [];
   const selected = selections[q.question] || [];
   const customText = customAnswers[q.question] || "";
+  const questionAttachments = attachments[q.question] || [];
 
-  // ── Preview pane (mirror of ElicitationCard's OptionsBlock) ─────────────
-  // Only single-select questions trigger the preview pane, per the
-  // AskUserQuestion spec inherited from `fleet__ask`. Multi-select with
-  // preview falls back to the inline list.
-  const hasPreview = useMemo(
-    () => !q.multiSelect && opts.some((o) => o.preview),
-    [q.multiSelect, opts],
-  );
-  const firstWithPreview = useMemo(
-    () => opts.find((o) => o.preview)?.label ?? opts[0]?.label ?? "",
-    [opts],
-  );
-  const [focusedLabel, setFocusedLabel] = useState<string>(firstWithPreview);
-  useEffect(() => {
-    setFocusedLabel(firstWithPreview);
-  }, [firstWithPreview]);
+  // Mirror v1: user can locally widen a single-select question to multi-select.
+  const effectiveMulti = q.multiSelect || multiSelectOverrides[q.question] === true;
+  const canToggleMode = !q.multiSelect && opts.length > 0;
 
-  const focusedPreview = opts.find((o) => o.label === focusedLabel)?.preview;
-
-  // Lite/compact mode: push preview into the floating Tauri subwindow
-  // instead of splitting the narrow main window. Reuses the same Tauri
-  // commands ElicitationCard wires up — see the matching effect there.
-  useEffect(() => {
-    if (!compact) return;
-    if (hasPreview) {
-      const theme = resolveTheme(useUIStore.getState().theme);
-      invoke("open_preview_window", {
-        markdown: focusedPreview ?? "",
-        title: focusedLabel || null,
-        theme,
-      }).catch(() => {});
-    } else {
-      invoke("close_preview_window").catch(() => {});
-    }
-  }, [compact, hasPreview, focusedPreview, focusedLabel]);
-
-  // Tear down the subwindow when the card unmounts or step changes the
-  // visibility of preview content. compact-mode only.
-  useEffect(() => {
-    if (!compact) return;
-    return () => {
-      invoke("close_preview_window").catch(() => {});
-    };
-  }, [compact]);
-
-  // Whether a question is "complete enough" to advance. Form-field required
-  // flags + at least one of (option picked / custom typed / any form field
-  // populated when no options exist).
+  // Whether a question is "complete enough" to advance. Required form fields
+  // plus at least one of (option picked / custom typed / attachment / form-only).
   const requiredFormFieldsFilled = formFields.every((f) => {
     if (!f.required) return true;
     const v = formAnswers[f.name];
     return v !== undefined && v !== "";
   });
-  const hasOptionPick = opts.length === 0 || selected.length > 0 || customText.trim().length > 0;
+  const hasOptionPick =
+    opts.length === 0 ||
+    selected.length > 0 ||
+    customText.trim().length > 0 ||
+    questionAttachments.length > 0;
   const hasAnswer = requiredFormFieldsFilled && hasOptionPick;
 
   const allAnswered = request.questions.every((qq) => {
@@ -1285,7 +1291,9 @@ function FleetAskCard({
     const qFormFields = qq.formFields ?? [];
     const sel = selections[qq.question] || [];
     const custom = customAnswers[qq.question]?.trim() ?? "";
-    const optsOk = qOpts.length === 0 || sel.length > 0 || custom.length > 0;
+    const atts = attachments[qq.question] || [];
+    const optsOk =
+      qOpts.length === 0 || sel.length > 0 || custom.length > 0 || atts.length > 0;
     const formOk = qFormFields.every((f) => {
       if (!f.required) return true;
       const v = formAnswers[f.name];
@@ -1335,6 +1343,24 @@ function FleetAskCard({
             {step + 1} / {total}
           </span>
         )}
+        {canToggleMode && (
+          <button
+            type="button"
+            className={`${styles.mode_toggle} ${effectiveMulti ? styles.mode_toggle_multi : ""}`}
+            onClick={() =>
+              setFleetAskMultiSelectOverride(
+                decision.id,
+                q.question,
+                !effectiveMulti,
+              )
+            }
+            title={t("fleet_ask.mode_tooltip", "Switch between single/multi select")}
+          >
+            {effectiveMulti
+              ? t("fleet_ask.mode_multi", "Multi")
+              : t("fleet_ask.mode_single", "Single")}
+          </button>
+        )}
         {request.workspaceName && (
           <span className={styles.card_workspace}>{request.workspaceName}</span>
         )}
@@ -1347,13 +1373,19 @@ function FleetAskCard({
 
       {total > 1 && (
         <div className={styles.elicitation_dots}>
-          {request.questions.map((_, i) => (
-            <button
-              key={i}
-              className={`${styles.elicitation_dot} ${i === step ? styles.elicitation_dot_active : ""}`}
-              onClick={() => setFleetAskStep(decision.id, i)}
-            />
-          ))}
+          {request.questions.map((qq, i) => {
+            const sel = selections[qq.question] || [];
+            const custom = customAnswers[qq.question]?.trim() ?? "";
+            const atts = attachments[qq.question] || [];
+            const answered = sel.length > 0 || custom.length > 0 || atts.length > 0;
+            return (
+              <button
+                key={i}
+                className={`${styles.elicitation_dot} ${i === step ? styles.elicitation_dot_active : ""} ${answered && i !== step ? styles.elicitation_dot_done : ""}`}
+                onClick={() => setFleetAskStep(decision.id, i)}
+              />
+            );
+          })}
         </div>
       )}
 
@@ -1394,60 +1426,59 @@ function FleetAskCard({
           </div>
         )}
 
-        {opts.length > 0 && (() => {
-          const optionsList = (
-            <div className={styles.elicitation_options}>
-              {opts.map((opt) => {
-                const isSelected = selected.includes(opt.label);
-                const isFocused = hasPreview && opt.label === focusedLabel;
-                return (
-                  <button
-                    key={opt.label}
-                    type="button"
-                    className={`${styles.elicitation_option} ${isSelected ? styles.elicitation_option_selected : ""} ${isFocused ? styles.elicitation_option_focused : ""}`}
-                    onClick={() =>
-                      toggleFleetAskOption(decision.id, q.question, opt.label, q.multiSelect)
-                    }
-                    onMouseEnter={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
-                    onFocus={hasPreview ? () => setFocusedLabel(opt.label) : undefined}
-                  >
-                    <span className={styles.elicitation_option_label}>{opt.label}</span>
-                    {opt.description && (
-                      <span className={styles.elicitation_option_desc}>{opt.description}</span>
-                    )}
-                  </button>
+        {opts.length > 0 && (
+          <SharedOptionsBlock
+            decisionId={decision.id}
+            question={{
+              question: q.question,
+              multiSelect: q.multiSelect,
+              options: opts,
+            }}
+            compact={compact}
+            effectiveMulti={effectiveMulti}
+            selected={selected}
+            onToggle={toggleFleetAskOption}
+            customText={customText}
+            onCustomChange={(val) =>
+              setFleetAskCustomAnswer(decision.id, q.question, val)
+            }
+            attachments={questionAttachments}
+            onAddAttachment={async (path, name, fromClipboard, preview) => {
+              try {
+                await addFleetAskAttachment(
+                  decision.id,
+                  q.question,
+                  path,
+                  name,
+                  fromClipboard,
+                  preview,
                 );
-              })}
-              <div className={styles.elicitation_other_block}>
-                <span className={styles.elicitation_option_label}>
-                  {t("fleet_ask.other", "Other")}
-                </span>
-                <input
-                  type="text"
-                  value={customText}
-                  placeholder={t("fleet_ask.other_placeholder", "Type your answer…")}
-                  onChange={(e) => setFleetAskCustomAnswer(decision.id, q.question, e.target.value)}
-                />
-              </div>
-            </div>
-          );
-          // Lite/compact mode keeps options inline; preview is in the
-          // floating subwindow. Normal mode with preview content splits
-          // the card into a side-by-side grid.
-          if (!hasPreview || compact) return optionsList;
-          return (
-            <div className={styles.elicitation_options_with_preview}>
-              {optionsList}
-              <div className={styles.elicitation_preview}>
-                {focusedPreview ? (
-                  <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
-                    {focusedPreview}
-                  </ReactMarkdown>
-                ) : null}
-              </div>
-            </div>
-          );
-        })()}
+              } catch (e) {
+                const detail = e instanceof Error ? e.message : String(e);
+                showAttachError(
+                  `${t("fleet_ask.attach_failed", "Attachment upload failed")}: ${detail}`,
+                );
+              }
+            }}
+            onRemoveAttachment={(path) =>
+              removeFleetAskAttachment(decision.id, q.question, path)
+            }
+            onAttachmentError={showAttachError}
+          />
+        )}
+        {attachError && (
+          <div className={styles.elicitation_attach_error} role="alert">
+            <span className={styles.elicitation_attach_error_text}>{attachError}</span>
+            <button
+              type="button"
+              className={styles.elicitation_attach_error_dismiss}
+              onClick={() => setAttachError(null)}
+              aria-label={t("fleet_ask.attach_error_dismiss", "Dismiss")}
+            >
+              ×
+            </button>
+          </div>
+        )}
       </div>
 
       <div className={styles.actions}>
