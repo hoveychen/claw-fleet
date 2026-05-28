@@ -817,6 +817,19 @@ interface DecisionState {
   setFleetAskFormAnswer: (id: string, fieldName: string, value: string) => void;
   /** Navigate to a specific step in a fleet__ask card. */
   setFleetAskStep: (id: string, step: number) => void;
+  /** Flip a fleet__ask question between single-select and multi-select locally. */
+  setFleetAskMultiSelectOverride: (id: string, question: string, override: boolean) => void;
+  /** Attach a file/image to the current fleet__ask question. */
+  addFleetAskAttachment: (
+    id: string,
+    question: string,
+    sourcePath: string,
+    displayName: string,
+    fromClipboard?: boolean,
+    preview?: { previewUrl: string; width: number; height: number },
+  ) => Promise<void>;
+  /** Remove a fleet__ask attachment from a question by path. */
+  removeFleetAskAttachment: (id: string, question: string, path: string) => void;
   /** Approve a plan (optionally with edited plan text). */
   approvePlan: (id: string, editedPlan?: string | null) => Promise<void>;
   /** Reject a plan (with optional feedback). */
@@ -938,6 +951,8 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       selections: {},
       customAnswers: {},
       formAnswers,
+      multiSelectOverrides: {},
+      attachments: {},
       arrivedAt: Date.now(),
     };
     set((s) => {
@@ -1321,6 +1336,68 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       ),
     })),
 
+  setFleetAskMultiSelectOverride: (id, question, override) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "fleet-ask") return d;
+        const nextOverrides = { ...d.multiSelectOverrides, [question]: override };
+        // When flipping back to single-select, trim selections to at most one.
+        let nextSelections = d.selections;
+        if (!override) {
+          const current = d.selections[question] || [];
+          if (current.length > 1) {
+            nextSelections = { ...d.selections, [question]: [current[0]] };
+          }
+        }
+        return { ...d, multiSelectOverrides: nextOverrides, selections: nextSelections };
+      }),
+    }));
+  },
+
+  addFleetAskAttachment: async (id, question, sourcePath, displayName, fromClipboard, preview) => {
+    const resolvedPath = await invoke<string>("upload_elicitation_attachment", {
+      sourcePath,
+    });
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "fleet-ask") return d;
+        const prev = d.attachments[question] || [];
+        if (prev.some((a) => a.path === resolvedPath)) {
+          if (preview?.previewUrl) URL.revokeObjectURL(preview.previewUrl);
+          return d;
+        }
+        const next: ElicitationAttachment = {
+          path: resolvedPath,
+          name: displayName,
+          fromClipboard,
+          previewUrl: preview?.previewUrl,
+          width: preview?.width,
+          height: preview?.height,
+        };
+        return {
+          ...d,
+          attachments: { ...d.attachments, [question]: [...prev, next] },
+        };
+      }),
+    }));
+  },
+
+  removeFleetAskAttachment: (id, question, path) => {
+    set((s) => ({
+      decisions: s.decisions.map((d) => {
+        if (d.id !== id || d.kind !== "fleet-ask") return d;
+        const prev = d.attachments[question] || [];
+        const removed = prev.find((a) => a.path === path);
+        if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+        const next = prev.filter((a) => a.path !== path);
+        return {
+          ...d,
+          attachments: { ...d.attachments, [question]: next },
+        };
+      }),
+    }));
+  },
+
   submitFleetAsk: async (id) => {
     const decision = get().decisions.find(
       (d) => d.id === id && d.kind === "fleet-ask",
@@ -1335,13 +1412,27 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     const answers: Record<string, string> = {};
     for (const q of decision.request.questions) {
       const custom = decision.customAnswers[q.question]?.trim();
+      let answer = "";
       if (custom) {
-        answers[q.question] = custom;
+        answer = custom;
       } else if (q.options && q.options.length > 0) {
         const sel = decision.selections[q.question] || [];
         if (sel.length > 0) {
-          answers[q.question] = sel.join(", ");
+          answer = sel.join(", ");
         }
+      }
+      const overridden =
+        decision.multiSelectOverrides[q.question] === true && !q.multiSelect;
+      if (overridden && answer) {
+        answer = `${answer} [用户将此题从单选改为多选 / user switched this question from single-select to multi-select]`;
+      }
+      const atts = decision.attachments[q.question] || [];
+      if (atts.length > 0) {
+        const mentions = atts.map((a) => `@${a.path}`).join(" ");
+        answer = answer ? `${answer} ${mentions}` : mentions;
+      }
+      if (answer) {
+        answers[q.question] = answer;
       }
       for (const f of q.formFields ?? []) {
         const v = decision.formAnswers[f.name];
