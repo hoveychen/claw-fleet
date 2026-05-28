@@ -539,6 +539,14 @@ export interface FleetAskDecision {
   customAnswers: Record<string, string>;
   /** Dynamic form-field values (form_field name → value). */
   formAnswers: Record<string, string>;
+  /**
+   * Per-question single↔multi override. When `true` for a question whose
+   * own `multiSelect` was `false`, the user has locally widened it; the
+   * submit path appends an override annotation so the calling agent knows.
+   */
+  multiSelectOverrides: Record<string, boolean>;
+  /** Per-question attachment list (question text → attachments). */
+  attachments: Record<string, ElicitationAttachment[]>;
   arrivedAt: number;
 }
 
