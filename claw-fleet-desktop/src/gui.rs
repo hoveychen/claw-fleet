@@ -3202,6 +3202,17 @@ pub fn run() {
             decision_float_snapshot: Arc::new(Mutex::new(None)),
         })
         .setup(move |app| {
+            // Windows: strip native chrome so the frontend's drag bar +
+            // caption-button overlay can replace the OS title bar / system
+            // menu. macOS keeps titleBarStyle: Overlay from tauri.conf.json.
+            // Done at setup() (not in conf) because the option is
+            // platform-conditional and Tauri's per-window `decorations`
+            // toggle is the cleanest way to express that.
+            #[cfg(target_os = "windows")]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_decorations(false);
+            }
+
             // Replace NullBackend with the real LocalBackend now that AppHandle
             // is available.
             {
