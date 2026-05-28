@@ -1,0 +1,4 @@
+shamefullyHoist: true
+allowBuilds:
+  '@shopify/react-native-skia': false
+  esbuild: true
