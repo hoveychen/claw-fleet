@@ -635,10 +635,38 @@ export interface UserPromptHistoryRecord {
   sentAt: string;
 }
 
+export type FleetAskOutcome =
+  | "answered"
+  | "cancelled"
+  | "heartbeat-lost"
+  | "timeout";
+
+/**
+ * Persisted shape of a resolved fleet__ask card. Carries the original
+ * questions (each with their options + formFields metadata + html string)
+ * plus a flat answers map keyed by either the question text or a form-field
+ * name. The history view must NOT re-render `html` as a sandboxed iframe —
+ * show a "[HTML preview was shown]" marker instead.
+ */
+export interface FleetAskHistoryRecord {
+  kind: "fleet-ask";
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  aiTitle?: string | null;
+  requestedAt: string;
+  resolvedAt: string;
+  outcome: FleetAskOutcome;
+  questions: FleetAskQuestion[];
+  /** question text → option label (or @path suffix from attachments); form-field name → value. */
+  answers: Record<string, string>;
+}
+
 export type DecisionHistoryRecord =
   | ElicitationHistoryRecord
   | PlanApprovalHistoryRecord
-  | UserPromptHistoryRecord;
+  | UserPromptHistoryRecord
+  | FleetAskHistoryRecord;
 
 // ── Session-pending types (wait-for-input DecisionPanel card) ──────────
 
