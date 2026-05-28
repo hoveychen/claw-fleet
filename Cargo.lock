@@ -880,6 +880,7 @@ dependencies = [
  "tiny_http",
  "tokio",
  "uuid",
+ "windows 0.61.3",
  "zstd",
 ]
 

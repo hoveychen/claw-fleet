@@ -213,6 +213,16 @@ pub fn read_keychain_credentials() -> Result<(String, String), String> {
 
 #[cfg(not(target_os = "macos"))]
 pub fn read_keychain_credentials() -> Result<(String, String), String> {
+    // Windows: Claude Desktop App keeps its OAuth token DPAPI-encrypted under
+    // `%APPDATA%\Claude\config.json#oauth:tokenCache`, NOT in
+    // `~/.claude/.credentials.json` (which only the standalone Claude Code
+    // CLI uses). Try the Desktop App store first so users who never install
+    // the CLI can still authenticate; fall back to the file otherwise.
+    #[cfg(windows)]
+    if let Ok(creds) = read_desktop_app_credentials() {
+        return Ok(creds);
+    }
+
     let cred_path = crate::session::real_home_dir()
         .ok_or("No home dir")?
         .join(".claude")
@@ -228,6 +238,65 @@ pub fn read_keychain_credentials() -> Result<(String, String), String> {
         .to_string();
     let sub = oauth
         .get("subscriptionType")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown")
+        .to_string();
+    Ok((token, sub))
+}
+
+/// Read `(accessToken, subscriptionType)` from Claude Desktop App's
+/// DPAPI-encrypted `config.json` (Windows only). The Desktop App stores the
+/// token under `oauth:tokenCache` as a base64-encoded Electron `safeStorage`
+/// blob; the decrypted plaintext is a JSON document whose schema Anthropic
+/// has not publicly documented, so we probe a few plausible shapes:
+///
+/// * `{ "claudeAiOauth": { "accessToken": …, "subscriptionType": … } }`
+///   (CLI-style — what `~/.claude/.credentials.json` uses)
+/// * `{ "accessToken": …, "subscriptionType": … }` (flat camelCase)
+/// * `{ "access_token": …, "subscription_type": … }` (flat snake_case)
+///
+/// On an unrecognised shape the error message lists the top-level keys so
+/// future schema changes can be diagnosed without re-decrypting.
+#[cfg(windows)]
+fn read_desktop_app_credentials() -> Result<(String, String), String> {
+    let appdata = std::env::var("APPDATA").map_err(|_| "APPDATA env var not set".to_string())?;
+    let config_path = std::path::PathBuf::from(appdata)
+        .join("Claude")
+        .join("config.json");
+
+    let raw = std::fs::read_to_string(&config_path)
+        .map_err(|e| format!("read {}: {e}", config_path.display()))?;
+    let cfg: Value = serde_json::from_str(&raw)
+        .map_err(|e| format!("parse {}: {e}", config_path.display()))?;
+
+    let encoded = cfg
+        .get("oauth:tokenCache")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "Desktop App config.json missing `oauth:tokenCache`".to_string())?;
+
+    let plain_bytes = crate::dpapi::decrypt_safe_storage(encoded)?;
+    let plain_str = std::str::from_utf8(&plain_bytes)
+        .map_err(|e| format!("decrypted blob not UTF-8: {e}"))?;
+    let blob: Value = serde_json::from_str(plain_str)
+        .map_err(|e| format!("decrypted blob not JSON: {e}"))?;
+
+    let inner = blob.get("claudeAiOauth").unwrap_or(&blob);
+
+    let token = inner
+        .get("accessToken")
+        .or_else(|| inner.get("access_token"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let keys: Vec<&str> = blob
+                .as_object()
+                .map(|o| o.keys().map(|k| k.as_str()).collect())
+                .unwrap_or_default();
+            format!("decrypted Desktop App blob has no accessToken; top-level keys: {keys:?}")
+        })?
+        .to_string();
+    let sub = inner
+        .get("subscriptionType")
+        .or_else(|| inner.get("subscription_type"))
         .and_then(|v| v.as_str())
         .unwrap_or("unknown")
         .to_string();
