@@ -735,7 +735,7 @@ fn find_local_fleet_binary() -> Option<std::path::PathBuf> {
 
 /// Run a command on the remote host and return stdout, or an error string.
 fn ssh_exec_remote(host: &str, cmd: &str) -> Result<String, String> {
-    let output = std::process::Command::new("ssh")
+    let output = claw_fleet_core::process_util::command("ssh")
         .args([
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=15",
@@ -801,7 +801,7 @@ fn ensure_remote_fleet(host: &str) -> String {
 
     if local_matches {
         if let Some(bin_path) = find_local_fleet_binary() {
-            let scp_ok = std::process::Command::new("scp")
+            let scp_ok = claw_fleet_core::process_util::command("scp")
                 .args([
                     "-o", "StrictHostKeyChecking=accept-new",
                     "-o", "ConnectTimeout=30",
@@ -882,7 +882,7 @@ fn delegate_to_remote(host: &str, remote_bin: &str) -> ! {
 
     #[cfg(not(unix))]
     {
-        let status = std::process::Command::new("ssh")
+        let status = claw_fleet_core::process_util::command("ssh")
             .args(["-o", "StrictHostKeyChecking=accept-new", host, remote_bin])
             .args(&filtered)
             .status()

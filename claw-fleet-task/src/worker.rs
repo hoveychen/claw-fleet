@@ -278,7 +278,7 @@ pub fn run_post_completion_check(workspace: &Path, p_item: &PItem) -> PostComple
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default()
         });
-        let out = std::process::Command::new("cargo")
+        let out = crate::process_util::command("cargo")
             .arg("check")
             .arg("--package")
             .arg(&crate_name)
