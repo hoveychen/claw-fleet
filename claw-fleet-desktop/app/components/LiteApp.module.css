@@ -27,6 +27,12 @@
   padding-left: 76px;
 }
 
+/* Leave room for Windows caption buttons (3 × 46px) drawn by
+   <WindowsFrameOverlay> at top-right. */
+:global(html.os-windows) .drag_bar {
+  padding-right: 144px;
+}
+
 .drag_title {
   flex: 1;
   font-size: 12px;

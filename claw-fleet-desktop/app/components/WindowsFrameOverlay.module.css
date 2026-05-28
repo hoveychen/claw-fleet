@@ -1,0 +1,116 @@
+/* Invisible drag strip — present on every Tauri host, suppressed outside
+   Tauri (mock browser preview). pointer-events: none so the strip never
+   eats DOM clicks on content underneath; -webkit-app-region: drag stays
+   active because the OS hit-tests it before the browser. */
+.drag_bar {
+  display: none;
+}
+
+:global(html.tauri-host) .drag_bar {
+  display: block;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 38px;
+  z-index: 100;
+  background: transparent;
+  -webkit-app-region: drag;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Caption group — visible only when running inside Tauri on Windows.
+   Sits above the drag bar's z-index so clicks reach the buttons. */
+.caption_group {
+  display: none;
+}
+
+:global(html.tauri-host.os-windows) .caption_group {
+  display: flex;
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 38px;
+  z-index: 200;
+  -webkit-app-region: no-drag;
+}
+
+.caption_btn {
+  width: 46px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text, #d9d9d9);
+  cursor: pointer;
+  padding: 0;
+  margin: 0;
+  outline: none;
+  -webkit-app-region: no-drag;
+  transition: background-color 0.08s ease;
+}
+
+.caption_btn:hover {
+  background: var(--caption-hover, rgba(255, 255, 255, 0.08));
+}
+
+.caption_btn:active {
+  background: var(--caption-active, rgba(255, 255, 255, 0.04));
+}
+
+/* The close button gets a red hover like the OS does. */
+.caption_close:hover {
+  background: #e81123;
+  color: #ffffff;
+}
+
+.caption_close:active {
+  background: #c50f1f;
+  color: #ffffff;
+}
+
+/* In light themes the default hover/active overlays are too pale — use
+   darker tints. App.css doesn't define a --caption-hover variable, so
+   keying off the theme attribute keeps the rule local. */
+:global([data-theme="light"]) .caption_btn:hover {
+  background: rgba(0, 0, 0, 0.06);
+}
+:global([data-theme="light"]) .caption_btn:active {
+  background: rgba(0, 0, 0, 0.03);
+}
+
+/* Resize handles — Windows only. Match Win11 widths: 6px on edges,
+   12px on corners. z-index above caption_group so corners win the
+   hit-test where they overlap the buttons (top-right corner). */
+.resize_layer {
+  display: none;
+}
+
+:global(html.tauri-host.os-windows) .resize_layer {
+  display: block;
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 300;
+}
+
+.resize_handle {
+  position: absolute;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+.edge_n { top: 0; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+.edge_s { bottom: 0; left: 12px; right: 12px; height: 6px; cursor: ns-resize; }
+.edge_e { top: 12px; bottom: 12px; right: 0; width: 6px; cursor: ew-resize; }
+.edge_w { top: 12px; bottom: 12px; left: 0; width: 6px; cursor: ew-resize; }
+
+.corner_nw { top: 0; left: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+.corner_ne { top: 0; right: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+.corner_sw { bottom: 0; left: 0; width: 12px; height: 12px; cursor: nesw-resize; }
+.corner_se { bottom: 0; right: 0; width: 12px; height: 12px; cursor: nwse-resize; }
+
