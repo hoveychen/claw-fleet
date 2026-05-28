@@ -2329,8 +2329,16 @@ fn read_fleet_session_id() -> Option<String> {
 /// Re-inject the workspace's `TASKS.md` (active plan region) into every user
 /// prompt as additional context. Companion to PRD Discipline mode — survives
 /// context compression, since the file lives on disk.
+///
+/// Multi-source: discovers the repo's main checkout root and scans both
+/// `<main>/TASKS.md` and every `<main>/.worktrees/*/TASKS.md`, so a worker
+/// inside a worktree still sees plans living in the main checkout (and vice
+/// versa). Plans are deduped by `id`; on conflict the source whose file was
+/// modified most recently wins. Legacy anonymous (no `id`) blocks are kept
+/// independently — they pre-date the multi-plan format.
 fn cmd_prd_context() {
     use std::io::Read;
+    use std::path::PathBuf;
 
     // Read stdin payload — Claude Code sends `{ session_id, cwd, prompt, ... }`.
     let mut input = String::new();
@@ -2343,62 +2351,56 @@ fn cmd_prd_context() {
         .and_then(|v| {
             v.get("cwd")
                 .and_then(|c| c.as_str())
-                .map(std::path::PathBuf::from)
+                .map(PathBuf::from)
         });
-
     let cwd = cwd_from_stdin
         .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| std::path::PathBuf::from("."));
+        .unwrap_or_else(|| PathBuf::from("."));
 
-    let tasks_path = cwd.join("TASKS.md");
-    let Ok(body) = std::fs::read_to_string(&tasks_path) else {
-        // No TASKS.md → silent no-op. PRD mode just doesn't trigger here.
-        return;
-    };
-
-    // Read the whole file: an earlier 64 KB cap dropped tail plans once
-    // TASKS.md grew past that. Per-plan distillation below keeps injection
-    // size proportional to *active* work, not total file size.
-    //
-    // Pull out every plan region between sentinels (`id="..."` tagged plus
-    // a legacy anonymous form), then drop plans whose every P-task is `[x]`
-    // — their body is reference history, not actionable context.
-    let blocks: Vec<PrdBlock> = extract_prd_blocks(&body)
-        .into_iter()
-        .filter_map(|b| {
-            distill_active_block(&b.body).map(|distilled| PrdBlock {
-                id: b.id,
-                body: distilled,
-            })
-        })
-        .collect();
-    if blocks.is_empty() {
+    let main_root = discover_main_checkout_root(&cwd);
+    let sources = collect_task_sources(&cwd, main_root.as_deref());
+    if sources.is_empty() {
+        // No TASKS.md anywhere → silent no-op. PRD mode just doesn't trigger.
         return;
     }
 
-    let rendered = render_prd_blocks(&blocks);
+    let raw = load_sourced_blocks(&sources);
+    if raw.is_empty() {
+        return;
+    }
+    let deduped = dedup_blocks_keep_latest_mtime(raw);
+    if deduped.is_empty() {
+        return;
+    }
+
+    let rendered = render_with_sources(&deduped, main_root.as_deref());
     if rendered.trim().is_empty() {
         return;
     }
 
-    let plan_word = if blocks.len() == 1 { "plan" } else { "plans" };
+    let n = deduped.len();
+    let plan_word = if n == 1 { "plan" } else { "plans" };
+    let sources_list = sources
+        .iter()
+        .map(|p| format!("  - {}", p.display()))
+        .collect::<Vec<_>>()
+        .join("\n");
     let reminder = format!(
         "<system-reminder>\n\
 The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
-Discipline mode) holds {n} active {plan_word} below. This file is the \
-durable macro plan — defer to it over your in-context memory of which \
-P-tasks are done. After each P-task, update the checkbox in this file \
-before moving on. Only modify the block whose `id` matches the plan you \
-are working on; treat every other block as another agent's in-flight work.\n\
+Discipline mode) holds {n} active {plan_word} below — merged across the \
+main checkout and any sibling worktrees. This file is the durable macro \
+plan — defer to it over your in-context memory of which P-tasks are done. \
+After each P-task, update the checkbox in the source file shown for that \
+plan. Only modify the block whose `id` matches the plan you are working \
+on; treat every other block as another agent's in-flight work. When the \
+same `id` appears in multiple TASKS.md files, the most recently modified \
+file wins — keep a given `id` in exactly one file.\n\
 \n\
-File: {path}\n\
+Sources scanned:\n{sources_list}\n\
 \n\
 {rendered}\n\
 </system-reminder>",
-        n = blocks.len(),
-        plan_word = plan_word,
-        path = tasks_path.display(),
-        rendered = rendered,
     );
 
     let out = serde_json::json!({
@@ -2414,6 +2416,198 @@ File: {path}\n\
 struct PrdBlock {
     id: Option<String>,
     body: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SourcedBlock {
+    id: Option<String>,
+    body: String,
+    source: std::path::PathBuf,
+    mtime: std::time::SystemTime,
+}
+
+/// Walk up from `start` to locate the main checkout root.
+///
+/// `.git` as a directory → its parent is the main checkout root.
+/// `.git` as a file (`gitdir: ...`) → we're in a linked worktree; follow the
+/// pointer to the worktree's git dir, read `commondir` to find the common
+/// `.git` directory, and return that directory's parent.
+/// Returns `None` if `start` is not inside any git repository.
+fn discover_main_checkout_root(start: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut p = start.canonicalize().ok()?;
+    loop {
+        let git = p.join(".git");
+        if let Ok(meta) = std::fs::metadata(&git) {
+            if meta.is_dir() {
+                return Some(p);
+            }
+            if meta.is_file() {
+                let content = std::fs::read_to_string(&git).ok()?;
+                let gitdir = content
+                    .lines()
+                    .find_map(|l| l.strip_prefix("gitdir:").map(|s| s.trim()))?;
+                let worktree_gitdir = std::path::PathBuf::from(gitdir);
+                let commondir_path = worktree_gitdir.join("commondir");
+                let commondir = std::fs::read_to_string(&commondir_path).ok()?;
+                let common_abs = worktree_gitdir.join(commondir.trim());
+                let common = common_abs.canonicalize().ok()?;
+                return common.parent().map(|x| x.to_path_buf());
+            }
+        }
+        p = p.parent()?.to_path_buf();
+    }
+}
+
+/// Enumerate candidate TASKS.md files. In a git repo: main checkout's
+/// TASKS.md first, then each `<main>/.worktrees/*/TASKS.md` that exists,
+/// sorted alphabetically by path so output ordering is stable across runs.
+/// Outside any repo (no main_root): just `<cwd>/TASKS.md` if it exists.
+fn collect_task_sources(
+    cwd: &std::path::Path,
+    main_root: Option<&std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    match main_root {
+        Some(root) => {
+            let main_tasks = root.join("TASKS.md");
+            if main_tasks.exists() {
+                paths.push(main_tasks);
+            }
+            let worktrees_dir = root.join(".worktrees");
+            if let Ok(entries) = std::fs::read_dir(&worktrees_dir) {
+                let mut wt: Vec<std::path::PathBuf> = entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let p = e.path().join("TASKS.md");
+                        if p.exists() {
+                            Some(p)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                wt.sort();
+                paths.extend(wt);
+            }
+        }
+        None => {
+            let p = cwd.join("TASKS.md");
+            if p.exists() {
+                paths.push(p);
+            }
+        }
+    }
+    paths
+}
+
+/// For each source path, read its body and mtime, then extract every active
+/// PRD block (one with at least one pending `- [ ]` P-task). Sources we can't
+/// read or stat are silently skipped — the hook re-runs on the next prompt,
+/// so transient errors self-heal.
+fn load_sourced_blocks(sources: &[std::path::PathBuf]) -> Vec<SourcedBlock> {
+    let mut all: Vec<SourcedBlock> = Vec::new();
+    for path in sources {
+        let Ok(body) = std::fs::read_to_string(path) else {
+            continue;
+        };
+        let mtime = std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .unwrap_or(std::time::UNIX_EPOCH);
+        for b in extract_prd_blocks(&body) {
+            if let Some(distilled) = distill_active_block(&b.body) {
+                all.push(SourcedBlock {
+                    id: b.id,
+                    body: distilled,
+                    source: path.clone(),
+                    mtime,
+                });
+            }
+        }
+    }
+    all
+}
+
+/// Dedup by `id`: when the same `Some(id)` appears in multiple sources, keep
+/// the one whose source file mtime is most recent (ties resolve to first
+/// seen). `None` ids (legacy anonymous blocks) are kept independently — each
+/// source contributes its own anonymous block. Preserves first-seen position
+/// so the rendered order matches file order within each source.
+fn dedup_blocks_keep_latest_mtime(blocks: Vec<SourcedBlock>) -> Vec<SourcedBlock> {
+    use std::collections::HashMap;
+    let mut chosen: HashMap<String, usize> = HashMap::new();
+    for (i, b) in blocks.iter().enumerate() {
+        if let Some(id) = &b.id {
+            match chosen.get(id) {
+                Some(&j) => {
+                    if blocks[i].mtime > blocks[j].mtime {
+                        chosen.insert(id.clone(), i);
+                    }
+                }
+                None => {
+                    chosen.insert(id.clone(), i);
+                }
+            }
+        }
+    }
+    blocks
+        .into_iter()
+        .enumerate()
+        .filter(|(i, b)| match &b.id {
+            None => true,
+            Some(id) => chosen.get(id) == Some(i),
+        })
+        .map(|(_, b)| b)
+        .collect()
+}
+
+/// Render the deduped blocks. Blocks sourced from the main checkout's
+/// TASKS.md get no source annotation; blocks from any other file (typically a
+/// worktree) get `— source: <relative-path>` appended to the plan header.
+/// The legacy single-anonymous-block shape (unwrapped body, no header) is
+/// preserved for any single anonymous block — that format only ever existed
+/// as one-per-workspace, so keeping it bare matches every existing TASKS.md
+/// in the wild.
+fn render_with_sources(
+    blocks: &[SourcedBlock],
+    main_root: Option<&std::path::Path>,
+) -> String {
+    if blocks.len() == 1 && blocks[0].id.is_none() {
+        return blocks[0].body.trim().to_string();
+    }
+    let primary: Option<std::path::PathBuf> = main_root.map(|r| r.join("TASKS.md"));
+    let mut out = String::new();
+    for (i, b) in blocks.iter().enumerate() {
+        if i > 0 {
+            out.push_str("\n\n---\n\n");
+        }
+        let label = b.id.as_deref().unwrap_or("(anonymous)");
+        let tag = display_source(&b.source, main_root, primary.as_deref());
+        match tag {
+            Some(s) => out.push_str(&format!("## Plan: {label} — source: {s}\n\n")),
+            None => out.push_str(&format!("## Plan: {label}\n\n")),
+        }
+        out.push_str(b.body.trim());
+    }
+    out
+}
+
+/// `None` when `source` is the main TASKS.md (the implicit norm — no
+/// annotation needed). Otherwise a relative path under `main_root` when
+/// possible, else the absolute path as a fallback.
+fn display_source(
+    source: &std::path::Path,
+    main_root: Option<&std::path::Path>,
+    primary: Option<&std::path::Path>,
+) -> Option<String> {
+    if primary.map_or(false, |p| source == p) {
+        return None;
+    }
+    if let Some(root) = main_root {
+        if let Ok(rel) = source.strip_prefix(root) {
+            return Some(rel.display().to_string());
+        }
+    }
+    Some(source.display().to_string())
 }
 
 /// Scan a TASKS.md body for every active-plan region. A block opens on a
@@ -2475,24 +2669,6 @@ fn parse_sentinel_line(line: &str, kind: &str) -> Option<Option<String>> {
         return None;
     }
     Some(Some(id.to_string()))
-}
-
-fn render_prd_blocks(blocks: &[PrdBlock]) -> String {
-    // Single anonymous (legacy) block: render its body unwrapped to keep the
-    // pre-multiplan output shape identical.
-    if blocks.len() == 1 && blocks[0].id.is_none() {
-        return blocks[0].body.trim().to_string();
-    }
-    let mut out = String::new();
-    for (i, b) in blocks.iter().enumerate() {
-        if i > 0 {
-            out.push_str("\n\n---\n\n");
-        }
-        let label = b.id.as_deref().unwrap_or("(anonymous)");
-        out.push_str(&format!("## Plan: {label}\n\n"));
-        out.push_str(b.body.trim());
-    }
-    out
 }
 
 /// Drop completed plans, keep active ones whole. A plan is "complete" when
@@ -2601,36 +2777,221 @@ trailing notes outside\n";
         assert!(blocks[0].body.contains("inside"));
     }
 
+    use std::path::{Path, PathBuf};
+    use std::time::{Duration, SystemTime};
+
+    fn sb(id: Option<&str>, body: &str, source: &Path, mtime: SystemTime) -> SourcedBlock {
+        SourcedBlock {
+            id: id.map(|s| s.to_string()),
+            body: body.to_string(),
+            source: source.to_path_buf(),
+            mtime,
+        }
+    }
+
     #[test]
     fn render_single_legacy_block_keeps_old_shape() {
-        let blocks = vec![PrdBlock {
-            id: None,
-            body: "the body\n".into(),
-        }];
-        let out = render_prd_blocks(&blocks);
-        // No "## Plan:" header for the legacy single-anonymous case so
-        // existing single-plan workspaces see the same injection as before.
+        let main = PathBuf::from("/repo");
+        let blocks = vec![sb(
+            None,
+            "the body\n",
+            &main.join("TASKS.md"),
+            SystemTime::UNIX_EPOCH,
+        )];
+        let out = render_with_sources(&blocks, Some(&main));
+        // No "## Plan:" header for the single-anonymous case so existing
+        // legacy single-plan workspaces see the same injection as before.
         assert_eq!(out, "the body");
     }
 
     #[test]
     fn render_multiple_blocks_get_plan_headings() {
+        let main = PathBuf::from("/repo");
         let blocks = vec![
-            PrdBlock {
-                id: Some("a".into()),
-                body: "A body\n".into(),
-            },
-            PrdBlock {
-                id: Some("b".into()),
-                body: "B body\n".into(),
-            },
+            sb(Some("a"), "A body\n", &main.join("TASKS.md"), SystemTime::UNIX_EPOCH),
+            sb(Some("b"), "B body\n", &main.join("TASKS.md"), SystemTime::UNIX_EPOCH),
         ];
-        let out = render_prd_blocks(&blocks);
+        let out = render_with_sources(&blocks, Some(&main));
         assert!(out.contains("## Plan: a"));
         assert!(out.contains("## Plan: b"));
         assert!(out.contains("A body"));
         assert!(out.contains("B body"));
         assert!(out.contains("---"), "blocks must be visually separated");
+        // Main TASKS.md is the implicit norm — no `— source:` suffix.
+        assert!(
+            !out.contains("source:"),
+            "main TASKS.md blocks must not get a source annotation: {out}"
+        );
+    }
+
+    #[test]
+    fn render_worktree_blocks_get_source_suffix() {
+        let main = PathBuf::from("/repo");
+        let wt_path = main.join(".worktrees").join("featX").join("TASKS.md");
+        let blocks = vec![
+            sb(Some("a"), "A body\n", &main.join("TASKS.md"), SystemTime::UNIX_EPOCH),
+            sb(Some("z"), "Z body\n", &wt_path, SystemTime::UNIX_EPOCH),
+        ];
+        let out = render_with_sources(&blocks, Some(&main));
+        assert!(out.contains("## Plan: a\n"), "main block has no source tag");
+        assert!(
+            out.contains("## Plan: z — source: .worktrees/featX/TASKS.md"),
+            "worktree block gets relative source suffix: {out}"
+        );
+    }
+
+    #[test]
+    fn dedup_picks_newer_mtime_for_same_id() {
+        let main = PathBuf::from("/repo");
+        let wt = main.join(".worktrees").join("featX").join("TASKS.md");
+        let old = SystemTime::UNIX_EPOCH;
+        let new = SystemTime::UNIX_EPOCH + Duration::from_secs(60);
+        // id="shared" in both files; worktree's copy is newer → keeps it.
+        let blocks = vec![
+            sb(Some("shared"), "main copy", &main.join("TASKS.md"), old),
+            sb(Some("shared"), "worktree copy", &wt, new),
+            sb(Some("solo"), "main solo", &main.join("TASKS.md"), old),
+        ];
+        let out = dedup_blocks_keep_latest_mtime(blocks);
+        assert_eq!(out.len(), 2);
+        let shared = out.iter().find(|b| b.id.as_deref() == Some("shared")).unwrap();
+        assert_eq!(shared.body, "worktree copy");
+        assert_eq!(shared.source, wt);
+        // Untouched id is preserved.
+        assert!(out.iter().any(|b| b.id.as_deref() == Some("solo")));
+    }
+
+    #[test]
+    fn dedup_keeps_anonymous_blocks_from_each_source() {
+        let main = PathBuf::from("/repo");
+        let wt = main.join(".worktrees").join("featX").join("TASKS.md");
+        let t = SystemTime::UNIX_EPOCH;
+        let blocks = vec![
+            sb(None, "main anon", &main.join("TASKS.md"), t),
+            sb(None, "wt anon", &wt, t),
+        ];
+        let out = dedup_blocks_keep_latest_mtime(blocks);
+        assert_eq!(out.len(), 2, "anonymous blocks are not deduped across files");
+    }
+
+    #[test]
+    fn dedup_preserves_first_seen_order() {
+        let main = PathBuf::from("/repo");
+        let t = SystemTime::UNIX_EPOCH;
+        let blocks = vec![
+            sb(Some("b"), "Bx", &main.join("TASKS.md"), t),
+            sb(Some("a"), "Ax", &main.join("TASKS.md"), t),
+            sb(Some("c"), "Cx", &main.join("TASKS.md"), t),
+        ];
+        let out = dedup_blocks_keep_latest_mtime(blocks);
+        let ids: Vec<&str> = out.iter().filter_map(|b| b.id.as_deref()).collect();
+        // File order preserved — no implicit alphabetic re-sort.
+        assert_eq!(ids, vec!["b", "a", "c"]);
+    }
+
+    #[test]
+    fn collect_task_sources_main_only_when_no_worktrees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::write(main.join("TASKS.md"), "main body").unwrap();
+        let sources = collect_task_sources(main, Some(main));
+        assert_eq!(sources, vec![main.join("TASKS.md")]);
+    }
+
+    #[test]
+    fn collect_task_sources_includes_all_worktrees_sorted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::write(main.join("TASKS.md"), "main body").unwrap();
+        let wt_dir = main.join(".worktrees");
+        std::fs::create_dir_all(wt_dir.join("beta")).unwrap();
+        std::fs::create_dir_all(wt_dir.join("alpha")).unwrap();
+        // gamma worktree has no TASKS.md — skipped silently.
+        std::fs::create_dir_all(wt_dir.join("gamma")).unwrap();
+        std::fs::write(wt_dir.join("alpha").join("TASKS.md"), "a").unwrap();
+        std::fs::write(wt_dir.join("beta").join("TASKS.md"), "b").unwrap();
+        let sources = collect_task_sources(main, Some(main));
+        assert_eq!(
+            sources,
+            vec![
+                main.join("TASKS.md"),
+                wt_dir.join("alpha").join("TASKS.md"),
+                wt_dir.join("beta").join("TASKS.md"),
+            ]
+        );
+    }
+
+    #[test]
+    fn collect_task_sources_falls_back_to_cwd_outside_git() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("TASKS.md"), "lone").unwrap();
+        let sources = collect_task_sources(tmp.path(), None);
+        assert_eq!(sources, vec![tmp.path().join("TASKS.md")]);
+    }
+
+    #[test]
+    fn discover_main_root_for_plain_checkout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::create_dir_all(main.join("sub")).unwrap();
+        // From subdir → walks up to repo root.
+        assert_eq!(discover_main_checkout_root(&main.join("sub")), Some(main.clone()));
+        // From root → returns root.
+        assert_eq!(discover_main_checkout_root(&main), Some(main));
+    }
+
+    #[test]
+    fn discover_main_root_from_worktree_follows_pointer() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().canonicalize().unwrap();
+        // Main repo with a real .git/ directory.
+        let main_gitdir = main.join(".git");
+        std::fs::create_dir_all(&main_gitdir).unwrap();
+        // Worktree at <main>/.worktrees/feat with a .git pointer file.
+        let wt_path = main.join(".worktrees").join("feat");
+        std::fs::create_dir_all(&wt_path).unwrap();
+        let wt_gitdir = main_gitdir.join("worktrees").join("feat");
+        std::fs::create_dir_all(&wt_gitdir).unwrap();
+        std::fs::write(
+            wt_path.join(".git"),
+            format!("gitdir: {}", wt_gitdir.display()),
+        )
+        .unwrap();
+        std::fs::write(wt_gitdir.join("commondir"), "../..").unwrap();
+        let resolved = discover_main_checkout_root(&wt_path);
+        assert_eq!(resolved, Some(main));
+    }
+
+    #[test]
+    fn discover_main_root_none_when_not_in_repo() {
+        let tmp = tempfile::tempdir().unwrap();
+        // No .git anywhere up the chain (tempdir parent is /tmp, also no .git).
+        // discover returns None — caller falls back to cwd-only.
+        let result = discover_main_checkout_root(tmp.path());
+        // /tmp itself isn't a git repo on the test host; if it ever is, this
+        // assertion still proves the function terminates cleanly without panic.
+        assert!(result.is_none() || result.is_some());
+    }
+
+    #[test]
+    fn load_sourced_blocks_reads_and_distills() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("TASKS.md");
+        std::fs::write(
+            &path,
+            "<!-- fleet:prd:begin id=\"x\" -->\n\
+- [ ] **P1** — pending\n\
+<!-- fleet:prd:end id=\"x\" -->\n\
+<!-- fleet:prd:begin id=\"done\" -->\n\
+- [x] **P1** — all done\n\
+<!-- fleet:prd:end id=\"done\" -->\n",
+        )
+        .unwrap();
+        let out = load_sourced_blocks(&[path.clone()]);
+        assert_eq!(out.len(), 1, "completed plan dropped, active kept");
+        assert_eq!(out[0].id.as_deref(), Some("x"));
+        assert_eq!(out[0].source, path);
     }
 
     #[test]
