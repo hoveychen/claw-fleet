@@ -16,7 +16,7 @@
 //! "downloaded but not enabled" category, callers must combine this CLI
 //! output with a filesystem scan (see `crate::plugins`).
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
 
@@ -151,7 +151,7 @@ pub fn remove_marketplace(name: &str) -> Result<(), ClaudeCliError> {
 }
 
 fn run_claude_silent(bin: &str, args: &[&str]) -> Result<(), ClaudeCliError> {
-    let output = Command::new(bin)
+    let output = crate::process_util::command(bin)
         .args(args)
         .stdin(Stdio::null())
         .output()
@@ -169,7 +169,7 @@ fn run_claude_json<T: serde::de::DeserializeOwned>(
     bin: &str,
     args: &[&str],
 ) -> Result<T, ClaudeCliError> {
-    let output = Command::new(bin)
+    let output = crate::process_util::command(bin)
         .args(args)
         .stdin(Stdio::null())
         .output()

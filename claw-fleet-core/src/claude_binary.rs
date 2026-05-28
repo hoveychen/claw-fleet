@@ -223,7 +223,7 @@ fn which_claude() -> Option<String> {
     let cmd = "which";
     #[cfg(not(unix))]
     let cmd = "where";
-    let output = std::process::Command::new(cmd).arg("claude").output().ok()?;
+    let output = crate::process_util::command(cmd).arg("claude").output().ok()?;
     if !output.status.success() { return None }
     let s = String::from_utf8_lossy(&output.stdout).trim().to_string();
     // `where` on Windows can list multiple matches separated by newlines —
