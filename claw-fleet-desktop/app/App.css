@@ -261,7 +261,20 @@ input, button {
 }
 
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */
+/* WebView2 (Windows) paints the main document scrollbar on the <html>
+   element. `::-webkit-scrollbar` is a pseudo of the *scrollable* element,
+   so the html-level scrollbar needs the pseudo attached directly to
+   `html` (no descendant space) — otherwise Win11 paints its chunky
+   default. Belt-and-braces with the standard Scrollbars Module too. */
+html.tauri-host {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+html.tauri-host::-webkit-scrollbar,
 ::-webkit-scrollbar { width: 6px; height: 6px; }
+html.tauri-host::-webkit-scrollbar-track,
 ::-webkit-scrollbar-track { background: transparent; }
+html.tauri-host::-webkit-scrollbar-thumb,
 ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+html.tauri-host::-webkit-scrollbar-thumb:hover,
 ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
