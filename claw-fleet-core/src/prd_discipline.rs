@@ -202,6 +202,30 @@ Rules of thumb for the format itself:\n\
 - Keep P-task titles ≤ 60 chars. Long acceptance notes go in sub-bullets.\n\
 - {language_line}\n\
 \n\
+### Multi-source scan across worktrees\n\
+\n\
+Because Rule 3 develops plans inside `.worktrees/<task-id>/` checkouts, the \
+prd-context hook scans **every** TASKS.md it can find for the repo on each \
+prompt — the main checkout's `<repo>/TASKS.md` plus every \
+`<repo>/.worktrees/*/TASKS.md` that exists — and merges the active plans \
+from all of them into a single injection. This works the same whether the \
+session's cwd is the main checkout or one of the worktrees, so a worker \
+agent running inside a worktree still sees plans living in the main \
+checkout (and vice versa).\n\
+\n\
+**Dedup rule:** when the same `id=\"X\"` appears in more than one TASKS.md \
+file, the hook keeps the version from the file whose mtime is most recent \
+and drops the rest. The rendered plan header carries a `— source: <path>` \
+suffix when the block came from a worktree TASKS.md, so the agent can tell \
+which file to edit. Anonymous (legacy unmarked) blocks are kept independently \
+per file — they pre-date the multi-plan format.\n\
+\n\
+**Therefore: keep a given `id` in exactly one TASKS.md file.** Copying the \
+same id-tagged block from the main checkout into a worktree (or between two \
+worktrees) creates a phantom plan that flickers based on whichever file you \
+saved last. If a plan needs to live in a worktree for any reason, delete \
+it from the main TASKS.md first.\n\
+\n\
 ### Keep TASKS.md out of git\n\
 \n\
 TASKS.md is scratch state for the agent — it doesn't belong in version \
@@ -640,6 +664,31 @@ mod tests {
         assert!(
             g.contains("only edit your own") || g.contains("Only edit your own"),
             "guidance must instruct the agent to leave other plans' blocks untouched"
+        );
+    }
+
+    #[test]
+    fn render_documents_multi_source_scan_and_dedup() {
+        let g = render_guidance("Boss", "en");
+        assert!(
+            g.contains("Multi-source scan across worktrees"),
+            "guidance must call out the multi-source scan section"
+        );
+        assert!(
+            g.contains(".worktrees/*/TASKS.md") || g.contains(".worktrees/<task-id>"),
+            "guidance must show that worktree TASKS.md files are scanned alongside the main one"
+        );
+        assert!(
+            g.contains("mtime") && g.contains("most recent"),
+            "guidance must spell out the mtime-newest-wins dedup rule so agents don't guess"
+        );
+        assert!(
+            g.contains("keep a given `id` in exactly one TASKS.md file"),
+            "guidance must tell agents not to clone an id-tagged block across files"
+        );
+        assert!(
+            g.contains("source:"),
+            "guidance must explain that the rendered header carries a `source:` annotation for worktree blocks"
         );
     }
 
