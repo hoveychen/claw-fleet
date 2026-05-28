@@ -108,7 +108,7 @@ fn spawn_claude(
             .map_err(|e| format!("spawn fake (sleep): {e}"))?;
         return Ok(child.id());
     }
-    let mut cmd = Command::new("claude");
+    let mut cmd = claw_fleet_task::process_util::command("claude");
     cmd.current_dir(cwd)
         .arg("--print")
         .arg("--session-id")

@@ -1255,7 +1255,7 @@ pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
 
     #[cfg(not(unix))]
     {
-        std::process::Command::new("taskkill")
+        claw_fleet_core::process_util::command("taskkill")
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .status()
             .map_err(|e| format!("taskkill failed: {e}"))?;
@@ -1367,7 +1367,7 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
 
     #[cfg(not(unix))]
     {
-        std::process::Command::new("taskkill")
+        claw_fleet_core::process_util::command("taskkill")
             .args(["/F", "/T", "/PID"])
             .args(
                 crate::session::scan_cli_processes()

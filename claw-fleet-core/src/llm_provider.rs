@@ -4,7 +4,7 @@
 //! The trait is used by `claude_analyze` and `daily_report` modules so that any
 //! supported CLI can power session analysis, report summaries, and lesson extraction.
 
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -102,7 +102,7 @@ pub fn kill_process(pid: u32) {
     }
     #[cfg(windows)]
     {
-        let _ = Command::new("taskkill")
+        let _ = crate::process_util::command("taskkill")
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -118,7 +118,7 @@ fn resolve_binary(name: &str, extra_paths: &[&str]) -> Option<String> {
     #[cfg(not(unix))]
     let which = "where";
 
-    if let Ok(output) = Command::new(which).arg(name).output() {
+    if let Ok(output) = crate::process_util::command(which).arg(name).output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -158,7 +158,7 @@ fn run_cli(
         if a.len() > 80 { "<prompt…>" } else { a }
     }).collect();
     log_debug(&format!("[{tag}] spawning: {bin} {}", safe_args.join(" ")));
-    let child = match Command::new(bin)
+    let child = match crate::process_util::command(bin)
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -401,7 +401,7 @@ impl LlmProvider for CursorCliProvider {
         //   model-id - Display Name
         //   model-id - Display Name  (default)
         // with ANSI escape codes mixed in.
-        let output = match Command::new(bin).arg("models").output() {
+        let output = match crate::process_util::command(bin).arg("models").output() {
             Ok(o) if o.status.success() => o,
             _ => return Vec::new(),
         };

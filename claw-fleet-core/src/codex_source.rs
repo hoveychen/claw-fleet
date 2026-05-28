@@ -1850,7 +1850,7 @@ pub fn fetch_codex_usage_blocking() -> Result<CodexUsageItem, String> {
 fn fetch_codex_usage_blocking_impl(bin: &std::path::Path) -> Result<CodexUsageItem, String> {
     use std::io::{BufRead, BufReader, Write};
 
-    let mut child = std::process::Command::new(bin)
+    let mut child = crate::process_util::command(bin)
         .arg("app-server")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

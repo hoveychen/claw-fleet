@@ -23,7 +23,7 @@
 //! Linux/Windows users see queued items but never get spawned).
 
 #[cfg(target_os = "macos")]
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
 
@@ -563,7 +563,7 @@ fn spawn_claude(
         }
     }
 
-    let mut cmd = Command::new(&claude.path);
+    let mut cmd = crate::process_util::command(&claude.path);
     cmd.current_dir(workspace).arg("--print");
     if is_resume {
         cmd.arg("--resume").arg(session_id);
