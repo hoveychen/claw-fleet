@@ -13,7 +13,7 @@
 use std::io::BufRead;
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread::JoinHandle;
@@ -182,7 +182,7 @@ impl CloudflareTunnel {
     pub fn start_with_binary(binary: &str, local_port: u16) -> Result<Self, TunnelError> {
         eprintln!("[tunnel] starting: {binary} tunnel --url http://127.0.0.1:{local_port}");
 
-        let mut child = Command::new(binary)
+        let mut child = claw_fleet_core::process_util::command(binary)
             .args([
                 "tunnel",
                 "--protocol", "http2",
@@ -301,7 +301,7 @@ fn find_cloudflared() -> Option<String> {
     #[cfg(not(unix))]
     let which = "where";
 
-    match Command::new(which).arg("cloudflared").output() {
+    match claw_fleet_core::process_util::command(which).arg("cloudflared").output() {
         Ok(output) if output.status.success() => {
             // Windows `where` can return multiple lines (one per PATHEXT hit) with CRLF.
             // Take the first non-empty line.
@@ -416,7 +416,7 @@ pub fn download_cloudflared(on_progress: Option<ProgressFn>) -> Result<String, T
             .map_err(|e| TunnelError::DownloadFailed(format!("write tgz failed: {e}")))?;
 
         let parent = dest.parent().unwrap();
-        let output = Command::new("tar")
+        let output = claw_fleet_core::process_util::command("tar")
             .args(["xzf"])
             .arg(&tgz_path)
             .arg("-C")
@@ -468,7 +468,7 @@ pub fn download_cloudflared(on_progress: Option<ProgressFn>) -> Result<String, T
     // Remove macOS quarantine attribute so Gatekeeper doesn't block execution.
     #[cfg(target_os = "macos")]
     {
-        let _ = Command::new("xattr")
+        let _ = claw_fleet_core::process_util::command("xattr")
             .args(["-d", "com.apple.quarantine"])
             .arg(&dest)
             .output();
