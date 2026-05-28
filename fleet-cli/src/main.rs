@@ -2602,12 +2602,16 @@ fn display_source(
     if primary.map_or(false, |p| source == p) {
         return None;
     }
+    // Normalize to forward slashes so the rendered TASKS.md context is the
+    // same on every platform — markdown readers expect `/`, and stable
+    // strings make the snapshot tests cross-platform.
+    let to_string = |p: &std::path::Path| p.display().to_string().replace('\\', "/");
     if let Some(root) = main_root {
         if let Ok(rel) = source.strip_prefix(root) {
-            return Some(rel.display().to_string());
+            return Some(to_string(rel));
         }
     }
-    Some(source.display().to_string())
+    Some(to_string(source))
 }
 
 /// Scan a TASKS.md body for every active-plan region. A block opens on a
@@ -2838,6 +2842,26 @@ trailing notes outside\n";
             out.contains("## Plan: z — source: .worktrees/featX/TASKS.md"),
             "worktree block gets relative source suffix: {out}"
         );
+    }
+
+    #[test]
+    fn render_normalizes_backslashes_in_worktree_path() {
+        // Forces literal backslashes into the source path so the test reproduces
+        // the Windows bug on every platform: on Unix the join produces a single
+        // child component whose name contains backslashes; on Windows the
+        // backslashes act as separators. Either way `display_source` must emit
+        // forward slashes so the rendered TASKS.md context is platform-stable.
+        let main = PathBuf::from("/repo");
+        let wt_path = main.join(r".worktrees\featX\TASKS.md");
+        let blocks = vec![
+            sb(Some("z"), "Z body\n", &wt_path, SystemTime::UNIX_EPOCH),
+        ];
+        let out = render_with_sources(&blocks, Some(&main));
+        assert!(
+            out.contains("source: .worktrees/featX/TASKS.md"),
+            "expected forward-slash source path: {out}"
+        );
+        assert!(!out.contains('\\'), "expected no backslashes in output: {out}");
     }
 
     #[test]
