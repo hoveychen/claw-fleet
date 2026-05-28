@@ -452,7 +452,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           )}
           <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
         </div>
-        <OptionsBlock
+        <SharedOptionsBlock
           decisionId={decision.id}
           question={q}
           compact={compact}
@@ -530,9 +530,21 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   );
 }
 
+// Structural question shape that both ElicitationQuestion and FleetAskQuestion
+// satisfy. SharedOptionsBlock reads `question` (used as the store-map key),
+// `multiSelect`, and the options array — nothing else. Keeping the type local
+// means we don't have to widen the option shape across both decision flows.
+interface SharedOptionsQuestion {
+  question: string;
+  multiSelect: boolean;
+  options: Array<{ label: string; description: string; preview?: string }>;
+}
+
 // Renders the option list + "Other" input. Splits into side-by-side layout
 // when any option carries a preview (single-select only, per AskUserQuestion spec).
-function OptionsBlock({
+// Shared between ElicitationCard (v1) and FleetAskCard (v2) — both pass their
+// own store actions in via callbacks, so the same UI surface drives both.
+function SharedOptionsBlock({
   decisionId,
   question,
   compact,
@@ -547,7 +559,7 @@ function OptionsBlock({
   onAttachmentError,
 }: {
   decisionId: string;
-  question: ElicitationDecision["request"]["questions"][number];
+  question: SharedOptionsQuestion;
   compact: boolean;
   effectiveMulti: boolean;
   selected: string[];
