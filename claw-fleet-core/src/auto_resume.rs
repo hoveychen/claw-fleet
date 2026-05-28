@@ -144,7 +144,7 @@ fn spawn_resume_with_path(
         .open(stderr_log)
         .map_err(|e| format!("reopen stderr log {}: {}", stderr_log.display(), e))?;
 
-    let mut child = std::process::Command::new(claude_path)
+    let mut child = crate::process_util::command(claude_path)
         .arg("--resume")
         .arg(session_id)
         .arg("-p")

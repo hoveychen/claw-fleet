@@ -723,7 +723,7 @@ fn find_openclaw_binary() -> Option<PathBuf> {
     #[cfg(not(unix))]
     let cmd = "where";
 
-    if let Ok(output) = std::process::Command::new(cmd).arg("openclaw").output() {
+    if let Ok(output) = crate::process_util::command(cmd).arg("openclaw").output() {
         if output.status.success() {
             let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !path.is_empty() {
@@ -793,7 +793,7 @@ pub fn fetch_openclaw_account_blocking() -> Result<OpenClawAccountInfo, String> 
 }
 
 fn fetch_openclaw_account_blocking_impl(bin: &Path) -> Result<OpenClawAccountInfo, String> {
-    let output = std::process::Command::new(bin)
+    let output = crate::process_util::command(bin)
         .args(["models", "status", "--json"])
         .env("PATH", augmented_path())
         .stdout(std::process::Stdio::piped())
@@ -862,7 +862,7 @@ fn fetch_openclaw_account_blocking_impl(bin: &Path) -> Result<OpenClawAccountInf
     }
 
     // Get version from the CLI
-    let version = std::process::Command::new(bin)
+    let version = crate::process_util::command(bin)
         .args(["--version"])
         .env("PATH", augmented_path())
         .output()
@@ -893,7 +893,7 @@ pub fn fetch_openclaw_usage_blocking() -> Result<OpenClawUsageInfo, String> {
 }
 
 fn fetch_openclaw_usage_blocking_impl(bin: &Path) -> Result<OpenClawUsageInfo, String> {
-    let output = std::process::Command::new(bin)
+    let output = crate::process_util::command(bin)
         .args(["status", "--json"])
         .env("PATH", augmented_path())
         .stdout(std::process::Stdio::piped())
