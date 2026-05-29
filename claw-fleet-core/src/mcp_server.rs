@@ -149,6 +149,20 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 }
 
+/// The Claude Code session id of the agent that invoked this MCP tool.
+///
+/// Claude Code exposes it to MCP stdio servers via the `CLAUDE_CODE_SESSION_ID`
+/// environment variable (verified empirically: the value equals the transcript
+/// UUID, e.g. `~/.claude/projects/<proj>/<uuid>.jsonl`, which is exactly what
+/// `session::parse_session_info` keys `SessionInfo.id` on). Returning a real id
+/// lets the Fleet desktop decision panel resolve which session a `fleet__ask` /
+/// `fleet__render_a2ui` card belongs to, so its inline SessionDetail side column
+/// can open — mirroring the v1 hook-driven elicitation path, where the session
+/// id arrives over the hook's stdin payload instead of the environment.
+fn current_session_id() -> String {
+    std::env::var("CLAUDE_CODE_SESSION_ID").unwrap_or_default()
+}
+
 fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     let args = params.get("arguments").cloned().unwrap_or(Value::Null);
     let questions: Vec<crate::mcp_ipc::FleetAskQuestion> =
@@ -181,7 +195,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 
     let request_id = crate::guard::new_request_id();
-    let session_id = std::env::var("CLAUDE_SESSION_ID").unwrap_or_default();
+    let session_id = current_session_id();
     let workspace_name = std::env::var("CLAUDE_PROJECT_DIR")
         .ok()
         .and_then(|p| {
@@ -323,7 +337,7 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
     }
 
     let request_id = crate::guard::new_request_id();
-    let session_id = std::env::var("CLAUDE_SESSION_ID").unwrap_or_default();
+    let session_id = current_session_id();
     let workspace_name = std::env::var("CLAUDE_PROJECT_DIR")
         .ok()
         .and_then(|p| {
@@ -641,5 +655,32 @@ mod tests {
     fn malformed_json_silently_ignored() {
         assert!(handle_line("not json").is_none());
         assert!(handle_line("").is_none());
+    }
+
+    /// Regression: `current_session_id` must read the env var Claude Code
+    /// actually injects into MCP stdio servers — `CLAUDE_CODE_SESSION_ID` —
+    /// not the look-alike `CLAUDE_SESSION_ID`. When it read the wrong name the
+    /// id came back empty, so every `fleet__ask` / `fleet__render_a2ui` card
+    /// carried `sessionId: ""`, which gated off the decision panel's inline
+    /// SessionDetail side column (DecisionPanel.tsx `PastHistoryStrip` only
+    /// renders when `active.request.sessionId` is truthy).
+    ///
+    /// `set_var`/`remove_var` mutate process-global state; no other test reads
+    /// `CLAUDE_CODE_SESSION_ID`, so this stays self-contained. The wrong-name
+    /// var is also cleared to prove the value comes from the right source.
+    #[test]
+    fn current_session_id_reads_claude_code_session_id() {
+        unsafe {
+            std::env::remove_var("CLAUDE_SESSION_ID");
+            std::env::set_var("CLAUDE_CODE_SESSION_ID", "sess-abc-123");
+        }
+        let got = current_session_id();
+        unsafe {
+            std::env::remove_var("CLAUDE_CODE_SESSION_ID");
+        }
+        assert_eq!(
+            got, "sess-abc-123",
+            "current_session_id must read CLAUDE_CODE_SESSION_ID, not CLAUDE_SESSION_ID"
+        );
     }
 }
