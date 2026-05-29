@@ -121,6 +121,35 @@ export interface WorkflowAgent {
   status: WorkflowAgentStatus;
   /** final result text, present only once the agent is done */
   result?: string;
+  /** runtime agentType from agent-<id>.meta.json (e.g. "Explore") */
+  agentType?: string;
+}
+
+/** how a DAG node's agent(s) were orchestrated in the script */
+export type WorkflowNodeKind = "single" | "parallel" | "pipeline";
+
+/** rolled-up live status of a DAG node */
+export type WorkflowNodeStatus = "pending" | "running" | "done";
+
+/** one node per agent() call-site in the script */
+export interface WorkflowNode {
+  /** stable id (n0, n1, ...), referenced by WorkflowEdge */
+  id: string;
+  label: string;
+  /** enclosing phase title */
+  phase?: string;
+  kind: WorkflowNodeKind;
+  status: WorkflowNodeStatus;
+  /** runtime agent ids bound to this call-site (0..N) */
+  agentIds: string[];
+  /** true when the agent→node binding is heuristic rather than exact */
+  approximate: boolean;
+}
+
+/** a directed dependency edge between two nodes (from → to) */
+export interface WorkflowEdge {
+  from: string;
+  to: string;
 }
 
 export interface WorkflowPhase {
@@ -139,6 +168,10 @@ export interface WorkflowTree {
   phases: WorkflowPhase[];
   /** fan-out agents, in first-seen journal order */
   agents: WorkflowAgent[];
+  /** reconstructed orchestration DAG nodes (one per agent() call-site) */
+  nodes: WorkflowNode[];
+  /** directed edges between DAG nodes (pipeline chains + phase progression) */
+  edges: WorkflowEdge[];
   /** absolute path to the wf_<run-id> transcript dir */
   transcriptDir: string;
 }
