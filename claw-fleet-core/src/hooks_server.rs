@@ -1540,6 +1540,21 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/workflow_trees" => {
+                // Claude Code Workflow runs for a session. `path` is the parent
+                // session's .jsonl transcript path; discovery reads the sibling
+                // `<sid>/subagents/workflows/wf_*/` dirs server-side so remote
+                // clients see runs that live on the remote host.
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let trees = crate::workflow::discover_workflow_trees(std::path::Path::new(
+                    &file_path,
+                ));
+                let body = serde_json::to_string(&trees).unwrap_or_default();
+                let _ = request
+                    .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            }
+
             "/token_breakdown" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
