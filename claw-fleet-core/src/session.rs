@@ -928,20 +928,29 @@ fn claude_family_version(model_lower: &str, family: &str) -> Option<(u32, u32)> 
     Some((major, minor))
 }
 
-/// Whether a Claude model ships with a 1M-token context window. Loosely mirrors
-/// [`modelSupports1M`](../claude-code-fork/src/utils/context.ts) in Claude Code,
-/// but parses the family + `major.minor` version instead of hard-coding each
-/// release — so future minors (Opus 4.9, 4.10) and future majors (Opus 5.x,
-/// Sonnet 5.x) are recognised without another whitelist edit:
-///   * Sonnet — every major ≥ 4 (4.x shipped with 1M).
-///   * Opus   — 4.6+ (1M landed at 4.6), and every later major (5.x, 6.x …).
-///   * Haiku and anything older/unrecognised — 200K.
+/// Whether a Claude model ships with a 1M-token context window. Verified
+/// against Anthropic's model docs (2026-05): the 1M window landed at the **.6**
+/// minor for BOTH Opus and Sonnet, and every later major carries it forward.
+/// Parsing the family + `major.minor` (instead of hard-coding each release)
+/// means future minors (Opus 4.9, 4.10) and future majors (5.x, 6.x) are
+/// recognised without another edit:
+///   * Opus & Sonnet — 4.6+ within major 4, and every later major (5.x …).
+///   * Mythos research preview (Project Glasswing) — always 1M.
+///   * Opus ≤4.5, Sonnet ≤4.5, all Haiku, Claude 3.x — 200K.
+///
+/// Note Sonnet 4 / 4.5 are 200K models: Sonnet 4's brief 1M was a public-beta
+/// header, not the default, and Sonnet 4.5 never shipped 1M.
 fn claude_model_supports_1m(model_lower: &str) -> bool {
-    if let Some((major, _minor)) = claude_family_version(model_lower, "sonnet") {
-        return major >= 4;
+    // Mythos preview's dated id is invitation-only / unpublished, so match the
+    // family substring rather than a version.
+    if model_lower.contains("mythos") {
+        return true;
     }
-    if let Some((major, minor)) = claude_family_version(model_lower, "opus") {
-        return major > 4 || (major == 4 && minor >= 6);
+    // Opus and Sonnet share the same 4.6+ gate; Haiku never qualifies.
+    for family in ["opus", "sonnet"] {
+        if let Some((major, minor)) = claude_family_version(model_lower, family) {
+            return major > 4 || (major == 4 && minor >= 6);
+        }
     }
     false
 }
@@ -3221,30 +3230,50 @@ mod tests {
     }
 
     #[test]
-    fn context_window_inferred_1m_for_sonnet_4_x() {
+    fn context_window_sonnet_1m_only_from_4_6() {
+        // Per Anthropic's model docs (2026-05): Sonnet gained 1M at 4.6.
+        // Sonnet 4.6 → 1M.
         assert_eq!(
             context_window_for_model("claude-sonnet-4-6", 250_000),
             Some(1_000_000)
         );
+        // Sonnet 4.5 is a 200K model — even with a >195K observed turn it must
+        // NOT be promoted to 1M (its real ceiling is ~200K, so 100% there is a
+        // truthful "full", not a fake one).
         assert_eq!(
             context_window_for_model("claude-sonnet-4-5", 250_000),
-            Some(1_000_000)
+            Some(200_000)
         );
     }
 
     #[test]
     fn context_window_no_1m_inference_for_unsupported_families() {
-        // Opus 4 / 4.1 don't support 1M — even if max>200K, stay at 200K
+        // Opus 4 / 4.1 / 4.5 don't support 1M — even if max>200K, stay at 200K
         // (which would clamp the percentage to 100, but at least won't lie
-        // about the denominator).
+        // about the denominator). 1M landed at Opus 4.6.
         assert_eq!(
             context_window_for_model("claude-opus-4-1", 500_000),
+            Some(200_000)
+        );
+        assert_eq!(
+            context_window_for_model("claude-opus-4-5", 500_000),
             Some(200_000)
         );
         // Haiku 4.5 doesn't support 1M either.
         assert_eq!(
             context_window_for_model("claude-haiku-4-5", 500_000),
             Some(200_000)
+        );
+    }
+
+    #[test]
+    fn context_window_mythos_is_1m() {
+        // Claude Mythos Preview (Project Glasswing) ships with a 1M window.
+        // Its dated id is invitation-only / unpublished, so we match the family
+        // substring; assert on a representative id shape.
+        assert_eq!(
+            context_window_for_model("claude-mythos-preview", 530_000),
+            Some(1_000_000)
         );
     }
 
