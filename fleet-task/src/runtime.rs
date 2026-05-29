@@ -425,10 +425,12 @@ mod tests {
 
         let projects_dir = home.path().join(".claude").join("fleet");
         std::fs::create_dir_all(&projects_dir).unwrap();
-        let projects_json = format!(
-            r#"[{{"id":"proj-uuid-1","name":"x","workspace":"{ws}"}}]"#,
-            ws = ws.path().display()
-        );
+        // Build via serde so the workspace path is JSON-escaped — on Windows it
+        // contains backslashes that would otherwise form invalid JSON escapes.
+        let projects_json = serde_json::to_string(&serde_json::json!([
+            {"id": "proj-uuid-1", "name": "x", "workspace": ws.path()}
+        ]))
+        .unwrap();
         std::fs::write(projects_dir.join("projects.json"), projects_json).unwrap();
 
         let found = lookup_project_id(ws.path());
@@ -445,10 +447,10 @@ mod tests {
 
         let projects_dir = home.path().join(".claude").join("fleet");
         std::fs::create_dir_all(&projects_dir).unwrap();
-        let projects_json = format!(
-            r#"[{{"id":"proj-other","name":"x","workspace":"{ws}"}}]"#,
-            ws = other.path().display()
-        );
+        let projects_json = serde_json::to_string(&serde_json::json!([
+            {"id": "proj-other", "name": "x", "workspace": other.path()}
+        ]))
+        .unwrap();
         std::fs::write(projects_dir.join("projects.json"), projects_json).unwrap();
 
         assert!(lookup_project_id(ws.path()).is_none());
