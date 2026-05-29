@@ -328,3 +328,38 @@
   border-left: none;
   transition: none;
 }
+
+/* ── Workflow DAG panel ───────────────────────────────────────────────────── */
+.workflow_panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.workflow_run {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.workflow_run_head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.workflow_run_name {
+  font-weight: 600;
+  color: var(--color-text);
+  font-size: 13px;
+}
+
+.workflow_run_meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
