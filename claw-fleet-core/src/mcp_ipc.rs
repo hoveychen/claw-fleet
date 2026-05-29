@@ -22,7 +22,7 @@ use std::time::Duration;
 pub struct FleetAskRequest {
     pub id: String,
     /// Originating Claude Code session id (passed via env var
-    /// `CLAUDE_SESSION_ID` when the MCP server is launched). Used by the
+    /// `CLAUDE_CODE_SESSION_ID` when the MCP server is launched). Used by the
     /// desktop watcher to resolve workspace + AI title for the Decision
     /// Card header, exactly like `ElicitationRequest::session_id`.
     #[serde(default)]
