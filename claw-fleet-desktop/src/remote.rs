@@ -656,6 +656,14 @@ impl crate::backend::Backend for RemoteBackend {
             .get(&format!("/skill_history?path={}", encode_path(jsonl_path)))
     }
 
+    fn get_workflow_trees(
+        &self,
+        jsonl_path: &str,
+    ) -> Result<Vec<claw_fleet_core::workflow::WorkflowTree>, String> {
+        self.probe
+            .get(&format!("/workflow_trees?path={}", encode_path(jsonl_path)))
+    }
+
     fn get_task_token_breakdown(
         &self,
         main_jsonl_path: &str,

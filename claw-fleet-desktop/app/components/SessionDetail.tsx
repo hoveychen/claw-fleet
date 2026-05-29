@@ -422,7 +422,7 @@ export function SessionDetail({
                       : t("detail.load_earlier") || "Load earlier messages"}
                   </button>
                 )}
-                <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} />
+                <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} jsonlPath={liveSession.jsonlPath} />
               </div>
 
               {/* Auto-follow indicator */}

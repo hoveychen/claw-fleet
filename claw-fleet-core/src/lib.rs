@@ -76,6 +76,7 @@ pub mod task {
 pub mod tcc;
 pub mod token_analysis;
 pub mod touches_hook;
+pub mod workflow;
 pub mod worker_executor {
     pub use claw_fleet_task::worker::*;
 }
