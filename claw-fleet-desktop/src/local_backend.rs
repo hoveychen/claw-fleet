@@ -1867,6 +1867,15 @@ impl Backend for LocalBackend {
         Ok(out)
     }
 
+    fn get_workflow_trees(
+        &self,
+        jsonl_path: &str,
+    ) -> Result<Vec<claw_fleet_core::workflow::WorkflowTree>, String> {
+        Ok(claw_fleet_core::workflow::discover_workflow_trees(
+            std::path::Path::new(jsonl_path),
+        ))
+    }
+
     fn get_task_token_breakdown(
         &self,
         main_jsonl_path: &str,

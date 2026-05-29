@@ -792,6 +792,18 @@ fn get_skill_history(
 }
 
 #[tauri::command]
+fn get_workflow_trees(
+    jsonl_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::workflow::WorkflowTree>, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .get_workflow_trees(&jsonl_path)
+}
+
+#[tauri::command]
 fn get_task_token_breakdown(
     jsonl_path: String,
     project_root: Option<String>,
@@ -3512,6 +3524,7 @@ pub fn run() {
             get_messages,
             get_messages_tail,
             get_skill_history,
+            get_workflow_trees,
             get_task_token_breakdown,
             get_session_todos,
             get_audit_events,

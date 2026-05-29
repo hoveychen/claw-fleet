@@ -278,6 +278,19 @@ pub trait Backend: Send + Sync {
     /// flagged with `is_subagent: true`.
     fn get_skill_history(&self, jsonl_path: &str) -> Result<Vec<SkillInvocation>, String>;
 
+    /// Claude Code **Workflow** runs for a session. `jsonl_path` is the parent
+    /// session's `.jsonl` transcript path; the sibling
+    /// `<sid>/subagents/workflows/wf_*/` dirs are discovered and each run's
+    /// `journal.jsonl` + script `meta.phases` are parsed into a
+    /// [`crate::workflow::WorkflowTree`]. Empty when the session has no runs.
+    /// Default impl returns empty so non-Claude sources opt out for free.
+    fn get_workflow_trees(
+        &self,
+        _jsonl_path: &str,
+    ) -> Result<Vec<crate::workflow::WorkflowTree>, String> {
+        Ok(Vec::new())
+    }
+
     // ── Token spend ──────────────────────────────────────────────────────────
     /// Token-spend attribution for the task tree rooted at `main_jsonl_path`
     /// (main session + recursive subagent jsonls). Returns billed totals from
