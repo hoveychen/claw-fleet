@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, Play, Pause, Circle, Plus } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useTasksStore, useUIStore } from "../store";
+import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
 import { MascotEyes } from "./MascotEyes";
@@ -217,6 +218,7 @@ export function SessionList() {
   const { searching, ftsMatchPaths } = useSessionSearch(filter);
 
   const filtered = sessions.filter((s) => {
+    if (isWorkflowAgent(s)) return false; // hidden from the list (open via DAG node only)
     if (!filter) return true;
     const q = filter.toLowerCase();
     const clientMatch =

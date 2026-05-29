@@ -9,6 +9,7 @@ import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
+import { isWorkflowAgent } from "../workflowAgent";
 import styles from "./SessionDetail.module.css";
 
 const ACTIVE_STATUSES = new Set([
@@ -150,6 +151,15 @@ export function SessionDetail({
     ).length;
     setWorkflowRunCount(sid, { total: workflowTrees.length, running });
   }, [liveSession?.id, workflowTrees, setWorkflowRunCount]);
+  // Open a workflow fan-out agent's session (the scan registers it as
+  // `agent-<agentId>`, see session.rs). No-op if a scan hasn't surfaced it yet.
+  const openAgentSession = useCallback(
+    (agentId: string) => {
+      const target = sessions.find((s) => s.id === `agent-${agentId}`);
+      if (target) open(target);
+    },
+    [sessions, open],
+  );
 
   useEffect(() => {
     setUserPickedTab(false);
@@ -275,15 +285,23 @@ export function SessionDetail({
     let mainSession: SessionInfo | undefined;
     let subagents: SessionInfo[];
 
+    // Exclude workflow fan-out agents — surfaced only for "open from DAG node",
+    // not as conversation tabs (100+ per run). See isWorkflowAgent.
     if (liveSession.isSubagent && liveSession.parentSessionId) {
       mainSession = sessions.find((s) => s.id === liveSession.parentSessionId);
       subagents = sessions.filter(
-        (s) => s.isSubagent && s.parentSessionId === liveSession.parentSessionId
+        (s) =>
+          s.isSubagent &&
+          s.parentSessionId === liveSession.parentSessionId &&
+          !isWorkflowAgent(s)
       );
     } else {
       mainSession = liveSession;
       subagents = sessions.filter(
-        (s) => s.isSubagent && s.parentSessionId === liveSession.id
+        (s) =>
+          s.isSubagent &&
+          s.parentSessionId === liveSession.id &&
+          !isWorkflowAgent(s)
       );
     }
 
@@ -447,7 +465,7 @@ export function SessionDetail({
                         {tree.runId} · {done}/{tree.agents.length} agents
                       </span>
                     </div>
-                    <WorkflowDag tree={tree} />
+                    <WorkflowDag tree={tree} onOpenAgent={openAgentSession} />
                   </div>
                 );
               })}
