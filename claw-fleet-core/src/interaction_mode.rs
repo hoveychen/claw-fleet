@@ -290,11 +290,19 @@ put in `fleet__ask`, plus two new optional per-question fields:\n\
 | Needs a rendered HTML preview (diff table, formatted artefact, screenshot grid) | `fleet__ask` with `html` |\n\
 | Needs structured form input (commit message, slider, date/time picker, multiple typed fields) | `fleet__ask` with `formFields` |\n\
 | Mix of all three (preview + form + options) on one card | `fleet__ask` (composite) |\n\
+| The visual rendering itself is the deliverable — a drawing, chart, styled artefact, anything where \"looks good\" is part of the ask — even when plain text could technically convey the same information | `fleet__ask` with `html` (or `render_a2ui`) |\n\
 \n\
 Default to `AskUserQuestion` for the routine wait-for-input moments \
 documented above. Reach for `fleet__ask` when you genuinely need the html \
-preview or structured form. Both tools render in the same Decision Panel, \
-so {title_en} doesn't see a UX seam.\n\
+preview or structured form. The deciding test is NOT \"can plain text express \
+this?\" — text can express almost anything, so that question always answers \
+yes and quietly steers you back to the cheaper tool. The test is \"would a \
+richer rendering be the better answer for {title_en}?\": when the visual \
+presentation itself is part of what {title_en} asked for — a drawing, a styled \
+diff, a chart, anything where how it looks is the point — go straight to \
+`fleet__ask`/`render_a2ui` instead of falling back to ASCII or bare markdown. \
+Both tools render in the same Decision Panel, so {title_en} doesn't see a UX \
+seam.\n\
 \n\
 ### `fleet__ask` schema (reference)\n\
 \n\
