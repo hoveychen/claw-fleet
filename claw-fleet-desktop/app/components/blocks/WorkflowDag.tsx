@@ -1,5 +1,5 @@
-import { useMemo } from "react";
-import type { WorkflowTree, WorkflowNode } from "../../types";
+import { useMemo, useState } from "react";
+import type { WorkflowTree, WorkflowNode, WorkflowAgent } from "../../types";
 import styles from "./WorkflowDag.module.css";
 
 const NODE_W = 156;
@@ -7,9 +7,13 @@ const NODE_H = 66;
 const H_GAP = 60;
 const V_GAP = 22;
 const PAD = 12;
+const RESULT_PREVIEW = 360;
 
 interface Props {
   tree: WorkflowTree;
+  /** Open the session for a workflow agent (id = `agent-<agentId>`). When
+   *  omitted, the "open session" affordance is hidden. */
+  onOpenAgent?: (agentId: string) => void;
 }
 
 interface Placed {
@@ -27,8 +31,16 @@ interface Placed {
  * Falls back to a flat agent list when the script could not be parsed into a
  * DAG (no nodes).
  */
-export function WorkflowDag({ tree }: Props) {
+export function WorkflowDag({ tree, onOpenAgent }: Props) {
   const layout = useMemo(() => computeLayout(tree), [tree]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const agentById = useMemo(
+    () => new Map(tree.agents.map((a) => [a.agentId, a])),
+    [tree],
+  );
+  const selectedNode = selectedId
+    ? tree.nodes.find((n) => n.id === selectedId)
+    : undefined;
 
   if (tree.nodes.length === 0) {
     // Unparseable script → honest flat fallback.
@@ -100,9 +112,20 @@ export function WorkflowDag({ tree }: Props) {
         {placed.map(({ node, x, y }) => (
           <div
             key={node.id}
-            className={`${styles.node} ${styles[`status_${node.status}`]}`}
+            role="button"
+            tabIndex={0}
+            className={`${styles.node} ${styles[`status_${node.status}`]} ${selectedId === node.id ? styles.selected : ""}`}
             style={{ left: x + PAD, top: y + PAD, width: NODE_W, height: NODE_H }}
             title={nodeTitle(node)}
+            onClick={() =>
+              setSelectedId((cur) => (cur === node.id ? null : node.id))
+            }
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                setSelectedId((cur) => (cur === node.id ? null : node.id));
+              }
+            }}
           >
             <div className={styles.nodeHead}>
               <span className={`${styles.kind} ${styles[`kind_${node.kind}`]}`}>
@@ -123,6 +146,95 @@ export function WorkflowDag({ tree }: Props) {
           </div>
         ))}
       </div>
+
+      {selectedNode && (
+        <div className={styles.detail}>
+          <div className={styles.detailHead}>
+            <span className={styles.detailTitle}>
+              {selectedNode.label}
+            </span>
+            <span className={styles.detailMeta}>
+              {kindLabel(selectedNode.kind)} · {selectedNode.status} ·{" "}
+              {selectedNode.agentIds.length} agent
+              {selectedNode.approximate ? " · ≈ 启发式绑定" : ""}
+            </span>
+            <button
+              className={styles.detailClose}
+              onClick={() => setSelectedId(null)}
+              title="收起"
+            >
+              ✕
+            </button>
+          </div>
+          {selectedNode.agentIds.length === 0 ? (
+            <div className={styles.detailEmpty}>尚无运行时 agent（未启动）</div>
+          ) : (
+            <div className={styles.agentRows}>
+              {selectedNode.agentIds.map((id) => (
+                <AgentRow
+                  key={id}
+                  agentId={id}
+                  agent={agentById.get(id)}
+                  onOpen={onOpenAgent}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentRow({
+  agentId,
+  agent,
+  onOpen,
+}: {
+  agentId: string;
+  agent: WorkflowAgent | undefined;
+  onOpen?: (agentId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const result = agent?.result ?? "";
+  const long = result.length > RESULT_PREVIEW;
+  const shown = expanded || !long ? result : result.slice(0, RESULT_PREVIEW) + "…";
+  const status = agent?.status ?? "running";
+  return (
+    <div className={styles.agentRow}>
+      <div className={styles.agentRowHead}>
+        <span className={`${styles.agentDot} ${styles[`st_${status}`]}`} />
+        <span className={styles.agentType}>
+          {agent?.agentType ?? "agent"}
+        </span>
+        <span className={styles.agentId}>{agentId.slice(0, 10)}</span>
+        <span className={`${styles.agentStatus} ${styles[`st_${status}`]}`}>
+          {status}
+        </span>
+        {onOpen && (
+          <button
+            className={styles.openBtn}
+            onClick={() => onOpen(agentId)}
+            title="在 Fleet 里打开该 agent 的 session"
+          >
+            打开 session ↗
+          </button>
+        )}
+      </div>
+      {result ? (
+        <pre
+          className={styles.result}
+          onClick={() => long && setExpanded((v) => !v)}
+          style={{ cursor: long ? "pointer" : "default" }}
+          title={long ? (expanded ? "点击收起" : "点击展开") : undefined}
+        >
+          {shown}
+        </pre>
+      ) : (
+        <div className={styles.detailEmpty}>
+          {status === "done" ? "（无结果文本）" : "运行中，暂无结果"}
+        </div>
+      )}
     </div>
   );
 }

@@ -1825,11 +1825,40 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     continue;
                 };
 
+                // Collect agent transcripts: direct subagents
+                // (`subagents/agent-*.jsonl`) plus Claude Code Workflow fan-out
+                // agents (`subagents/workflows/wf_*/agent-*.jsonl`), so workflow
+                // nodes can link to an openable session.
+                let mut agent_paths: Vec<PathBuf> = Vec::new();
                 for agent_entry in agent_entries.flatten() {
-                    let agent_path = agent_entry.path();
-                    if agent_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                        continue;
+                    let p = agent_entry.path();
+                    if p.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+                        agent_paths.push(p);
                     }
+                }
+                if let Ok(wf_runs) = fs::read_dir(subagents_dir.join("workflows")) {
+                    for run in wf_runs.flatten() {
+                        let run_dir = run.path();
+                        if !run_dir.is_dir() {
+                            continue;
+                        }
+                        if let Ok(wf_agents) = fs::read_dir(&run_dir) {
+                            for a in wf_agents.flatten() {
+                                let p = a.path();
+                                if p.extension().and_then(|e| e.to_str()) == Some("jsonl")
+                                    && p.file_name()
+                                        .and_then(|n| n.to_str())
+                                        .map(|n| n.starts_with("agent-"))
+                                        .unwrap_or(false)
+                                {
+                                    agent_paths.push(p);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                for agent_path in agent_paths {
 
                     let agent_id = agent_path
                         .file_stem()

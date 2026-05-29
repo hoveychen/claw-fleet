@@ -159,3 +159,108 @@
   border-color: #22c55e;
   color: #16a34a;
 }
+
+/* ── clickable node + selection ───────────────────────────────────────────── */
+.node { cursor: pointer; }
+.node:hover { border-color: var(--color-text-dim); }
+.selected {
+  outline: 2px solid var(--color-accent-tool, #f59e0b);
+  outline-offset: 1px;
+}
+
+/* ── node detail panel (click-to-expand below the DAG) ─────────────────────── */
+.detail {
+  margin-top: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-bg-tool);
+  overflow: hidden;
+}
+.detailHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+.detailTitle { font-weight: 700; font-size: 12px; color: var(--color-text); }
+.detailMeta { font-size: 10px; color: var(--color-text-dim); }
+.detailClose {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+}
+.detailClose:hover { color: var(--color-text); }
+.detailEmpty {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  font-style: italic;
+}
+
+.agentRows { display: flex; flex-direction: column; }
+.agentRow {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+.agentRow:last-child { border-bottom: none; }
+.agentRowHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.agentDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--color-text-dim);
+}
+.agentDot.st_running {
+  background: var(--color-accent-tool, #f59e0b);
+  animation: wfdag-pulse 1.2s ease-in-out infinite;
+}
+.agentDot.st_done { background: #22c55e; }
+.agentType { font-size: 11px; font-weight: 600; color: var(--color-text); }
+.agentId {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
+.agentStatus { font-size: 10px; color: var(--color-text-dim); }
+.agentStatus.st_running { color: var(--color-accent-tool, #f59e0b); }
+.agentStatus.st_done { color: #16a34a; }
+.openBtn {
+  margin-left: auto;
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.openBtn:hover {
+  border-color: var(--color-accent-tool, #f59e0b);
+  color: var(--color-accent-tool, #f59e0b);
+}
+.result {
+  margin: 6px 0 0;
+  padding: 7px 9px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
+}

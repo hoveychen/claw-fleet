@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useSessionsStore } from "../store";
 import type { SessionInfo } from "../types";
+import { isWorkflowAgent } from "../workflowAgent";
 import { StatusBadge, AgentSourceIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
 import styles from "./TrayPanel.module.css";
 
@@ -143,7 +144,7 @@ function useGroupedSessions(): SessionGroup[] {
     const mains = active.filter((s) => !s.isSubagent);
     const subsByParent = new Map<string, SessionInfo[]>();
     for (const s of active) {
-      if (s.isSubagent && s.parentSessionId) {
+      if (s.isSubagent && s.parentSessionId && !isWorkflowAgent(s)) {
         const list = subsByParent.get(s.parentSessionId) ?? [];
         list.push(s);
         subsByParent.set(s.parentSessionId, list);
