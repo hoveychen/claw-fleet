@@ -7,6 +7,8 @@ import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
+import { WorkflowDag } from "./blocks/WorkflowDag";
+import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import styles from "./SessionDetail.module.css";
 
 const ACTIVE_STATUSES = new Set([
@@ -128,11 +130,26 @@ export function SessionDetail({
   // or when viewing a subagent (show sibling tabs + parent).
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowing, setIsFollowing] = useState(true);
-  type ViewTab = "decisions" | "skills" | "messages" | "tokens";
+  type ViewTab = "decisions" | "skills" | "messages" | "tokens" | "workflow";
   const [viewTab, setViewTab] = useState<ViewTab>("decisions");
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const [decisionsLoaded, setDecisionsLoaded] = useState(false);
+
+  // Claude Code Workflow runs for this session → reconstructed DAG, surfaced as
+  // a session-level "Workflow" tab (not inline in the conversation). Publishing
+  // the run rollup to the store drives the SessionCard chip.
+  const setWorkflowRunCount = useSessionsStore((s) => s.setWorkflowRunCount);
+  const workflowTrees = useWorkflowTrees(liveSession?.jsonlPath ?? null, !!liveSession);
+  const hasWorkflows = workflowTrees.length > 0;
+  useEffect(() => {
+    const sid = liveSession?.id;
+    if (!sid) return;
+    const running = workflowTrees.filter((tr) =>
+      tr.agents.some((a) => a.status === "running"),
+    ).length;
+    setWorkflowRunCount(sid, { total: workflowTrees.length, running });
+  }, [liveSession?.id, workflowTrees, setWorkflowRunCount]);
 
   useEffect(() => {
     setUserPickedTab(false);
@@ -389,6 +406,14 @@ export function SessionDetail({
             >
               {t("detail.tab_tokens")}
             </button>
+            {hasWorkflows && (
+              <button
+                className={`${styles.view_tab} ${viewTab === "workflow" ? styles.view_tab_active : ""}`}
+                onClick={() => pickTab("workflow")}
+              >
+                {t("detail.tab_workflow")} ({workflowTrees.length})
+              </button>
+            )}
           </div>
 
           {viewTab === "decisions" && (
@@ -408,6 +433,27 @@ export function SessionDetail({
             />
           )}
 
+          {viewTab === "workflow" && (
+            <div className={styles.workflow_panel}>
+              {workflowTrees.map((tree) => {
+                const done = tree.agents.filter((a) => a.status === "done").length;
+                return (
+                  <div key={tree.runId} className={styles.workflow_run}>
+                    <div className={styles.workflow_run_head}>
+                      <span className={styles.workflow_run_name}>
+                        {tree.name ?? tree.runId}
+                      </span>
+                      <span className={styles.workflow_run_meta}>
+                        {tree.runId} · {done}/{tree.agents.length} agents
+                      </span>
+                    </div>
+                    <WorkflowDag tree={tree} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           {viewTab === "messages" && (
             <>
               <div ref={scrollRef} className={styles.scroll_area}>
@@ -422,7 +468,7 @@ export function SessionDetail({
                       : t("detail.load_earlier") || "Load earlier messages"}
                   </button>
                 )}
-                <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} jsonlPath={liveSession.jsonlPath} />
+                <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} />
               </div>
 
               {/* Auto-follow indicator */}
