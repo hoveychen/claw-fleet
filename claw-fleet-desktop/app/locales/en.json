@@ -415,6 +415,17 @@
     "switch_connection": "Switch Connection",
     "usage": "Usage"
   },
+  "workflow": {
+    "title": "Workflow",
+    "phases": "Phases",
+    "agents": "Agents",
+    "running": "{{done}}/{{total}} running",
+    "done": "{{total}} done",
+    "agentRunning": "running",
+    "agentDone": "done",
+    "resultChars": "{{n}} chars",
+    "noAgents": "No agent activity recorded yet."
+  },
   "detail": {
     "following": "Auto-following",
     "scroll_to_latest": "Scroll to latest",
