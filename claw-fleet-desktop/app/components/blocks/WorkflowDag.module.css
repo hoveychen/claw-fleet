@@ -69,6 +69,8 @@
   font-size: 11px;
   color: var(--color-text-dim);
   margin-left: auto;
+  /* clear the absolutely-positioned status dot at the top-right corner */
+  margin-right: 13px;
   cursor: help;
 }
 
