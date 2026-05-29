@@ -15,6 +15,10 @@
   align-items: center;
   gap: 16px;
   padding: 14px 20px 12px;
+  /* Windows frameless: reserve room on the right so the three caption
+     buttons drawn by <WindowsFrameOverlay> don't overlap the share menu.
+     0px everywhere except Windows (see --win-caption-inset-x in App.css). */
+  padding-right: calc(20px + var(--win-caption-inset-x));
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
 }
