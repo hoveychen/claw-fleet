@@ -54,11 +54,17 @@ pub fn boot_new_task(
     // Phase 5: reverse-look the desktop's `projects.json` so a task started
     // via `fleet-task new` on a workspace the user already added in the
     // desktop UI lands under the same project_id — that's what makes it
-    // visible in the Kanban/TasksView grouped by project. Falls back to
-    // the synthetic `fleet-task-local` bucket if no project owns this
-    // workspace yet.
+    // visible in the Kanban/TasksView grouped by project.
+    //
+    // When no registered project owns this workspace, fall back to a
+    // *workspace-stable* synthetic id (`derive_auto_project_id`) so the
+    // desktop can auto-discover one virtual project per distinct workspace
+    // (see `claw_fleet_core::project::list_projects_discovered`). The old
+    // constant `fleet-task-local` collapsed every unregistered workspace
+    // into a single bucket; we only fall back to it when the workspace path
+    // can't be canonicalised.
     let project_id = lookup_project_id(&args.workspace)
-        .unwrap_or_else(|| FLEET_TASK_LOCAL_PROJECT.into());
+        .unwrap_or_else(|| derive_auto_project_id(&args.workspace));
     let task = create_task(TaskInput {
         project_id,
         title: args.title.clone(),
@@ -155,6 +161,32 @@ fn lookup_project_id(workspace: &std::path::Path) -> Option<String> {
         }
     }
     None
+}
+
+/// Deterministic, workspace-stable project id for a workspace that no
+/// registered project owns. Two `fleet-task new` invocations on the same
+/// workspace produce the same id, so the desktop's auto-discovery groups
+/// their tasks under a single virtual project; two *different* workspaces
+/// produce different ids, so each surfaces as its own virtual project.
+///
+/// Format: `auto-<16 hex>` where the hash is `DefaultHasher` (SipHash-1-3
+/// with the fixed zero key — deterministic across runs) over the
+/// canonicalised path, falling back to the raw path when canonicalisation
+/// fails (e.g. the dir was removed between creation and this call). When even
+/// the raw path is unavailable we return the legacy `fleet-task-local`
+/// constant so behaviour degrades rather than panics.
+fn derive_auto_project_id(workspace: &std::path::Path) -> String {
+    use std::hash::{Hash, Hasher};
+    let key = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+    let key = key.to_string_lossy();
+    if key.is_empty() {
+        return FLEET_TASK_LOCAL_PROJECT.into();
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    key.hash(&mut h);
+    format!("auto-{:016x}", h.finish())
 }
 
 pub fn shutdown(boot: Bootstrap) {
@@ -429,5 +461,26 @@ mod tests {
         let ws = tempfile::TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(home.path());
         assert!(lookup_project_id(ws.path()).is_none());
+    }
+
+    #[test]
+    fn derive_auto_project_id_is_stable_and_workspace_scoped() {
+        let ws_a = tempfile::TempDir::new().unwrap();
+        let ws_b = tempfile::TempDir::new().unwrap();
+
+        let a1 = derive_auto_project_id(ws_a.path());
+        let a2 = derive_auto_project_id(ws_a.path());
+        let b = derive_auto_project_id(ws_b.path());
+
+        // Same workspace → same id across calls (so the desktop groups all
+        // tasks of one workspace under a single virtual project).
+        assert_eq!(a1, a2);
+        // Different workspaces → different ids (each surfaces separately).
+        assert_ne!(a1, b);
+        // Format contract relied on by the discovery layer.
+        assert!(a1.starts_with("auto-"), "got {a1}");
+        assert_eq!(a1.len(), "auto-".len() + 16);
+        // Never the legacy collapse-all bucket for a real, canonicalisable dir.
+        assert_ne!(a1, FLEET_TASK_LOCAL_PROJECT);
     }
 }

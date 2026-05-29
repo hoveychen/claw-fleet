@@ -1663,7 +1663,11 @@ impl Backend for LocalBackend {
     // ── Projects ──────────────────────────────────────────────────────────────
 
     fn list_projects(&self) -> Vec<crate::project::Project> {
-        crate::project::list_projects()
+        // Auto-discover: registered projects PLUS a virtual project for every
+        // task workspace no registered project owns, so a task started via
+        // `fleet-task new` on an unregistered workspace still surfaces in the
+        // desktop (mirrors how sessions are scanned rather than registered).
+        crate::project::list_projects_discovered()
     }
 
     fn create_project(
@@ -1759,16 +1763,23 @@ impl Backend for LocalBackend {
         // block briefly until that entry shows up so the GUI immediately
         // sees the task as "live".
         let task = crate::task::get_task(task_id)?;
-        let project = crate::project::list_projects()
+        // Prefer the registered project's workspace; but a task started via
+        // `fleet-task new` on an unregistered workspace has no registered
+        // project (its project_id is a synthetic `auto-<hash>`). In that case
+        // fall back to the workspace the task itself stamped at start time, so
+        // auto-discovered tasks remain (re)startable from the desktop instead
+        // of erroring out.
+        let workspace = crate::project::list_projects()
             .into_iter()
             .find(|p| p.id == task.project_id)
+            .map(|p| std::path::PathBuf::from(&p.workspace))
+            .or_else(|| task.workspace.clone())
             .ok_or_else(|| {
                 format!(
-                    "project {} not found for task {task_id}",
+                    "no workspace for task {task_id}: project {} not registered and task has no stamped workspace",
                     task.project_id
                 )
             })?;
-        let workspace = std::path::PathBuf::from(&project.workspace);
         crate::fleet_task_spawn::spawn_fleet_task_resume(
             task_id,
             &workspace,
