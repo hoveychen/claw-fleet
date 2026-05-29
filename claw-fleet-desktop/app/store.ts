@@ -320,8 +320,13 @@ interface TasksState {
   tasks: Task[];
   selectedTaskId: string | null;
   loaded: boolean;
+  /// Phase 5: remembers the projectId argument of the last refresh so the
+  /// `tasks-updated` event handler can re-run with the same scope without
+  /// the caller having to thread the current selection through.
+  lastProjectId: string | null;
   setSelectedTaskId: (id: string | null) => void;
   refresh: (projectId?: string) => Promise<void>;
+  refreshLastScope: () => Promise<void>;
   createTask: (input: TaskInput) => Promise<Task>;
   startTask: (taskId: string) => Promise<void>;
   updateTaskTitle: (taskId: string, title: string) => Promise<void>;
@@ -331,14 +336,19 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   tasks: [],
   selectedTaskId: null,
   loaded: false,
+  lastProjectId: null,
   setSelectedTaskId: (id) => set({ selectedTaskId: id }),
   refresh: async (projectId) => {
     try {
       const tasks = await invoke<Task[]>("list_tasks", { projectId: projectId ?? null });
-      set({ tasks, loaded: true });
+      set({ tasks, loaded: true, lastProjectId: projectId ?? null });
     } catch {
-      set({ loaded: true });
+      set({ loaded: true, lastProjectId: projectId ?? null });
     }
+  },
+  refreshLastScope: async () => {
+    const pid = get().lastProjectId;
+    return get().refresh(pid ?? undefined);
   },
   createTask: async (input) => {
     const task = await invoke<Task>("create_task", { input });
