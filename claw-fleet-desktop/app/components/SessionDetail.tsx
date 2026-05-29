@@ -9,6 +9,7 @@ import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
+import { isWorkflowAgent } from "../workflowAgent";
 import styles from "./SessionDetail.module.css";
 
 const ACTIVE_STATUSES = new Set([
@@ -284,15 +285,23 @@ export function SessionDetail({
     let mainSession: SessionInfo | undefined;
     let subagents: SessionInfo[];
 
+    // Exclude workflow fan-out agents — surfaced only for "open from DAG node",
+    // not as conversation tabs (100+ per run). See isWorkflowAgent.
     if (liveSession.isSubagent && liveSession.parentSessionId) {
       mainSession = sessions.find((s) => s.id === liveSession.parentSessionId);
       subagents = sessions.filter(
-        (s) => s.isSubagent && s.parentSessionId === liveSession.parentSessionId
+        (s) =>
+          s.isSubagent &&
+          s.parentSessionId === liveSession.parentSessionId &&
+          !isWorkflowAgent(s)
       );
     } else {
       mainSession = liveSession;
       subagents = sessions.filter(
-        (s) => s.isSubagent && s.parentSessionId === liveSession.id
+        (s) =>
+          s.isSubagent &&
+          s.parentSessionId === liveSession.id &&
+          !isWorkflowAgent(s)
       );
     }
 

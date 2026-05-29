@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useDetailStore, useSessionsStore } from "../store";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import type { SessionInfo, SessionStatus } from "../types";
+import { isWorkflowAgent } from "../workflowAgent";
 import { SessionCard, StatusIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import styles from "./GalleryView.module.css";
@@ -139,10 +140,13 @@ function buildRows(
   allSessions: SessionInfo[],
   onSelect: (s: SessionInfo) => void,
 ) {
-  // Build subagent map from ALL sessions so idle subs of active mains are included
+  // Build subagent map from ALL sessions so idle subs of active mains are included.
+  // Workflow fan-out agents (jsonlPath under subagents/workflows/) are kept in the
+  // session list only so a DAG node can open them — they must NOT inflate the
+  // group's "+N sub" count or render as cards (a single run can have 100+).
   const subByParent = new Map<string, SessionInfo[]>();
   for (const s of allSessions) {
-    if (s.isSubagent && s.parentSessionId) {
+    if (s.isSubagent && s.parentSessionId && !isWorkflowAgent(s)) {
       const arr = subByParent.get(s.parentSessionId) ?? [];
       arr.push(s);
       subByParent.set(s.parentSessionId, arr);
