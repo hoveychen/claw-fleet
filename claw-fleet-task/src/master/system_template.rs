@@ -218,6 +218,11 @@ mod tests {
 
     #[test]
     fn compose_substitutes_task_vars() {
+        // Serialise against `env_override_swaps_template_when_set`, which mutates
+        // the process-global `FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE` env var read
+        // by `template_source()`. Without this lock a concurrent override leaks a
+        // stub template lacking `{{PLAN_JSON}}` into our `compose_system_prompt`.
+        let _g = crate::paths::fleet_home_lock();
         let task = sample_task();
         let prompt = compose_system_prompt(&task);
         assert!(prompt.contains("t-demo"));
@@ -239,6 +244,7 @@ mod tests {
     #[test]
     fn compose_keeps_untrusted_wrapping_around_user_data() {
         // The XML wrapping is a security boundary — must survive substitution.
+        let _g = crate::paths::fleet_home_lock();
         let task = sample_task();
         let prompt = compose_system_prompt(&task);
         assert!(prompt.contains("<untrusted_task_title>"));
@@ -258,6 +264,7 @@ mod tests {
 
     #[test]
     fn compose_handles_missing_description_and_materials() {
+        let _g = crate::paths::fleet_home_lock();
         let mut task = sample_task();
         task.description = String::new();
         task.inbox_materials = Vec::new();
@@ -271,6 +278,7 @@ mod tests {
 
     #[test]
     fn compose_handles_empty_plan() {
+        let _g = crate::paths::fleet_home_lock();
         let mut task = sample_task();
         task.plan = DagPlan::default();
         let prompt = compose_system_prompt(&task);
@@ -279,6 +287,11 @@ mod tests {
 
     #[test]
     fn env_override_swaps_template_when_set() {
+        // Hold the global test lock across the whole set→read→remove window so
+        // the override env var never leaks into a concurrent reader's
+        // `compose_system_prompt` (which would drop `{{PLAN_JSON}}` and fail
+        // assertions in the runtime/compose tests).
+        let _g = crate::paths::fleet_home_lock();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("override.md");
         std::fs::write(&path, "OVERRIDE TEMPLATE for task {{TASK_ID}}").unwrap();
