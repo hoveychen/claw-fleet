@@ -327,6 +327,9 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
   const isActive = ["thinking", "executing", "streaming", "processing", "waitingInput", "delegating"].includes(
     session.status
   );
+  // Workflow run rollup, lazily published by SessionDetail once the session has
+  // been opened (absent until then). Drives the "wf" chip.
+  const workflowRun = useSessionsStore((s) => s.workflowRunCounts[session.id]);
   const [killing, setKilling] = useState(false);
 
   const handleStop = async (e: React.MouseEvent) => {
@@ -389,6 +392,19 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           )}
           {(subagentCount ?? 0) > 0 && (
             <span className={styles.gm_sub_count}>+{subagentCount} sub</span>
+          )}
+          {workflowRun && workflowRun.total > 0 && (
+            <span
+              className={styles.gm_sub_count}
+              data-running={workflowRun.running > 0 ? "true" : undefined}
+              title={t("card.tip_workflow", {
+                total: workflowRun.total,
+                running: workflowRun.running,
+              })}
+            >
+              ⚙ {workflowRun.total} wf
+              {workflowRun.running > 0 ? ` · ${workflowRun.running}▶` : ""}
+            </span>
           )}
           <span className={styles.gm_spacer} />
           <RateLimitControls session={session} />

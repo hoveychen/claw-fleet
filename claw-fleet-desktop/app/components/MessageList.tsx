@@ -1,12 +1,10 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
   RawMessage,
   ToolResultBlock,
   ToolUseBlock,
-  WorkflowTree,
 } from "../types";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
@@ -14,10 +12,6 @@ import {
   GroupedToolUseBlocks,
   ToolUseBlock as ToolUseBlockComp,
 } from "./blocks/ToolUseBlock";
-import {
-  WorkflowTreeBlock,
-  extractRunId,
-} from "./blocks/WorkflowTreeBlock";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import styles from "./MessageList.module.css";
 
@@ -159,11 +153,9 @@ interface BlocksProps {
   baselineMap: Map<string, string>;
   isPartial: boolean;
   searchTerms?: string[] | null;
-  /** runId → live WorkflowTree, for Workflow tool_use cards. */
-  workflowTrees?: Map<string, WorkflowTree>;
 }
 
-const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baselineMap, isPartial, searchTerms, workflowTrees }: BlocksProps) {
+const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baselineMap, isPartial, searchTerms }: BlocksProps) {
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -208,21 +200,9 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
       const toolBlock = block as ToolUseBlock;
       const result = resultMap.get(toolBlock.id);
 
-      // Claude Code Workflow tool → dedicated progress-tree card.
-      if (toolBlock.name === "Workflow") {
-        const runId = extractRunId(result);
-        const tree = runId ? workflowTrees?.get(runId) : undefined;
-        elements.push(
-          <WorkflowTreeBlock
-            key={i}
-            block={toolBlock}
-            result={result}
-            tree={tree}
-          />
-        );
-        i++;
-        continue;
-      }
+      // Note: the Claude Code Workflow tool renders as an ordinary tool card
+      // here; its progress DAG is surfaced at the session level (the "Workflow"
+      // tab in SessionDetail), not inline in the conversation.
 
       // Check if the next blocks are also read-only tools → group them
       const READ_ONLY = new Set([
@@ -276,10 +256,9 @@ interface MsgProps {
   baselineMap: Map<string, string>;
   searchTerms?: string[] | null;
   msgIdx?: number;
-  workflowTrees?: Map<string, WorkflowTree>;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searchTerms, msgIdx, workflowTrees }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searchTerms, msgIdx }: MsgProps) {
   if (!msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
@@ -343,7 +322,6 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
             baselineMap={baselineMap}
             isPartial={isPartial}
             searchTerms={searchTerms}
-            workflowTrees={workflowTrees}
           />
         )}
         {isUser && (
@@ -395,23 +373,6 @@ interface Props {
   messages: RawMessage[];
   isLoading: boolean;
   searchQuery?: string | null;
-  /** Session transcript path; used to fetch live Workflow progress trees. */
-  jsonlPath?: string | null;
-}
-
-/** True if any assistant message invokes the Workflow tool. */
-function hasWorkflowToolUse(messages: RawMessage[]): boolean {
-  for (const msg of messages) {
-    if (msg.type !== "assistant" || !msg.message) continue;
-    const content = msg.message.content;
-    if (!Array.isArray(content)) continue;
-    for (const b of content) {
-      if (b.type === "tool_use" && (b as ToolUseBlock).name === "Workflow") {
-        return true;
-      }
-    }
-  }
-  return false;
 }
 
 const PAGE_SIZE = 100;
@@ -431,50 +392,11 @@ function messageText(msg: RawMessage): string {
     .join(" ");
 }
 
-export function MessageList({ messages, isLoading, searchQuery, jsonlPath }: Props) {
+export function MessageList({ messages, isLoading, searchQuery }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Live Workflow progress trees (journal + phases), keyed by runId. Only
-  // fetched when a Workflow tool_use is actually present, and re-polled while
-  // any run is still in flight so the agent dots flip running → done live.
-  const [workflowTrees, setWorkflowTrees] = useState<Map<string, WorkflowTree>>(
-    () => new Map()
-  );
-  const wantWorkflows = useMemo(() => hasWorkflowToolUse(messages), [messages]);
-  useEffect(() => {
-    if (!jsonlPath || !wantWorkflows) {
-      setWorkflowTrees(new Map());
-      return;
-    }
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const poll = async () => {
-      try {
-        const trees = await invoke<WorkflowTree[]>("get_workflow_trees", {
-          jsonlPath,
-        });
-        if (cancelled) return;
-        const map = new Map<string, WorkflowTree>();
-        let anyRunning = false;
-        for (const tr of trees) {
-          map.set(tr.runId, tr);
-          if (tr.agents.some((a) => a.status === "running")) anyRunning = true;
-        }
-        setWorkflowTrees(map);
-        // Keep polling only while something is still running.
-        if (anyRunning) timer = setTimeout(poll, 4000);
-      } catch {
-        // best-effort: leave whatever we have
-      }
-    };
-    poll();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [jsonlPath, wantWorkflows, messages]);
   // visibleStart tracks the actual start index into displayMsgs.
   // -1 is a sentinel meaning "show the tail (last PAGE_SIZE)".
   const [visibleStart, setVisibleStart] = useState(-1);
@@ -627,7 +549,6 @@ export function MessageList({ messages, isLoading, searchQuery, jsonlPath }: Pro
           baselineMap={baselineMap}
           searchTerms={searchTerms}
           msgIdx={effectiveStart + i}
-          workflowTrees={workflowTrees}
         />
       ))}
       {isWaiting && <WaitingIndicator />}

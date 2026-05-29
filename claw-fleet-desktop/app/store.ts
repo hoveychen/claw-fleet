@@ -181,13 +181,24 @@ export interface CostSample {
   costPerMin: number;
 }
 
+/** Per-session Claude Code Workflow run rollup, published by SessionDetail when
+ *  a session's workflow trees are fetched. Drives the SessionCard chip. Lazily
+ *  populated: a session that has never been opened this run has no entry. */
+export interface WorkflowRunCount {
+  total: number;
+  running: number;
+}
+
 interface SessionsState {
   sessions: SessionInfo[];
   speedHistory: SpeedSample[];
   costHistory: CostSample[];
   scanReady: boolean;
+  /** sessionId → workflow run rollup (see WorkflowRunCount) */
+  workflowRunCounts: Record<string, WorkflowRunCount>;
   setSessions: (sessions: SessionInfo[]) => void;
   setScanReady: (ready: boolean) => void;
+  setWorkflowRunCount: (sessionId: string, count: WorkflowRunCount) => void;
   refresh: () => Promise<void>;
 }
 
@@ -198,6 +209,7 @@ export const useSessionsStore = create<SessionsState>((set) => ({
   speedHistory: [],
   costHistory: [],
   scanReady: false,
+  workflowRunCounts: {},
   setSessions: (sessions) =>
     set((state) => {
       const totalSpeed = sessions.reduce((sum, s) => sum + s.tokenSpeed, 0);
@@ -217,6 +229,16 @@ export const useSessionsStore = create<SessionsState>((set) => ({
       return { sessions, speedHistory, costHistory };
     }),
   setScanReady: (ready) => set({ scanReady: ready }),
+  setWorkflowRunCount: (sessionId, count) =>
+    set((state) => {
+      const prev = state.workflowRunCounts[sessionId];
+      if (prev && prev.total === count.total && prev.running === count.running) {
+        return state; // no-op: avoid needless re-renders during polling
+      }
+      return {
+        workflowRunCounts: { ...state.workflowRunCounts, [sessionId]: count },
+      };
+    }),
   refresh: async () => {
     const sessions = await invoke<SessionInfo[]>("list_sessions");
     useSessionsStore.getState().setSessions(sessions);
