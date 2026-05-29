@@ -432,7 +432,8 @@
     "tab_decisions": "决策",
     "tab_skills": "Skills",
     "tab_messages": "对话",
-    "tab_tokens": "Token"
+    "tab_tokens": "Token",
+    "tab_workflow": "Workflow"
   },
   "token_spend": {
     "loading": "正在分析 token 花销…",
@@ -495,6 +496,7 @@
     "tip_model": "模型：{{model}}",
     "tip_thinking": "扩展思考：{{level}}",
     "tip_skill": "最近调用的 Skill：/{{skill}}",
+    "tip_workflow": "{{total}} 个 workflow run，{{running}} 个运行中",
     "tip_slug": "会话 ID 标识：{{slug}}",
     "tip_tokens": "已生成的 Token 总数",
     "tip_speed": "Token 输出速度",
