@@ -929,7 +929,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             "/projects" if request.method() == &tiny_http::Method::Get => {
-                let items = crate::project::list_projects();
+                // Auto-discovery parity with LocalBackend: include virtual
+                // projects synthesised from task workspaces so RemoteBackend
+                // sees the same project list a local desktop would.
+                let items = crate::project::list_projects_discovered();
                 let body = serde_json::to_string(&items).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
