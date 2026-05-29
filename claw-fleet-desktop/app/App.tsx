@@ -92,6 +92,12 @@ function App() {
       if (p === "macos") {
         getCurrentWindow().setTitle("").catch(() => {});
         document.documentElement.setAttribute("data-platform", "macos");
+      } else if (p === "windows") {
+        // Windows gets the same Liquid Glass sidebar skin as macOS — the
+        // module-CSS rules key off [data-platform], so flag the platform
+        // here. No setTitle: native chrome is already stripped via
+        // set_decorations(false) in gui.rs.
+        document.documentElement.setAttribute("data-platform", "windows");
       }
     });
   }, []);
