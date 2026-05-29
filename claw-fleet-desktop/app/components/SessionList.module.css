@@ -97,9 +97,9 @@
   transform: translateX(-50%);
 }
 
-/* macOS expanded: traffic-light row is 38px tall; align the toggle vertically
-   within that strip. */
-:global([data-platform="macos"]) .sidebar_toggle {
+/* Floating-slab platforms (macOS traffic-light row / Windows drag bar) have a
+   38px top strip; align the toggle vertically within that strip. */
+:global([data-platform]) .sidebar_toggle {
   top: 6px;
   right: 10px;
 }
@@ -110,12 +110,12 @@
   top: 8px;
 }
 
-/* macOS Liquid Glass: floating slab — sidebar detaches from window edges,
-   gains rounded corners + hairline shadow so it reads as a glass panel
-   floating above the content layer. The slab stays flush with the top of
-   the window so the traffic-light buttons sit inside the sidebar, matching
-   Finder / Mail in macOS Tahoe. */
-:global([data-platform="macos"]) .sidebar {
+/* Liquid Glass: floating slab — sidebar detaches from window edges, gains
+   rounded corners + hairline shadow so it reads as a glass panel floating
+   above the content layer. On macOS the slab stays flush with the top of the
+   window so the traffic-light buttons sit inside the sidebar (Finder / Mail in
+   macOS Tahoe); on Windows the full-width drag bar overlays the same strip. */
+:global([data-platform]) .sidebar {
   background: var(--color-bg-card);
   border-right: none;
   margin: 8px 0 8px 8px;
@@ -126,7 +126,7 @@
     0 1px 2px rgba(0, 0, 0, 0.18),
     0 12px 32px rgba(0, 0, 0, 0.22);
 }
-:global([data-platform="macos"][data-theme="light"]) .sidebar {
+:global([data-platform][data-theme="light"]) .sidebar {
   box-shadow:
     inset 0 0 0 0.5px rgba(0, 0, 0, 0.06),
     0 1px 2px rgba(0, 0, 0, 0.06),
@@ -152,49 +152,49 @@
 /* Liquid Glass: hover & active states are full-width capsule pills.
    Active gets a slightly tinted glass tone + 0.5px hairline highlight that
    reads as a soft bevel — matches Tahoe's Mail/Settings selection language. */
-:global([data-platform="macos"]) .nav_item {
+:global([data-platform]) .nav_item {
   border-radius: 8px;
 }
-:global([data-platform="macos"]) .nav_item:hover {
+:global([data-platform]) .nav_item:hover {
   background: rgba(255, 255, 255, 0.05);
 }
-:global([data-platform="macos"]) .nav_active {
+:global([data-platform]) .nav_active {
   background: rgba(255, 255, 255, 0.16);
   box-shadow:
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.08);
 }
-:global([data-platform="macos"]) .nav_active:hover {
+:global([data-platform]) .nav_active:hover {
   background: rgba(255, 255, 255, 0.18);
 }
-:global([data-platform="macos"]) .footer_card:hover {
+:global([data-platform]) .footer_card:hover {
   background: rgba(255, 255, 255, 0.05);
 }
-:global([data-platform="macos"]) .separator {
+:global([data-platform]) .separator {
   background: rgba(255, 255, 255, 0.05);
 }
-:global([data-platform="macos"][data-theme="light"]) .nav_item:hover {
+:global([data-platform][data-theme="light"]) .nav_item:hover {
   background: rgba(0, 0, 0, 0.04);
 }
-:global([data-platform="macos"][data-theme="light"]) .nav_active {
+:global([data-platform][data-theme="light"]) .nav_active {
   background: rgba(0, 0, 0, 0.08);
   box-shadow:
     inset 0 0 0 0.5px rgba(0, 0, 0, 0.05),
     inset 0 1px 0 rgba(255, 255, 255, 0.5);
 }
-:global([data-platform="macos"][data-theme="light"]) .nav_active:hover {
+:global([data-platform][data-theme="light"]) .nav_active:hover {
   background: rgba(0, 0, 0, 0.1);
 }
-:global([data-platform="macos"][data-theme="light"]) .footer_card:hover {
+:global([data-platform][data-theme="light"]) .footer_card:hover {
   background: rgba(0, 0, 0, 0.04);
 }
-:global([data-platform="macos"][data-theme="light"]) .separator {
+:global([data-platform][data-theme="light"]) .separator {
   background: rgba(0, 0, 0, 0.06);
 }
-:global([data-platform="macos"]) .footer {
+:global([data-platform]) .footer {
   border-top-color: rgba(255, 255, 255, 0.06);
 }
-:global([data-platform="macos"][data-theme="light"]) .footer {
+:global([data-platform][data-theme="light"]) .footer {
   border-top-color: rgba(0, 0, 0, 0.08);
 }
 
@@ -331,10 +331,10 @@
   color: var(--color-text);
 }
 
-:global([data-platform="macos"]) .nav_chevron:hover {
+:global([data-platform]) .nav_chevron:hover {
   background: rgba(255, 255, 255, 0.08);
 }
-:global([data-platform="macos"][data-theme="light"]) .nav_chevron:hover {
+:global([data-platform][data-theme="light"]) .nav_chevron:hover {
   background: rgba(0, 0, 0, 0.06);
 }
 
@@ -368,10 +368,10 @@
   color: var(--color-text);
 }
 
-:global([data-platform="macos"]) .nav_project_item:hover {
+:global([data-platform]) .nav_project_item:hover {
   background: rgba(255, 255, 255, 0.06);
 }
-:global([data-platform="macos"][data-theme="light"]) .nav_project_item:hover {
+:global([data-platform][data-theme="light"]) .nav_project_item:hover {
   background: rgba(0, 0, 0, 0.05);
 }
 
@@ -521,10 +521,10 @@
   color: var(--color-text-muted);
 }
 
-:global([data-platform="macos"]) .nav_divider {
+:global([data-platform]) .nav_divider {
   background: rgba(255, 255, 255, 0.08);
 }
-:global([data-platform="macos"][data-theme="light"]) .nav_divider {
+:global([data-platform][data-theme="light"]) .nav_divider {
   background: rgba(0, 0, 0, 0.08);
 }
 
@@ -554,11 +554,11 @@
   border-top: 1px solid var(--color-border);
 }
 
-:global([data-platform="macos"]) .mascot_section {
+:global([data-platform]) .mascot_section {
   border-top-color: rgba(255, 255, 255, 0.05);
 }
 
-:global([data-platform="macos"][data-theme="light"]) .mascot_section {
+:global([data-platform][data-theme="light"]) .mascot_section {
   border-top-color: rgba(0, 0, 0, 0.06);
 }
 
@@ -793,7 +793,7 @@
 
 /* Floating sidebar clips its overflow, so pull the handle inside the panel
    to keep the full hit-area usable. */
-:global([data-platform="macos"]) .resize_handle {
+:global([data-platform]) .resize_handle {
   right: 0;
   width: 6px;
 }
