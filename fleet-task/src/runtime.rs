@@ -51,8 +51,16 @@ pub fn boot_new_task(
             args.workspace.display()
         ));
     }
+    // Phase 5: reverse-look the desktop's `projects.json` so a task started
+    // via `fleet-task new` on a workspace the user already added in the
+    // desktop UI lands under the same project_id — that's what makes it
+    // visible in the Kanban/TasksView grouped by project. Falls back to
+    // the synthetic `fleet-task-local` bucket if no project owns this
+    // workspace yet.
+    let project_id = lookup_project_id(&args.workspace)
+        .unwrap_or_else(|| FLEET_TASK_LOCAL_PROJECT.into());
     let task = create_task(TaskInput {
-        project_id: FLEET_TASK_LOCAL_PROJECT.into(),
+        project_id,
         title: args.title.clone(),
         description: args.prompt,
     })?;
@@ -122,6 +130,31 @@ fn finish_boot(
         broadcaster,
         master_session_id: master_sid,
     })
+}
+
+/// Read the desktop's `projects.json` (under `<home>/.claude/fleet/`, mirroring
+/// `claw_fleet_core::project::projects_file()`) and return the `id` of any
+/// project whose `workspace` canonicalises to the same path. Returns None
+/// when the file is missing, malformed, or no project matches.
+fn lookup_project_id(workspace: &std::path::Path) -> Option<String> {
+    #[derive(serde::Deserialize)]
+    struct MiniProject {
+        id: String,
+        workspace: String,
+    }
+    let home = claw_fleet_task::paths::real_home_dir()?;
+    let path = home.join(".claude").join("fleet").join("projects.json");
+    let bytes = std::fs::read(&path).ok()?;
+    let projects: Vec<MiniProject> = serde_json::from_slice(&bytes).ok()?;
+    let canonical = workspace.canonicalize().ok()?;
+    for p in projects {
+        if let Ok(c) = std::path::Path::new(&p.workspace).canonicalize() {
+            if c == canonical {
+                return Some(p.id);
+            }
+        }
+    }
+    None
 }
 
 pub fn shutdown(boot: Bootstrap) {
@@ -349,5 +382,52 @@ mod tests {
             Err(e) => e,
         };
         assert!(err.contains("workspace"));
+    }
+
+    #[test]
+    fn lookup_project_id_matches_workspace_path() {
+        let _g = fleet_home_lock();
+        let home = tempfile::TempDir::new().unwrap();
+        let ws = tempfile::TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(home.path());
+
+        let projects_dir = home.path().join(".claude").join("fleet");
+        std::fs::create_dir_all(&projects_dir).unwrap();
+        let projects_json = format!(
+            r#"[{{"id":"proj-uuid-1","name":"x","workspace":"{ws}"}}]"#,
+            ws = ws.path().display()
+        );
+        std::fs::write(projects_dir.join("projects.json"), projects_json).unwrap();
+
+        let found = lookup_project_id(ws.path());
+        assert_eq!(found.as_deref(), Some("proj-uuid-1"));
+    }
+
+    #[test]
+    fn lookup_project_id_returns_none_when_workspace_not_in_projects() {
+        let _g = fleet_home_lock();
+        let home = tempfile::TempDir::new().unwrap();
+        let ws = tempfile::TempDir::new().unwrap();
+        let other = tempfile::TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(home.path());
+
+        let projects_dir = home.path().join(".claude").join("fleet");
+        std::fs::create_dir_all(&projects_dir).unwrap();
+        let projects_json = format!(
+            r#"[{{"id":"proj-other","name":"x","workspace":"{ws}"}}]"#,
+            ws = other.path().display()
+        );
+        std::fs::write(projects_dir.join("projects.json"), projects_json).unwrap();
+
+        assert!(lookup_project_id(ws.path()).is_none());
+    }
+
+    #[test]
+    fn lookup_project_id_returns_none_when_projects_file_missing() {
+        let _g = fleet_home_lock();
+        let home = tempfile::TempDir::new().unwrap();
+        let ws = tempfile::TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(home.path());
+        assert!(lookup_project_id(ws.path()).is_none());
     }
 }
