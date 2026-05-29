@@ -109,6 +109,40 @@ export interface SkillInvocation {
   isSubagent: boolean;
 }
 
+// ── Claude Code Workflow visualization ──────────────────────────────────────
+// Mirrors claw-fleet-core/src/workflow.rs (serde camelCase / lowercase enum).
+
+export type WorkflowAgentStatus = "running" | "done";
+
+export interface WorkflowAgent {
+  agentId: string;
+  /** journal pairing key (v2:<hash>), stable across started/result */
+  key: string;
+  status: WorkflowAgentStatus;
+  /** final result text, present only once the agent is done */
+  result?: string;
+}
+
+export interface WorkflowPhase {
+  title: string;
+  detail?: string;
+}
+
+export interface WorkflowTree {
+  /** the wf_<run-id> dir name, e.g. wf_c3ab5242-718 */
+  runId: string;
+  /** meta.name from the workflow script */
+  name?: string;
+  /** meta.description from the workflow script */
+  description?: string;
+  /** declared phases (script meta.phases) */
+  phases: WorkflowPhase[];
+  /** fan-out agents, in first-seen journal order */
+  agents: WorkflowAgent[];
+  /** absolute path to the wf_<run-id> transcript dir */
+  transcriptDir: string;
+}
+
 export interface UsageTotals {
   inputTokens: number;
   outputTokens: number;
