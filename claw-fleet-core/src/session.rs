@@ -912,15 +912,38 @@ fn determine_status(
 // ── Context window helpers ────────────────────────────────────────────────────
 
 /// Whether a Claude model belongs to the family that can be opted in to a
-/// 1M-token context window (Sonnet 4.x, Opus 4.6, and Opus 4.7+; loosely
-/// mirrors [`modelSupports1M`](../claude-code-fork/src/utils/context.ts) in
-/// Claude Code, with Opus 4.7 added because that family ships with 1M support
-/// even though upstream's whitelist hasn't been updated yet). Other Claude
-/// families are always 200K.
+/// Parse the `major.minor` version that follows a Claude family token in a
+/// model id, e.g. `claude-opus-4-8` + `"opus"` → `Some((4, 8))`. Returns
+/// `None` for aliases without a version (`"opus"`, `"sonnet"`) or when the
+/// family token isn't present. Trailing date stamps (`claude-opus-4-1-2026…`)
+/// are ignored — only the first two numeric tokens after the family count.
+fn claude_family_version(model_lower: &str, family: &str) -> Option<(u32, u32)> {
+    let rest = model_lower.split(family).nth(1)?;
+    let mut nums = rest
+        .split(|c: char| !c.is_ascii_digit())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<u32>().ok());
+    let major = nums.next()?;
+    let minor = nums.next().unwrap_or(0);
+    Some((major, minor))
+}
+
+/// Whether a Claude model ships with a 1M-token context window. Loosely mirrors
+/// [`modelSupports1M`](../claude-code-fork/src/utils/context.ts) in Claude Code,
+/// but parses the family + `major.minor` version instead of hard-coding each
+/// release — so future minors (Opus 4.9, 4.10) and future majors (Opus 5.x,
+/// Sonnet 5.x) are recognised without another whitelist edit:
+///   * Sonnet — every major ≥ 4 (4.x shipped with 1M).
+///   * Opus   — 4.6+ (1M landed at 4.6), and every later major (5.x, 6.x …).
+///   * Haiku and anything older/unrecognised — 200K.
 fn claude_model_supports_1m(model_lower: &str) -> bool {
-    model_lower.contains("sonnet-4")
-        || model_lower.contains("opus-4-6")
-        || model_lower.contains("opus-4-7")
+    if let Some((major, _minor)) = claude_family_version(model_lower, "sonnet") {
+        return major >= 4;
+    }
+    if let Some((major, minor)) = claude_family_version(model_lower, "opus") {
+        return major > 4 || (major == 4 && minor >= 6);
+    }
+    false
 }
 
 /// Best-effort lookup of a model's input-context-window size (in tokens).
@@ -3221,6 +3244,42 @@ mod tests {
         // Haiku 4.5 doesn't support 1M either.
         assert_eq!(
             context_window_for_model("claude-haiku-4-5", 500_000),
+            Some(200_000)
+        );
+    }
+
+    #[test]
+    fn context_window_inferred_1m_for_opus_4_8_and_future_versions() {
+        // Opus 4.8 (the model that shipped after the hard-coded 4-6/4-7
+        // whitelist) must be recognised as 1M-capable — otherwise its
+        // denominator defaults to 200K and the UI shows a fake "ctx 100%".
+        assert_eq!(
+            context_window_for_model("claude-opus-4-8", 530_000),
+            Some(1_000_000)
+        );
+        // Future Opus minors (4.9, 4.10) and future majors (5.x, 6.x) should
+        // be auto-recognised without another whitelist edit.
+        assert_eq!(
+            context_window_for_model("claude-opus-4-10", 530_000),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            context_window_for_model("claude-opus-5-0", 530_000),
+            Some(1_000_000)
+        );
+        assert_eq!(
+            context_window_for_model("claude-opus-6-2", 530_000),
+            Some(1_000_000)
+        );
+        // Future Sonnet majors must also be recognised — today's code only
+        // matched the literal "sonnet-4".
+        assert_eq!(
+            context_window_for_model("claude-sonnet-5-0", 530_000),
+            Some(1_000_000)
+        );
+        // Below-threshold observed input still yields the conservative 200K.
+        assert_eq!(
+            context_window_for_model("claude-opus-4-8", 50_000),
             Some(200_000)
         );
     }
