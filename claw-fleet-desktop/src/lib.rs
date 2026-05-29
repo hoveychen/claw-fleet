@@ -15,6 +15,7 @@ pub mod remote;
 pub mod fleet_task_client;
 pub mod fleet_task_spawn;
 pub mod runtime_registry;
+pub mod tasks_watcher;
 pub mod traffic_lights;
 pub mod tunnel;
 pub mod version_check;

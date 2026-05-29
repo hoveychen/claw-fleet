@@ -106,6 +106,10 @@ pub struct LocalBackend {
     /// Phase 3: tracks live `fleet-task` subprocesses by polling
     /// `~/.fleet/runtime/`. Pushes `runtime-task-*` events to the frontend.
     pub runtime_registry: Arc<crate::runtime_registry::RuntimeRegistryWatcher>,
+    /// Phase 5: filesystem watcher on `~/.fleet/tasks/` that emits
+    /// `tasks-updated` whenever an out-of-process tool (e.g. `fleet-task
+    /// new`) writes / updates / deletes a task json.
+    _tasks_watcher: crate::tasks_watcher::TasksDirWatcher,
 }
 
 impl Drop for LocalBackend {
@@ -905,6 +909,7 @@ impl LocalBackend {
 
         let runtime_registry =
             Arc::new(crate::runtime_registry::RuntimeRegistryWatcher::start(app.clone()));
+        let tasks_watcher = crate::tasks_watcher::TasksDirWatcher::start(app.clone());
 
         let result = LocalBackend {
             app,
@@ -923,6 +928,7 @@ impl LocalBackend {
             _watcher: watcher,
             running,
             runtime_registry,
+            _tasks_watcher: tasks_watcher,
         };
         step!("LocalBackend::new() complete");
         result
