@@ -183,7 +183,20 @@ struct JournalLine {
     key: Option<String>,
     #[serde(rename = "agentId")]
     agent_id: Option<String>,
-    result: Option<String>,
+    /// `result` is a string for plain agents but a JSON **object** for agents
+    /// that return structured output. Accept either (a plain `Option<String>`
+    /// would fail to parse object results, dropping the whole line → the agent
+    /// would never flip to done).
+    result: Option<serde_json::Value>,
+}
+
+/// Flatten a journal `result` value to display text: plain strings pass through
+/// unquoted; objects/arrays are JSON-stringified.
+fn result_to_string(v: serde_json::Value) -> String {
+    match v {
+        serde_json::Value::String(s) => s,
+        other => other.to_string(),
+    }
 }
 
 /// Parse a `journal.jsonl` body into the ordered agent list.
@@ -243,7 +256,7 @@ pub fn parse_journal(body: &str) -> Vec<WorkflowAgent> {
                         agent.agent_id = id;
                     }
                 }
-                agent.result = entry.result;
+                agent.result = entry.result.map(result_to_string);
             }
             _ => {}
         }
@@ -996,6 +1009,37 @@ mod tests {
         let agents = parse_journal(body);
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].key, "v2:x");
+    }
+
+    #[test]
+    fn parse_journal_handles_object_result() {
+        // Real workflows using structured output write `result` as a JSON
+        // object, not a string. The agent must still flip to done and the
+        // result must be captured (stringified), not dropped.
+        let body = r#"
+{"type":"started","key":"v2:k","agentId":"a"}
+{"type":"result","key":"v2:k","agentId":"a","result":{"question":"Q","answer":"A"}}
+"#;
+        let agents = parse_journal(body);
+        assert_eq!(agents.len(), 1);
+        assert_eq!(
+            agents[0].status,
+            WorkflowAgentStatus::Done,
+            "object result must still flip the agent to done"
+        );
+        let r = agents[0].result.as_deref().unwrap_or("");
+        assert!(
+            r.contains("question") && r.contains("answer"),
+            "object result should be captured (stringified), got: {r:?}"
+        );
+    }
+
+    #[test]
+    fn parse_journal_string_result_stays_unquoted() {
+        // A plain string result must be stored as-is, not JSON-quoted.
+        let body = "{\"type\":\"started\",\"key\":\"v2:k\",\"agentId\":\"a\"}\n{\"type\":\"result\",\"key\":\"v2:k\",\"agentId\":\"a\",\"result\":\"plain text\"}\n";
+        let agents = parse_journal(body);
+        assert_eq!(agents[0].result.as_deref(), Some("plain text"));
     }
 
     #[test]
