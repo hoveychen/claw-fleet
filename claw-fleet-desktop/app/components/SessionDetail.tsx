@@ -150,6 +150,15 @@ export function SessionDetail({
     ).length;
     setWorkflowRunCount(sid, { total: workflowTrees.length, running });
   }, [liveSession?.id, workflowTrees, setWorkflowRunCount]);
+  // Open a workflow fan-out agent's session (the scan registers it as
+  // `agent-<agentId>`, see session.rs). No-op if a scan hasn't surfaced it yet.
+  const openAgentSession = useCallback(
+    (agentId: string) => {
+      const target = sessions.find((s) => s.id === `agent-${agentId}`);
+      if (target) open(target);
+    },
+    [sessions, open],
+  );
 
   useEffect(() => {
     setUserPickedTab(false);
@@ -447,7 +456,7 @@ export function SessionDetail({
                         {tree.runId} · {done}/{tree.agents.length} agents
                       </span>
                     </div>
-                    <WorkflowDag tree={tree} />
+                    <WorkflowDag tree={tree} onOpenAgent={openAgentSession} />
                   </div>
                 );
               })}
