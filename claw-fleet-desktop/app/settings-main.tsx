@@ -44,10 +44,13 @@ async function boot() {
   installAppContextMenu();
 
   const { default: SettingsApp } = await import("./SettingsApp");
+  const { ErrorBoundary } = await import("./components/ErrorBoundary");
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <SettingsApp />
+      <ErrorBoundary label="Settings">
+        <SettingsApp />
+      </ErrorBoundary>
     </React.StrictMode>,
   );
 }
