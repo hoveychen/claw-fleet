@@ -412,6 +412,17 @@
     "switch_connection": "切换连接",
     "usage": "用量"
   },
+  "workflow": {
+    "title": "工作流",
+    "phases": "阶段",
+    "agents": "代理",
+    "running": "{{done}}/{{total}} 运行中",
+    "done": "{{total}} 个已完成",
+    "agentRunning": "运行中",
+    "agentDone": "已完成",
+    "resultChars": "{{n}} 字符",
+    "noAgents": "暂无代理活动记录。"
+  },
   "detail": {
     "following": "自动跟随中",
     "scroll_to_latest": "滚动到最新",
