@@ -427,6 +427,15 @@ struct ScriptStep {
     label: Option<String>,
     /// Id of the enclosing `pipeline(...)` call, if any (for stage chaining).
     pipeline_group: Option<usize>,
+    /// Leading **static** text of this call-site's prompt argument: either the
+    /// concatenated string literals at the head of an inline prompt
+    /// (`"a" + "b" + dynamicVar`), or the static head of a prompt-builder
+    /// function (`const P = (x) => "## Header " + x`). Used to bind runtime
+    /// agents to call-sites by prefix-matching their first user message — the
+    /// only on-disk signal that survives, since the journal records no
+    /// call-site → agent mapping. `None` when the prompt begins with a bare
+    /// variable (no static text to fingerprint).
+    prompt_fingerprint: Option<String>,
 }
 
 /// Skip a JS string literal starting at `b[i]` (an opening quote). Returns the
@@ -578,14 +587,280 @@ fn find_opts_object(span: &str) -> Option<&str> {
     None
 }
 
+/// Is `c` a byte that can appear in a JS identifier?
+fn is_ident_byte(c: u8) -> bool {
+    (c as char).is_ascii_alphanumeric() || c == b'_' || c == b'$'
+}
+
+/// True when the keyword `kw` sits at byte `i` on identifier boundaries.
+fn matches_kw(b: &[u8], i: usize, kw: &str) -> bool {
+    let k = kw.as_bytes();
+    if i + k.len() > b.len() || &b[i..i + k.len()] != k {
+        return false;
+    }
+    let before_ok = i == 0 || !is_ident_byte(b[i - 1]);
+    let after_ok = i + k.len() >= b.len() || !is_ident_byte(b[i + k.len()]);
+    before_ok && after_ok
+}
+
+/// Advance past any run of whitespace and `//` / `/* */` comments from `i`.
+fn skip_ws_comments(b: &[u8], mut i: usize) -> usize {
+    loop {
+        while i < b.len() && (b[i] as char).is_whitespace() {
+            i += 1;
+        }
+        let j = skip_comment(b, i);
+        if j != i {
+            i = j;
+            continue;
+        }
+        break;
+    }
+    i
+}
+
+/// Decode a string literal whose opening quote is at byte `start` of `s`.
+/// Returns `(decoded contents, byte index just past the closing quote)`.
+/// Honors `\n`/`\t`/`\<char>` escapes and is UTF-8 safe (Chinese prompt text
+/// survives). For backtick template literals, decoding stops at the first
+/// `${` interpolation (the static prefix is what we want) but the scan still
+/// runs to the closing backtick so the returned end index is correct.
+fn decode_string_at(s: &str, start: usize) -> Option<(String, usize)> {
+    let b = s.as_bytes();
+    if start >= b.len() {
+        return None;
+    }
+    let quote = b[start];
+    if quote != b'\'' && quote != b'"' && quote != b'`' {
+        return None;
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    let mut i = start + 1;
+    let mut stop = false; // hit a template interpolation — keep the static prefix
+    while i < b.len() {
+        let c = b[i];
+        if c == b'\\' && i + 1 < b.len() {
+            if !stop {
+                match b[i + 1] {
+                    b'n' => buf.push(b'\n'),
+                    b't' => buf.push(b'\t'),
+                    other => buf.push(other),
+                }
+            }
+            i += 2;
+            continue;
+        }
+        if c == quote {
+            return Some((String::from_utf8_lossy(&buf).into_owned(), i + 1));
+        }
+        if quote == b'`' && c == b'$' && i + 1 < b.len() && b[i + 1] == b'{' {
+            stop = true;
+        }
+        if !stop {
+            buf.push(c);
+        }
+        i += 1;
+    }
+    Some((String::from_utf8_lossy(&buf).into_owned(), b.len()))
+}
+
+/// Read the leading run of string literals joined by `+` at the head of
+/// expression `s` (skipping whitespace/comments). Returns the concatenated
+/// static text, capturing the static prefix of a prompt built like
+/// `"a" + "b" + dynamicVar + ...`. Returns `None` when `s` does not begin with
+/// a string literal (e.g. a bare identifier, a builder call, or a variable).
+fn leading_static_concat(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut i = skip_ws_comments(b, 0);
+    if i >= b.len() {
+        return None;
+    }
+    let c = b[i];
+    if c != b'\'' && c != b'"' && c != b'`' {
+        return None;
+    }
+    let mut acc = String::new();
+    loop {
+        let (text, end) = decode_string_at(s, i)?;
+        acc.push_str(&text);
+        i = skip_ws_comments(b, end);
+        if i < b.len() && b[i] == b'+' {
+            let next = skip_ws_comments(b, i + 1);
+            if next < b.len() && (b[next] == b'\'' || b[next] == b'"' || b[next] == b'`') {
+                i = next;
+                continue; // another literal in the static concat chain
+            }
+        }
+        break; // `+ <dynamic>` or end of expression — static prefix ends here
+    }
+    if acc.is_empty() {
+        None
+    } else {
+        Some(acc)
+    }
+}
+
+/// Find the first top-level `=>` arrow at or after byte `start`, skipping over
+/// a leading `(params)` list, strings, and comments. Returns `None` if the RHS
+/// is a plain value expression (begins with a string literal at depth 0) rather
+/// than an arrow function, or if no arrow is found before the expression ends.
+fn find_arrow(b: &[u8], start: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut i = start;
+    while i < b.len() {
+        let j = skip_comment(b, i);
+        if j != i {
+            i = j;
+            continue;
+        }
+        let c = b[i];
+        if c == b'\'' || c == b'"' || c == b'`' {
+            if depth == 0 {
+                return None; // RHS is a value, not an arrow fn
+            }
+            i = skip_string(b, i);
+            continue;
+        }
+        match c {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+            }
+            b'=' if depth == 0 && i + 1 < b.len() && b[i + 1] == b'>' => return Some(i),
+            b';' | b',' if depth == 0 => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Scan the script for prompt-builder definitions
+/// (`const NAME = (params) => "static" + ...` or `const NAME = "static" + ...`)
+/// and map each builder name to the static head text of its returned prompt.
+/// Only expression-bodied arrows / direct string consts are recognised — enough
+/// for the documented prompt-builder pattern. Block-bodied functions are skipped.
+fn extract_prompt_builders(body: &str) -> BTreeMap<String, String> {
+    let b = body.as_bytes();
+    let n = b.len();
+    let mut map = BTreeMap::new();
+    let mut i = 0;
+    while i < n {
+        let c = b[i];
+        if c == b'/' {
+            let j = skip_comment(b, i);
+            if j != i {
+                i = j;
+                continue;
+            }
+        }
+        if c == b'\'' || c == b'"' || c == b'`' {
+            i = skip_string(b, i);
+            continue;
+        }
+        let kwlen = if matches_kw(b, i, "const") {
+            5
+        } else if matches_kw(b, i, "let") {
+            3
+        } else {
+            0
+        };
+        if kwlen > 0 {
+            let mut j = skip_ws_comments(b, i + kwlen);
+            let id_start = j;
+            while j < n && is_ident_byte(b[j]) {
+                j += 1;
+            }
+            if j > id_start {
+                let name = String::from_utf8_lossy(&b[id_start..j]).into_owned();
+                let k = skip_ws_comments(b, j);
+                // a single `=` (not `==` / `=>`)
+                if k < n && b[k] == b'=' && (k + 1 >= n || (b[k + 1] != b'=' && b[k + 1] != b'>'))
+                {
+                    let rhs = skip_ws_comments(b, k + 1);
+                    let fp = match find_arrow(b, rhs) {
+                        Some(arrow) => {
+                            let after = skip_ws_comments(b, arrow + 2);
+                            leading_static_concat(&body[after..])
+                        }
+                        None => leading_static_concat(&body[rhs..]),
+                    };
+                    if let Some(fp) = fp {
+                        map.insert(name, fp);
+                    }
+                }
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    map
+}
+
+/// Within an `agent(...)` argument span (excludes the outer parens), return the
+/// first argument substring — everything up to the first top-level comma.
+fn first_arg_of(span: &str) -> &str {
+    let b = span.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        let j = skip_comment(b, i);
+        if j != i {
+            i = j;
+            continue;
+        }
+        if c == b'\'' || c == b'"' || c == b'`' {
+            i = skip_string(b, i);
+            continue;
+        }
+        match c {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b',' if depth == 0 => return &span[..i],
+            _ => {}
+        }
+        i += 1;
+    }
+    span
+}
+
+/// Compute a call-site's prompt fingerprint from its first argument: an inline
+/// string-concat prompt yields its static head directly; a builder call
+/// `IDENT(...)` resolves to the builder's static head via `builders`.
+fn fingerprint_for_call(first_arg: &str, builders: &BTreeMap<String, String>) -> Option<String> {
+    if let Some(fp) = leading_static_concat(first_arg) {
+        return Some(fp);
+    }
+    let t = first_arg.trim_start();
+    let tb = t.as_bytes();
+    let mut k = 0;
+    while k < tb.len() && is_ident_byte(tb[k]) {
+        k += 1;
+    }
+    if k > 0 {
+        let rest = skip_ws_comments(tb, k);
+        if rest < tb.len() && tb[rest] == b'(' {
+            return builders.get(&t[..k]).cloned();
+        }
+    }
+    None
+}
+
 /// Parse the script body into the ordered list of `agent(...)` call-sites, each
 /// tagged with its enclosing phase, orchestration kind (single / parallel /
-/// pipeline), declared `agentType`/`label` opts, and pipeline group. This is a
-/// tolerant lexical scan, not a real JS parse — robust enough for the documented
-/// workflow patterns (`phase()`, `parallel([...])`, `pipeline(items, ...)`).
+/// pipeline), declared `agentType`/`label` opts, pipeline group, and the static
+/// head of its prompt (for agent→call-site binding). This is a tolerant lexical
+/// scan, not a real JS parse — robust enough for the documented workflow
+/// patterns (`phase()`, `parallel([...])`, `pipeline(items, ...)`).
 fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
     let b = body.as_bytes();
     let n = b.len();
+    let builders = extract_prompt_builders(body);
 
     struct Frame {
         name: String,
@@ -651,6 +926,7 @@ fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
                 let agent_type = opts.and_then(|o| extract_string_field(o, "agentType"));
                 let label = opts.and_then(|o| extract_string_field(o, "label"));
                 let phase_opt = opts.and_then(|o| extract_string_field(o, "phase"));
+                let prompt_fingerprint = fingerprint_for_call(first_arg_of(span), &builders);
 
                 steps.push(ScriptStep {
                     phase: phase_opt.or_else(|| current_phase.clone()),
@@ -658,6 +934,7 @@ fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
                     agent_type,
                     label,
                     pipeline_group,
+                    prompt_fingerprint,
                 });
             }
 
@@ -1207,6 +1484,70 @@ const synthesis = await agent(
         assert_eq!(steps[1].agent_type, None);
         assert_eq!(steps[1].label.as_deref(), Some("synthesize"));
         assert_eq!(steps[1].phase.as_deref(), Some("Synthesize"));
+    }
+
+    #[test]
+    fn canonical_fingerprints_inline_and_variable() {
+        // synthesize uses a backtick prompt `synth ${...}` → static head "synth ";
+        // the parallel probe uses a bare `a.prompt` variable → no fingerprint.
+        let steps = parse_script_steps(CANONICAL);
+        assert_eq!(steps[0].prompt_fingerprint, None, "variable prompt has no static head");
+        assert_eq!(steps[1].prompt_fingerprint.as_deref(), Some("synth "));
+    }
+
+    #[test]
+    fn fingerprint_inline_string_concat_prompt() {
+        // scope-style inline prompt: leading literal(s) then `+ dynamicVar`.
+        let script = r###"
+const QUESTION = "x"
+const s = await agent(
+  "Decompose this question.\n\n## Q\n" + QUESTION + "\n\nStructured output.",
+  { label: "scope" }
+)
+"###;
+        let steps = parse_script_steps(script);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(
+            steps[0].prompt_fingerprint.as_deref(),
+            Some("Decompose this question.\n\n## Q\n"),
+            "static head stops at the first dynamic `+ QUESTION`"
+        );
+    }
+
+    #[test]
+    fn fingerprint_resolves_builder_function() {
+        // The exact deep-research shape: prompt built by an arrow-fn builder,
+        // called inside a parallel fan-out. The fingerprint must come from the
+        // builder's static head, not the bare `SEARCH_PROMPT(angle)` call expr.
+        let script = r###"
+const SEARCH_PROMPT = (angle) =>
+  "## Web Searcher: " + angle.label + "\n\nResearch question: " + QUESTION
+phase("Search")
+const r = await pipeline(angles,
+  angle => agent(SEARCH_PROMPT(angle), { label: "search:" + angle.label, phase: "Search" })
+)
+"###;
+        let builders = extract_prompt_builders(script);
+        assert_eq!(builders.get("SEARCH_PROMPT").map(String::as_str), Some("## Web Searcher: "));
+        let steps = parse_script_steps(script);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].prompt_fingerprint.as_deref(), Some("## Web Searcher: "));
+        assert_eq!(steps[0].kind, WorkflowNodeKind::Pipeline);
+    }
+
+    #[test]
+    fn extract_prompt_builders_skips_block_body_and_non_string() {
+        // Arrow with a string body is captured; a numeric const and a
+        // block-bodied arrow are not mistaken for prompt builders.
+        let script = r###"
+const HEADER = (v) => "## Voter " + v
+const MAX = 12
+const calc = (a) => { return a + 1 }
+"###;
+        let b = extract_prompt_builders(script);
+        assert_eq!(b.get("HEADER").map(String::as_str), Some("## Voter "));
+        assert!(!b.contains_key("MAX"));
+        assert!(!b.contains_key("calc"));
     }
 
     #[test]
