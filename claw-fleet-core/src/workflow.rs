@@ -1134,7 +1134,15 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
                 WorkflowNodeStatus::Done
             }
         };
-        let label = step.label.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| {
+        // A label's static head can be a trivial 1-char fragment when the
+        // script builds it from a dominantly-dynamic concat (e.g.
+        // `label: "v" + v + ":" + claim` → "v"). That's uninformative; fall back
+        // to the phase-derived label in that case.
+        let label = step
+            .label
+            .clone()
+            .filter(|s| s.trim().chars().count() >= 2)
+            .unwrap_or_else(|| {
             match &step.phase {
                 Some(p) => {
                     let pk = p.clone();
@@ -1858,6 +1866,26 @@ const report = await agent("## Synthesis: research report\n\n" + Q, { label: "sy
         // build_dag still produces a DAG via the heuristic (no panic, 5 nodes).
         let (nodes, _) = build_dag(&steps, &agents);
         assert_eq!(nodes.len(), 5);
+    }
+
+    #[test]
+    fn node_label_falls_back_to_phase_for_trivial_static_label() {
+        // A label built from a dominantly-dynamic concat (`"v" + v + ":"`) has a
+        // 1-char static head ("v") — uninformative, so the node must be labeled
+        // by its phase ("Verify") instead. A normal label like "search:" stays.
+        let script = r###"
+phase("Search")
+const s = await pipeline(items, x => agent("## S " + x, { label: "search:" + x, phase: "Search" }))
+phase("Verify")
+const v = await parallel(items.map(c => () => parallel(vs.map(n => () => agent("## V " + n, { label: "v" + n + ":" + c.t, phase: "Verify" })))))
+"###;
+        let steps = parse_script_steps(script);
+        let agents = vec![mk_agent_pt("s0", "## S a"), mk_agent_pt("v0", "## V 0")];
+        let (nodes, _) = build_dag(&steps, &agents);
+        let labels: Vec<&str> = nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"search:"), "informative label kept: {labels:?}");
+        assert!(labels.contains(&"Verify"), "trivial 'v' label → phase: {labels:?}");
+        assert!(!labels.contains(&"v"), "must not label a node 'v': {labels:?}");
     }
 
     #[test]
