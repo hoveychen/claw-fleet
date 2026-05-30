@@ -36,6 +36,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 /// Status of a single fan-out workflow agent.
@@ -66,6 +67,13 @@ pub struct WorkflowAgent {
     /// back to their script call-site during DAG binding.
     #[serde(rename = "agentType", skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<String>,
+    /// First user-message text from the agent's `agent-<id>.jsonl` transcript,
+    /// loaded during discovery. This is the binding signal used to route the
+    /// agent to its script call-site (prefix-match against
+    /// [`WorkflowNode`]-derived prompt fingerprints). Internal only — never
+    /// serialized to the frontend (would bloat the payload with N full prompts).
+    #[serde(skip)]
+    pub prompt_text: Option<String>,
 }
 
 /// One declared phase, parsed from the script's `meta.phases`.
@@ -234,6 +242,7 @@ pub fn parse_journal(body: &str) -> Vec<WorkflowAgent> {
                             status: WorkflowAgentStatus::Running,
                             result: None,
                             agent_type: None,
+                            prompt_text: None,
                         },
                     );
                 }
@@ -248,6 +257,7 @@ pub fn parse_journal(body: &str) -> Vec<WorkflowAgent> {
                         status: WorkflowAgentStatus::Running,
                         result: None,
                         agent_type: None,
+                        prompt_text: None,
                     }
                 });
                 agent.status = WorkflowAgentStatus::Done;
@@ -427,6 +437,15 @@ struct ScriptStep {
     label: Option<String>,
     /// Id of the enclosing `pipeline(...)` call, if any (for stage chaining).
     pipeline_group: Option<usize>,
+    /// Leading **static** text of this call-site's prompt argument: either the
+    /// concatenated string literals at the head of an inline prompt
+    /// (`"a" + "b" + dynamicVar`), or the static head of a prompt-builder
+    /// function (`const P = (x) => "## Header " + x`). Used to bind runtime
+    /// agents to call-sites by prefix-matching their first user message — the
+    /// only on-disk signal that survives, since the journal records no
+    /// call-site → agent mapping. `None` when the prompt begins with a bare
+    /// variable (no static text to fingerprint).
+    prompt_fingerprint: Option<String>,
 }
 
 /// Skip a JS string literal starting at `b[i]` (an opening quote). Returns the
@@ -578,14 +597,280 @@ fn find_opts_object(span: &str) -> Option<&str> {
     None
 }
 
+/// Is `c` a byte that can appear in a JS identifier?
+fn is_ident_byte(c: u8) -> bool {
+    (c as char).is_ascii_alphanumeric() || c == b'_' || c == b'$'
+}
+
+/// True when the keyword `kw` sits at byte `i` on identifier boundaries.
+fn matches_kw(b: &[u8], i: usize, kw: &str) -> bool {
+    let k = kw.as_bytes();
+    if i + k.len() > b.len() || &b[i..i + k.len()] != k {
+        return false;
+    }
+    let before_ok = i == 0 || !is_ident_byte(b[i - 1]);
+    let after_ok = i + k.len() >= b.len() || !is_ident_byte(b[i + k.len()]);
+    before_ok && after_ok
+}
+
+/// Advance past any run of whitespace and `//` / `/* */` comments from `i`.
+fn skip_ws_comments(b: &[u8], mut i: usize) -> usize {
+    loop {
+        while i < b.len() && (b[i] as char).is_whitespace() {
+            i += 1;
+        }
+        let j = skip_comment(b, i);
+        if j != i {
+            i = j;
+            continue;
+        }
+        break;
+    }
+    i
+}
+
+/// Decode a string literal whose opening quote is at byte `start` of `s`.
+/// Returns `(decoded contents, byte index just past the closing quote)`.
+/// Honors `\n`/`\t`/`\<char>` escapes and is UTF-8 safe (Chinese prompt text
+/// survives). For backtick template literals, decoding stops at the first
+/// `${` interpolation (the static prefix is what we want) but the scan still
+/// runs to the closing backtick so the returned end index is correct.
+fn decode_string_at(s: &str, start: usize) -> Option<(String, usize)> {
+    let b = s.as_bytes();
+    if start >= b.len() {
+        return None;
+    }
+    let quote = b[start];
+    if quote != b'\'' && quote != b'"' && quote != b'`' {
+        return None;
+    }
+    let mut buf: Vec<u8> = Vec::new();
+    let mut i = start + 1;
+    let mut stop = false; // hit a template interpolation — keep the static prefix
+    while i < b.len() {
+        let c = b[i];
+        if c == b'\\' && i + 1 < b.len() {
+            if !stop {
+                match b[i + 1] {
+                    b'n' => buf.push(b'\n'),
+                    b't' => buf.push(b'\t'),
+                    other => buf.push(other),
+                }
+            }
+            i += 2;
+            continue;
+        }
+        if c == quote {
+            return Some((String::from_utf8_lossy(&buf).into_owned(), i + 1));
+        }
+        if quote == b'`' && c == b'$' && i + 1 < b.len() && b[i + 1] == b'{' {
+            stop = true;
+        }
+        if !stop {
+            buf.push(c);
+        }
+        i += 1;
+    }
+    Some((String::from_utf8_lossy(&buf).into_owned(), b.len()))
+}
+
+/// Read the leading run of string literals joined by `+` at the head of
+/// expression `s` (skipping whitespace/comments). Returns the concatenated
+/// static text, capturing the static prefix of a prompt built like
+/// `"a" + "b" + dynamicVar + ...`. Returns `None` when `s` does not begin with
+/// a string literal (e.g. a bare identifier, a builder call, or a variable).
+fn leading_static_concat(s: &str) -> Option<String> {
+    let b = s.as_bytes();
+    let mut i = skip_ws_comments(b, 0);
+    if i >= b.len() {
+        return None;
+    }
+    let c = b[i];
+    if c != b'\'' && c != b'"' && c != b'`' {
+        return None;
+    }
+    let mut acc = String::new();
+    loop {
+        let (text, end) = decode_string_at(s, i)?;
+        acc.push_str(&text);
+        i = skip_ws_comments(b, end);
+        if i < b.len() && b[i] == b'+' {
+            let next = skip_ws_comments(b, i + 1);
+            if next < b.len() && (b[next] == b'\'' || b[next] == b'"' || b[next] == b'`') {
+                i = next;
+                continue; // another literal in the static concat chain
+            }
+        }
+        break; // `+ <dynamic>` or end of expression — static prefix ends here
+    }
+    if acc.is_empty() {
+        None
+    } else {
+        Some(acc)
+    }
+}
+
+/// Find the first top-level `=>` arrow at or after byte `start`, skipping over
+/// a leading `(params)` list, strings, and comments. Returns `None` if the RHS
+/// is a plain value expression (begins with a string literal at depth 0) rather
+/// than an arrow function, or if no arrow is found before the expression ends.
+fn find_arrow(b: &[u8], start: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut i = start;
+    while i < b.len() {
+        let j = skip_comment(b, i);
+        if j != i {
+            i = j;
+            continue;
+        }
+        let c = b[i];
+        if c == b'\'' || c == b'"' || c == b'`' {
+            if depth == 0 {
+                return None; // RHS is a value, not an arrow fn
+            }
+            i = skip_string(b, i);
+            continue;
+        }
+        match c {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => {
+                depth -= 1;
+                if depth < 0 {
+                    return None;
+                }
+            }
+            b'=' if depth == 0 && i + 1 < b.len() && b[i + 1] == b'>' => return Some(i),
+            b';' | b',' if depth == 0 => return None,
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Scan the script for prompt-builder definitions
+/// (`const NAME = (params) => "static" + ...` or `const NAME = "static" + ...`)
+/// and map each builder name to the static head text of its returned prompt.
+/// Only expression-bodied arrows / direct string consts are recognised — enough
+/// for the documented prompt-builder pattern. Block-bodied functions are skipped.
+fn extract_prompt_builders(body: &str) -> BTreeMap<String, String> {
+    let b = body.as_bytes();
+    let n = b.len();
+    let mut map = BTreeMap::new();
+    let mut i = 0;
+    while i < n {
+        let c = b[i];
+        if c == b'/' {
+            let j = skip_comment(b, i);
+            if j != i {
+                i = j;
+                continue;
+            }
+        }
+        if c == b'\'' || c == b'"' || c == b'`' {
+            i = skip_string(b, i);
+            continue;
+        }
+        let kwlen = if matches_kw(b, i, "const") {
+            5
+        } else if matches_kw(b, i, "let") {
+            3
+        } else {
+            0
+        };
+        if kwlen > 0 {
+            let mut j = skip_ws_comments(b, i + kwlen);
+            let id_start = j;
+            while j < n && is_ident_byte(b[j]) {
+                j += 1;
+            }
+            if j > id_start {
+                let name = String::from_utf8_lossy(&b[id_start..j]).into_owned();
+                let k = skip_ws_comments(b, j);
+                // a single `=` (not `==` / `=>`)
+                if k < n && b[k] == b'=' && (k + 1 >= n || (b[k + 1] != b'=' && b[k + 1] != b'>'))
+                {
+                    let rhs = skip_ws_comments(b, k + 1);
+                    let fp = match find_arrow(b, rhs) {
+                        Some(arrow) => {
+                            let after = skip_ws_comments(b, arrow + 2);
+                            leading_static_concat(&body[after..])
+                        }
+                        None => leading_static_concat(&body[rhs..]),
+                    };
+                    if let Some(fp) = fp {
+                        map.insert(name, fp);
+                    }
+                }
+                i = j;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    map
+}
+
+/// Within an `agent(...)` argument span (excludes the outer parens), return the
+/// first argument substring — everything up to the first top-level comma.
+fn first_arg_of(span: &str) -> &str {
+    let b = span.as_bytes();
+    let mut depth = 0i32;
+    let mut i = 0;
+    while i < b.len() {
+        let c = b[i];
+        let j = skip_comment(b, i);
+        if j != i {
+            i = j;
+            continue;
+        }
+        if c == b'\'' || c == b'"' || c == b'`' {
+            i = skip_string(b, i);
+            continue;
+        }
+        match c {
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth -= 1,
+            b',' if depth == 0 => return &span[..i],
+            _ => {}
+        }
+        i += 1;
+    }
+    span
+}
+
+/// Compute a call-site's prompt fingerprint from its first argument: an inline
+/// string-concat prompt yields its static head directly; a builder call
+/// `IDENT(...)` resolves to the builder's static head via `builders`.
+fn fingerprint_for_call(first_arg: &str, builders: &BTreeMap<String, String>) -> Option<String> {
+    if let Some(fp) = leading_static_concat(first_arg) {
+        return Some(fp);
+    }
+    let t = first_arg.trim_start();
+    let tb = t.as_bytes();
+    let mut k = 0;
+    while k < tb.len() && is_ident_byte(tb[k]) {
+        k += 1;
+    }
+    if k > 0 {
+        let rest = skip_ws_comments(tb, k);
+        if rest < tb.len() && tb[rest] == b'(' {
+            return builders.get(&t[..k]).cloned();
+        }
+    }
+    None
+}
+
 /// Parse the script body into the ordered list of `agent(...)` call-sites, each
 /// tagged with its enclosing phase, orchestration kind (single / parallel /
-/// pipeline), declared `agentType`/`label` opts, and pipeline group. This is a
-/// tolerant lexical scan, not a real JS parse — robust enough for the documented
-/// workflow patterns (`phase()`, `parallel([...])`, `pipeline(items, ...)`).
+/// pipeline), declared `agentType`/`label` opts, pipeline group, and the static
+/// head of its prompt (for agent→call-site binding). This is a tolerant lexical
+/// scan, not a real JS parse — robust enough for the documented workflow
+/// patterns (`phase()`, `parallel([...])`, `pipeline(items, ...)`).
 fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
     let b = body.as_bytes();
     let n = b.len();
+    let builders = extract_prompt_builders(body);
 
     struct Frame {
         name: String,
@@ -651,6 +936,7 @@ fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
                 let agent_type = opts.and_then(|o| extract_string_field(o, "agentType"));
                 let label = opts.and_then(|o| extract_string_field(o, "label"));
                 let phase_opt = opts.and_then(|o| extract_string_field(o, "phase"));
+                let prompt_fingerprint = fingerprint_for_call(first_arg_of(span), &builders);
 
                 steps.push(ScriptStep {
                     phase: phase_opt.or_else(|| current_phase.clone()),
@@ -658,6 +944,7 @@ fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
                     agent_type,
                     label,
                     pipeline_group,
+                    prompt_fingerprint,
                 });
             }
 
@@ -692,20 +979,77 @@ fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
     steps
 }
 
-/// Build the DAG (nodes + edges) from parsed script steps and the runtime
-/// journal agents. Agents are bound to call-site nodes by a documented
-/// heuristic: `agentType`-anchored runs for fan-out call-sites, one agent per
-/// single call-site, in journal start order. Bindings that fall back to order
-/// (dynamic fan-out, count mismatch) flag the node `approximate = true`.
-fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
-    if steps.is_empty() {
-        return (Vec::new(), Vec::new());
+/// The leftover sink for unbindable agents: the last fan-out (parallel /
+/// pipeline) call-site if there is one, else the last step. Shared by both
+/// binding strategies so dynamic fan-out beyond what we could route lands
+/// somewhere honest (flagged `approximate`).
+fn leftover_target(steps: &[ScriptStep]) -> usize {
+    steps
+        .iter()
+        .rposition(|s| matches!(s.kind, WorkflowNodeKind::Parallel | WorkflowNodeKind::Pipeline))
+        .unwrap_or(steps.len() - 1)
+}
+
+/// Bind agents to call-sites by prefix-matching each agent's first prompt
+/// against the call-sites' static prompt fingerprints. Returns `None` (so the
+/// caller falls back to the heuristic) when there's nothing to match on — no
+/// agent carries `prompt_text`, or no step has a usable fingerprint. When a
+/// match is found it is **exact** (not approximate): the agent ran that exact
+/// prompt head, so the binding is ground truth, not a guess. Agents that match
+/// nothing become leftover on the last fan-out node (approximate).
+fn fingerprint_binding(
+    steps: &[ScriptStep],
+    agents: &[WorkflowAgent],
+) -> Option<(Vec<Vec<String>>, Vec<bool>)> {
+    let has_prompts = agents.iter().any(|a| a.prompt_text.is_some());
+    // (step index, fingerprint) for steps with a fingerprint long enough to be
+    // discriminating — guards against a 1-2 char head matching everything.
+    let mut fps: Vec<(usize, &str)> = steps
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| s.prompt_fingerprint.as_deref().map(|f| (i, f)))
+        .filter(|(_, f)| f.trim().len() >= 4)
+        .collect();
+    if !has_prompts || fps.is_empty() {
+        return None;
     }
+    // Longest fingerprint first, so a more specific head wins when one
+    // fingerprint is a prefix of another.
+    fps.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
 
     let mut bound: Vec<Vec<String>> = vec![Vec::new(); steps.len()];
     let mut approx: Vec<bool> = vec![false; steps.len()];
+    let mut leftover: Vec<String> = Vec::new();
+    for a in agents {
+        let hit = a
+            .prompt_text
+            .as_deref()
+            .and_then(|pt| fps.iter().find(|(_, fp)| pt.starts_with(fp)).map(|(i, _)| *i));
+        match hit {
+            Some(si) => bound[si].push(a.agent_id.clone()),
+            None => leftover.push(a.agent_id.clone()),
+        }
+    }
+    if !leftover.is_empty() {
+        let target = leftover_target(steps);
+        bound[target].extend(leftover);
+        approx[target] = true; // the leftover portion is a guess, not ground truth
+    }
+    Some((bound, approx))
+}
 
-    // ── Binding pass ──────────────────────────────────────────────────────
+/// Bind agents to call-sites by the legacy `agentType`/order heuristic:
+/// `agentType`-anchored runs for typed fan-out call-sites, one agent per single
+/// call-site, in journal start order. Used as a fallback when fingerprint
+/// binding has nothing to work with. Bindings that fall back to order (dynamic
+/// fan-out, count mismatch, untyped fan-out) flag the node `approximate`.
+fn heuristic_binding(
+    steps: &[ScriptStep],
+    agents: &[WorkflowAgent],
+) -> (Vec<Vec<String>>, Vec<bool>) {
+    let mut bound: Vec<Vec<String>> = vec![Vec::new(); steps.len()];
+    let mut approx: Vec<bool> = vec![false; steps.len()];
+
     let mut ai = 0usize; // journal-agent cursor
     for (ni, step) in steps.iter().enumerate() {
         match step.kind {
@@ -745,21 +1089,29 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
     // Leftover agents (dynamic fan-out beyond what we could route): attach to
     // the last fan-out node if there is one, else the last node. Flag approximate.
     if ai < agents.len() {
-        let target = steps
-            .iter()
-            .rposition(|s| {
-                matches!(
-                    s.kind,
-                    WorkflowNodeKind::Parallel | WorkflowNodeKind::Pipeline
-                )
-            })
-            .unwrap_or(steps.len() - 1);
+        let target = leftover_target(steps);
         while ai < agents.len() {
             bound[target].push(agents[ai].agent_id.clone());
             ai += 1;
         }
         approx[target] = true;
     }
+
+    (bound, approx)
+}
+
+/// Build the DAG (nodes + edges) from parsed script steps and the runtime
+/// journal agents. Agents are bound to call-site nodes by prompt fingerprint
+/// when possible (ground truth), else by the `agentType`/order heuristic.
+/// Heuristic / leftover bindings flag the node `approximate = true`.
+fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
+    if steps.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    // ── Binding pass ──────────────────────────────────────────────────────
+    let (mut bound, approx) =
+        fingerprint_binding(steps, agents).unwrap_or_else(|| heuristic_binding(steps, agents));
 
     // ── Node construction ─────────────────────────────────────────────────
     let mut nodes: Vec<WorkflowNode> = Vec::with_capacity(steps.len());
@@ -782,7 +1134,15 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
                 WorkflowNodeStatus::Done
             }
         };
-        let label = step.label.clone().filter(|s| !s.is_empty()).unwrap_or_else(|| {
+        // A label's static head can be a trivial 1-char fragment when the
+        // script builds it from a dominantly-dynamic concat (e.g.
+        // `label: "v" + v + ":" + claim` → "v"). That's uninformative; fall back
+        // to the phase-derived label in that case.
+        let label = step
+            .label
+            .clone()
+            .filter(|s| s.trim().chars().count() >= 2)
+            .unwrap_or_else(|| {
             match &step.phase {
                 Some(p) => {
                     let pk = p.clone();
@@ -898,6 +1258,54 @@ fn find_script_for_run(session_dir: &Path, run_id: &str) -> Option<String> {
     None
 }
 
+/// Read the first user-message text from an agent's `agent-<id>.jsonl`
+/// transcript. This is the prompt the workflow passed to the agent, used to
+/// bind the agent back to its script call-site. Scans only the first few lines
+/// (the prompt is line 1 in practice) and reads one line at a time so a large
+/// multi-turn transcript isn't slurped whole. Handles both string and
+/// text-block `content` shapes. `None` when the file is missing or no user
+/// message is found near the top.
+fn read_agent_first_prompt(wf_dir: &Path, agent_id: &str) -> Option<String> {
+    if agent_id.is_empty() {
+        return None;
+    }
+    let path = wf_dir.join(format!("agent-{agent_id}.jsonl"));
+    let file = fs::File::open(&path).ok()?;
+    let mut reader = BufReader::new(file);
+    for _ in 0..8 {
+        let mut line = String::new();
+        let n = reader.read_line(&mut line).ok()?;
+        if n == 0 {
+            break;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+            continue;
+        }
+        let content = v.get("message").and_then(|m| m.get("content"));
+        let text = match content {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Array(arr)) => arr
+                .iter()
+                .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join(""),
+            _ => continue,
+        };
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+    None
+}
+
 /// Discover all workflow runs for a session, given its `.jsonl` transcript path.
 ///
 /// Returns one [`WorkflowTree`] per `wf_*` directory found under
@@ -937,7 +1345,9 @@ pub fn discover_workflow_trees_in_dir(session_dir: &Path) -> Vec<WorkflowTree> {
         let mut agents = parse_journal(&journal_body);
 
         // Enrich each agent with its runtime `agentType` from the sibling
-        // `agent-<id>.meta.json` (the journal itself carries no agentType).
+        // `agent-<id>.meta.json` (the journal itself carries no agentType) and
+        // its first prompt text from the `agent-<id>.jsonl` transcript (the
+        // binding signal — the journal carries no call-site mapping either).
         for a in &mut agents {
             if a.agent_id.is_empty() {
                 continue;
@@ -950,6 +1360,7 @@ pub fn discover_workflow_trees_in_dir(session_dir: &Path) -> Vec<WorkflowTree> {
                     }
                 }
             }
+            a.prompt_text = read_agent_first_prompt(&wf_dir, &a.agent_id);
         }
 
         let script_body = find_script_for_run(session_dir, &run_id);
@@ -1149,6 +1560,41 @@ phase('Probe')
     }
 
     #[test]
+    fn read_agent_first_prompt_string_and_block_content() {
+        let tmp = std::env::temp_dir().join(format!("wf-prompt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // string content (the common shape on disk)
+        fs::write(
+            tmp.join("agent-aaa.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"## Web Searcher: protocol-layer\\n\\nbody\"}}\n{\"type\":\"assistant\",\"message\":{\"content\":\"...\"}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_agent_first_prompt(&tmp, "aaa").as_deref(),
+            Some("## Web Searcher: protocol-layer\n\nbody")
+        );
+
+        // text-block array content
+        fs::write(
+            tmp.join("agent-bbb.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"## Source Extractor\\n\\nx\"}]}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_agent_first_prompt(&tmp, "bbb").as_deref(),
+            Some("## Source Extractor\n\nx")
+        );
+
+        // missing file / empty id
+        assert_eq!(read_agent_first_prompt(&tmp, "missing"), None);
+        assert_eq!(read_agent_first_prompt(&tmp, ""), None);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn discover_returns_empty_when_no_workflows() {
         let tmp = std::env::temp_dir().join(format!("wfviz-empty-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
@@ -1172,6 +1618,7 @@ phase('Probe')
             status: st,
             result: None,
             agent_type: Some(at.into()),
+            prompt_text: None,
         }
     }
 
@@ -1207,6 +1654,70 @@ const synthesis = await agent(
         assert_eq!(steps[1].agent_type, None);
         assert_eq!(steps[1].label.as_deref(), Some("synthesize"));
         assert_eq!(steps[1].phase.as_deref(), Some("Synthesize"));
+    }
+
+    #[test]
+    fn canonical_fingerprints_inline_and_variable() {
+        // synthesize uses a backtick prompt `synth ${...}` → static head "synth ";
+        // the parallel probe uses a bare `a.prompt` variable → no fingerprint.
+        let steps = parse_script_steps(CANONICAL);
+        assert_eq!(steps[0].prompt_fingerprint, None, "variable prompt has no static head");
+        assert_eq!(steps[1].prompt_fingerprint.as_deref(), Some("synth "));
+    }
+
+    #[test]
+    fn fingerprint_inline_string_concat_prompt() {
+        // scope-style inline prompt: leading literal(s) then `+ dynamicVar`.
+        let script = r###"
+const QUESTION = "x"
+const s = await agent(
+  "Decompose this question.\n\n## Q\n" + QUESTION + "\n\nStructured output.",
+  { label: "scope" }
+)
+"###;
+        let steps = parse_script_steps(script);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(
+            steps[0].prompt_fingerprint.as_deref(),
+            Some("Decompose this question.\n\n## Q\n"),
+            "static head stops at the first dynamic `+ QUESTION`"
+        );
+    }
+
+    #[test]
+    fn fingerprint_resolves_builder_function() {
+        // The exact deep-research shape: prompt built by an arrow-fn builder,
+        // called inside a parallel fan-out. The fingerprint must come from the
+        // builder's static head, not the bare `SEARCH_PROMPT(angle)` call expr.
+        let script = r###"
+const SEARCH_PROMPT = (angle) =>
+  "## Web Searcher: " + angle.label + "\n\nResearch question: " + QUESTION
+phase("Search")
+const r = await pipeline(angles,
+  angle => agent(SEARCH_PROMPT(angle), { label: "search:" + angle.label, phase: "Search" })
+)
+"###;
+        let builders = extract_prompt_builders(script);
+        assert_eq!(builders.get("SEARCH_PROMPT").map(String::as_str), Some("## Web Searcher: "));
+        let steps = parse_script_steps(script);
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].prompt_fingerprint.as_deref(), Some("## Web Searcher: "));
+        assert_eq!(steps[0].kind, WorkflowNodeKind::Pipeline);
+    }
+
+    #[test]
+    fn extract_prompt_builders_skips_block_body_and_non_string() {
+        // Arrow with a string body is captured; a numeric const and a
+        // block-bodied arrow are not mistaken for prompt builders.
+        let script = r###"
+const HEADER = (v) => "## Voter " + v
+const MAX = 12
+const calc = (a) => { return a + 1 }
+"###;
+        let b = extract_prompt_builders(script);
+        assert_eq!(b.get("HEADER").map(String::as_str), Some("## Voter "));
+        assert!(!b.contains_key("MAX"));
+        assert!(!b.contains_key("calc"));
     }
 
     #[test]
@@ -1271,6 +1782,110 @@ const r = await pipeline(items,
             edges.iter().any(|e| e.from == "n0" && e.to == "n1"),
             "pipeline stages chain n0 → n1"
         );
+    }
+
+    fn mk_agent_pt(id: &str, prompt: &str) -> WorkflowAgent {
+        WorkflowAgent {
+            agent_id: id.into(),
+            key: format!("v2:{id}"),
+            status: WorkflowAgentStatus::Done,
+            result: None,
+            agent_type: Some("workflow-subagent".into()),
+            prompt_text: Some(prompt.into()),
+        }
+    }
+
+    /// The deep-research shape that broke before this fix: 5 call-sites, every
+    /// runtime agent the default `workflow-subagent` type (no agentType signal),
+    /// agents interleaved in journal order (pipeline has no barrier). The old
+    /// heuristic bound ×1 to each fan-out node and dumped the rest on the last
+    /// one. Fingerprint binding must recover the true fan-out widths.
+    const DEEP_RESEARCH: &str = r###"
+const SEARCH_PROMPT = (a) => "## Web Searcher: " + a.label
+const FETCH_PROMPT = (s, a) => "## Source Extractor\n\n" + s.url
+const VERIFY_PROMPT = (c, v) => "## Adversarial Claim Verifier (voter " + (v + 1) + ")"
+phase("Scope")
+const scope = await agent("Decompose this research question.\n\n## Q\n" + Q, { label: "scope" })
+phase("Search")
+const sr = await pipeline(scope.angles,
+  angle => agent(SEARCH_PROMPT(angle), { label: "search:" + angle.label, phase: "Search" }),
+  res => parallel(novel.map(source => () => agent(FETCH_PROMPT(source, res.angle), { label: "fetch", phase: "Fetch" })))
+)
+phase("Verify")
+const voted = await parallel(claims.map(c => () => parallel(votes.map(v => () => agent(VERIFY_PROMPT(c, v), { label: "verify", phase: "Verify" })))))
+phase("Synthesize")
+const report = await agent("## Synthesis: research report\n\n" + Q, { label: "synthesize" })
+"###;
+
+    #[test]
+    fn build_dag_fingerprint_recovers_fanout_widths() {
+        let steps = parse_script_steps(DEEP_RESEARCH);
+        assert_eq!(steps.len(), 5, "scope/search/fetch/verify/synthesize");
+
+        // Agents interleaved (not grouped by call-site) — order must not matter.
+        let agents = vec![
+            mk_agent_pt("scope0", "Decompose this research question.\n\n## Q\nwhat is X?"),
+            mk_agent_pt("search0", "## Web Searcher: protocol-layer\n\n..."),
+            mk_agent_pt("fetch0", "## Source Extractor\n\nhttps://a.example\n..."),
+            mk_agent_pt("verify0", "## Adversarial Claim Verifier (voter 1)\n\n..."),
+            mk_agent_pt("search1", "## Web Searcher: product-practice\n\n..."),
+            mk_agent_pt("fetch1", "## Source Extractor\n\nhttps://b.example\n..."),
+            mk_agent_pt("fetch2", "## Source Extractor\n\nhttps://c.example\n..."),
+            mk_agent_pt("verify1", "## Adversarial Claim Verifier (voter 2)\n\n..."),
+            mk_agent_pt("verify2", "## Adversarial Claim Verifier (voter 3)\n\n..."),
+            mk_agent_pt("verify3", "## Adversarial Claim Verifier (voter 1)\n\n..."),
+            mk_agent_pt("synth0", "## Synthesis: research report\n\nFinal answer."),
+        ];
+
+        let (nodes, _edges) = build_dag(&steps, &agents);
+        assert_eq!(nodes.len(), 5);
+        // scope ×1, search ×2, fetch ×3, verify ×4, synthesize ×1 — true widths.
+        assert_eq!(nodes[0].agent_ids, vec!["scope0"]);
+        assert_eq!(nodes[1].agent_ids, vec!["search0", "search1"]);
+        assert_eq!(nodes[2].agent_ids, vec!["fetch0", "fetch1", "fetch2"]);
+        assert_eq!(nodes[3].agent_ids, vec!["verify0", "verify1", "verify2", "verify3"]);
+        assert_eq!(nodes[4].agent_ids, vec!["synth0"]);
+        // Every binding is ground truth (a real prompt match) — nothing approximate.
+        assert!(nodes.iter().all(|n| !n.approximate), "fingerprint binding is exact");
+    }
+
+    #[test]
+    fn fingerprint_binding_skipped_without_prompts_falls_back() {
+        // Same script, but agents carry no prompt_text (the unit-fixture case):
+        // fingerprint binding returns None and the legacy heuristic runs, which
+        // for this untyped shape collapses fan-out to ×1 + a leftover dump.
+        let steps = parse_script_steps(DEEP_RESEARCH);
+        assert!(fingerprint_binding(&steps, &[]).is_none(), "no agents → no fingerprint binding");
+        let agents: Vec<WorkflowAgent> = (0..6)
+            .map(|i| mk_agent(&format!("a{i}"), "workflow-subagent", WorkflowAgentStatus::Done))
+            .collect();
+        assert!(
+            fingerprint_binding(&steps, &agents).is_none(),
+            "agents without prompt_text → fall back to heuristic"
+        );
+        // build_dag still produces a DAG via the heuristic (no panic, 5 nodes).
+        let (nodes, _) = build_dag(&steps, &agents);
+        assert_eq!(nodes.len(), 5);
+    }
+
+    #[test]
+    fn node_label_falls_back_to_phase_for_trivial_static_label() {
+        // A label built from a dominantly-dynamic concat (`"v" + v + ":"`) has a
+        // 1-char static head ("v") — uninformative, so the node must be labeled
+        // by its phase ("Verify") instead. A normal label like "search:" stays.
+        let script = r###"
+phase("Search")
+const s = await pipeline(items, x => agent("## S " + x, { label: "search:" + x, phase: "Search" }))
+phase("Verify")
+const v = await parallel(items.map(c => () => parallel(vs.map(n => () => agent("## V " + n, { label: "v" + n + ":" + c.t, phase: "Verify" })))))
+"###;
+        let steps = parse_script_steps(script);
+        let agents = vec![mk_agent_pt("s0", "## S a"), mk_agent_pt("v0", "## V 0")];
+        let (nodes, _) = build_dag(&steps, &agents);
+        let labels: Vec<&str> = nodes.iter().map(|n| n.label.as_str()).collect();
+        assert!(labels.contains(&"search:"), "informative label kept: {labels:?}");
+        assert!(labels.contains(&"Verify"), "trivial 'v' label → phase: {labels:?}");
+        assert!(!labels.contains(&"v"), "must not label a node 'v': {labels:?}");
     }
 
     #[test]
