@@ -158,7 +158,7 @@ jobs:
           fi
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: dist/
@@ -219,19 +219,19 @@ jobs:
       # ── Download CLI artifacts from step 1 ────────────────────────────────
 
       - name: Download sidecar CLI
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.sidecar_artifact }}
           path: claw-fleet-desktop/binaries
 
       - name: Download Linux x64 probe
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: fleet-linux-x64
           path: claw-fleet-desktop/resources
 
       - name: Download Linux arm64 probe
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: fleet-linux-arm64
           path: claw-fleet-desktop/resources
@@ -258,10 +258,10 @@ jobs:
       # ── Build desktop app (unsigned) ──────────────────────────────────────
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
@@ -335,7 +335,7 @@ jobs:
             -name "*.AppImage" | head -1 | xargs -I{} cp {} dist-artifacts/claw-fleet-${{ matrix.fixed_suffix }}.AppImage 2>/dev/null || true
 
       - name: Upload desktop artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.fixed_suffix == 'macos' && 'desktop-macos-unsigned' || format('desktop-{0}', matrix.fixed_suffix) }}
           path: dist-artifacts/

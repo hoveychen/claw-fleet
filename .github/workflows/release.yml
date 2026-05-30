@@ -66,7 +66,7 @@ jobs:
           ref: ${{ needs.resolve.outputs.tag }}
 
       - name: Download unsigned macOS .app
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-macos-unsigned
           path: incoming
@@ -143,7 +143,7 @@ jobs:
             "out/claw-fleet-macos.pkg"
 
       - name: Upload signed pkg
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-macos-signed
           path: out/
@@ -159,7 +159,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Download signed pkg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-macos-signed
           path: out
@@ -219,7 +219,7 @@ jobs:
           done
 
       - name: Upload notarized pkg
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-macos-notarized
           path: out/
@@ -244,7 +244,7 @@ jobs:
           ref: ${{ needs.resolve.outputs.tag }}
 
       - name: Download CLI artifacts (from CI run)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: 'fleet-*'
           path: all-artifacts
@@ -253,7 +253,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Windows desktop artifact (from CI run)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-windows-x64
           path: all-artifacts
@@ -261,7 +261,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download Linux desktop artifact (from CI run)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: desktop-linux-x64
           path: all-artifacts
@@ -269,7 +269,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Download notarized macOS pkg
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: release-macos-notarized
           path: all-artifacts
@@ -328,7 +328,7 @@ jobs:
           EOF
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.resolve.outputs.tag }}
           name: Claw Fleet v${{ needs.resolve.outputs.version }}
