@@ -36,6 +36,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 /// Status of a single fan-out workflow agent.
@@ -66,6 +67,13 @@ pub struct WorkflowAgent {
     /// back to their script call-site during DAG binding.
     #[serde(rename = "agentType", skip_serializing_if = "Option::is_none")]
     pub agent_type: Option<String>,
+    /// First user-message text from the agent's `agent-<id>.jsonl` transcript,
+    /// loaded during discovery. This is the binding signal used to route the
+    /// agent to its script call-site (prefix-match against
+    /// [`WorkflowNode`]-derived prompt fingerprints). Internal only — never
+    /// serialized to the frontend (would bloat the payload with N full prompts).
+    #[serde(skip)]
+    pub prompt_text: Option<String>,
 }
 
 /// One declared phase, parsed from the script's `meta.phases`.
@@ -234,6 +242,7 @@ pub fn parse_journal(body: &str) -> Vec<WorkflowAgent> {
                             status: WorkflowAgentStatus::Running,
                             result: None,
                             agent_type: None,
+                            prompt_text: None,
                         },
                     );
                 }
@@ -248,6 +257,7 @@ pub fn parse_journal(body: &str) -> Vec<WorkflowAgent> {
                         status: WorkflowAgentStatus::Running,
                         result: None,
                         agent_type: None,
+                        prompt_text: None,
                     }
                 });
                 agent.status = WorkflowAgentStatus::Done;
@@ -1175,6 +1185,54 @@ fn find_script_for_run(session_dir: &Path, run_id: &str) -> Option<String> {
     None
 }
 
+/// Read the first user-message text from an agent's `agent-<id>.jsonl`
+/// transcript. This is the prompt the workflow passed to the agent, used to
+/// bind the agent back to its script call-site. Scans only the first few lines
+/// (the prompt is line 1 in practice) and reads one line at a time so a large
+/// multi-turn transcript isn't slurped whole. Handles both string and
+/// text-block `content` shapes. `None` when the file is missing or no user
+/// message is found near the top.
+fn read_agent_first_prompt(wf_dir: &Path, agent_id: &str) -> Option<String> {
+    if agent_id.is_empty() {
+        return None;
+    }
+    let path = wf_dir.join(format!("agent-{agent_id}.jsonl"));
+    let file = fs::File::open(&path).ok()?;
+    let mut reader = BufReader::new(file);
+    for _ in 0..8 {
+        let mut line = String::new();
+        let n = reader.read_line(&mut line).ok()?;
+        if n == 0 {
+            break;
+        }
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+            continue;
+        }
+        let content = v.get("message").and_then(|m| m.get("content"));
+        let text = match content {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Array(arr)) => arr
+                .iter()
+                .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("text"))
+                .filter_map(|b| b.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join(""),
+            _ => continue,
+        };
+        if !text.is_empty() {
+            return Some(text);
+        }
+    }
+    None
+}
+
 /// Discover all workflow runs for a session, given its `.jsonl` transcript path.
 ///
 /// Returns one [`WorkflowTree`] per `wf_*` directory found under
@@ -1214,7 +1272,9 @@ pub fn discover_workflow_trees_in_dir(session_dir: &Path) -> Vec<WorkflowTree> {
         let mut agents = parse_journal(&journal_body);
 
         // Enrich each agent with its runtime `agentType` from the sibling
-        // `agent-<id>.meta.json` (the journal itself carries no agentType).
+        // `agent-<id>.meta.json` (the journal itself carries no agentType) and
+        // its first prompt text from the `agent-<id>.jsonl` transcript (the
+        // binding signal — the journal carries no call-site mapping either).
         for a in &mut agents {
             if a.agent_id.is_empty() {
                 continue;
@@ -1227,6 +1287,7 @@ pub fn discover_workflow_trees_in_dir(session_dir: &Path) -> Vec<WorkflowTree> {
                     }
                 }
             }
+            a.prompt_text = read_agent_first_prompt(&wf_dir, &a.agent_id);
         }
 
         let script_body = find_script_for_run(session_dir, &run_id);
@@ -1426,6 +1487,41 @@ phase('Probe')
     }
 
     #[test]
+    fn read_agent_first_prompt_string_and_block_content() {
+        let tmp = std::env::temp_dir().join(format!("wf-prompt-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        fs::create_dir_all(&tmp).unwrap();
+
+        // string content (the common shape on disk)
+        fs::write(
+            tmp.join("agent-aaa.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"role\":\"user\",\"content\":\"## Web Searcher: protocol-layer\\n\\nbody\"}}\n{\"type\":\"assistant\",\"message\":{\"content\":\"...\"}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_agent_first_prompt(&tmp, "aaa").as_deref(),
+            Some("## Web Searcher: protocol-layer\n\nbody")
+        );
+
+        // text-block array content
+        fs::write(
+            tmp.join("agent-bbb.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"## Source Extractor\\n\\nx\"}]}}\n",
+        )
+        .unwrap();
+        assert_eq!(
+            read_agent_first_prompt(&tmp, "bbb").as_deref(),
+            Some("## Source Extractor\n\nx")
+        );
+
+        // missing file / empty id
+        assert_eq!(read_agent_first_prompt(&tmp, "missing"), None);
+        assert_eq!(read_agent_first_prompt(&tmp, ""), None);
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
     fn discover_returns_empty_when_no_workflows() {
         let tmp = std::env::temp_dir().join(format!("wfviz-empty-{}", std::process::id()));
         let _ = fs::remove_dir_all(&tmp);
@@ -1449,6 +1545,7 @@ phase('Probe')
             status: st,
             result: None,
             agent_type: Some(at.into()),
+            prompt_text: None,
         }
     }
 
