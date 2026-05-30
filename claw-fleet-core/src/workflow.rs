@@ -979,20 +979,77 @@ fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
     steps
 }
 
-/// Build the DAG (nodes + edges) from parsed script steps and the runtime
-/// journal agents. Agents are bound to call-site nodes by a documented
-/// heuristic: `agentType`-anchored runs for fan-out call-sites, one agent per
-/// single call-site, in journal start order. Bindings that fall back to order
-/// (dynamic fan-out, count mismatch) flag the node `approximate = true`.
-fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
-    if steps.is_empty() {
-        return (Vec::new(), Vec::new());
+/// The leftover sink for unbindable agents: the last fan-out (parallel /
+/// pipeline) call-site if there is one, else the last step. Shared by both
+/// binding strategies so dynamic fan-out beyond what we could route lands
+/// somewhere honest (flagged `approximate`).
+fn leftover_target(steps: &[ScriptStep]) -> usize {
+    steps
+        .iter()
+        .rposition(|s| matches!(s.kind, WorkflowNodeKind::Parallel | WorkflowNodeKind::Pipeline))
+        .unwrap_or(steps.len() - 1)
+}
+
+/// Bind agents to call-sites by prefix-matching each agent's first prompt
+/// against the call-sites' static prompt fingerprints. Returns `None` (so the
+/// caller falls back to the heuristic) when there's nothing to match on — no
+/// agent carries `prompt_text`, or no step has a usable fingerprint. When a
+/// match is found it is **exact** (not approximate): the agent ran that exact
+/// prompt head, so the binding is ground truth, not a guess. Agents that match
+/// nothing become leftover on the last fan-out node (approximate).
+fn fingerprint_binding(
+    steps: &[ScriptStep],
+    agents: &[WorkflowAgent],
+) -> Option<(Vec<Vec<String>>, Vec<bool>)> {
+    let has_prompts = agents.iter().any(|a| a.prompt_text.is_some());
+    // (step index, fingerprint) for steps with a fingerprint long enough to be
+    // discriminating — guards against a 1-2 char head matching everything.
+    let mut fps: Vec<(usize, &str)> = steps
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| s.prompt_fingerprint.as_deref().map(|f| (i, f)))
+        .filter(|(_, f)| f.trim().len() >= 4)
+        .collect();
+    if !has_prompts || fps.is_empty() {
+        return None;
     }
+    // Longest fingerprint first, so a more specific head wins when one
+    // fingerprint is a prefix of another.
+    fps.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
 
     let mut bound: Vec<Vec<String>> = vec![Vec::new(); steps.len()];
     let mut approx: Vec<bool> = vec![false; steps.len()];
+    let mut leftover: Vec<String> = Vec::new();
+    for a in agents {
+        let hit = a
+            .prompt_text
+            .as_deref()
+            .and_then(|pt| fps.iter().find(|(_, fp)| pt.starts_with(fp)).map(|(i, _)| *i));
+        match hit {
+            Some(si) => bound[si].push(a.agent_id.clone()),
+            None => leftover.push(a.agent_id.clone()),
+        }
+    }
+    if !leftover.is_empty() {
+        let target = leftover_target(steps);
+        bound[target].extend(leftover);
+        approx[target] = true; // the leftover portion is a guess, not ground truth
+    }
+    Some((bound, approx))
+}
 
-    // ── Binding pass ──────────────────────────────────────────────────────
+/// Bind agents to call-sites by the legacy `agentType`/order heuristic:
+/// `agentType`-anchored runs for typed fan-out call-sites, one agent per single
+/// call-site, in journal start order. Used as a fallback when fingerprint
+/// binding has nothing to work with. Bindings that fall back to order (dynamic
+/// fan-out, count mismatch, untyped fan-out) flag the node `approximate`.
+fn heuristic_binding(
+    steps: &[ScriptStep],
+    agents: &[WorkflowAgent],
+) -> (Vec<Vec<String>>, Vec<bool>) {
+    let mut bound: Vec<Vec<String>> = vec![Vec::new(); steps.len()];
+    let mut approx: Vec<bool> = vec![false; steps.len()];
+
     let mut ai = 0usize; // journal-agent cursor
     for (ni, step) in steps.iter().enumerate() {
         match step.kind {
@@ -1032,21 +1089,29 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
     // Leftover agents (dynamic fan-out beyond what we could route): attach to
     // the last fan-out node if there is one, else the last node. Flag approximate.
     if ai < agents.len() {
-        let target = steps
-            .iter()
-            .rposition(|s| {
-                matches!(
-                    s.kind,
-                    WorkflowNodeKind::Parallel | WorkflowNodeKind::Pipeline
-                )
-            })
-            .unwrap_or(steps.len() - 1);
+        let target = leftover_target(steps);
         while ai < agents.len() {
             bound[target].push(agents[ai].agent_id.clone());
             ai += 1;
         }
         approx[target] = true;
     }
+
+    (bound, approx)
+}
+
+/// Build the DAG (nodes + edges) from parsed script steps and the runtime
+/// journal agents. Agents are bound to call-site nodes by prompt fingerprint
+/// when possible (ground truth), else by the `agentType`/order heuristic.
+/// Heuristic / leftover bindings flag the node `approximate = true`.
+fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNode>, Vec<WorkflowEdge>) {
+    if steps.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+
+    // ── Binding pass ──────────────────────────────────────────────────────
+    let (mut bound, approx) =
+        fingerprint_binding(steps, agents).unwrap_or_else(|| heuristic_binding(steps, agents));
 
     // ── Node construction ─────────────────────────────────────────────────
     let mut nodes: Vec<WorkflowNode> = Vec::with_capacity(steps.len());
@@ -1709,6 +1774,90 @@ const r = await pipeline(items,
             edges.iter().any(|e| e.from == "n0" && e.to == "n1"),
             "pipeline stages chain n0 → n1"
         );
+    }
+
+    fn mk_agent_pt(id: &str, prompt: &str) -> WorkflowAgent {
+        WorkflowAgent {
+            agent_id: id.into(),
+            key: format!("v2:{id}"),
+            status: WorkflowAgentStatus::Done,
+            result: None,
+            agent_type: Some("workflow-subagent".into()),
+            prompt_text: Some(prompt.into()),
+        }
+    }
+
+    /// The deep-research shape that broke before this fix: 5 call-sites, every
+    /// runtime agent the default `workflow-subagent` type (no agentType signal),
+    /// agents interleaved in journal order (pipeline has no barrier). The old
+    /// heuristic bound ×1 to each fan-out node and dumped the rest on the last
+    /// one. Fingerprint binding must recover the true fan-out widths.
+    const DEEP_RESEARCH: &str = r###"
+const SEARCH_PROMPT = (a) => "## Web Searcher: " + a.label
+const FETCH_PROMPT = (s, a) => "## Source Extractor\n\n" + s.url
+const VERIFY_PROMPT = (c, v) => "## Adversarial Claim Verifier (voter " + (v + 1) + ")"
+phase("Scope")
+const scope = await agent("Decompose this research question.\n\n## Q\n" + Q, { label: "scope" })
+phase("Search")
+const sr = await pipeline(scope.angles,
+  angle => agent(SEARCH_PROMPT(angle), { label: "search:" + angle.label, phase: "Search" }),
+  res => parallel(novel.map(source => () => agent(FETCH_PROMPT(source, res.angle), { label: "fetch", phase: "Fetch" })))
+)
+phase("Verify")
+const voted = await parallel(claims.map(c => () => parallel(votes.map(v => () => agent(VERIFY_PROMPT(c, v), { label: "verify", phase: "Verify" })))))
+phase("Synthesize")
+const report = await agent("## Synthesis: research report\n\n" + Q, { label: "synthesize" })
+"###;
+
+    #[test]
+    fn build_dag_fingerprint_recovers_fanout_widths() {
+        let steps = parse_script_steps(DEEP_RESEARCH);
+        assert_eq!(steps.len(), 5, "scope/search/fetch/verify/synthesize");
+
+        // Agents interleaved (not grouped by call-site) — order must not matter.
+        let agents = vec![
+            mk_agent_pt("scope0", "Decompose this research question.\n\n## Q\nwhat is X?"),
+            mk_agent_pt("search0", "## Web Searcher: protocol-layer\n\n..."),
+            mk_agent_pt("fetch0", "## Source Extractor\n\nhttps://a.example\n..."),
+            mk_agent_pt("verify0", "## Adversarial Claim Verifier (voter 1)\n\n..."),
+            mk_agent_pt("search1", "## Web Searcher: product-practice\n\n..."),
+            mk_agent_pt("fetch1", "## Source Extractor\n\nhttps://b.example\n..."),
+            mk_agent_pt("fetch2", "## Source Extractor\n\nhttps://c.example\n..."),
+            mk_agent_pt("verify1", "## Adversarial Claim Verifier (voter 2)\n\n..."),
+            mk_agent_pt("verify2", "## Adversarial Claim Verifier (voter 3)\n\n..."),
+            mk_agent_pt("verify3", "## Adversarial Claim Verifier (voter 1)\n\n..."),
+            mk_agent_pt("synth0", "## Synthesis: research report\n\nFinal answer."),
+        ];
+
+        let (nodes, _edges) = build_dag(&steps, &agents);
+        assert_eq!(nodes.len(), 5);
+        // scope ×1, search ×2, fetch ×3, verify ×4, synthesize ×1 — true widths.
+        assert_eq!(nodes[0].agent_ids, vec!["scope0"]);
+        assert_eq!(nodes[1].agent_ids, vec!["search0", "search1"]);
+        assert_eq!(nodes[2].agent_ids, vec!["fetch0", "fetch1", "fetch2"]);
+        assert_eq!(nodes[3].agent_ids, vec!["verify0", "verify1", "verify2", "verify3"]);
+        assert_eq!(nodes[4].agent_ids, vec!["synth0"]);
+        // Every binding is ground truth (a real prompt match) — nothing approximate.
+        assert!(nodes.iter().all(|n| !n.approximate), "fingerprint binding is exact");
+    }
+
+    #[test]
+    fn fingerprint_binding_skipped_without_prompts_falls_back() {
+        // Same script, but agents carry no prompt_text (the unit-fixture case):
+        // fingerprint binding returns None and the legacy heuristic runs, which
+        // for this untyped shape collapses fan-out to ×1 + a leftover dump.
+        let steps = parse_script_steps(DEEP_RESEARCH);
+        assert!(fingerprint_binding(&steps, &[]).is_none(), "no agents → no fingerprint binding");
+        let agents: Vec<WorkflowAgent> = (0..6)
+            .map(|i| mk_agent(&format!("a{i}"), "workflow-subagent", WorkflowAgentStatus::Done))
+            .collect();
+        assert!(
+            fingerprint_binding(&steps, &agents).is_none(),
+            "agents without prompt_text → fall back to heuristic"
+        );
+        // build_dag still produces a DAG via the heuristic (no panic, 5 nodes).
+        let (nodes, _) = build_dag(&steps, &agents);
+        assert_eq!(nodes.len(), 5);
     }
 
     #[test]
