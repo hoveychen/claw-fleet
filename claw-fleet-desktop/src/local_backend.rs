@@ -486,6 +486,16 @@ impl LocalBackend {
                     .min()
                     .unwrap_or(Duration::from_secs(5));
 
+                // The initial-scan thread emits `scan-ready` once its first scan
+                // finishes (see above). But it early-returns *without* emitting
+                // when another scan already holds the gate, and this poll thread
+                // never emitted readiness at all — so on that race the frontend
+                // could stay stuck on "scanning…" forever. Emit `scan-ready` once
+                // after this thread's first completed scan too. The event is
+                // idempotent (frontend just sets `scanReady = true`), so the
+                // common case where the initial scan already emitted is harmless.
+                let mut emitted_scan_ready = false;
+
                 loop {
                     std::thread::sleep(interval);
                     if !running_poll.load(Ordering::SeqCst) {
@@ -509,6 +519,10 @@ impl LocalBackend {
                     incremental_rescan_and_emit(
                         &sources3, &app3, &sess3, &so3, &poll_source_indices,
                     );
+                    if !emitted_scan_ready {
+                        let _ = app3.emit("scan-ready", true);
+                        emitted_scan_ready = true;
+                    }
                     let elapsed = started.elapsed();
                     if elapsed > Duration::from_secs(30) {
                         log_debug(&format!(
