@@ -1,8 +1,46 @@
 import { useTranslation } from "react-i18next";
 import { MessagesSquare, Loader2 } from "lucide-react";
+import type { ReactNode } from "react";
 import styles from "./EmptyState.module.css";
 
+interface EmptyStateAction {
+  label: string;
+  onClick: () => void;
+}
+
 interface EmptyStateProps {
+  /** Friendly illustration — usually a lucide icon sized ~28px. */
+  icon: ReactNode;
+  /** Short headline. */
+  title: string;
+  /** Optional supporting line under the title. */
+  subtitle?: string;
+  /** Optional call-to-action button shown under the text. */
+  action?: EmptyStateAction;
+}
+
+/**
+ * Shared friendly empty state: a framed icon + title + optional subtitle +
+ * optional CTA button. Use this for any "no data yet" region so every view
+ * shares one look. For the session list / gallery's three-state behaviour
+ * (scanning / no-match / onboarding) use {@link SessionEmptyState} instead.
+ */
+export function EmptyState({ icon, title, subtitle, action }: EmptyStateProps) {
+  return (
+    <div className={styles.wrap}>
+      <div className={styles.icon}>{icon}</div>
+      <p className={styles.title}>{title}</p>
+      {subtitle && <p className={styles.subtitle}>{subtitle}</p>}
+      {action && (
+        <button type="button" className={styles.cta} onClick={action.onClick}>
+          {action.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
+interface SessionEmptyStateProps {
   /**
    * Whether the initial background scan has completed. While `false` (and no
    * sessions exist yet) we show a lightweight "scanning…" state instead of the
@@ -20,13 +58,13 @@ interface EmptyStateProps {
 }
 
 /**
- * Friendly empty state for the session list / gallery. Three cases:
+ * Session list / gallery empty state. Three cases:
+ *  - sessions exist but none match the current filter → neutral "no match";
  *  - scan not done yet AND no sessions at all → subtle scanning spinner;
- *  - scan done AND no sessions at all → onboarding hint guiding the user to
- *    start an agent session (Fleet only observes externally-launched sessions);
- *  - sessions exist but none match the current filter → neutral "no match".
+ *  - scan done AND no sessions at all → friendly onboarding hint guiding the
+ *    user to start an agent session (Fleet only observes external sessions).
  */
-export function EmptyState({ scanReady, hasSessions }: EmptyStateProps) {
+export function SessionEmptyState({ scanReady, hasSessions }: SessionEmptyStateProps) {
   const { t } = useTranslation();
 
   if (hasSessions) {
@@ -47,12 +85,10 @@ export function EmptyState({ scanReady, hasSessions }: EmptyStateProps) {
   }
 
   return (
-    <div className={styles.wrap}>
-      <div className={styles.icon}>
-        <MessagesSquare size={28} strokeWidth={1.5} />
-      </div>
-      <p className={styles.title}>{t("empty_state.title")}</p>
-      <p className={styles.subtitle}>{t("empty_state.subtitle")}</p>
-    </div>
+    <EmptyState
+      icon={<MessagesSquare size={28} strokeWidth={1.5} />}
+      title={t("empty_state.title")}
+      subtitle={t("empty_state.subtitle")}
+    />
   );
 }

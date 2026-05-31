@@ -1,7 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Sparkles } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
+import { EmptyState } from "./EmptyState";
 import { useConnectionStore } from "../store";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
@@ -143,7 +145,11 @@ export function SkillsView() {
         <aside className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("skills.loading")}</p>}
           {loaded && filtered.length === 0 && (
-            <p className={styles.empty}>{t("skills.no_skills")}</p>
+            <EmptyState
+              icon={<Sparkles size={28} strokeWidth={1.5} />}
+              title={t("empty_state.skills_title")}
+              subtitle={t("empty_state.skills_subtitle")}
+            />
           )}
           <div className={styles.card_list}>
             {filtered.map((skill) => (

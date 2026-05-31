@@ -37,6 +37,23 @@
   color: var(--color-text-dim);
 }
 
+.cta {
+  margin-top: 8px;
+  padding: 7px 16px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-bg);
+  background: var(--color-text);
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.12s ease;
+}
+
+.cta:hover {
+  opacity: 0.85;
+}
+
 .scanning {
   margin: 0;
   font-size: 12px;

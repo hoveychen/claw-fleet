@@ -2,7 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Brain } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
+import { EmptyState } from "./EmptyState";
 import styles from "./MemoryView.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -244,7 +246,11 @@ export function MemoryView() {
         <aside className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("memory.loading")}</p>}
           {loaded && filtered.length === 0 && (
-            <p className={styles.empty}>{t("memory.no_memories")}</p>
+            <EmptyState
+              icon={<Brain size={28} strokeWidth={1.5} />}
+              title={t("empty_state.memory_title")}
+              subtitle={t("empty_state.memory_subtitle")}
+            />
           )}
           {filtered.map((ws) => {
             const indexed = ws.files.filter(

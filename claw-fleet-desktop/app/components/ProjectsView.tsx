@@ -9,6 +9,8 @@ import {
   type KanbanColumn,
   type Project,
 } from "../store";
+import { FolderGit2 } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import styles from "./ProjectsView.module.css";
 import { PROJECTS_FEATURE_ENABLED } from "../featureFlags";
 
@@ -81,7 +83,18 @@ export function ProjectsView() {
       {!loaded ? (
         <p className={styles.empty}>{t("scanning")}</p>
       ) : projects.length === 0 ? (
-        <p className={styles.empty}>{t("projects.empty")}</p>
+        <EmptyState
+          icon={<FolderGit2 size={28} strokeWidth={1.5} />}
+          title={t("empty_state.projects_title")}
+          subtitle={t("empty_state.projects_subtitle")}
+          action={{
+            label: t("empty_state.projects_cta"),
+            onClick: () => {
+              setError(null);
+              setDialog({ type: "create" });
+            },
+          }}
+        />
       ) : (
         <div className={styles.body}>
           {!listCollapsed && (

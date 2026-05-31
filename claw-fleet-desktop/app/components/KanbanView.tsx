@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { KanbanSquare } from "lucide-react";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { SessionInfo, SessionStatus } from "../types";
+import { EmptyState } from "./EmptyState";
 import styles from "./KanbanView.module.css";
 
 const ACTIVE_STATUSES: ReadonlySet<SessionStatus> = new Set<SessionStatus>([
@@ -136,6 +138,16 @@ export function KanbanView({
     },
     [t],
   );
+
+  if (!compact && sessions.length === 0) {
+    return (
+      <EmptyState
+        icon={<KanbanSquare size={28} strokeWidth={1.5} />}
+        title={t("empty_state.kanban_title")}
+        subtitle={t("empty_state.kanban_subtitle")}
+      />
+    );
+  }
 
   return (
     <div className={`${styles.board} ${compact ? styles.board_compact : ""}`}>
