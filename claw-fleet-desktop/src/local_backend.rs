@@ -189,6 +189,11 @@ impl LocalBackend {
                 "[BACKEND-INIT] zombie recovery failed: {e}"
             )),
         }
+
+        // Start the outbound Feishu WS long-connection if credentials already
+        // exist (no-op otherwise). Idempotent. card.action.trigger arrives over
+        // this outbound socket, so no public webhook/tunnel is needed.
+        claw_fleet_core::feishu::ensure_ws_client();
         step!("zombie recovery done");
 
         // Sweep orphan worktrees under ~/.fleet/worktrees/ whose owning
