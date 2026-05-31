@@ -13,9 +13,10 @@
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Play, Pause, Circle } from "lucide-react";
+import { Play, Pause, Circle, ListTodo } from "lucide-react";
 import styles from "./TasksView.module.css";
 import { InboxDialog } from "./InboxDialog";
+import { EmptyState } from "./EmptyState";
 import {
   useProjectsStore,
   useTasksStore,
