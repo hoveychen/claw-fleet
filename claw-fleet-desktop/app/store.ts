@@ -226,7 +226,13 @@ export const useSessionsStore = create<SessionsState>((set) => ({
         ...state.costHistory,
         { time: now, costPerMin: totalCostPerMin },
       ].filter((s) => s.time >= windowStart);
-      return { sessions, speedHistory, costHistory };
+      // If we received any sessions, the scan has demonstrably completed — mark
+      // the scan ready even if the one-shot `scan-ready` push event was emitted
+      // before this window's listener was registered (a real race that left the
+      // list stuck on "scanning…" forever). Never flip it back to false here:
+      // an empty payload doesn't prove the scan finished.
+      const scanReady = sessions.length > 0 ? true : state.scanReady;
+      return { sessions, speedHistory, costHistory, scanReady };
     }),
   setScanReady: (ready) => set({ scanReady: ready }),
   setWorkflowRunCount: (sessionId, count) =>

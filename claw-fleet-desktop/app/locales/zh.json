@@ -8,7 +8,8 @@
   "empty_state": {
     "title": "还没有任何会话",
     "subtitle": "在终端运行 claude，或在 IDE 里启动 Claude Code，会话就会自动出现在这里。",
-    "scanning": "正在扫描会话…"
+    "scanning": "正在扫描会话…",
+    "no_match": "没有符合条件的会话"
   },
   "select_session": "选择一个会话以查看详情",
   "tokens_out": "tokens 输出",

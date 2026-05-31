@@ -253,7 +253,7 @@ export function GalleryView() {
               </div>
             )}
             {filteredMains.length === 0 && (
-              <EmptyState scanReady={scanReady} />
+              <EmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
             )}
           </>
         ) : (
@@ -262,7 +262,7 @@ export function GalleryView() {
               {buildRows(filteredActiveMains, sessions, handleSelect)}
             </div>
             {filteredActiveMains.length === 0 && (
-              <EmptyState scanReady={scanReady} />
+              <EmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
             )}
           </>
         )}
