@@ -1330,7 +1330,7 @@
     "prd_mode_enabled": "启用 PRD 自律模式",
     "feishu": "飞书（Lark）手机同步",
     "feishu_desc": "连接飞书后，所有决策卡片会同步推送到飞书，手机上就能随时处理。",
-    "feishu_setup_hint": "首次使用需先到 open.feishu.cn 创建一个企业自建应用，拿到下面几项凭证。",
+    "feishu_setup_hint": "首次使用需先到 open.feishu.cn 创建企业自建应用：开启机器人、用「长连接」方式订阅卡片回调事件（card.action.trigger），再填入下面的凭证。每人用自己的应用即可，无需公网服务器。",
     "feishu_show_creds": "填写 / 修改凭证",
     "feishu_hide_creds": "收起凭证",
     "feishu_app_id": "App ID",
