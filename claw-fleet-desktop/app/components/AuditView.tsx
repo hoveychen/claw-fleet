@@ -10,6 +10,8 @@ import type {
   GuardAllowRule,
   SuggestedRule,
 } from "../types";
+import { ShieldCheck } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import styles from "./AuditView.module.css";
 
 // ── Risk level helpers ──────────────────────────────────────────────────────
@@ -177,7 +179,13 @@ function EventsTab() {
       <div className={styles.body}>
         <aside className={styles.list_pane}>
           {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
-          {!loading && filtered.length === 0 && <p className={styles.empty}>{t("audit.no_events")}</p>}
+          {!loading && filtered.length === 0 && (
+            <EmptyState
+              icon={<ShieldCheck size={28} strokeWidth={1.5} />}
+              title={t("empty_state.audit_title")}
+              subtitle={t("empty_state.audit_subtitle")}
+            />
+          )}
           {!loading && Array.from(grouped.entries()).map(([sessionId, events]) => (
             <div key={sessionId} className={styles.workspace_group}>
               <button

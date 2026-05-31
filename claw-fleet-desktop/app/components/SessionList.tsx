@@ -7,7 +7,7 @@ import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, 
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
-import { EmptyState } from "./EmptyState";
+import { SessionEmptyState } from "./EmptyState";
 import { MascotEyes } from "./MascotEyes";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { MemoryView } from "./MemoryView";
@@ -609,14 +609,14 @@ export function SessionList() {
                   </section>
                 )}
                 {promoted.length === 0 && (
-                  <EmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
+                  <SessionEmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
                 )}
               </>
             ) : (
               <>
                 {active.length > 0 && renderGroup(active)}
                 {active.length === 0 && (
-                  <EmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
+                  <SessionEmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
                 )}
               </>
             )}
