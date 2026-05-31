@@ -624,27 +624,41 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
             let _ = notify_decision_resolved(decision_id, DecisionKind::Guard, summary);
         }
         "elicitation" => {
-            let label = value
-                .get("answer_label")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let question = value
-                .get("question")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let mut answers = HashMap::new();
-            if !question.is_empty() {
-                answers.insert(question, label.clone());
-            }
+            let answers = if let Some(fields) = value.get("fields") {
+                // New single-card form: the Submit button carries a
+                // `fields` map (q0 → question text); the submitted values
+                // live in the form-submit payload.
+                assemble_elicitation_answers(fields, extract_form_value(body))
+            } else {
+                // Backwards-compat: a pre-upgrade card still in flight
+                // carried a single answer_label/question pair.
+                let mut a = HashMap::new();
+                let q = value.get("question").and_then(|v| v.as_str()).unwrap_or("");
+                let label = value
+                    .get("answer_label")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                if !q.is_empty() {
+                    a.insert(q.to_string(), label.to_string());
+                }
+                a
+            };
+            // No question answered → treat the submit as a decline so the
+            // agent doesn't proceed on empty input.
+            let declined = answers.is_empty();
+            let summary = if declined {
+                "↩︎ 未选择 (Feishu)".to_string()
+            } else {
+                let mut picks: Vec<&str> = answers.values().map(|s| s.as_str()).collect();
+                picks.sort_unstable();
+                format!("✅ {} (Feishu)", picks.join(" · "))
+            };
             let resp = crate::elicitation::ElicitationResponse {
                 id: decision_id.to_string(),
-                declined: false,
+                declined,
                 answers,
             };
             crate::elicitation::write_response(&resp)?;
-            let summary = format!("✅ {label} (Feishu)");
             let _ = notify_decision_resolved(decision_id, DecisionKind::Elicitation, &summary);
         }
         "plan" => {
@@ -669,6 +683,65 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
         other => return Err(format!("unknown card action: {other}")),
     }
     Ok(b"{}".to_vec())
+}
+
+/// Locate the submitted form values inside a `card.action.trigger` body.
+///
+/// Feishu's exact field name for a `form_submit` payload has varied across
+/// Card 2.0 revisions (`form_value` / `form_fields` / `form`), so probe the
+/// documented locations in order and return the first object found.  This
+/// is the one spot whose shape we could not confirm against a live Feishu
+/// callback (no test credentials), so it parses defensively rather than
+/// assuming a single path.
+fn extract_form_value(body: &serde_json::Value) -> Option<&serde_json::Value> {
+    for path in [
+        "/event/action/form_value",
+        "/event/action/form_fields",
+        "/event/action/form",
+        "/event/action/input_value",
+    ] {
+        if let Some(v) = body.pointer(path) {
+            if v.is_object() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+/// Reassemble the elicitation answer map from the Submit button's `fields`
+/// map (form field name → question text) and the form's submitted values
+/// (`form_value`: field name → string for `select_static`, array for
+/// `multi_select_static`).  Multi-select picks are joined with `", "` to
+/// match the desktop encoding in `store.ts` `submitElicitation`.  Questions
+/// the user left unanswered are omitted from the map.
+fn assemble_elicitation_answers(
+    fields: &serde_json::Value,
+    form_value: Option<&serde_json::Value>,
+) -> HashMap<String, String> {
+    let mut answers = HashMap::new();
+    let Some(fields) = fields.as_object() else {
+        return answers;
+    };
+    for (field_name, question) in fields {
+        let Some(question) = question.as_str() else {
+            continue;
+        };
+        let submitted = form_value.and_then(|fv| fv.get(field_name));
+        let joined = match submitted {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Array(arr)) => arr
+                .iter()
+                .filter_map(|v| v.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+            _ => continue, // unanswered → omit
+        };
+        if !joined.is_empty() {
+            answers.insert(question.to_string(), joined);
+        }
+    }
+    answers
 }
 
 fn sha256_hex(s: &str) -> String {
@@ -1500,6 +1573,50 @@ mod tests {
             value.pointer("/fields/q1").and_then(|x| x.as_str()),
             Some("Which features?")
         );
+    }
+
+    #[test]
+    fn assemble_answers_handles_single_and_multi_select() {
+        let fields = serde_json::json!({
+            "q0": "Which framework?",
+            "q1": "Which features?",
+            "q2": "Skipped question?",
+        });
+        let form_value = serde_json::json!({
+            "q0": "React",
+            "q1": ["Auth", "Billing"],
+            // q2 intentionally absent → unanswered, must be omitted.
+        });
+        let answers = assemble_elicitation_answers(&fields, Some(&form_value));
+        assert_eq!(answers.len(), 2);
+        assert_eq!(answers.get("Which framework?").map(String::as_str), Some("React"));
+        // Multi-select joined with ", " to match the desktop encoding.
+        assert_eq!(
+            answers.get("Which features?").map(String::as_str),
+            Some("Auth, Billing")
+        );
+        assert!(!answers.contains_key("Skipped question?"));
+    }
+
+    #[test]
+    fn assemble_answers_empty_when_nothing_submitted() {
+        let fields = serde_json::json!({ "q0": "Which?" });
+        assert!(assemble_elicitation_answers(&fields, None).is_empty());
+    }
+
+    #[test]
+    fn extract_form_value_probes_documented_paths() {
+        // form_fields fallback path.
+        let body = serde_json::json!({
+            "event": { "action": { "form_fields": { "q0": "A" } } }
+        });
+        assert_eq!(
+            extract_form_value(&body).and_then(|v| v.get("q0")).and_then(|v| v.as_str()),
+            Some("A")
+        );
+        // No recognised path → None.
+        let empty = serde_json::json!({ "event": { "action": {} } });
+        assert!(extract_form_value(&empty).is_none());
     }
 
     /// URL verification handshake — Feishu console probes the endpoint
