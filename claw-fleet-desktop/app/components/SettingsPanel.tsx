@@ -548,6 +548,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     null | "frontend" | "e2e" | "cli" | "fleet_ask_e2e" | "fleet_ask_cli"
   >(null);
   const [lastTestResult, setLastTestResult] = useState<TestRunResult | null>(null);
+  // Consumer-facing diagnostics: a single status card + one-click fix. The raw
+  // per-check detail and the deep test buttons live behind this collapsed
+  // expander so a normal user never meets the debug-log surface.
+  const [showAdvancedDiagnostics, setShowAdvancedDiagnostics] = useState(false);
+  const [fixingAll, setFixingAll] = useState(false);
 
   const refreshInteractionDiagnostics = useCallback(async () => {
     try {
@@ -637,6 +642,37 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     },
     [refreshInteractionDiagnostics],
   );
+
+  // Run every distinct fix action across all currently-failing checks, then
+  // re-check. Deduped because reinstall_interaction_mode covers both the
+  // CLAUDE.md sentinel and the guidance file.
+  const handleFixAll = useCallback(async () => {
+    setFixingAll(true);
+    try {
+      const actions = Array.from(
+        new Set(
+          interactionChecks
+            .filter((c) => c.status === "fail" || c.status === "warn")
+            .map((c) => c.fixAction)
+            .filter((a): a is NonNullable<DiagnosticCheck["fixAction"]> => !!a),
+        ),
+      );
+      for (const action of actions) {
+        if (action === "reinstall_interaction_mode") {
+          await invoke("apply_interaction_mode");
+        } else if (action === "enable_elicitation_hook") {
+          await invoke("apply_elicitation_hook");
+        } else if (action === "enable_mcp_injector") {
+          await invoke("apply_mcp_injector");
+        }
+      }
+      await refreshInteractionDiagnostics();
+    } catch (e) {
+      console.error("fix-all failed:", e);
+    } finally {
+      setFixingAll(false);
+    }
+  }, [interactionChecks, refreshInteractionDiagnostics]);
 
   const statusIcon = (s: DiagnosticCheck["status"]) =>
     s === "pass" ? "✅" : s === "warn" ? "⚠️" : s === "fail" ? "❌" : "❓";
@@ -1512,23 +1548,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </label>
                 </div>
 
-                <div
-                  className={styles.section_title}
-                  style={{
-                    marginTop: 18,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                  }}
-                >
-                  <span>{t("settings.interaction_diagnostics")}</span>
-                  <button
-                    type="button"
-                    onClick={refreshInteractionDiagnostics}
-                    style={{ fontSize: 12, padding: "2px 8px" }}
-                  >
-                    {t("settings.interaction_diagnostics_refresh")}
-                  </button>
+                <div className={styles.section_title} style={{ marginTop: 18 }}>
+                  {t("settings.interaction_diagnostics")}
                 </div>
                 <div className={styles.row}>
                   <span
@@ -1539,6 +1560,122 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </span>
                 </div>
 
+                {(() => {
+                  const problems = interactionChecks.filter(
+                    (c) => c.status === "fail" || c.status === "warn",
+                  );
+                  const fixable = problems.filter((c) => c.fixAction);
+                  const ok = problems.length === 0;
+                  return (
+                    <div
+                      className={styles.row}
+                      style={{
+                        flexDirection: "column",
+                        alignItems: "stretch",
+                        gap: 10,
+                        padding: "14px 16px",
+                        borderRadius: 10,
+                        border: `1px solid ${ok ? "var(--color-success-border, rgba(52,199,89,0.35))" : "var(--color-warning-border, rgba(255,159,10,0.4))"}`,
+                        background: ok
+                          ? "var(--color-success-bg, rgba(52,199,89,0.08))"
+                          : "var(--color-warning-bg, rgba(255,159,10,0.08))",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span style={{ fontSize: 22 }} aria-hidden>
+                          {ok ? "✅" : "⚠️"}
+                        </span>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--color-text)" }}>
+                            {ok
+                              ? t("settings.interaction_diagnostics_status_ok_title")
+                              : t("settings.interaction_diagnostics_status_problem_title", {
+                                  count: problems.length,
+                                })}
+                          </span>
+                          <span style={{ fontSize: 12, color: "var(--color-text-dim)" }}>
+                            {ok
+                              ? t("settings.interaction_diagnostics_status_ok_desc")
+                              : t("settings.interaction_diagnostics_status_problem_desc")}
+                          </span>
+                        </div>
+                      </div>
+
+                      {!ok && (
+                        <ul
+                          style={{
+                            margin: 0,
+                            paddingLeft: 44,
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: 4,
+                          }}
+                        >
+                          {problems.map((c) => (
+                            <li key={c.id} style={{ fontSize: 12, color: "var(--color-text)" }}>
+                              {t(`settings.interaction_diagnostics_problem_${c.id}`, {
+                                defaultValue: c.label,
+                              })}
+                              {!c.fixAction && (
+                                <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                                  {t("settings.interaction_diagnostics_problem_manual")}
+                                </span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+
+                      <div style={{ display: "flex", gap: 8, marginLeft: 32 }}>
+                        {!ok && fixable.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleFixAll}
+                            disabled={fixingAll}
+                            className={styles.hooks_install_btn}
+                            style={{ fontSize: 12, padding: "4px 14px" }}
+                          >
+                            {fixingAll
+                              ? t("settings.interaction_diagnostics_fixing")
+                              : t("settings.interaction_diagnostics_fix_all")}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={refreshInteractionDiagnostics}
+                          disabled={fixingAll}
+                          style={{ fontSize: 12, padding: "4px 14px" }}
+                        >
+                          {t("settings.interaction_diagnostics_refresh")}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className={styles.row} style={{ marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedDiagnostics((v) => !v)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      color: "var(--color-text-dim)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <span aria-hidden>{showAdvancedDiagnostics ? "▾" : "▸"}</span>
+                    {t("settings.interaction_diagnostics_advanced")}
+                  </button>
+                </div>
+
+                {showAdvancedDiagnostics && (
+                <>
                 {[
                   ...interactionChecks,
                   {
@@ -1644,6 +1781,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       </pre>
                     )}
                   </div>
+                )}
+                </>
                 )}
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.prd_mode")}</div>
