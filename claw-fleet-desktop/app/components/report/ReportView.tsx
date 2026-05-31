@@ -9,6 +9,8 @@ import { AISummaryCard } from "./AISummaryCard";
 import { LessonsCard } from "./LessonsCard";
 import { ToolCallChart } from "./ToolCallChart";
 import { ReportShareMenu } from "./ReportShareMenu";
+import { BarChart3 } from "lucide-react";
+import { EmptyState } from "../EmptyState";
 import styles from "./ReportView.module.css";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -235,15 +237,15 @@ function ReportDetail() {
       <div className={styles.detail_body}>
         {loading && <div className={styles.empty}>{t("report.loading")}</div>}
         {!loading && !currentReport && (
-          <div className={styles.empty_state}>
-            <p>{t("report.no_report")}</p>
-            <button
-              className={styles.primary_btn}
-              onClick={() => generateReport(selectedDate)}
-            >
-              {t("report.generate")}
-            </button>
-          </div>
+          <EmptyState
+            icon={<BarChart3 size={28} strokeWidth={1.5} />}
+            title={t("empty_state.report_title")}
+            subtitle={t("empty_state.report_subtitle")}
+            action={{
+              label: t("report.generate"),
+              onClick: () => generateReport(selectedDate),
+            }}
+          />
         )}
         {!loading && currentReport && (
           <div className={styles.detail_content}>

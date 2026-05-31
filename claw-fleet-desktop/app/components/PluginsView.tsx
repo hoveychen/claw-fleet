@@ -1,9 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Blocks } from "lucide-react";
 import { useConnectionStore } from "../store";
+import { EmptyState } from "./EmptyState";
 import styles from "./MemoryView.module.css";
 import pluginStyles from "./PluginsView.module.css";
+
+const MARKETPLACE_DOCS_URL =
+  "https://code.claude.com/docs/en/plugin-marketplaces";
 
 interface PluginContributions {
   commands: number;
@@ -287,7 +292,19 @@ export function PluginsView() {
         <aside className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("plugins.loading")}</p>}
           {loaded && plugins.length === 0 && (
-            <p className={styles.empty}>{t("plugins.no_plugins")}</p>
+            <EmptyState
+              icon={<Blocks size={28} strokeWidth={1.5} />}
+              title={t("empty_state.plugins_title")}
+              subtitle={t("empty_state.plugins_subtitle")}
+              action={{
+                label: t("empty_state.plugins_cta"),
+                onClick: () => {
+                  void import("@tauri-apps/plugin-opener").then(({ openUrl }) =>
+                    openUrl(MARKETPLACE_DOCS_URL).catch(() => {}),
+                  );
+                },
+              }}
+            />
           )}
           {loaded && plugins.length > 0 && filtered.length === 0 && (
             <p className={styles.empty}>{t("plugins.no_match")}</p>

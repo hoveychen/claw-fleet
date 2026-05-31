@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import type { SkillInvocation } from "../types";
+import { History } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
+import { EmptyState } from "./EmptyState";
 import styles from "./SkillHistory.module.css";
 
 interface Props {
@@ -120,7 +122,11 @@ export function SkillHistory({ jsonlPath, mode = "inline" }: Props) {
     if (mode === "inline") return null;
     return (
       <div className={styles.root}>
-        <div className={styles.empty}>{t("skill_history.empty")}</div>
+        <EmptyState
+          icon={<History size={28} strokeWidth={1.5} />}
+          title={t("empty_state.skill_history_title")}
+          subtitle={t("empty_state.skill_history_subtitle")}
+        />
       </div>
     );
   }
