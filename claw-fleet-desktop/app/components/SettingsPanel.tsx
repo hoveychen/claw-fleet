@@ -526,7 +526,10 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     label: string;
     status: "pass" | "warn" | "fail" | "unknown";
     detail: string;
-    fixAction?: "reinstall_interaction_mode" | "enable_elicitation_hook";
+    fixAction?:
+      | "reinstall_interaction_mode"
+      | "enable_elicitation_hook"
+      | "enable_mcp_injector";
   };
   type TestRunResult = {
     kind: string;
@@ -613,12 +616,19 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   );
 
   const handleInteractionFix = useCallback(
-    async (action: "reinstall_interaction_mode" | "enable_elicitation_hook") => {
+    async (
+      action:
+        | "reinstall_interaction_mode"
+        | "enable_elicitation_hook"
+        | "enable_mcp_injector",
+    ) => {
       try {
         if (action === "reinstall_interaction_mode") {
           await invoke("apply_interaction_mode");
-        } else {
+        } else if (action === "enable_elicitation_hook") {
           await invoke("apply_elicitation_hook");
+        } else {
+          await invoke("apply_mcp_injector");
         }
         await refreshInteractionDiagnostics();
       } catch (e) {
