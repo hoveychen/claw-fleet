@@ -6,6 +6,7 @@ import type { SessionInfo, SessionStatus } from "../types";
 import { isWorkflowAgent } from "../workflowAgent";
 import { SessionCard, StatusIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
+import { EmptyState } from "./EmptyState";
 import styles from "./GalleryView.module.css";
 import sessionStyles from "./SessionCard.module.css";
 
@@ -252,7 +253,7 @@ export function GalleryView() {
               </div>
             )}
             {filteredMains.length === 0 && (
-              <p className={styles.empty}>{scanReady ? t("no_sessions") : t("scanning")}</p>
+              <EmptyState scanReady={scanReady} />
             )}
           </>
         ) : (
@@ -261,7 +262,7 @@ export function GalleryView() {
               {buildRows(filteredActiveMains, sessions, handleSelect)}
             </div>
             {filteredActiveMains.length === 0 && (
-              <p className={styles.empty}>{scanReady ? t("no_sessions") : t("scanning")}</p>
+              <EmptyState scanReady={scanReady} />
             )}
           </>
         )}
