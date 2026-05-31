@@ -843,14 +843,22 @@ pub struct ElicitationOptionCard {
     pub value: String,
 }
 
+/// One question inside a multi-question elicitation form.
 #[derive(Serialize, Debug, Clone)]
-pub struct ElicitationCard {
-    pub workspace: String,
+pub struct ElicitationQuestionCard {
+    /// Question text — also the key under which the answer is written into
+    /// `ElicitationResponse.answers`.
     pub question: String,
     pub options: Vec<ElicitationOptionCard>,
     pub multi_select: bool,
-    pub allow_other: bool,
-    pub step: Option<(u32, u32)>,
+}
+
+#[derive(Serialize, Debug, Clone)]
+pub struct ElicitationCard {
+    pub workspace: String,
+    /// All questions rendered onto a single card as one form; one Submit
+    /// returns every answer at once (no server-side cross-webhook state).
+    pub questions: Vec<ElicitationQuestionCard>,
     pub decision_id: String,
 }
 
@@ -919,43 +927,88 @@ impl GuardCard {
 }
 
 impl ElicitationCard {
+    /// Render every question onto one card as a single Feishu Card 2.0
+    /// `form`.  Single-select questions use `select_static`, multi-select
+    /// use `multi_select_static`; one `form_submit` button returns all
+    /// answers at once.  The Submit button's callback value carries a
+    /// `fields` map (`q0` → question text, …) so the webhook handler can
+    /// reassemble `answers` without keeping any server-side state.
+    ///
+    /// Each option's `value` is set to the option label itself, so the
+    /// submitted form value IS the human-readable label — no value→label
+    /// lookup is needed at resolve time.
     pub fn to_card_json(&self) -> serde_json::Value {
-        let mut body = String::new();
-        body.push_str(&format!("**工作区:** {}\n\n", escape_md(&self.workspace)));
-        if let Some((cur, total)) = self.step {
-            body.push_str(&format!("_问题 {cur}/{total}_\n\n"));
-        }
-        body.push_str(&format!("**{}**", escape_md(&self.question)));
+        let mut elements: Vec<serde_json::Value> = vec![serde_json::json!({
+            "tag": "markdown",
+            "content": format!("**工作区:** {}", escape_md(&self.workspace)),
+        })];
 
-        let mut elements: Vec<serde_json::Value> = vec![
-            serde_json::json!({ "tag": "markdown", "content": body }),
-        ];
+        let multi = self.questions.len() > 1;
+        let mut form_elements: Vec<serde_json::Value> = Vec::new();
+        let mut fields = serde_json::Map::new();
 
-        // Multi-select isn't supported via simple callback buttons (would
-        // need a form + submit button).  Render a notice and let the
-        // desktop UI handle it.
-        if self.multi_select {
-            elements.push(serde_json::json!({
-                "tag": "markdown",
-                "content": "_多选问题请在 Fleet 桌面端选择。_",
-            }));
-            return wrap_card("Decision needed · 多选", "blue", elements);
-        }
+        for (i, q) in self.questions.iter().enumerate() {
+            let field_name = format!("q{i}");
+            fields.insert(
+                field_name.clone(),
+                serde_json::Value::String(q.question.clone()),
+            );
 
-        for opt in &self.options {
-            let value = serde_json::json!({
-                "action": "elicitation",
-                "decision_id": self.decision_id,
-                "question": self.question,
-                "answer_label": opt.label,
-            });
-            let label = if let Some(desc) = &opt.description {
-                format!("{} — {}", opt.label, desc)
+            let prompt = if multi {
+                format!("**{}. {}**", i + 1, escape_md(&q.question))
             } else {
-                opt.label.clone()
+                format!("**{}**", escape_md(&q.question))
             };
-            elements.push(callback_button(&label, "default", value));
+            form_elements.push(serde_json::json!({ "tag": "markdown", "content": prompt }));
+
+            let options: Vec<serde_json::Value> = q
+                .options
+                .iter()
+                .map(|opt| {
+                    let text = match &opt.description {
+                        Some(d) => format!("{} — {}", opt.label, d),
+                        None => opt.label.clone(),
+                    };
+                    serde_json::json!({
+                        "text": { "tag": "plain_text", "content": short(&text, 120) },
+                        // value == label so the submitted value is the answer text.
+                        "value": opt.label,
+                    })
+                })
+                .collect();
+
+            let (tag, placeholder) = if q.multi_select {
+                ("multi_select_static", "可多选")
+            } else {
+                ("select_static", "选择一项")
+            };
+            form_elements.push(serde_json::json!({
+                "tag": tag,
+                "name": field_name,
+                "placeholder": { "tag": "plain_text", "content": placeholder },
+                "options": options,
+            }));
         }
+
+        let submit_value = serde_json::json!({
+            "action": "elicitation",
+            "decision_id": self.decision_id,
+            "fields": serde_json::Value::Object(fields),
+        });
+        form_elements.push(serde_json::json!({
+            "tag": "button",
+            "text": { "tag": "plain_text", "content": "✅ 提交" },
+            "type": "primary",
+            "width": "fill",
+            "form_action_type": "submit",
+            "behaviors": [ { "type": "callback", "value": submit_value } ],
+        }));
+
+        elements.push(serde_json::json!({
+            "tag": "form",
+            "name": "elicitation_form",
+            "elements": form_elements,
+        }));
 
         wrap_card("Decision needed", "blue", elements)
     }
@@ -1361,43 +1414,92 @@ mod tests {
     }
 
     #[test]
-    fn elicitation_card_emits_one_button_per_option() {
+    fn elicitation_card_renders_form_with_one_selector_per_question() {
         let card = ElicitationCard {
             workspace: "demo".into(),
-            question: "Which?".into(),
-            options: vec![
-                ElicitationOptionCard {
-                    label: "A".into(),
-                    description: None,
-                    value: "A".into(),
+            questions: vec![
+                ElicitationQuestionCard {
+                    question: "Which framework?".into(),
+                    options: vec![
+                        ElicitationOptionCard {
+                            label: "A".into(),
+                            description: None,
+                            value: "A".into(),
+                        },
+                        ElicitationOptionCard {
+                            label: "B".into(),
+                            description: Some("the second".into()),
+                            value: "B".into(),
+                        },
+                    ],
+                    multi_select: false,
                 },
-                ElicitationOptionCard {
-                    label: "B".into(),
-                    description: Some("the second".into()),
-                    value: "B".into(),
+                ElicitationQuestionCard {
+                    question: "Which features?".into(),
+                    options: vec![ElicitationOptionCard {
+                        label: "Auth".into(),
+                        description: None,
+                        value: "Auth".into(),
+                    }],
+                    multi_select: true,
                 },
             ],
-            multi_select: false,
-            allow_other: false,
-            step: None,
             decision_id: "e-9".into(),
         }
         .to_card_json();
-        let buttons: Vec<&serde_json::Value> = card
+
+        // The card body holds a single form element.
+        let form = card
             .pointer("/body/elements")
             .and_then(|e| e.as_array())
             .unwrap()
             .iter()
-            .filter(|el| el.get("tag").and_then(|t| t.as_str()) == Some("button"))
+            .find(|el| el.get("tag").and_then(|t| t.as_str()) == Some("form"))
+            .expect("form element present");
+        let form_elements = form
+            .pointer("/elements")
+            .and_then(|e| e.as_array())
+            .unwrap();
+
+        // One select_static (single) + one multi_select_static (multi).
+        let selectors: Vec<&str> = form_elements
+            .iter()
+            .filter_map(|el| el.get("tag").and_then(|t| t.as_str()))
+            .filter(|t| *t == "select_static" || *t == "multi_select_static")
             .collect();
-        assert_eq!(buttons.len(), 2);
-        for btn in &buttons {
-            let v = btn.pointer("/behaviors/0/value").unwrap();
-            assert_eq!(v.get("action").and_then(|x| x.as_str()), Some("elicitation"));
-            assert_eq!(v.get("decision_id").and_then(|x| x.as_str()), Some("e-9"));
-            assert_eq!(v.get("question").and_then(|x| x.as_str()), Some("Which?"));
-            assert!(v.get("answer_label").and_then(|x| x.as_str()).is_some());
-        }
+        assert_eq!(selectors, vec!["select_static", "multi_select_static"]);
+
+        // Selector field names are q0/q1 and option value == label.
+        let q0 = form_elements
+            .iter()
+            .find(|el| el.get("name").and_then(|n| n.as_str()) == Some("q0"))
+            .unwrap();
+        assert_eq!(q0.get("tag").and_then(|t| t.as_str()), Some("select_static"));
+        let opt_values: Vec<&str> = q0
+            .pointer("/options")
+            .and_then(|o| o.as_array())
+            .unwrap()
+            .iter()
+            .filter_map(|o| o.get("value").and_then(|v| v.as_str()))
+            .collect();
+        assert_eq!(opt_values, vec!["A", "B"]);
+
+        // The single Submit button carries the fields map + decision_id.
+        let submit = form_elements
+            .iter()
+            .find(|el| el.get("form_action_type").and_then(|t| t.as_str()) == Some("submit"))
+            .expect("submit button present");
+        let value = submit.pointer("/behaviors/0/value").unwrap();
+        assert_eq!(value.get("action").and_then(|x| x.as_str()), Some("elicitation"));
+        assert_eq!(value.get("decision_id").and_then(|x| x.as_str()), Some("e-9"));
+        assert_eq!(
+            value.pointer("/fields/q0").and_then(|x| x.as_str()),
+            Some("Which framework?")
+        );
+        assert_eq!(
+            value.pointer("/fields/q1").and_then(|x| x.as_str()),
+            Some("Which features?")
+        );
     }
 
     /// URL verification handshake — Feishu console probes the endpoint
