@@ -155,7 +155,11 @@ pub fn set_stored_creds(c: StoredCreds) -> Result<(), String> {
     if c.app_id.is_empty() || c.app_secret.is_empty() {
         return Err("app_id and app_secret are both required".into());
     }
-    save_creds_file(&c)
+    save_creds_file(&c)?;
+    // Fresh/updated creds → (re)start the outbound WS long-connection that
+    // receives card.action.trigger callbacks (idempotent; no-op without creds).
+    ensure_ws_client();
+    Ok(())
 }
 
 // ── In-process bridge state ──────────────────────────────────────────────────
@@ -591,6 +595,467 @@ pub fn handle_webhook(
     match event_type {
         "card.action.trigger" => handle_card_action(&body),
         _ => Ok(b"{}".to_vec()),
+    }
+}
+
+// ── WebSocket long-connection (card.action.trigger over an outbound WS) ──────
+//
+// Replaces the public-internet webhook for receiving card button clicks: the
+// process opens an *outbound* WebSocket to Feishu (no inbound port, no tunnel,
+// works behind a firewall) and `card.action.trigger` events arrive over it.
+// Topology = scheme A — each desktop holds its own app credentials and opens
+// its own connection.  The received payload is the same JSON envelope the
+// webhook used to receive, so it is routed straight into `handle_card_action`.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+static WS_STARTED: AtomicBool = AtomicBool::new(false);
+
+/// Ensure the outbound Feishu WebSocket long-connection is running.
+///
+/// Idempotent: the first call with valid credentials spawns one background
+/// thread (with its own tokio runtime) that connects and auto-reconnects.
+/// No-op when credentials are absent — safe to call again after creds are set.
+pub fn ensure_ws_client() {
+    let has_creds = AppCredentials::load()
+        .map(|c| !c.app_id.is_empty() && !c.app_secret.is_empty())
+        .unwrap_or(false);
+    if !has_creds {
+        return;
+    }
+    if WS_STARTED.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("feishu-ws".into())
+        .spawn(|| {
+            match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => rt.block_on(ws_run_loop()),
+                Err(e) => {
+                    eprintln!("feishu ws: runtime build failed: {e}");
+                    WS_STARTED.store(false, Ordering::SeqCst);
+                }
+            }
+        });
+    if let Err(e) = spawned {
+        eprintln!("feishu ws: spawn failed: {e}");
+        WS_STARTED.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Reconnect loop: `LarkWsClient::open` resolves when the socket drops, so we
+/// reconnect after a short backoff.  Bails out only if credentials disappear.
+async fn ws_run_loop() {
+    loop {
+        match ws_connect_once().await {
+            Ok(()) => { /* open() returned ⇒ disconnected; reconnect */ }
+            Err(e) => {
+                eprintln!("feishu ws: {e}");
+                if e == "no-creds" {
+                    WS_STARTED.store(false, Ordering::SeqCst);
+                    return;
+                }
+            }
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+}
+
+// ── Hand-written larkws client ───────────────────────────────────────────────
+//
+// A minimal port of open-lark 0.16.1's `ws_client` (client.rs + frame_handler.rs),
+// keeping only the `card.action.trigger` path.  We dropped the `open_lark` crate
+// (bad gitlink); the wire protocol is reproduced here directly against
+// `tokio-tungstenite` + the `lark-websocket-protobuf` `Frame`/`Header` types.
+//
+// Flow:
+//   1. POST app_id/app_secret to `…/callback/ws/endpoint` → ws URL (query carries
+//      `service_id`) + `ClientConfig` (ping_interval seconds).
+//   2. `connect_async(url)`, split into sink/stream.
+//   3. select! loop:
+//        • inbound Binary → decode `Frame`; control(0) is pong/ignored, data(1)
+//          is reassembled (sum/seq/message_id fragmenting) then routed into
+//          `dispatch_ws_payload`, and we send back an ack response frame.
+//        • ping interval tick → send a control ping frame.
+//        • 1s checkout tick → reconnect if >120s silent.
+
+use lark_websocket_protobuf::pbbp2::{Frame, Header};
+use prost::Message as _;
+
+const WS_ENDPOINT_URL: &str = "https://open.feishu.cn/callback/ws/endpoint";
+/// Reconnect if no inbound traffic for this long (mirrors open-lark).
+const WS_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(120);
+
+#[derive(Deserialize)]
+struct WsEndpointEnvelope {
+    #[serde(default)]
+    code: i32,
+    #[serde(default)]
+    msg: String,
+    data: Option<WsEndpointData>,
+}
+
+#[derive(Deserialize)]
+struct WsEndpointData {
+    #[serde(rename = "URL")]
+    url: Option<String>,
+    #[serde(rename = "ClientConfig")]
+    client_config: Option<WsClientConfig>,
+}
+
+#[derive(Deserialize, Clone)]
+struct WsClientConfig {
+    /// Ping heartbeat interval, seconds.
+    #[serde(rename = "PingInterval", default)]
+    ping_interval: i32,
+}
+
+/// Resolved connection target: the ws URL, its `service_id`, and the ping period.
+struct WsEndpoint {
+    url: String,
+    service_id: i32,
+    ping_interval: Duration,
+}
+
+/// Fetch the outbound ws endpoint from Feishu using the app credentials.
+///
+/// Uses the async `reqwest::Client` (the rest of `feishu.rs` is blocking, but
+/// this call lives inside the ws tokio runtime, so it must not block).
+async fn ws_get_endpoint(app_id: &str, app_secret: &str) -> Result<WsEndpoint, String> {
+    let client = reqwest::Client::builder()
+        .timeout(FEISHU_HTTP_TIMEOUT)
+        .build()
+        .map_err(|e| format!("ws endpoint client init: {e}"))?;
+    let resp: WsEndpointEnvelope = client
+        .post(WS_ENDPOINT_URL)
+        .header("locale", "zh")
+        // Official BootstrapRequest sends all three fields (ClientAssertion is
+        // empty when authenticating with AppSecret); mirror it for parity.
+        .json(&serde_json::json!({ "AppID": app_id, "AppSecret": app_secret, "ClientAssertion": "" }))
+        .send()
+        .await
+        .map_err(|e| format!("ws endpoint request: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("ws endpoint parse: {e}"))?;
+
+    if resp.code != 0 {
+        return Err(format!("ws endpoint error code={} msg={}", resp.code, resp.msg));
+    }
+    let data = resp.data.ok_or_else(|| "ws endpoint missing data".to_string())?;
+    let url = data
+        .url
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| "ws endpoint missing URL".to_string())?;
+    let service_id = parse_service_id(&url)
+        .ok_or_else(|| format!("ws endpoint URL missing service_id: {url}"))?;
+    let ping_secs = data
+        .client_config
+        .map(|c| c.ping_interval)
+        .filter(|s| *s > 0)
+        .unwrap_or(120) as u64;
+    Ok(WsEndpoint {
+        url,
+        service_id,
+        ping_interval: Duration::from_secs(ping_secs),
+    })
+}
+
+/// Pull `service_id` out of the ws URL's query string.  Hand-rolled so we don't
+/// pull in the `url` crate just for one query param.
+fn parse_service_id(url: &str) -> Option<i32> {
+    let query = url.split_once('?').map(|(_, q)| q).unwrap_or("");
+    for pair in query.split('&') {
+        if let Some((k, v)) = pair.split_once('=') {
+            if k == "service_id" {
+                return v.parse().ok();
+            }
+        }
+    }
+    None
+}
+
+fn frame_header_value<'a>(headers: &'a [Header], key: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|h| h.key == key)
+        .map(|h| h.value.as_str())
+}
+
+/// Per-`message_id` fragment buffer for data frames split across multiple ws
+/// frames (`sum`/`seq` headers).  Ported from open-lark's `FramePackageBuffer`.
+#[derive(Default)]
+struct FragmentBuffer {
+    sum: usize,
+    parts: Vec<Option<Vec<u8>>>,
+    received: usize,
+}
+
+impl FragmentBuffer {
+    fn new(sum: usize) -> Self {
+        Self {
+            sum,
+            parts: vec![None; sum],
+            received: 0,
+        }
+    }
+
+    fn insert(&mut self, seq: usize, payload: Vec<u8>) {
+        if seq >= self.sum {
+            return;
+        }
+        if self.parts[seq].is_none() {
+            self.received += 1;
+        }
+        self.parts[seq] = Some(payload);
+    }
+
+    fn is_complete(&self) -> bool {
+        self.sum > 0 && self.received == self.sum && self.parts.iter().all(|p| p.is_some())
+    }
+
+    fn combine(self) -> Vec<u8> {
+        let mut out = Vec::new();
+        for part in self.parts.into_iter().flatten() {
+            out.extend_from_slice(&part);
+        }
+        out
+    }
+}
+
+/// Build a control ping frame (method=0, single `type: ping` header).
+/// Mirrors `FrameHandler::build_ping_frame`.
+fn build_ping_frame(service_id: i32) -> Frame {
+    Frame {
+        seq_id: 0,
+        log_id: 0,
+        service: service_id,
+        method: 0, // control
+        headers: vec![Header {
+            key: "type".to_string(),
+            value: "ping".to_string(),
+        }],
+        payload_encoding: None,
+        payload_type: None,
+        payload: None,
+        log_id_new: None,
+    }
+}
+
+/// Build the ack frame Feishu expects after a data event: echo the inbound data
+/// frame's headers, append a `biz_rt` header, and set the payload to the
+/// `{"code":200,...}` response envelope (the `NewWsResponse` shape open-lark
+/// serialises).  Mirrors `FrameHandler::handle_data_frame`'s `"event"` branch.
+fn build_ack_frame(received: &Frame, biz_rt_ms: u128) -> Frame {
+    let mut headers = received.headers.clone();
+    headers.push(Header {
+        key: "biz_rt".to_string(),
+        value: biz_rt_ms.to_string(),
+    });
+    let response = serde_json::json!({
+        "code": 200u16,
+        "headers": { "biz_rt": biz_rt_ms.to_string() },
+        "data": Vec::<u8>::new(),
+    });
+    let payload = serde_json::to_vec(&response).unwrap_or_default();
+    Frame {
+        seq_id: received.seq_id,
+        log_id: received.log_id,
+        service: received.service,
+        method: received.method, // data
+        headers,
+        payload_encoding: received.payload_encoding.clone(),
+        payload_type: received.payload_type.clone(),
+        payload: Some(payload),
+        log_id_new: received.log_id_new.clone(),
+    }
+}
+
+/// Reassemble a data frame's payload, returning `Some(bytes)` once a full
+/// message is available (single-frame messages return immediately; fragments
+/// return `None` until the last piece arrives).  Ported from open-lark's
+/// `process_frame_packages_internal`.
+fn reassemble<'a>(
+    buffers: &mut HashMap<String, FragmentBuffer>,
+    headers: &[Header],
+    payload: Vec<u8>,
+) -> Option<Vec<u8>> {
+    let sum = frame_header_value(headers, "sum")
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|s| *s > 0)
+        .unwrap_or(1);
+    let seq = frame_header_value(headers, "seq")
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    let msg_id = frame_header_value(headers, "message_id").unwrap_or("");
+
+    // Single frame, or un-aggregatable fragment → pass straight through.
+    if sum == 1 || msg_id.is_empty() || seq >= sum {
+        return Some(payload);
+    }
+
+    let buffer = buffers
+        .entry(msg_id.to_string())
+        .or_insert_with(|| FragmentBuffer::new(sum));
+    if buffer.sum != sum {
+        *buffer = FragmentBuffer::new(sum);
+    }
+    buffer.insert(seq, payload);
+    if !buffer.is_complete() {
+        return None;
+    }
+    buffers.remove(msg_id).map(FragmentBuffer::combine)
+}
+
+async fn ws_connect_once() -> Result<(), String> {
+    let creds = AppCredentials::load().map_err(|_| "no-creds".to_string())?;
+    if creds.app_id.is_empty() || creds.app_secret.is_empty() {
+        return Err("no-creds".to_string());
+    }
+
+    let endpoint = ws_get_endpoint(&creds.app_id, &creds.app_secret).await?;
+    let service_id = endpoint.service_id;
+
+    let (stream, _resp) = tokio_tungstenite::connect_async(&endpoint.url)
+        .await
+        .map_err(|e| format!("ws connect: {e}"))?;
+
+    use futures::{SinkExt, StreamExt};
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (mut sink, mut source) = stream.split();
+    let mut buffers: HashMap<String, FragmentBuffer> = HashMap::new();
+
+    let mut ping_timer = tokio::time::interval(endpoint.ping_interval);
+    // The first tick fires immediately; skip it so we don't ping before the
+    // server is ready.
+    ping_timer.tick().await;
+    let mut checkout = tokio::time::interval(Duration::from_secs(1));
+    let mut last_seen = tokio::time::Instant::now();
+    // Reconnect only after ~3 missed pings, not 1 — a long idle wait (user
+    // takes 30+ min to tap a card) must not trigger spurious reconnects. The
+    // connection stays alive on ping/pong regardless of how long the wait is.
+    let heartbeat_timeout = endpoint
+        .ping_interval
+        .saturating_mul(3)
+        .max(WS_HEARTBEAT_TIMEOUT);
+
+    loop {
+        tokio::select! {
+            item = source.next() => {
+                match item {
+                    Some(Ok(msg)) => {
+                        last_seen = tokio::time::Instant::now();
+                        if let Some(ack) = handle_ws_message(msg, service_id, &mut buffers) {
+                            let bytes = ack.encode_to_vec();
+                            sink.send(Message::Binary(bytes.into()))
+                                .await
+                                .map_err(|e| format!("ws send ack: {e}"))?;
+                        }
+                    }
+                    Some(Err(e)) => return Err(format!("ws recv: {e}")),
+                    None => return Ok(()), // stream closed ⇒ reconnect
+                }
+            }
+            _ = ping_timer.tick() => {
+                let frame = build_ping_frame(service_id);
+                let bytes = frame.encode_to_vec();
+                sink.send(Message::Binary(bytes.into()))
+                    .await
+                    .map_err(|e| format!("ws send ping: {e}"))?;
+            }
+            _ = checkout.tick() => {
+                if last_seen.elapsed() > heartbeat_timeout {
+                    return Err("ws heartbeat timeout".to_string());
+                }
+            }
+        }
+    }
+}
+
+/// Handle one inbound ws message.  Returns `Some(frame)` when an ack should be
+/// sent back (only for fully-reassembled `event` data frames).  Pings, pongs,
+/// control frames, `card` frames, and mid-fragment data frames return `None`.
+fn handle_ws_message(
+    msg: tokio_tungstenite::tungstenite::Message,
+    _service_id: i32,
+    buffers: &mut HashMap<String, FragmentBuffer>,
+) -> Option<Frame> {
+    use tokio_tungstenite::tungstenite::Message;
+    let data = match msg {
+        Message::Binary(data) => data,
+        // Ping/Pong/Close/Text carry no Lark frame; tungstenite auto-replies to
+        // protocol-level pings, so we just refresh liveness (done by caller).
+        _ => return None,
+    };
+
+    let frame = match Frame::decode(&*data) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("feishu ws: frame decode: {e}");
+            return None;
+        }
+    };
+
+    match frame.method {
+        // control: pong / server keepalive — nothing to ack.
+        0 => None,
+        // data
+        1 => handle_data_frame(frame, buffers),
+        other => {
+            eprintln!("feishu ws: unknown frame method {other}");
+            None
+        }
+    }
+}
+
+/// Process a data frame: reassemble fragments, dispatch the `event` payload into
+/// `dispatch_ws_payload`, and produce the ack frame.  `card` frames are skipped
+/// (card.action.trigger does NOT arrive as a `card` frame — it's an `event`).
+fn handle_data_frame(
+    mut frame: Frame,
+    buffers: &mut HashMap<String, FragmentBuffer>,
+) -> Option<Frame> {
+    let msg_type = frame_header_value(&frame.headers, "type")
+        .unwrap_or("")
+        .to_string();
+
+    match msg_type.as_str() {
+        "event" | "" => {
+            let payload = frame.payload.take()?;
+            let full = reassemble(buffers, &frame.headers, payload)?;
+            let start = Instant::now();
+            dispatch_ws_payload(&full);
+            let biz_rt = start.elapsed().as_millis();
+            Some(build_ack_frame(&frame, biz_rt))
+        }
+        "card" => None,
+        _ => None,
+    }
+}
+
+/// Route a raw WS event payload (the same JSON envelope the webhook received)
+/// to the existing card-action handler.  Only `card.action.trigger` is acted
+/// on; all other event types are ignored.
+fn dispatch_ws_payload(payload: &[u8]) {
+    let body: serde_json::Value = match serde_json::from_slice(payload) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("feishu ws: payload not json: {e}");
+            return;
+        }
+    };
+    let event_type = body
+        .pointer("/header/event_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    if event_type == "card.action.trigger" {
+        if let Err(e) = handle_card_action(&body) {
+            eprintln!("feishu ws: card action: {e}");
+        }
     }
 }
 
@@ -1762,5 +2227,140 @@ mod tests {
         assert_eq!(got.app_secret, "secret_x");
         assert_eq!(got.encrypt_key, "ek_x");
         assert_eq!(got.verification_token, "");
+    }
+
+    // ── Hand-written WebSocket client ────────────────────────────────────────
+
+    fn hdr(key: &str, value: &str) -> Header {
+        Header { key: key.to_string(), value: value.to_string() }
+    }
+
+    #[test]
+    fn parse_service_id_from_url_query() {
+        let url = "wss://example.feishu.cn/ws?device_id=abc&service_id=42&x=1";
+        assert_eq!(parse_service_id(url), Some(42));
+        assert_eq!(parse_service_id("wss://example.feishu.cn/ws"), None);
+        assert_eq!(parse_service_id("wss://x/ws?service_id=notnum"), None);
+    }
+
+    /// A single-frame data message (no `sum`/`seq`) passes straight through.
+    #[test]
+    fn reassemble_single_frame_passthrough() {
+        let mut buffers = HashMap::new();
+        let headers = vec![hdr("type", "event")];
+        let out = reassemble(&mut buffers, &headers, b"hello".to_vec());
+        assert_eq!(out, Some(b"hello".to_vec()));
+        assert!(buffers.is_empty(), "single frame must not leave buffer state");
+    }
+
+    /// `sum=1` is an explicit single frame, not a fragment.
+    #[test]
+    fn reassemble_sum_one_passthrough() {
+        let mut buffers = HashMap::new();
+        let headers = vec![hdr("sum", "1"), hdr("seq", "0"), hdr("message_id", "m1")];
+        let out = reassemble(&mut buffers, &headers, b"abc".to_vec());
+        assert_eq!(out, Some(b"abc".to_vec()));
+        assert!(buffers.is_empty());
+    }
+
+    /// Multi-fragment message: only the final piece yields the joined payload,
+    /// in seq order regardless of arrival order.
+    #[test]
+    fn reassemble_multi_fragment_joins_in_seq_order() {
+        let mut buffers = HashMap::new();
+        let mk = |seq: &str| {
+            vec![
+                hdr("type", "event"),
+                hdr("sum", "3"),
+                hdr("seq", seq),
+                hdr("message_id", "msg-7"),
+            ]
+        };
+        // Deliver out of order: seq 2, then 0, then 1.
+        assert_eq!(reassemble(&mut buffers, &mk("2"), b"CC".to_vec()), None);
+        assert_eq!(reassemble(&mut buffers, &mk("0"), b"AA".to_vec()), None);
+        let out = reassemble(&mut buffers, &mk("1"), b"BB".to_vec());
+        assert_eq!(out, Some(b"AABBCC".to_vec()));
+        assert!(buffers.is_empty(), "completed message must clear its buffer");
+    }
+
+    /// A fragment with `sum>1` but an empty `message_id` can't be aggregated, so
+    /// it degrades to single-frame passthrough rather than being dropped.
+    #[test]
+    fn reassemble_missing_message_id_degrades_to_passthrough() {
+        let mut buffers = HashMap::new();
+        let headers = vec![hdr("sum", "2"), hdr("seq", "0")];
+        let out = reassemble(&mut buffers, &headers, b"x".to_vec());
+        assert_eq!(out, Some(b"x".to_vec()));
+        assert!(buffers.is_empty());
+    }
+
+    /// Ping frame must round-trip through prost encode/decode with method=0 and
+    /// a single `type: ping` header carrying the service id.
+    #[test]
+    fn ping_frame_encodes_and_decodes() {
+        let frame = build_ping_frame(99);
+        assert_eq!(frame.method, 0);
+        assert_eq!(frame.service, 99);
+        assert_eq!(frame.headers.len(), 1);
+        assert_eq!(frame.headers[0].key, "type");
+        assert_eq!(frame.headers[0].value, "ping");
+        assert!(frame.payload.is_none());
+
+        let bytes = frame.encode_to_vec();
+        let decoded = Frame::decode(&*bytes).expect("ping frame must decode");
+        assert_eq!(decoded.method, 0);
+        assert_eq!(decoded.service, 99);
+        assert_eq!(decoded.headers[0].value, "ping");
+    }
+
+    /// The ack frame echoes the inbound headers, appends `biz_rt`, keeps the
+    /// data method, and carries a `{"code":200,…}` JSON payload.
+    #[test]
+    fn ack_frame_echoes_headers_and_ok_payload() {
+        let received = Frame {
+            seq_id: 5,
+            log_id: 6,
+            service: 7,
+            method: 1,
+            headers: vec![hdr("type", "event"), hdr("message_id", "mm")],
+            payload_encoding: None,
+            payload_type: None,
+            payload: Some(b"ignored".to_vec()),
+            log_id_new: None,
+        };
+        let ack = build_ack_frame(&received, 12);
+        assert_eq!(ack.method, 1);
+        assert_eq!(ack.service, 7);
+        assert_eq!(ack.seq_id, 5);
+        assert_eq!(frame_header_value(&ack.headers, "type"), Some("event"));
+        assert_eq!(frame_header_value(&ack.headers, "message_id"), Some("mm"));
+        assert_eq!(frame_header_value(&ack.headers, "biz_rt"), Some("12"));
+
+        let payload = ack.payload.clone().expect("ack must carry a payload");
+        let v: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(v.get("code").and_then(|c| c.as_u64()), Some(200));
+
+        // And it must survive a prost round-trip.
+        let decoded = Frame::decode(&*ack.encode_to_vec()).unwrap();
+        assert_eq!(frame_header_value(&decoded.headers, "biz_rt"), Some("12"));
+    }
+
+    /// A `card`-type data frame is skipped (no payload dispatch, no ack).
+    #[test]
+    fn card_data_frame_is_skipped() {
+        let mut buffers = HashMap::new();
+        let frame = Frame {
+            seq_id: 0,
+            log_id: 0,
+            service: 1,
+            method: 1,
+            headers: vec![hdr("type", "card")],
+            payload_encoding: None,
+            payload_type: None,
+            payload: Some(b"{}".to_vec()),
+            log_id_new: None,
+        };
+        assert!(handle_data_frame(frame, &mut buffers).is_none());
     }
 }
