@@ -8,7 +8,8 @@
   "empty_state": {
     "title": "No agent sessions yet",
     "subtitle": "Run claude in your terminal, or start Claude Code in your IDE — sessions show up here automatically.",
-    "scanning": "Scanning for sessions…"
+    "scanning": "Scanning for sessions…",
+    "no_match": "No sessions match the current filter"
   },
   "select_session": "Select a session to inspect",
   "tokens_out": "tokens out",

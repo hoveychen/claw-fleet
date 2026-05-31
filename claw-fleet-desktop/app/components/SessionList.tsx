@@ -609,14 +609,14 @@ export function SessionList() {
                   </section>
                 )}
                 {promoted.length === 0 && (
-                  <EmptyState scanReady={scanReady} />
+                  <EmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
                 )}
               </>
             ) : (
               <>
                 {active.length > 0 && renderGroup(active)}
                 {active.length === 0 && (
-                  <EmptyState scanReady={scanReady} />
+                  <EmptyState scanReady={scanReady} hasSessions={sessions.length > 0} />
                 )}
               </>
             )}
