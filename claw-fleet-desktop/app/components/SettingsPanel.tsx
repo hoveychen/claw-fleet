@@ -553,6 +553,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   // expander so a normal user never meets the debug-log surface.
   const [showAdvancedDiagnostics, setShowAdvancedDiagnostics] = useState(false);
   const [fixingAll, setFixingAll] = useState(false);
+  // Raw timing parameters are tucked behind this collapsed expander at the
+  // bottom of the Interaction tab — most users never need them.
+  const [showInteractionAdvanced, setShowInteractionAdvanced] = useState(false);
 
   const refreshInteractionDiagnostics = useCallback(async () => {
     try {
@@ -691,6 +694,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   });
   const [feishuCredsSaving, setFeishuCredsSaving] = useState(false);
   const [feishuCredsSaved, setFeishuCredsSaved] = useState(false);
+  // The four raw credential fields stay collapsed by default so the section
+  // leads with the friendly "Connect" action instead of a wall of secrets.
+  const [showFeishuCreds, setShowFeishuCreds] = useState(false);
 
   useEffect(() => {
     if (activeTab !== "interaction") return;
@@ -1318,7 +1324,10 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
             {/* ── Interaction ── */}
             {activeTab === "interaction" && (
               <>
+              {/* ── Group: how decisions reach you ── */}
               <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.interaction_group_decision")}</div>
+
                 <div className={styles.row}>
                   <div>
                     <span className={styles.row_label}>{t("settings.floating_decision_panel")}</span>
@@ -1331,156 +1340,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       type="checkbox"
                       checked={floatingDecisionPanel}
                       onChange={(e) => handleToggleFloatingDecisionPanel(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
-                </div>
-              </div>
-              <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.timeouts_section_title")}</div>
-                <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.timeouts_desc")}
-                  </span>
-                </div>
-                {timeoutsDraft && (
-                  <>
-                    <div className={styles.row}>
-                      <span className={styles.row_label}>
-                        {t("settings.timeouts_wait")}
-                        <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
-                          {t("settings.timeouts_unit_seconds")} · 60–3600
-                        </span>
-                      </span>
-                      <input
-                        type="number"
-                        min={60}
-                        max={3600}
-                        value={timeoutsDraft.wait_seconds}
-                        onChange={(e) =>
-                          setTimeoutsDraft((d) => (d ? { ...d, wait_seconds: e.target.value } : d))
-                        }
-                        onBlur={() => commitTimeoutField("wait_seconds")}
-                        style={{
-                          width: 90,
-                          padding: "4px 6px",
-                          background: "var(--color-bg-input)",
-                          border: "1px solid var(--color-border, #333)",
-                          borderRadius: 4,
-                          color: "var(--color-text, #eee)",
-                          fontFamily: "monospace",
-                          fontSize: 12,
-                          textAlign: "right",
-                        }}
-                      />
-                    </div>
-                    <div className={styles.row}>
-                      <span className={styles.row_label}>
-                        {t("settings.timeouts_poll")}
-                        <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
-                          {t("settings.timeouts_unit_ms")} · 50–1000
-                        </span>
-                      </span>
-                      <input
-                        type="number"
-                        min={50}
-                        max={1000}
-                        value={timeoutsDraft.poll_ms}
-                        onChange={(e) =>
-                          setTimeoutsDraft((d) => (d ? { ...d, poll_ms: e.target.value } : d))
-                        }
-                        onBlur={() => commitTimeoutField("poll_ms")}
-                        style={{
-                          width: 90,
-                          padding: "4px 6px",
-                          background: "var(--color-bg-input)",
-                          border: "1px solid var(--color-border, #333)",
-                          borderRadius: 4,
-                          color: "var(--color-text, #eee)",
-                          fontFamily: "monospace",
-                          fontSize: 12,
-                          textAlign: "right",
-                        }}
-                      />
-                    </div>
-                    <div className={styles.row}>
-                      <span className={styles.row_label}>
-                        {t("settings.timeouts_heartbeat")}
-                        <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
-                          {t("settings.timeouts_unit_seconds")} · 5–60
-                        </span>
-                      </span>
-                      <input
-                        type="number"
-                        min={5}
-                        max={60}
-                        value={timeoutsDraft.heartbeat_window_seconds}
-                        onChange={(e) =>
-                          setTimeoutsDraft((d) =>
-                            d ? { ...d, heartbeat_window_seconds: e.target.value } : d,
-                          )
-                        }
-                        onBlur={() => commitTimeoutField("heartbeat_window_seconds")}
-                        style={{
-                          width: 90,
-                          padding: "4px 6px",
-                          background: "var(--color-bg-input)",
-                          border: "1px solid var(--color-border, #333)",
-                          borderRadius: 4,
-                          color: "var(--color-text, #eee)",
-                          fontFamily: "monospace",
-                          fontSize: 12,
-                          textAlign: "right",
-                        }}
-                      />
-                    </div>
-                  </>
-                )}
-
-                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.guard")}</div>
-                <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.guard_desc")}
-                  </span>
-                </div>
-                <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.guard_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={guardEnabled}
-                      onChange={(e) => handleToggleGuard(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
-                </div>
-                <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.guard_llm_analysis")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={guardLlmAnalysis}
-                      disabled={!guardEnabled}
-                      onChange={(e) => handleToggleGuardLlm(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
-                </div>
-
-                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.permissions_bypass")}</div>
-                <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.permissions_bypass_desc")}
-                  </span>
-                </div>
-                <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={permissionsBypassEnabled ?? true}
-                      disabled={permissionsBypassEnabled === null}
-                      onChange={(e) => handleTogglePermissionsBypass(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>
@@ -1547,8 +1406,63 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     <span className={styles.toggle_slider} />
                   </label>
                 </div>
+              </div>
 
-                <div className={styles.section_title} style={{ marginTop: 18 }}>
+              {/* ── Group: safety ── */}
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.interaction_group_safety")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.guard_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.guard_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={guardEnabled}
+                      onChange={(e) => handleToggleGuard(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.guard_llm_analysis")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={guardLlmAnalysis}
+                      disabled={!guardEnabled}
+                      onChange={(e) => handleToggleGuardLlm(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.permissions_bypass")}</div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.permissions_bypass_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.permissions_bypass_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={permissionsBypassEnabled ?? true}
+                      disabled={permissionsBypassEnabled === null}
+                      onChange={(e) => handleTogglePermissionsBypass(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+              </div>
+
+              {/* ── Diagnostics ── */}
+              <div className={styles.section}>
+                <div className={styles.section_title}>
                   {t("settings.interaction_diagnostics")}
                 </div>
                 <div className={styles.row}>
@@ -1785,7 +1699,11 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                 </>
                 )}
 
-                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.prd_mode")}</div>
+              </div>
+
+              {/* ── Group: work discipline ── */}
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.interaction_group_discipline")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                     {t("settings.prd_mode_desc")}
@@ -1803,67 +1721,26 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </label>
                 </div>
 
-                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.feishu")}</div>
+              </div>
+
+              {/* ── Feishu phone sync ── */}
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.feishu")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
                     {t("settings.feishu_desc")}
                   </span>
                 </div>
-                <div className={styles.row} style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
-                  {(["app_id", "app_secret", "encrypt_key", "verification_token"] as const).map((key) => (
-                    <div key={key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <label style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                        {t(`settings.feishu_${key}`)}
-                      </label>
-                      <input
-                        type={key === "app_secret" || key === "encrypt_key" ? "password" : "text"}
-                        value={feishuCreds[key]}
-                        onChange={(e) => {
-                          setFeishuCreds((prev) => ({ ...prev, [key]: e.target.value }));
-                          setFeishuCredsSaved(false);
-                        }}
-                        placeholder={key === "encrypt_key" || key === "verification_token" ? t("settings.feishu_optional") : ""}
-                        spellCheck={false}
-                        autoCorrect="off"
-                        autoCapitalize="off"
-                        style={{
-                          padding: "6px 8px",
-                          background: "var(--color-bg-input)",
-                          border: "1px solid var(--color-border, #333)",
-                          borderRadius: 4,
-                          color: "var(--color-text, #eee)",
-                          fontFamily: "monospace",
-                          fontSize: 12,
-                        }}
-                      />
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <button
-                      className={styles.hooks_install_btn}
-                      onClick={handleSaveFeishuCreds}
-                      disabled={feishuCredsSaving}
-                    >
-                      {feishuCredsSaving ? t("account.loading") : t("settings.feishu_save_creds")}
-                    </button>
-                    {feishuCredsSaved && (
-                      <span style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                        {t("settings.feishu_creds_saved")}
-                      </span>
-                    )}
-                  </div>
-                </div>
+
                 {feishuConn.kind === "connected" ? (
-                  <>
-                    <div className={styles.row}>
-                      <span className={styles.row_label}>
-                        {t("settings.feishu_connected_as")}: {feishuConn.name || feishuConn.open_id}
-                      </span>
-                      <button className={styles.switch_btn} onClick={handleDisconnectFeishu}>
-                        {t("settings.feishu_disconnect")}
-                      </button>
-                    </div>
-                  </>
+                  <div className={styles.row}>
+                    <span className={styles.row_label}>
+                      {t("settings.feishu_connected_as")}: {feishuConn.name || feishuConn.open_id}
+                    </span>
+                    <button className={styles.switch_btn} onClick={handleDisconnectFeishu}>
+                      {t("settings.feishu_disconnect")}
+                    </button>
+                  </div>
                 ) : (
                   <div className={styles.row}>
                     <button
@@ -1875,12 +1752,214 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     </button>
                   </div>
                 )}
+
+                <div className={styles.row} style={{ marginTop: 4 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowFeishuCreds((v) => !v)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      color: "var(--color-text-dim)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <span aria-hidden>{showFeishuCreds ? "▾" : "▸"}</span>
+                    {showFeishuCreds ? t("settings.feishu_hide_creds") : t("settings.feishu_show_creds")}
+                  </button>
+                </div>
+
+                {showFeishuCreds && (
+                  <>
+                    <div className={styles.row}>
+                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                        {t("settings.feishu_setup_hint")}
+                      </span>
+                    </div>
+                    <div className={styles.row} style={{ flexDirection: "column", alignItems: "stretch", gap: 8 }}>
+                      {(["app_id", "app_secret", "encrypt_key", "verification_token"] as const).map((key) => (
+                        <div key={key} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          <label style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                            {t(`settings.feishu_${key}`)}
+                          </label>
+                          <input
+                            type={key === "app_secret" || key === "encrypt_key" ? "password" : "text"}
+                            value={feishuCreds[key]}
+                            onChange={(e) => {
+                              setFeishuCreds((prev) => ({ ...prev, [key]: e.target.value }));
+                              setFeishuCredsSaved(false);
+                            }}
+                            placeholder={key === "encrypt_key" || key === "verification_token" ? t("settings.feishu_optional") : ""}
+                            spellCheck={false}
+                            autoCorrect="off"
+                            autoCapitalize="off"
+                            style={{
+                              padding: "6px 8px",
+                              background: "var(--color-bg-input)",
+                              border: "1px solid var(--color-border, #333)",
+                              borderRadius: 4,
+                              color: "var(--color-text, #eee)",
+                              fontFamily: "monospace",
+                              fontSize: 12,
+                            }}
+                          />
+                        </div>
+                      ))}
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <button
+                          className={styles.hooks_install_btn}
+                          onClick={handleSaveFeishuCreds}
+                          disabled={feishuCredsSaving}
+                        >
+                          {feishuCredsSaving ? t("account.loading") : t("settings.feishu_save_creds")}
+                        </button>
+                        {feishuCredsSaved && (
+                          <span style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                            {t("settings.feishu_creds_saved")}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
                 {feishuError && (
                   <div className={styles.row}>
                     <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-error, #d33)" }}>
                       {t("settings.feishu_failed")}: {feishuError}
                     </span>
                   </div>
+                )}
+              </div>
+
+              {/* ── Advanced timing parameters (collapsed) ── */}
+              <div className={styles.section}>
+                <div className={styles.row} style={{ marginTop: 0 }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowInteractionAdvanced((v) => !v)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      color: "var(--color-text-dim)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
+                  >
+                    <span aria-hidden>{showInteractionAdvanced ? "▾" : "▸"}</span>
+                    {t("settings.interaction_advanced_toggle")}
+                  </button>
+                </div>
+                {showInteractionAdvanced && (
+                  <>
+                    <div className={styles.section_title} style={{ marginTop: 12 }}>{t("settings.timeouts_section_title")}</div>
+                    <div className={styles.row}>
+                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                        {t("settings.timeouts_desc")}
+                      </span>
+                    </div>
+                    {timeoutsDraft && (
+                      <>
+                        <div className={styles.row}>
+                          <span className={styles.row_label}>
+                            {t("settings.timeouts_wait")}
+                            <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                              {t("settings.timeouts_unit_seconds")} · 60–3600
+                            </span>
+                          </span>
+                          <input
+                            type="number"
+                            min={60}
+                            max={3600}
+                            value={timeoutsDraft.wait_seconds}
+                            onChange={(e) =>
+                              setTimeoutsDraft((d) => (d ? { ...d, wait_seconds: e.target.value } : d))
+                            }
+                            onBlur={() => commitTimeoutField("wait_seconds")}
+                            style={{
+                              width: 90,
+                              padding: "4px 6px",
+                              background: "var(--color-bg-input)",
+                              border: "1px solid var(--color-border, #333)",
+                              borderRadius: 4,
+                              color: "var(--color-text, #eee)",
+                              fontFamily: "monospace",
+                              fontSize: 12,
+                              textAlign: "right",
+                            }}
+                          />
+                        </div>
+                        <div className={styles.row}>
+                          <span className={styles.row_label}>
+                            {t("settings.timeouts_poll")}
+                            <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                              {t("settings.timeouts_unit_ms")} · 50–1000
+                            </span>
+                          </span>
+                          <input
+                            type="number"
+                            min={50}
+                            max={1000}
+                            value={timeoutsDraft.poll_ms}
+                            onChange={(e) =>
+                              setTimeoutsDraft((d) => (d ? { ...d, poll_ms: e.target.value } : d))
+                            }
+                            onBlur={() => commitTimeoutField("poll_ms")}
+                            style={{
+                              width: 90,
+                              padding: "4px 6px",
+                              background: "var(--color-bg-input)",
+                              border: "1px solid var(--color-border, #333)",
+                              borderRadius: 4,
+                              color: "var(--color-text, #eee)",
+                              fontFamily: "monospace",
+                              fontSize: 12,
+                              textAlign: "right",
+                            }}
+                          />
+                        </div>
+                        <div className={styles.row}>
+                          <span className={styles.row_label}>
+                            {t("settings.timeouts_heartbeat")}
+                            <span style={{ fontSize: 11, color: "var(--color-text-dim)", marginLeft: 6 }}>
+                              {t("settings.timeouts_unit_seconds")} · 5–60
+                            </span>
+                          </span>
+                          <input
+                            type="number"
+                            min={5}
+                            max={60}
+                            value={timeoutsDraft.heartbeat_window_seconds}
+                            onChange={(e) =>
+                              setTimeoutsDraft((d) =>
+                                d ? { ...d, heartbeat_window_seconds: e.target.value } : d,
+                              )
+                            }
+                            onBlur={() => commitTimeoutField("heartbeat_window_seconds")}
+                            style={{
+                              width: 90,
+                              padding: "4px 6px",
+                              background: "var(--color-bg-input)",
+                              border: "1px solid var(--color-border, #333)",
+                              borderRadius: 4,
+                              color: "var(--color-text, #eee)",
+                              fontFamily: "monospace",
+                              fontSize: 12,
+                              textAlign: "right",
+                            }}
+                          />
+                        </div>
+                      </>
+                    )}
+                  </>
                 )}
               </div>
               </>
