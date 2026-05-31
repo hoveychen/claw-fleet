@@ -715,6 +715,11 @@ fn extract_form_value(body: &serde_json::Value) -> Option<&serde_json::Value> {
 /// `multi_select_static`).  Multi-select picks are joined with `", "` to
 /// match the desktop encoding in `store.ts` `submitElicitation`.  Questions
 /// the user left unanswered are omitted from the map.
+///
+/// Each question also has an optional `q{i}_other` free-text field.  When
+/// non-empty it **overrides** the selector picks for that question — same
+/// precedence as the desktop, where a `customAnswers` entry replaces the
+/// selection rather than appending to it.
 fn assemble_elicitation_answers(
     fields: &serde_json::Value,
     form_value: Option<&serde_json::Value>,
@@ -727,15 +732,26 @@ fn assemble_elicitation_answers(
         let Some(question) = question.as_str() else {
             continue;
         };
-        let submitted = form_value.and_then(|fv| fv.get(field_name));
-        let joined = match submitted {
-            Some(serde_json::Value::String(s)) => s.clone(),
-            Some(serde_json::Value::Array(arr)) => arr
-                .iter()
-                .filter_map(|v| v.as_str())
-                .collect::<Vec<_>>()
-                .join(", "),
-            _ => continue, // unanswered → omit
+
+        // Free-text "Other" wins over the selector when filled.
+        let custom = form_value
+            .and_then(|fv| fv.get(format!("{field_name}_other")))
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+
+        let joined = if let Some(custom) = custom {
+            custom.to_string()
+        } else {
+            match form_value.and_then(|fv| fv.get(field_name)) {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Array(arr)) => arr
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => continue, // unanswered → omit
+            }
         };
         if !joined.is_empty() {
             answers.insert(question.to_string(), joined);
@@ -1622,6 +1638,22 @@ mod tests {
     fn assemble_answers_empty_when_nothing_submitted() {
         let fields = serde_json::json!({ "q0": "Which?" });
         assert!(assemble_elicitation_answers(&fields, None).is_empty());
+    }
+
+    #[test]
+    fn assemble_answers_other_text_overrides_selector() {
+        let fields = serde_json::json!({ "q0": "Which framework?", "q1": "Pick one?" });
+        let form_value = serde_json::json!({
+            "q0": "React",
+            "q0_other": "  Svelte  ",   // non-empty → overrides q0
+            "q1": "A",
+            "q1_other": "   ",           // whitespace only → ignored
+        });
+        let answers = assemble_elicitation_answers(&fields, Some(&form_value));
+        // Trimmed custom text replaces the selector pick for q0.
+        assert_eq!(answers.get("Which framework?").map(String::as_str), Some("Svelte"));
+        // Blank Other leaves the selector value intact for q1.
+        assert_eq!(answers.get("Pick one?").map(String::as_str), Some("A"));
     }
 
     #[test]
