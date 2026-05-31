@@ -1333,7 +1333,7 @@
     "prd_mode_enabled": "Enable PRD discipline mode",
     "feishu": "Feishu (Lark) phone sync",
     "feishu_desc": "Once connected, every decision card is mirrored to Feishu so you can handle them from your phone.",
-    "feishu_setup_hint": "First time? Create an enterprise self-built app at open.feishu.cn to get the credentials below.",
+    "feishu_setup_hint": "First time? At open.feishu.cn create an enterprise self-built app: enable the bot and subscribe to card callbacks (card.action.trigger) over long-connection mode, then fill in the credentials below. Each person uses their own app — no public server needed.",
     "feishu_show_creds": "Enter / edit credentials",
     "feishu_hide_creds": "Hide credentials",
     "feishu_app_id": "App ID",
