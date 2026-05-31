@@ -145,9 +145,11 @@ export function TasksView() {
       <div className={styles.card_list}>
         {!loaded && <div className={styles.empty}>{t("loading", "Loading…")}</div>}
         {loaded && projectTasks.length === 0 && (
-          <div className={styles.empty}>
-            {t("tasks.empty", "No tasks yet — click + New task to start one.")}
-          </div>
+          <EmptyState
+            icon={<ListTodo size={28} strokeWidth={1.5} />}
+            title={t("empty_state.tasks_title")}
+            subtitle={t("empty_state.tasks_subtitle")}
+          />
         )}
         {projectTasks.map((task) => (
           <TaskCard

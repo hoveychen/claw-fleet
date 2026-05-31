@@ -10,6 +10,8 @@ import type {
   PlanApprovalHistoryRecord,
   UserPromptHistoryRecord,
 } from "../types";
+import { History } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import styles from "./DecisionHistory.module.css";
 
 // Inline-only markdown variant: unwraps the surrounding <p> so we can drop the
@@ -344,7 +346,11 @@ export function DecisionHistory({ records, mode = "inline" }: Props) {
         </div>
       )}
       {isTab && records.length === 0 && (
-        <div className={styles.empty}>{t("decision_history.empty")}</div>
+        <EmptyState
+          icon={<History size={28} strokeWidth={1.5} />}
+          title={t("empty_state.decision_title")}
+          subtitle={t("empty_state.decision_subtitle")}
+        />
       )}
       {showList && records.length > 0 && (
         <div className={styles.list}>
