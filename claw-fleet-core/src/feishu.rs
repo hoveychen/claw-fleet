@@ -935,6 +935,13 @@ async fn ws_connect_once() -> Result<(), String> {
     ping_timer.tick().await;
     let mut checkout = tokio::time::interval(Duration::from_secs(1));
     let mut last_seen = tokio::time::Instant::now();
+    // Reconnect only after ~3 missed pings, not 1 — a long idle wait (user
+    // takes 30+ min to tap a card) must not trigger spurious reconnects. The
+    // connection stays alive on ping/pong regardless of how long the wait is.
+    let heartbeat_timeout = endpoint
+        .ping_interval
+        .saturating_mul(3)
+        .max(WS_HEARTBEAT_TIMEOUT);
 
     loop {
         tokio::select! {
@@ -961,7 +968,7 @@ async fn ws_connect_once() -> Result<(), String> {
                     .map_err(|e| format!("ws send ping: {e}"))?;
             }
             _ = checkout.tick() => {
-                if last_seen.elapsed() > WS_HEARTBEAT_TIMEOUT {
+                if last_seen.elapsed() > heartbeat_timeout {
                     return Err("ws heartbeat timeout".to_string());
                 }
             }
