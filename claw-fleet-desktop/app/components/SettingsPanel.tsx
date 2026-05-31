@@ -157,11 +157,17 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const [claudeBinaries, setClaudeBinaries] = useState<ClaudeBinary[]>([]);
   const [claudeBinaryOverride, setClaudeBinaryOverrideState] = useState<string>("");
   const [claudeBinaryNeedRestart, setClaudeBinaryNeedRestart] = useState(false);
+  // The raw path picker stays collapsed unless the user already has a manual
+  // override set — auto-detect covers everyone else.
+  const [showBinaryPicker, setShowBinaryPicker] = useState(false);
 
   useEffect(() => {
     invoke<ClaudeBinary[]>("list_claude_binaries").then(setClaudeBinaries).catch(() => {});
     invoke<string | null>("get_claude_binary_override")
-      .then((p) => setClaudeBinaryOverrideState(p ?? ""))
+      .then((p) => {
+        setClaudeBinaryOverrideState(p ?? "");
+        if (p) setShowBinaryPicker(true);
+      })
       .catch(() => {});
   }, []);
 
@@ -1243,28 +1249,52 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </span>
                 </div>
                 <div className={styles.row}>
-                  <span className={styles.row_label}>{t("settings.claude_binary_picker")}</span>
-                  <select
-                    className={styles.select}
-                    value={claudeBinaryOverride}
-                    onChange={(e) => handleClaudeBinaryChange(e.target.value)}
+                  <button
+                    type="button"
+                    onClick={() => setShowBinaryPicker((v) => !v)}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      cursor: "pointer",
+                      fontSize: 12,
+                      color: "var(--color-text-dim)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 4,
+                    }}
                   >
-                    <option value="">{t("settings.claude_binary_auto")}</option>
-                    {claudeBinaries.map((b) => (
-                      <option key={b.path} value={b.path}>
-                        {t(`settings.claude_binary_source.${b.source}`)}
-                        {b.version ? ` ${b.version}` : ""}
-                        {" — "}{b.path}
-                      </option>
-                    ))}
-                  </select>
+                    <span aria-hidden>{showBinaryPicker ? "▾" : "▸"}</span>
+                    {t("settings.claude_binary_advanced_toggle")}
+                  </button>
                 </div>
-                {claudeBinaryOverride && !claudeBinaries.some((b) => b.path === claudeBinaryOverride) && (
-                  <div className={styles.row}>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                      {t("settings.claude_binary_custom_path", { path: claudeBinaryOverride })}
-                    </span>
-                  </div>
+                {showBinaryPicker && (
+                  <>
+                    <div className={styles.row}>
+                      <span className={styles.row_label}>{t("settings.claude_binary_picker")}</span>
+                      <select
+                        className={styles.select}
+                        value={claudeBinaryOverride}
+                        onChange={(e) => handleClaudeBinaryChange(e.target.value)}
+                      >
+                        <option value="">{t("settings.claude_binary_auto")}</option>
+                        {claudeBinaries.map((b) => (
+                          <option key={b.path} value={b.path}>
+                            {t(`settings.claude_binary_source.${b.source}`)}
+                            {b.version ? ` ${b.version}` : ""}
+                            {" — "}{b.path}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    {claudeBinaryOverride && !claudeBinaries.some((b) => b.path === claudeBinaryOverride) && (
+                      <div className={styles.row}>
+                        <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                          {t("settings.claude_binary_custom_path", { path: claudeBinaryOverride })}
+                        </span>
+                      </div>
+                    )}
+                  </>
                 )}
                 {claudeBinaryNeedRestart && (
                   <div className={styles.sources_restart_row}>
