@@ -1061,6 +1061,17 @@ impl ElicitationCard {
                 "placeholder": { "tag": "plain_text", "content": placeholder },
                 "options": options,
             }));
+
+            // Optional free-text "Other" input, mirroring the implicit
+            // Other choice AskUserQuestion appends to every question (the
+            // desktop exposes it via `customAnswers`).  If filled, it
+            // overrides the selector picks at resolve time.
+            form_elements.push(serde_json::json!({
+                "tag": "input",
+                "name": format!("{field_name}_other"),
+                "required": false,
+                "placeholder": { "tag": "plain_text", "content": "其它（自己填写，将覆盖上面的选择）" },
+            }));
         }
 
         let submit_value = serde_json::json!({
@@ -1541,6 +1552,15 @@ mod tests {
             .filter(|t| *t == "select_static" || *t == "multi_select_static")
             .collect();
         assert_eq!(selectors, vec!["select_static", "multi_select_static"]);
+
+        // Each question gets an optional free-text "Other" input named
+        // `q{i}_other`.
+        let other_inputs: Vec<&str> = form_elements
+            .iter()
+            .filter(|el| el.get("tag").and_then(|t| t.as_str()) == Some("input"))
+            .filter_map(|el| el.get("name").and_then(|n| n.as_str()))
+            .collect();
+        assert_eq!(other_inputs, vec!["q0_other", "q1_other"]);
 
         // Selector field names are q0/q1 and option value == label.
         let q0 = form_elements
