@@ -5,6 +5,11 @@
   "recent": "Recent",
   "no_sessions": "No sessions found.",
   "scanning": "Scanning sessions…",
+  "empty_state": {
+    "title": "No agent sessions yet",
+    "subtitle": "Run claude in your terminal, or start Claude Code in your IDE — sessions show up here automatically.",
+    "scanning": "Scanning for sessions…"
+  },
   "select_session": "Select a session to inspect",
   "tokens_out": "tokens out",
   "tokens": "tokens",
