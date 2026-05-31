@@ -997,34 +997,38 @@ fn send_guard_card(req: &claw_fleet_core::guard::GuardRequest) {
 }
 
 fn send_elicitation_card(req: &claw_fleet_core::elicitation::ElicitationRequest) {
-    // The desktop UI walks questions one at a time; mirror the *first*
-    // question to the Feishu surface for now.  Multi-step rendering is a
-    // follow-up that needs the webhook slice anyway.
+    // Mirror every question onto a single Feishu card as one form; the
+    // user answers all of them and submits once (single/multi-select both
+    // supported). The webhook reassembles the answers map.
     let req = req.clone();
     std::thread::spawn(move || {
-        let Some(first) = req.questions.first() else {
+        if req.questions.is_empty() {
             return;
-        };
-        let total = req.questions.len() as u32;
+        }
+        let questions = req
+            .questions
+            .iter()
+            .map(|q| claw_fleet_core::feishu::ElicitationQuestionCard {
+                question: q.question.clone(),
+                options: q
+                    .options
+                    .iter()
+                    .map(|o| claw_fleet_core::feishu::ElicitationOptionCard {
+                        label: o.label.clone(),
+                        description: if o.description.is_empty() {
+                            None
+                        } else {
+                            Some(o.description.clone())
+                        },
+                        value: o.label.clone(),
+                    })
+                    .collect(),
+                multi_select: q.multi_select,
+            })
+            .collect();
         let card = claw_fleet_core::feishu::ElicitationCard {
             workspace: req.workspace_name.clone(),
-            question: first.question.clone(),
-            options: first
-                .options
-                .iter()
-                .map(|o| claw_fleet_core::feishu::ElicitationOptionCard {
-                    label: o.label.clone(),
-                    description: if o.description.is_empty() {
-                        None
-                    } else {
-                        Some(o.description.clone())
-                    },
-                    value: o.label.clone(),
-                })
-                .collect(),
-            multi_select: first.multi_select,
-            allow_other: false,
-            step: if total > 1 { Some((1, total)) } else { None },
+            questions,
             decision_id: req.id.clone(),
         };
         if let Err(e) = claw_fleet_core::feishu::notify_decision_created(
