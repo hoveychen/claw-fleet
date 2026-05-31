@@ -164,7 +164,33 @@ export function AccountInfo({ embedded }: { embedded?: boolean } = {}) {
       setCliInstallMsg(t("account.cli_installed", { path }));
     } catch (e) {
       setCliInstallState("error");
-      setCliInstallMsg(String(e));
+      setCliInstallMsg(localizeInstallError(String(e)));
+    }
+  }
+
+  // install_fleet_cli returns a machine-readable error code on the first line
+  // (optionally followed by a detail line) — see osascript_failure_code in
+  // gui.rs. Map known codes to localized messages so non-technical users get a
+  // readable message instead of raw osascript stderr.
+  function localizeInstallError(raw: string): string {
+    const nl = raw.indexOf("\n");
+    const code = (nl === -1 ? raw : raw.slice(0, nl)).trim();
+    const detail = nl === -1 ? "" : raw.slice(nl + 1).trim();
+    switch (code) {
+      case "cancelled":
+        return t("account.cli_err_cancelled");
+      case "not_macos":
+        return t("account.cli_err_not_macos");
+      case "not_found":
+        return t("account.cli_err_not_found", { path: detail });
+      case "failed":
+        return detail
+          ? t("account.cli_err_failed", { detail })
+          : t("account.cli_err_failed_nodetail");
+      default:
+        // Unknown / unexpected error (e.g. a low-level IO error) — show it raw
+        // rather than swallowing information.
+        return raw;
     }
   }
 

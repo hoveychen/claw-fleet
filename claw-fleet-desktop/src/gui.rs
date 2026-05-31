@@ -1394,7 +1394,8 @@ fn install_fleet_cli(app: tauri::AppHandle) -> Result<String, String> {
             .to_path_buf();
         let fleet_bin = exe_dir.join("fleet");
         if !fleet_bin.exists() {
-            return Err(format!("fleet binary not found at {}", fleet_bin.display()));
+            // `not_found` code + path detail (see osascript_failure_code docs).
+            return Err(format!("not_found\n{}", fleet_bin.display()));
         }
 
         let target = "/usr/local/bin/fleet";
@@ -1414,72 +1415,70 @@ fn install_fleet_cli(app: tauri::AppHandle) -> Result<String, String> {
             Ok(target.to_string())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(osascript_failure_message(&stderr))
+            Err(osascript_failure_code(&stderr))
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
-        Err("install_fleet_cli is only supported on macOS".to_string())
+        Err("not_macos".to_string())
     }
 }
 
-/// Turn an osascript admin-privilege failure into a user-facing message.
+/// Classify an osascript admin-privilege failure into a stable error payload.
 ///
-/// When the user dismisses the macOS password dialog, osascript exits non-zero
-/// and prints `User canceled. (-128)` to stderr. That is a cancellation, not a
-/// failure, and the user just needs to retry. Any other stderr is a genuine
-/// failure (e.g. `mkdir`/`ln` error) whose text we surface verbatim so it can
-/// actually be diagnosed instead of being hidden behind a generic message.
+/// The frontend localizes `install_fleet_cli` errors, so this returns a
+/// machine-readable code (NOT prose) on the first line, optionally followed by
+/// a `\n` and a human detail string. Recognised codes (kept in sync with
+/// `AccountInfo.tsx`'s `installCLI` catch handler):
+///   - `cancelled` — user dismissed the macOS password dialog
+///     (osascript exits non-zero with `User canceled. (-128)`); just retry.
+///   - `failed`    — a genuine failure; when osascript printed anything, its
+///     raw stderr follows on the next line so it can actually be diagnosed.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn osascript_failure_message(stderr: &str) -> String {
+fn osascript_failure_code(stderr: &str) -> String {
     let s = stderr.trim();
     let lower = s.to_lowercase();
     if s.contains("-128") || lower.contains("user canceled") || lower.contains("user cancelled") {
-        "Authorization was cancelled. Click \"Install to PATH\" again and enter your password to finish.".to_string()
+        "cancelled".to_string()
     } else if s.is_empty() {
-        "Installation failed (osascript exited with an error but printed no message).".to_string()
+        "failed".to_string()
     } else {
-        format!("Installation failed: {s}")
+        format!("failed\n{s}")
     }
 }
 
 #[cfg(test)]
 mod install_cli_tests {
-    use super::osascript_failure_message;
+    use super::osascript_failure_code;
 
     #[test]
-    fn user_cancel_minus_128_is_treated_as_cancellation() {
-        let msg = osascript_failure_message("0:50: execution error: User canceled. (-128)");
-        assert!(
-            msg.contains("cancelled") && msg.contains("again"),
-            "cancellation should produce a retry-friendly message, got: {msg}"
-        );
-        assert!(
-            !msg.contains("User canceled"),
-            "raw osascript cancel text should not leak into the user message, got: {msg}"
+    fn user_cancel_minus_128_maps_to_cancelled_code() {
+        let payload = osascript_failure_code("0:50: execution error: User canceled. (-128)");
+        assert_eq!(
+            payload, "cancelled",
+            "a cancelled password dialog must map to the bare `cancelled` code, got: {payload}"
         );
     }
 
     #[test]
-    fn real_failure_stderr_is_surfaced_verbatim() {
-        let msg = osascript_failure_message("ln: /usr/local/bin/fleet: Permission denied");
-        assert!(
-            msg.contains("Permission denied"),
-            "a genuine failure must surface the real osascript stderr, got: {msg}"
-        );
-        assert!(
-            !msg.contains("cancelled"),
-            "a genuine failure must not be misreported as a cancellation, got: {msg}"
+    fn real_failure_carries_failed_code_and_raw_stderr_detail() {
+        let payload = osascript_failure_code("ln: /usr/local/bin/fleet: Permission denied");
+        let mut lines = payload.splitn(2, '\n');
+        assert_eq!(lines.next(), Some("failed"), "genuine failures use the `failed` code");
+        assert_eq!(
+            lines.next(),
+            Some("ln: /usr/local/bin/fleet: Permission denied"),
+            "the real osascript stderr must ride along as the detail line"
         );
     }
 
     #[test]
-    fn empty_stderr_still_reports_failure() {
-        let msg = osascript_failure_message("   ");
-        assert!(
-            msg.to_lowercase().contains("failed"),
-            "empty stderr should still be reported as a failure, got: {msg}"
+    fn empty_stderr_maps_to_bare_failed_code() {
+        let payload = osascript_failure_code("   ");
+        assert_eq!(
+            payload, "failed",
+            "empty stderr should map to the bare `failed` code with no detail, got: {payload}"
         );
     }
 }
