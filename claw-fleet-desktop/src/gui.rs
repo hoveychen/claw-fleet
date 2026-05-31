@@ -1405,21 +1405,82 @@ fn install_fleet_cli(app: tauri::AppHandle) -> Result<String, String> {
             r#"do shell script "mkdir -p /usr/local/bin && ln -sf '{}' '{}'" with administrator privileges"#,
             src, target
         );
-        let status = std::process::Command::new("osascript")
+        let output = std::process::Command::new("osascript")
             .args(["-e", &script])
-            .status()
+            .output()
             .map_err(|e| e.to_string())?;
 
-        if status.success() {
+        if output.status.success() {
             Ok(target.to_string())
         } else {
-            Err("Installation cancelled or failed".to_string())
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            Err(osascript_failure_message(&stderr))
         }
     }
     #[cfg(not(target_os = "macos"))]
     {
         let _ = app;
         Err("install_fleet_cli is only supported on macOS".to_string())
+    }
+}
+
+/// Turn an osascript admin-privilege failure into a user-facing message.
+///
+/// When the user dismisses the macOS password dialog, osascript exits non-zero
+/// and prints `User canceled. (-128)` to stderr. That is a cancellation, not a
+/// failure, and the user just needs to retry. Any other stderr is a genuine
+/// failure (e.g. `mkdir`/`ln` error) whose text we surface verbatim so it can
+/// actually be diagnosed instead of being hidden behind a generic message.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn osascript_failure_message(stderr: &str) -> String {
+    let s = stderr.trim();
+    let lower = s.to_lowercase();
+    if s.contains("-128") || lower.contains("user canceled") || lower.contains("user cancelled") {
+        "Authorization was cancelled. Click \"Install to PATH\" again and enter your password to finish.".to_string()
+    } else if s.is_empty() {
+        "Installation failed (osascript exited with an error but printed no message).".to_string()
+    } else {
+        format!("Installation failed: {s}")
+    }
+}
+
+#[cfg(test)]
+mod install_cli_tests {
+    use super::osascript_failure_message;
+
+    #[test]
+    fn user_cancel_minus_128_is_treated_as_cancellation() {
+        let msg = osascript_failure_message("0:50: execution error: User canceled. (-128)");
+        assert!(
+            msg.contains("cancelled") && msg.contains("again"),
+            "cancellation should produce a retry-friendly message, got: {msg}"
+        );
+        assert!(
+            !msg.contains("User canceled"),
+            "raw osascript cancel text should not leak into the user message, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn real_failure_stderr_is_surfaced_verbatim() {
+        let msg = osascript_failure_message("ln: /usr/local/bin/fleet: Permission denied");
+        assert!(
+            msg.contains("Permission denied"),
+            "a genuine failure must surface the real osascript stderr, got: {msg}"
+        );
+        assert!(
+            !msg.contains("cancelled"),
+            "a genuine failure must not be misreported as a cancellation, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn empty_stderr_still_reports_failure() {
+        let msg = osascript_failure_message("   ");
+        assert!(
+            msg.to_lowercase().contains("failed"),
+            "empty stderr should still be reported as a failure, got: {msg}"
+        );
     }
 }
 
