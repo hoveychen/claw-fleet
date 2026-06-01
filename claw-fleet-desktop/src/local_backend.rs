@@ -1064,17 +1064,10 @@ fn send_plan_card(req: &claw_fleet_core::plan_approval::PlanApprovalRequest) {
     });
 }
 
-fn resolve_feishu_card(
-    decision_id: &str,
-    kind: claw_fleet_core::feishu::DecisionKind,
-    summary: &str,
-) {
+fn resolve_feishu_card(decision_id: &str, card: serde_json::Value) {
     let decision_id = decision_id.to_string();
-    let summary = summary.to_string();
     std::thread::spawn(move || {
-        if let Err(e) =
-            claw_fleet_core::feishu::notify_decision_resolved(&decision_id, kind, &summary)
-        {
+        if let Err(e) = claw_fleet_core::feishu::notify_decision_resolved(&decision_id, card) {
             crate::log_debug(&format!("[feishu] resolve card failed: {e}"));
         }
     });
@@ -1986,7 +1979,13 @@ impl Backend for LocalBackend {
         };
         let result = crate::guard::write_response(&resp);
         let summary = if allow { "✅ Allow" } else { "🚫 Block" };
-        resolve_feishu_card(id, claw_fleet_core::feishu::DecisionKind::Guard, summary);
+        resolve_feishu_card(
+            id,
+            claw_fleet_core::feishu::resolved_card(
+                claw_fleet_core::feishu::DecisionKind::Guard,
+                summary,
+            ),
+        );
         result
     }
 
@@ -2086,29 +2085,17 @@ impl Backend for LocalBackend {
         declined: bool,
         answers: std::collections::HashMap<String, String>,
     ) -> Result<(), String> {
-        let summary = if declined {
-            "已取消".to_string()
-        } else if answers.is_empty() {
-            "已回复".to_string()
-        } else {
-            let mut parts: Vec<String> = answers
-                .iter()
-                .map(|(q, a)| format!("- **{}**: {}", q, a))
-                .collect();
-            parts.sort();
-            parts.join("\n")
-        };
+        // Render the read-only Feishu card (questions + all options, pick(s)
+        // highlighted) before `answers` is moved into the response.
+        let resolved =
+            claw_fleet_core::feishu::resolved_elicitation_card(id, &answers, declined);
         let resp = crate::elicitation::ElicitationResponse {
             id: id.to_string(),
             declined,
             answers,
         };
         let result = crate::elicitation::write_response(&resp);
-        resolve_feishu_card(
-            id,
-            claw_fleet_core::feishu::DecisionKind::Elicitation,
-            &summary,
-        );
+        resolve_feishu_card(id, resolved);
         result
     }
 
@@ -2198,8 +2185,10 @@ impl Backend for LocalBackend {
         let result = crate::plan_approval::write_response(&resp);
         resolve_feishu_card(
             id,
-            claw_fleet_core::feishu::DecisionKind::PlanApproval,
-            &summary,
+            claw_fleet_core::feishu::resolved_card(
+                claw_fleet_core::feishu::DecisionKind::PlanApproval,
+                &summary,
+            ),
         );
         result
     }
