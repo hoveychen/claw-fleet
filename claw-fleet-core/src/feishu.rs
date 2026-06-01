@@ -1536,6 +1536,19 @@ impl ElicitationCard {
     /// submitted form value IS the human-readable label — no value→label
     /// lookup is needed at resolve time.
     pub fn to_card_json(&self) -> serde_json::Value {
+        // Fast path: a lone single-select question renders as a flat list of
+        // callback buttons (one per option) instead of a collapsed
+        // `select_static` dropdown — every option *and* its description is
+        // visible at once, and a tap resolves the decision immediately via the
+        // handler's single-answer (`question` + `answer_label`) path.  Only
+        // single-select is eligible: multi-select and multi-question cards
+        // still need the `form` + one Submit so every answer comes back
+        // together, and Feishu has no verified inline form-submittable
+        // single-select primitive other than the dropdown.
+        if self.questions.len() == 1 && !self.questions[0].multi_select {
+            return self.to_buttons_card_json();
+        }
+
         let mut elements: Vec<serde_json::Value> = vec![serde_json::json!({
             "tag": "markdown",
             "content": format!("**工作区:** {}", escape_md(&self.workspace)),
@@ -1624,6 +1637,44 @@ impl ElicitationCard {
             "name": "elicitation_form",
             "elements": form_elements,
         }));
+
+        wrap_card("Decision needed", "blue", elements)
+    }
+
+    /// Render a lone single-select question as one full-width callback button
+    /// per option.  Each option's description (when present) is shown as a
+    /// markdown line directly above its button, so nothing is truncated into
+    /// the button label.  The button's callback value carries `question` +
+    /// `answer_label`, which `handle_card_action` resolves through its
+    /// single-answer path — no `form`, no Submit, one tap settles it.
+    fn to_buttons_card_json(&self) -> serde_json::Value {
+        let q = &self.questions[0];
+        let mut elements: Vec<serde_json::Value> = vec![
+            serde_json::json!({
+                "tag": "markdown",
+                "content": format!("**工作区:** {}", escape_md(&self.workspace)),
+            }),
+            serde_json::json!({
+                "tag": "markdown",
+                "content": format!("**{}**", escape_md(&q.question)),
+            }),
+        ];
+
+        for opt in &q.options {
+            if let Some(desc) = &opt.description {
+                elements.push(serde_json::json!({
+                    "tag": "markdown",
+                    "content": format!("**{}** — {}", escape_md(&opt.label), escape_md(desc)),
+                }));
+            }
+            let value = serde_json::json!({
+                "action": "elicitation",
+                "decision_id": self.decision_id,
+                "question": q.question,
+                "answer_label": opt.label,
+            });
+            elements.push(callback_button(&opt.label, "default", value));
+        }
 
         wrap_card("Decision needed", "blue", elements)
     }
@@ -2127,6 +2178,86 @@ mod tests {
     }
 
     #[test]
+    fn single_select_single_question_renders_option_buttons_not_dropdown() {
+        // A lone single-select question must render every option as its own
+        // callback button (all options + descriptions visible, no collapsed
+        // dropdown, no form) so the user can answer with a single tap.
+        let card = ElicitationCard {
+            workspace: "demo".into(),
+            questions: vec![ElicitationQuestionCard {
+                question: "Which framework?".into(),
+                options: vec![
+                    ElicitationOptionCard {
+                        label: "Alpha".into(),
+                        description: Some("light & fast".into()),
+                        value: "Alpha".into(),
+                    },
+                    ElicitationOptionCard {
+                        label: "Beta".into(),
+                        description: None,
+                        value: "Beta".into(),
+                    },
+                ],
+                multi_select: false,
+            }],
+            decision_id: "e-btn".into(),
+        }
+        .to_card_json();
+
+        let elements = card
+            .pointer("/body/elements")
+            .and_then(|e| e.as_array())
+            .unwrap();
+
+        // No form, no dropdown anywhere on the card.
+        assert!(
+            elements.iter().all(|el| {
+                let t = el.get("tag").and_then(|t| t.as_str()).unwrap_or("");
+                t != "form" && t != "select_static" && t != "multi_select_static"
+            }),
+            "single-select single-question card must not use a form or dropdown"
+        );
+
+        // One callback button per option, in order, label == option label.
+        let buttons: Vec<&serde_json::Value> = elements
+            .iter()
+            .filter(|el| el.get("tag").and_then(|t| t.as_str()) == Some("button"))
+            .collect();
+        assert_eq!(buttons.len(), 2, "one button per option");
+        let labels: Vec<&str> = buttons
+            .iter()
+            .filter_map(|b| b.pointer("/text/content").and_then(|c| c.as_str()))
+            .collect();
+        assert_eq!(labels, vec!["Alpha", "Beta"]);
+
+        // Each button carries the single-answer payload the handler's compat
+        // path consumes: action + decision_id + question + answer_label.
+        for (btn, label) in buttons.iter().zip(["Alpha", "Beta"]) {
+            let value = btn
+                .pointer("/behaviors/0/value")
+                .expect("button missing callback value");
+            assert_eq!(value.get("action").and_then(|v| v.as_str()), Some("elicitation"));
+            assert_eq!(value.get("decision_id").and_then(|v| v.as_str()), Some("e-btn"));
+            assert_eq!(
+                value.get("question").and_then(|v| v.as_str()),
+                Some("Which framework?")
+            );
+            assert_eq!(value.get("answer_label").and_then(|v| v.as_str()), Some(label));
+        }
+
+        // The description of the first option appears as visible markdown text.
+        let has_desc = elements.iter().any(|el| {
+            el.get("tag").and_then(|t| t.as_str()) == Some("markdown")
+                && el
+                    .get("content")
+                    .and_then(|c| c.as_str())
+                    .map(|c| c.contains("light & fast"))
+                    .unwrap_or(false)
+        });
+        assert!(has_desc, "option description must be rendered as markdown");
+    }
+
+    #[test]
     fn elicitation_form_interactive_components_all_have_unique_nonempty_names() {
         // Feishu rejects a form submit with error 200530 when any interactive
         // component inside a `form` container has an empty/missing `name`
@@ -2134,6 +2265,9 @@ mod tests {
         // `form_action_type: "submit"`, which makes it a form-interactive
         // component — so it MUST have a name too, not just the selectors and
         // inputs. Regression guard for the 200530 card-callback failure.
+        // Multi-select keeps the card on the `form` path (single-select single-
+        // question now renders as buttons with no form), so this still guards
+        // the form's name-uniqueness invariant.
         let card = ElicitationCard {
             workspace: "demo".into(),
             questions: vec![ElicitationQuestionCard {
@@ -2143,7 +2277,7 @@ mod tests {
                     description: None,
                     value: "A".into(),
                 }],
-                multi_select: false,
+                multi_select: true,
             }],
             decision_id: "e-1".into(),
         }
