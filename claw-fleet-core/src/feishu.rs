@@ -651,9 +651,11 @@ pub fn ensure_ws_client() {
 async fn ws_run_loop() {
     loop {
         match ws_connect_once().await {
-            Ok(()) => { /* open() returned ⇒ disconnected; reconnect */ }
+            Ok(()) => {
+                crate::log_debug("[feishu ws] disconnected; reconnecting in 5s");
+            }
             Err(e) => {
-                eprintln!("feishu ws: {e}");
+                crate::log_debug(&format!("[feishu ws] error: {e}"));
                 if e == "no-creds" {
                     WS_STARTED.store(false, Ordering::SeqCst);
                     return;
@@ -922,6 +924,10 @@ async fn ws_connect_once() -> Result<(), String> {
     let (stream, _resp) = tokio_tungstenite::connect_async(&endpoint.url)
         .await
         .map_err(|e| format!("ws connect: {e}"))?;
+    crate::log_debug(&format!(
+        "[feishu ws] connected: service_id={service_id} ping_interval={:?}",
+        endpoint.ping_interval
+    ));
 
     use futures::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
@@ -995,7 +1001,7 @@ fn handle_ws_message(
     let frame = match Frame::decode(&*data) {
         Ok(f) => f,
         Err(e) => {
-            eprintln!("feishu ws: frame decode: {e}");
+            crate::log_debug(&format!("[feishu ws] frame decode error: {e}"));
             return None;
         }
     };
@@ -1004,9 +1010,16 @@ fn handle_ws_message(
         // control: pong / server keepalive — nothing to ack.
         0 => None,
         // data
-        1 => handle_data_frame(frame, buffers),
+        1 => {
+            crate::log_debug(&format!(
+                "[feishu ws] data frame: {} bytes, type={:?}",
+                data.len(),
+                frame_header_value(&frame.headers, "type")
+            ));
+            handle_data_frame(frame, buffers)
+        }
         other => {
-            eprintln!("feishu ws: unknown frame method {other}");
+            crate::log_debug(&format!("[feishu ws] unknown frame method {other}"));
             None
         }
     }
@@ -1041,10 +1054,17 @@ fn handle_data_frame(
 /// to the existing card-action handler.  Only `card.action.trigger` is acted
 /// on; all other event types are ignored.
 fn dispatch_ws_payload(payload: &[u8]) {
+    // Log the raw payload verbatim before parsing — this is the one shape we
+    // could never confirm against a live Feishu callback, so capturing the
+    // exact JSON is the whole point of this instrumentation.
+    crate::log_debug(&format!(
+        "[feishu ws] event payload: {}",
+        String::from_utf8_lossy(payload)
+    ));
     let body: serde_json::Value = match serde_json::from_slice(payload) {
         Ok(v) => v,
         Err(e) => {
-            eprintln!("feishu ws: payload not json: {e}");
+            crate::log_debug(&format!("[feishu ws] payload not json: {e}"));
             return;
         }
     };
@@ -1052,9 +1072,11 @@ fn dispatch_ws_payload(payload: &[u8]) {
         .pointer("/header/event_type")
         .and_then(|v| v.as_str())
         .unwrap_or_default();
+    crate::log_debug(&format!("[feishu ws] event_type={event_type}"));
     if event_type == "card.action.trigger" {
-        if let Err(e) = handle_card_action(&body) {
-            eprintln!("feishu ws: card action: {e}");
+        match handle_card_action(&body) {
+            Ok(_) => crate::log_debug("[feishu ws] card action handled OK"),
+            Err(e) => crate::log_debug(&format!("[feishu ws] card action ERROR: {e}")),
         }
     }
 }
@@ -1071,6 +1093,9 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
         .get("decision_id")
         .and_then(|v| v.as_str())
         .ok_or_else(|| "missing decision_id".to_string())?;
+    crate::log_debug(&format!(
+        "[feishu ws] card action={action} decision_id={decision_id} value={value}"
+    ));
 
     match action {
         "guard" => {
@@ -1093,7 +1118,11 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
                 // New single-card form: the Submit button carries a
                 // `fields` map (q0 → question text); the submitted values
                 // live in the form-submit payload.
-                assemble_elicitation_answers(fields, extract_form_value(body))
+                let form = extract_form_value(body);
+                crate::log_debug(&format!(
+                    "[feishu ws] elicitation fields={fields} extracted_form={form:?}"
+                ));
+                assemble_elicitation_answers(fields, form)
             } else {
                 // Backwards-compat: a pre-upgrade card still in flight
                 // carried a single answer_label/question pair.
@@ -1111,6 +1140,9 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
             // No question answered → treat the submit as a decline so the
             // agent doesn't proceed on empty input.
             let declined = answers.is_empty();
+            crate::log_debug(&format!(
+                "[feishu ws] elicitation answers={answers:?} declined={declined}"
+            ));
             let summary = if declined {
                 "↩︎ 未选择 (Feishu)".to_string()
             } else {
