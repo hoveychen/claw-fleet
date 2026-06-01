@@ -64,6 +64,20 @@ type TtsMode = "chime_and_speech" | "chime_only" | "off";
 // Surfaced in the setup checklist so the operator can register it as the
 // app's redirect URL (otherwise OAuth fails with error 20029).
 const FEISHU_REDIRECT_URL = "http://localhost:51823/feishu/cb";
+
+// Permission scopes to grant under the Feishu console's 权限管理. Superset of
+// what's strictly required: the first three are in the OAuth authorize request
+// (claw-fleet-core/src/feishu.rs) so a missing one fails consent with error
+// 20027; the last two back the bot-send and name/open_id read. Granting extras
+// is harmless — under-granting is what breaks the flow. See
+// design/feishu-integration.md §2.
+const FEISHU_SCOPES: { scope: string; glossKey: string }[] = [
+  { scope: "im:message", glossKey: "feishu_scope_message" },
+  { scope: "im:message:send_as_bot", glossKey: "feishu_scope_send_as_bot" },
+  { scope: "im:message.urgent", glossKey: "feishu_scope_urgent" },
+  { scope: "im:resource", glossKey: "feishu_scope_resource" },
+  { scope: "contact:user.id:readonly", glossKey: "feishu_scope_contact" },
+];
 type SettingsTab = "general" | "appearance" | "profile" | "connection" | "interaction" | "channel" | "mobile" | "notifications" | "sound" | "usage";
 
 interface MobileAccessInfo {
@@ -1977,7 +1991,31 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       }}
                     >
                       <li>{t("settings.feishu_setup_step_app")}</li>
-                      <li>{t("settings.feishu_setup_step_perms")}</li>
+                      <li>
+                        {t("settings.feishu_setup_step_perms")}
+                        <ul style={{ margin: "3px 0 0", paddingLeft: 16, listStyle: "disc" }}>
+                          {FEISHU_SCOPES.map(({ scope, glossKey }) => (
+                            <li key={scope}>
+                              <code
+                                style={{
+                                  padding: "0 4px",
+                                  background: "var(--color-bg-input)",
+                                  border: "1px solid var(--color-border, #333)",
+                                  borderRadius: 3,
+                                  fontFamily: "monospace",
+                                  fontSize: 11,
+                                  color: "var(--color-text, #eee)",
+                                  userSelect: "all",
+                                }}
+                              >
+                                {scope}
+                              </code>
+                              {" — "}
+                              {t(`settings.${glossKey}`)}
+                            </li>
+                          ))}
+                        </ul>
+                      </li>
                       <li>{t("settings.feishu_setup_step_event")}</li>
                       <li>
                         {t("settings.feishu_setup_step_redirect")}
