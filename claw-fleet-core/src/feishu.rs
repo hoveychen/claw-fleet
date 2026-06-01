@@ -1040,10 +1040,22 @@ fn handle_data_frame(
         "event" | "" => {
             let payload = frame.payload.take()?;
             let full = reassemble(buffers, &frame.headers, payload)?;
-            let start = Instant::now();
-            dispatch_ws_payload(&full);
-            let biz_rt = start.elapsed().as_millis();
-            Some(build_ack_frame(&frame, biz_rt))
+            // Ack the transport IMMEDIATELY and run the business logic on a
+            // plain OS thread. Two reasons, both fatal to the ack otherwise:
+            //   1. Feishu fails a card.action.trigger callback with "target
+            //      callback service has timed out and there is no response"
+            //      if it doesn't get the ack within ~3s, and the dispatch
+            //      path does a blocking `update_card` HTTP round-trip.
+            //   2. `update_card` uses `reqwest::blocking`, which PANICS when
+            //      called from within a tokio runtime thread ("Cannot block
+            //      the current thread from within a runtime"). The WS loop IS
+            //      such a thread, so running dispatch inline killed the WS
+            //      thread before the ack could be sent.
+            // A std::thread is not a tokio runtime thread, so the blocking
+            // client is happy there. The ack carries no business payload (the
+            // card is updated out-of-band), so it need not wait for dispatch.
+            std::thread::spawn(move || dispatch_ws_payload(&full));
+            Some(build_ack_frame(&frame, 0))
         }
         "card" => None,
         _ => None,
