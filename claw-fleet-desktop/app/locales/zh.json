@@ -1257,6 +1257,7 @@
     "language": "语言",
     "connection": "连接",
     "interaction": "交互",
+    "channel": "渠道",
     "current_connection": "当前",
     "local": "本地",
     "remote": "远程",
