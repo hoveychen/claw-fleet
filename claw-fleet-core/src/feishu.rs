@@ -194,7 +194,10 @@ struct CachedTenantToken {
 enum DecisionState {
     Sending,
     Sent { message_id: String },
-    ResolvedBeforeSent { kind: DecisionKind, summary: String },
+    /// Resolved while the send was still in flight; carries the fully
+    /// rendered "已处理" card the send-thread applies once it has a
+    /// `message_id`.
+    ResolvedBeforeSent { card: serde_json::Value },
 }
 
 struct Bridge {
@@ -1123,7 +1126,7 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
             };
             crate::guard::write_response(&resp)?;
             let summary = if allow { "✅ Allow (Feishu)" } else { "🚫 Block (Feishu)" };
-            let _ = notify_decision_resolved(decision_id, DecisionKind::Guard, summary);
+            let _ = notify_decision_resolved(decision_id, resolved_card(DecisionKind::Guard, summary));
         }
         "elicitation" => {
             let answers = if let Some(fields) = value.get("fields") {
@@ -1155,20 +1158,18 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
             crate::log_debug(&format!(
                 "[feishu ws] elicitation answers={answers:?} declined={declined}"
             ));
-            let summary = if declined {
-                "↩︎ 未选择 (Feishu)".to_string()
-            } else {
-                let mut picks: Vec<&str> = answers.values().map(|s| s.as_str()).collect();
-                picks.sort_unstable();
-                format!("✅ {} (Feishu)", picks.join(" · "))
-            };
+            // Render the read-only card (questions + all options, pick(s)
+            // highlighted) before `answers` is moved into the response —
+            // resolved_elicitation_card reads the still-present request file
+            // for the option lists.
+            let resolved = resolved_elicitation_card(decision_id, &answers, declined);
             let resp = crate::elicitation::ElicitationResponse {
                 id: decision_id.to_string(),
                 declined,
                 answers,
             };
             crate::elicitation::write_response(&resp)?;
-            let _ = notify_decision_resolved(decision_id, DecisionKind::Elicitation, &summary);
+            let _ = notify_decision_resolved(decision_id, resolved);
         }
         "plan" => {
             let decision = value
@@ -1187,7 +1188,7 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
             } else {
                 "🚫 Rejected (Feishu)"
             };
-            let _ = notify_decision_resolved(decision_id, DecisionKind::PlanApproval, summary);
+            let _ = notify_decision_resolved(decision_id, resolved_card(DecisionKind::PlanApproval, summary));
         }
         other => return Err(format!("unknown card action: {other}")),
     }
@@ -1759,9 +1760,7 @@ pub fn notify_decision_created(
                 let mut map = bridge().decision_states.lock().unwrap();
                 let prior = map.remove(decision_id);
                 match prior {
-                    Some(DecisionState::ResolvedBeforeSent { kind: rkind, summary }) => {
-                        Some((rkind, summary))
-                    }
+                    Some(DecisionState::ResolvedBeforeSent { card }) => Some(card),
                     _ => {
                         map.insert(
                             decision_id.to_string(),
@@ -1774,8 +1773,7 @@ pub fn notify_decision_created(
                 }
             };
 
-            if let Some((rkind, summary)) = pending_resolve {
-                let card = resolved_card(rkind, &summary);
+            if let Some(card) = pending_resolve {
                 return update_card(&message_id, &card);
             }
             if matches!(kind, DecisionKind::Guard) {
@@ -1798,14 +1796,13 @@ pub fn notify_decision_created(
     }
 }
 
-/// Flips the previously-sent card into a read-only "已处理" state.  If
-/// the send is still in flight, leaves a marker so the send-thread
-/// applies the update once it has a `message_id`.  No-op if no card was
-/// ever sent (e.g. not connected).
+/// Flips the previously-sent card into a read-only "已处理" state, applying
+/// the caller-rendered `card`.  If the send is still in flight, stores the
+/// card so the send-thread applies it once it has a `message_id`.  No-op if
+/// no card was ever sent (e.g. not connected).
 pub fn notify_decision_resolved(
     decision_id: &str,
-    kind: DecisionKind,
-    summary: &str,
+    card: serde_json::Value,
 ) -> Result<(), String> {
     let message_id = {
         let mut map = bridge().decision_states.lock().unwrap();
@@ -1815,14 +1812,13 @@ pub fn notify_decision_resolved(
                 Some(message_id)
             }
             Some(DecisionState::Sending) => {
+                // Send still in flight — stash the rendered card; the
+                // send-thread applies it once it has a message_id.
                 map.insert(
                     decision_id.to_string(),
-                    DecisionState::ResolvedBeforeSent {
-                        kind,
-                        summary: summary.to_string(),
-                    },
+                    DecisionState::ResolvedBeforeSent { card },
                 );
-                None
+                return Ok(());
             }
             // Already-marked or never-existed both no-op.
             _ => None,
@@ -1831,11 +1827,10 @@ pub fn notify_decision_resolved(
     let Some(message_id) = message_id else {
         return Ok(());
     };
-    let card = resolved_card(kind, summary);
     update_card(&message_id, &card)
 }
 
-fn resolved_card(kind: DecisionKind, summary: &str) -> serde_json::Value {
+pub fn resolved_card(kind: DecisionKind, summary: &str) -> serde_json::Value {
     serde_json::json!({
         "schema": "2.0",
         "config": { "wide_screen_mode": true },
@@ -1848,6 +1843,116 @@ fn resolved_card(kind: DecisionKind, summary: &str) -> serde_json::Value {
                 { "tag": "markdown", "content": format!("**已在 Fleet 桌面端处理。**\n\n{summary}") }
             ]
         }
+    })
+}
+
+/// Strip the AskUserQuestion speech-summary divider (`\n---\n`) from a
+/// question, returning the real question body (the part after the last
+/// divider).  Cards show the body, not the spoken pre-divider summary.
+fn question_body(question: &str) -> &str {
+    match question.rsplit_once("\n---\n") {
+        Some((_, body)) => body.trim(),
+        None => question.trim(),
+    }
+}
+
+/// Build the read-only "已处理" card for a resolved elicitation, preserving
+/// the original questions and *all* their options (greyed out) with the
+/// submitted pick(s) highlighted — instead of collapsing to a single answer
+/// line.  `answers` maps question text → submitted label(s) (multi-select
+/// joined with `, `).  Reads the original questions/options from the pending
+/// request file; if it is already gone, falls back to the compact summary
+/// card so we still flip the card to a resolved state.
+pub fn resolved_elicitation_card(
+    decision_id: &str,
+    answers: &HashMap<String, String>,
+    declined: bool,
+) -> serde_json::Value {
+    let Some(request) = crate::elicitation::read_request(decision_id) else {
+        // Request already cleaned up — degrade to the compact summary card.
+        let summary = if declined {
+            "↩︎ 未选择 (Feishu)".to_string()
+        } else if answers.is_empty() {
+            "已回复 (Feishu)".to_string()
+        } else {
+            let mut picks: Vec<&str> = answers.values().map(|s| s.as_str()).collect();
+            picks.sort_unstable();
+            format!("✅ {} (Feishu)", picks.join(" · "))
+        };
+        return resolved_card(DecisionKind::Elicitation, &summary);
+    };
+    render_resolved_elicitation(&request, answers, declined)
+}
+
+/// Pure renderer for the resolved elicitation card — split from
+/// [`resolved_elicitation_card`] so it can be tested without a request file
+/// on disk.
+fn render_resolved_elicitation(
+    request: &crate::elicitation::ElicitationRequest,
+    answers: &HashMap<String, String>,
+    declined: bool,
+) -> serde_json::Value {
+    let mut body = format!(
+        "**已在 Fleet 桌面端处理。**\n\n**工作区:** {}",
+        escape_md(&request.workspace_name)
+    );
+    let multi_q = request.questions.len() > 1;
+
+    for (i, q) in request.questions.iter().enumerate() {
+        let prompt = if multi_q {
+            format!("**{}. {}**", i + 1, escape_md(question_body(&q.question)))
+        } else {
+            format!("**{}**", escape_md(question_body(&q.question)))
+        };
+        body.push_str("\n\n");
+        body.push_str(&prompt);
+
+        // The submitted pick(s) for this question; multi-select arrives as a
+        // single string joined with ", " (see `assemble_elicitation_answers`).
+        let picked: Vec<String> = answers
+            .get(&q.question)
+            .map(|a| a.split(", ").map(|s| s.trim().to_string()).collect())
+            .unwrap_or_default();
+
+        for opt in &q.options {
+            let chosen = picked.iter().any(|p| p == &opt.label);
+            let line = if opt.description.is_empty() {
+                opt.label.clone()
+            } else {
+                format!("{} — {}", opt.label, opt.description)
+            };
+            if chosen {
+                body.push_str(&format!("\n✅ **{}**", escape_md(&short(&line, 120))));
+            } else {
+                // Greyed/struck-through to read as "not chosen".
+                body.push_str(&format!("\n· ~~{}~~", escape_md(&short(&line, 120))));
+            }
+        }
+
+        // A free-text "Other" answer that matches no option label.
+        for p in &picked {
+            if !q.options.iter().any(|o| &o.label == p) && !p.is_empty() {
+                body.push_str(&format!("\n✅ **其它:** {}", escape_md(&short(p, 120))));
+            }
+        }
+
+        if picked.is_empty() {
+            body.push_str("\n· （未选择）");
+        }
+    }
+
+    if declined {
+        body.push_str("\n\n↩︎ **未选择，已按取消处理。**");
+    }
+
+    serde_json::json!({
+        "schema": "2.0",
+        "config": { "wide_screen_mode": true },
+        "header": {
+            "template": "grey",
+            "title": { "tag": "plain_text", "content": format!("{} · 已处理", DecisionKind::Elicitation.label()) }
+        },
+        "body": { "elements": [ { "tag": "markdown", "content": body } ] }
     })
 }
 
@@ -2187,6 +2292,62 @@ mod tests {
                 "form component name `{name}` is duplicated; names must be unique"
             );
         }
+    }
+
+    #[test]
+    fn resolved_elicitation_card_keeps_questions_and_marks_picks() {
+        use crate::elicitation::{ElicitationOption, ElicitationQuestion, ElicitationRequest};
+        let request = ElicitationRequest {
+            id: "e-1".into(),
+            session_id: "s".into(),
+            workspace_name: "demo".into(),
+            ai_title: None,
+            timestamp: "t".into(),
+            questions: vec![ElicitationQuestion {
+                // Carries the speech-summary divider; only the body should show.
+                question: "语音摘要句\n---\n选哪个框架？".into(),
+                header: "框架".into(),
+                multi_select: false,
+                options: vec![
+                    ElicitationOption {
+                        label: "React".into(),
+                        description: "前端".into(),
+                        preview: None,
+                    },
+                    ElicitationOption {
+                        label: "Vue".into(),
+                        description: String::new(),
+                        preview: None,
+                    },
+                ],
+            }],
+        };
+        let mut answers = HashMap::new();
+        answers.insert("语音摘要句\n---\n选哪个框架？".to_string(), "React".to_string());
+
+        let card = render_resolved_elicitation(&request, &answers, false);
+        let content = card
+            .pointer("/body/elements/0/content")
+            .and_then(|c| c.as_str())
+            .unwrap();
+
+        // The real question body is shown; the spoken pre-divider summary is not.
+        assert!(content.contains("选哪个框架？"), "question body must remain: {content}");
+        assert!(!content.contains("语音摘要句"), "pre-divider summary must be stripped");
+        // The original options are all preserved.
+        assert!(content.contains("React"), "picked option present");
+        assert!(content.contains("Vue"), "unpicked option still present (greyed)");
+        // The pick is highlighted and the other is struck through.
+        assert!(content.contains("✅ **React"), "picked option highlighted: {content}");
+        assert!(content.contains("~~Vue~~"), "unpicked option struck through: {content}");
+        // Header marks it resolved, and the card is non-interactive (no form).
+        assert_eq!(
+            card.pointer("/header/title/content").and_then(|c| c.as_str()),
+            Some("Decision needed · 已处理")
+        );
+        assert!(card.pointer("/body/elements/0/tag").and_then(|t| t.as_str()) == Some("markdown"));
+        let body_str = serde_json::to_string(&card).unwrap();
+        assert!(!body_str.contains("form_action_type"), "resolved card must not be interactive");
     }
 
     #[test]
