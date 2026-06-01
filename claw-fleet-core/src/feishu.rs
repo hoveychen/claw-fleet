@@ -1594,6 +1594,12 @@ impl ElicitationCard {
         });
         form_elements.push(serde_json::json!({
             "tag": "button",
+            // A submit button inside a `form` container is itself a form-
+            // interactive component, so it needs a unique non-empty `name`
+            // like every selector/input — without it Feishu rejects the
+            // submit client-side with error 200530 and never delivers the
+            // card.action.trigger callback.
+            "name": "submit",
             "text": { "tag": "plain_text", "content": "✅ 提交" },
             "type": "primary",
             "width": "fill",
@@ -2106,6 +2112,69 @@ mod tests {
             value.pointer("/fields/q1").and_then(|x| x.as_str()),
             Some("Which features?")
         );
+    }
+
+    #[test]
+    fn elicitation_form_interactive_components_all_have_unique_nonempty_names() {
+        // Feishu rejects a form submit with error 200530 when any interactive
+        // component inside a `form` container has an empty/missing `name`
+        // (names must also be unique). The submit button carries
+        // `form_action_type: "submit"`, which makes it a form-interactive
+        // component — so it MUST have a name too, not just the selectors and
+        // inputs. Regression guard for the 200530 card-callback failure.
+        let card = ElicitationCard {
+            workspace: "demo".into(),
+            questions: vec![ElicitationQuestionCard {
+                question: "Which framework?".into(),
+                options: vec![ElicitationOptionCard {
+                    label: "A".into(),
+                    description: None,
+                    value: "A".into(),
+                }],
+                multi_select: false,
+            }],
+            decision_id: "e-1".into(),
+        }
+        .to_card_json();
+
+        let form = card
+            .pointer("/body/elements")
+            .and_then(|e| e.as_array())
+            .unwrap()
+            .iter()
+            .find(|el| el.get("tag").and_then(|t| t.as_str()) == Some("form"))
+            .expect("form element present");
+        let form_elements = form
+            .pointer("/elements")
+            .and_then(|e| e.as_array())
+            .unwrap();
+
+        // An element is "interactive" if it is a known input/select tag or a
+        // button acting as the form's submit trigger. Pure display elements
+        // (markdown) are exempt.
+        let mut seen_names = std::collections::HashSet::new();
+        for el in form_elements {
+            let tag = el.get("tag").and_then(|t| t.as_str()).unwrap_or("");
+            let is_submit_button = tag == "button"
+                && el.get("form_action_type").and_then(|t| t.as_str()) == Some("submit");
+            let is_interactive = matches!(
+                tag,
+                "select_static" | "multi_select_static" | "input"
+            ) || is_submit_button;
+            if !is_interactive {
+                continue;
+            }
+            let name = el.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            assert!(
+                !name.is_empty(),
+                "interactive form component (tag={tag}) must have a non-empty name; \
+                 an empty name triggers Feishu error 200530"
+            );
+            assert!(
+                seen_names.insert(name.to_string()),
+                "form component name `{name}` is duplicated; names must be unique"
+            );
+        }
     }
 
     #[test]
