@@ -1260,6 +1260,7 @@
     "language": "Language",
     "connection": "Connection",
     "interaction": "Interaction",
+    "channel": "Channels",
     "current_connection": "Current",
     "local": "Local",
     "remote": "Remote",

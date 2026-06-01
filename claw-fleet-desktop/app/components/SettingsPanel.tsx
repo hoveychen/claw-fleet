@@ -59,7 +59,7 @@ interface LlmConfig {
 
 type NotificationMode = "all" | "user_action" | "none";
 type TtsMode = "chime_and_speech" | "chime_only" | "off";
-type SettingsTab = "general" | "appearance" | "profile" | "connection" | "interaction" | "mobile" | "notifications" | "sound" | "usage";
+type SettingsTab = "general" | "appearance" | "profile" | "connection" | "interaction" | "channel" | "mobile" | "notifications" | "sound" | "usage";
 
 interface MobileAccessInfo {
   running: boolean;
@@ -101,6 +101,12 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <path d="M2 4a1.5 1.5 0 0 1 1.5-1.5h6A1.5 1.5 0 0 1 11 4v3a1.5 1.5 0 0 1-1.5 1.5H6L3.5 10.5V8.5A1.5 1.5 0 0 1 2 7V4z" />
       <path d="M6.5 8.5V9a1.5 1.5 0 0 0 1.5 1.5h2.5L13 12.5v-2A1.5 1.5 0 0 0 14 9V6a1.5 1.5 0 0 0-1.5-1.5H11" />
+    </svg>
+  ),
+  channel: (
+    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M14 2L1.5 7l4.5 1.5L14 2z" />
+      <path d="M14 2L9 14l-3-5.5L14 2z" />
     </svg>
   ),
   mobile: (
@@ -957,6 +963,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     { key: "profile", label: t("settings.profile") },
     { key: "connection", label: t("settings.connection") },
     { key: "interaction", label: t("settings.interaction") },
+    { key: "channel", label: t("settings.channel") },
     { key: "mobile", label: t("settings.mobile_access") },
     { key: "notifications", label: t("settings.notifications") },
     { key: "sound", label: t("settings.sound") },
