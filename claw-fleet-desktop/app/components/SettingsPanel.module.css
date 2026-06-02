@@ -143,6 +143,31 @@
   font-weight: 600;
 }
 
+/* Collapsible "Advanced" group header in the left menu — visually quieter
+   than a tab so it reads as a divider/disclosure, not a destination. */
+.menu_group_header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 10px 16px 4px;
+  margin-top: 6px;
+  background: none;
+  border: none;
+  border-top: 1px solid var(--color-border);
+  text-align: left;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.menu_group_header:hover {
+  color: var(--color-text);
+}
+
 /* ── Right content ───────────────────────────────────────────────────────── */
 
 .content {
