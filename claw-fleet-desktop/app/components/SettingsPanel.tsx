@@ -78,7 +78,12 @@ const FEISHU_SCOPES: { scope: string; glossKey: string }[] = [
   { scope: "im:resource", glossKey: "feishu_scope_resource" },
   { scope: "contact:user.id:readonly", glossKey: "feishu_scope_contact" },
 ];
-type SettingsTab = "general" | "appearance" | "profile" | "connection" | "interaction" | "channel" | "mobile" | "notifications" | "sound" | "usage";
+// Redesigned IA: 3 everyday tabs (general / alerts / account) + 4 advanced
+// tabs (interaction / model / integration / usage) shown under a collapsible
+// "Advanced" group. See the settings-redesign plan.
+type SettingsTab = "general" | "alerts" | "account" | "interaction" | "model" | "integration" | "usage";
+const BASE_TABS: SettingsTab[] = ["general", "alerts", "account"];
+const ADVANCED_TABS: SettingsTab[] = ["interaction", "model", "integration", "usage"];
 
 interface MobileAccessInfo {
   running: boolean;
@@ -98,22 +103,18 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
       <path d="M6.7 1.2l-.4 1.6a5 5 0 0 0-1.5.9L3.3 3.2 1.9 5.6l1.2 1.1a5 5 0 0 0 0 1.7l-1.2 1.1 1.4 2.4 1.5-.5a5 5 0 0 0 1.5.9l.4 1.6h2.6l.4-1.6a5 5 0 0 0 1.5-.9l1.5.5 1.4-2.4-1.2-1.1a5 5 0 0 0 0-1.7l1.2-1.1-1.4-2.4-1.5.5a5 5 0 0 0-1.5-.9L9.3 1.2z" />
     </svg>
   ),
-  appearance: (
+  // Alerts = bell (formerly the Notifications icon); the unified "how Fleet
+  // alerts me" tab covers system notifications + chime + speech.
+  alerts: (
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="8" cy="8" r="3" />
-      <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.41 1.41M11.54 11.54l1.41 1.41M3.05 12.95l1.41-1.41M11.54 4.46l1.41-1.41" />
+      <path d="M6 13a2 2 0 0 0 4 0" />
+      <path d="M12 7c0-2.76-1.79-5-4-5S4 4.24 4 7c0 3-1.5 4.5-2 5h12c-.5-.5-2-2-2-5z" />
     </svg>
   ),
-  profile: (
+  account: (
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="8" cy="5" r="3" />
       <path d="M2.5 14a5.5 5.5 0 0 1 11 0" />
-    </svg>
-  ),
-  connection: (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M6 10l4-4" />
-      <path d="M9.5 3.5l1-1a2.12 2.12 0 0 1 3 3l-1 1M6.5 12.5l-1 1a2.12 2.12 0 0 1-3-3l1-1" />
     </svg>
   ),
   interaction: (
@@ -122,28 +123,18 @@ const tabIcons: Record<SettingsTab, React.ReactNode> = {
       <path d="M6.5 8.5V9a1.5 1.5 0 0 0 1.5 1.5h2.5L13 12.5v-2A1.5 1.5 0 0 0 14 9V6a1.5 1.5 0 0 0-1.5-1.5H11" />
     </svg>
   ),
-  channel: (
+  // Model = a chip glyph for the LLM provider/model picker.
+  model: (
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M14 2L1.5 7l4.5 1.5L14 2z" />
-      <path d="M14 2L9 14l-3-5.5L14 2z" />
+      <rect x="4.5" y="4.5" width="7" height="7" rx="1" />
+      <path d="M6.5 1.5v2M9.5 1.5v2M6.5 12.5v2M9.5 12.5v2M1.5 6.5h2M1.5 9.5h2M12.5 6.5h2M12.5 9.5h2" />
     </svg>
   ),
-  mobile: (
+  // Integration = link (formerly Connection); covers hooks, binary, sources, Feishu.
+  integration: (
     <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <rect x="4" y="1" width="8" height="14" rx="1.5" />
-      <line x1="7" y1="12" x2="9" y2="12" />
-    </svg>
-  ),
-  notifications: (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M6 13a2 2 0 0 0 4 0" />
-      <path d="M12 7c0-2.76-1.79-5-4-5S4 4.24 4 7c0 3-1.5 4.5-2 5h12c-.5-.5-2-2-2-5z" />
-    </svg>
-  ),
-  sound: (
-    <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M8 2L4 6H1v4h3l4 4V2z" />
-      <path d="M11 5.5a3.5 3.5 0 0 1 0 5M13 3.5a6.5 6.5 0 0 1 0 9" />
+      <path d="M6 10l4-4" />
+      <path d="M9.5 3.5l1-1a2.12 2.12 0 0 1 3 3l-1 1M6.5 12.5l-1 1a2.12 2.12 0 0 1-3-3l1-1" />
     </svg>
   ),
   usage: (
@@ -159,6 +150,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const { t } = useTranslation();
   const { connection, disconnect } = useConnectionStore();
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+  // Advanced group starts expanded only when an advanced tab is somehow the
+  // initial tab; otherwise everyday users see just the 3 base tabs.
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   // ── Sources state ────────────────────────────────────────────────────────
   const [sources, setSources] = useState<SourceInfo[]>([]);
@@ -499,7 +493,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const [feishuError, setFeishuError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (activeTab !== "channel") return;
+    if (activeTab !== "integration") return;
     invoke<FeishuConnection>("feishu_status").then(setFeishuConn).catch(() => {});
   }, [activeTab]);
 
@@ -735,7 +729,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const [showFeishuCreds, setShowFeishuCreds] = useState(false);
 
   useEffect(() => {
-    if (activeTab !== "channel") return;
+    if (activeTab !== "integration") return;
     invoke<FeishuStoredCreds>("get_feishu_creds")
       .then((c) => {
         setFeishuCreds(c);
@@ -803,6 +797,20 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
   const handleTtsModeChange = useCallback((mode: TtsMode) => {
     setTtsMode(mode);
     setItem("tts-mode", mode);
+  }, []);
+
+  // ── Master mute ───────────────────────────────────────────────────────
+  // `tts-muted` is read by both the front-end decision-panel queue
+  // (audio.ts playDecisionAlert/playAlertSound) and the Rust notification
+  // TTS path (gui.rs play_tts_for_notification). It used to have NO settings
+  // UI — only the Lite-mode top-bar button — which is why "I turned sound
+  // off but the decision panel still spoke" happened. Surface it here as the
+  // single master switch.
+  const [ttsMuted, setTtsMuted] = useState(() => getItem("tts-muted") === "true");
+
+  const handleTtsMutedChange = useCallback((muted: boolean) => {
+    setTtsMuted(muted);
+    setItem("tts-muted", muted ? "true" : "false");
   }, []);
 
   // ── Chime preset state ────────────────────────────────────────────────
@@ -997,18 +1005,25 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
 
   const hooksInstalled = hooksPlan?.alreadyInstalled || hooksStatus === "success";
 
-  const tabs: { key: SettingsTab; label: string }[] = [
-    { key: "general", label: t("settings.general") },
-    { key: "appearance", label: t("settings.appearance") },
-    { key: "profile", label: t("settings.profile") },
-    { key: "connection", label: t("settings.connection") },
-    { key: "interaction", label: t("settings.interaction") },
-    { key: "channel", label: t("settings.channel") },
-    { key: "mobile", label: t("settings.mobile_access") },
-    { key: "notifications", label: t("settings.notifications") },
-    { key: "sound", label: t("settings.sound") },
-    { key: "usage", label: t("settings.usage") },
-  ];
+  const tabLabels: Record<SettingsTab, string> = {
+    general: t("settings.tab_general"),
+    alerts: t("settings.tab_alerts"),
+    account: t("settings.tab_account"),
+    interaction: t("settings.tab_interaction"),
+    model: t("settings.tab_model"),
+    integration: t("settings.tab_integration"),
+    usage: t("settings.usage"),
+  };
+  const renderTabButton = (key: SettingsTab) => (
+    <button
+      key={key}
+      className={`${styles.menu_item} ${activeTab === key ? styles.menu_item_active : ""}`}
+      onClick={() => setActiveTab(key)}
+    >
+      {tabIcons[key]}
+      {tabLabels[key]}
+    </button>
+  );
 
   const wrapperProps = standalone
     ? { className: styles.standalone_root }
@@ -1027,18 +1042,19 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
         </div>
 
         <div className={styles.body}>
-          {/* ── Left: menu ── */}
+          {/* ── Left: menu — everyday tabs, then a collapsible Advanced group ── */}
           <nav className={styles.menu}>
-            {tabs.map((tab) => (
-              <button
-                key={tab.key}
-                className={`${styles.menu_item} ${activeTab === tab.key ? styles.menu_item_active : ""}`}
-                onClick={() => setActiveTab(tab.key)}
-              >
-                {tabIcons[tab.key]}
-                {tab.label}
-              </button>
-            ))}
+            {BASE_TABS.map(renderTabButton)}
+
+            <button
+              type="button"
+              className={styles.menu_group_header}
+              onClick={() => setShowAdvanced((v) => !v)}
+            >
+              <span aria-hidden>{showAdvanced ? "▾" : "▸"}</span>
+              {t("settings.group_advanced")}
+            </button>
+            {showAdvanced && ADVANCED_TABS.map(renderTabButton)}
           </nav>
 
           {/* ── Right: content ── */}
@@ -1106,8 +1122,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                   </div>
                 )}
 
-                {/* ── LLM Provider ── */}
-                <div className={styles.section_title} style={{ marginTop: 18 }}>
+              </div>
+            )}
+
+            {/* ── Model (advanced) — LLM provider & models ── */}
+            {activeTab === "model" && (
+              <div className={styles.section}>
+                <div className={styles.section_title}>
                   {t("settings.llm_provider")}
                 </div>
                 <div className={styles.row}>
@@ -1175,8 +1196,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
               </div>
             )}
 
-            {/* ── Appearance ── */}
-            {activeTab === "appearance" && (
+            {/* ── Appearance (merged into General) ── */}
+            {activeTab === "general" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.appearance")}</div>
                 <div className={styles.row}>
@@ -1220,8 +1241,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
               </div>
             )}
 
-            {/* ── Profile ── */}
-            {activeTab === "profile" && (
+            {/* ── Profile (merged into General) ── */}
+            {activeTab === "general" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.profile")}</div>
                 <div className={styles.row}>
@@ -1247,8 +1268,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
               </div>
             )}
 
-            {/* ── Connection (merged: connection + hooks + sources) ── */}
-            {activeTab === "connection" && (
+            {/* ── Account & Connection ── */}
+            {activeTab === "account" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.connection")}</div>
                 <div className={styles.row}>
@@ -1262,8 +1283,13 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                     {t("switch_connection")}
                   </button>
                 </div>
+              </div>
+            )}
 
-                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.hooks")}</div>
+            {/* ── Integration (advanced): hooks + Claude binary + sources + Feishu ── */}
+            {activeTab === "integration" && (
+              <div className={styles.section}>
+                <div className={styles.section_title}>{t("settings.hooks")}</div>
                 <div className={styles.row}>
                   <span className={styles.row_label}>{t("settings.hooks_desc")}</span>
                 </div>
@@ -1401,26 +1427,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
             {/* ── Interaction ── */}
             {activeTab === "interaction" && (
               <>
-              {/* ── Group: how decisions reach you ── */}
+              {/* ── Group: how decisions reach you (floating panel toggle moved to Alerts) ── */}
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.interaction_group_decision")}</div>
-
-                <div className={styles.row}>
-                  <div>
-                    <span className={styles.row_label}>{t("settings.floating_decision_panel")}</span>
-                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
-                      {t("settings.floating_decision_panel_desc")}
-                    </span>
-                  </div>
-                  <label className={styles.toggle}>
-                    <input
-                      type="checkbox"
-                      checked={floatingDecisionPanel}
-                      onChange={(e) => handleToggleFloatingDecisionPanel(e.target.checked)}
-                    />
-                    <span className={styles.toggle_slider} />
-                  </label>
-                </div>
 
                 <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.elicitation")}</div>
                 <div className={styles.row}>
@@ -1929,8 +1938,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
               </>
             )}
 
-            {/* ── Channels (Feishu / Lark) ── */}
-            {activeTab === "channel" && (
+            {/* ── Channels (Feishu / Lark) — merged into Integration ── */}
+            {activeTab === "integration" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.feishu")}</div>
                 <div className={styles.row}>
@@ -2124,8 +2133,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
               </div>
             )}
 
-            {/* ── Mobile Access ── */}
-            {activeTab === "mobile" && (
+            {/* ── Mobile Access — merged into Account ── */}
+            {activeTab === "account" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.mobile_access")}</div>
                 <div className={styles.row}>
@@ -2200,10 +2209,54 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
               </div>
             )}
 
-            {/* ── Notifications ── */}
-            {activeTab === "notifications" && (
+            {/* ── Alerts — unified: master mute → floating panel → system
+                 notifications → sound/speech. Replaces the old separate
+                 Notifications + Sound tabs and the floating-panel toggle that
+                 used to live under Interaction. ── */}
+            {activeTab === "alerts" && (
               <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.notification_mode")}</div>
+                {/* Master mute — the single switch that silences EVERYTHING.
+                    Writes tts-muted, which both the front-end decision queue
+                    and the Rust notification TTS honour. */}
+                <div className={styles.section_title}>{t("settings.alerts_master")}</div>
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.mute_all")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.mute_all_desc")}
+                    </span>
+                  </div>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={ttsMuted}
+                      onChange={(e) => handleTtsMutedChange(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+
+                {/* Visual — floating decision panel */}
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.alerts_visual")}</div>
+                <div className={styles.row}>
+                  <div>
+                    <span className={styles.row_label}>{t("settings.floating_decision_panel")}</span>
+                    <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                      {t("settings.floating_decision_panel_desc")}
+                    </span>
+                  </div>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={floatingDecisionPanel}
+                      onChange={(e) => handleToggleFloatingDecisionPanel(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+
+                {/* System notifications */}
+                <div className={styles.section_title} style={{ marginTop: 18 }}>{t("settings.notification_mode")}</div>
                 {(["all", "user_action", "none"] as const).map((mode) => (
                   <label className={styles.radio_row} key={mode}>
                     <input
@@ -2255,8 +2308,8 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
               </div>
             )}
 
-            {/* ── Sound ── */}
-            {activeTab === "sound" && (
+            {/* ── Sound / speech — merged into Alerts ── */}
+            {activeTab === "alerts" && (
               <div className={styles.section}>
                 <div className={styles.section_title}>{t("settings.tts")}</div>
                 {(["chime_and_speech", "chime_only", "off"] as const).map((mode) => (
