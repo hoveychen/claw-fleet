@@ -14,6 +14,11 @@ jobs:
   # ═══════════════════════════════════════════════════════════════════════════
   # Non-tag push / PR — quick single-platform test only. Saves Actions usage by
   # skipping the multi-platform CLI + desktop bundles below until a release tag.
+  #
+  # This is the ONLY place unit tests run. A release tag is always cut from a
+  # commit that already passed this job on push, so the tag-time jobs below
+  # deliberately skip tests to avoid recompiling the whole workspace in release
+  # mode on four platforms just to re-run the same suite.
   # ═══════════════════════════════════════════════════════════════════════════
   test:
     if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
@@ -49,9 +54,16 @@ jobs:
         run: cargo test --release -p fleet-cli -p claw-fleet-core -p claw-fleet-task -p fleet-task
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Tag push only — Step 1: test + build fleet-cli for all platforms
+  # Tag push only — Linux CLI binaries.
+  #
+  # These two artifacts serve double duty: they are the standalone Linux CLI
+  # release downloads AND the `fleet` probes that every desktop bundle (macOS,
+  # Windows, Linux) embeds as resources for remote SSH deployment. They are the
+  # only cross-platform binaries the desktop jobs cannot produce on their own
+  # runner, so they live in this small, fast (zigbuild, no tests) job that the
+  # desktop matrix depends on.
   # ═══════════════════════════════════════════════════════════════════════════
-  cli-build:
+  cli-linux:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
     name: CLI — ${{ matrix.name }}
     strategy:
@@ -61,24 +73,12 @@ jobs:
           - name: Linux x64
             runner: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
-            zigbuild: true
             artifact: fleet-linux-x64
 
           - name: Linux ARM64
             runner: ubuntu-22.04-arm
             rust_target: aarch64-unknown-linux-gnu
-            zigbuild: true
             artifact: fleet-linux-arm64
-
-          - name: macOS Universal
-            runner: macos-latest
-            rust_target: universal-apple-darwin
-            artifact: fleet-macos
-
-          - name: Windows x64
-            runner: windows-latest
-            rust_target: x86_64-pc-windows-msvc
-            artifact: fleet-windows-x64
 
     runs-on: ${{ matrix.runner }}
 
@@ -87,7 +87,6 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -97,7 +96,6 @@ jobs:
           done
 
       - name: Install Linux dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
@@ -116,56 +114,25 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.rust_target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.rust_target }}
+          targets: ${{ matrix.rust_target }}
 
       - name: Setup Zig
-        if: matrix.zigbuild
         uses: mlugg/setup-zig@v2
         with:
           version: 0.13.0
 
       - name: Install cargo-zigbuild
-        if: matrix.zigbuild
         run: cargo install cargo-zigbuild
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
 
-      - name: Run unit tests (host platform)
-        shell: bash
-        run: |
-          # cargo test must run on the host triple — cross-compiled binaries
-          # can't execute. fleet-cli + claw-fleet-core have unit tests; skip
-          # claw-fleet-desktop (Tauri/webkit deps) — its build is exercised in
-          # the desktop-build job. fleet-task is included because fleet-cli's
-          # e2e test spawns the fleet-task binary.
-          cargo test --release -p fleet-cli -p claw-fleet-core -p claw-fleet-task -p fleet-task
-
       - name: Build fleet-cli
         shell: bash
         run: |
           mkdir -p dist
-
-          if [ "${{ matrix.rust_target }}" = "universal-apple-darwin" ]; then
-            cargo build --release -p fleet-cli --target aarch64-apple-darwin
-            cargo build --release -p fleet-cli --target x86_64-apple-darwin
-            lipo -create \
-              target/aarch64-apple-darwin/release/fleet-cli \
-              target/x86_64-apple-darwin/release/fleet-cli \
-              -output dist/${{ matrix.artifact }}
-            chmod +x dist/${{ matrix.artifact }}
-
-          elif [ "${{ matrix.zigbuild }}" = "true" ]; then
-            cargo zigbuild --release -p fleet-cli --target ${{ matrix.rust_target }}.2.17
-            cp target/${{ matrix.rust_target }}/release/fleet-cli dist/${{ matrix.artifact }}
-
-          else
-            cargo build --release -p fleet-cli --target ${{ matrix.rust_target }}
-            EXT=""
-            if [ "$RUNNER_OS" = "Windows" ]; then EXT=".exe"; fi
-            cp "target/${{ matrix.rust_target }}/release/fleet-cli${EXT}" \
-               "dist/${{ matrix.artifact }}${EXT}"
-          fi
+          cargo zigbuild --release -p fleet-cli --target ${{ matrix.rust_target }}.2.17
+          cp target/${{ matrix.rust_target }}/release/fleet-cli dist/${{ matrix.artifact }}
 
       - name: Upload CLI artifact
         uses: actions/upload-artifact@v7
@@ -175,12 +142,22 @@ jobs:
           if-no-files-found: error
 
   # ═══════════════════════════════════════════════════════════════════════════
-  # Tag push only — Step 2: Build desktop apps (unsigned). Tag-time signing
-  # happens in release.yml, which downloads these artifacts.
+  # Tag push only — per-platform desktop bundle (unsigned).
+  #
+  # Each job builds its OWN-platform `fleet` sidecar CLI and the Tauri app in a
+  # single runner, so the shared `target/` directory lets cargo reuse the
+  # compiled `claw-fleet-core` and dependency tree between the two builds
+  # instead of recompiling the whole workspace in a separate CLI job. The macOS
+  # and Windows jobs also upload their sidecar as the standalone CLI release
+  # artifact (fleet-macos / fleet-windows-x64). The Linux job reuses the
+  # cli-linux x64 probe as its sidecar, so it never compiles fleet-cli twice.
+  #
+  # Tag-time signing (macOS) and publishing happen in release.yml, which
+  # downloads these artifacts.
   # ═══════════════════════════════════════════════════════════════════════════
   desktop-build:
     if: ${{ startsWith(github.ref, 'refs/tags/v') }}
-    needs: cli-build
+    needs: cli-linux
     name: Desktop — ${{ matrix.name }}
     strategy:
       fail-fast: false
@@ -190,25 +167,28 @@ jobs:
             runner: macos-latest
             rust_target: universal-apple-darwin
             tauri_args: --target universal-apple-darwin --features vendored-ssl
-            sidecar_artifact: fleet-macos
             sidecar_name: fleet-universal-apple-darwin
+            cli_artifact: fleet-macos
             fixed_suffix: macos
+            build_sidecar: true
 
           - name: Windows (x64)
             runner: windows-latest
             rust_target: x86_64-pc-windows-msvc
             tauri_args: --target x86_64-pc-windows-msvc
-            sidecar_artifact: fleet-windows-x64
             sidecar_name: fleet-x86_64-pc-windows-msvc.exe
+            cli_artifact: fleet-windows-x64
             fixed_suffix: windows-x64
+            build_sidecar: true
 
           - name: Linux (x86_64)
             runner: ubuntu-22.04
             rust_target: x86_64-unknown-linux-gnu
             tauri_args: --target x86_64-unknown-linux-gnu
-            sidecar_artifact: fleet-linux-x64
             sidecar_name: fleet-x86_64-unknown-linux-gnu
+            cli_artifact: ''
             fixed_suffix: linux-x64
+            build_sidecar: false
 
     runs-on: ${{ matrix.runner }}
 
@@ -217,7 +197,6 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set version from tag
-        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
@@ -226,46 +205,7 @@ jobs:
             rm -f "${toml}.bak"
           done
 
-      # ── Download CLI artifacts from step 1 ────────────────────────────────
-
-      - name: Download sidecar CLI
-        uses: actions/download-artifact@v8
-        with:
-          name: ${{ matrix.sidecar_artifact }}
-          path: claw-fleet-desktop/binaries
-
-      - name: Download Linux x64 probe
-        uses: actions/download-artifact@v8
-        with:
-          name: fleet-linux-x64
-          path: claw-fleet-desktop/resources
-
-      - name: Download Linux arm64 probe
-        uses: actions/download-artifact@v8
-        with:
-          name: fleet-linux-arm64
-          path: claw-fleet-desktop/resources
-
-      - name: Prepare sidecar and probes
-        shell: bash
-        run: |
-          cd claw-fleet-desktop/binaries
-          mv ${{ matrix.sidecar_artifact }}* ${{ matrix.sidecar_name }}
-          chmod +x ${{ matrix.sidecar_name }} 2>/dev/null || true
-
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            cp ${{ matrix.sidecar_name }} fleet-linux
-          fi
-
-          if [ "${{ matrix.rust_target }}" = "universal-apple-darwin" ]; then
-            mkdir -p ../../target/universal-apple-darwin/release
-            cp ${{ matrix.sidecar_name }} ../../target/universal-apple-darwin/release/fleet-cli
-          fi
-
-          cd ../resources
-          chmod +x fleet-linux-x64 fleet-linux-arm64
-
-      # ── Build desktop app (unsigned) ──────────────────────────────────────
+      # ── Toolchains ────────────────────────────────────────────────────────
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -304,6 +244,88 @@ jobs:
             libayatana-appindicator3-dev \
             libasound2-dev \
             xdg-utils
+
+      # ── Build own-platform sidecar CLI (macOS / Windows) ──────────────────
+      # Runs before the Tauri build so the shared target/ dir warms core for it.
+
+      - name: Build sidecar CLI (macOS universal)
+        if: matrix.build_sidecar && runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p claw-fleet-desktop/binaries dist
+          cargo build --release -p fleet-cli --target aarch64-apple-darwin
+          cargo build --release -p fleet-cli --target x86_64-apple-darwin
+          lipo -create \
+            target/aarch64-apple-darwin/release/fleet-cli \
+            target/x86_64-apple-darwin/release/fleet-cli \
+            -output "claw-fleet-desktop/binaries/${{ matrix.sidecar_name }}"
+          chmod +x "claw-fleet-desktop/binaries/${{ matrix.sidecar_name }}"
+          # tauri-action's universal build looks here for the lipo'd CLI too.
+          mkdir -p target/universal-apple-darwin/release
+          cp "claw-fleet-desktop/binaries/${{ matrix.sidecar_name }}" target/universal-apple-darwin/release/fleet-cli
+          # Standalone CLI release artifact.
+          cp "claw-fleet-desktop/binaries/${{ matrix.sidecar_name }}" "dist/${{ matrix.cli_artifact }}"
+
+      - name: Build sidecar CLI (Windows)
+        if: matrix.build_sidecar && runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p claw-fleet-desktop/binaries dist
+          cargo build --release -p fleet-cli --target ${{ matrix.rust_target }}
+          cp "target/${{ matrix.rust_target }}/release/fleet-cli.exe" \
+             "claw-fleet-desktop/binaries/${{ matrix.sidecar_name }}"
+          cp "target/${{ matrix.rust_target }}/release/fleet-cli.exe" \
+             "dist/${{ matrix.cli_artifact }}.exe"
+
+      - name: Upload standalone CLI artifact
+        if: matrix.build_sidecar
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.cli_artifact }}
+          path: dist/
+          if-no-files-found: error
+
+      # ── Download cross-platform binaries from cli-linux ───────────────────
+
+      - name: Download Linux x64 probe
+        uses: actions/download-artifact@v8
+        with:
+          name: fleet-linux-x64
+          path: claw-fleet-desktop/resources
+
+      - name: Download Linux arm64 probe
+        uses: actions/download-artifact@v8
+        with:
+          name: fleet-linux-arm64
+          path: claw-fleet-desktop/resources
+
+      - name: Download Linux sidecar
+        if: '!matrix.build_sidecar'
+        uses: actions/download-artifact@v8
+        with:
+          name: fleet-linux-x64
+          path: claw-fleet-desktop/binaries
+
+      - name: Prepare sidecar and probes
+        shell: bash
+        run: |
+          cd claw-fleet-desktop/binaries
+          # Linux job downloads its sidecar (named fleet-linux-x64) and renames
+          # it; macOS/Windows already placed the sidecar in the build step above.
+          if [ "${{ matrix.build_sidecar }}" != "true" ]; then
+            mv fleet-linux-x64* "${{ matrix.sidecar_name }}"
+            chmod +x "${{ matrix.sidecar_name }}"
+          fi
+          chmod +x "${{ matrix.sidecar_name }}" 2>/dev/null || true
+
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            cp "${{ matrix.sidecar_name }}" fleet-linux
+          fi
+
+          cd ../resources
+          chmod +x fleet-linux-x64 fleet-linux-arm64
+
+      # ── Build desktop app (unsigned) ──────────────────────────────────────
 
       - name: Install frontend dependencies
         run: pnpm install --frozen-lockfile
