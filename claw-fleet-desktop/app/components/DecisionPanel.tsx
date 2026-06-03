@@ -1426,7 +1426,13 @@ function FleetAskCard({
           </div>
         )}
 
-        {opts.length > 0 && (
+        {/* Render unconditionally so the free-text "Other" composer (which lives
+            inside SharedOptionsBlock, outside its options .map) persists even when
+            the agent supplied no options. A zero-option fleet__ask card would
+            otherwise leave the user no way to type a free answer — v1's
+            ElicitationCard renders this block unconditionally, so match it. With
+            an empty options array SharedOptionsBlock renders just the Other input. */}
+        {
           <SharedOptionsBlock
             decisionId={decision.id}
             question={{
@@ -1465,7 +1471,7 @@ function FleetAskCard({
             }
             onAttachmentError={showAttachError}
           />
-        )}
+        }
         {attachError && (
           <div className={styles.elicitation_attach_error} role="alert">
             <span className={styles.elicitation_attach_error_text}>{attachError}</span>
