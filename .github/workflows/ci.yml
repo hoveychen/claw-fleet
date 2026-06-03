@@ -171,6 +171,7 @@ jobs:
             cli_artifact: fleet-macos
             fixed_suffix: macos
             build_sidecar: true
+            cache_key: desktop-macos
 
           - name: Windows (x64)
             runner: windows-latest
@@ -180,6 +181,7 @@ jobs:
             cli_artifact: fleet-windows-x64
             fixed_suffix: windows-x64
             build_sidecar: true
+            cache_key: desktop-windows-x64
 
           - name: Linux (x86_64)
             runner: ubuntu-22.04
@@ -189,6 +191,7 @@ jobs:
             cli_artifact: ''
             fixed_suffix: linux-x64
             build_sidecar: false
+            cache_key: desktop-linux-x64
 
     runs-on: ${{ matrix.runner }}
 
@@ -229,6 +232,13 @@ jobs:
 
       - name: Cache Rust
         uses: Swatinem/rust-cache@v2
+        with:
+          # shared-key (not the per-job id) so the cache-warm job on main and
+          # this tag-time job read/write the same key. GHA caches are scoped to
+          # the creating ref + the default branch; since desktop builds only run
+          # on tags, the warm cache populated on main is the only one a release
+          # can restore. See the cache-warm job below.
+          shared-key: ${{ matrix.cache_key }}
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -377,3 +387,134 @@ jobs:
           name: ${{ matrix.fixed_suffix == 'macos' && 'desktop-macos-unsigned' || format('desktop-{0}', matrix.fixed_suffix) }}
           path: dist-artifacts/
           if-no-files-found: error
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # main-branch only — warm the desktop Rust cache.
+  #
+  # The tag-time desktop-build jobs above otherwise run with a stone-cold cache:
+  # GitHub Actions caches are readable only from the creating ref + the default
+  # branch, and desktop-build runs *only* on tags, so each release recompiles
+  # the entire dependency tree from scratch (~15 min of a ~22 min macOS build —
+  # the workspace crates themselves are only ~2 min; the rest is deps).
+  #
+  # This job runs on main, compiles the same crates/targets/features with the
+  # same env, and saves a Swatinem cache under the same `shared-key` the
+  # desktop-build jobs restore from. A release tag cut from that main commit
+  # then hits a warm dependency cache. It only does the expensive compile when
+  # the dependency set (Cargo.lock / any Cargo.toml) changed, since that is the
+  # only thing the cache preserves across the workspace recompile a tag does.
+  #
+  # NOTE: GHA evicts caches unused for 7 days. If no dependency change lands for
+  # a week, the next release falls back to a cold build until the following dep
+  # change re-warms it. Add a scheduled keep-alive trigger if that becomes a
+  # problem.
+  # ═══════════════════════════════════════════════════════════════════════════
+  cache-warm:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    name: Warm cache — ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            runner: macos-latest
+            cache_key: desktop-macos
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+            build: |
+              cargo build --release -p fleet-cli --target aarch64-apple-darwin
+              cargo build --release -p fleet-cli --target x86_64-apple-darwin
+              OPENSSL_STATIC=1 cargo build --release -p claw-fleet-desktop --features vendored-ssl --target aarch64-apple-darwin
+              OPENSSL_STATIC=1 cargo build --release -p claw-fleet-desktop --features vendored-ssl --target x86_64-apple-darwin
+
+          - name: Windows (x64)
+            runner: windows-latest
+            cache_key: desktop-windows-x64
+            targets: x86_64-pc-windows-msvc
+            build: |
+              cargo build --release -p fleet-cli --target x86_64-pc-windows-msvc
+              cargo build --release -p claw-fleet-desktop --target x86_64-pc-windows-msvc
+
+          - name: Linux (x86_64)
+            runner: ubuntu-22.04
+            cache_key: desktop-linux-x64
+            targets: x86_64-unknown-linux-gnu
+            build: |
+              cargo build --release -p claw-fleet-desktop --target x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Detect dependency changes
+        uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            deps:
+              - '**/Cargo.lock'
+              - '**/Cargo.toml'
+
+      - name: Setup pnpm
+        if: steps.filter.outputs.deps == 'true'
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        if: steps.filter.outputs.deps == 'true'
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: claw-fleet-desktop/pnpm-lock.yaml
+
+      - name: Setup protoc
+        if: steps.filter.outputs.deps == 'true'
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        if: steps.filter.outputs.deps == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+
+      - name: Cache Rust
+        if: steps.filter.outputs.deps == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ${{ matrix.cache_key }}
+          # Save on main even though cargo exits "successful with nothing to do"
+          # on a warm cache — this also refreshes the cache's 7-day TTL.
+          save-if: true
+
+      - name: Install Linux dependencies
+        if: steps.filter.outputs.deps == 'true' && runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            patchelf \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            libasound2-dev \
+            xdg-utils
+
+      # claw-fleet-desktop's tauri build script requires the frontend dist to
+      # exist (frontendDist: ./dist), so build it before compiling the crate.
+      - name: Build frontend
+        if: steps.filter.outputs.deps == 'true'
+        working-directory: claw-fleet-desktop
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+
+      - name: Warm dependency compilation
+        if: steps.filter.outputs.deps == 'true'
+        shell: bash
+        run: |
+          ${{ matrix.build }}
