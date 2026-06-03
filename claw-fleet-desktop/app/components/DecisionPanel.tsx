@@ -1698,6 +1698,10 @@ export function DecisionPanel({
 
   const cardAreaRef = useRef<HTMLDivElement>(null);
   const [widthTier, setWidthTier] = useState(0);
+  // Whether the scroll viewport still has content below the fold — drives the
+  // bottom fade hint so users (especially on external mice, where macOS hides
+  // the overlay scrollbar) get a visual cue that more options lie below.
+  const [canScrollDown, setCanScrollDown] = useState(false);
 
   const active = decisions.length > 0
     ? (decisions.find((d) => d.id === activeDecisionId) ?? decisions[0])
@@ -1775,6 +1779,7 @@ export function DecisionPanel({
       if (widthTier < widthTiers.length - 1 && el.scrollHeight > el.clientHeight + 2) {
         setWidthTier((t) => Math.min(t + 1, widthTiers.length - 1));
       }
+      setCanScrollDown(el.scrollHeight - el.scrollTop - el.clientHeight > 2);
     };
     const ro = new ResizeObserver(check);
     ro.observe(el);
@@ -1891,8 +1896,18 @@ export function DecisionPanel({
         )}
 
         {/* Card area — scrollable, shows the active decision */}
-        <div className={styles.card_area} ref={cardAreaRef}>
+        <div
+          className={styles.card_area}
+          ref={cardAreaRef}
+          data-more={canScrollDown ? "true" : "false"}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            setCanScrollDown(el.scrollHeight - el.scrollTop - el.clientHeight > 2);
+          }}
+        >
           <DecisionCard key={active.id} decision={active} compact={compact} />
+          {/* Sticky bottom fade — hints that more options remain below the fold. */}
+          <div className={styles.card_fade} aria-hidden="true" />
         </div>
 
         {/* Tab bar — always at the bottom */}

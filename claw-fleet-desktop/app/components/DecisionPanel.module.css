@@ -223,6 +223,58 @@
   animation: cardFadeIn 0.2s ease;
 }
 
+/* Always-visible scrollbar affordance.
+ *
+ * On macOS the default WKWebView scrollbar is an *overlay* that stays hidden at
+ * rest — and its visibility follows the system "Show scroll bars" setting, which
+ * defaults to "Automatically based on mouse or trackpad". With an external mouse
+ * connected, that resolves to "When scrolling", so the bar never shows while idle.
+ * Users then have no visual cue that the option list continues below the fold and
+ * report "the panel won't scroll" — even though the wheel still works.
+ *
+ * Defining `::-webkit-scrollbar` opts this element out of overlay scrollbars and
+ * into a classic, always-present (when content overflows) gutter, restoring the
+ * "there's more below" affordance regardless of input device. */
+.card_area::-webkit-scrollbar {
+  width: 10px;
+}
+.card_area::-webkit-scrollbar-track {
+  background: transparent;
+}
+.card_area::-webkit-scrollbar-thumb {
+  background: rgba(var(--color-accent-rgb), 0.35);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.card_area::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--color-accent-rgb), 0.6);
+  background-clip: padding-box;
+}
+
+/* Bottom fade hint — a sticky gradient pinned to the bottom of the scroll
+ * viewport, shown only while more content remains below (toggled via the
+ * `data-more` attribute from DecisionPanel). The negative margin makes it
+ * overlay the last line of content instead of adding scroll height. */
+.card_fade {
+  position: sticky;
+  bottom: 0;
+  left: 0;
+  height: 32px;
+  margin-top: -32px;
+  pointer-events: none;
+  background: linear-gradient(
+    to top,
+    rgb(var(--color-bg-rgb)) 10%,
+    rgba(var(--color-bg-rgb), 0) 100%
+  );
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.card_area[data-more="true"] .card_fade {
+  opacity: 1;
+}
+
 @keyframes cardFadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
