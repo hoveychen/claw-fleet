@@ -452,6 +452,10 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           )}
           <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
         </div>
+      </div>
+
+      {/* Pinned footer — options / "Other" / actions stay visible without scrolling. */}
+      <div className={styles.card_footer}>
         <SharedOptionsBlock
           decisionId={decision.id}
           question={q}
@@ -490,9 +494,8 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
             </button>
           </div>
         )}
-      </div>
 
-      <div className={styles.actions}>
+        <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
           onClick={handleDecline}
@@ -525,6 +528,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
             {t("elicitation.next", "Next")}
           </button>
         )}
+        </div>
       </div>
     </div>
   );
@@ -1411,7 +1415,10 @@ function FleetAskCard({
             }}
           />
         )}
+      </div>
 
+      {/* Pinned footer — form fields / options / "Other" / actions stay visible without scrolling. */}
+      <div className={styles.card_footer}>
         {formFields.length > 0 && (
           <div className={styles.elicitation_options}>
             {formFields.map((f) => (
@@ -1485,9 +1492,8 @@ function FleetAskCard({
             </button>
           </div>
         )}
-      </div>
 
-      <div className={styles.actions}>
+        <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
           onClick={handleCancel}
@@ -1520,6 +1526,7 @@ function FleetAskCard({
             {t("fleet_ask.next", "Next")}
           </button>
         )}
+        </div>
       </div>
     </div>
   );
