@@ -470,6 +470,27 @@
   padding: 14px 16px;
 }
 
+/* Pinned footer for the interactive tail (options / "Other" composer / form
+ * fields / action buttons). Sticky to the bottom of the scrollable card_area so
+ * the controls a user needs to respond are ALWAYS visible without scrolling —
+ * only the question/report body above scrolls. Negative margins bleed the
+ * opaque background to the card edges (cancelling .card's 14/16px padding) so
+ * scrolled body content disappears cleanly underneath. max-height guards the
+ * rare many-option case: the footer itself scrolls instead of eating the body. */
+.card_footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin: 8px -16px -14px;
+  padding: 10px 16px 12px;
+  max-height: 55vh;
+  overflow-y: auto;
+  background: var(--color-bg-card);
+  border-top: 1px solid var(--color-border);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
 .card_header {
   display: flex;
   align-items: center;

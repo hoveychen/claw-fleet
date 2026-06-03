@@ -452,6 +452,10 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           )}
           <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
         </div>
+      </div>
+
+      {/* Pinned footer — options / "Other" / actions stay visible without scrolling. */}
+      <div className={styles.card_footer}>
         <SharedOptionsBlock
           decisionId={decision.id}
           question={q}
@@ -490,9 +494,8 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
             </button>
           </div>
         )}
-      </div>
 
-      <div className={styles.actions}>
+        <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
           onClick={handleDecline}
@@ -525,6 +528,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
             {t("elicitation.next", "Next")}
           </button>
         )}
+        </div>
       </div>
     </div>
   );
@@ -1411,7 +1415,10 @@ function FleetAskCard({
             }}
           />
         )}
+      </div>
 
+      {/* Pinned footer — form fields / options / "Other" / actions stay visible without scrolling. */}
+      <div className={styles.card_footer}>
         {formFields.length > 0 && (
           <div className={styles.elicitation_options}>
             {formFields.map((f) => (
@@ -1426,7 +1433,13 @@ function FleetAskCard({
           </div>
         )}
 
-        {opts.length > 0 && (
+        {/* Render unconditionally so the free-text "Other" composer (which lives
+            inside SharedOptionsBlock, outside its options .map) persists even when
+            the agent supplied no options. A zero-option fleet__ask card would
+            otherwise leave the user no way to type a free answer — v1's
+            ElicitationCard renders this block unconditionally, so match it. With
+            an empty options array SharedOptionsBlock renders just the Other input. */}
+        {
           <SharedOptionsBlock
             decisionId={decision.id}
             question={{
@@ -1465,7 +1478,7 @@ function FleetAskCard({
             }
             onAttachmentError={showAttachError}
           />
-        )}
+        }
         {attachError && (
           <div className={styles.elicitation_attach_error} role="alert">
             <span className={styles.elicitation_attach_error_text}>{attachError}</span>
@@ -1479,9 +1492,8 @@ function FleetAskCard({
             </button>
           </div>
         )}
-      </div>
 
-      <div className={styles.actions}>
+        <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
           onClick={handleCancel}
@@ -1514,6 +1526,7 @@ function FleetAskCard({
             {t("fleet_ask.next", "Next")}
           </button>
         )}
+        </div>
       </div>
     </div>
   );
