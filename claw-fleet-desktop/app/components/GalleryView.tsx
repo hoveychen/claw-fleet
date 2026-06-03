@@ -204,6 +204,7 @@ export function GalleryView() {
         const q = filter.toLowerCase();
         const clientMatch =
           s.workspaceName.toLowerCase().includes(q) ||
+          s.aiTitle?.toLowerCase().includes(q) ||
           s.slug?.toLowerCase().includes(q) ||
           s.agentDescription?.toLowerCase().includes(q) ||
           s.ideName?.toLowerCase().includes(q);
