@@ -252,29 +252,6 @@
   background-clip: padding-box;
 }
 
-/* Bottom fade hint — a sticky gradient pinned to the bottom of the scroll
- * viewport, shown only while more content remains below (toggled via the
- * `data-more` attribute from DecisionPanel). The negative margin makes it
- * overlay the last line of content instead of adding scroll height. */
-.card_fade {
-  position: sticky;
-  bottom: 0;
-  left: 0;
-  height: 32px;
-  margin-top: -32px;
-  pointer-events: none;
-  background: linear-gradient(
-    to top,
-    rgb(var(--color-bg-rgb)) 10%,
-    rgba(var(--color-bg-rgb), 0) 100%
-  );
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-.card_area[data-more="true"] .card_fade {
-  opacity: 1;
-}
-
 @keyframes cardFadeIn {
   from { opacity: 0; transform: translateY(6px); }
   to   { opacity: 1; transform: translateY(0); }
