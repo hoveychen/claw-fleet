@@ -16,6 +16,15 @@ use serde_json::Value;
 
 use crate::log_debug;
 
+/// Bumped whenever the set of indexed fields changes. On open, a database
+/// stamped with an older version has its FTS content + per-file offsets wiped
+/// so the next scan fully re-indexes every session under the new rules.
+///
+/// History:
+///   1 — initial (user/assistant message bodies only)
+///   2 — also index the `ai-title` line's `aiTitle` field
+const SCHEMA_VERSION: i64 = 2;
+
 // ── SearchHit ────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -78,6 +87,20 @@ impl SearchIndex {
              );",
         )
         .map_err(|e| format!("sqlite schema: {e}"))?;
+
+        // One-time migration: if the DB was built under an older field set,
+        // wipe content + offsets so the next scan re-indexes everything.
+        let db_version: i64 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap_or(0);
+        if db_version < SCHEMA_VERSION {
+            conn.execute_batch(&format!(
+                "DELETE FROM session_fts;
+                 DELETE FROM index_meta;
+                 PRAGMA user_version = {SCHEMA_VERSION};"
+            ))
+            .map_err(|e| format!("sqlite migrate: {e}"))?;
+        }
 
         Ok(Self { conn })
     }
@@ -299,7 +322,14 @@ impl SearchIndex {
 /// Extract all searchable text from a single JSONL line.
 fn extract_searchable_text(val: &Value) -> String {
     let msg_type = val["type"].as_str().unwrap_or("");
-    // Only index user and assistant messages.
+
+    // The session's AI-generated title lives on its own line; index it so a
+    // session is findable by its human-readable title, not just transcript body.
+    if msg_type == "ai-title" {
+        return val["aiTitle"].as_str().unwrap_or("").to_string();
+    }
+
+    // Otherwise only index user and assistant messages.
     if msg_type != "user" && msg_type != "assistant" {
         return String::new();
     }
@@ -359,4 +389,89 @@ fn sanitize_fts_query(input: &str) -> String {
         .filter(|s| !s.is_empty())
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn extracts_ai_title_text() {
+        let line = json!({
+            "type": "ai-title",
+            "aiTitle": "Continue extracting decision history",
+        });
+        assert_eq!(
+            extract_searchable_text(&line),
+            "Continue extracting decision history"
+        );
+    }
+
+    #[test]
+    fn search_finds_title_only_session() {
+        // A session whose distinctive phrase appears ONLY in its ai-title line,
+        // never in any user/assistant message body.
+        let dir = std::env::temp_dir().join("fleet-search-title-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("title-only.jsonl");
+        let body = "{\"type\":\"ai-title\",\"aiTitle\":\"Continue extracting decision history\"}\n\
+                    {\"type\":\"user\",\"message\":{\"content\":\"hello world\"}}\n";
+        fs::write(&jsonl, body).unwrap();
+
+        let db = dir.join("idx.db");
+        let _ = fs::remove_file(&db);
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-1").unwrap();
+
+        let hits = idx.search("Continue extracting", 10).unwrap();
+        assert_eq!(hits.len(), 1, "title-only phrase should be findable");
+        assert_eq!(hits[0].session_id, "sess-1");
+
+        let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
+    }
+
+    #[test]
+    fn stale_version_db_is_rebuilt_on_open() {
+        let dir = std::env::temp_dir().join("fleet-search-rebuild-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("rebuild.jsonl");
+        fs::write(
+            &jsonl,
+            "{\"type\":\"ai-title\",\"aiTitle\":\"unique rebuild phrase\"}\n",
+        )
+        .unwrap();
+
+        let db = dir.join("rebuild.db");
+        let _ = fs::remove_file(&db);
+
+        // Simulate a DB indexed under the old (v1) schema: index, then stamp
+        // an older user_version so the next open triggers a rebuild.
+        {
+            let idx = SearchIndex::open_at(&db).unwrap();
+            idx.index_session(jsonl.to_str().unwrap(), "sess-r").unwrap();
+            idx.conn
+                .execute_batch("PRAGMA user_version = 1;")
+                .unwrap();
+        }
+
+        // Reopen: migration must clear index_meta so the file re-indexes.
+        let idx = SearchIndex::open_at(&db).unwrap();
+        let remaining: i64 = idx
+            .conn
+            .query_row("SELECT COUNT(*) FROM index_meta", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0, "stale-version DB should be wiped on open");
+
+        // After re-indexing, the title is findable.
+        idx.index_session(jsonl.to_str().unwrap(), "sess-r").unwrap();
+        let hits = idx.search("unique rebuild phrase", 10).unwrap();
+        assert_eq!(hits.len(), 1);
+
+        let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
+    }
 }
