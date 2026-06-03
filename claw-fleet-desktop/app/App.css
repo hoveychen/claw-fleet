@@ -27,7 +27,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
 
   /* Linear-inspired cool neutrals (dark) */
   --color-bg: #08090a;
-  --color-bg-rgb: 8, 9, 10;
   --color-bg-sidebar: var(--color-bg);
   --color-bg-secondary: #18191b;
   --color-bg-tertiary: #0e0f11;
@@ -133,7 +132,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
 
   /* Linear-inspired cool neutrals (light) */
   --color-bg: #ffffff;
-  --color-bg-rgb: 255, 255, 255;
   --color-bg-sidebar: var(--color-bg);
   --color-bg-secondary: #f4f5f8;
   --color-bg-tertiary: #fafbfc;
