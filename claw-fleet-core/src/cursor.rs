@@ -540,6 +540,7 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
             ai_title: if !is_subagent { c.name.clone() } else { None },
             status: session_status,
             token_speed: token_stats.get(&c.composer_id).map_or(0.0, |s| s.0),
+            agent_token_speed: token_stats.get(&c.composer_id).map_or(0.0, |s| s.0),
             total_output_tokens: token_stats.get(&c.composer_id).map_or(0, |s| s.1),
             total_cost_usd: 0.0,
             agent_total_cost_usd: 0.0,

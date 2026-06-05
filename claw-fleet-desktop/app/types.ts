@@ -40,6 +40,10 @@ export interface SessionInfo {
   aiTitle: string | null;
   status: SessionStatus;
   tokenSpeed: number;
+  /** This session's speed + all its subagents' speeds (main sessions only).
+   *  For subagents this equals `tokenSpeed`. Lets a parent card surface the
+   *  speed of its hidden workflow fan-out agents. */
+  agentTokenSpeed: number;
   totalOutputTokens: number;
   totalCostUsd: number;
   agentTotalCostUsd: number;
