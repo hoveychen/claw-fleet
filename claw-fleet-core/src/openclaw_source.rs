@@ -388,6 +388,7 @@ fn parse_openclaw_session(
         ai_title,
         status,
         token_speed,
+        agent_token_speed: token_speed,
         total_output_tokens,
         total_cost_usd: 0.0,
         agent_total_cost_usd: 0.0,
