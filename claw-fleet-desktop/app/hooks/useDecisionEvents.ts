@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
 import { playDecisionAlert } from "../audio";
 import { useDecisionStore } from "../store";
@@ -7,6 +8,7 @@ import type {
   ElicitationRequest,
   FleetAskRequest,
   GuardRequest,
+  PendingDecisions,
   PlanApprovalRequest,
   SessionPendingRequest,
 } from "../types";
@@ -53,6 +55,43 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   // Dedup: re-emitted payloads (e.g. after remount / reconnect) shouldn't
   // double-chime.
   const announcedIds = useRef<Set<string>>(new Set());
+
+  // Mount catch-up: the backend watcher emits each pending request exactly
+  // once, and Tauri events are NOT buffered for listeners that attach later.
+  // On a cold restart while a `fleet elicitation` / `fleet mcp` child process
+  // is still blocking on its poll, that one-shot emit fires before this hook's
+  // listeners are attached — so the decision panel never reappears and the
+  // agent stays blocked until its (default 600s) timeout. Pull the current
+  // pending set once on mount and seed the store directly; the add* actions
+  // dedup by id, so this is safe even when a live event also arrives. Only the
+  // main window pulls — the decision-float window (silent) mirrors the
+  // snapshot handed to it by App.tsx.
+  useEffect(() => {
+    if (silent) return;
+    let cancelled = false;
+    invoke<PendingDecisions>("list_pending_decisions")
+      .then((p) => {
+        if (cancelled || !p) return;
+        p.guard?.forEach((r) => addGuardRequest(r));
+        p.elicitation?.forEach((r) => addElicitationRequest(r));
+        p.fleetAsk?.forEach((r) => addFleetAskRequest(r));
+        p.a2uiRender?.forEach((r) => addA2uiRenderRequest(r));
+        p.planApproval?.forEach((r) => addPlanApprovalRequest(r));
+      })
+      .catch((e) => {
+        console.warn("[decision] mount catch-up list_pending_decisions failed:", e);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    silent,
+    addGuardRequest,
+    addElicitationRequest,
+    addFleetAskRequest,
+    addA2uiRenderRequest,
+    addPlanApprovalRequest,
+  ]);
 
   useEffect(() => {
     const unlisten = listen<GuardRequest>("guard-request", (e) => {
