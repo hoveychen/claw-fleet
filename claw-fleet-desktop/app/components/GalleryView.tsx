@@ -12,8 +12,13 @@ import sessionStyles from "./SessionCard.module.css";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
+// "rateLimited" counts as active: a rate-limited session is unfinished work
+// waiting to resume, so it stays in the default (active-only) view and the
+// active count instead of vanishing into the "show all" tail. Its card keeps a
+// distinct look via RateLimitControls (countdown + resume), and SessionCard's
+// own isActive (live-process pulse / stop button) deliberately excludes it.
 const ACTIVE_STATUSES: SessionStatus[] = [
-  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating",
+  "thinking", "executing", "streaming", "processing", "waitingInput", "active", "delegating", "rateLimited",
 ];
 
 function isActive(s: SessionInfo) {
