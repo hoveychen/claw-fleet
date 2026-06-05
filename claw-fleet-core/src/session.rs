@@ -70,6 +70,11 @@ pub struct SessionInfo {
     pub ai_title: Option<String>,
     pub status: SessionStatus,
     pub token_speed: f64,
+    /// Token speed of this session + all its subagents' speeds (main sessions
+    /// only). For subagents this equals `token_speed`. Lets a parent card show
+    /// the speed of its hidden workflow fan-out agents so the per-card sum
+    /// reconciles with the global aggregate.
+    pub agent_token_speed: f64,
     pub total_output_tokens: u64,
     /// Cumulative USD cost for this session alone (main or subagent).
     pub total_cost_usd: f64,
@@ -1550,6 +1555,7 @@ pub fn parse_session_info(
         ai_title,
         status,
         token_speed: stats.token_speed,
+        agent_token_speed: stats.token_speed,
         total_output_tokens: stats.total_output_tokens,
         total_cost_usd: stats.total_cost_usd,
         agent_total_cost_usd: stats.total_cost_usd,
@@ -1948,11 +1954,17 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     // Aggregate subagent cost into each main session's `agent_total_cost_usd`.
     // Main sessions already hold their own cost in that field from parse; we add
     // the sum of every subagent that points back to them.
+    // Token speed rolls up identically: a parent's `agent_token_speed` starts at
+    // its own speed (set in parse, cached pre-aggregation so no double-count on
+    // cache hits) and gains every subagent's speed — including the workflow
+    // fan-out agents hidden from the session list.
     let mut subagent_cost_by_parent: HashMap<String, f64> = HashMap::new();
+    let mut subagent_speed_by_parent: HashMap<String, f64> = HashMap::new();
     for s in &sessions {
         if s.is_subagent {
             if let Some(pid) = &s.parent_session_id {
                 *subagent_cost_by_parent.entry(pid.clone()).or_insert(0.0) += s.total_cost_usd;
+                *subagent_speed_by_parent.entry(pid.clone()).or_insert(0.0) += s.token_speed;
             }
         }
     }
@@ -1960,6 +1972,9 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         if !session.is_subagent {
             if let Some(extra) = subagent_cost_by_parent.get(&session.id) {
                 session.agent_total_cost_usd += *extra;
+            }
+            if let Some(extra) = subagent_speed_by_parent.get(&session.id) {
+                session.agent_token_speed += *extra;
             }
         }
     }
@@ -2251,6 +2266,7 @@ mod tests {
             ai_title: None,
             status,
             token_speed: 10.0,
+            agent_token_speed: 10.0,
             total_output_tokens: 500,
             total_cost_usd: 0.0,
             agent_total_cost_usd: 0.0,
