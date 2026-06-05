@@ -789,6 +789,21 @@ export interface A2uiRenderRequest {
   timestamp: string;
 }
 
+/**
+ * Snapshot of every decision-panel request currently awaiting a response,
+ * returned by the `list_pending_decisions` Tauri command. The frontend pulls
+ * this on mount to seed the store, covering the cold-restart gap where the
+ * one-shot watcher emit was lost (no Tauri listener attached yet). Field names
+ * are camelCase per the Rust `#[serde(rename_all = "camelCase")]`.
+ */
+export interface PendingDecisions {
+  guard: GuardRequest[];
+  elicitation: ElicitationRequest[];
+  fleetAsk: FleetAskRequest[];
+  a2uiRender: A2uiRenderRequest[];
+  planApproval: PlanApprovalRequest[];
+}
+
 /** Agent is asking via the `fleet__render_a2ui` MCP tool. */
 export interface A2uiRenderDecision {
   kind: "a2ui-render";
