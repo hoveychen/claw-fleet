@@ -1284,6 +1284,17 @@ fn list_session_decisions(
         .list_session_decisions(&session_id, jsonl_path.as_deref())
 }
 
+/// Mount catch-up: return every decision-panel request currently awaiting a
+/// response so the frontend can seed its store on launch. Covers the
+/// cold-restart gap where the one-shot watcher emit was lost because no Tauri
+/// listener was attached yet.
+#[tauri::command]
+fn list_pending_decisions(
+    state: tauri::State<AppState>,
+) -> claw_fleet_core::backend::PendingDecisions {
+    state.backend.read().unwrap().list_pending_decisions()
+}
+
 // ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────────
 
 #[tauri::command]
@@ -3696,6 +3707,7 @@ pub fn run() {
             list_pending_plan_approvals,
             respond_to_plan_approval,
             list_session_decisions,
+            list_pending_decisions,
             connect_feishu,
             poll_feishu_oauth,
             feishu_status,

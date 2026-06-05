@@ -72,6 +72,57 @@ pub struct WaitingAlert {
     pub source: String,
 }
 
+// ── Pending decisions snapshot (mount catch-up) ──────────────────────────────
+
+/// Snapshot of every decision-panel request currently awaiting a response,
+/// across all five file-IPC channels. Returned by [`Backend::list_pending_decisions`]
+/// so the frontend can pull outstanding decisions on mount instead of relying
+/// solely on the one-shot watcher emit (which is lost if no Tauri listener is
+/// attached at emit time — e.g. on a cold app restart while a `fleet
+/// elicitation` / `fleet mcp` child process is still blocking on its poll).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingDecisions {
+    pub guard: Vec<crate::guard::GuardRequest>,
+    pub elicitation: Vec<crate::elicitation::ElicitationRequest>,
+    pub fleet_ask: Vec<crate::mcp_ipc::FleetAskRequest>,
+    pub a2ui_render: Vec<crate::mcp_a2ui_ipc::A2uiRenderRequest>,
+    pub plan_approval: Vec<crate::plan_approval::PlanApprovalRequest>,
+}
+
+/// Fill in each pending request's `workspace_name` / `ai_title` from the
+/// session cache, mirroring `local_backend::resolve_session_display` so
+/// mount-catch-up cards show the same workspace/title labels the live watcher
+/// would have stamped. Only fills empty `workspace_name` and `None` `ai_title`
+/// so a request that already carries display info is left untouched.
+pub fn resolve_pending_display(pending: &mut PendingDecisions, sessions: &[SessionInfo]) {
+    let lookup = |session_id: &str| -> Option<(String, Option<String>)> {
+        sessions
+            .iter()
+            .find(|s| s.id == session_id)
+            .map(|s| (s.workspace_name.clone(), s.ai_title.clone()))
+    };
+    macro_rules! resolve_vec {
+        ($v:expr) => {
+            for req in $v.iter_mut() {
+                if let Some((ws, ai)) = lookup(&req.session_id) {
+                    if req.workspace_name.is_empty() {
+                        req.workspace_name = ws;
+                    }
+                    if req.ai_title.is_none() {
+                        req.ai_title = ai;
+                    }
+                }
+            }
+        };
+    }
+    resolve_vec!(pending.guard);
+    resolve_vec!(pending.elicitation);
+    resolve_vec!(pending.fleet_ask);
+    resolve_vec!(pending.a2ui_render);
+    resolve_vec!(pending.plan_approval);
+}
+
 // ── Unified usage summary for tray / overview ───────────────────────────────
 
 /// A single rate-limit bar (e.g. "5h", "7d Opus", "Premium requests").
@@ -544,6 +595,15 @@ pub trait Backend: Send + Sync {
         feedback: Option<String>,
     ) -> Result<(), String>;
 
+    // ── Pending decisions snapshot (mount catch-up) ─────────────────────
+    /// Snapshot every decision-panel request currently awaiting a response so
+    /// the frontend can seed its store on mount, covering the cold-restart gap
+    /// where the one-shot watcher emit was lost (no Tauri listener attached
+    /// yet). Default impl returns empty; both real backends override.
+    fn list_pending_decisions(&self) -> PendingDecisions {
+        PendingDecisions::default()
+    }
+
     // ── Decision history (per-session log of resolved decision panels) ──
     /// Return all decision records (elicitation + plan-approval + user
     /// prompts extracted from the session jsonl) for a session, oldest-first.
@@ -698,6 +758,101 @@ mod tests {
     use crate::account::{AccountInfo, UsageStats};
 
     // ── SourceUsageSummary::from_claude tests ───────────────────────────────
+
+    // ── resolve_pending_display ─────────────────────────────────────────────
+
+    fn mk_session(id: &str, workspace_name: &str, ai_title: Option<&str>) -> SessionInfo {
+        use crate::session::SessionStatus;
+        SessionInfo {
+            id: id.into(),
+            workspace_path: "/tmp/test".into(),
+            workspace_name: workspace_name.into(),
+            ide_name: None,
+            is_subagent: false,
+            parent_session_id: None,
+            agent_type: None,
+            agent_description: None,
+            slug: None,
+            ai_title: ai_title.map(|s| s.to_string()),
+            status: SessionStatus::Idle,
+            token_speed: 0.0,
+            total_output_tokens: 0,
+            total_cost_usd: 0.0,
+            agent_total_cost_usd: 0.0,
+            cost_speed_usd_per_min: 0.0,
+            last_message_preview: None,
+            last_activity_ms: 0,
+            created_at_ms: 0,
+            jsonl_path: format!("/tmp/{id}.jsonl"),
+            model: None,
+            thinking_level: None,
+            pid: None,
+            pid_precise: false,
+            last_skill: None,
+            context_percent: None,
+            agent_source: "claude-code".into(),
+            last_outcome: None,
+            rate_limit: None,
+            todos: None,
+            compact_count: 0,
+            compact_pre_tokens: 0,
+            compact_post_tokens: 0,
+            compact_cost_usd: 0.0,
+        }
+    }
+
+    #[test]
+    fn resolve_pending_display_fills_empty_workspace_and_title() {
+        use crate::elicitation::{ElicitationQuestion, ElicitationRequest};
+        let mut pending = PendingDecisions::default();
+        pending.elicitation.push(ElicitationRequest {
+            id: "e1".into(),
+            session_id: "s1".into(),
+            workspace_name: String::new(),
+            ai_title: None,
+            questions: vec![ElicitationQuestion {
+                question: "q?".into(),
+                header: "h".into(),
+                options: vec![],
+                multi_select: false,
+            }],
+            timestamp: "t".into(),
+        });
+        let sessions = vec![mk_session("s1", "my-workspace", Some("Fix the bug"))];
+        resolve_pending_display(&mut pending, &sessions);
+        assert_eq!(pending.elicitation[0].workspace_name, "my-workspace");
+        assert_eq!(pending.elicitation[0].ai_title.as_deref(), Some("Fix the bug"));
+    }
+
+    #[test]
+    fn resolve_pending_display_preserves_existing_and_handles_unknown_session() {
+        use crate::elicitation::ElicitationRequest;
+        let mut pending = PendingDecisions::default();
+        // Already-populated workspace must be preserved.
+        pending.elicitation.push(ElicitationRequest {
+            id: "e1".into(),
+            session_id: "s1".into(),
+            workspace_name: "preset-ws".into(),
+            ai_title: Some("preset-title".into()),
+            questions: vec![],
+            timestamp: "t".into(),
+        });
+        // Unknown session → left as-is (empty), no panic.
+        pending.elicitation.push(ElicitationRequest {
+            id: "e2".into(),
+            session_id: "missing".into(),
+            workspace_name: String::new(),
+            ai_title: None,
+            questions: vec![],
+            timestamp: "t".into(),
+        });
+        let sessions = vec![mk_session("s1", "lookup-ws", Some("lookup-title"))];
+        resolve_pending_display(&mut pending, &sessions);
+        assert_eq!(pending.elicitation[0].workspace_name, "preset-ws");
+        assert_eq!(pending.elicitation[0].ai_title.as_deref(), Some("preset-title"));
+        assert_eq!(pending.elicitation[1].workspace_name, "");
+        assert_eq!(pending.elicitation[1].ai_title, None);
+    }
 
     #[test]
     fn from_claude_all_windows() {
