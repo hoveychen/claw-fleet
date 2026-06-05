@@ -908,6 +908,9 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   activeDecisionId: null,
 
   addGuardRequest: (req) => {
+    // Dedup by id: mount catch-up may seed the same request the live watcher
+    // also emits. Skip the duplicate (and its chime + LLM analysis) entirely.
+    if (get().decisions.some((d) => d.id === req.id)) return;
     const decision: PendingDecision = {
       kind: "guard",
       id: req.id,
@@ -950,6 +953,9 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   },
 
   addElicitationRequest: (req) => {
+    // Dedup by id: mount catch-up may seed the same request the live watcher
+    // also emits. Skip the duplicate (and its chime) entirely.
+    if (get().decisions.some((d) => d.id === req.id)) return;
     const decision: PendingDecision = {
       kind: "elicitation",
       id: req.id,
@@ -1033,6 +1039,9 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   },
 
   addPlanApprovalRequest: (req) => {
+    // Dedup by id: mount catch-up may seed the same request the live watcher
+    // also emits. Skip the duplicate (and its chime) entirely.
+    if (get().decisions.some((d) => d.id === req.id)) return;
     const decision: PendingDecision = {
       kind: "plan-approval",
       id: req.id,
