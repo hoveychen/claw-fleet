@@ -214,6 +214,7 @@ mod tests {
             ai_title: None,
             status,
             token_speed: 0.0,
+            agent_token_speed: 0.0,
             total_output_tokens: 0,
             total_cost_usd: 0.0,
             agent_total_cost_usd: 0.0,

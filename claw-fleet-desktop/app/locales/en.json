@@ -538,6 +538,7 @@
     "tip_slug": "Session ID slug: {{slug}}",
     "tip_tokens": "Total output tokens generated",
     "tip_speed": "Output token generation speed",
+    "tip_speed_agent": "Self: {{self}} · Agent total (main + subagents): {{total}} tok/s",
     "tip_context": "Context window usage: {{percent}}%",
     "tip_cost": "Session cost (USD)",
     "tip_cost_agent": "Self: ${{self}} · Agent total (main + subagents): ${{total}}",

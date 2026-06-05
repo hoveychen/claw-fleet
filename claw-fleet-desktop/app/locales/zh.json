@@ -535,6 +535,7 @@
     "tip_slug": "会话 ID 标识：{{slug}}",
     "tip_tokens": "已生成的 Token 总数",
     "tip_speed": "Token 输出速度",
+    "tip_speed_agent": "自身: {{self}} · Agent 合计 (主 + 子代理): {{total}} tok/s",
     "tip_context": "上下文窗口使用率：{{percent}}%",
     "tip_cost": "会话花费 (USD)",
     "tip_cost_agent": "自身: ${{self}} · Agent 合计 (主 + 子代理): ${{total}}",
