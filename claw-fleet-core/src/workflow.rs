@@ -1258,6 +1258,75 @@ fn find_script_for_run(session_dir: &Path, run_id: &str) -> Option<String> {
     None
 }
 
+/// Fallback script resolver for `scriptPath`-invoked runs.
+///
+/// When a Workflow is launched with `{scriptPath}` (or a `name`) instead of an
+/// inline `{script}`, the SDK does NOT persist a copy under
+/// `workflows/scripts/`, so [`find_script_for_run`] finds nothing and the DAG
+/// comes back empty ("无法解析编排结构"). The script's real location is still
+/// recorded in the parent transcript: every Workflow tool_result prints a
+/// `Transcript dir: …/<run-id>` line and a `Script file: <path>` line. We match
+/// the tool_result to this run by its transcript dir and read that file.
+fn script_path_from_transcript(session_dir: &Path, run_id: &str) -> Option<String> {
+    let dir_name = session_dir.file_name()?.to_str()?;
+    let jsonl = session_dir.parent()?.join(format!("{dir_name}.jsonl"));
+    let body = fs::read_to_string(&jsonl).ok()?;
+    for line in body.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let content = v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .or_else(|| v.get("content"));
+        let Some(blocks) = content.and_then(|c| c.as_array()) else {
+            continue;
+        };
+        for b in blocks {
+            if b.get("type").and_then(|t| t.as_str()) != Some("tool_result") {
+                continue;
+            }
+            let text = match b.get("content") {
+                Some(serde_json::Value::String(s)) => s.clone(),
+                Some(serde_json::Value::Array(items)) => items
+                    .iter()
+                    .filter_map(|x| x.get("text").and_then(|t| t.as_str()))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+                _ => continue,
+            };
+            if let Some(path) = match_script_file_line(&text, run_id) {
+                if let Ok(script) = fs::read_to_string(&path) {
+                    return Some(script);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Pull the `Script file: <path>` value out of a Workflow tool_result, but only
+/// when its `Transcript dir:` line resolves to `run_id` (the dir basename).
+fn match_script_file_line(text: &str, run_id: &str) -> Option<String> {
+    let mut matches_run = false;
+    let mut script: Option<String> = None;
+    for line in text.lines() {
+        let l = line.trim();
+        if let Some(rest) = l.strip_prefix("Transcript dir:") {
+            if rest.trim().trim_end_matches('/').rsplit('/').next() == Some(run_id) {
+                matches_run = true;
+            }
+        } else if let Some(rest) = l.strip_prefix("Script file:") {
+            script = Some(rest.trim().to_string());
+        }
+    }
+    if matches_run {
+        script
+    } else {
+        None
+    }
+}
+
 /// Read the first user-message text from an agent's `agent-<id>.jsonl`
 /// transcript. This is the prompt the workflow passed to the agent, used to
 /// bind the agent back to its script call-site. Scans only the first few lines
@@ -1363,7 +1432,8 @@ pub fn discover_workflow_trees_in_dir(session_dir: &Path) -> Vec<WorkflowTree> {
             a.prompt_text = read_agent_first_prompt(&wf_dir, &a.agent_id);
         }
 
-        let script_body = find_script_for_run(session_dir, &run_id);
+        let script_body = find_script_for_run(session_dir, &run_id)
+            .or_else(|| script_path_from_transcript(session_dir, &run_id));
         let (name, description, phases) = script_body
             .as_deref()
             .map(parse_script_meta)
@@ -1555,6 +1625,56 @@ phase('Probe')
         assert_eq!(t.agents[0].status, WorkflowAgentStatus::Done);
         assert_eq!(t.done_count(), 1);
         assert!(!t.is_running());
+
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_falls_back_to_script_file_from_transcript() {
+        // Repro for "无法解析编排结构": a `scriptPath`-invoked run leaves NO
+        // persisted copy under `workflows/scripts/`. The only pointer to the
+        // script is the `Script file: <path>` line the Workflow tool_result
+        // records in the parent transcript. Without a fallback, phases+nodes
+        // come back empty and the UI drops to the flat agent-list fallback.
+        let tmp = std::env::temp_dir().join(format!("wfviz-spath-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sid-spath");
+        let wf_dir = session_dir
+            .join("subagents")
+            .join("workflows")
+            .join("wf_spath-1");
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(
+            wf_dir.join("journal.jsonl"),
+            "{\"type\":\"started\",\"key\":\"v2:k\",\"agentId\":\"a1\"}\n",
+        )
+        .unwrap();
+
+        // The actual script lives at an arbitrary external path (mimicking the
+        // real `/tmp/wofdec/*.js` case) — NOT under workflows/scripts/.
+        let script_path = tmp.join("my_external_flow.js");
+        fs::write(&script_path, CANONICAL).unwrap();
+
+        // Parent transcript: one Workflow tool_result pointing at that script.
+        let parent_jsonl = session_dir.parent().unwrap().join("sid-spath.jsonl");
+        let result_text = format!(
+            "Workflow launched in background. Task ID: t1\nTranscript dir: {}\nScript file: {}\n(Edit this file with Write/Edit and re-invoke …)",
+            wf_dir.to_string_lossy(),
+            script_path.to_string_lossy(),
+        );
+        let line = serde_json::json!({
+            "type": "user",
+            "message": { "content": [ { "type": "tool_result", "content": result_text } ] }
+        })
+        .to_string();
+        fs::write(&parent_jsonl, format!("{line}\n")).unwrap();
+
+        let trees = discover_workflow_trees_in_dir(&session_dir);
+        assert_eq!(trees.len(), 1);
+        let t = &trees[0];
+        assert_eq!(t.name.as_deref(), Some("x"), "name from external script");
+        assert_eq!(t.phases.len(), 2, "phases parse from external script");
+        assert!(!t.nodes.is_empty(), "DAG nodes parse from external script");
 
         let _ = fs::remove_dir_all(&tmp);
     }
