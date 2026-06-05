@@ -447,17 +447,63 @@
   padding: 14px 16px;
 }
 
-/* Pinned footer for the interactive tail (options / "Other" composer / form
- * fields / action buttons). Sticky to the bottom of the scrollable card_area so
- * the controls a user needs to respond are ALWAYS visible without scrolling —
- * only the question/report body above scrolls. Negative margins bleed the
- * opaque background to the card edges (cancelling .card's 14/16px padding) so
- * scrolled body content disappears cleanly underneath. max-height guards the
- * rare many-option case: the footer itself scrolls instead of eating the body. */
+/* Flex layout for cards with a pinned interactive tail (elicitation / fleet-ask).
+ * The card becomes a height-bounded flex column: a scrollable body region
+ * (.card_scroll) takes the slack, and .card_footer is a flex-none always-visible
+ * tail. This REPLACES the earlier `position: sticky` footer, which got its offset
+ * stuck at a stale value in macOS WKWebView when a second decision arrived while
+ * the panel was open — leaving the option list rendered but pushed out of view
+ * (blank, yet still hover-clickable). A flex-none footer has no sticky offset to
+ * go stale, so the controls can never be mispositioned by a dynamic re-layout. */
+.card_area_flex {
+  display: flex;
+  /* The card fills card_area and owns its own internal scroll; card_area itself
+   * no longer scrolls (the body does), so clip rather than double-scroll. */
+  overflow: hidden;
+}
+.card_area_flex > .card {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.card_flex {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.card_scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Always-visible scrollbar affordance, same rationale as .card_area's (the macOS
+ * overlay scrollbar hides at rest with an external mouse, so the "more below" cue
+ * is lost). Now that the body scrolls inside .card_scroll, the gutter lives here. */
+.card_scroll::-webkit-scrollbar {
+  width: 10px;
+}
+.card_scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.card_scroll::-webkit-scrollbar-thumb {
+  background: rgba(var(--color-accent-rgb), 0.35);
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+.card_scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--color-accent-rgb), 0.6);
+  background-clip: padding-box;
+}
+
+/* Always-visible interactive tail (options / "Other" composer / form fields /
+ * action buttons). flex-none so it keeps its natural height at the bottom of the
+ * card while .card_scroll absorbs a tall body above it. Negative margins bleed
+ * the opaque background to the card edges (cancelling .card's 14/16px padding) so
+ * scrolled body content ends cleanly at the footer's top border. max-height +
+ * overflow guard the rare many-option case: the footer scrolls instead of
+ * crowding the body region down to nothing. */
 .card_footer {
-  position: sticky;
-  bottom: 0;
-  z-index: 1;
+  flex: 0 0 auto;
   margin: 8px -16px -14px;
   padding: 10px 16px 12px;
   max-height: 55vh;
