@@ -376,7 +376,8 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   );
 
   return (
-    <div className={styles.card}>
+    <div className={`${styles.card} ${styles.card_flex}`}>
+      <div className={styles.card_scroll}>
       <div className={styles.card_header}>
         <svg
           className={styles.card_icon_question}
@@ -453,8 +454,10 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
         </div>
       </div>
+      </div>
 
-      {/* Pinned footer — options / "Other" / actions stay visible without scrolling. */}
+      {/* Always-visible footer — options / "Other" / actions stay reachable
+          without scrolling (flex-none tail; the body scrolls in .card_scroll). */}
       <div className={styles.card_footer}>
         <SharedOptionsBlock
           decisionId={decision.id}
@@ -1324,7 +1327,8 @@ function FleetAskCard({
   );
 
   return (
-    <div className={styles.card}>
+    <div className={`${styles.card} ${styles.card_flex}`}>
+      <div className={styles.card_scroll}>
       <div className={styles.card_header}>
         <svg
           className={styles.card_icon_question}
@@ -1416,8 +1420,10 @@ function FleetAskCard({
           />
         )}
       </div>
+      </div>
 
-      {/* Pinned footer — form fields / options / "Other" / actions stay visible without scrolling. */}
+      {/* Always-visible footer — form fields / options / "Other" / actions stay
+          reachable without scrolling (flex-none tail; body scrolls in .card_scroll). */}
       <div className={styles.card_footer}>
         {formFields.length > 0 && (
           <div className={styles.elicitation_options}>
@@ -1903,8 +1909,17 @@ export function DecisionPanel({
           </button>
         )}
 
-        {/* Card area — scrollable, shows the active decision */}
-        <div className={styles.card_area} ref={cardAreaRef}>
+        {/* Card area — scrollable, shows the active decision. Elicitation /
+            fleet-ask cards own their internal scroll + flex-none footer, so the
+            area switches to a clip-flex container for them (see .card_area_flex). */}
+        <div
+          className={`${styles.card_area} ${
+            active.kind === "elicitation" || active.kind === "fleet-ask"
+              ? styles.card_area_flex
+              : ""
+          }`}
+          ref={cardAreaRef}
+        >
           <DecisionCard key={active.id} decision={active} compact={compact} />
         </div>
 
