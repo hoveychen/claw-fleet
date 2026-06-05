@@ -1995,6 +1995,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 | SessionStatus::Delegating
                 | SessionStatus::Processing
                 | SessionStatus::WaitingInput
+                | SessionStatus::RateLimited
         );
         let b_active = matches!(
             b.status,
@@ -2004,6 +2005,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 | SessionStatus::Delegating
                 | SessionStatus::Processing
                 | SessionStatus::WaitingInput
+                | SessionStatus::RateLimited
         );
         b_active
             .cmp(&a_active)
@@ -2042,6 +2044,7 @@ pub fn sort_sessions(sessions: &mut Vec<SessionInfo>) {
                 | SessionStatus::Delegating
                 | SessionStatus::Processing
                 | SessionStatus::WaitingInput
+                | SessionStatus::RateLimited
         );
         let b_active = matches!(
             b.status,
@@ -2051,6 +2054,7 @@ pub fn sort_sessions(sessions: &mut Vec<SessionInfo>) {
                 | SessionStatus::Delegating
                 | SessionStatus::Processing
                 | SessionStatus::WaitingInput
+                | SessionStatus::RateLimited
         );
         b_active
             .cmp(&a_active)
@@ -2290,6 +2294,28 @@ mod tests {
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
         }
+    }
+
+    #[test]
+    fn sort_treats_rate_limited_as_active() {
+        // A rate-limited session is unfinished work waiting to resume, so it
+        // must sort alongside the active sessions (ahead of Idle), not get
+        // buried in the idle tail.
+        let mut active = make_session(SessionStatus::Thinking);
+        active.created_at_ms = 100;
+        let mut rate_limited = make_session(SessionStatus::RateLimited);
+        rate_limited.created_at_ms = 200;
+        let mut idle = make_session(SessionStatus::Idle);
+        idle.created_at_ms = 50;
+
+        let mut sessions = vec![idle, rate_limited, active];
+        sort_sessions(&mut sessions);
+
+        // Active group first (Thinking, RateLimited) ordered by created_at asc,
+        // then the Idle session.
+        assert_eq!(sessions[0].status, SessionStatus::Thinking);
+        assert_eq!(sessions[1].status, SessionStatus::RateLimited);
+        assert_eq!(sessions[2].status, SessionStatus::Idle);
     }
 
     // ── determine_status tests ──────────────────────────────────────────────
