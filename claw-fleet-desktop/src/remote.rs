@@ -813,6 +813,21 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get("/plan-approval/pending").unwrap_or_default()
     }
 
+    fn list_pending_decisions(&self) -> claw_fleet_core::backend::PendingDecisions {
+        // Same five `/…/pending` endpoints the live poller threads consume,
+        // aggregated into one snapshot for the frontend's mount catch-up.
+        let mut pending = claw_fleet_core::backend::PendingDecisions {
+            guard: self.probe.get("/guard/pending").unwrap_or_default(),
+            elicitation: self.probe.get("/elicitation/pending").unwrap_or_default(),
+            fleet_ask: self.probe.get("/fleet-ask/pending").unwrap_or_default(),
+            a2ui_render: self.probe.get("/a2ui-render/pending").unwrap_or_default(),
+            plan_approval: self.probe.get("/plan-approval/pending").unwrap_or_default(),
+        };
+        let sessions = self.list_sessions();
+        claw_fleet_core::backend::resolve_pending_display(&mut pending, &sessions);
+        pending
+    }
+
     fn respond_to_plan_approval(
         &self,
         id: &str,
