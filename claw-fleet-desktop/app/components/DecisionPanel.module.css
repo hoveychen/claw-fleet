@@ -464,15 +464,23 @@
 .card_area_flex > .card {
   flex: 1 1 auto;
   min-height: 0;
+  /* min-width:0 lets the flex item shrink to the panel width instead of being
+   * forced to its content's min-content width. Without it, a long unbreakable
+   * run (e.g. `Skill/Agent/WebSearch/.../ExitPlanMode`) makes the card wider
+   * than its `.card_area_flex { overflow:hidden }` clip box and gets hard-clipped
+   * at the right border — the missing counterpart to the min-height:0 above. */
+  min-width: 0;
 }
 .card_flex {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  min-width: 0;
 }
 .card_scroll {
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
 }
 /* Always-visible scrollbar affordance, same rationale as .card_area's (the macOS
@@ -914,6 +922,13 @@
   color: var(--color-text);
   margin-bottom: 6px;
   line-height: 1.4;
+  /* Force long unbreakable runs (e.g. `Skill/Agent/.../ExitPlanMode`, URLs) to
+   * wrap rather than establish a wide min-content that pushes the card past the
+   * panel. Belt-and-suspenders to the flex `min-width:0` above: that lets the
+   * card shrink, this guarantees the text actually breaks instead of h-scrolling.
+   * `anywhere` only breaks when there's no better opportunity, so normal CJK /
+   * spaced text is unaffected. */
+  overflow-wrap: anywhere;
 }
 
 .elicitation_header {
