@@ -2161,6 +2161,34 @@ impl Backend for LocalBackend {
             .collect()
     }
 
+    fn list_pending_decisions(&self) -> claw_fleet_core::backend::PendingDecisions {
+        let mut pending = claw_fleet_core::backend::PendingDecisions {
+            guard: crate::guard::list_pending_requests()
+                .iter()
+                .filter_map(|id| crate::guard::read_request(id))
+                .collect(),
+            elicitation: crate::elicitation::list_pending_requests()
+                .iter()
+                .filter_map(|id| crate::elicitation::read_request(id))
+                .collect(),
+            fleet_ask: claw_fleet_core::mcp_ipc::list_pending_requests()
+                .iter()
+                .filter_map(|id| claw_fleet_core::mcp_ipc::read_request(id))
+                .collect(),
+            a2ui_render: claw_fleet_core::mcp_a2ui_ipc::list_pending_requests()
+                .iter()
+                .filter_map(|id| claw_fleet_core::mcp_a2ui_ipc::read_request(id))
+                .collect(),
+            plan_approval: crate::plan_approval::list_pending_requests()
+                .iter()
+                .filter_map(|id| crate::plan_approval::read_request(id))
+                .collect(),
+        };
+        let sessions = self.sessions.lock().unwrap().clone();
+        claw_fleet_core::backend::resolve_pending_display(&mut pending, &sessions);
+        pending
+    }
+
     fn respond_to_plan_approval(
         &self,
         id: &str,
