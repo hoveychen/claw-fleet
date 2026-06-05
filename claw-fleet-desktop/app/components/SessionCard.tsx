@@ -233,12 +233,28 @@ export function StatusBadge({ status }: { status: SessionStatus }) {
 
 // ── Token speed ───────────────────────────────────────────────────────────────
 
-function TokenSpeed({ speed }: { speed: number }) {
+function TokenSpeed({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
-  if (speed < 0.5) return null;
+  const own = session.tokenSpeed;
+  // Roll the hidden workflow fan-out agents' speed into the main session so the
+  // per-card sum reconciles with the global aggregate. Subagents show own only.
+  const agentTotal = session.agentTokenSpeed ?? own;
+  const hasSubagentSpeed = !session.isSubagent && agentTotal > own + 0.5;
+  if (agentTotal < 0.5) return null;
   return (
-    <span className={styles.speed} title={t("card.tip_speed")}>
-      {speed.toFixed(1)} <span className={styles.speed_unit}>{t("tok_s")}</span>
+    <span
+      className={styles.speed}
+      title={
+        hasSubagentSpeed
+          ? t("card.tip_speed_agent", { self: own.toFixed(1), total: agentTotal.toFixed(1) })
+          : t("card.tip_speed")
+      }
+    >
+      {own.toFixed(1)}
+      {hasSubagentSpeed && (
+        <span className={styles.speed_total}> · {agentTotal.toFixed(1)}</span>
+      )}{" "}
+      <span className={styles.speed_unit}>{t("tok_s")}</span>
     </span>
   );
 }
@@ -532,7 +548,7 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
 
       {/* Footer row */}
       <div className={styles.footer}>
-        <TokenSpeed speed={session.tokenSpeed} />
+        <TokenSpeed session={session} />
         <span className={styles.tokens} title={t("card.tip_tokens")}>
           {session.totalOutputTokens.toLocaleString()} {t("tokens")}
         </span>
