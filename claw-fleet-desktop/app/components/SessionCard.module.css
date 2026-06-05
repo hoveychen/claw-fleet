@@ -326,6 +326,8 @@
   opacity: 0.7;
 }
 
+.speed_total { color: var(--color-warning, #e8a838); font-weight: 500; }
+
 .tokens { margin-left: auto; }
 .cost { color: var(--color-text-dim); }
 .cost_total { color: var(--color-warning, #e8a838); font-weight: 500; }
