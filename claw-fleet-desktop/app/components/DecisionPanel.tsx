@@ -1790,8 +1790,17 @@ export function DecisionPanel({
   useEffect(() => {
     const el = cardAreaRef.current;
     if (!el) return;
+    // Elicitation / fleet-ask cards clip `.card_area` (overflow:hidden) and scroll
+    // their body inside an inner `.card_scroll` instead — so `.card_area` itself
+    // can never overflow vertically. Measure the real scroller: prefer the inner
+    // `.card_scroll` when present, else `.card_area`. Without this, the widen-on-
+    // overflow trigger reads scrollH==clientH on `.card_area` and never fires, so
+    // the panel stays pinned at base width and the body reflows narrow + scrolls.
+    const scroller = () =>
+      (el.querySelector(`.${styles.card_scroll}`) as HTMLElement | null) ?? el;
     const check = () => {
-      if (widthTier < widthTiers.length - 1 && el.scrollHeight > el.clientHeight + 2) {
+      const s = scroller();
+      if (widthTier < widthTiers.length - 1 && s.scrollHeight > s.clientHeight + 2) {
         setWidthTier((t) => Math.min(t + 1, widthTiers.length - 1));
       }
     };
@@ -1799,6 +1808,8 @@ export function DecisionPanel({
     ro.observe(el);
     const content = el.firstElementChild;
     if (content) ro.observe(content);
+    const inner = el.querySelector(`.${styles.card_scroll}`);
+    if (inner) ro.observe(inner);
     check();
     return () => ro.disconnect();
   }, [widthTier, widthTiers, active?.id]);
