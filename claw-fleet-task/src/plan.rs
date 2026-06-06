@@ -12,6 +12,10 @@ use serde::{Deserialize, Serialize};
 use crate::dag;
 use crate::pitem::{PItem, PItemId, PItemStatus, ResourceName};
 
+// [REQ-002] Task-level container: an immutable-by-convention map of P-item id →
+// P-item plus the accessors the scheduler needs. `node_ids()` gives a
+// deterministic iteration order; `validate()` is the pre-run integrity gate
+// (reference completeness + acyclicity).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DagPlan {
@@ -24,6 +28,28 @@ pub struct ResourceConflict {
     pub a: PItemId,
     pub b: PItemId,
     pub resource: ResourceName,
+}
+
+/// One auto-skip event produced by [`DagPlan::propagate_skip_with_evidence`].
+///
+/// [REQ-007] requires every skipped P-item to carry the decision evidence the
+/// deviation ledger needs to trace *why* a node was skipped: the id, a
+/// human-readable reason, the wall-clock timestamp, and the session that drove
+/// the skip (the master/scheduler session that ran propagation). The deviation
+/// ledger consumer (P8 `deviation_ledger`, P9 `actions`) turns each record into
+/// a ledger / state-transition entry so users can query which P-items were
+/// auto-skipped because of an upstream failure and when.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkipRecord {
+    /// The P-item that was flipped to `Skipped`.
+    pub p_item_id: PItemId,
+    /// Why it was skipped — names the failed upstream ancestor that poisoned it.
+    pub skip_reason: String,
+    /// Unix epoch seconds the skip was decided.
+    pub skipped_at_timestamp: i64,
+    /// The session that ran propagation (master/scheduler), if known. `None`
+    /// when propagation runs outside a session context (e.g. a unit test).
+    pub skipped_by_session_id: Option<String>,
 }
 
 /// Reference-integrity issue surfaced by `validate`.
@@ -62,9 +88,12 @@ impl DagPlan {
         self.items.get_mut(id)
     }
 
-    /// Stable list of node ids — sorted so iteration order is deterministic
-    /// and tests can compare against a fixed order.
-    fn node_ids(&self) -> Vec<PItemId> {
+    /// Stable list of node ids — sorted lexicographically so iteration order is
+    /// deterministic regardless of `HashMap` insertion order, and tests/schedulers
+    /// can compare against a fixed order.
+    // [REQ-002] Deterministic node iteration: the scheduler and traceability
+    // layer both depend on a stable ordering that does not vary across runs.
+    pub fn node_ids(&self) -> Vec<PItemId> {
         let mut ids: Vec<PItemId> = self.items.keys().cloned().collect();
         ids.sort();
         ids
@@ -90,6 +119,9 @@ impl DagPlan {
     }
 
     /// Reference + acyclicity check. Returns the first issue encountered.
+    // [REQ-002] Pre-run integrity gate: every `depends_on` must resolve to a
+    // node in the plan, and the graph must be acyclic, before the scheduler
+    // dispatches anything.
     pub fn validate(&self) -> Result<(), PlanValidationError> {
         for (id, p) in &self.items {
             for d in &p.depends_on {
@@ -110,6 +142,9 @@ impl DagPlan {
     /// IDs of P-items currently `WaitDeps` whose every dependency is settled
     /// (`Done` or `Skipped`). Scheduler uses this as the candidate set before
     /// applying resource-lock filtering.
+    // [REQ-014] Returns the `WaitDeps` nodes whose `depends_on` are all terminal
+    // (Done/Skipped — Failed does not unblock; see `unblocks_downstream`). The
+    // result is sorted for determinism so the scheduler picks reproducibly.
     pub fn unblocked_items(&self) -> Vec<PItemId> {
         let mut out: Vec<PItemId> = self
             .items
@@ -129,11 +164,18 @@ impl DagPlan {
         out
     }
 
-    /// All pairs `(a, b, resource)` in `candidates` that share at least one
-    /// resource. Pairs are emitted once with `a < b` for determinism.
+    /// All pairs `(a, b, resource)` in `candidates` that contend for the same
+    /// resource. Each *pair* appears at most once (`a < b`), even when the two
+    /// items share several resources — the lexicographically-smallest shared
+    /// resource is reported. The returned vec is ordered by `(a, b)` so the
+    /// scheduler sees a deterministic, duplicate-free conflict set.
+    // [REQ-015][REQ-049] Resource-conflict detection: the scheduler refuses to
+    // run a conflicting pair concurrently. Pairs are de-duplicated and sorted so
+    // two items contending on multiple resources don't double-count.
     pub fn resource_conflicts(&self, candidates: &[PItemId]) -> Vec<ResourceConflict> {
         let mut sorted: Vec<&PItemId> = candidates.iter().collect();
         sorted.sort();
+        sorted.dedup();
         let mut out = Vec::new();
         for i in 0..sorted.len() {
             for j in (i + 1)..sorted.len() {
@@ -143,14 +185,19 @@ impl DagPlan {
                     continue;
                 };
                 let set_a: HashSet<&ResourceName> = pa.resources.iter().collect();
-                for r in &pb.resources {
-                    if set_a.contains(r) {
-                        out.push(ResourceConflict {
-                            a: a.clone(),
-                            b: b.clone(),
-                            resource: r.clone(),
-                        });
-                    }
+                // Report the smallest shared resource so the pair is emitted at
+                // most once and the choice is deterministic.
+                let shared = pb
+                    .resources
+                    .iter()
+                    .filter(|r| set_a.contains(*r))
+                    .min();
+                if let Some(r) = shared {
+                    out.push(ResourceConflict {
+                        a: a.clone(),
+                        b: b.clone(),
+                        resource: r.clone(),
+                    });
                 }
             }
         }
@@ -159,11 +206,46 @@ impl DagPlan {
 
     /// Transitively flip every `WaitDeps` descendant of a `Failed` ancestor
     /// to `Skipped`. Already-terminal descendants are left alone. Returns the
-    /// set of newly-skipped IDs.
+    /// sorted set of newly-skipped IDs.
     ///
     /// Convention: `Failed` poisons; `Skipped` and `Done` both unblock and do
     /// not poison. So a `Skipped` parent leaves children to run normally.
+    ///
+    /// This is the bare-id form kept for callers that only need the set of
+    /// skipped ids (scheduler, `actions::mark_failed`). When the deviation
+    /// ledger needs the *evidence* behind each skip — reason, timestamp,
+    /// triggering session — use [`propagate_skip_with_evidence`] instead
+    /// ([REQ-007]); this method delegates to it and discards the evidence.
     pub fn propagate_skip(&mut self) -> Vec<PItemId> {
+        let mut ids: Vec<PItemId> = self
+            .propagate_skip_with_evidence(0, None)
+            .into_iter()
+            .map(|r| r.p_item_id)
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    /// Same transitive skip propagation as [`propagate_skip`], but returns a
+    /// [`SkipRecord`] for each newly-skipped P-item carrying the decision
+    /// evidence the deviation ledger tracks: the skip reason (which failed
+    /// upstream ancestor poisoned it), the timestamp, and the session that ran
+    /// propagation. Records are returned in sorted-by-id order for determinism.
+    ///
+    /// `now` is the Unix-epoch-seconds timestamp to stamp on each skip (the
+    /// caller passes `chrono::Utc::now().timestamp()`; tests pass a fixed
+    /// value). `session_id` is the master/scheduler session driving the skip,
+    /// if any. [REQ-007]
+    ///
+    /// The returned records are the evidence the master (P9) turns into
+    /// `WaitDeps/WaitResource → Skipped` entries in the state-transition audit
+    /// log (`task-audit.jsonl`, via `claw_fleet_core::deviation_ledger`) so each
+    /// auto-skip's (from, to, ts, trigger=REQ-007) is persisted. [REQ-008] [REQ-039]
+    pub fn propagate_skip_with_evidence(
+        &mut self,
+        now: i64,
+        session_id: Option<String>,
+    ) -> Vec<SkipRecord> {
         // Forward adjacency: dep → [dependants]
         let mut dependants: HashMap<PItemId, Vec<PItemId>> = HashMap::new();
         for (id, p) in &self.items {
@@ -172,16 +254,19 @@ impl DagPlan {
             }
         }
 
-        let mut newly_skipped: Vec<PItemId> = Vec::new();
-        let mut frontier: Vec<PItemId> = self
+        // Seed the frontier with the failed roots. We carry, alongside each
+        // frontier node, the originating failed ancestor so a skipped child can
+        // name *why* it was skipped (which upstream failure poisoned its chain).
+        let mut newly_skipped: Vec<SkipRecord> = Vec::new();
+        let mut frontier: Vec<(PItemId, PItemId)> = self
             .items
             .iter()
             .filter(|(_, p)| matches!(p.status, PItemStatus::Failed(_)))
-            .map(|(id, _)| id.clone())
+            .map(|(id, _)| (id.clone(), id.clone()))
             .collect();
 
         let mut visited: HashSet<PItemId> = HashSet::new();
-        while let Some(node) = frontier.pop() {
+        while let Some((node, failed_root)) = frontier.pop() {
             if !visited.insert(node.clone()) {
                 continue;
             }
@@ -192,13 +277,22 @@ impl DagPlan {
                     };
                     if matches!(child.status, PItemStatus::WaitDeps | PItemStatus::WaitResource) {
                         child.status = PItemStatus::Skipped;
-                        newly_skipped.push(c.clone());
-                        frontier.push(c);
+                        newly_skipped.push(SkipRecord {
+                            p_item_id: c.clone(),
+                            skip_reason: format!(
+                                "auto-skipped: upstream P-item '{failed_root}' failed"
+                            ),
+                            skipped_at_timestamp: now,
+                            skipped_by_session_id: session_id.clone(),
+                        });
+                        // The originating failed root propagates further down so
+                        // a grand-child blames the same root failure.
+                        frontier.push((c, failed_root.clone()));
                     }
                 }
             }
         }
-        newly_skipped.sort();
+        newly_skipped.sort_by(|a, b| a.p_item_id.cmp(&b.p_item_id));
         newly_skipped
     }
 }
@@ -275,6 +369,54 @@ mod tests {
         ));
     }
 
+    /// [REQ-002] `node_ids()` must be deterministic regardless of the order
+    /// items were inserted into the underlying HashMap. Build the same plan two
+    /// ways (forward + reversed insertion) and assert identical ordering.
+    #[test]
+    fn node_ids_is_deterministic_across_insertion_order() {
+        let forward = DagPlan::from_items(vec![
+            item("a", &[], &[], PItemStatus::WaitDeps),
+            item("b", &[], &[], PItemStatus::WaitDeps),
+            item("c", &[], &[], PItemStatus::WaitDeps),
+        ]);
+        let reversed = DagPlan::from_items(vec![
+            item("c", &[], &[], PItemStatus::WaitDeps),
+            item("b", &[], &[], PItemStatus::WaitDeps),
+            item("a", &[], &[], PItemStatus::WaitDeps),
+        ]);
+        assert_eq!(forward.node_ids(), vec!["a", "b", "c"]);
+        assert_eq!(forward.node_ids(), reversed.node_ids());
+    }
+
+    /// [REQ-002] Basic accessors exist and behave: get / get_mut / len.
+    #[test]
+    fn basic_accessors() {
+        let mut plan = DagPlan::from_items(vec![item("a", &[], &[], PItemStatus::WaitDeps)]);
+        assert_eq!(plan.len(), 1);
+        assert!(plan.get("a").is_some());
+        assert!(plan.get("missing").is_none());
+        plan.get_mut("a").unwrap().desc = "edited".into();
+        assert_eq!(plan.get("a").unwrap().desc, "edited");
+    }
+
+    /// [REQ-014] Registry scenario: nodes 2 and 3 both depend on 1. While 1 is
+    /// WaitDeps nothing is unblocked; once 1 is Done both 2 and 3 unblock, in
+    /// sorted order.
+    #[test]
+    fn unblocked_items_registry_scenario_1_unblocks_2_and_3() {
+        let mut plan = DagPlan::from_items(vec![
+            item("1", &[], &[], PItemStatus::WaitDeps),
+            item("2", &["1"], &[], PItemStatus::WaitDeps),
+            item("3", &["1"], &[], PItemStatus::WaitDeps),
+        ]);
+        // Node 1 has no deps, so it is the only thing unblocked initially; 2 and
+        // 3 still wait on it.
+        assert_eq!(plan.unblocked_items(), vec!["1".to_string()]);
+        plan.get_mut("1").unwrap().status = PItemStatus::Done;
+        // Now 1 is terminal-and-unblocking; 2 and 3 become runnable in sorted order.
+        assert_eq!(plan.unblocked_items(), vec!["2".to_string(), "3".to_string()]);
+    }
+
     #[test]
     fn unblocked_items_requires_all_deps_settled() {
         let plan = DagPlan::from_items(vec![
@@ -316,6 +458,55 @@ mod tests {
         assert_eq!(conflicts[0].a, "a");
         assert_eq!(conflicts[0].b, "b");
         assert_eq!(conflicts[0].resource, "build");
+    }
+
+    /// [REQ-015][REQ-049] Registry scenario: P1[build], P2[build], P3[git] →
+    /// exactly one conflict (P1,P2 on build); P3 conflicts with no one.
+    #[test]
+    fn resource_conflicts_registry_scenario_p1_p2_on_build() {
+        let plan = DagPlan::from_items(vec![
+            item("P1", &[], &["build"], PItemStatus::WaitDeps),
+            item("P2", &[], &["build"], PItemStatus::WaitDeps),
+            item("P3", &[], &["git"], PItemStatus::WaitDeps),
+        ]);
+        let conflicts = plan.resource_conflicts(&["P1".into(), "P2".into(), "P3".into()]);
+        assert_eq!(conflicts.len(), 1);
+        assert_eq!(conflicts[0].a, "P1");
+        assert_eq!(conflicts[0].b, "P2");
+        assert_eq!(conflicts[0].resource, "build");
+    }
+
+    /// [REQ-015] Two items sharing *multiple* resources must yield a single
+    /// conflict entry for the pair (deduplicated), not one per shared resource.
+    #[test]
+    fn resource_conflicts_dedups_pairs_sharing_multiple_resources() {
+        let plan = DagPlan::from_items(vec![
+            item("a", &[], &["build", "test"], PItemStatus::WaitDeps),
+            item("b", &[], &["test", "build"], PItemStatus::WaitDeps),
+        ]);
+        let conflicts = plan.resource_conflicts(&["a".into(), "b".into()]);
+        assert_eq!(conflicts.len(), 1, "pair must appear once, not once per shared resource");
+        assert_eq!(conflicts[0].a, "a");
+        assert_eq!(conflicts[0].b, "b");
+        // Smallest shared resource is reported deterministically.
+        assert_eq!(conflicts[0].resource, "build");
+    }
+
+    /// [REQ-015] Output is ordered by (a, b) regardless of candidate input order.
+    #[test]
+    fn resource_conflicts_ordered_by_pair() {
+        let plan = DagPlan::from_items(vec![
+            item("a", &[], &["build"], PItemStatus::WaitDeps),
+            item("b", &[], &["build"], PItemStatus::WaitDeps),
+            item("c", &[], &["build"], PItemStatus::WaitDeps),
+        ]);
+        // Feed candidates in scrambled order.
+        let conflicts = plan.resource_conflicts(&["c".into(), "a".into(), "b".into()]);
+        let pairs: Vec<(&str, &str)> = conflicts
+            .iter()
+            .map(|c| (c.a.as_str(), c.b.as_str()))
+            .collect();
+        assert_eq!(pairs, vec![("a", "b"), ("a", "c"), ("b", "c")]);
     }
 
     #[test]
@@ -368,6 +559,76 @@ mod tests {
         ]);
         let skipped = plan.propagate_skip();
         assert!(skipped.is_empty());
+        assert!(matches!(plan.get("b").unwrap().status, PItemStatus::WaitDeps));
+    }
+
+    /// [REQ-007] propagate_skip_with_evidence: each skipped P-item carries
+    /// (p_item_id, skip_reason naming the failed upstream, timestamp, session).
+    /// Registry scenario: upstream Failed → downstream Skipped, and the evidence
+    /// is sufficient for the deviation ledger to trace the cause.
+    #[test]
+    fn req007_propagate_skip_with_evidence_carries_reason_ts_session() {
+        let mut plan = DagPlan::from_items(vec![
+            item("a", &[], &[], PItemStatus::Failed(FailReason::BuildFailed)),
+            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("c", &["b"], &[], PItemStatus::WaitDeps),
+        ]);
+        let records =
+            plan.propagate_skip_with_evidence(1_717_000_000, Some("sess-master".into()));
+
+        assert_eq!(records.len(), 2, "b and c both skipped");
+        // Sorted by id for determinism.
+        assert_eq!(records[0].p_item_id, "b");
+        assert_eq!(records[1].p_item_id, "c");
+
+        for r in &records {
+            // Timestamp + session are propagated onto every record.
+            assert_eq!(r.skipped_at_timestamp, 1_717_000_000);
+            assert_eq!(r.skipped_by_session_id.as_deref(), Some("sess-master"));
+            // Reason names the failed upstream root 'a' — enough to trace cause.
+            assert!(
+                r.skip_reason.contains("'a'") && r.skip_reason.contains("failed"),
+                "reason must name the failed upstream ancestor: {}",
+                r.skip_reason
+            );
+        }
+        // State actually flipped.
+        assert!(matches!(plan.get("b").unwrap().status, PItemStatus::Skipped));
+        assert!(matches!(plan.get("c").unwrap().status, PItemStatus::Skipped));
+    }
+
+    /// [REQ-007] The bare `propagate_skip` wrapper still returns the same sorted
+    /// id set (the evidence form must not regress P2's existing contract).
+    #[test]
+    fn req007_bare_propagate_skip_matches_evidence_ids() {
+        let make = || {
+            DagPlan::from_items(vec![
+                item("a", &[], &[], PItemStatus::Failed(FailReason::BuildFailed)),
+                item("b", &["a"], &[], PItemStatus::WaitDeps),
+                item("c", &["b"], &[], PItemStatus::WaitDeps),
+            ])
+        };
+        let mut p1 = make();
+        let bare = p1.propagate_skip();
+        let mut p2 = make();
+        let rich: Vec<PItemId> = p2
+            .propagate_skip_with_evidence(0, None)
+            .into_iter()
+            .map(|r| r.p_item_id)
+            .collect();
+        assert_eq!(bare, rich);
+        assert_eq!(bare, vec!["b".to_string(), "c".to_string()]);
+    }
+
+    /// [REQ-007] No failed ancestors → no skip records, nothing flipped.
+    #[test]
+    fn req007_no_failure_no_skip_records() {
+        let mut plan = DagPlan::from_items(vec![
+            item("a", &[], &[], PItemStatus::Done),
+            item("b", &["a"], &[], PItemStatus::WaitDeps),
+        ]);
+        let records = plan.propagate_skip_with_evidence(5, Some("s".into()));
+        assert!(records.is_empty());
         assert!(matches!(plan.get("b").unwrap().status, PItemStatus::WaitDeps));
     }
 

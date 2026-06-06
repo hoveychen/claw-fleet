@@ -168,6 +168,35 @@
       "tag": "permission-change",
       "match_mode": "command_start",
       "patterns": ["chmod ", "chown "]
+    },
+    {
+      "level": "critical",
+      "tag": "master-direct-merge",
+      "match_mode": "contains",
+      "patterns": ["git merge ", "git rebase ", "git commit "]
+    },
+    {
+      "level": "critical",
+      "tag": "master-lifecycle-control",
+      "match_mode": "contains",
+      "patterns": [
+        "fleet task pause", "fleet task resume", "fleet task clear"
+      ]
+    },
+    {
+      "level": "high",
+      "tag": "master-task-create",
+      "match_mode": "contains",
+      "patterns": ["fleet task new", "fleet task create"]
+    },
+    {
+      "level": "high",
+      "tag": "fleet-config-mutation",
+      "match_mode": "contains",
+      "patterns": [
+        ".claude/settings.json", "fleet.yaml", "permissions-config.json",
+        "permissions-lock.json"
+      ]
     }
   ],
   "python_patterns": [

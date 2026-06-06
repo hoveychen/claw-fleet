@@ -159,6 +159,28 @@ pub struct GuardAllowRule {
     #[serde(default)]
     pub source_tag: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
+    /// [REQ-035] DEC-017: who signed off on this whitelist rule. A rule with
+    /// `approved_by == None` is **unsigned** and MUST NOT take effect — the
+    /// signature is the require-approval gate. A signed rule may short-circuit
+    /// the guard prompt even for a Critical command (the classifier's false
+    /// positives are exactly what the whitelist is for); non-silence is still
+    /// guaranteed by the independent `extract_audit_events` transcript trail.
+    /// Older on-disk files predate this field; `#[serde(default)]` loads them as
+    /// unsigned so they stop short-circuiting until a human explicitly approves.
+    #[serde(default)]
+    pub approved_by: Option<String>,
+}
+
+impl GuardAllowRule {
+    /// [REQ-035] DEC-017: an allow rule is only live once a human has
+    /// signed it. Unsigned rules are inert — they neither short-circuit the
+    /// guard nor count as "already allowed" in the UI.
+    pub fn is_signed(&self) -> bool {
+        self.approved_by
+            .as_deref()
+            .map(|s| !s.trim().is_empty())
+            .unwrap_or(false)
+    }
 }
 
 /// On-disk store for user preferences: which built-in rules are disabled and
@@ -983,7 +1005,23 @@ pub fn guard_prefix_matches(cmd: &str, prefix: &str) -> bool {
     crate::cmd_ast::cmd_matches_rule(cmd, prefix)
 }
 
-/// Find the first guard allow rule whose prefix matches `cmd`, if any.
+/// Find the first signed guard allow rule whose prefix matches `cmd`, if any.
+///
+/// [REQ-035] DEC-017 (supersedes DEC-005): the whitelist's one remaining gate
+/// here is the **signature**. A rule with no `approved_by` signer is inert; a
+/// signed rule whose prefix matches `cmd` short-circuits the live guard prompt
+/// — **including for `Critical` commands**. That is deliberate: the whitelist's
+/// legitimate job is to wave through a trusted command that the substring-based
+/// classifier mis-flags as Critical (e.g. `patchwright-cli eval …` tripping the
+/// `eval-exec` tag). Requiring a human signature first is the require-approval
+/// teeth REQ-035 asked for.
+///
+/// This is NOT a silent bypass: `extract_audit_events` scans the session
+/// transcript completely independently of the whitelist and records every bash
+/// command — including ones a signed rule let through — as an `AuditEvent` in
+/// the `AuditView`. The audit trail therefore captures everything, so REQ-035's
+/// "no silent bypass" requirement is satisfied by the existing trail rather than
+/// by a parallel deviation-logging mechanism (see DEC-017).
 pub fn match_guard_allow_rule_in<'a>(
     rules: &'a UserAuditRules,
     cmd: &str,
@@ -991,6 +1029,9 @@ pub fn match_guard_allow_rule_in<'a>(
     rules
         .guard_allow_rules
         .iter()
+        // [REQ-035] DEC-017: only signed rules are live — signature is the
+        // require-approval gate.
+        .filter(|r| r.is_signed())
         .find(|r| guard_prefix_matches(cmd, &r.prefix))
 }
 
@@ -1011,9 +1052,35 @@ pub fn upsert_guard_allow_rule_in(
         prefix,
         source_tag,
         created_at: chrono::Utc::now(),
+        // [REQ-035] DEC-017: new rules are created UNSIGNED. They do not
+        // take effect until a human signs them via `sign_guard_allow_rule_in`.
+        // This closes the silent-bypass hole: simply clicking "always allow" no
+        // longer grants a permanent critical-command exemption on its own.
+        approved_by: None,
     };
     rules.guard_allow_rules.push(rule.clone());
     rule
+}
+
+/// [REQ-035] DEC-017: sign an existing guard allow rule, making it live.
+/// Returns the updated rule, or an error if the id is unknown. In-memory
+/// variant for unit-testing; [`sign_guard_allow_rule`] persists.
+pub fn sign_guard_allow_rule_in(
+    rules: &mut UserAuditRules,
+    id: &str,
+    approved_by: &str,
+) -> Result<GuardAllowRule, String> {
+    let approver = approved_by.trim();
+    if approver.is_empty() {
+        return Err("approved_by must be a non-empty signer".to_string());
+    }
+    let rule = rules
+        .guard_allow_rules
+        .iter_mut()
+        .find(|r| r.id == id)
+        .ok_or_else(|| format!("Guard allow rule '{}' not found", id))?;
+    rule.approved_by = Some(approver.to_string());
+    Ok(rule.clone())
 }
 
 /// Persistent variant of [`upsert_guard_allow_rule_in`] — loads the user rules
@@ -1023,6 +1090,15 @@ pub fn add_guard_allow_rule(prefix: String, source_tag: Option<String>) -> Guard
     let rule = upsert_guard_allow_rule_in(&mut rules, prefix, source_tag);
     save_user_rules(&rules);
     rule
+}
+
+/// [REQ-035] DEC-017: persistently sign a guard allow rule so it takes
+/// effect. Loads the user rules, signs the rule by id, writes back.
+pub fn sign_guard_allow_rule(id: &str, approved_by: &str) -> Result<GuardAllowRule, String> {
+    let mut rules = load_user_rules();
+    let rule = sign_guard_allow_rule_in(&mut rules, id, approved_by)?;
+    save_user_rules(&rules);
+    Ok(rule)
 }
 
 /// List all persisted guard allow rules.
@@ -1978,15 +2054,21 @@ mod tests {
 
     #[test]
     fn match_guard_allow_rule_in_finds_first_hit() {
+        reset();
         let mut rules = UserAuditRules::default();
-        upsert_guard_allow_rule_in(&mut rules, "patchwright-cli eval".into(), None);
-        upsert_guard_allow_rule_in(&mut rules, "git push".into(), None);
+        // Both rules target non-critical commands so they're whitelist-eligible
+        // once signed: `git pull` = Medium, `npm install` = Medium.
+        let a = upsert_guard_allow_rule_in(&mut rules, "git pull".into(), Some("git-fetch".into()));
+        let b = upsert_guard_allow_rule_in(&mut rules, "npm install".into(), Some("package-install".into()));
+        // [REQ-035] DEC-017: sign both, otherwise they're inert.
+        sign_guard_allow_rule_in(&mut rules, &a.id, "boss").unwrap();
+        sign_guard_allow_rule_in(&mut rules, &b.id, "boss").unwrap();
 
-        let hit = match_guard_allow_rule_in(&rules, "patchwright-cli eval \"foo\"").unwrap();
-        assert_eq!(hit.prefix, "patchwright-cli eval");
+        let hit = match_guard_allow_rule_in(&rules, "git pull origin main").unwrap();
+        assert_eq!(hit.prefix, "git pull");
 
-        // Different tool → no match.
-        assert!(match_guard_allow_rule_in(&rules, "kubectl get pods").is_none());
+        // Different command, audited but not covered by a rule → no match.
+        assert!(match_guard_allow_rule_in(&rules, "git fetch upstream").is_none());
     }
 
     // ── classify_leaves_with_rules tests ────────────────────────────────────
@@ -2018,21 +2100,126 @@ mod tests {
     #[test]
     fn classify_leaves_marks_already_allowed_when_rule_covers_leaf() {
         reset();
-        let cmd = r#"playwright-cli -s=mu eval "() => 1" | grep -oE "OK""#;
+        // `git pull` is a Medium (non-critical) hit, so a SIGNED whitelist rule
+        // is permitted to short-circuit it under DEC-017.
+        let cmd = r#"git pull origin main | tee log.txt"#;
         let view = crate::cmd_ast::extract_structured_view(cmd);
 
         let mut rules = UserAuditRules::default();
-        upsert_guard_allow_rule_in(
+        let r = upsert_guard_allow_rule_in(
             &mut rules,
-            "playwright-cli eval".into(),
-            Some("eval-exec".into()),
+            "git pull".into(),
+            Some("git-fetch".into()),
         );
+        // [REQ-035] DEC-017: rules are unsigned by default and inert; sign
+        // it so it counts as "already allowed".
+        sign_guard_allow_rule_in(&mut rules, &r.id, "boss").unwrap();
 
         let flags = classify_leaves_with_rules(&view, &rules);
-        assert!(flags[0].triggering, "eval leaf still trips audit even when allow-listed");
+        assert!(flags[0].triggering, "git pull leaf still trips audit even when allow-listed");
         assert!(
             flags[0].already_allowed,
-            "with `playwright-cli eval` in allow rules, the eval leaf must be marked already_allowed"
+            "with a SIGNED `git pull` allow rule, the leaf must be marked already_allowed"
+        );
+    }
+
+    // ── [REQ-035] DEC-017 enforcement tests ─────────────────────────────────
+    //
+    // DEC-017 (supersedes DEC-005): the whitelist's sole gate is the SIGNATURE.
+    // A signed rule short-circuits the guard prompt (even for Critical commands
+    // — that's the require-approval false-positive escape hatch); an unsigned
+    // rule is inert. "No silent bypass" is guaranteed by the independent
+    // `extract_audit_events` transcript trail, NOT by a parallel deviation log.
+
+    /// DEC-017: an UNSIGNED whitelist rule is inert — it neither
+    /// short-circuits the guard (`match_guard_allow_rule_in` → None) nor marks
+    /// a leaf `already_allowed`. Signing it makes it live.
+    #[test]
+    fn req035_unsigned_rule_has_no_effect() {
+        reset();
+        let mut rules = UserAuditRules::default();
+        // `git pull` is non-critical, so the only thing stopping the match is
+        // the missing signature.
+        upsert_guard_allow_rule_in(&mut rules, "git pull".into(), Some("git-fetch".into()));
+
+        // Unsigned → no match.
+        assert!(
+            match_guard_allow_rule_in(&rules, "git pull origin main").is_none(),
+            "unsigned rule must NOT short-circuit"
+        );
+        let view = crate::cmd_ast::extract_structured_view("git pull origin main");
+        let flags = classify_leaves_with_rules(&view, &rules);
+        assert!(flags[0].triggering, "git pull still trips the audit");
+        assert!(!flags[0].already_allowed, "unsigned rule must not mark already_allowed");
+
+        // Sign it → now it applies.
+        let id = rules.guard_allow_rules[0].id.clone();
+        sign_guard_allow_rule_in(&mut rules, &id, "boss").unwrap();
+        assert!(
+            match_guard_allow_rule_in(&rules, "git pull origin main").is_some(),
+            "signed rule short-circuits"
+        );
+    }
+
+    /// DEC-017: signing requires a non-empty signer; whitespace-only is rejected
+    /// and an unknown id errors. This is the require-approval check with teeth.
+    #[test]
+    fn req035_sign_requires_real_signer_and_known_id() {
+        let mut rules = UserAuditRules::default();
+        let r = upsert_guard_allow_rule_in(&mut rules, "git pull".into(), None);
+        assert!(sign_guard_allow_rule_in(&mut rules, &r.id, "   ").is_err());
+        assert!(sign_guard_allow_rule_in(&mut rules, "no-such-id", "boss").is_err());
+        // Sanity: the rule is still unsigned after the failed attempts.
+        assert!(!rules.guard_allow_rules[0].is_signed());
+    }
+
+    /// [REQ-035] DEC-017: a signed rule short-circuits even a CRITICAL command
+    /// (the substring classifier's false positives are exactly what the
+    /// whitelist is for). Non-silence is guaranteed by the independent
+    /// `extract_audit_events` transcript trail, not by this gate.
+    #[test]
+    fn req035_signed_rule_short_circuits_critical() {
+        reset();
+        let mut rules = UserAuditRules::default();
+        // `git push` carries the `code-push` Critical tag.
+        let r = upsert_guard_allow_rule_in(&mut rules, "git push".into(), Some("code-push".into()));
+        sign_guard_allow_rule_in(&mut rules, &r.id, "boss").unwrap();
+
+        // Signed + prefix-matching → the critical command IS short-circuited.
+        let hit = match_guard_allow_rule_in(&rules, "git push origin main");
+        assert!(
+            hit.is_some(),
+            "DEC-017: a signed whitelist rule short-circuits a Critical command"
+        );
+        assert_eq!(hit.unwrap().id, r.id);
+
+        // An UNSIGNED rule matching another critical tag does NOT short-circuit.
+        let r2 = upsert_guard_allow_rule_in(&mut rules, "sudo".into(), Some("sudo".into()));
+        let _ = r2; // left unsigned on purpose
+        assert!(
+            match_guard_allow_rule_in(&rules, "sudo rm -rf /tmp/x").is_none(),
+            "DEC-017: an unsigned rule is inert even for a Critical command"
+        );
+    }
+
+    /// DEC-017: a command with NO matching signed rule yields `None` — the
+    /// caller falls through to its normal confirmation path. Covers both an
+    /// audited command (`git pull`) with no covering rule and a purely safe one.
+    #[test]
+    fn req035_no_matching_rule_is_norule() {
+        reset();
+        let mut rules = UserAuditRules::default();
+        // A signed rule that does NOT cover the probed commands.
+        let r = upsert_guard_allow_rule_in(&mut rules, "npm install".into(), Some("package-install".into()));
+        sign_guard_allow_rule_in(&mut rules, &r.id, "boss").unwrap();
+
+        assert!(
+            match_guard_allow_rule_in(&rules, "git pull origin main").is_none(),
+            "no covering rule → no short-circuit for an audited command"
+        );
+        assert!(
+            match_guard_allow_rule_in(&rules, "ls -la").is_none(),
+            "no covering rule → no short-circuit for a safe command"
         );
     }
 

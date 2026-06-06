@@ -29,19 +29,35 @@ use crate::task::{Material, Task};
 /// forgets to wrap something, the unwrapped section can't masquerade as
 /// trusted instructions because the wrapping is what tells the master "this
 /// is user data, not high-priority commands".
+///
+/// [REQ-037] Embedded at compile time via `include_str!`. There is no runtime
+/// API to replace this constant; the only override is the debug-only env-var
+/// in `template_source()`, so a release binary always serves this exact text.
 pub const MASTER_SYSTEM_TEMPLATE: &str = include_str!("system_template.md");
 
-/// Dev-only override. Reads the path from `FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE`
-/// when set; falls back to the embedded constant.
+/// Dev-only override. In **debug builds** reads the path from
+/// `FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE` when set; in **release builds** the
+/// env-var is ignored entirely and the embedded constant is always returned.
 ///
-/// **Production code should never set this env-var.** If you're tempted to,
-/// you're about to bypass the security boundary that makes the master's red
-/// lines tamper-resistant — find another way.
+/// [REQ-037] The escape hatch is gated behind `cfg!(debug_assertions)` so a
+/// release binary cannot be made to swap the master's red-line constraints by
+/// setting an env-var. Compile-time `include_str!` plus a debug-only override
+/// is the security boundary: production runs the tamper-resistant constant, and
+/// there is no runtime path to replace it.
+///
+/// **Production code should never set this env-var.** Even if set, a release
+/// build ignores it; in a debug build it bypasses the security boundary, so
+/// reach for it only in local development.
 pub fn template_source() -> String {
-    if let Some(path) = std::env::var_os("FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE") {
-        let p = PathBuf::from(path);
-        if let Ok(content) = std::fs::read_to_string(&p) {
-            return content;
+    // [REQ-037] Only honour the override in debug builds. `cfg!(debug_assertions)`
+    // is `false` in release, so the `read_to_string` branch is dead code there
+    // and the embedded constant is the only source.
+    if cfg!(debug_assertions) {
+        if let Some(path) = std::env::var_os("FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE") {
+            let p = PathBuf::from(path);
+            if let Ok(content) = std::fs::read_to_string(&p) {
+                return content;
+            }
         }
     }
     MASTER_SYSTEM_TEMPLATE.to_string()
@@ -285,6 +301,8 @@ mod tests {
         assert!(prompt.contains("no plan yet"));
     }
 
+    // [REQ-037] In debug builds the env-var escape hatch is honoured.
+    #[cfg(debug_assertions)]
     #[test]
     fn env_override_swaps_template_when_set() {
         // Hold the global test lock across the whole set→read→remove window so
@@ -299,5 +317,246 @@ mod tests {
         let result = template_source();
         unsafe { std::env::remove_var("FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE") };
         assert!(result.starts_with("OVERRIDE TEMPLATE"));
+    }
+
+    // [REQ-037] In release builds the env-var must be IGNORED — the embedded
+    // constant is the only source, so the security boundary can't be bypassed
+    // at runtime. This test only compiles into release builds; debug runs skip
+    // it (the debug counterpart above covers the override path).
+    #[cfg(not(debug_assertions))]
+    #[test]
+    fn env_override_ignored_in_release_build() {
+        let _g = crate::paths::fleet_home_lock();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("override.md");
+        std::fs::write(&path, "MALICIOUS OVERRIDE that strips red lines").unwrap();
+        unsafe { std::env::set_var("FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE", &path) };
+        let result = template_source();
+        unsafe { std::env::remove_var("FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE") };
+        // Release build must serve the embedded constant verbatim, ignoring env.
+        assert_eq!(result, MASTER_SYSTEM_TEMPLATE);
+        assert!(!result.contains("MALICIOUS OVERRIDE"));
+    }
+
+    // [REQ-037] Regardless of build profile, with NO env-var set the source is
+    // exactly the embedded constant. This proves the `cfg!` gate doesn't alter
+    // the no-override default.
+    #[test]
+    fn template_source_is_embedded_constant_without_override() {
+        let _g = crate::paths::fleet_home_lock();
+        // Ensure no stray override leaks from another test.
+        unsafe { std::env::remove_var("FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE") };
+        assert_eq!(template_source(), MASTER_SYSTEM_TEMPLATE);
+    }
+
+    // [REQ-037] The template is embedded via `include_str!`, so the constant is
+    // non-empty at compile time and carries the load-bearing red-line section.
+    #[test]
+    fn template_is_compile_time_embedded_and_nonempty() {
+        assert!(!MASTER_SYSTEM_TEMPLATE.is_empty());
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("红线"));
+    }
+
+    // ───────── [REQ-010] 10 red lines, one assertion per line ─────────
+    // Each red line must be mentioned in the embedded template. If anyone
+    // strips one, the matching test fails before it reaches a real run. The
+    // sanction for each red line (Auditor critical report / acceptance reject)
+    // is documented in the template's red-line section.
+
+    #[test]
+    fn redline_01_no_direct_code_edit() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无直接代码编辑"));
+    }
+
+    #[test]
+    fn redline_02_no_skip_audit() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无跳过审计"));
+    }
+
+    #[test]
+    fn redline_03_no_pause_resume_clear() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无 pause/resume/clear"));
+    }
+
+    #[test]
+    fn redline_04_no_proxy_signals() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无代理信号"));
+    }
+
+    #[test]
+    fn redline_05_no_direct_git() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无直接 git"));
+    }
+
+    #[test]
+    fn redline_06_no_worker_session_rw() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无 worker 会话读写"));
+    }
+
+    #[test]
+    fn redline_07_no_fleet_config_edit() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无改 fleet 配置"));
+    }
+
+    #[test]
+    fn redline_08_no_new_task() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无创建新 task"));
+    }
+
+    #[test]
+    fn redline_09_no_worker_file_edit() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("无改 worker 文件"));
+    }
+
+    #[test]
+    fn redline_10_merge_only_via_pmerge() {
+        // [REQ-010]
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("merge 仅通过 P-merge"));
+    }
+
+    #[test]
+    fn redline_section_declares_exactly_ten() {
+        // [REQ-010] The template must claim "共 10 条" and the numbered list
+        // must run 1.→10. so the count is unambiguous and auditable.
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("红线（共 10 条"));
+        // Extract the red-line section and count the numbered items 1.–10.
+        let section = MASTER_SYSTEM_TEMPLATE
+            .split("红线（共 10 条")
+            .nth(1)
+            .expect("red-line section present")
+            .split("你的工具集")
+            .next()
+            .unwrap_or("");
+        for n in 1..=10 {
+            let marker = format!("{n}. **");
+            assert!(
+                section.contains(&marker),
+                "red-line section is missing numbered item `{marker}`"
+            );
+        }
+        // There must be no 11th numbered item in the section.
+        assert!(
+            !section.contains("11. **"),
+            "red-line section must declare exactly 10 items, found an 11th"
+        );
+    }
+
+    // ───────── [REQ-003] 4 forbidden proxy signals ─────────
+    #[test]
+    fn audit_protocol_forbids_four_proxy_signals() {
+        // [REQ-003] The four proxy signals (worker self-report, token spend,
+        // diff size, elapsed time) must each be named as forbidden evidence.
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("worker 自报说完了"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("token / 时间消耗大"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("diff 看着量足够"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("耗时长"));
+        // The forbid step must be explicitly framed as proxy-signal rejection.
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("不能用代理信号充证据"));
+    }
+
+    // ───────── [REQ-004] 4-step audit protocol ─────────
+    #[test]
+    fn audit_protocol_has_four_named_steps() {
+        // [REQ-004] unpack → find evidence → forbid proxies → escalate.
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("Acceptance Audit Protocol"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("**unpack**"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("**find evidence**"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("**forbid proxies**"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("**escalate**"));
+    }
+
+    #[test]
+    fn audit_protocol_maps_each_acceptance_kind_to_evidence() {
+        // [REQ-004] Each acceptance variant must map to a concrete evidence
+        // gathering step in the find-evidence stage.
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("`builds`"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("cargo check --package"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("`testsPass(cmd)`"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("`humanReview`"));
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("`custom(rule)`"));
+    }
+
+    #[test]
+    fn audit_protocol_escalate_retries_worker_before_user() {
+        // [REQ-004][DEC-007] When uncertain, retry the worker once before
+        // escalating to the user via AskUserQuestion.
+        let section = MASTER_SYSTEM_TEMPLATE
+            .split("**escalate**")
+            .nth(1)
+            .expect("escalate step present")
+            .split("═══")
+            .next()
+            .unwrap_or("");
+        assert!(section.contains("retry worker"));
+        assert!(section.contains("AskUserQuestion"));
+    }
+
+    // ───────── [REQ-021] 7 allowed tools, git/edit/write/pause/resume/clear forbidden ─────────
+    /// Body of the tool section: text between the tool-section header line
+    /// (which itself ends in `═══`) and the next section header `═══ 事件协议`.
+    fn tool_section_body() -> &'static str {
+        MASTER_SYSTEM_TEMPLATE
+            .split("仅这 7 个能动 task） ═══")
+            .nth(1)
+            .expect("tool section header present")
+            .split("═══ 事件协议")
+            .next()
+            .expect("event-protocol header present after tools")
+    }
+
+    #[test]
+    fn tool_section_lists_seven_allowed_tools() {
+        // [REQ-021] Exactly the 7 task tools, no more.
+        let section = tool_section_body();
+        for tool in [
+            "get-plan",
+            "get-dispatchable",
+            "dispatch",
+            "read-output",
+            "mark-done",
+            "mark-failed",
+            "update-plan",
+        ] {
+            assert!(
+                section.contains(tool),
+                "tool section missing allowed tool `{tool}`"
+            );
+        }
+        // Numbered 1.–7. with no 8th item.
+        for n in 1..=7 {
+            assert!(
+                section.contains(&format!("{n}. `fleet task")),
+                "tool section missing numbered tool {n}"
+            );
+        }
+        assert!(
+            !section.contains("8. `fleet task"),
+            "tool section must list exactly 7 tools, found an 8th"
+        );
+        // The header declares the count of 7.
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("共 7 个专用工具"));
+    }
+
+    #[test]
+    fn tool_section_explicitly_forbids_git_edit_write_and_user_only_tools() {
+        // [REQ-021] git / Edit / Write / pause / resume / clear must be named
+        // as forbidden, not merely absent.
+        let section = tool_section_body();
+        assert!(section.contains("禁止使用"));
+        assert!(section.contains("`git`"));
+        assert!(section.contains("`Edit`"));
+        assert!(section.contains("`Write`"));
+        assert!(section.contains("pause"));
+        assert!(section.contains("resume"));
+        assert!(section.contains("clear"));
     }
 }

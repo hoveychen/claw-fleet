@@ -15,6 +15,9 @@ use crate::paths::get_fleet_dir;
 use crate::task::ProjectId;
 
 /// `~/.fleet/projects/<project_id>/architecture.md` if it exists, else None.
+///
+/// [REQ-046] Canonical storage location for the project-level Layer 1
+/// constant. V1 is hand-authored; V2+ will auto-index it.
 pub fn architecture_path(project_id: &ProjectId) -> Option<PathBuf> {
     let dir = get_fleet_dir()?;
     Some(dir.join("projects").join(project_id).join("architecture.md"))
@@ -46,6 +49,9 @@ pub fn load_for_project(project_id: &ProjectId) -> Result<Option<String>, String
 /// architecture overview is absent, includes a one-line note pointing the
 /// user at where to create it; the agent shouldn't pretend it has context
 /// it doesn't.
+///
+/// [REQ-046] Renders the loaded `architecture.md` as the Layer 1 project
+/// constant block consumed by [`crate::worker::compose_layer1`].
 pub fn render_layer1_block(project_id: &ProjectId) -> String {
     match load_for_project(project_id) {
         Ok(Some(arch)) => format!(
