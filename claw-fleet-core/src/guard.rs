@@ -258,21 +258,55 @@ mod tests {
 
     #[test]
     fn classify_short_circuits_when_allow_rule_matches() {
-        // `eval ` (with trailing space) appears as a substring inside
-        // `patchwright-cli eval "..."` — the eval-exec builtin tags it
-        // Critical.  An allow rule for `patchwright-cli eval` must short-circuit.
+        // [REQ-035] DEC-017: a SIGNED allow rule may short-circuit even a
+        // Critical command. `eval ` (trailing space) appears as a substring
+        // inside `patchwright-cli eval "..."`, so the eval-exec builtin tags it
+        // Critical — exactly the false-positive case the whitelist exists to
+        // wave through for a trusted command. Non-silence is guaranteed by the
+        // independent `audit::extract_audit_events` transcript trail, which
+        // still records this command as an AuditEvent regardless of the rule.
+        let mut rules = audit::UserAuditRules::default();
+        let r = audit::upsert_guard_allow_rule_in(
+            &mut rules,
+            "patchwright-cli eval".into(),
+            Some("eval-exec".into()),
+        );
+        // DEC-017: the rule only bites once a human signs it.
+        audit::sign_guard_allow_rule_in(&mut rules, &r.id, "boss").unwrap();
+
+        let input = bash_hook(r#"patchwright-cli eval "() => document.title""#);
+        match classify_hook_input_with_rules(&input, &rules) {
+            GuardClassification::Allow => {}
+            GuardClassification::NeedsConfirmation { .. } => {
+                panic!("expected signed allow-list rule to short-circuit Critical command")
+            }
+        }
+    }
+
+    #[test]
+    fn classify_does_not_short_circuit_critical_for_unsigned_rule() {
+        // [REQ-035] DEC-017: the signature is the require-approval teeth. An
+        // UNSIGNED rule (just clicking "always allow", never approved) must NOT
+        // short-circuit a Critical command — it still needs confirmation. This
+        // is the symmetric counterpart to the test above.
         let mut rules = audit::UserAuditRules::default();
         audit::upsert_guard_allow_rule_in(
             &mut rules,
             "patchwright-cli eval".into(),
             Some("eval-exec".into()),
         );
+        // Deliberately NOT signed.
 
         let input = bash_hook(r#"patchwright-cli eval "() => document.title""#);
         match classify_hook_input_with_rules(&input, &rules) {
-            GuardClassification::Allow => {}
-            GuardClassification::NeedsConfirmation { .. } => {
-                panic!("expected allow-list to short-circuit")
+            GuardClassification::NeedsConfirmation { risk_tags, .. } => {
+                assert!(
+                    risk_tags.contains(&"eval-exec".to_string()),
+                    "unsigned rule must not bypass; eval-exec confirmation still required, got {risk_tags:?}"
+                );
+            }
+            GuardClassification::Allow => {
+                panic!("unsigned allow-list rule must NOT short-circuit a Critical command")
             }
         }
     }
