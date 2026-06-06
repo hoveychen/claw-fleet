@@ -1227,6 +1227,39 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
     (nodes, edges)
 }
 
+/// Execution-based skeleton: run the script through the node sidecar and convert
+/// the executed call-sites into [`ScriptStep`]s for [`build_dag`]. Returns `None`
+/// when `node` is unavailable, the run errored/timed out, or it surfaced no
+/// call-sites — the caller then keeps the static scan. Fingerprints are the
+/// resolved-prompt static heads (generalized across executions via LCP in the
+/// harness), a stronger binding signal than the regex-extracted static prefix.
+///
+/// `args` is passed as `None` for now: the real invocation args aren't recovered
+/// from disk yet, so args-driven fan-out shapes collapse — but those bind their
+/// real cardinality from the journal regardless, and the `>= static` guard at
+/// the call-site keeps such collapses from being adopted over the static scan.
+fn sidecar_steps(body: &str) -> Option<Vec<ScriptStep>> {
+    let r = crate::workflow_sidecar::extract(body, None).ok()?;
+    if r.calls.is_empty() {
+        return None;
+    }
+    Some(
+        r.calls
+            .into_iter()
+            .map(|c| ScriptStep {
+                phase: c.phase,
+                kind: c.kind,
+                agent_type: c.agent_type,
+                label: c.label,
+                pipeline_group: c.pipeline_id,
+                // Match fingerprint_binding's own >= 4 usefulness threshold;
+                // an empty/tiny head (variable-first prompt) means "no fingerprint".
+                prompt_fingerprint: Some(c.fingerprint).filter(|f| f.trim().len() >= 4),
+            })
+            .collect(),
+    )
+}
+
 // ── Disk discovery ──────────────────────────────────────────────────────────
 
 /// Given a parent session's `.jsonl` transcript path, return the sibling
@@ -1438,10 +1471,20 @@ pub fn discover_workflow_trees_in_dir(session_dir: &Path) -> Vec<WorkflowTree> {
             .as_deref()
             .map(parse_script_meta)
             .unwrap_or((None, None, Vec::new()));
-        let steps = script_body
+        // Skeleton: prefer execution-based extraction (resolved-prompt
+        // fingerprints, accurate kinds/labels) but only when it is at least as
+        // complete as the static scan — never regress node count. The static
+        // scan is the floor and the silent fallback when `node` is absent, the
+        // run fails/times out, or a data-dependent branch collapses the skeleton.
+        let static_steps = script_body
             .as_deref()
             .map(parse_script_steps)
             .unwrap_or_default();
+        let steps = script_body
+            .as_deref()
+            .and_then(sidecar_steps)
+            .filter(|s| !s.is_empty() && s.len() >= static_steps.len())
+            .unwrap_or(static_steps);
         let (nodes, edges) = build_dag(&steps, &agents);
 
         trees.push(WorkflowTree {
@@ -2013,6 +2056,123 @@ const v = await parallel(items.map(c => () => parallel(vs.map(n => () => agent("
         let (nodes, edges) = build_dag(&[], &[]);
         assert!(nodes.is_empty());
         assert!(edges.is_empty());
+    }
+
+    // ── Sidecar (execution-based) integration ────────────────────────────────
+
+    use std::sync::Mutex as SidecarMutex;
+    /// Serialize tests touching FLEET_NODE_BIN (cargo runs tests in parallel).
+    pub(crate) static SIDECAR_ENV_LOCK: SidecarMutex<()> = SidecarMutex::new(());
+
+    fn node_runnable() -> bool {
+        crate::process_util::command(
+            std::env::var("FLEET_NODE_BIN").unwrap_or_else(|_| "node".into()),
+        )
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    }
+
+    /// A self-contained two-fan-out script whose prompts are built with a
+    /// **computed** prefix (`['alpha','task'].join(' ')`) the static scanner
+    /// can't fingerprint (it begins with `[`, not a string literal or builder
+    /// call). All agents share the default `worker` agentType, so the static
+    /// heuristic can't route them either. Execution resolves the prefixes →
+    /// fingerprints route each agent to the right node.
+    const ROUTING: &str = r#"export const meta = { name: 'route', phases: [ { title: 'A' }, { title: 'B' } ] }
+phase('A')
+const aItems = [{ i: '1' }, { i: '2' }]
+const ra = await parallel(aItems.map((x) => () => agent(['alpha', 'task'].join(' ') + ' ' + x.i, { phase: 'A', agentType: 'worker' })))
+phase('B')
+const bItems = [{ i: '9' }]
+const rb = await parallel(bItems.map((x) => () => agent(['beta', 'job'].join(' ') + ' ' + x.i, { phase: 'B', agentType: 'worker' })))
+return [ra, rb]
+"#;
+
+    /// Build a fixture session dir for ROUTING with three worker agents whose
+    /// first-prompt transcripts carry the resolved prompts (the binding signal).
+    pub(crate) fn make_routing_fixture(tag: &str) -> (PathBuf, PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("wfsc-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sid");
+        let wf_dir = session_dir
+            .join("subagents")
+            .join("workflows")
+            .join("wf_route-1");
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(
+            wf_dir.join("journal.jsonl"),
+            "{\"type\":\"started\",\"key\":\"v2:k0\",\"agentId\":\"a1\"}\n\
+             {\"type\":\"result\",\"key\":\"v2:k0\",\"agentId\":\"a1\",\"result\":\"r\"}\n\
+             {\"type\":\"started\",\"key\":\"v2:k1\",\"agentId\":\"a2\"}\n\
+             {\"type\":\"result\",\"key\":\"v2:k1\",\"agentId\":\"a2\",\"result\":\"r\"}\n\
+             {\"type\":\"started\",\"key\":\"v2:k2\",\"agentId\":\"b1\"}\n\
+             {\"type\":\"result\",\"key\":\"v2:k2\",\"agentId\":\"b1\",\"result\":\"r\"}\n",
+        )
+        .unwrap();
+        for (id, prompt) in [
+            ("a1", "alpha task 1"),
+            ("a2", "alpha task 2"),
+            ("b1", "beta job 9"),
+        ] {
+            fs::write(
+                wf_dir.join(format!("agent-{id}.meta.json")),
+                "{\"agentType\":\"worker\"}",
+            )
+            .unwrap();
+            let line = serde_json::json!({
+                "type": "user",
+                "message": { "content": prompt }
+            })
+            .to_string();
+            fs::write(wf_dir.join(format!("agent-{id}.jsonl")), format!("{line}\n")).unwrap();
+        }
+        let scripts_dir = session_dir.join("workflows").join("scripts");
+        fs::create_dir_all(&scripts_dir).unwrap();
+        fs::write(scripts_dir.join("route-wf_route-1.js"), ROUTING).unwrap();
+        (tmp, session_dir)
+    }
+
+    #[test]
+    fn discover_sidecar_routes_same_type_agents_by_resolved_prompt() {
+        let _g = SIDECAR_ENV_LOCK.lock().unwrap();
+        std::env::remove_var("FLEET_NODE_BIN");
+        if !node_runnable() {
+            eprintln!("skipping: node not available");
+            return;
+        }
+        let (tmp, session_dir) = make_routing_fixture("route");
+        let trees = discover_workflow_trees_in_dir(&session_dir);
+        assert_eq!(trees.len(), 1);
+        let t = &trees[0];
+        assert_eq!(t.nodes.len(), 2, "two fan-out call-sites");
+        // Execution fingerprints route a1/a2 → node A, b1 → node B, exactly.
+        assert_eq!(t.nodes[0].agent_ids, vec!["a1", "a2"], "node A bound a1,a2");
+        assert!(!t.nodes[0].approximate, "node A binding is exact");
+        assert_eq!(t.nodes[1].agent_ids, vec!["b1"], "node B bound b1");
+        assert!(!t.nodes[1].approximate, "node B binding is exact");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_falls_back_to_static_when_node_missing() {
+        let _g = SIDECAR_ENV_LOCK.lock().unwrap();
+        // Force the sidecar to fail (node "binary" that can't run the harness).
+        std::env::set_var("FLEET_NODE_BIN", "/bin/false");
+        let (tmp, session_dir) = make_routing_fixture("fallback");
+        let trees = discover_workflow_trees_in_dir(&session_dir);
+        std::env::remove_var("FLEET_NODE_BIN");
+        assert_eq!(trees.len(), 1);
+        let t = &trees[0];
+        // Static scan still yields the 2-node skeleton and loses no agent — the
+        // fallback is safe even though routing may be coarser (heuristic).
+        assert_eq!(t.nodes.len(), 2, "static scan still finds both call-sites");
+        let total: usize = t.nodes.iter().map(|n| n.agent_ids.len()).sum();
+        assert_eq!(total, 3, "every journal agent still bound somewhere");
+        let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
