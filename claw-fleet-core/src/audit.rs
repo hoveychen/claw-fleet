@@ -52,6 +52,10 @@ pub struct AuditSummary {
 
 impl AuditEvent {
     /// A stable key for deduplication (notification tracking, read state, etc.).
+    ///
+    /// [REQ-034] `AuditEvent` (10 fields ≥ the required 7) + `dedup_key()`
+    /// returning `session_id|timestamp|tool_name`. Events are reconstructed from
+    /// session history by [`extract_audit_events`].
     pub fn dedup_key(&self) -> String {
         format!("{}|{}|{}", self.session_id, self.timestamp, self.tool_name)
     }
@@ -266,6 +270,11 @@ pub struct SuggestedRule {
 // ── Compiled-in defaults ────────────────────────────────────────────────────
 //
 // These are used when no external JSON file is present.
+//
+// [REQ-033] The audit rule set — `builtin_patterns` + `builtin_python_patterns`
+// here, mirrored by the shipped `audit-patterns.json` and overridable via
+// `~/.fleet/fleet-audit-patterns.json` — must hold ≥ 25 rules spanning the three
+// `AuditRiskLevel` tiers (Critical / High / Medium). `get_patterns` loads them.
 
 fn builtin_patterns() -> Vec<RuntimeRiskPattern> {
     vec![
@@ -1531,6 +1540,49 @@ mod tests {
             user_rules_mtime: None,
             last_check: std::time::Instant::now(),
         });
+    }
+
+    /// [REQ-033] The builtin audit rule set must hold ≥ 25 rules spanning all
+    /// three `AuditRiskLevel` tiers (Critical / High / Medium).
+    #[test]
+    fn req033_pattern_set_has_25plus_rules_in_three_levels() {
+        let rules: Vec<RuntimeRiskPattern> = builtin_patterns()
+            .into_iter()
+            .chain(builtin_python_patterns())
+            .collect();
+        assert!(
+            rules.len() >= 25,
+            "expected >= 25 builtin audit rules, found {}",
+            rules.len()
+        );
+        for tier in [
+            AuditRiskLevel::Critical,
+            AuditRiskLevel::High,
+            AuditRiskLevel::Medium,
+        ] {
+            assert!(
+                rules.iter().any(|r| r.level == tier),
+                "no builtin rule at tier {tier:?}"
+            );
+        }
+    }
+
+    /// [REQ-034] `AuditEvent::dedup_key()` is `session_id|timestamp|tool_name`.
+    #[test]
+    fn req034_audit_event_dedup_key_format() {
+        let ev = AuditEvent {
+            session_id: "sess-1".into(),
+            workspace_name: "ws".into(),
+            agent_source: "claude".into(),
+            tool_name: "Bash".into(),
+            command_summary: "ls".into(),
+            full_command: "ls -la".into(),
+            risk_level: AuditRiskLevel::Medium,
+            risk_tags: vec![],
+            timestamp: "2026-06-06T00:00:00Z".into(),
+            jsonl_path: "/tmp/x.jsonl".into(),
+        };
+        assert_eq!(ev.dedup_key(), "sess-1|2026-06-06T00:00:00Z|Bash");
     }
 
     // ── Regression: CJK truncate must not panic on UTF-8 boundaries ────────
