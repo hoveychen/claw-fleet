@@ -1,103 +1,27 @@
-//! Independent adversarial Auditor agent (methodology pillar 4).
+//! Deterministic adversarial-rule layer (methodology pillar 4).
 //!
-//! Scaffold created by master before Wave 3 so P10 can fill this without
-//! racing P15 on `lib.rs`. P10 implements: independent auditor session,
-//! 10 red lines, weak-implementation heuristics, AuditFinding, 2-of-3 voting.
-//! See design/tasks-impl-plan.md (P10) and design/tasks-req-registry.yaml
-//! (REQ-022, REQ-028, REQ-033, REQ-034, REQ-043).
+//! Per WA-DEC the Auditor is **no longer an LLM session** that votes on
+//! findings — that 3-session 2-of-3 quorum was over-designed. What survives is
+//! the part that always carried the value: a set of **deterministic rules** that
+//! inspect a mark-done decision and a P-item plan diff and emit structured
+//! [`AuditFinding`]s with zero model calls, zero sessions, zero timeouts, and
+//! zero voting. The mark-done hard gate (`crate::actions::mark_done`) runs these
+//! rules in-process; any red-line / `Critical` finding deterministically rejects
+//! the mark-done. The `fleet task audit` CLI runs the same rules as a read-only
+//! preview.
 //!
-//! ## Why an independent session
-//!
-//! The "don't trust the model" methodology forbids the Master from auditing
-//! itself — a model marking its own work `Done` is the被审计方 reporting on
-//! itself. So the Auditor runs as its **own** Claude session ([REQ-022]) with
-//! its own SYSTEM prompt ([`AUDITOR_SYSTEM_PROMPT`], `include_str!`-embedded at
-//! compile time so it cannot be tampered with at runtime), spawned by the same
-//! supervisor that spawns workers but pointed at the Master's decision log
-//! rather than at code. This module is the **pure data + decision layer** for
-//! that session, mirroring how [`crate::worker`] is the pure layer behind a
-//! worker subprocess: it builds the spawn spec, models the structured findings
-//! the Auditor emits, runs the proxy-signal / weak-implementation checks, and
-//! tallies the 2-of-3 vote. The actual subprocess spawn and the routing of
-//! confirmed findings into the deviation ledger live at the supervisor /
-//! `claw-fleet-core` boundary (see the deviation note in the P10 report).
+//! This module is therefore the **pure data + rule layer**: it models the
+//! structured findings, runs the proxy-signal check ([`audit_mark_done`]) and
+//! the plan-shape weak-implementation heuristics ([`audit_pitem_diff`]). The
+//! 10 red lines and 4 weak patterns are encoded as [`Category`] so the rule
+//! code and tests can't typo a tag. See design/tasks-req-registry.yaml
+//! (REQ-003, REQ-028, REQ-043).
 
 use serde::{Deserialize, Serialize};
 
 use crate::pitem::{AcceptanceCriterion, PItemId};
 
-/// The Auditor's SYSTEM prompt, embedded at compile time so it cannot be
-/// swapped out at runtime (same tamper-resistance contract as the Master
-/// template's `include_str!`). Lists the 10 red lines and the 4
-/// weak-implementation heuristics the Auditor must check.
-///
-/// [REQ-022] independent system prompt with 10 red lines.
-/// [REQ-028] the 4 weak-implementation heuristics.
-pub const AUDITOR_SYSTEM_PROMPT: &str = include_str!("system_prompt.md");
-
-/// Model the Auditor session runs on. Opus-class on purpose: an adversarial
-/// auditor that is *weaker* than the Master it audits would be easy to fool, so
-/// the Auditor gets the same tier as the Master (patch §5 reserves Opus for the
-/// master; the auditor shares that tier precisely because it must out-reason the
-/// thing it polices).
-pub const AUDITOR_MODEL: &str = "claude-opus-4-8";
-
-/// How many independent Auditor sessions vote on each batch of findings.
-///
-/// [REQ-022][REQ-033] Three independent sessions; a finding is confirmed only
-/// when at least [`VOTE_THRESHOLD`] of them report the same problem.
-pub const AUDITOR_QUORUM: usize = 3;
-
-/// Votes required (out of [`AUDITOR_QUORUM`]) to confirm a finding. 2-of-3.
-///
-/// [REQ-022][REQ-033][REQ-034] The 2/3 threshold: a single session's finding is
-/// treated as noise; two independent agreeing sessions confirm it.
-pub const VOTE_THRESHOLD: usize = 2;
-
-// ── Independent spawn spec (REQ-022) ─────────────────────────────────────────
-
-/// What the supervisor needs to spawn **one** independent Auditor session.
-///
-/// [REQ-022] The Auditor is independent of the Master: its own spawn spec, its
-/// own (compile-time-embedded) SYSTEM prompt, and — critically — it is *not*
-/// pointed at the codebase the way a worker is; `master_log_path` is the Master
-/// decision log it audits. `session_index` distinguishes the three quorum
-/// members so they don't collide on session files. Mirrors
-/// [`crate::worker::WorkerSpawnSpec`]'s "pure spec, supervisor does the spawn"
-/// shape, with `Serialize`/`Deserialize` so it can cross the supervisor boundary.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuditorSpawnSpec {
-    pub task_id: String,
-    /// 0-based index of this session within the 3-session quorum.
-    pub session_index: usize,
-    /// The Master decision log this Auditor reads (it never reads worker code
-    /// directly — it audits the Master's *decisions*, not the diffs).
-    pub master_log_path: String,
-    /// The compile-time-embedded Auditor SYSTEM prompt.
-    pub system_prompt: String,
-    pub model: String,
-}
-
-/// Build the 3 independent [`AuditorSpawnSpec`]s for a task's audit quorum.
-///
-/// [REQ-022][REQ-033] Exactly [`AUDITOR_QUORUM`] specs, each carrying the same
-/// embedded SYSTEM prompt but a distinct `session_index` so the three sessions
-/// are genuinely separate processes (separate session files, separate model
-/// context) — that independence is what makes the 2-of-3 vote meaningful.
-pub fn auditor_quorum_specs(task_id: &str, master_log_path: &str) -> Vec<AuditorSpawnSpec> {
-    (0..AUDITOR_QUORUM)
-        .map(|i| AuditorSpawnSpec {
-            task_id: task_id.to_string(),
-            session_index: i,
-            master_log_path: master_log_path.to_string(),
-            system_prompt: AUDITOR_SYSTEM_PROMPT.to_string(),
-            model: AUDITOR_MODEL.to_string(),
-        })
-        .collect()
-}
-
-// ── Structured finding (REQ-022 / REQ-034) ───────────────────────────────────
+// ── Structured finding ───────────────────────────────────────────────────────
 
 /// Severity of an audit finding, aligned with the deviation ledger's
 /// `RiskLevel` and `audit-patterns.json`'s tiers. Red-line violations are always
@@ -110,18 +34,12 @@ pub enum Severity {
     Critical,
 }
 
-/// One structured violation report the Auditor emits.
+/// One structured violation report a deterministic rule emits.
 ///
-/// [REQ-022] The required JSON shape `{severity, category, finding, evidence,
+/// The required JSON shape `{severity, category, finding, evidence,
 /// req_affected}`. Serialized as camelCase (`reqAffected`) so it matches the
 /// wire shape the supervisor / UI consume, and so it lines up with
 /// `claw_fleet_core::audit::AuditEvent`'s camelCase convention.
-///
-/// [REQ-034] alignment: the runtime *security* audit event
-/// (`claw_fleet_core::audit::AuditEvent` with `session_id|timestamp|tool_name`
-/// dedup) is a sibling record produced by the guard layer; an `AuditFinding`
-/// reuses the same dedup discipline via [`AuditFinding::dedup_key`] so the UI
-/// can de-duplicate repeated findings across the quorum's three sessions.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditFinding {
@@ -131,35 +49,20 @@ pub struct AuditFinding {
     pub category: String,
     /// One-line statement of what was violated.
     pub finding: String,
-    /// Concrete evidence quoted from the Master log / worker output. Never a
-    /// proxy signal, never the Auditor's own paraphrase.
+    /// Concrete evidence quoted from the mark-done record / plan diff. Never a
+    /// proxy signal, never a paraphrase.
     pub evidence: String,
     /// REQ ids this finding implicates, for reverse-lookup against the registry.
     pub req_affected: Vec<String>,
 }
 
-impl AuditFinding {
-    /// A stable dedup key for collapsing the same finding reported by multiple
-    /// quorum sessions, mirroring `claw_fleet_core::audit::AuditEvent::dedup_key`.
-    /// Two findings are "the same problem" iff they share category + the sorted
-    /// set of affected REQs — exactly the equivalence the 2-of-3 vote uses.
-    ///
-    /// [REQ-034] dedup discipline so the UI surfaces one notification per real
-    /// problem rather than three (one per quorum member).
-    pub fn dedup_key(&self) -> String {
-        let mut reqs = self.req_affected.clone();
-        reqs.sort();
-        format!("{}|{}", self.category, reqs.join(","))
-    }
-}
-
 /// The canonical category tags. Red lines (1..=10) → always Critical; weak
-/// patterns (A..=D) → High/Medium. Kept as an enum so the heuristic code and
+/// patterns (A..=D) → High/Medium. Kept as an enum so the rule code and
 /// tests can't typo a tag string; [`Category::tag`] is the on-the-wire value
 /// that goes into [`AuditFinding::category`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Category {
-    // ── 10 red lines (REQ-022) — all Critical ──
+    // ── 10 red lines — all Critical ──
     NoDirectEdit,
     NoSkipAudit,
     NoPauseResumeClear,
@@ -170,7 +73,7 @@ pub enum Category {
     NoNewTask,
     NoWorkerFileWrite,
     MergeOnlyViaPMerge,
-    // ── 4 weak-implementation heuristics (REQ-028) ──
+    // ── 4 weak-implementation heuristics ──
     DeclaredVsReality,
     AcceptanceStrengthRegression,
     TouchesScopeShrink,
@@ -215,8 +118,7 @@ impl Category {
         )
     }
 
-    /// The 10 red lines, in red-line order (1..=10). Used to prove the SYSTEM
-    /// prompt mentions every one of them.
+    /// The 10 red lines, in red-line order (1..=10).
     pub fn red_lines() -> [Category; 10] {
         [
             Category::NoDirectEdit,
@@ -540,61 +442,6 @@ pub fn audit_pitem_diff(diff: &PItemDiff) -> Vec<AuditFinding> {
     findings
 }
 
-// ── 2-of-3 voting (REQ-022 / REQ-033 / REQ-034) ──────────────────────────────
-
-/// A finding confirmed by the quorum vote: the canonical finding plus how many
-/// of the [`AUDITOR_QUORUM`] sessions reported it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ConfirmedFinding {
-    pub finding: AuditFinding,
-    pub votes: usize,
-}
-
-/// [REQ-022][REQ-033][REQ-034] Tally findings from the 3 independent Auditor
-/// sessions and keep only those that reached the [`VOTE_THRESHOLD`] (2-of-3).
-///
-/// Two findings are "the same problem" iff they share [`AuditFinding::dedup_key`]
-/// (category + sorted affected-REQ set) — the same equivalence the UI uses to
-/// de-duplicate. Within a single session, repeated findings of the same problem
-/// count as **one** vote (a session can't out-vote itself by repeating). The
-/// returned list is sorted by votes desc then dedup_key for determinism, and the
-/// representative `AuditFinding` is the first one seen for that key.
-pub fn tally_votes(per_session: &[Vec<AuditFinding>]) -> Vec<ConfirmedFinding> {
-    use std::collections::BTreeMap;
-
-    // key -> (representative finding, set of session indices that reported it)
-    let mut tally: BTreeMap<String, (AuditFinding, std::collections::BTreeSet<usize>)> =
-        BTreeMap::new();
-
-    for (session_idx, findings) in per_session.iter().enumerate() {
-        for f in findings {
-            let key = f.dedup_key();
-            tally
-                .entry(key)
-                .or_insert_with(|| (f.clone(), std::collections::BTreeSet::new()))
-                .1
-                .insert(session_idx);
-        }
-    }
-
-    let mut confirmed: Vec<ConfirmedFinding> = tally
-        .into_iter()
-        .filter(|(_, (_, voters))| voters.len() >= VOTE_THRESHOLD)
-        .map(|(_, (finding, voters))| ConfirmedFinding {
-            finding,
-            votes: voters.len(),
-        })
-        .collect();
-
-    confirmed.sort_by(|a, b| {
-        b.votes
-            .cmp(&a.votes)
-            .then_with(|| a.finding.dedup_key().cmp(&b.finding.dedup_key()))
-    });
-    confirmed
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -603,59 +450,20 @@ mod tests {
         AcceptanceCriterion::TestsPass(cmd.to_string())
     }
 
-    // ── [REQ-022] independent session + embedded prompt ──────────────────────
+    // ── red lines + weak patterns are the canonical 10 + 4 ───────────────────
 
-    /// The SYSTEM prompt is embedded at compile time and mentions all 10 red
-    /// lines (by tag) and all 4 weak-implementation heuristics — proving the
-    /// Auditor's constitution travels with the binary, not a runtime file.
+    /// The two canonical category sets stay 10 + 4, all red lines classify as
+    /// red lines, and weak patterns do not.
     #[test]
-    fn req022_system_prompt_lists_all_red_lines_and_weak_patterns() {
-        assert!(
-            AUDITOR_SYSTEM_PROMPT.contains("Auditor"),
-            "prompt must identify the auditor role"
-        );
+    fn red_lines_and_weak_patterns_are_canonical_sets() {
+        assert_eq!(Category::red_lines().len(), 10);
+        assert_eq!(Category::weak_patterns().len(), 4);
         for rl in Category::red_lines() {
-            assert!(
-                AUDITOR_SYSTEM_PROMPT.contains(rl.tag()),
-                "system prompt must mention red-line tag `{}`",
-                rl.tag()
-            );
+            assert!(rl.is_red_line(), "red line `{}` must classify as red", rl.tag());
         }
         for wp in Category::weak_patterns() {
-            assert!(
-                AUDITOR_SYSTEM_PROMPT.contains(wp.tag()),
-                "system prompt must mention weak-pattern tag `{}`",
-                wp.tag()
-            );
+            assert!(!wp.is_red_line(), "weak pattern `{}` must not be a red line", wp.tag());
         }
-        // The 4 proxy signals must be named so the Auditor knows what to reject.
-        for proxy in ["自报", "token", "diff"] {
-            assert!(
-                AUDITOR_SYSTEM_PROMPT.contains(proxy),
-                "system prompt must name proxy signal `{proxy}`"
-            );
-        }
-    }
-
-    /// [REQ-022][REQ-033] The quorum is 3 independent specs, each with its own
-    /// session_index but the same embedded prompt — independence is what makes
-    /// the 2-of-3 vote meaningful.
-    #[test]
-    fn req022_quorum_is_three_independent_specs() {
-        let specs = auditor_quorum_specs("task-1", "/log/master.jsonl");
-        assert_eq!(specs.len(), AUDITOR_QUORUM);
-        assert_eq!(AUDITOR_QUORUM, 3);
-        let idxs: Vec<usize> = specs.iter().map(|s| s.session_index).collect();
-        assert_eq!(idxs, vec![0, 1, 2], "sessions must be distinctly indexed");
-        for s in &specs {
-            assert_eq!(s.system_prompt, AUDITOR_SYSTEM_PROMPT);
-            assert_eq!(s.model, AUDITOR_MODEL);
-            assert_eq!(s.master_log_path, "/log/master.jsonl");
-        }
-        // A spec round-trips through JSON (crosses the supervisor boundary).
-        let json = serde_json::to_string(&specs[0]).unwrap();
-        let back: AuditorSpawnSpec = serde_json::from_str(&json).unwrap();
-        assert_eq!(back, specs[0]);
     }
 
     // ── [REQ-043] proxy-signal detection at mark-done ────────────────────────
@@ -836,99 +644,5 @@ mod tests {
     #[test]
     fn req028_clean_diff_yields_no_findings() {
         assert!(audit_pitem_diff(&base_diff()).is_empty());
-    }
-
-    // ── [REQ-022][REQ-033][REQ-034] 2-of-3 voting ────────────────────────────
-
-    fn finding(cat: Category, reqs: &[&str]) -> AuditFinding {
-        AuditFinding {
-            severity: if cat.is_red_line() {
-                Severity::Critical
-            } else {
-                Severity::High
-            },
-            category: cat.tag().to_string(),
-            finding: "f".into(),
-            evidence: "e".into(),
-            req_affected: reqs.iter().map(|s| s.to_string()).collect(),
-        }
-    }
-
-    /// 2-of-3: a finding reported by 2 sessions is confirmed; one reported by
-    /// only 1 is dropped as noise.
-    #[test]
-    fn req033_two_of_three_confirms_majority_drops_singletons() {
-        let s0 = vec![
-            finding(Category::NoProxySignal, &["REQ-003", "REQ-043"]),
-            finding(Category::TouchesScopeShrink, &["REQ-028"]),
-        ];
-        let s1 = vec![finding(Category::NoProxySignal, &["REQ-043", "REQ-003"])]; // same key, reordered reqs
-        let s2 = vec![finding(Category::DependencyChainBreak, &["REQ-028"])]; // singleton
-
-        let confirmed = tally_votes(&[s0, s1, s2]);
-        // no-proxy-signal: 2 votes → confirmed. touches-scope-shrink: 1 → dropped.
-        // dependency-chain-break: 1 → dropped.
-        assert_eq!(confirmed.len(), 1);
-        assert_eq!(confirmed[0].finding.category, Category::NoProxySignal.tag());
-        assert_eq!(confirmed[0].votes, 2);
-    }
-
-    /// All three agree → confirmed with 3 votes.
-    #[test]
-    fn req033_unanimous_finding_confirmed_with_three_votes() {
-        let f = finding(Category::NoDirectGit, &["REQ-021"]);
-        let confirmed = tally_votes(&[vec![f.clone()], vec![f.clone()], vec![f.clone()]]);
-        assert_eq!(confirmed.len(), 1);
-        assert_eq!(confirmed[0].votes, 3);
-    }
-
-    /// A single session repeating the same finding 3× is still only 1 vote — a
-    /// session can't out-vote itself.
-    #[test]
-    fn req033_repeated_finding_in_one_session_counts_once() {
-        let f = finding(Category::NoProxySignal, &["REQ-043"]);
-        let confirmed = tally_votes(&[vec![f.clone(), f.clone(), f.clone()], vec![], vec![]]);
-        assert!(
-            confirmed.is_empty(),
-            "1 session (even repeating) is below the 2/3 threshold"
-        );
-    }
-
-    /// Mock master that ONLY reports proxy signals, fed end-to-end through the
-    /// quorum: 2 of 3 auditors catch it → confirmed critical. This is the spec's
-    /// "mock master 仅代理信号 → Auditor 报 critical" acceptance test.
-    #[test]
-    fn req034_mock_proxy_only_master_confirmed_critical_by_quorum() {
-        let record = MarkDoneRecord {
-            p_item_id: "p9".into(),
-            declared: vec![AcceptanceCriterion::Builds],
-            evidence: vec![MarkDoneEvidence::WorkerSelfReport {
-                text: "done!".into(),
-            }],
-        };
-        // Two independent auditor sessions both run the same audit and agree;
-        // the third (mock) missed it.
-        let a0 = audit_mark_done(&record);
-        let a1 = audit_mark_done(&record);
-        let a2: Vec<AuditFinding> = vec![];
-        assert_eq!(a0[0].severity, Severity::Critical);
-
-        let confirmed = tally_votes(&[a0, a1, a2]);
-        assert_eq!(confirmed.len(), 1, "proxy-only mark-done must be confirmed");
-        assert_eq!(confirmed[0].finding.severity, Severity::Critical);
-        assert_eq!(
-            confirmed[0].finding.category,
-            Category::NoProxySignal.tag()
-        );
-        assert_eq!(confirmed[0].votes, 2, "2-of-3 confirms it");
-    }
-
-    #[test]
-    fn dedup_key_is_category_plus_sorted_reqs() {
-        let a = finding(Category::NoProxySignal, &["REQ-043", "REQ-003"]);
-        let b = finding(Category::NoProxySignal, &["REQ-003", "REQ-043"]);
-        assert_eq!(a.dedup_key(), b.dedup_key(), "req order must not matter");
-        let c = finding(Category::DeclaredVsReality, &["REQ-028"]);
-        assert_ne!(a.dedup_key(), c.dedup_key());
     }
 }

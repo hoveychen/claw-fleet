@@ -278,11 +278,9 @@ fn pid_alive_reaping(_pid: u32) -> bool {
 mod tests {
     use super::*;
     use crate::local_host::ProcessLauncher;
-    use claw_fleet_task::auditor::AuditorSpawnSpec;
     use claw_fleet_task::master::MasterSpawnSpec;
     use claw_fleet_task::paths::fleet_home_lock;
     use claw_fleet_task::worker::WorkerSpawnSpec;
-    use std::path::Path;
     use std::process::{Command, Stdio};
     use std::sync::Mutex;
 
@@ -334,15 +332,6 @@ mod tests {
             self.spawn()
         }
         fn launch_worker(&self, _s: &str, _spec: &WorkerSpawnSpec) -> Result<u32, String> {
-            self.spawn()
-        }
-        // [WA1] Test fake must satisfy the widened ProcessLauncher trait.
-        fn launch_auditor(
-            &self,
-            _s: &str,
-            _spec: &AuditorSpawnSpec,
-            _output_path: &Path,
-        ) -> Result<u32, String> {
             self.spawn()
         }
     }

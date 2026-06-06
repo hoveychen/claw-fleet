@@ -342,20 +342,16 @@ enum TaskCommands {
         #[arg(long)]
         file: Option<std::path::PathBuf>,
     },
-    /// [WA2] Run the live adversarial audit on a P-item before mark-done:
-    /// spawn 3 independent Auditor sessions against the Master decision log,
-    /// wait (hard timeout) for their `AuditFinding[]` JSON, 2-of-3 vote, persist
-    /// the confirmed findings to `~/.fleet/audits/`, and print a verdict line
-    /// (`AUDIT_VERDICT: CRITICAL_CONFIRMED <n>` or `AUDIT_VERDICT: CLEAN`).
-    /// Master tool — required by the Acceptance Audit Protocol before mark-done.
+    /// [WA-DEC] Run the deterministic adversarial audit on a P-item, in-process —
+    /// no session, no timeout, no voting. Reconstructs the P-item's MarkDoneRecord
+    /// from its persisted acceptance evidence, runs the proxy-signal / red-line
+    /// rules, writes the findings to `~/.fleet/audits/`, and prints a verdict line
+    /// (`AUDIT_VERDICT: CRITICAL_CONFIRMED <n>` or `AUDIT_VERDICT: CLEAN`), exiting
+    /// 2 on a critical. Read-only PREVIEW only: mark-done runs the same rule gate
+    /// itself, so this command is informational and not a required step.
     Audit {
         task_id: String,
         p_id: String,
-        /// Hard timeout in seconds for the auditor quorum to deliver findings.
-        /// A session that misses the deadline is recorded as a Critical
-        /// `auditor-timeout` — never a silent pass.
-        #[arg(long, default_value_t = 600)]
-        timeout_secs: u64,
     },
     /// Delete a task's json + materials dir. **Does not touch any running
     /// fleet-task process** — kill that separately (e.g. SIGTERM the pid in
@@ -627,32 +623,23 @@ fn cmd_task(action: TaskCommands) {
             claw_fleet_core::task::update_plan(&task_id, plan).unwrap_or_else(|e| die(e));
             println!("plan updated");
         }
-        TaskCommands::Audit {
-            task_id,
-            p_id,
-            timeout_secs,
-        } => {
-            // [WA2] Live adversarial audit. The launcher shells out to `claude`
-            // for each of the 3 quorum sessions (same flags as the master/worker
-            // spawn path); `audit_pitem` builds the specs, polls each session's
-            // output, 2-of-3 votes, and persists the confirmed findings.
-            let launcher = CliAuditorLauncher;
-            let outcome = claw_fleet_core::actions::audit_pitem(
-                &task_id,
-                &p_id,
-                &launcher,
-                std::time::Duration::from_secs(timeout_secs),
-            )
-            .unwrap_or_else(|e| die(e));
+        TaskCommands::Audit { task_id, p_id } => {
+            // [WA-DEC] In-process deterministic audit (read-only preview). No
+            // launcher, no quorum, no timeout — `audit_pitem` rebuilds the
+            // MarkDoneRecord from the P-item's persisted acceptance evidence,
+            // runs the proxy-signal / red-line rules, and persists the findings.
+            let outcome = claw_fleet_core::actions::audit_pitem(&task_id, &p_id)
+                .unwrap_or_else(|e| die(e));
             // The verdict line is the contract the master parses.
             println!("{}", outcome.verdict.verdict_line());
             eprintln!(
-                "audit: {} confirmed finding(s) written to {}",
-                outcome.confirmed.len(),
+                "audit: {} finding(s) written to {}",
+                outcome.findings.len(),
                 outcome.written_to.display()
             );
-            // Non-zero exit on a confirmed Critical so callers (and the master's
-            // shell) can branch on the process status as well as the stdout line.
+            // Non-zero exit on a critical so callers (and the master's shell) can
+            // branch on the process status as well as the stdout line. This is a
+            // read-only preview and does not itself block anything else.
             if matches!(
                 outcome.verdict,
                 claw_fleet_core::actions::AuditVerdict::CriticalConfirmed(_)
@@ -684,74 +671,6 @@ fn cmd_task(action: TaskCommands) {
         TaskCommands::List { project_id, json } => {
             cmd_task_list(project_id.as_deref(), json);
         }
-    }
-}
-
-/// [WA2] The real `AuditorLauncher` for `fleet task audit`: shells out to the
-/// `claude` CLI for each of the 3 quorum sessions, mirroring the master/worker
-/// spawn flags (`--print --session-id --append-system-prompt --model`). The
-/// auditor's compile-time-embedded SYSTEM prompt + Opus-tier model travel on the
-/// `AuditorSpawnSpec`; we pass the per-session output drop path in the prompt
-/// and as `FLEET_AUDITOR_OUTPUT` so the session knows where to write its
-/// `AuditFinding[]` JSON, which `audit_pitem` then polls.
-struct CliAuditorLauncher;
-
-impl claw_fleet_core::actions::AuditorLauncher for CliAuditorLauncher {
-    fn launch_auditor(
-        &self,
-        session_index: usize,
-        spec: &claw_fleet_core::auditor::AuditorSpawnSpec,
-        output_path: &std::path::Path,
-    ) -> Result<u32, String> {
-        use std::process::Stdio;
-        // No uuid dep in fleet-cli; a task+pidx+nanos id is unique enough for a
-        // short-lived audit session file name.
-        let session_id = format!(
-            "auditor-{}-{}-{}",
-            spec.task_id,
-            session_index,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
-        let prompt = format!(
-            "You are independent Auditor session #{idx} of a 3-session quorum for \
-             task `{task}`. Read the Master decision log at `{log}` (and any P-item \
-             worker output/diff it references), apply the red lines and weak-impl \
-             heuristics from your SYSTEM prompt, and write your `AuditFinding[]` JSON \
-             array to the file `{out}`. Write `[]` if you find nothing. Do NOT edit \
-             any code; you only observe and report. Stop when the file is written.",
-            idx = session_index,
-            task = spec.task_id,
-            log = spec.master_log_path,
-            out = output_path.display(),
-        );
-        // Anchor cwd at the log's parent (the ~/.fleet dir) — the auditor is
-        // read-only and needs no project working tree.
-        let cwd = std::path::Path::new(&spec.master_log_path)
-            .parent()
-            .map(std::path::Path::to_path_buf)
-            .unwrap_or_else(std::env::temp_dir);
-        let mut cmd = claw_fleet_core::process_util::command("claude");
-        cmd.current_dir(&cwd)
-            .arg("--print")
-            .arg("--session-id")
-            .arg(&session_id)
-            .arg("--append-system-prompt")
-            .arg(&spec.system_prompt)
-            .arg("--model")
-            .arg(&spec.model)
-            .arg(&prompt)
-            .env("FLEET_SESSION_ID", &session_id)
-            .env("FLEET_SESSION_KIND", "auditor")
-            .env("FLEET_TASK_ID", &spec.task_id)
-            .env("FLEET_AUDITOR_OUTPUT", output_path)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null());
-        let child = cmd.spawn().map_err(|e| format!("spawn auditor claude: {e}"))?;
-        Ok(child.id())
     }
 }
 
