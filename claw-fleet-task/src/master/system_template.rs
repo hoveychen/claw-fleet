@@ -505,7 +505,7 @@ mod tests {
     /// (which itself ends in `═══`) and the next section header `═══ 事件协议`.
     fn tool_section_body() -> &'static str {
         MASTER_SYSTEM_TEMPLATE
-            .split("仅这 7 个能动 task） ═══")
+            .split("仅这 8 个能动 task） ═══")
             .nth(1)
             .expect("tool section header present")
             .split("═══ 事件协议")
@@ -514,14 +514,17 @@ mod tests {
     }
 
     #[test]
-    fn tool_section_lists_seven_allowed_tools() {
-        // [REQ-021] Exactly the 7 task tools, no more.
+    fn tool_section_lists_eight_allowed_tools() {
+        // [REQ-021][WA3] Exactly the 8 task tools (the adversarial `audit` tool
+        // was added in WA3 so the master can run the independent quorum audit
+        // before mark-done), no more.
         let section = tool_section_body();
         for tool in [
             "get-plan",
             "get-dispatchable",
             "dispatch",
             "read-output",
+            "audit",
             "mark-done",
             "mark-failed",
             "update-plan",
@@ -531,19 +534,76 @@ mod tests {
                 "tool section missing allowed tool `{tool}`"
             );
         }
-        // Numbered 1.–7. with no 8th item.
-        for n in 1..=7 {
+        // Numbered 1.–8. with no 9th item.
+        for n in 1..=8 {
             assert!(
                 section.contains(&format!("{n}. `fleet task")),
                 "tool section missing numbered tool {n}"
             );
         }
         assert!(
-            !section.contains("8. `fleet task"),
-            "tool section must list exactly 7 tools, found an 8th"
+            !section.contains("9. `fleet task"),
+            "tool section must list exactly 8 tools, found a 9th"
         );
-        // The header declares the count of 7.
-        assert!(MASTER_SYSTEM_TEMPLATE.contains("共 7 个专用工具"));
+        // The header declares the count of 8.
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("共 8 个专用工具"));
+    }
+
+    // ───────── [WA-DEC] mark-done's built-in deterministic adversarial gate ─────
+
+    #[test]
+    fn audit_protocol_describes_builtin_deterministic_gate() {
+        // [WA-DEC] The adversarial audit is no longer a separate mandatory CLI
+        // step — it is a deterministic rule gate built INTO mark-done. The
+        // protocol must say so, and must say the master need not call it
+        // separately.
+        assert!(
+            MASTER_SYSTEM_TEMPLATE.contains("**adversarial audit**"),
+            "protocol must still name the adversarial-audit step"
+        );
+        assert!(
+            MASTER_SYSTEM_TEMPLATE.contains("已经内建在 `mark-done` 里"),
+            "protocol must say the gate is built into mark-done"
+        );
+        assert!(
+            MASTER_SYSTEM_TEMPLATE.contains("你无需额外调用"),
+            "protocol must say the master need not invoke the audit separately"
+        );
+        // No-session / no-vote / no-timeout framing must be present.
+        assert!(
+            MASTER_SYSTEM_TEMPLATE.contains("无 session") && MASTER_SYSTEM_TEMPLATE.contains("无投票"),
+            "protocol must frame the gate as deterministic (no session / no vote)"
+        );
+        // The old quorum / mandatory-CLI wording must be gone.
+        assert!(
+            !MASTER_SYSTEM_TEMPLATE.contains("2-of-3"),
+            "the 2-of-3 voting language must be removed"
+        );
+        assert!(
+            !MASTER_SYSTEM_TEMPLATE.contains("3 个独立 Auditor 会话"),
+            "the 3-session quorum language must be removed"
+        );
+    }
+
+    #[test]
+    fn audit_protocol_critical_auto_rejects_mark_done() {
+        // [WA-DEC][DEC-007] A critical / red-line finding must AUTO-reject
+        // mark-done (the gate returns AUDIT_CRITICAL) and route to
+        // retry-worker-once then AskUserQuestion (never self-release).
+        let step = MASTER_SYSTEM_TEMPLATE
+            .split("**adversarial audit**")
+            .nth(1)
+            .expect("audit step present")
+            .split("═══ Human Gate")
+            .next()
+            .unwrap_or("");
+        assert!(step.contains("自动拒绝 mark-done"), "critical must auto-reject mark-done");
+        assert!(step.contains("AUDIT_CRITICAL"), "gate must surface the AUDIT_CRITICAL prefix");
+        assert!(step.contains("proxy 信号") || step.contains("代理信号"), "must mention proxy signals");
+        assert!(step.contains("红线"), "must mention the 10 red lines");
+        assert!(step.contains("DEC-007"));
+        assert!(step.contains("retry worker") || step.contains("retry"));
+        assert!(step.contains("AskUserQuestion"));
     }
 
     #[test]

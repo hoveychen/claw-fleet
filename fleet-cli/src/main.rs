@@ -342,6 +342,17 @@ enum TaskCommands {
         #[arg(long)]
         file: Option<std::path::PathBuf>,
     },
+    /// [WA-DEC] Run the deterministic adversarial audit on a P-item, in-process —
+    /// no session, no timeout, no voting. Reconstructs the P-item's MarkDoneRecord
+    /// from its persisted acceptance evidence, runs the proxy-signal / red-line
+    /// rules, writes the findings to `~/.fleet/audits/`, and prints a verdict line
+    /// (`AUDIT_VERDICT: CRITICAL_CONFIRMED <n>` or `AUDIT_VERDICT: CLEAN`), exiting
+    /// 2 on a critical. Read-only PREVIEW only: mark-done runs the same rule gate
+    /// itself, so this command is informational and not a required step.
+    Audit {
+        task_id: String,
+        p_id: String,
+    },
     /// Delete a task's json + materials dir. **Does not touch any running
     /// fleet-task process** — kill that separately (e.g. SIGTERM the pid in
     /// `~/.fleet/runtime/<task_id>.json`) before clearing if you want a
@@ -611,6 +622,30 @@ fn cmd_task(action: TaskCommands) {
             }
             claw_fleet_core::task::update_plan(&task_id, plan).unwrap_or_else(|e| die(e));
             println!("plan updated");
+        }
+        TaskCommands::Audit { task_id, p_id } => {
+            // [WA-DEC] In-process deterministic audit (read-only preview). No
+            // launcher, no quorum, no timeout — `audit_pitem` rebuilds the
+            // MarkDoneRecord from the P-item's persisted acceptance evidence,
+            // runs the proxy-signal / red-line rules, and persists the findings.
+            let outcome = claw_fleet_core::actions::audit_pitem(&task_id, &p_id)
+                .unwrap_or_else(|e| die(e));
+            // The verdict line is the contract the master parses.
+            println!("{}", outcome.verdict.verdict_line());
+            eprintln!(
+                "audit: {} finding(s) written to {}",
+                outcome.findings.len(),
+                outcome.written_to.display()
+            );
+            // Non-zero exit on a critical so callers (and the master's shell) can
+            // branch on the process status as well as the stdout line. This is a
+            // read-only preview and does not itself block anything else.
+            if matches!(
+                outcome.verdict,
+                claw_fleet_core::actions::AuditVerdict::CriticalConfirmed(_)
+            ) {
+                std::process::exit(2);
+            }
         }
         TaskCommands::Clear { task_id } => {
             // File-only delete: bypass the legacy SupervisorHost terminate
