@@ -1227,6 +1227,39 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
     (nodes, edges)
 }
 
+/// Execution-based skeleton: run the script through the node sidecar and convert
+/// the executed call-sites into [`ScriptStep`]s for [`build_dag`]. Returns `None`
+/// when `node` is unavailable, the run errored/timed out, or it surfaced no
+/// call-sites — the caller then keeps the static scan. Fingerprints are the
+/// resolved-prompt static heads (generalized across executions via LCP in the
+/// harness), a stronger binding signal than the regex-extracted static prefix.
+///
+/// `args` is the JSON-encoded invocation argument recovered from the parent
+/// transcript (see [`args_from_transcript`]); it lets `args`-driven fan-out
+/// shapes execute their real width instead of collapsing. `None` when the run
+/// took no args or they couldn't be recovered.
+fn sidecar_steps(body: &str, args: Option<&str>) -> Option<Vec<ScriptStep>> {
+    let r = crate::workflow_sidecar::extract(body, args).ok()?;
+    if r.calls.is_empty() {
+        return None;
+    }
+    Some(
+        r.calls
+            .into_iter()
+            .map(|c| ScriptStep {
+                phase: c.phase,
+                kind: c.kind,
+                agent_type: c.agent_type,
+                label: c.label,
+                pipeline_group: c.pipeline_id,
+                // Match fingerprint_binding's own >= 4 usefulness threshold;
+                // an empty/tiny head (variable-first prompt) means "no fingerprint".
+                prompt_fingerprint: Some(c.fingerprint).filter(|f| f.trim().len() >= 4),
+            })
+            .collect(),
+    )
+}
+
 // ── Disk discovery ──────────────────────────────────────────────────────────
 
 /// Given a parent session's `.jsonl` transcript path, return the sibling
@@ -1325,6 +1358,87 @@ fn match_script_file_line(text: &str, run_id: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// True when a Workflow tool_result's text reports this `run_id` (matched on its
+/// `Transcript dir:` line, same rule as [`match_script_file_line`]).
+fn tool_result_matches_run(text: &str, run_id: &str) -> bool {
+    text.lines().any(|l| {
+        l.trim()
+            .strip_prefix("Transcript dir:")
+            .map(|rest| rest.trim().trim_end_matches('/').rsplit('/').next() == Some(run_id))
+            .unwrap_or(false)
+    })
+}
+
+/// Recover the JSON-encoded `args` a Workflow run was invoked with, from the
+/// parent transcript. The args live in the assistant's `Workflow` tool_use
+/// `input.args`; we map that tool_use to this `run_id` via the matching
+/// tool_result's `tool_use_id` (the tool_result carries `Transcript dir:
+/// …/<run_id>`). Returns the args serialized back to a JSON string (round-trips
+/// any shape — string / array / object) for the sidecar's argv, or `None` when
+/// the run took no args, they can't be correlated, or they're implausibly large
+/// (avoids overflowing the child's argv).
+fn args_from_transcript(session_dir: &Path, run_id: &str) -> Option<String> {
+    const MAX_ARGS_BYTES: usize = 128 * 1024;
+    let dir_name = session_dir.file_name()?.to_str()?;
+    let jsonl = session_dir.parent()?.join(format!("{dir_name}.jsonl"));
+    let body = fs::read_to_string(&jsonl).ok()?;
+
+    let mut args_by_id: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    let mut run_tool_use_id: Option<String> = None;
+
+    for line in body.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let content = v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .or_else(|| v.get("content"));
+        let Some(blocks) = content.and_then(|c| c.as_array()) else {
+            continue;
+        };
+        for b in blocks {
+            match b.get("type").and_then(|t| t.as_str()) {
+                Some("tool_use") if b.get("name").and_then(|n| n.as_str()) == Some("Workflow") => {
+                    if let (Some(id), Some(args)) = (
+                        b.get("id").and_then(|x| x.as_str()),
+                        b.get("input").and_then(|i| i.get("args")),
+                    ) {
+                        if !args.is_null() {
+                            args_by_id.insert(id.to_string(), args.clone());
+                        }
+                    }
+                }
+                Some("tool_result") => {
+                    let text = match b.get("content") {
+                        Some(serde_json::Value::String(s)) => s.clone(),
+                        Some(serde_json::Value::Array(items)) => items
+                            .iter()
+                            .filter_map(|x| x.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        _ => continue,
+                    };
+                    if tool_result_matches_run(&text, run_id) {
+                        if let Some(id) = b.get("tool_use_id").and_then(|x| x.as_str()) {
+                            run_tool_use_id = Some(id.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let id = run_tool_use_id?;
+    let args = args_by_id.get(&id)?;
+    let encoded = serde_json::to_string(args).ok()?;
+    if encoded.len() > MAX_ARGS_BYTES {
+        return None;
+    }
+    Some(encoded)
 }
 
 /// Read the first user-message text from an agent's `agent-<id>.jsonl`
@@ -1438,10 +1552,23 @@ pub fn discover_workflow_trees_in_dir(session_dir: &Path) -> Vec<WorkflowTree> {
             .as_deref()
             .map(parse_script_meta)
             .unwrap_or((None, None, Vec::new()));
-        let steps = script_body
+        // Skeleton: prefer execution-based extraction (resolved-prompt
+        // fingerprints, accurate kinds/labels) but only when it is at least as
+        // complete as the static scan — never regress node count. The static
+        // scan is the floor and the silent fallback when `node` is absent, the
+        // run fails/times out, or a data-dependent branch collapses the skeleton.
+        let static_steps = script_body
             .as_deref()
             .map(parse_script_steps)
             .unwrap_or_default();
+        // Real invocation args (if any) let args-driven fan-out execute its true
+        // width instead of collapsing to an empty/thin skeleton.
+        let run_args = args_from_transcript(session_dir, &run_id);
+        let steps = script_body
+            .as_deref()
+            .and_then(|b| sidecar_steps(b, run_args.as_deref()))
+            .filter(|s| !s.is_empty() && s.len() >= static_steps.len())
+            .unwrap_or(static_steps);
         let (nodes, edges) = build_dag(&steps, &agents);
 
         trees.push(WorkflowTree {
@@ -2015,6 +2142,123 @@ const v = await parallel(items.map(c => () => parallel(vs.map(n => () => agent("
         assert!(edges.is_empty());
     }
 
+    // ── Sidecar (execution-based) integration ────────────────────────────────
+
+    use std::sync::Mutex as SidecarMutex;
+    /// Serialize tests touching FLEET_NODE_BIN (cargo runs tests in parallel).
+    pub(crate) static SIDECAR_ENV_LOCK: SidecarMutex<()> = SidecarMutex::new(());
+
+    fn node_runnable() -> bool {
+        crate::process_util::command(
+            std::env::var("FLEET_NODE_BIN").unwrap_or_else(|_| "node".into()),
+        )
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+    }
+
+    /// A self-contained two-fan-out script whose prompts are built with a
+    /// **computed** prefix (`['alpha','task'].join(' ')`) the static scanner
+    /// can't fingerprint (it begins with `[`, not a string literal or builder
+    /// call). All agents share the default `worker` agentType, so the static
+    /// heuristic can't route them either. Execution resolves the prefixes →
+    /// fingerprints route each agent to the right node.
+    const ROUTING: &str = r#"export const meta = { name: 'route', phases: [ { title: 'A' }, { title: 'B' } ] }
+phase('A')
+const aItems = [{ i: '1' }, { i: '2' }]
+const ra = await parallel(aItems.map((x) => () => agent(['alpha', 'task'].join(' ') + ' ' + x.i, { phase: 'A', agentType: 'worker' })))
+phase('B')
+const bItems = [{ i: '9' }]
+const rb = await parallel(bItems.map((x) => () => agent(['beta', 'job'].join(' ') + ' ' + x.i, { phase: 'B', agentType: 'worker' })))
+return [ra, rb]
+"#;
+
+    /// Build a fixture session dir for ROUTING with three worker agents whose
+    /// first-prompt transcripts carry the resolved prompts (the binding signal).
+    pub(crate) fn make_routing_fixture(tag: &str) -> (PathBuf, PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("wfsc-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sid");
+        let wf_dir = session_dir
+            .join("subagents")
+            .join("workflows")
+            .join("wf_route-1");
+        fs::create_dir_all(&wf_dir).unwrap();
+        fs::write(
+            wf_dir.join("journal.jsonl"),
+            "{\"type\":\"started\",\"key\":\"v2:k0\",\"agentId\":\"a1\"}\n\
+             {\"type\":\"result\",\"key\":\"v2:k0\",\"agentId\":\"a1\",\"result\":\"r\"}\n\
+             {\"type\":\"started\",\"key\":\"v2:k1\",\"agentId\":\"a2\"}\n\
+             {\"type\":\"result\",\"key\":\"v2:k1\",\"agentId\":\"a2\",\"result\":\"r\"}\n\
+             {\"type\":\"started\",\"key\":\"v2:k2\",\"agentId\":\"b1\"}\n\
+             {\"type\":\"result\",\"key\":\"v2:k2\",\"agentId\":\"b1\",\"result\":\"r\"}\n",
+        )
+        .unwrap();
+        for (id, prompt) in [
+            ("a1", "alpha task 1"),
+            ("a2", "alpha task 2"),
+            ("b1", "beta job 9"),
+        ] {
+            fs::write(
+                wf_dir.join(format!("agent-{id}.meta.json")),
+                "{\"agentType\":\"worker\"}",
+            )
+            .unwrap();
+            let line = serde_json::json!({
+                "type": "user",
+                "message": { "content": prompt }
+            })
+            .to_string();
+            fs::write(wf_dir.join(format!("agent-{id}.jsonl")), format!("{line}\n")).unwrap();
+        }
+        let scripts_dir = session_dir.join("workflows").join("scripts");
+        fs::create_dir_all(&scripts_dir).unwrap();
+        fs::write(scripts_dir.join("route-wf_route-1.js"), ROUTING).unwrap();
+        (tmp, session_dir)
+    }
+
+    #[test]
+    fn discover_sidecar_routes_same_type_agents_by_resolved_prompt() {
+        let _g = SIDECAR_ENV_LOCK.lock().unwrap();
+        std::env::remove_var("FLEET_NODE_BIN");
+        if !node_runnable() {
+            eprintln!("skipping: node not available");
+            return;
+        }
+        let (tmp, session_dir) = make_routing_fixture("route");
+        let trees = discover_workflow_trees_in_dir(&session_dir);
+        assert_eq!(trees.len(), 1);
+        let t = &trees[0];
+        assert_eq!(t.nodes.len(), 2, "two fan-out call-sites");
+        // Execution fingerprints route a1/a2 → node A, b1 → node B, exactly.
+        assert_eq!(t.nodes[0].agent_ids, vec!["a1", "a2"], "node A bound a1,a2");
+        assert!(!t.nodes[0].approximate, "node A binding is exact");
+        assert_eq!(t.nodes[1].agent_ids, vec!["b1"], "node B bound b1");
+        assert!(!t.nodes[1].approximate, "node B binding is exact");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn discover_falls_back_to_static_when_node_missing() {
+        let _g = SIDECAR_ENV_LOCK.lock().unwrap();
+        // Force the sidecar to fail (node "binary" that can't run the harness).
+        std::env::set_var("FLEET_NODE_BIN", "/bin/false");
+        let (tmp, session_dir) = make_routing_fixture("fallback");
+        let trees = discover_workflow_trees_in_dir(&session_dir);
+        std::env::remove_var("FLEET_NODE_BIN");
+        assert_eq!(trees.len(), 1);
+        let t = &trees[0];
+        // Static scan still yields the 2-node skeleton and loses no agent — the
+        // fallback is safe even though routing may be coarser (heuristic).
+        assert_eq!(t.nodes.len(), 2, "static scan still finds both call-sites");
+        let total: usize = t.nodes.iter().map(|n| n.agent_ids.len()).sum();
+        assert_eq!(total, 3, "every journal agent still bound somewhere");
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn discover_builds_dag_with_meta_agenttype() {
         let tmp = std::env::temp_dir().join(format!("wfdag-test-{}", std::process::id()));
@@ -2061,6 +2305,88 @@ const v = await parallel(items.map(c => () => parallel(vs.map(n => () => agent("
         assert_eq!(t.nodes[1].status, WorkflowNodeStatus::Running);
         assert_eq!(t.edges.len(), 1);
 
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Write a parent transcript pairing a `Workflow` tool_use (carrying `args`)
+    /// with its tool_result (carrying `Transcript dir: …/<run_id>`), then assert
+    /// args_from_transcript recovers the args round-tripped to a JSON string.
+    fn args_fixture(tag: &str, run_id: &str, args: serde_json::Value) -> (PathBuf, PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("wfargs-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sid-args");
+        fs::create_dir_all(&session_dir).unwrap();
+        let wf_path = format!("/somewhere/{run_id}");
+        let tu = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [
+                { "type": "tool_use", "id": "tu1", "name": "Workflow", "input": { "scriptPath": "/x.js", "args": args } }
+            ]}
+        });
+        let tr = serde_json::json!({
+            "type": "user",
+            "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "tu1",
+                  "content": format!("Workflow launched. Task ID: t1\nTranscript dir: {wf_path}\nScript file: /x.js\n") }
+            ]}
+        });
+        let parent = session_dir.parent().unwrap().join("sid-args.jsonl");
+        fs::write(&parent, format!("{tu}\n{tr}\n")).unwrap();
+        (tmp, session_dir)
+    }
+
+    #[test]
+    fn args_from_transcript_recovers_string_arg() {
+        let (tmp, session_dir) =
+            args_fixture("str", "wf_q-1", serde_json::json!("what is rust?"));
+        let got = args_from_transcript(&session_dir, "wf_q-1");
+        assert_eq!(got.as_deref(), Some("\"what is rust?\""), "string args round-trip");
+        // wrong run id → no args
+        assert_eq!(args_from_transcript(&session_dir, "wf_other"), None);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn args_from_transcript_recovers_array_arg() {
+        let (tmp, session_dir) = args_fixture(
+            "arr",
+            "wf_list-1",
+            serde_json::json!(["00001b02", "000010bc"]),
+        );
+        let got = args_from_transcript(&session_dir, "wf_list-1");
+        assert_eq!(
+            got.as_deref(),
+            Some("[\"00001b02\",\"000010bc\"]"),
+            "array args round-trip"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn args_from_transcript_none_when_no_args() {
+        // tool_use with no args field → None (not an error)
+        let tmp = std::env::temp_dir().join(format!("wfargs-none-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sid-args");
+        fs::create_dir_all(&session_dir).unwrap();
+        let tu = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [
+                { "type": "tool_use", "id": "tu1", "name": "Workflow", "input": { "scriptPath": "/x.js" } }
+            ]}
+        });
+        let tr = serde_json::json!({
+            "type": "user",
+            "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "tu1", "content": "Transcript dir: /somewhere/wf_n-1\n" }
+            ]}
+        });
+        fs::write(
+            session_dir.parent().unwrap().join("sid-args.jsonl"),
+            format!("{tu}\n{tr}\n"),
+        )
+        .unwrap();
+        assert_eq!(args_from_transcript(&session_dir, "wf_n-1"), None);
         let _ = fs::remove_dir_all(&tmp);
     }
 }
