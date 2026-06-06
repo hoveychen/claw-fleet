@@ -1218,7 +1218,9 @@
     "no_active_tasks": "No active tasks",
     "no_projects": "No projects yet — create one",
     "manage_projects": "Manage projects",
-    "new_task_for_project": "New task for {{name}}"
+    "new_task_for_project": "New task for {{name}}",
+    "tab_monitor": "Sessions",
+    "tab_tasks": "Tasks"
   },
   "master": {
     "chip_master": "Master",
