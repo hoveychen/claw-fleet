@@ -505,7 +505,7 @@ mod tests {
     /// (which itself ends in `═══`) and the next section header `═══ 事件协议`.
     fn tool_section_body() -> &'static str {
         MASTER_SYSTEM_TEMPLATE
-            .split("仅这 7 个能动 task） ═══")
+            .split("仅这 8 个能动 task） ═══")
             .nth(1)
             .expect("tool section header present")
             .split("═══ 事件协议")
@@ -514,14 +514,17 @@ mod tests {
     }
 
     #[test]
-    fn tool_section_lists_seven_allowed_tools() {
-        // [REQ-021] Exactly the 7 task tools, no more.
+    fn tool_section_lists_eight_allowed_tools() {
+        // [REQ-021][WA3] Exactly the 8 task tools (the adversarial `audit` tool
+        // was added in WA3 so the master can run the independent quorum audit
+        // before mark-done), no more.
         let section = tool_section_body();
         for tool in [
             "get-plan",
             "get-dispatchable",
             "dispatch",
             "read-output",
+            "audit",
             "mark-done",
             "mark-failed",
             "update-plan",
@@ -531,19 +534,64 @@ mod tests {
                 "tool section missing allowed tool `{tool}`"
             );
         }
-        // Numbered 1.–7. with no 8th item.
-        for n in 1..=7 {
+        // Numbered 1.–8. with no 9th item.
+        for n in 1..=8 {
             assert!(
                 section.contains(&format!("{n}. `fleet task")),
                 "tool section missing numbered tool {n}"
             );
         }
         assert!(
-            !section.contains("8. `fleet task"),
-            "tool section must list exactly 7 tools, found an 8th"
+            !section.contains("9. `fleet task"),
+            "tool section must list exactly 8 tools, found a 9th"
         );
-        // The header declares the count of 7.
-        assert!(MASTER_SYSTEM_TEMPLATE.contains("共 7 个专用工具"));
+        // The header declares the count of 8.
+        assert!(MASTER_SYSTEM_TEMPLATE.contains("共 8 个专用工具"));
+    }
+
+    // ───────── [WA3] mandatory adversarial-audit step before mark-done ─────────
+
+    #[test]
+    fn audit_protocol_has_mandatory_audit_step_before_mark_done() {
+        // [WA3] The Acceptance Audit Protocol must carry an explicit step that
+        // requires `fleet task audit` before mark-done — skipping it is framed
+        // as a red-line-2 violation.
+        assert!(
+            MASTER_SYSTEM_TEMPLATE.contains("**adversarial audit**"),
+            "protocol must name the adversarial-audit step"
+        );
+        assert!(
+            MASTER_SYSTEM_TEMPLATE.contains("fleet task audit"),
+            "protocol must instruct calling `fleet task audit`"
+        );
+        // The audit step must precede / gate mark-done explicitly.
+        assert!(
+            MASTER_SYSTEM_TEMPLATE.contains("之前**必须**先跑独立对抗审计"),
+            "protocol must make audit mandatory before mark-done"
+        );
+    }
+
+    #[test]
+    fn audit_protocol_critical_confirmed_blocks_mark_done() {
+        // [WA3][DEC-007] A CRITICAL_CONFIRMED verdict must forbid mark-done and
+        // route to retry-worker-once then AskUserQuestion (never self-release).
+        // Pull the audit step body and assert the blocking + escalation wording.
+        let step = MASTER_SYSTEM_TEMPLATE
+            .split("**adversarial audit**")
+            .nth(1)
+            .expect("audit step present")
+            .split("═══ Human Gate")
+            .next()
+            .unwrap_or("");
+        assert!(step.contains("CRITICAL_CONFIRMED"));
+        assert!(step.contains("CLEAN"));
+        assert!(
+            step.contains("绝对不许 mark-done"),
+            "a confirmed critical must hard-block mark-done"
+        );
+        assert!(step.contains("DEC-007"));
+        assert!(step.contains("retry worker") || step.contains("retry"));
+        assert!(step.contains("AskUserQuestion"));
     }
 
     #[test]
