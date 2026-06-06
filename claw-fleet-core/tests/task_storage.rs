@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
 
-use claw_fleet_core::pitem::{ArtifactKind, PItem, PItemStatus};
+use claw_fleet_core::pitem::{AcceptanceCriterion, ArtifactKind, PItem, PItemStatus};
 use claw_fleet_core::plan::DagPlan;
 use claw_fleet_core::project::{self, ProjectInput};
 use claw_fleet_core::task::{
@@ -159,7 +159,7 @@ fn full_lifecycle_create_update_material_start() {
             depends_on: vec![],
             resources: vec![],
             estimate_secs: None,
-            acceptance: vec![],
+            acceptance: vec![AcceptanceCriterion::Custom("true".into())],
             artifacts: vec![ArtifactKind::GitDiff],
             skippable: None,
             human_gate: false,
@@ -176,7 +176,7 @@ fn full_lifecycle_create_update_material_start() {
             depends_on: vec!["p1".into()],
             resources: vec![],
             estimate_secs: None,
-            acceptance: vec![],
+            acceptance: vec![AcceptanceCriterion::Custom("true".into())],
             artifacts: vec![ArtifactKind::GitDiff],
             skippable: None,
             human_gate: false,
@@ -234,7 +234,7 @@ fn master_mutations_flip_p_item_statuses_correctly() {
             depends_on: vec![],
             resources: vec![],
             estimate_secs: None,
-            acceptance: vec![],
+            acceptance: vec![AcceptanceCriterion::Custom("true".into())],
             artifacts: vec![ArtifactKind::GitDiff],
             skippable: None,
             human_gate: false,
@@ -251,7 +251,7 @@ fn master_mutations_flip_p_item_statuses_correctly() {
             depends_on: vec!["p1".into()],
             resources: vec![],
             estimate_secs: None,
-            acceptance: vec![],
+            acceptance: vec![AcceptanceCriterion::Custom("true".into())],
             artifacts: vec![ArtifactKind::GitDiff],
             skippable: None,
             human_gate: false,
@@ -408,7 +408,7 @@ fn dispatch_pitem_enqueues_worker_session_and_records_agent_session_id() {
         depends_on: vec![],
         resources: vec![],
         estimate_secs: None,
-        acceptance: vec![],
+        acceptance: vec![AcceptanceCriterion::Custom("true".into())],
         artifacts: vec![ArtifactKind::GitDiff],
         skippable: None,
         human_gate: false,
@@ -508,7 +508,7 @@ fn reconcile_flips_task_to_done_when_master_exited_and_plan_terminal() {
         depends_on: vec![],
         resources: vec![],
         estimate_secs: None,
-        acceptance: vec![],
+        acceptance: vec![AcceptanceCriterion::Custom("true".into())],
         artifacts: vec![ArtifactKind::GitDiff],
         skippable: None,
         human_gate: false,
@@ -617,7 +617,7 @@ fn concurrent_dispatch_isolates_workers_and_merges_back() {
             depends_on: vec![],
             resources: vec![],
             estimate_secs: None,
-            acceptance: vec![],
+            acceptance: vec![AcceptanceCriterion::Custom("true".into())],
             artifacts: vec![ArtifactKind::GitDiff],
             skippable: None,
             human_gate: false,
@@ -634,7 +634,7 @@ fn concurrent_dispatch_isolates_workers_and_merges_back() {
             depends_on: vec![],
             resources: vec![],
             estimate_secs: None,
-            acceptance: vec![],
+            acceptance: vec![AcceptanceCriterion::Custom("true".into())],
             artifacts: vec![ArtifactKind::GitDiff],
             skippable: None,
             human_gate: false,
