@@ -26,7 +26,9 @@ jobs:
 
       # Same desktop/system deps the CI test job installs — the spec-fidelity
       # gate runs `cargo build/test --workspace`, which compiles the desktop
-      # crate and therefore needs the webkit/gtk/appindicator stack.
+      # crate and therefore needs the webkit/gtk/appindicator stack. The desktop
+      # crate also pulls in rodio → alsa-sys, so libasound2-dev is required (the
+      # tag-time desktop-build job in ci.yml installs it for the same reason).
       - name: Install Linux dependencies
         run: |
           sudo apt-get update
@@ -36,7 +38,8 @@ jobs:
             libglib2.0-dev \
             libgtk-3-dev \
             libssl-dev \
-            libayatana-appindicator3-dev
+            libayatana-appindicator3-dev \
+            libasound2-dev
 
       - name: Setup protoc
         uses: arduino/setup-protoc@v3
