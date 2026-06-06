@@ -79,7 +79,7 @@ impl ProcessLauncher for ClaudeLauncher {
             &spec.cwd,
             &prompt,
             Some(&spec.system_prompt),
-            // [REQ-016] model is now an owned String on WorkerSpawnSpec; borrow
+            // model is now an owned String on WorkerSpawnSpec; borrow
             // it (&String deref-coerces to &str) like the other spawn_claude args.
             Some(&spec.model),
             "worker",
@@ -389,7 +389,7 @@ mod tests {
             p_item_id: p_id.into(),
             cwd: cwd.to_path_buf(),
             system_prompt: "sys".into(),
-            // [REQ-016] WorkerSpawnSpec.model is an owned String now.
+            // WorkerSpawnSpec.model is an owned String now.
             model: "claude-sonnet-4-6".to_string(),
         }
     }

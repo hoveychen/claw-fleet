@@ -78,7 +78,7 @@ pub const MEDIATOR_TIMEOUT: Duration = Duration::from_secs(120);
 /// — relying on the LLM to emit "just the file" is fragile; the tags let
 /// us strip preamble noise deterministically.
 ///
-/// [REQ-031] The template encodes four explicit heuristics, one per
+/// The template encodes four explicit heuristics, one per
 /// numbered instruction: (1) preserve every non-conflicting change from
 /// both sides; (2) favor THEIRS (the incoming worker branch) on overlap
 /// unless OURS clearly supersedes; (3) leave NO conflict markers; (4) emit
@@ -119,7 +119,7 @@ Now emit the resolved file inside <resolved>...</resolved>. Nothing else.";
 /// Render the prompt for one conflict. Pure function; testable without an
 /// LLM.
 ///
-/// [REQ-030] Fills `MEDIATOR_PROMPT_TEMPLATE` with the conflicted file's
+/// Fills `MEDIATOR_PROMPT_TEMPLATE` with the conflicted file's
 /// path and 3-way (BASE/OURS/THEIRS) contents — this is the fixed prompt
 /// each per-file LLM call receives.
 pub fn render_prompt(spec: &ConflictSpec) -> String {
@@ -134,7 +134,7 @@ pub fn render_prompt(spec: &ConflictSpec) -> String {
 /// text between `<resolved>` and `</resolved>` (newlines trimmed at the
 /// boundaries). Pure function.
 ///
-/// [REQ-030] Enforces the `<resolved>...</resolved>` wrapper contract: a
+/// Enforces the `<resolved>...</resolved>` wrapper contract: a
 /// response lacking the tags yields `None`, which `mediate_one` surfaces as
 /// `MissingWrapper` rather than guessing at unwrapped output.
 pub fn extract_resolved(response: &str) -> Option<String> {
@@ -152,7 +152,7 @@ pub fn extract_resolved(response: &str) -> Option<String> {
 /// Sanity check: no conflict markers in the resolved content. Returns the
 /// first offending marker if any.
 ///
-/// [REQ-030] Rejects any resolved content still containing `<<<<<<<`,
+/// Rejects any resolved content still containing `<<<<<<<`,
 /// `=======`, or `>>>>>>>` — `mediate_one` turns a hit into the
 /// `MarkersLeftBehind` error so we never write half-resolved conflicts.
 pub fn first_conflict_marker(content: &str) -> Option<String> {
@@ -169,7 +169,7 @@ pub fn first_conflict_marker(content: &str) -> Option<String> {
 /// Mediate one conflict via the supplied provider. Caller owns the
 /// provider so tests can swap in fakes.
 ///
-/// [REQ-030] One LLM call per conflicted file using the fixed template:
+/// One LLM call per conflicted file using the fixed template:
 /// render prompt → call provider → require the `<resolved>` wrapper →
 /// reject any leftover conflict markers. No retry, no tools.
 pub fn mediate_one(
@@ -364,7 +364,7 @@ mod tests {
         assert!(matches!(err, MediationError::EmptyResponse));
     }
 
-    // [REQ-031] The template must encode the four heuristics, with an
+    // The template must encode the four heuristics, with an
     // explicit THEIRS-preference instruction and the marker/wrapper rules.
     #[test]
     fn template_encodes_four_heuristics_including_theirs_preference() {
@@ -421,7 +421,7 @@ mod tests {
         }
     }
 
-    // [REQ-031] On a 3-way conflict, an LLM that follows the THEIRS-preference
+    // On a 3-way conflict, an LLM that follows the THEIRS-preference
     // instruction resolves the file to the THEIRS (incoming worker) content.
     #[test]
     fn theirs_preference_resolves_to_theirs_branch_content() {

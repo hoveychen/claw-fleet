@@ -31,7 +31,7 @@ use crate::task::Task;
 /// What the supervisor needs to spawn one worker. Built by
 /// `worker_spawn_spec`; consumed by the subprocess spawn layer.
 ///
-/// [REQ-016] Exactly 5 fields — `task_id`, `p_item_id`, `cwd`,
+/// Exactly 5 fields — `task_id`, `p_item_id`, `cwd`,
 /// `system_prompt`, `model` — none `Option`-wrapped (all mandatory), with
 /// `Serialize`/`Deserialize` so the spec can cross the supervisor/subprocess
 /// boundary. `model` is an owned `String` (not `&'static str`) so a
@@ -78,7 +78,7 @@ pub fn worker_spawn_spec(
 /// Compose the worker's full SYSTEM prompt — Layer 1 + Layer 2 + Layer 3.
 /// Pure function; safe to call repeatedly.
 ///
-/// [REQ-017] Assembles the three context layers strictly in order
+/// Assembles the three context layers strictly in order
 /// (L1 project constants → L2 task description → L3 P-item spec), joining each
 /// with a blank-line separator so the markdown `## Layer N — …` headings stay
 /// visually distinct. The cache-friendly ordering (most-stable layer first) is
@@ -96,13 +96,13 @@ pub fn compose_worker_system_prompt(task: &Task, p_item: &PItem) -> String {
 /// Layer 1 — project-level constants. CLAUDE.md is loaded lazily by the
 /// agent itself at runtime; we only inline the architecture overview here.
 ///
-/// [REQ-018] Layer 1 carries the project constants (`architecture.md` via
+/// Layer 1 carries the project constants (`architecture.md` via
 /// [`render_layer1_block`]) plus the three compile-time execution constraints
 /// the worker is bound by: (1) touches-only editing (SIGSTOP on violation),
 /// (2) no manual commits / pushes / branch changes, (3) the worker's only
 /// durable output is its `output_summary` — it never mutates task state.
 pub fn compose_layer1(project_id: &str) -> String {
-    // [REQ-046] Project-level architecture overview pulled from
+    // Project-level architecture overview pulled from
     // `~/.fleet/projects/<project_id>/architecture.md`.
     let arch_block = render_layer1_block(&project_id.to_string());
     format!(
@@ -135,7 +135,7 @@ pub fn compose_layer1(project_id: &str) -> String {
 /// audit protocol summary (the worker doesn't run the audit — master does —
 /// but knowing the criteria helps the worker target the right output).
 ///
-/// [REQ-019] Renders `Task.title` + `Task.description`, each Inbox `Material`
+/// Renders `Task.title` + `Task.description`, each Inbox `Material`
 /// individually wrapped in `<untrusted_file>` / `<untrusted_text>` tags (so a
 /// prompt-injection payload inside user-supplied material is fenced off and
 /// cannot be mistaken for an instruction), and a task-level acceptance summary
@@ -153,14 +153,14 @@ pub fn compose_layer2(task: &Task) -> String {
             .inbox_materials
             .iter()
             .map(|m| match m {
-                // [REQ-019] Each file material is fenced in its own
+                // Each file material is fenced in its own
                 // <untrusted_file> tag carrying the path + media kind.
                 crate::task::Material::File { path, media, .. } => format!(
                     "<untrusted_file path=\"{}\" media=\"{media:?}\">\n(file contents \
                      loaded by the agent at runtime)\n</untrusted_file>",
                     path.display()
                 ),
-                // [REQ-019] Each text material is fenced in its own
+                // Each text material is fenced in its own
                 // <untrusted_text> tag carrying the (truncated) content.
                 crate::task::Material::Text { content, .. } => {
                     let preview: String = content.chars().take(160).collect();
@@ -172,7 +172,7 @@ pub fn compose_layer2(task: &Task) -> String {
         blocks.join("\n\n")
     };
 
-    // [REQ-019] Task-level acceptance summary: dedup the union of every
+    // Task-level acceptance summary: dedup the union of every
     // P-item's acceptance criteria so the worker knows what the master will
     // ultimately audit against (the worker does not run the audit itself).
     let mut accept_lines: Vec<String> = Vec::new();
@@ -207,12 +207,12 @@ pub fn compose_layer2(task: &Task) -> String {
 /// Layer 3 — P-item private. Desc, touches, acceptance criteria, upstream
 /// summaries from `depends_on` items.
 ///
-/// [REQ-020] Carries the P-item's `desc`, its `touches` file list, the
+/// Carries the P-item's `desc`, its `touches` file list, the
 /// `acceptance` criteria the master will audit against, and — for every
 /// `depends_on` upstream that wrote one — its `output_summary`. Closes with an
 /// explicit instruction to write the worker's own `output_summary` to disk.
 ///
-/// [REQ-038] The upstream summaries are rendered as `依赖 <id> 的摘要：<summary>`
+/// The upstream summaries are rendered as `依赖 <id> 的摘要：<summary>`
 /// so the downstream worker sees the information flow, and the closing
 /// instruction asks for a 50-200 word summary tagged with an artifact kind
 /// (FileList | GitDiff | TestOutput | ManualNote).
@@ -243,7 +243,7 @@ pub fn compose_layer3(task: &Task, p_item: &PItem) -> String {
         .iter()
         .filter_map(|dep_id| {
             task.plan.get(dep_id).and_then(|dep| {
-                // [REQ-038] Inject the upstream's output_summary into this
+                // Inject the upstream's output_summary into this
                 // worker's Layer 3 with the explicit「依赖 <id> 的摘要」phrasing.
                 dep.output_summary
                     .as_ref()
@@ -336,7 +336,7 @@ pub fn rust_crates_touched(workspace: &Path, p_item: &PItem) -> HashSet<PathBuf>
 /// state — the caller (supervisor, on a worker self-report-complete event)
 /// decides whether to bounce back to the master or pass through.
 ///
-/// [REQ-032] Phase-2 patch §6 post-completion check: walks `touches`, finds
+/// Phase-2 patch §6 post-completion check: walks `touches`, finds
 /// each owning Cargo.toml, runs `cargo check --package <crate>`, and collects
 /// the combined stderr. Failure is **non-fatal** — it does not flip the
 /// P-item to `Failed`; the master reviews `combined_stderr` after mark-done.
@@ -507,7 +507,7 @@ mod tests {
         assert!(l2.contains("Implement bookmarks CRUD"));
     }
 
-    // [REQ-016] WorkerSpawnSpec has exactly the 5 mandatory fields, model is
+    // WorkerSpawnSpec has exactly the 5 mandatory fields, model is
     // an owned String, and the spec round-trips through serde unchanged.
     #[test]
     fn worker_spawn_spec_serde_roundtrip_with_owned_model() {
@@ -531,7 +531,7 @@ mod tests {
         assert_eq!(custom.model, "claude-opus-4-8");
     }
 
-    // [REQ-018] Layer 1 spells out all three execution constraints, including
+    // Layer 1 spells out all three execution constraints, including
     // the summary-only constraint that the worker's only durable output is its
     // output_summary.
     #[test]
@@ -544,7 +544,7 @@ mod tests {
         assert!(l1.contains("master owns every status transition"));
     }
 
-    // [REQ-019] Each inbox material is wrapped in its own <untrusted_file> /
+    // Each inbox material is wrapped in its own <untrusted_file> /
     // <untrusted_text> tag, and Layer 2 carries a task-level acceptance summary.
     #[test]
     fn layer2_wraps_each_material_individually_and_lists_acceptance() {
@@ -578,7 +578,7 @@ mod tests {
         assert!(l2.contains("TestsPass"));
     }
 
-    // [REQ-020][REQ-038] Layer 3 renders upstream summaries with the
+    //Layer 3 renders upstream summaries with the
     // 「依赖 <id> 的摘要」phrasing and closes with an explicit
     // write-your-output_summary-to-disk instruction naming the artifact kinds.
     #[test]
