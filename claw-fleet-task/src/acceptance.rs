@@ -34,7 +34,7 @@ use crate::pitem::AcceptanceCriterion;
 /// to disk as JSON so the audit trail records *what was checked, whether it
 /// passed, and the concrete evidence* — never a proxy signal.
 ///
-/// [REQ-006] Every declared criterion is checked individually and yields one
+/// Every declared criterion is checked individually and yields one
 /// of these; the master iterates `PItem.acceptance` in declared order and
 /// collects the results.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -118,7 +118,7 @@ fn output_tail(stdout: &[u8], stderr: &[u8], n: usize) -> String {
     lines[start..].join("\n")
 }
 
-/// [REQ-006] Check [`AcceptanceCriterion::Builds`] by running `cargo build` in
+/// Check [`AcceptanceCriterion::Builds`] by running `cargo build` in
 /// `workspace`. Passes iff the build exits 0; evidence is the stderr tail
 /// (cargo writes diagnostics to stderr).
 pub fn check_builds(workspace: &Path) -> AcceptanceCheckResult {
@@ -148,7 +148,7 @@ pub fn check_builds(workspace: &Path) -> AcceptanceCheckResult {
     }
 }
 
-/// [REQ-006] Check [`AcceptanceCriterion::TestsPass`] by running the declared
+/// Check [`AcceptanceCriterion::TestsPass`] by running the declared
 /// command line in `workspace` via the platform shell. Passes iff the command
 /// exits 0; evidence is the exit status + output tail.
 pub fn check_tests_pass(workspace: &Path, cmd: &str) -> AcceptanceCheckResult {
@@ -180,7 +180,7 @@ pub fn check_tests_pass(workspace: &Path, cmd: &str) -> AcceptanceCheckResult {
     }
 }
 
-/// [REQ-011] [`AcceptanceCriterion::HumanReview`] is never auto-passed by the
+/// [`AcceptanceCriterion::HumanReview`] is never auto-passed by the
 /// engine. It always returns a *deferred* result (`needs_human = true`,
 /// `passed = false`) so the master routes it through `AskUserQuestion`.
 pub fn check_human_review() -> AcceptanceCheckResult {
@@ -192,7 +192,7 @@ pub fn check_human_review() -> AcceptanceCheckResult {
     )
 }
 
-/// [REQ-006] Evaluate [`AcceptanceCriterion::Custom`] by running the declared
+/// Evaluate [`AcceptanceCriterion::Custom`] by running the declared
 /// rule as a shell command in `workspace`. Convention: the rule passes iff the
 /// command exits 0 (e.g. `cargo clippy -- -D warnings`).
 pub fn eval_custom(workspace: &Path, rule: &str) -> AcceptanceCheckResult {
@@ -254,7 +254,7 @@ fn run_shell(
 /// Dispatch a single criterion to its checker. `Builds` / `TestsPass` /
 /// `Custom` run real commands in `workspace`; `HumanReview` is deferred.
 ///
-/// [REQ-006][REQ-050] The master calls this per declared criterion, in order.
+///The master calls this per declared criterion, in order.
 pub fn check_one(workspace: &Path, criterion: &AcceptanceCriterion) -> AcceptanceCheckResult {
     match criterion {
         AcceptanceCriterion::Builds => check_builds(workspace),
@@ -268,7 +268,7 @@ pub fn check_one(workspace: &Path, criterion: &AcceptanceCriterion) -> Acceptanc
 
 /// The verdict the master acts on after auditing the full criterion list.
 ///
-/// [REQ-050] mark-done logic: all pass → `Done`; any hard fail → `Failed`;
+/// mark-done logic: all pass → `Done`; any hard fail → `Failed`;
 /// some criterion needs a human (or P-item/task gating is on) → `WaitHuman`.
 /// [DEC-007] When uncertain, P9 retries the worker once before escalating;
 /// this enum only reports the verdict, not the retry orchestration.
@@ -288,11 +288,11 @@ pub enum AuditDecision {
 
 /// Full audit of a P-item's declared acceptance list, in declared order.
 ///
-/// [REQ-006][REQ-050] Iterates every criterion, checks it, and applies the
+///Iterates every criterion, checks it, and applies the
 /// all-must-pass rule. Declaring `[Builds, TestsPass]` but only `Builds`
 /// passing yields `Rejected` — the engine never lets a partial pass through.
 ///
-/// [REQ-011] The `gate` precedence (P-item `human_gate` OR task
+/// The `gate` precedence (P-item `human_gate` OR task
 /// `manual_review_all`) is folded in: even when every machine-checkable
 /// criterion passes, an active gate forces `WaitHuman` so the master cannot
 /// unilaterally mark done.
@@ -319,12 +319,12 @@ pub fn audit_acceptance(
     let any_needs_human = results.iter().any(|r| r.needs_human);
 
     let decision = if any_hard_fail {
-        // [REQ-050] Any failing criterion → reject. A hard failure outranks a
+        // Any failing criterion → reject. A hard failure outranks a
         // pending human review: there's no point asking a human to bless a
         // build that doesn't compile.
         AuditDecision::Rejected
     } else if any_needs_human || gate {
-        // [REQ-011] HumanReview criterion or an active human gate → WaitHuman,
+        // HumanReview criterion or an active human gate → WaitHuman,
         // never straight to Done.
         AuditDecision::WaitHuman
     } else {
@@ -334,7 +334,7 @@ pub fn audit_acceptance(
     AuditReport { results, decision }
 }
 
-/// [REQ-011][REQ-013][REQ-050] Human-gate precedence. The P-item is gated when
+///Human-gate precedence. The P-item is gated when
 /// **either** its own `human_gate` flag is set **or** the task-level
 /// `manual_review_all` is on. Mirrors the master template wording
 /// ("P-item.human_gate=true 或 project.manual_review_all 开启"): a gate at
@@ -352,7 +352,7 @@ fn acceptance_dir() -> Option<PathBuf> {
     crate::paths::get_fleet_dir().map(|d| d.join("acceptance"))
 }
 
-/// [REQ-006] Persist a batch of [`AcceptanceCheckResult`] to disk as JSON so
+/// Persist a batch of [`AcceptanceCheckResult`] to disk as JSON so
 /// the audit trail records what was checked. Written atomically (temp file +
 /// rename) to `~/.fleet/acceptance/<task_id>__<p_item_id>.json`. Returns the
 /// path written.
@@ -431,7 +431,7 @@ mod tests {
         dir
     }
 
-    // ── [REQ-006] individual checks gather real evidence ─────────────────────
+    // ── individual checks gather real evidence ─────────────────────
 
     #[test]
     fn check_builds_passes_on_compiling_crate() {
@@ -495,7 +495,7 @@ mod tests {
         assert_eq!(r.criterion, AcceptanceCriterion::HumanReview);
     }
 
-    // ── [REQ-006][REQ-050] the all-must-pass rule ────────────────────────────
+    // ──the all-must-pass rule ────────────────────────────
 
     /// Declaring `[Builds, TestsPass]` but only Builds passing → Rejected.
     /// This is the spec's named acceptance test for REQ-006/050.
@@ -551,7 +551,7 @@ mod tests {
         assert_eq!(report.decision, AuditDecision::WaitHuman);
     }
 
-    // ── [REQ-011] human-gate precedence ──────────────────────────────────────
+    // ── human-gate precedence ──────────────────────────────────────
 
     #[test]
     fn human_gate_precedence_either_side_gates() {
@@ -565,7 +565,7 @@ mod tests {
         assert!(requires_human_gate(true, true));
     }
 
-    /// [REQ-011][REQ-050] Even when every machine-checkable criterion passes,
+    ///Even when every machine-checkable criterion passes,
     /// an active gate (P-item OR task level) forces WaitHuman, never Done.
     #[test]
     fn gate_forces_wait_human_even_when_all_machine_checks_pass() {
@@ -606,7 +606,7 @@ mod tests {
         assert_eq!(report.decision, AuditDecision::Rejected);
     }
 
-    // ── [REQ-006] persistence ────────────────────────────────────────────────
+    // ── persistence ────────────────────────────────────────────────
 
     #[test]
     fn results_roundtrip_to_disk_as_json() {

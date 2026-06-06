@@ -18,7 +18,7 @@
 //! lives in `fleet-cli` as a hidden subcommand and the Tauri install path is
 //! in `claw-fleet-desktop`.
 //!
-//! ## Scope boundary — DEC-006 (Read is NOT intercepted) — [REQ-005] [REQ-036]
+//! ## Scope boundary — DEC-006 (Read is NOT intercepted) —
 //!
 //! This touches-boundary enforcement applies **only to the `Edit` and `Write`
 //! tool calls** (mutation of the worktree). `Read` (and other read-only tool
@@ -50,7 +50,7 @@ pub enum TouchesDecision {
     /// Target path is **not** in `touches`. The supervisor should
     /// SIGSTOP the worker and notify master, which then chooses one of three
     /// resolutions — extend `touches`, reject the edit, or escalate to the
-    /// user. [REQ-036]
+    /// user.
     Block {
         attempted_path: PathBuf,
         declared: Vec<PathBuf>,
@@ -69,9 +69,9 @@ pub enum TouchesDecision {
 /// drift; master will still catch via acceptance audit).
 ///
 /// This is the runtime boundary check invoked for every `Edit`/`Write` tool
-/// call ([REQ-005]); an out-of-range path returns [`TouchesDecision::Block`],
+/// call (); an out-of-range path returns [`TouchesDecision::Block`],
 /// which the hook handler turns into a [`record_violation`] marker + worker
-/// SIGSTOP ([REQ-036]). `Read` calls never reach this function (DEC-006).
+/// SIGSTOP (). `Read` calls never reach this function (DEC-006).
 pub fn check_path_against_touches(
     attempted_path: &Path,
     declared_touches: &[PathBuf],
@@ -141,7 +141,7 @@ fn normalise(p: &Path) -> PathBuf {
 
 /// Persisted marker file the supervisor polls. One marker per out-of-`touches`
 /// edit attempt; the append-only `~/.fleet/touches-violations/` log of these is
-/// the physical carrier of the touches-violation deviation ledger. [REQ-009]
+/// the physical carrier of the touches-violation deviation ledger.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TouchesViolationMarker {
@@ -163,7 +163,7 @@ pub fn violations_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "could not resolve fleet home dir".to_string())
 }
 
-/// Persist a violation marker. Returns the file path written. [REQ-009]
+/// Persist a violation marker. Returns the file path written.
 ///
 /// Append-only semantics: every call produces a **uniquely named** file — the
 /// name carries a random uuid segment in addition to `task.p_item.recorded_at`
@@ -203,7 +203,7 @@ pub fn record_violation(marker: &TouchesViolationMarker) -> Result<PathBuf, Stri
 /// timestamp order (oldest first) so the supervisor can replay them into
 /// the master in arrival order. This is the supervisor's periodic drain of the
 /// append-only violation log — the only operation permitted to delete markers
-/// (the recorder never overwrites or deletes). [REQ-009]
+/// (the recorder never overwrites or deletes).
 pub fn drain_violations() -> Result<Vec<TouchesViolationMarker>, String> {
     let Ok(dir) = violations_dir() else { return Ok(vec![]) };
     if !dir.exists() {
@@ -360,7 +360,7 @@ mod tests {
         assert!(drain_violations().unwrap().is_empty());
     }
 
-    // [REQ-005] acceptance: touches=['src/foo/'], attempt to write src/bar/ → block.
+    // acceptance: touches=['src/foo/'], attempt to write src/bar/ → block.
     #[test]
     fn req005_write_outside_declared_subtree_is_blocked() {
         let d = check_path_against_touches(
@@ -376,7 +376,7 @@ mod tests {
         }
     }
 
-    // [REQ-036] acceptance: touches=['src/'], attempt to edit 'test/' → violation
+    // acceptance: touches=['src/'], attempt to edit 'test/' → violation
     // recorded (Block decision, then record_violation persists a marker the
     // supervisor can drain to drive its extend/reject/escalate decision).
     #[test]
@@ -411,7 +411,7 @@ mod tests {
         assert_eq!(drained[0].declared_touches, vec![pb("src/")]);
     }
 
-    // [REQ-009] acceptance: write 10 violations, drain returns 10 in
+    // acceptance: write 10 violations, drain returns 10 in
     // recorded_at order. Includes same-second / same-task collisions to prove
     // unique-naming (no overwrite) holds even when task/p-item/recorded_at
     // all repeat.

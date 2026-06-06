@@ -43,7 +43,7 @@ use crate::worktree::{self, MergeOutcome};
 
 // ── output_summary validation (REQ-013, DEC-012) ─────────────────────────────
 
-/// [REQ-013][DEC-012] The PRD requires every worker `output_summary` to be
+///[DEC-012] The PRD requires every worker `output_summary` to be
 /// 50–200 *characters* (`字`) and tagged with an `artifact_kind`. P6 added the
 /// `output_summary` field + `ArtifactKind` enum; DEC-012 explicitly deferred
 /// this mark-done-side *validation* to P9 (here): the acceptance engine checks
@@ -74,7 +74,7 @@ pub struct SummaryValidation {
     pub truncated: bool,
 }
 
-/// [REQ-013] Validate + normalise a worker `output_summary`. Never rejects on
+/// Validate + normalise a worker `output_summary`. Never rejects on
 /// length alone (short → warn, long → truncate); the only hard requirement
 /// (`artifact_kind` 必选) is enforced separately against the P-item's
 /// `artifacts` field by the caller, because the mark-done signature carries no
@@ -96,7 +96,7 @@ pub fn validate_output_summary(summary: &str) -> SummaryValidation {
     }
 }
 
-/// [REQ-013] artifact_kind is mandatory on a Done P-item. The mark-done call
+/// artifact_kind is mandatory on a Done P-item. The mark-done call
 /// site has no artifact-kind parameter (the signature is shared with the core
 /// wrapper + fleet-cli, both outside P9's touches), so the kind is read from
 /// the P-item's own `artifacts` field, which the planner declares. An empty
@@ -115,8 +115,8 @@ fn require_artifact_kind(artifacts: &[ArtifactKind]) -> Result<(), String> {
 // ── deviation-marker parsing (REQ-042, REQ-026) ──────────────────────────────
 
 /// A simplification/deviation the worker self-declared in its `output_summary`.
-/// [REQ-026] When a worker can't fully satisfy a requirement it must say so in
-/// its summary; [REQ-042] the master parses those markers and turns each into a
+/// When a worker can't fully satisfy a requirement it must say so in
+/// its summary; the master parses those markers and turns each into a
 /// deviation-ledger entry carrying the `affected_req` ids so the Auditor can
 /// trace which REQ was weakened.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,7 +127,7 @@ pub struct ParsedDeviation {
     pub affected_req: Vec<String>,
 }
 
-/// [REQ-042][REQ-026] Parse `[DEVIATION]` / 简化声明 markers out of a worker
+///Parse `[DEVIATION]` / 简化声明 markers out of a worker
 /// `output_summary`. Recognised marker tokens (case-insensitive for the ASCII
 /// one) at the start of a line: `[DEVIATION]`, `简化声明`, `简化:`. Everything
 /// after the marker on that line is the decision text; any `REQ-NNN` tokens
@@ -228,7 +228,7 @@ fn deviations_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "could not resolve fleet home dir".to_string())
 }
 
-/// [REQ-026][REQ-042] Append one deviation entry as a single JSONL line.
+///Append one deviation entry as a single JSONL line.
 /// Append-only: never truncates/rewrites, so the audit trail is preserved.
 fn append_deviation(entry: &DeviationEntry) -> Result<PathBuf, String> {
     let path = deviations_path()?;
@@ -236,13 +236,13 @@ fn append_deviation(entry: &DeviationEntry) -> Result<PathBuf, String> {
     Ok(path)
 }
 
-/// [REQ-027] Read every deviation entry in append (chronological) order.
+/// Read every deviation entry in append (chronological) order.
 /// Malformed lines are skipped so one corrupt append can't hide the rest.
 fn read_deviations() -> Result<Vec<DeviationEntry>, String> {
     read_jsonl_lines::<DeviationEntry>(&deviations_path()?)
 }
 
-/// [REQ-027] Pending deviations whose `affected_req` intersects this P-item's
+/// Pending deviations whose `affected_req` intersects this P-item's
 /// covered REQ ids. A non-empty result means mark-done must not proceed
 /// straight to Done (see [`mark_done`] / DEC-007).
 fn pending_deviations_for_reqs(covered_reqs: &[String]) -> Result<Vec<DeviationEntry>, String> {
@@ -278,7 +278,7 @@ fn pending_entry(parsed: &ParsedDeviation, task_id: &str, p_item_id: &str) -> De
 
 // ── master decision log (REQ-042) ────────────────────────────────────────────
 
-/// [REQ-042] One structured master-decision record. The methodology's
+/// One structured master-decision record. The methodology's
 /// traceability pillar requires the master to log every `dispatch` / `mark-done`
 /// decision with the acceptance verdict and whether a deviation was recorded,
 /// so the Auditor can replay the audit. Written to `~/.fleet/master-decisions.jsonl`.
@@ -307,7 +307,7 @@ fn decisions_path() -> Result<PathBuf, String> {
         .ok_or_else(|| "could not resolve fleet home dir".to_string())
 }
 
-/// [REQ-042] Append one master decision as a JSONL line (append-only).
+/// Append one master decision as a JSONL line (append-only).
 /// Best-effort: logging failure must not abort the decision itself, so callers
 /// ignore the result.
 fn log_master_decision(d: &MasterDecision) -> Result<PathBuf, String> {
@@ -358,7 +358,7 @@ fn read_jsonl_lines<T: for<'de> Deserialize<'de>>(path: &PathBuf) -> Result<Vec<
     Ok(out)
 }
 
-/// [REQ-026] The REQ ids a P-item's worker work is expected to cover. The
+/// The REQ ids a P-item's worker work is expected to cover. The
 /// planner does not (yet) attach an explicit REQ list to each P-item, so we
 /// derive the set the mark-done gate must guard from two sources: REQ ids the
 /// worker named in its own deviation markers (those are exactly the REQs the
@@ -608,16 +608,16 @@ pub fn start_task(task_id: &str, host: &dyn TaskHost, opts: StartOpts) -> Result
 ///
 /// This is the methodology's enforcement point. It runs, in order:
 ///
-/// 1. **[REQ-013][DEC-012] output_summary validation** — 50–200 chars (short →
+/// 1. **[DEC-012] output_summary validation** — 50–200 chars (short →
 ///    warn, long → truncate) and a mandatory `artifact_kind` (read from the
 ///    P-item's `artifacts`, since the call signature carries no kind param).
-/// 2. **[REQ-042][REQ-026] deviation-marker parsing** — `[DEVIATION]` / 简化声明
+/// 2. **deviation-marker parsing** — `[DEVIATION]` / 简化声明
 ///    lines in the summary become `Pending` deviation-ledger entries carrying
 ///    their `affected_req`.
-/// 3. **[REQ-027][DEC-007] pending-deviation gate** — if any `Pending`
+/// 3. **[DEC-007] pending-deviation gate** — if any `Pending`
 ///    deviation touches a REQ this P-item covers, mark-done refuses (the master
 ///    retries the worker once, then asks the user) — never straight to Done.
-/// 4. **[REQ-026][REQ-050] acceptance audit** — `acceptance::audit_acceptance`
+/// 4. **acceptance audit** — `acceptance::audit_acceptance`
 ///    runs every declared `AcceptanceCriterion` *in the worker's worktree*
 ///    (real build/test evidence, never a proxy signal). `Rejected` → refuse;
 ///    `WaitHuman` → park in `WaitHumanGate`; `AllPassed` → proceed.
@@ -657,11 +657,11 @@ pub fn mark_done(
         )
     };
 
-    // 1. [REQ-013][DEC-012] output_summary validation + mandatory artifact_kind.
+    // 1.[DEC-012] output_summary validation + mandatory artifact_kind.
     require_artifact_kind(&item_artifacts)?;
     let validated = validate_output_summary(summary);
 
-    // 2. [REQ-042][REQ-026] parse worker-declared simplifications → Pending
+    // 2.parse worker-declared simplifications → Pending
     // deviation ledger entries (with affected_req).
     let parsed = parse_deviation_markers(summary);
     let mut recorded_ids = Vec::new();
@@ -671,7 +671,7 @@ pub fn mark_done(
         append_deviation(&entry)?;
     }
 
-    // 3. [REQ-027][DEC-007] refuse Done while a relevant deviation is Pending.
+    // 3.[DEC-007] refuse Done while a relevant deviation is Pending.
     let covered = covered_reqs(&item_desc, &parsed);
     let blocking = pending_deviations_for_reqs(&covered)?;
     if !blocking.is_empty() {
@@ -696,18 +696,18 @@ pub fn mark_done(
         ));
     }
 
-    // 4. [REQ-026][REQ-050] real acceptance audit in the worker's worktree —
+    // 4.real acceptance audit in the worker's worktree —
     // never a proxy signal. The worktree still holds the worker's changes
     // (it is reaped only after a successful merge below).
     let audit_cwd =
         worktree::worktree_path(task_id, p_item_id).unwrap_or_else(|_| workspace.clone());
     let audit_cwd = if audit_cwd.exists() { audit_cwd } else { workspace.clone() };
-    // [REQ-011] gate = P-item human_gate OR task manual_review (already folded
+    // gate = P-item human_gate OR task manual_review (already folded
     // into each item's human_gate by start_task; no task-level field exists at
     // mark-done time, so the second arg is the persisted per-item flag).
     let gate = acceptance::requires_human_gate(human_gate, false);
 
-    // [REQ-003][REQ-004] No declared acceptance criteria means there is NO real
+    //No declared acceptance criteria means there is NO real
     // evidence to check — the only thing left to flip Done on would be a proxy
     // signal (worker self-report / token count / elapsed time / diff size),
     // which the adversarial-audit pillar forbids. Refuse to mark Done unless a
@@ -753,7 +753,7 @@ pub fn mark_done(
 
     match report.decision {
         AuditDecision::Rejected => {
-            // [REQ-003][REQ-004][REQ-050] A declared criterion produced failing
+            //A declared criterion produced failing
             // evidence (or was missing/empty). Do NOT mark Done.
             let now = chrono::Utc::now().timestamp();
             if let Some(item) = task.plan.get_mut(p_item_id) {
@@ -780,7 +780,7 @@ pub fn mark_done(
             ))
         }
         AuditDecision::WaitHuman => {
-            // [REQ-011] Machine checks clean but a HumanReview criterion or an
+            // Machine checks clean but a HumanReview criterion or an
             // active human gate applies → park in WaitHumanGate, ask the user;
             // never unilaterally Done. No merge yet.
             let now = chrono::Utc::now().timestamp();
@@ -928,7 +928,7 @@ pub fn mark_failed(
     if let Ok(workspace) = host.workspace_for_task(&task) {
         let _ = worktree::reap(&workspace, task_id, p_item_id);
     }
-    // [REQ-042] Structured master decision log for the mark-failed transition,
+    // Structured master decision log for the mark-failed transition,
     // including the downstream P-items auto-skipped as a consequence.
     log_master_decision(&MasterDecision {
         task_id: task_id.to_string(),
@@ -1189,7 +1189,7 @@ mod tests {
         "Implemented the parser module end to end and added unit tests covering both the happy path and the error path.".to_string()
     }
 
-    // ── [REQ-013][DEC-012] output_summary validation ─────────────────────────
+    // ──[DEC-012] output_summary validation ─────────────────────────
 
     #[test]
     fn req013_summary_in_range_accepted_verbatim() {
@@ -1233,7 +1233,7 @@ mod tests {
         assert!(require_artifact_kind(&[ArtifactKind::GitDiff]).is_ok());
     }
 
-    // ── [REQ-042][REQ-026] deviation-marker parsing ──────────────────────────
+    // ──deviation-marker parsing ──────────────────────────
 
     #[test]
     fn req042_parses_ascii_and_chinese_markers_with_req_ids() {
@@ -1302,7 +1302,7 @@ mod tests {
 
     // ── [DEC-010] mark_done behaviour: REQ-003/004/050 ───────────────────────
 
-    /// [REQ-003][REQ-004] A P-item declaring NO machine criteria — the planner
+    ///A P-item declaring NO machine criteria — the planner
     /// supplied only proxy signals (worker self-report) and no real acceptance
     /// — must NOT be marked Done. Empty acceptance = nothing real was checked,
     /// so flipping Done would rely on proxy signals only, which the
@@ -1323,7 +1323,7 @@ mod tests {
         assert_ne!(get_task("t1").unwrap().plan.get("p1").unwrap().status, PItemStatus::Done);
     }
 
-    /// [REQ-003][REQ-011] Same empty-acceptance P-item, but human_gate=true:
+    ///Same empty-acceptance P-item, but human_gate=true:
     /// now the *user* (not a proxy) decides → WaitHuman, not a hard reject. This
     /// proves the empty-criteria guard keys off "no real evidence AND no human",
     /// not merely "no criteria".
@@ -1340,7 +1340,7 @@ mod tests {
         assert_eq!(get_task("t1").unwrap().plan.get("p1").unwrap().status, PItemStatus::WaitHumanGate);
     }
 
-    /// [REQ-004][REQ-006][REQ-050] Declared `[Builds, TestsPass(failing)]` —
+    ///Declared `[Builds, TestsPass(failing)]` —
     /// the TestsPass criterion fails → mark_done must REJECT, leaving the
     /// P-item Failed, not Done. This is the spec's "TestsPass missing/failing →
     /// reject" behaviour (DEC-010) at the mark-done layer.
@@ -1370,7 +1370,7 @@ mod tests {
         );
     }
 
-    /// [REQ-004][REQ-011] A `HumanReview` criterion (machine checks clean) must
+    ///A `HumanReview` criterion (machine checks clean) must
     /// route to the AskUserQuestion path: status parked in WaitHumanGate, a
     /// WAIT_HUMAN error returned, and NO merge/Done.
     #[test]
@@ -1392,7 +1392,7 @@ mod tests {
         assert_eq!(task.plan.get("p1").unwrap().status, PItemStatus::WaitHumanGate);
     }
 
-    /// [REQ-011] The P-item human_gate flag alone (machine checks clean, no
+    /// The P-item human_gate flag alone (machine checks clean, no
     /// HumanReview criterion) forces WaitHuman — proves the gate, not the
     /// criterion, is what parks it.
     #[test]
@@ -1407,7 +1407,7 @@ mod tests {
         assert!(err.starts_with("WAIT_HUMAN"), "got: {err}");
     }
 
-    /// [REQ-013] artifact_kind 必选 — a P-item with empty `artifacts` is
+    /// artifact_kind 必选 — a P-item with empty `artifacts` is
     /// rejected by mark_done before any audit runs.
     #[test]
     fn req013_mark_done_rejects_missing_artifact_kind() {
@@ -1421,7 +1421,7 @@ mod tests {
         assert!(err.contains("REQ-013"), "got: {err}");
     }
 
-    /// [REQ-027][DEC-007] A worker-declared `[DEVIATION]` touching the P-item's
+    ///[DEC-007] A worker-declared `[DEVIATION]` touching the P-item's
     /// covered REQ creates a Pending entry AND blocks mark-done (retry-once /
     /// AskUserQuestion). The summary names REQ-027 which the deviation marker
     /// also targets, so the gate intersects.
@@ -1448,7 +1448,7 @@ mod tests {
         assert_eq!(get_task("t1").unwrap().plan.get("p1").unwrap().status, PItemStatus::Running);
     }
 
-    /// [REQ-026][REQ-050][REQ-042] Happy path: all machine criteria pass, no
+    ///Happy path: all machine criteria pass, no
     /// deviation, no gate → Done, summary stored, decision logged with the
     /// per-criterion verdicts. merge_back has no worker branch → NoChanges.
     #[test]
@@ -1470,7 +1470,7 @@ mod tests {
         let p = task.plan.get("p1").unwrap();
         assert_eq!(p.status, PItemStatus::Done);
         assert!(p.output_summary.is_some());
-        // [REQ-042] structured decision log carries the acceptance verdicts.
+        // structured decision log carries the acceptance verdicts.
         let decisions = read_master_decisions().unwrap();
         let md = decisions.last().unwrap();
         assert_eq!(md.kind, "mark-done");
@@ -1586,7 +1586,7 @@ mod tests {
         assert!(outcome.written_to.exists());
     }
 
-    /// [REQ-042] mark_failed writes a structured decision log entry.
+    /// mark_failed writes a structured decision log entry.
     #[test]
     fn mark_failed_logs_decision() {
         let tmp_home = TempDir::new().unwrap();

@@ -17,7 +17,7 @@
 //! code and tests can't typo a tag. See design/tasks-req-registry.yaml
 //! (REQ-003, REQ-028, REQ-043).
 //!
-//! [REQ-022] Auditor independent of Master via *deterministic red-line rules*
+//! Auditor independent of Master via *deterministic red-line rules*
 //! (no LLM, no 3-session voting/quorum — that design was demolished in WA-DEC
 //! commit 5184d39). Independence here means the rules run as an objective gate
 //! the Master cannot talk its way past, not a separate agent process. The
@@ -157,7 +157,7 @@ impl Category {
 /// Auditor classifies each: a [`Self::is_proxy`] piece (worker self-report,
 /// token count, elapsed time, diff size) is NOT real acceptance evidence.
 ///
-/// [REQ-043] This is the data shape the Auditor reconstructs from the Master's
+/// This is the data shape the Auditor reconstructs from the Master's
 /// decision log to decide whether mark-done rested on real evidence or proxies.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -183,7 +183,7 @@ pub enum MarkDoneEvidence {
 
 impl MarkDoneEvidence {
     /// `true` iff this is a forbidden proxy signal (worker self-report, token
-    /// count, elapsed time, diff size). [REQ-003][REQ-043]
+    /// count, elapsed time, diff size).
     pub fn is_proxy(&self) -> bool {
         matches!(
             self,
@@ -216,7 +216,7 @@ impl MarkDoneEvidence {
 
 /// A mark-done decision the Master made, as the Auditor reconstructs it from the
 /// decision log: which P-item, what it declared, and the evidence the Master
-/// attached. [REQ-043]
+/// attached.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MarkDoneRecord {
@@ -225,7 +225,7 @@ pub struct MarkDoneRecord {
     pub evidence: Vec<MarkDoneEvidence>,
 }
 
-/// [REQ-043] Audit a single mark-done decision. Returns the findings the Auditor
+/// Audit a single mark-done decision. Returns the findings the Auditor
 /// would emit (empty when the decision is clean).
 ///
 /// Two failure modes are detected:
@@ -250,7 +250,7 @@ pub fn audit_mark_done(record: &MarkDoneRecord) -> Vec<AuditFinding> {
 
     if !has_any_real {
         // Red line 4: mark-done rested on nothing but proxy signals (or nothing
-        // at all). [REQ-003][REQ-043]
+        // at all).
         let cited: Vec<String> = record
             .evidence
             .iter()
@@ -287,7 +287,7 @@ pub fn audit_mark_done(record: &MarkDoneRecord) -> Vec<AuditFinding> {
     }
 
     // Some real evidence exists. Now check each declared criterion is actually
-    // substantiated; any that isn't is a declared-vs-reality weakness. [REQ-028]
+    // substantiated; any that isn't is a declared-vs-reality weakness.
     for criterion in &record.declared {
         let substantiated = record.evidence.iter().any(|e| e.substantiates(criterion));
         if !substantiated {
@@ -346,7 +346,7 @@ fn short_evidence(e: &MarkDoneEvidence) -> String {
 // ── weak-implementation heuristics (REQ-028) ─────────────────────────────────
 
 /// Before/after view of a P-item's plan-relevant shape, so the Auditor can spot
-/// a P-item being silently weakened across an `update-plan`. [REQ-028]
+/// a P-item being silently weakened across an `update-plan`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PItemDiff {
     pub p_item_id: PItemId,
@@ -368,7 +368,7 @@ pub struct PItemDiff {
     pub has_deviation_entry: bool,
 }
 
-/// [REQ-028] Run the 3 plan-shape weak-implementation heuristics over a P-item
+/// Run the 3 plan-shape weak-implementation heuristics over a P-item
 /// update (the 4th, declared-vs-reality, is folded into [`audit_mark_done`]).
 /// Reports — never fixes:
 ///
@@ -381,7 +381,7 @@ pub fn audit_pitem_diff(diff: &PItemDiff) -> Vec<AuditFinding> {
     let mut findings = Vec::new();
 
     // B. acceptance-strength-regression — acceptance got shorter without an
-    //    approved deviation. [REQ-028]
+    //    approved deviation.
     if diff.acceptance_after.len() < diff.acceptance_before.len() && !diff.has_deviation_entry {
         findings.push(AuditFinding {
             severity: Severity::High,
@@ -401,7 +401,7 @@ pub fn audit_pitem_diff(diff: &PItemDiff) -> Vec<AuditFinding> {
         });
     }
 
-    // C. touches-scope-shrink — a desc-required file fell out of touches. [REQ-028]
+    // C. touches-scope-shrink — a desc-required file fell out of touches.
     for required in &diff.desc_required_files {
         let covered = diff
             .touches_after
@@ -425,7 +425,7 @@ pub fn audit_pitem_diff(diff: &PItemDiff) -> Vec<AuditFinding> {
         }
     }
 
-    // D. dependency-chain-break — a depends_on edge was dropped. [REQ-028]
+    // D. dependency-chain-break — a depends_on edge was dropped.
     for dep in &diff.depends_on_before {
         if !diff.depends_on_after.contains(dep) {
             findings.push(AuditFinding {
@@ -472,7 +472,7 @@ mod tests {
         }
     }
 
-    // ── [REQ-043] proxy-signal detection at mark-done ────────────────────────
+    // ── proxy-signal detection at mark-done ────────────────────────
 
     /// The spec's named acceptance test: a mock master mark-done carrying ONLY a
     /// proxy signal (token count) → the Auditor reports `critical`.
@@ -540,7 +540,7 @@ mod tests {
         assert!(audit_mark_done(&record).is_empty(), "clean mark-done");
     }
 
-    /// [REQ-028] declared-vs-reality: real evidence exists for Builds, but the
+    /// declared-vs-reality: real evidence exists for Builds, but the
     /// declared TestsPass has no substantiating evidence → one High finding.
     #[test]
     fn req028_declared_criterion_without_evidence_is_declared_vs_reality() {
@@ -580,7 +580,7 @@ mod tests {
         assert_eq!(findings[0].category, Category::DeclaredVsReality.tag());
     }
 
-    // ── [REQ-028] plan-shape weak heuristics ─────────────────────────────────
+    // ── plan-shape weak heuristics ─────────────────────────────────
 
     fn base_diff() -> PItemDiff {
         PItemDiff {
