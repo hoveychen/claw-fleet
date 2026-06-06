@@ -16,6 +16,12 @@
 //! 10 red lines and 4 weak patterns are encoded as [`Category`] so the rule
 //! code and tests can't typo a tag. See design/tasks-req-registry.yaml
 //! (REQ-003, REQ-028, REQ-043).
+//!
+//! [REQ-022] Auditor independent of Master via *deterministic red-line rules*
+//! (no LLM, no 3-session voting/quorum — that design was demolished in WA-DEC
+//! commit 5184d39). Independence here means the rules run as an objective gate
+//! the Master cannot talk its way past, not a separate agent process. The
+//! mark-done hard gate that enforces this lives in `crate::actions::mark_done`.
 
 use serde::{Deserialize, Serialize};
 
