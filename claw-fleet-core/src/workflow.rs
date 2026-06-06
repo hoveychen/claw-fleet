@@ -1234,12 +1234,12 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
 /// resolved-prompt static heads (generalized across executions via LCP in the
 /// harness), a stronger binding signal than the regex-extracted static prefix.
 ///
-/// `args` is passed as `None` for now: the real invocation args aren't recovered
-/// from disk yet, so args-driven fan-out shapes collapse — but those bind their
-/// real cardinality from the journal regardless, and the `>= static` guard at
-/// the call-site keeps such collapses from being adopted over the static scan.
-fn sidecar_steps(body: &str) -> Option<Vec<ScriptStep>> {
-    let r = crate::workflow_sidecar::extract(body, None).ok()?;
+/// `args` is the JSON-encoded invocation argument recovered from the parent
+/// transcript (see [`args_from_transcript`]); it lets `args`-driven fan-out
+/// shapes execute their real width instead of collapsing. `None` when the run
+/// took no args or they couldn't be recovered.
+fn sidecar_steps(body: &str, args: Option<&str>) -> Option<Vec<ScriptStep>> {
+    let r = crate::workflow_sidecar::extract(body, args).ok()?;
     if r.calls.is_empty() {
         return None;
     }
@@ -1358,6 +1358,87 @@ fn match_script_file_line(text: &str, run_id: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+/// True when a Workflow tool_result's text reports this `run_id` (matched on its
+/// `Transcript dir:` line, same rule as [`match_script_file_line`]).
+fn tool_result_matches_run(text: &str, run_id: &str) -> bool {
+    text.lines().any(|l| {
+        l.trim()
+            .strip_prefix("Transcript dir:")
+            .map(|rest| rest.trim().trim_end_matches('/').rsplit('/').next() == Some(run_id))
+            .unwrap_or(false)
+    })
+}
+
+/// Recover the JSON-encoded `args` a Workflow run was invoked with, from the
+/// parent transcript. The args live in the assistant's `Workflow` tool_use
+/// `input.args`; we map that tool_use to this `run_id` via the matching
+/// tool_result's `tool_use_id` (the tool_result carries `Transcript dir:
+/// …/<run_id>`). Returns the args serialized back to a JSON string (round-trips
+/// any shape — string / array / object) for the sidecar's argv, or `None` when
+/// the run took no args, they can't be correlated, or they're implausibly large
+/// (avoids overflowing the child's argv).
+fn args_from_transcript(session_dir: &Path, run_id: &str) -> Option<String> {
+    const MAX_ARGS_BYTES: usize = 128 * 1024;
+    let dir_name = session_dir.file_name()?.to_str()?;
+    let jsonl = session_dir.parent()?.join(format!("{dir_name}.jsonl"));
+    let body = fs::read_to_string(&jsonl).ok()?;
+
+    let mut args_by_id: BTreeMap<String, serde_json::Value> = BTreeMap::new();
+    let mut run_tool_use_id: Option<String> = None;
+
+    for line in body.lines() {
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            continue;
+        };
+        let content = v
+            .get("message")
+            .and_then(|m| m.get("content"))
+            .or_else(|| v.get("content"));
+        let Some(blocks) = content.and_then(|c| c.as_array()) else {
+            continue;
+        };
+        for b in blocks {
+            match b.get("type").and_then(|t| t.as_str()) {
+                Some("tool_use") if b.get("name").and_then(|n| n.as_str()) == Some("Workflow") => {
+                    if let (Some(id), Some(args)) = (
+                        b.get("id").and_then(|x| x.as_str()),
+                        b.get("input").and_then(|i| i.get("args")),
+                    ) {
+                        if !args.is_null() {
+                            args_by_id.insert(id.to_string(), args.clone());
+                        }
+                    }
+                }
+                Some("tool_result") => {
+                    let text = match b.get("content") {
+                        Some(serde_json::Value::String(s)) => s.clone(),
+                        Some(serde_json::Value::Array(items)) => items
+                            .iter()
+                            .filter_map(|x| x.get("text").and_then(|t| t.as_str()))
+                            .collect::<Vec<_>>()
+                            .join("\n"),
+                        _ => continue,
+                    };
+                    if tool_result_matches_run(&text, run_id) {
+                        if let Some(id) = b.get("tool_use_id").and_then(|x| x.as_str()) {
+                            run_tool_use_id = Some(id.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let id = run_tool_use_id?;
+    let args = args_by_id.get(&id)?;
+    let encoded = serde_json::to_string(args).ok()?;
+    if encoded.len() > MAX_ARGS_BYTES {
+        return None;
+    }
+    Some(encoded)
 }
 
 /// Read the first user-message text from an agent's `agent-<id>.jsonl`
@@ -1480,9 +1561,12 @@ pub fn discover_workflow_trees_in_dir(session_dir: &Path) -> Vec<WorkflowTree> {
             .as_deref()
             .map(parse_script_steps)
             .unwrap_or_default();
+        // Real invocation args (if any) let args-driven fan-out execute its true
+        // width instead of collapsing to an empty/thin skeleton.
+        let run_args = args_from_transcript(session_dir, &run_id);
         let steps = script_body
             .as_deref()
-            .and_then(sidecar_steps)
+            .and_then(|b| sidecar_steps(b, run_args.as_deref()))
             .filter(|s| !s.is_empty() && s.len() >= static_steps.len())
             .unwrap_or(static_steps);
         let (nodes, edges) = build_dag(&steps, &agents);
@@ -2221,6 +2305,88 @@ return [ra, rb]
         assert_eq!(t.nodes[1].status, WorkflowNodeStatus::Running);
         assert_eq!(t.edges.len(), 1);
 
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Write a parent transcript pairing a `Workflow` tool_use (carrying `args`)
+    /// with its tool_result (carrying `Transcript dir: …/<run_id>`), then assert
+    /// args_from_transcript recovers the args round-tripped to a JSON string.
+    fn args_fixture(tag: &str, run_id: &str, args: serde_json::Value) -> (PathBuf, PathBuf) {
+        let tmp = std::env::temp_dir().join(format!("wfargs-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sid-args");
+        fs::create_dir_all(&session_dir).unwrap();
+        let wf_path = format!("/somewhere/{run_id}");
+        let tu = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [
+                { "type": "tool_use", "id": "tu1", "name": "Workflow", "input": { "scriptPath": "/x.js", "args": args } }
+            ]}
+        });
+        let tr = serde_json::json!({
+            "type": "user",
+            "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "tu1",
+                  "content": format!("Workflow launched. Task ID: t1\nTranscript dir: {wf_path}\nScript file: /x.js\n") }
+            ]}
+        });
+        let parent = session_dir.parent().unwrap().join("sid-args.jsonl");
+        fs::write(&parent, format!("{tu}\n{tr}\n")).unwrap();
+        (tmp, session_dir)
+    }
+
+    #[test]
+    fn args_from_transcript_recovers_string_arg() {
+        let (tmp, session_dir) =
+            args_fixture("str", "wf_q-1", serde_json::json!("what is rust?"));
+        let got = args_from_transcript(&session_dir, "wf_q-1");
+        assert_eq!(got.as_deref(), Some("\"what is rust?\""), "string args round-trip");
+        // wrong run id → no args
+        assert_eq!(args_from_transcript(&session_dir, "wf_other"), None);
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn args_from_transcript_recovers_array_arg() {
+        let (tmp, session_dir) = args_fixture(
+            "arr",
+            "wf_list-1",
+            serde_json::json!(["00001b02", "000010bc"]),
+        );
+        let got = args_from_transcript(&session_dir, "wf_list-1");
+        assert_eq!(
+            got.as_deref(),
+            Some("[\"00001b02\",\"000010bc\"]"),
+            "array args round-trip"
+        );
+        let _ = fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn args_from_transcript_none_when_no_args() {
+        // tool_use with no args field → None (not an error)
+        let tmp = std::env::temp_dir().join(format!("wfargs-none-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&tmp);
+        let session_dir = tmp.join("sid-args");
+        fs::create_dir_all(&session_dir).unwrap();
+        let tu = serde_json::json!({
+            "type": "assistant",
+            "message": { "content": [
+                { "type": "tool_use", "id": "tu1", "name": "Workflow", "input": { "scriptPath": "/x.js" } }
+            ]}
+        });
+        let tr = serde_json::json!({
+            "type": "user",
+            "message": { "content": [
+                { "type": "tool_result", "tool_use_id": "tu1", "content": "Transcript dir: /somewhere/wf_n-1\n" }
+            ]}
+        });
+        fs::write(
+            session_dir.parent().unwrap().join("sid-args.jsonl"),
+            format!("{tu}\n{tr}\n"),
+        )
+        .unwrap();
+        assert_eq!(args_from_transcript(&session_dir, "wf_n-1"), None);
         let _ = fs::remove_dir_all(&tmp);
     }
 }
