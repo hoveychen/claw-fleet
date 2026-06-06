@@ -131,6 +131,11 @@ pub struct WorkflowNode {
     /// exact (dynamic fan-out / order fallback). The UI flags these as
     /// approximate so the binding limitation is honest.
     pub approximate: bool,
+    /// A readable rendering of this call-site's prompt (interpolation points as
+    /// "…"), recovered by the execution-based extractor for the UI to show on
+    /// hover/selection. `None` when only the static scan ran.
+    #[serde(rename = "resolvedPrompt", skip_serializing_if = "Option::is_none")]
+    pub resolved_prompt: Option<String>,
 }
 
 /// A directed dependency edge between two [`WorkflowNode`]s (`from` → `to`).
@@ -446,6 +451,10 @@ struct ScriptStep {
     /// call-site → agent mapping. `None` when the prompt begins with a bare
     /// variable (no static text to fingerprint).
     prompt_fingerprint: Option<String>,
+    /// First execution's full resolved prompt as a readable template (only set
+    /// by the execution-based [`sidecar_steps`]; `None` for the static scan).
+    /// Carried onto [`WorkflowNode::resolved_prompt`] for the UI.
+    prompt_resolved: Option<String>,
 }
 
 /// Skip a JS string literal starting at `b[i]` (an opening quote). Returns the
@@ -945,6 +954,7 @@ fn parse_script_steps(body: &str) -> Vec<ScriptStep> {
                     label,
                     pipeline_group,
                     prompt_fingerprint,
+                    prompt_resolved: None, // static scan has no resolved prompt
                 });
             }
 
@@ -1166,6 +1176,7 @@ fn build_dag(steps: &[ScriptStep], agents: &[WorkflowAgent]) -> (Vec<WorkflowNod
             status,
             agent_ids,
             approximate: approx[ni],
+            resolved_prompt: step.prompt_resolved.clone(),
         });
     }
 
@@ -1255,6 +1266,7 @@ fn sidecar_steps(body: &str, args: Option<&str>) -> Option<Vec<ScriptStep>> {
                 // Match fingerprint_binding's own >= 4 usefulness threshold;
                 // an empty/tiny head (variable-first prompt) means "no fingerprint".
                 prompt_fingerprint: Some(c.fingerprint).filter(|f| f.trim().len() >= 4),
+                prompt_resolved: c.prompt_resolved,
             })
             .collect(),
     )
@@ -2144,9 +2156,9 @@ const v = await parallel(items.map(c => () => parallel(vs.map(n => () => agent("
 
     // ── Sidecar (execution-based) integration ────────────────────────────────
 
-    use std::sync::Mutex as SidecarMutex;
-    /// Serialize tests touching FLEET_NODE_BIN (cargo runs tests in parallel).
-    pub(crate) static SIDECAR_ENV_LOCK: SidecarMutex<()> = SidecarMutex::new(());
+    /// Shared with workflow_sidecar's tests — one global lock for FLEET_NODE_BIN
+    /// (per-module mutexes wouldn't serialize the process-wide env var).
+    use crate::workflow_sidecar::NODE_ENV_LOCK as SIDECAR_ENV_LOCK;
 
     fn node_runnable() -> bool {
         crate::process_util::command(
@@ -2222,7 +2234,7 @@ return [ra, rb]
 
     #[test]
     fn discover_sidecar_routes_same_type_agents_by_resolved_prompt() {
-        let _g = SIDECAR_ENV_LOCK.lock().unwrap();
+        let _g = SIDECAR_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::remove_var("FLEET_NODE_BIN");
         if !node_runnable() {
             eprintln!("skipping: node not available");
@@ -2238,12 +2250,18 @@ return [ra, rb]
         assert!(!t.nodes[0].approximate, "node A binding is exact");
         assert_eq!(t.nodes[1].agent_ids, vec!["b1"], "node B bound b1");
         assert!(!t.nodes[1].approximate, "node B binding is exact");
+        // Resolved prompt reaches the node for the UI (template with "…").
+        let rp = t.nodes[0]
+            .resolved_prompt
+            .as_deref()
+            .expect("node A carries resolvedPrompt from execution");
+        assert!(rp.starts_with("alpha task"), "node A resolved prompt: {rp:?}");
         let _ = fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn discover_falls_back_to_static_when_node_missing() {
-        let _g = SIDECAR_ENV_LOCK.lock().unwrap();
+        let _g = SIDECAR_ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // Force the sidecar to fail (node "binary" that can't run the harness).
         std::env::set_var("FLEET_NODE_BIN", "/bin/false");
         let (tmp, session_dir) = make_routing_fixture("fallback");

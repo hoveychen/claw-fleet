@@ -166,6 +166,11 @@ export function WorkflowDag({ tree, onOpenAgent }: Props) {
               ✕
             </button>
           </div>
+          {selectedNode.resolvedPrompt && (
+            <div className={styles.resolvedPrompt} title="执行时解析出的 prompt（… 为插值点）">
+              {selectedNode.resolvedPrompt}
+            </div>
+          )}
           {selectedNode.agentIds.length === 0 ? (
             <div className={styles.detailEmpty}>尚无运行时 agent（未启动）</div>
           ) : (
@@ -257,6 +262,7 @@ function nodeTitle(n: WorkflowNode): string {
     `agents: ${n.agentIds.length}`,
   ];
   if (n.approximate) parts.push("binding: approximate (heuristic)");
+  if (n.resolvedPrompt) parts.push("", n.resolvedPrompt);
   return parts.join("\n");
 }
 
