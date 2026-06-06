@@ -236,6 +236,13 @@ impl LocalBackend {
         // each spawned process's reaper via the on_exit callback.
         let auto_resume_in_flight: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
 
+        // Consecutive resume-failure count per session. A session whose resume
+        // keeps failing is backed off (skipped) so it stops being re-fired
+        // forever — the field log showed 24k+ such doomed spawns. A success
+        // resets the count. Cloned into watcher/poll/ticker threads.
+        let auto_resume_failures: Arc<Mutex<HashMap<String, u32>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+
         // Cancellation flag for long-running threads. Flipped to false by `Drop`
         // so old threads exit when the backend is replaced.
         let running = Arc::new(AtomicBool::new(true));
@@ -341,6 +348,7 @@ impl LocalBackend {
         let idx_tx2 = index_tx.clone();
         let ar2 = auto_resume_last_fire.clone();
         let arif2 = auto_resume_in_flight.clone();
+        let arfail2 = auto_resume_failures.clone();
 
         // Pre-compute each filesystem source's watch dirs for fast path matching.
         let source_watch_dirs: Vec<(usize, Vec<std::path::PathBuf>)> = sources
@@ -444,7 +452,7 @@ impl LocalBackend {
                         &locale2,
                         &llm_config2,
                     );
-                    maybe_fire_auto_resume(&sess2, &ar2, &arif2);
+                    maybe_fire_auto_resume(&sess2, &ar2, &arif2, &arfail2);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
                     last_rescan = Instant::now();
@@ -475,6 +483,7 @@ impl LocalBackend {
             let idx_tx3 = index_tx.clone();
             let ar3 = auto_resume_last_fire.clone();
             let arif3 = auto_resume_in_flight.clone();
+            let arfail3 = auto_resume_failures.clone();
 
             // Indices of polling sources — only these need rescanning on each tick.
             let poll_source_indices: HashSet<usize> = sources
@@ -554,7 +563,7 @@ impl LocalBackend {
                         &locale3,
                         &llm_config3,
                     );
-                    maybe_fire_auto_resume(&sess3, &ar3, &arif3);
+                    maybe_fire_auto_resume(&sess3, &ar3, &arif3, &arfail3);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
                 }
@@ -569,13 +578,14 @@ impl LocalBackend {
             let sess_ar = sessions.clone();
             let ar_ar = auto_resume_last_fire.clone();
             let arif_ar = auto_resume_in_flight.clone();
+            let arfail_ar = auto_resume_failures.clone();
             let running_ar = running.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(30));
                 if !running_ar.load(Ordering::SeqCst) {
                     break;
                 }
-                maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar);
+                maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar);
             });
         }
 
@@ -1310,6 +1320,11 @@ pub fn resume_session_impl(session_id: &str, workspace_path: &str) -> Result<(),
 /// few hundred is tens of GB of RSS — the startup runaway this caps.
 const AUTO_RESUME_MAX_CONCURRENT: usize = 4;
 
+/// After this many consecutive failed resumes, a session is backed off and no
+/// longer re-fired — stops the endless re-fire loop (24k+ doomed spawns seen
+/// in the field) for any session whose resume can never succeed.
+const AUTO_RESUME_FAILURE_BACKOFF: u32 = 3;
+
 /// Scan the current session list for auto-resume candidates and fire them,
 /// bounded by a global concurrency cap.
 ///
@@ -1324,6 +1339,7 @@ fn maybe_fire_auto_resume(
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     last_fire: &Arc<Mutex<HashMap<String, Instant>>>,
     in_flight: &Arc<AtomicUsize>,
+    failures: &Arc<Mutex<HashMap<String, u32>>>,
 ) {
     let config = claw_fleet_core::auto_resume::AutoResumeConfig::load();
     if !config.enabled {
@@ -1341,6 +1357,7 @@ fn maybe_fire_auto_resume(
     let candidates: Vec<(String, String)> = {
         let sess = sessions.lock().unwrap();
         let mut fire_map = last_fire.lock().unwrap();
+        let fail_map = failures.lock().unwrap();
         // Drop entries older than the debounce window so the map doesn't grow
         // unboundedly for sessions that come and go.
         fire_map.retain(|_, t| t.elapsed() < debounce * 10);
@@ -1348,7 +1365,16 @@ fn maybe_fire_auto_resume(
             &sess,
             &config,
             now,
-            |id| fire_map.get(id).is_some_and(|t| t.elapsed() < debounce),
+            // Skip a session that's still debounced OR backed off after
+            // repeated failures.
+            |id| {
+                fire_map.get(id).is_some_and(|t| t.elapsed() < debounce)
+                    || claw_fleet_core::auto_resume::is_backed_off(
+                        &fail_map,
+                        id,
+                        AUTO_RESUME_FAILURE_BACKOFF,
+                    )
+            },
             slots,
         );
         for (id, _) in &picked {
@@ -1367,17 +1393,33 @@ fn maybe_fire_auto_resume(
         // Reserve a slot now; the reaper releases it when the process exits.
         in_flight.fetch_add(1, Ordering::SeqCst);
         let in_flight_done = in_flight.clone();
+        let failures_done = failures.clone();
+        let id_done = session_id.clone();
         let spawn_result = claw_fleet_core::auto_resume::spawn_resume_tracked(
             &session_id,
             &workspace_path,
-            move |_success| {
+            move |success| {
                 in_flight_done.fetch_sub(1, Ordering::SeqCst);
+                if let Ok(mut fail_map) = failures_done.lock() {
+                    claw_fleet_core::auto_resume::record_resume_outcome(
+                        &mut fail_map,
+                        &id_done,
+                        success,
+                    );
+                }
             },
         );
         if let Err(e) = spawn_result {
-            // Spawn failed before any process exists → release the slot here,
-            // since no reaper will fire the on_exit callback.
+            // Spawn failed before any process exists → release the slot here
+            // and record the failure, since no reaper will fire on_exit.
             in_flight.fetch_sub(1, Ordering::SeqCst);
+            if let Ok(mut fail_map) = failures.lock() {
+                claw_fleet_core::auto_resume::record_resume_outcome(
+                    &mut fail_map,
+                    &session_id,
+                    false,
+                );
+            }
             log_debug(&format!("auto_resume: failed for {}: {}", session_id, e));
         }
     }

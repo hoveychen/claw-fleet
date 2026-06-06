@@ -118,6 +118,33 @@ pub fn select_resume_candidates(
         .collect()
 }
 
+/// A session is "backed off" once its resume has failed `threshold` consecutive
+/// times. Backed-off sessions are skipped by the scheduler so a resume that
+/// keeps failing (e.g. a session that can never make progress) stops being
+/// re-fired forever — that endless re-fire is what produced 24k+ spawns in the
+/// field. A later success clears the count (see [`record_resume_outcome`]).
+pub fn is_backed_off(
+    failures: &std::collections::HashMap<String, u32>,
+    id: &str,
+    threshold: u32,
+) -> bool {
+    failures.get(id).is_some_and(|&n| n >= threshold)
+}
+
+/// Update a session's consecutive-failure count after a resume attempt exits.
+/// A successful exit resets the count (entry removed); a failure increments it.
+pub fn record_resume_outcome(
+    failures: &mut std::collections::HashMap<String, u32>,
+    id: &str,
+    success: bool,
+) {
+    if success {
+        failures.remove(id);
+    } else {
+        *failures.entry(id.to_string()).or_insert(0) += 1;
+    }
+}
+
 /// Headlessly resume a rate-limited session by spawning
 /// `claude --resume <session_id> -p "continue"` detached in the given workspace.
 pub fn spawn_resume(session_id: &str, workspace_path: &str) -> Result<(), String> {
@@ -375,6 +402,34 @@ mod tests {
             select_resume_candidates(&sessions, &cfg, Utc::now(), |id| id == "s1", 5);
         let ids: Vec<&str> = picked.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["s0", "s2"]);
+    }
+
+    #[test]
+    fn backoff_after_threshold_consecutive_failures() {
+        use std::collections::HashMap;
+        let mut failures: HashMap<String, u32> = HashMap::new();
+        let threshold = 3;
+        // First two failures: not yet backed off.
+        record_resume_outcome(&mut failures, "s0", false);
+        assert!(!is_backed_off(&failures, "s0", threshold));
+        record_resume_outcome(&mut failures, "s0", false);
+        assert!(!is_backed_off(&failures, "s0", threshold));
+        // Third failure: now backed off (stops the endless re-fire loop).
+        record_resume_outcome(&mut failures, "s0", false);
+        assert!(is_backed_off(&failures, "s0", threshold));
+    }
+
+    #[test]
+    fn backoff_cleared_by_success() {
+        use std::collections::HashMap;
+        let mut failures: HashMap<String, u32> = HashMap::new();
+        record_resume_outcome(&mut failures, "s0", false);
+        record_resume_outcome(&mut failures, "s0", false);
+        record_resume_outcome(&mut failures, "s0", false);
+        assert!(is_backed_off(&failures, "s0", 3));
+        // A successful resume resets the counter so it can fire again later.
+        record_resume_outcome(&mut failures, "s0", true);
+        assert!(!is_backed_off(&failures, "s0", 3));
     }
 
     #[test]
