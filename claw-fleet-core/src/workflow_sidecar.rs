@@ -18,7 +18,8 @@
 use crate::workflow::{WorkflowNodeKind, WorkflowPhase};
 use serde::Deserialize;
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// The mocked-framework harness, embedded into the binary.
@@ -96,6 +97,25 @@ impl std::fmt::Display for SidecarError {
     }
 }
 
+/// A temp file deleted on drop. We avoid the `tempfile` crate here because it is
+/// a dev-dependency only (the runtime build must stay free of it); a pid + atomic
+/// counter name is unique per process without needing Date/random.
+struct TempFile {
+    path: PathBuf,
+}
+impl Drop for TempFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+fn write_temp(suffix: &str, content: &[u8]) -> std::io::Result<TempFile> {
+    static CTR: AtomicU64 = AtomicU64::new(0);
+    let n = CTR.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!("fleet-wf-{}-{n}{suffix}", std::process::id()));
+    std::fs::write(&path, content)?;
+    Ok(TempFile { path })
+}
+
 /// The node binary to invoke: `FLEET_NODE_BIN` override, else `node`.
 fn node_bin() -> String {
     std::env::var("FLEET_NODE_BIN")
@@ -111,37 +131,15 @@ fn node_bin() -> String {
 /// unknown. Returns the parsed skeleton on success, or a typed error the caller
 /// uses to fall back to the static scanner.
 pub fn extract(script: &str, args: Option<&str>) -> Result<SidecarResult, SidecarError> {
-    // Write the script and the harness to temp files. The harness reads the
-    // script path from argv, so it must be a real file.
-    let mut script_file =
-        tempfile::Builder::new()
-            .suffix(".js")
-            .tempfile()
-            .map_err(|e| SidecarError::Io(e.to_string()))?;
-    {
-        use std::io::Write;
-        script_file
-            .write_all(script.as_bytes())
-            .map_err(|e| SidecarError::Io(e.to_string()))?;
-        script_file
-            .flush()
-            .map_err(|e| SidecarError::Io(e.to_string()))?;
-    }
-    let mut harness_file = tempfile::Builder::new()
-        .suffix(".mjs")
-        .tempfile()
-        .map_err(|e| SidecarError::Io(e.to_string()))?;
-    {
-        use std::io::Write;
-        harness_file
-            .write_all(HARNESS_JS.as_bytes())
-            .map_err(|e| SidecarError::Io(e.to_string()))?;
-        harness_file
-            .flush()
-            .map_err(|e| SidecarError::Io(e.to_string()))?;
-    }
+    // Write the script and the harness to temp files (the harness reads the
+    // script path from argv, so it must be a real file). Both guards live until
+    // run_node returns, then drop-clean.
+    let script_file =
+        write_temp(".js", script.as_bytes()).map_err(|e| SidecarError::Io(e.to_string()))?;
+    let harness_file =
+        write_temp(".mjs", HARNESS_JS.as_bytes()).map_err(|e| SidecarError::Io(e.to_string()))?;
 
-    run_node(harness_file.path(), script_file.path(), args)
+    run_node(&harness_file.path, &script_file.path, args)
 }
 
 /// Spawn `node <harness> <script> [args]` with a hard timeout, returning parsed
