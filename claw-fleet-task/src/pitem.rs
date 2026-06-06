@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 
 pub type PItemId = String;
 
-// [REQ-049] A resource name the scheduler treats as a mutual-exclusion lock:
+// A resource name the scheduler treats as a mutual-exclusion lock:
 // `build` / `test` / `git` / `custom:*` (PRD §6.3). Two P-items declaring the
 // same ResourceName cannot run concurrently — see `DagPlan::resource_conflicts`.
 /// `local:build`, `port:3000`, `global:simulator:ios`, etc. See PRD §6.3.
 pub type ResourceName = String;
 
-// [REQ-001] P-item is the canonical DAG-node record. The PRD's nine *atomic*
+// P-item is the canonical DAG-node record. The PRD's nine *atomic*
 // fields — id, desc, depends_on, touches, resources, estimate_secs, acceptance,
 // artifacts, skippable, human_gate, status — are all present below with derived
 // Serialize/Deserialize. The runtime-bookkeeping tail (agent_session_id /
@@ -42,7 +42,7 @@ pub struct PItem {
     pub artifacts: Vec<ArtifactKind>,
     #[serde(default)]
     pub skippable: Option<SkipCondition>,
-    // [REQ-011][REQ-050] When `true`, the master must enter `WaitHumanGate`
+    //When `true`, the master must enter `WaitHumanGate`
     // after the acceptance audit and ask the user before flipping to `Done` —
     // it never marks done unilaterally. Precedence with the task-level
     // `manual_review_all` flag is resolved by
@@ -70,7 +70,7 @@ pub enum PItemStatus {
     WaitDeps,
     WaitResource,
     Running,
-    // [REQ-011] Acceptance passed but a human gate (P-item `human_gate` or task
+    // Acceptance passed but a human gate (P-item `human_gate` or task
     // `manual_review_all`) is active — the audit yields `WaitHuman` and the
     // master parks the P-item here until the user approves, instead of `Done`.
     WaitHumanGate,
@@ -91,7 +91,7 @@ pub enum FailReason {
     Custom(String),
 }
 
-// [REQ-012] The four verification methods. Master checks `PItem.acceptance` in
+// The four verification methods. Master checks `PItem.acceptance` in
 // declared order; each variant maps to one verification function (check_builds /
 // check_tests / ask_human / eval_custom) wired up in P6's acceptance engine.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -112,7 +112,7 @@ pub enum ArtifactKind {
     ManualNote,
 }
 
-// [REQ-048] Two skip conditions. `NoChangesIn(paths)` is auto-evaluated by the
+// Two skip conditions. `NoChangesIn(paths)` is auto-evaluated by the
 // Master via `git diff` over those paths; `Custom(rule)` is evaluated by the
 // worker, which returns a skip_result. Either way the Master records the reason
 // via `DagPlan::propagate_skip` into the deviation ledger (REQ-007, P8).
@@ -230,7 +230,7 @@ mod tests {
         assert!(p.is_terminal() && !p.unblocks_downstream());
     }
 
-    /// [REQ-001] Every atomic field the PRD enumerates must survive a JSON
+    /// Every atomic field the PRD enumerates must survive a JSON
     /// round-trip. We assert the serialized form actually carries each field key
     /// (so a field silently dropped from serde would fail here, not just an
     /// `assert_eq!` that could pass on two equally-broken values).
@@ -259,7 +259,7 @@ mod tests {
         assert_eq!(p, back);
     }
 
-    /// [REQ-012] All four AcceptanceCriterion variants round-trip, including the
+    /// All four AcceptanceCriterion variants round-trip, including the
     /// String payloads of TestsPass / Custom. Master iterates `acceptance[*]` in
     /// declared order, so order preservation is asserted too.
     #[test]
@@ -282,7 +282,7 @@ mod tests {
         }
     }
 
-    /// [REQ-048] Both SkipCondition variants round-trip with their payloads.
+    /// Both SkipCondition variants round-trip with their payloads.
     #[test]
     fn skip_condition_all_variants_roundtrip() {
         for sc in [

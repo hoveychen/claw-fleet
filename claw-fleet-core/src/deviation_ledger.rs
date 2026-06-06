@@ -3,7 +3,7 @@
 //!
 //! Two append-only JSONL logs live here, both under `~/.fleet/`:
 //!
-//! - **`deviations.jsonl`** ([REQ-025]) — one [`DeviationEntry`] per line. Every
+//! - **`deviations.jsonl`** () — one [`DeviationEntry`] per line. Every
 //!   decision that does NOT fully satisfy the spec (a simplification, a deferred
 //!   REQ, a touches violation accepted by the master) is appended here. The log
 //!   is append-only: [`append_deviation`] never rewrites or truncates the file,
@@ -11,7 +11,7 @@
 //!   ([`read_deviations`]) returns entries in the order they were written (file
 //!   order == chronological append order).
 //!
-//! - **`task-audit.jsonl`** ([REQ-008] [REQ-039]) — one [`StateTransition`] per
+//! - **`task-audit.jsonl`** () — one [`StateTransition`] per
 //!   line. Every runtime P-item status transition (`WaitDeps → Running`,
 //!   `Running → Done|Failed|Skipped`, etc.) is appended here with its timestamp
 //!   and the thing that triggered it ([`TransitionTrigger`] — a REQ id, a worker
@@ -43,7 +43,7 @@ use crate::session::get_fleet_dir;
 /// Approval state of a deviation. The Master refuses to mark a P-item `Done`
 /// while a deviation touching one of its REQs is still [`DeviationStatus::Pending`]
 /// (enforced in P9 via [`read_deviations`]).
-// [REQ-025]
+//
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum DeviationStatus {
@@ -56,7 +56,7 @@ pub enum DeviationStatus {
 }
 
 /// Severity of the spec deviation, mirroring the audit-pattern risk tiers.
-// [REQ-025]
+//
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum RiskLevel {
@@ -73,7 +73,7 @@ pub enum RiskLevel {
 /// `approved_by` / `signed_off_at` are `Option` because a freshly-appended
 /// `Pending` entry has not been signed off yet — they are filled in (by
 /// appending a superseding entry; the log is append-only) when a human approves.
-// [REQ-025]
+//
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct DeviationEntry {
@@ -99,7 +99,7 @@ pub struct DeviationEntry {
     pub status: DeviationStatus,
 }
 
-/// `~/.fleet/deviations.jsonl`. [REQ-025]
+/// `~/.fleet/deviations.jsonl`.
 pub fn deviations_path() -> Result<PathBuf, String> {
     get_fleet_dir()
         .map(|d| d.join("deviations.jsonl"))
@@ -108,7 +108,7 @@ pub fn deviations_path() -> Result<PathBuf, String> {
 
 /// Append one deviation entry as a single JSON line. Append-only: this never
 /// truncates or rewrites the file, so earlier entries are preserved verbatim.
-/// Returns the path written. [REQ-025]
+/// Returns the path written.
 pub fn append_deviation(entry: &DeviationEntry) -> Result<PathBuf, String> {
     let path = deviations_path()?;
     append_jsonl_line(&path, entry)?;
@@ -117,7 +117,7 @@ pub fn append_deviation(entry: &DeviationEntry) -> Result<PathBuf, String> {
 
 /// Read every deviation entry in append (chronological) order. Malformed lines
 /// are skipped rather than failing the whole read, so one corrupt append can't
-/// hide the rest of the audit trail. [REQ-025]
+/// hide the rest of the audit trail.
 pub fn read_deviations() -> Result<Vec<DeviationEntry>, String> {
     let path = deviations_path()?;
     read_jsonl_lines(&path)
@@ -125,15 +125,15 @@ pub fn read_deviations() -> Result<Vec<DeviationEntry>, String> {
 
 // ── State-transition audit log ───────────────────────────────────────────────
 
-/// What triggered a P-item state transition. [REQ-008] requires the source REQ
-/// id be recorded; [REQ-039] generalises the trigger to also cover the worker
+/// What triggered a P-item state transition. requires the source REQ
+/// id be recorded; generalises the trigger to also cover the worker
 /// session that drove it or an explicit user action.
-// [REQ-008] [REQ-039]
+//
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TransitionTrigger {
     /// The transition is attributed to a registered requirement (e.g. the
-    /// `propagate_skip` rule, which is REQ-007). [REQ-008]
+    /// `propagate_skip` rule, which is REQ-007).
     ReqId(String),
     /// A worker subprocess (Claude Code session UUID) drove the transition,
     /// e.g. `WaitDeps → Running` on dispatch.
@@ -142,8 +142,8 @@ pub enum TransitionTrigger {
     UserAction(String),
 }
 
-/// One append-only P-item status transition record. [REQ-008] [REQ-039]
-// [REQ-008] [REQ-039]
+/// One append-only P-item status transition record.
+//
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct StateTransition {
@@ -158,7 +158,7 @@ pub struct StateTransition {
     pub trigger: TransitionTrigger,
 }
 
-/// `~/.fleet/task-audit.jsonl`. [REQ-039]
+/// `~/.fleet/task-audit.jsonl`.
 pub fn audit_log_path() -> Result<PathBuf, String> {
     get_fleet_dir()
         .map(|d| d.join("task-audit.jsonl"))
@@ -166,7 +166,7 @@ pub fn audit_log_path() -> Result<PathBuf, String> {
 }
 
 /// Append one state-transition record as a single JSON line. Append-only.
-/// Returns the path written. [REQ-008] [REQ-039]
+/// Returns the path written.
 pub fn append_transition(t: &StateTransition) -> Result<PathBuf, String> {
     let path = audit_log_path()?;
     append_jsonl_line(&path, t)?;
@@ -174,7 +174,7 @@ pub fn append_transition(t: &StateTransition) -> Result<PathBuf, String> {
 }
 
 /// Append a batch of transitions in order (e.g. the skip records returned by
-/// `DagPlan::propagate_skip`). Each is one JSONL line. [REQ-008] [REQ-039]
+/// `DagPlan::propagate_skip`). Each is one JSONL line.
 pub fn append_transitions(ts: &[StateTransition]) -> Result<(), String> {
     let path = audit_log_path()?;
     for t in ts {
@@ -183,14 +183,14 @@ pub fn append_transitions(ts: &[StateTransition]) -> Result<(), String> {
     Ok(())
 }
 
-/// Read every state transition in append (chronological) order. [REQ-039]
+/// Read every state transition in append (chronological) order.
 pub fn read_transitions() -> Result<Vec<StateTransition>, String> {
     let path = audit_log_path()?;
     read_jsonl_lines(&path)
 }
 
 /// Read every state transition for one P-item, in append order — the user-facing
-/// "show this P-item's status history" query of [REQ-039].
+/// "show this P-item's status history" query of.
 pub fn transitions_for(p_item_id: &str) -> Result<Vec<StateTransition>, String> {
     Ok(read_transitions()?
         .into_iter()
@@ -293,7 +293,7 @@ mod tests {
         }
     }
 
-    /// [REQ-025] Append-only: write several entries, read them back in order,
+    /// Append-only: write several entries, read them back in order,
     /// none lost, none overwritten. Then append more and confirm the earlier
     /// ones are still present and still first (the file was extended, not
     /// rewritten).
@@ -332,7 +332,7 @@ mod tests {
         assert_eq!(raw.lines().filter(|l| !l.trim().is_empty()).count(), 5);
     }
 
-    /// [REQ-025] Full round-trip of every field, including the optional
+    /// Full round-trip of every field, including the optional
     /// `approved_by` / `signed_off_at` on an Approved entry.
     #[test]
     fn req025_deviation_entry_roundtrips_all_fields() {
@@ -358,7 +358,7 @@ mod tests {
         assert_eq!(back[0], e, "every field must survive the JSONL round-trip");
     }
 
-    /// [REQ-025] Reading a ledger that was never created yields an empty vec,
+    /// Reading a ledger that was never created yields an empty vec,
     /// not an error.
     #[test]
     fn req025_read_missing_deviations_is_empty() {
@@ -368,7 +368,7 @@ mod tests {
         assert!(read_deviations().unwrap().is_empty());
     }
 
-    /// [REQ-008] [REQ-039] State transitions append-only, queryable per P-item,
+    /// State transitions append-only, queryable per P-item,
     /// carrying (from, to, ts, trigger). Two P-items interleaved; per-item
     /// query returns only that item's chain, in append order.
     #[test]
@@ -407,7 +407,7 @@ mod tests {
         assert_eq!(all[0].timestamp, 100);
         assert_eq!(all[2].to_status, "done");
 
-        // [REQ-039] user-facing per-P-item history query.
+        // user-facing per-P-item history query.
         let p1 = transitions_for("p1").unwrap();
         assert_eq!(p1.len(), 2, "p1 has WaitDeps→Running→Done");
         assert_eq!(p1[0].from_status, "waitDeps");
@@ -415,14 +415,14 @@ mod tests {
         assert_eq!(p1[1].from_status, "running");
         assert_eq!(p1[1].to_status, "done");
 
-        // [REQ-008] the skip transition records the REQ source that triggered it.
+        // the skip transition records the REQ source that triggered it.
         let p2 = transitions_for("p2").unwrap();
         assert_eq!(p2.len(), 1);
         assert_eq!(p2[0].trigger, TransitionTrigger::ReqId("REQ-007".into()));
         assert_eq!(p2[0].to_status, "skipped");
     }
 
-    /// [REQ-008] [REQ-039] `append_transitions` batch helper writes each as its
+    /// `append_transitions` batch helper writes each as its
     /// own line and preserves order.
     #[test]
     fn req039_batch_append_transitions() {

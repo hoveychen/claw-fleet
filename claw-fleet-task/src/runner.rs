@@ -72,7 +72,7 @@ pub enum RunnerStep {
     Done,
 }
 
-// [REQ-047] Config-aware scheduling: the bare `claw_fleet_core::scheduler`
+// Config-aware scheduling: the bare `claw_fleet_core::scheduler`
 // treats every resource as a mutex (concurrency 1). fleet.yaml's custom locks
 // can declare `concurrency: N`, turning a resource into a counting semaphore
 // (N holders may run at once). This function is the scheduler's view *with*
@@ -222,7 +222,7 @@ mod config_scheduling_tests {
         }
     }
 
-    // [REQ-047] Acceptance scenario: a custom:db resource declared in
+    // Acceptance scenario: a custom:db resource declared in
     // fleet.yaml with concurrency 1 → the scheduler detects the conflict and
     // refuses to dispatch two contending P-items concurrently. The earlier id
     // wins this pass; the second waits until the resource frees.
@@ -244,7 +244,7 @@ mod config_scheduling_tests {
         assert!(ready.contains(&"P3".to_string()), "P3 (build) is disjoint: {ready:?}");
     }
 
-    // [REQ-047] With concurrency 2 the same custom:db resource becomes a
+    // With concurrency 2 the same custom:db resource becomes a
     // counting semaphore: both contenders may run at once. This proves the
     // cap actually drives the decision (vs. always-mutex).
     #[test]
@@ -265,7 +265,7 @@ mod config_scheduling_tests {
         assert!(!ready.contains(&"P3".to_string()), "third holder must wait: {ready:?}");
     }
 
-    // [REQ-047] currently_held (resources taken by already-running workers) is
+    // currently_held (resources taken by already-running workers) is
     // honoured: if custom:db is already held at its cap, no new contender runs.
     #[test]
     fn respects_externally_held_resource() {
@@ -280,7 +280,7 @@ mod config_scheduling_tests {
         assert!(ready.is_empty(), "custom:db already held at cap: {ready:?}");
     }
 
-    // [REQ-047] Undeclared / built-in resources fall back to mutex (cap 1),
+    // Undeclared / built-in resources fall back to mutex (cap 1),
     // matching the core scheduler when no fleet.yaml override exists.
     #[test]
     fn builtin_resource_defaults_to_mutex() {
