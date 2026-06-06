@@ -37,6 +37,10 @@ pub struct SessionRecord {
 pub trait ProcessLauncher: Send + Sync {
     fn launch_master(&self, session_id: &str, spec: &MasterSpawnSpec) -> Result<u32, String>;
     fn launch_worker(&self, session_id: &str, spec: &WorkerSpawnSpec) -> Result<u32, String>;
+    // [WA-DEC] `launch_auditor` removed: the adversarial audit is no longer an
+    // LLM session quorum. mark_done runs the deterministic rules in-process
+    // (see `actions::mark_done` / `actions::audit_pitem`), so the host no longer
+    // spawns auditor subprocesses.
 }
 
 /// Default launcher that shells out to the `claude` CLI on PATH. Mirrors the
@@ -60,6 +64,7 @@ impl ProcessLauncher for ClaudeLauncher {
             "master",
             Some(&spec.task_id),
             None,
+            &[],
         )
     }
 
@@ -80,6 +85,7 @@ impl ProcessLauncher for ClaudeLauncher {
             "worker",
             Some(&spec.task_id),
             Some(&spec.p_item_id),
+            &[],
         )
     }
 }
@@ -99,6 +105,9 @@ fn spawn_claude(
     kind_env: &str,
     task_id: Option<&str>,
     p_item_id: Option<&str>,
+    // [WA1] Extra (key,value) env pairs set on the child — used to pass the
+    // auditor its output-path drop location without widening every call site.
+    extra_env: &[(&str, &str)],
 ) -> Result<u32, String> {
     if std::env::var_os(FAKE_LAUNCHER_ENV).is_some() {
         let child = Command::new("sleep")
@@ -129,6 +138,9 @@ fn spawn_claude(
     }
     if let Some(p) = p_item_id {
         cmd.env("FLEET_P_ITEM_ID", p);
+    }
+    for (k, v) in extra_env {
+        cmd.env(k, v);
     }
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
