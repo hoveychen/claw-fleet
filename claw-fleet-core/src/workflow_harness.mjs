@@ -153,8 +153,9 @@ function record(prompt, opts = {}) {
     agentType: opts.agentType ?? null,
     schema: !!opts.schema,
     promptLen: resolved.length,
-    _fp: resolved,     // running LCP of resolved prompts (finalized at output)
-    _label: label,     // running LCP of labels
+    _fp: resolved,         // running LCP of resolved prompts (finalized at output)
+    _label: label,         // running LCP of labels
+    _resolved: resolved,   // first execution's full resolved prompt (for display)
   })
 }
 
@@ -227,13 +228,19 @@ async function main() {
     if (m) meta = await new AsyncFunction('return (' + m[1] + ')')()
   } catch {}
 
-  // finalize: cut running-LCP prefixes at the first interpolation sentinel
+  // finalize: cut running-LCP prefixes at the first interpolation sentinel;
+  // turn the first execution's full resolved prompt into a readable template
+  // (interpolation points → "…") for the UI to show on a node.
+  const DISPLAY_MAX = 600
   const calls = [...callsBySite.values()].map((c) => {
-    const { _fp, _label, ...rest } = c
+    const { _fp, _label, _resolved, ...rest } = c
+    let promptResolved = (_resolved ?? '').split(SENTINEL).join('…')
+    if (promptResolved.length > DISPLAY_MAX) promptResolved = promptResolved.slice(0, DISPLAY_MAX) + '…'
     return {
       ...rest,
       fingerprint: (_fp ?? '').split(SENTINEL)[0],
       label: _label === null || _label === undefined ? null : _label.split(SENTINEL)[0],
+      promptResolved: promptResolved || null,
     }
   })
   process.stdout.write(JSON.stringify({

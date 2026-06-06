@@ -148,6 +148,9 @@ export interface WorkflowNode {
   agentIds: string[];
   /** true when the agent→node binding is heuristic rather than exact */
   approximate: boolean;
+  /** readable rendering of this call-site's prompt (interpolation points as "…"),
+   *  recovered by the execution-based extractor; absent when only the static scan ran */
+  resolvedPrompt?: string;
 }
 
 /** a directed dependency edge between two nodes (from → to) */
