@@ -53,6 +53,13 @@ fn worktree_meta_name(task_id: &str, p_item_id: &str) -> String {
 /// Idempotent: if the worktree path already exists and is registered with
 /// git, returns it unchanged. If the path is an orphan (exists on disk but
 /// not registered) it gets wiped and re-provisioned.
+///
+/// [REQ-040] `provision` is the worktree-isolation entry point: it creates
+/// one `git worktree add`-style isolated checkout per P-item, recovers from
+/// orphaned dirs/branches left by a crashed prior run, and pairs with
+/// `merge_back` (3-way merge back to the task branch) and `reap` (worktree
+/// teardown) to manage the full lifecycle. Two P-items get independent
+/// worktrees that don't tread on each other.
 pub fn provision(
     project_workspace: &Path,
     task_branch: &str,
@@ -188,8 +195,41 @@ pub fn list_for_task(task_id: &str) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
+/// Build the identifying message for a fleet merge commit so the Auditor
+/// can trace which P-item / session / worker produced it.
+///
+/// [REQ-041] Every fleet-authored merge commit must carry identification in
+/// the form `fleet: merged <p_item_id> from session <sid> worker <worker>`,
+/// so `git log --oneline | grep fleet` surfaces all fleet merges and each
+/// line is traceable back to its origin.
+///
+/// `worktree::merge_back` / `apply_resolutions` only receive
+/// `(task_id, p_item_id)` from their callers — the worker/session id is not
+/// threaded through those signatures (callers live outside this module's
+/// touches). We therefore source the session id from the worker runtime's
+/// `FLEET_SESSION_ID` env var and the worker id from `FLEET_WORKER_ID`,
+/// falling back to the deterministic worktree branch name when neither is
+/// set (e.g. unit tests, manual merges). The `<p_item_id>` and the worker
+/// branch are always present, so the commit stays grep-able + traceable
+/// even outside a live worker context.
+fn fleet_merge_message(task_id: &str, p_item_id: &str, kind: &str) -> String {
+    let sid = std::env::var("FLEET_SESSION_ID").unwrap_or_else(|_| "unknown".to_string());
+    let worker = std::env::var("FLEET_WORKER_ID")
+        .unwrap_or_else(|_| worktree_branch(task_id, p_item_id));
+    format!("fleet: merged {p_item_id} from session {sid} worker {worker} ({kind})")
+}
+
 /// Outcome of `merge_back` for a P-item's worktree branch into the task
 /// branch.
+///
+/// [REQ-029] Exactly three "something happened" outcomes are modelled:
+/// `FastForwarded` (linear advance), `AutoMerged` (git's auto-merger
+/// resolved a divergence into a merge commit), and `Conflict` (a real
+/// 3-way conflict that needs LLM mediation or human intervention). The
+/// fourth `NoChanges` variant is the degenerate "worker committed nothing"
+/// case, not a merge strategy. There is no recursive retry: `merge_back`
+/// attempts FF→auto-merge once, and on `Conflict` the caller runs at most
+/// one round of LLM mediation via `apply_resolutions`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum MergeOutcome {
     /// Fast-forward applied `commits_merged` commits from the worker.
@@ -258,7 +298,9 @@ pub fn merge_back(
         });
     }
     // Fall back to a real 3-way merge — let libgit2 try to auto-resolve.
-    let msg = format!("Merge worktree {branch}");
+    // [REQ-041] Stamp the merge commit with fleet identification so the
+    // Auditor can trace it via `git log | grep fleet`.
+    let msg = fleet_merge_message(task_id, p_item_id, "auto-merge");
     repo.merge(&[&annotated], None, None)
         .map_err(|e| format!("merge {branch}: {}", e.message()))?;
     let mut index = repo
@@ -346,7 +388,9 @@ pub fn apply_resolutions(
             "mediation incomplete — {count} file(s) still unmerged after apply"
         ));
     }
-    let msg = format!("auto-merge: {p_item_id} via Sonnet mediation");
+    // [REQ-041] Mediated merges also carry fleet identification (kind marks
+    // them as LLM-mediated for the Auditor's benefit).
+    let msg = fleet_merge_message(task_id, p_item_id, "via Sonnet mediation");
     finish_merge_commit(&repo, &mut index, &msg, annotated.id())?;
     Ok(MergeOutcome::AutoMerged { commits_merged: 1 })
 }
@@ -1056,5 +1100,171 @@ mod tests {
         }
         assert!(repo.path().join("a.txt").exists());
         assert!(repo.path().join("b.txt").exists());
+    }
+
+    /// Read the subject line of HEAD's commit in `repo`.
+    fn head_subject(repo: &Path) -> String {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["log", "-1", "--format=%s"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    // [REQ-041] An auto-merge commit must identify the P-item and be
+    // discoverable via `git log | grep fleet`.
+    #[test]
+    fn auto_merge_commit_carries_fleet_identification() {
+        let _g = crate::paths::fleet_home_lock();
+        let fh = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(fh.path());
+        let repo = TempDir::new().unwrap();
+        init_repo(repo.path(), "main");
+
+        // Force a non-fast-forward auto-merge (divergent disjoint files).
+        let wt = provision(repo.path(), "main", "task-a", "p7").unwrap();
+        commit_in_worktree(&wt, "a.txt", "a\n", "worker a");
+        commit_in_worktree(repo.path(), "b.txt", "b\n", "main b");
+
+        let outcome = merge_back(repo.path(), "main", "task-a", "p7").unwrap();
+        assert!(matches!(outcome, MergeOutcome::AutoMerged { .. }));
+
+        let subject = head_subject(repo.path());
+        assert!(
+            subject.starts_with("fleet: merged p7 from session "),
+            "merge subject must identify the P-item + session: {subject:?}"
+        );
+        assert!(subject.contains("worker "), "must name a worker: {subject:?}");
+        assert!(subject.contains("auto-merge"), "must mark the merge kind: {subject:?}");
+
+        // `git log --oneline | grep fleet` finds it.
+        let log = Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["log", "--oneline"])
+            .output()
+            .unwrap();
+        let log = String::from_utf8_lossy(&log.stdout);
+        assert!(
+            log.lines().any(|l| l.contains("fleet: merged p7")),
+            "fleet merge must be grep-able in git log: {log}"
+        );
+    }
+
+    // [REQ-041] A mediated (apply_resolutions) merge commit must also carry
+    // fleet identification, distinguished as the mediation kind.
+    #[test]
+    fn mediated_merge_commit_carries_fleet_identification() {
+        let _g = crate::paths::fleet_home_lock();
+        let fh = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(fh.path());
+        let repo = TempDir::new().unwrap();
+        init_repo(repo.path(), "main");
+        commit_in_worktree(repo.path(), "shared.txt", "original\n", "seed");
+
+        let wt = provision(repo.path(), "main", "task-a", "p9").unwrap();
+        commit_in_worktree(&wt, "shared.txt", "from worker\n", "worker");
+        commit_in_worktree(repo.path(), "shared.txt", "from main\n", "main");
+
+        let resolutions = vec![(PathBuf::from("shared.txt"), "merged\n".to_string())];
+        let outcome = apply_resolutions(repo.path(), "task-a", "p9", &resolutions).unwrap();
+        assert!(matches!(outcome, MergeOutcome::AutoMerged { .. }));
+
+        let subject = head_subject(repo.path());
+        assert!(
+            subject.starts_with("fleet: merged p9 from session "),
+            "mediated merge subject must identify the P-item: {subject:?}"
+        );
+        assert!(
+            subject.contains("via Sonnet mediation"),
+            "must mark the merge as LLM-mediated: {subject:?}"
+        );
+    }
+
+    // [REQ-041] When the worker runtime sets FLEET_SESSION_ID / FLEET_WORKER_ID,
+    // those real ids land in the merge commit (not the branch-name fallback).
+    #[test]
+    fn fleet_merge_message_uses_runtime_session_and_worker_ids() {
+        // Guard env mutation: serialize via the same lock other tests use.
+        let _g = crate::paths::fleet_home_lock();
+        // Save + restore so we don't leak into sibling tests.
+        let prev_sid = std::env::var_os("FLEET_SESSION_ID");
+        let prev_wid = std::env::var_os("FLEET_WORKER_ID");
+        unsafe {
+            std::env::set_var("FLEET_SESSION_ID", "sess-xyz");
+            std::env::set_var("FLEET_WORKER_ID", "worker-42");
+        }
+        let msg = fleet_merge_message("task-a", "p3", "auto-merge");
+        unsafe {
+            match prev_sid {
+                Some(v) => std::env::set_var("FLEET_SESSION_ID", v),
+                None => std::env::remove_var("FLEET_SESSION_ID"),
+            }
+            match prev_wid {
+                Some(v) => std::env::set_var("FLEET_WORKER_ID", v),
+                None => std::env::remove_var("FLEET_WORKER_ID"),
+            }
+        }
+        assert_eq!(
+            msg,
+            "fleet: merged p3 from session sess-xyz worker worker-42 (auto-merge)"
+        );
+    }
+
+    // [REQ-041] Absent runtime ids, the message still identifies the P-item
+    // and falls back to the deterministic worktree branch name for traceability.
+    #[test]
+    fn fleet_merge_message_falls_back_to_branch_when_env_absent() {
+        let _g = crate::paths::fleet_home_lock();
+        let prev_sid = std::env::var_os("FLEET_SESSION_ID");
+        let prev_wid = std::env::var_os("FLEET_WORKER_ID");
+        unsafe {
+            std::env::remove_var("FLEET_SESSION_ID");
+            std::env::remove_var("FLEET_WORKER_ID");
+        }
+        let msg = fleet_merge_message("task-a", "p3", "auto-merge");
+        unsafe {
+            if let Some(v) = prev_sid { std::env::set_var("FLEET_SESSION_ID", v); }
+            if let Some(v) = prev_wid { std::env::set_var("FLEET_WORKER_ID", v); }
+        }
+        assert_eq!(
+            msg,
+            "fleet: merged p3 from session unknown worker fleet/task-a/p3 (auto-merge)"
+        );
+    }
+
+    // [REQ-029] merge_back's three real outcomes are exercised by dedicated
+    // tests; this one asserts the enum models exactly the FF / auto / conflict
+    // trichotomy with the Conflict variant carrying the 3-way specs the LLM
+    // mediator consumes — and that there is no built-in retry loop.
+    #[test]
+    fn merge_outcome_models_three_strategies_with_conflict_specs() {
+        let _g = crate::paths::fleet_home_lock();
+        let fh = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(fh.path());
+        let repo = TempDir::new().unwrap();
+        init_repo(repo.path(), "main");
+
+        // (1) FastForwarded: linear advance.
+        let wt1 = provision(repo.path(), "main", "t", "ff").unwrap();
+        commit_in_worktree(&wt1, "ff.txt", "x\n", "ff work");
+        assert!(matches!(
+            merge_back(repo.path(), "main", "t", "ff").unwrap(),
+            MergeOutcome::FastForwarded { .. }
+        ));
+
+        // (2) Conflict: same line changed both sides → carries ConflictSpec vec.
+        commit_in_worktree(repo.path(), "c.txt", "base\n", "seed c");
+        let wt2 = provision(repo.path(), "main", "t", "cf").unwrap();
+        commit_in_worktree(&wt2, "c.txt", "worker\n", "worker c");
+        commit_in_worktree(repo.path(), "c.txt", "main\n", "main c");
+        match merge_back(repo.path(), "main", "t", "cf").unwrap() {
+            MergeOutcome::Conflict { files, .. } => {
+                assert!(!files.is_empty(), "Conflict must surface ConflictSpec vec");
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
     }
 }

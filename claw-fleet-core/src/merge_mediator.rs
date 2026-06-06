@@ -77,6 +77,14 @@ pub const MEDIATOR_TIMEOUT: Duration = Duration::from_secs(120);
 /// the LLM's output is easy to extract. The wrapper tags are intentional
 /// — relying on the LLM to emit "just the file" is fragile; the tags let
 /// us strip preamble noise deterministically.
+///
+/// [REQ-031] The template encodes four explicit heuristics, one per
+/// numbered instruction: (1) preserve every non-conflicting change from
+/// both sides; (2) favor THEIRS (the incoming worker branch) on overlap
+/// unless OURS clearly supersedes; (3) leave NO conflict markers; (4) emit
+/// the complete file content wrapped in `<resolved>...</resolved>`. The
+/// THEIRS bias is the load-bearing rule for repeatability — workers own the
+/// P-item's changes, so their version is authoritative on genuine overlap.
 pub const MEDIATOR_PROMPT_TEMPLATE: &str = "You are resolving a 3-way merge conflict for a single file. \
 You will be given the common ancestor (BASE), the current branch's version (OURS), and \
 the incoming branch's version (THEIRS). Produce a single resolved version that:
@@ -110,6 +118,10 @@ Now emit the resolved file inside <resolved>...</resolved>. Nothing else.";
 
 /// Render the prompt for one conflict. Pure function; testable without an
 /// LLM.
+///
+/// [REQ-030] Fills `MEDIATOR_PROMPT_TEMPLATE` with the conflicted file's
+/// path and 3-way (BASE/OURS/THEIRS) contents — this is the fixed prompt
+/// each per-file LLM call receives.
 pub fn render_prompt(spec: &ConflictSpec) -> String {
     MEDIATOR_PROMPT_TEMPLATE
         .replace("{PATH}", &spec.path.display().to_string())
@@ -121,6 +133,10 @@ pub fn render_prompt(spec: &ConflictSpec) -> String {
 /// Extract the resolved content from the LLM's response. Returns the inner
 /// text between `<resolved>` and `</resolved>` (newlines trimmed at the
 /// boundaries). Pure function.
+///
+/// [REQ-030] Enforces the `<resolved>...</resolved>` wrapper contract: a
+/// response lacking the tags yields `None`, which `mediate_one` surfaces as
+/// `MissingWrapper` rather than guessing at unwrapped output.
 pub fn extract_resolved(response: &str) -> Option<String> {
     let start = response.find("<resolved>")?;
     let after_open = &response[start + "<resolved>".len()..];
@@ -135,6 +151,10 @@ pub fn extract_resolved(response: &str) -> Option<String> {
 
 /// Sanity check: no conflict markers in the resolved content. Returns the
 /// first offending marker if any.
+///
+/// [REQ-030] Rejects any resolved content still containing `<<<<<<<`,
+/// `=======`, or `>>>>>>>` — `mediate_one` turns a hit into the
+/// `MarkersLeftBehind` error so we never write half-resolved conflicts.
 pub fn first_conflict_marker(content: &str) -> Option<String> {
     for marker in ["<<<<<<<", "=======", ">>>>>>>"] {
         for line in content.lines() {
@@ -148,6 +168,10 @@ pub fn first_conflict_marker(content: &str) -> Option<String> {
 
 /// Mediate one conflict via the supplied provider. Caller owns the
 /// provider so tests can swap in fakes.
+///
+/// [REQ-030] One LLM call per conflicted file using the fixed template:
+/// render prompt → call provider → require the `<resolved>` wrapper →
+/// reject any leftover conflict markers. No retry, no tools.
 pub fn mediate_one(
     provider: &dyn LlmProvider,
     spec: &ConflictSpec,
@@ -338,5 +362,83 @@ mod tests {
         let s = spec("a.txt", "b", "o", "t");
         let err = mediate_one(&prov, &s).unwrap_err();
         assert!(matches!(err, MediationError::EmptyResponse));
+    }
+
+    // [REQ-031] The template must encode the four heuristics, with an
+    // explicit THEIRS-preference instruction and the marker/wrapper rules.
+    #[test]
+    fn template_encodes_four_heuristics_including_theirs_preference() {
+        let t = MEDIATOR_PROMPT_TEMPLATE;
+        // Four numbered instructions present.
+        for n in ["1.", "2.", "3.", "4."] {
+            assert!(t.contains(n), "template missing instruction {n}");
+        }
+        // (2) favor THEIRS on overlap.
+        assert!(
+            t.contains("prefer the intent of THEIRS"),
+            "template must instruct favoring THEIRS"
+        );
+        // (3) no conflict markers.
+        assert!(
+            t.contains("NO conflict markers"),
+            "template must forbid conflict markers"
+        );
+        // (4) wrap in <resolved>.
+        assert!(
+            t.contains("<resolved>") && t.contains("</resolved>"),
+            "template must require the <resolved> wrapper"
+        );
+        // (1) preserve non-conflicting changes from both sides.
+        assert!(
+            t.contains("Preserves every non-conflicting change"),
+            "template must instruct preserving non-conflicting changes"
+        );
+    }
+
+    /// A fake provider that simulates an LLM honoring the THEIRS-preference
+    /// instruction: it parses the rendered prompt's `<theirs>...</theirs>`
+    /// block and returns it verbatim inside a `<resolved>` wrapper. This
+    /// lets us verify the end-to-end contract deterministically — the
+    /// resolved content equals the THEIRS branch, with no real network call.
+    struct TheirsHonoringProvider;
+    impl LlmProvider for TheirsHonoringProvider {
+        fn name(&self) -> &str { "theirs" }
+        fn display_name(&self) -> &str { "Theirs" }
+        fn is_available(&self) -> bool { true }
+        fn list_models(&self) -> Vec<LlmModel> { vec![] }
+        fn default_fast_model(&self) -> &str { "fast" }
+        fn default_standard_model(&self) -> &str { "std" }
+        fn complete(&self, prompt: &str, _m: &str, _t: Duration) -> Option<Completion> {
+            // Pull the theirs block out of the rendered prompt.
+            let start = prompt.find("<theirs>\n")? + "<theirs>\n".len();
+            let rest = &prompt[start..];
+            let end = rest.find("\n</theirs>")?;
+            let theirs = &rest[..end];
+            Some(Completion {
+                text: format!("<resolved>\n{theirs}\n</resolved>"),
+                usage: Some(CompletionUsage::default()),
+            })
+        }
+    }
+
+    // [REQ-031] On a 3-way conflict, an LLM that follows the THEIRS-preference
+    // instruction resolves the file to the THEIRS (incoming worker) content.
+    #[test]
+    fn theirs_preference_resolves_to_theirs_branch_content() {
+        let s = spec(
+            "src/lib.rs",
+            "fn base() {}\n",
+            "fn ours_overlap() {}\n",
+            "fn theirs_overlap() {}\n",
+        );
+        let prov = TheirsHonoringProvider;
+        let result = mediate_one(&prov, &s).unwrap();
+        // Resolved content came from the THEIRS branch, not OURS. (The
+        // THEIRS branch content is `fn theirs_overlap() {}\n`; one boundary
+        // newline is trimmed by extract_resolved, leaving the trailing one.)
+        assert_eq!(result.resolved_content, "fn theirs_overlap() {}\n");
+        assert!(result.resolved_content.contains("fn theirs_overlap"));
+        assert!(!result.resolved_content.contains("ours_overlap"));
+        assert!(!result.resolved_content.contains("fn base"));
     }
 }

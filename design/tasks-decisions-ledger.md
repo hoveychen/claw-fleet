@@ -39,3 +39,19 @@
 3. touches 对 Read/Write 的范围模糊（hook 只拦 Write/Edit，不拦 Read）→ 需在 REQ 中明确边界，是否有意为之要老板拍。
 4. `human_gate` task级 vs P项级优先级未定义 → 需明确 precedence + 测试。
 5. **REQ-035**：用户审计白名单能静默绕过 critical 审计信号 → 要么删除，要么改为「require explicit master approval」。这是策略决策，实现前需老板拍。
+
+## 开工前意图分叉决策（2026-06-06，老板亲批）
+
+- **DEC-005** | REQ-035 白名单 → **改为 require-approval**：保留白名单但每条要 `approved_by` 签署，critical 规则（sudo / curl-upload 等）不可被白名单短路，Auditor 仍报 deferred 偏差。落 P11。
+- **DEC-006** | touches Read 范围 → **维持只拦 Write/Edit**：Read 不算越界（worker 常需读 touches 外的依赖/上游产物，拦 Read 高频误报）。落 P3，代码注释显式声明此边界。
+- **DEC-007** | acceptance escalate → **先 retry worker 一次再问**：验收拿不准先让 worker 补一轮，仍不行才 AskUserQuestion。落 P6/P9，与现有 master「先自动 fix」协议一致。
+- **DEC-008** | 启动方式 → **一口气跑完全部波次**：master 内部按拓扑波次串行驱动，波间做 `cargo build --workspace` 串行验证 + worktree commit（不并行 merge），全程不打断老板，仅真红灯 / 最终 merge 门才回。
+
+## Wave 1 执行后修正（2026-06-06，对抗审计 + master grep 复核触发）
+
+- **DEC-009 ⚠️ 撤销 DEC-003/004** | **P14 取消，slugify_title / pick_unique_branch / git_create_branch / git_branch_exists 全部保留**。
+  - 起因：P14 的对抗审计员发现「死代码」前提存疑；master 亲自 grep 复核确认：`start_task` (actions.rs:55-57) 直接调用 `slugify_title` / `pick_unique_branch` / `git_create_branch`；`pick_unique_branch` (task.rs:436/441) 调用 `git_branch_exists`。**这些是 start_task 的活代码，砍掉会破坏编译。**
+  - 根因：DEC-003/004 沿用了 keep/cut agent 基于过时快照（Phase 3 commit 86c3daf 集成前）的「未集成」判断，未验证调用链。这正是 netferry 教训（subagent 分类必须自己 grep 验证）的复现，被分层验证拦下。
+  - 处置：P14 worker 未执行任何删除（task.rs diff 为空），无损害。P14 从计划移除，task.rs 维持现状。
+- **DEC-010** | **P7 REQ-003/004 的行为测试下放到 P9**：P7 worker 只实现了 master template 文本强化（10 红线 / 4 禁信号 / 7 工具）+ 验证 template 提及，未写「mock 仅代理信号输入→必须 fail」「TestsPass 缺失→mark-done 拒绝」「HumanReview→AskUserQuestion」等行为测试。这些行为属于 mark_done（P9）的执行逻辑，非 template（P7）职责 → 显式归入 P9 acceptance，P7 仅留 template 层。
+- **DEC-011** | **P3 SIGSTOP / Master TouchesViolation 决策逻辑归 fleet-cli + P9**：touches_hook.rs 只做 check_path_against_touches + record_violation；SIGSTOP 投递（fleet-cli hook handler）和 Master 三选一决策（extend/reject/escalate）不在本模块，registry notes 已声明，非静默简化。
