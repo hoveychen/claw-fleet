@@ -1,0 +1,1860 @@
+[
+  {
+    "slice": "pitem/plan/dag/task data models & state machines",
+    "summary": "The four Rust modules implement a sound DAG scheduling model with good separation of concerns. Core structures (PItem, DagPlan, Task) correctly support all four methodology pillars: (1) Registry via acceptance/artifacts/touches; (2) Traceability via FailReason/inbox_materials/timestamps; (3) Append-only ledger via artifact kinds and skip reasons (NEEDS: auditable skip decision logging); (4) Adversarial audit via acceptance criteria, human_gate, and status machine. Non-essential code (git_* wrappers, slugify) should be cut per hard constraint. propagate_skip needs transformation to emit audit entries.",
+    "components": [
+      {
+        "name": "PItem struct core fields",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/pitem.rs:18-50",
+        "purpose": "Central DAG node: id, desc, depends_on, resources, touches, estimate_secs; execution lifecycle (status, agent_session_id, started_at, completed_at, output_summary)",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Essential for all four methodology pillars: (1) REQ registry via desc+touches; (2) traceability via agent_session_id+output_summary; (3) artifacts field stores evidence; (4) human_gate+acceptance enable auditor inspection. Cannot simplify without losing auditability."
+      },
+      {
+        "name": "PItem.acceptance (AcceptanceCriterion enum)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/pitem.rs:30,78-83",
+        "purpose": "Declares verifiable assertions before Done: Builds, TestsPass, HumanReview, Custom",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Direct enabler of pillar (4) independent auditor. Each criterion is an assertion to verify. HumanReview bridges human gate. Custom allows methodology-specific criteria (e.g. 'REQ-042 verified'). Underutilized but foundational."
+      },
+      {
+        "name": "PItem.artifacts (ArtifactKind enum)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/pitem.rs:32,87-92",
+        "purpose": "Artifact categories produced by execution: FileList, GitDiff, TestOutput, ManualNote",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "keep",
+        "rationale": "Maps to pillar (3) append-only ledger. Artifacts are evidence trail: FileList+GitDiff capture changes, TestOutput captures assertions, ManualNote captures human decisions. Defined at P-item but not enforced/tracked—needs worker compliance check."
+      },
+      {
+        "name": "PItem.skippable (SkipCondition enum)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/pitem.rs:34,96-99",
+        "purpose": "When to skip: NoChangesIn(paths) or Custom(reason)",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "keep",
+        "rationale": "Pillar (3): skip decisions must be logged. NoChangesIn is common (no diff=no work). Custom enables arbitrary declarations. Currently passive; should emit audit log when fired."
+      },
+      {
+        "name": "PItem.human_gate boolean field",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/pitem.rs:36",
+        "purpose": "If true, pause at WaitHumanGate status after worker completion for manual approval",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Bridges human judgment into audit chain. Gates mark decision points where human/auditor must sign off. Enables pillar (4). Simple, correct state machine (WaitHumanGate status). No simplification."
+      },
+      {
+        "name": "PItemStatus enum and state machine",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/pitem.rs:54-62,101-129",
+        "purpose": "Lifecycle: WaitDeps → WaitResource → Running → WaitHumanGate → Done/Failed/Skipped. Predicates: is_terminal, unblocks_downstream, is_active",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Clean state machine for traceability (pillar 2) and audit (pillar 4). FailReason enum captures causality. Predicates enable scheduler determinism. unblocks_downstream correctly treats Skipped as unblocking (not poisoning per PRD §6.1). Minimal, correct."
+      },
+      {
+        "name": "FailReason enum with causality variants",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/pitem.rs:66-74",
+        "purpose": "Failure classification: BuildFailed, TestsFailed, AcceptanceRejected, UpstreamFailed, UserRejected, Aborted, Custom",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "Each variant maps to distinct audit concern (pillars 2 & 4). Enables auditor to filter and root-cause. Custom allows methodology-specific failure types. Essential for diagnosis."
+      },
+      {
+        "name": "DagPlan container and accessors",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/plan.rs:17-19,42-71",
+        "purpose": "HashMap<PItemId, PItem> with get/get_mut/len; deterministic node_ids()",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Minimal, correct. Deterministic ordering aids audit log reproducibility. Serde roundtrip enables persistence. No business logic. No simplification possible."
+      },
+      {
+        "name": "DagPlan.validate() integrity check",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/plan.rs:93-108",
+        "purpose": "Verify reference integrity and acyclicity before execution",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "First gate in traceability chain (pillar 2): validates REQ registry structure. Catches broken references early. Acyclicity prevents infinite loops. Essential pre-flight check."
+      },
+      {
+        "name": "DagPlan.unblocked_items() scheduler candidate",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/plan.rs:113-130",
+        "purpose": "Return P-items in WaitDeps whose dependencies are all settled (Done or Skipped)",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Core scheduler primitive. Correctly treats Skipped as unblocking. Deterministic sorted output. Essential for DAG parallelism. Single responsibility, well-tested."
+      },
+      {
+        "name": "DagPlan.resource_conflicts() contention detection",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/plan.rs:134-158",
+        "purpose": "Find all P-item pairs contending for same resource; emitted once with deterministic ordering",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Prevents race conditions on shared resources (build, ports, git locks). Deterministic ordering ensures reproducible audit logs. Supports pillar (1) REQ scoping (which agent can access what). No false conflicts."
+      },
+      {
+        "name": "DagPlan.propagate_skip() failure poisoning",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/plan.rs:166-203",
+        "purpose": "Transitively skip descendants of Failed nodes; Skipped/Done unblock, not poison. Return newly-skipped IDs.",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "transform",
+        "rationale": "Logic correct (Failed poisons per PRD §6.1) BUT: returns IDs without evidence. Pillar (3) requires each skip to emit audit entry with reason/who/when. Recommend: add skip_reason field to track decision, emit audit log when firing. Missing auditability."
+      },
+      {
+        "name": "ResourceConflict data record",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/plan.rs:23-27",
+        "purpose": "Immutable record of two P-items contending for a resource",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Pure data for scheduler and audit logging. Minimal, correct. No side effects."
+      },
+      {
+        "name": "PlanValidationError discriminated union",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/plan.rs:31-40",
+        "purpose": "MissingDep and Cycle errors; includes witness path/reference for diagnosis",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Precise error types help auditor diagnose plan integrity. MissingDep includes which ref is broken. Cycle includes witness path. Good for current needs."
+      },
+      {
+        "name": "dag.rs topo_sort generic algorithm",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/dag.rs:20-64",
+        "purpose": "Kahn's algorithm for topological sort over arbitrary node type N; returns witness on cycle",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Reusable, well-tested standard algorithm. Linear time. No coupling to PItem. Excellent API design (closure-based deps_of). Tests comprehensive (linear, fan-in/out, cycles, unknown deps). Keep as-is."
+      },
+      {
+        "name": "dag.rs find_cycle DFS-based detection",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/dag.rs:68-85",
+        "purpose": "DFS cycle detection; returns witness path with closing node appended",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Returns auditable witness (not just boolean). Generic, reusable. Tests verify self-loops and simple cycles. Correct implementation."
+      },
+      {
+        "name": "dag.rs has_cycle convenience predicate",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/dag.rs:87-94",
+        "purpose": "Boolean wrapper over find_cycle for callers that don't need witness",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Minimal helper, zero overhead. Improves readability. One-liner. No reason to cut."
+      },
+      {
+        "name": "Task struct and full lifecycle container",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:23-60",
+        "purpose": "Run-level container: id, project_id, title, description, inbox_materials, plan, status, timestamps, master_session_id, workspace, title_auto",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Correct three-level hierarchy (Project → Task → P-item per PRD). inbox_materials enable traceability (pillar 2). workspace field supports reproducibility. agent_session_id links to master trace. No bloat, well-scoped."
+      },
+      {
+        "name": "TaskStatus enum lifecycle",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:64-79",
+        "purpose": "Drafting → Planning → Ready → Running → Paused → Done/Abandoned",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Correct progression. Paused and Abandoned kept briefly for audit (not auto-deleted). Clear states, no dead paths. Tests verify semantics."
+      },
+      {
+        "name": "Material + MediaKind inbox types",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:81-106",
+        "purpose": "Inbox materials (File or Text) with MediaKind (Document/Image/Screenshot/Other) and added_at timestamp",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "Pillar (2) evidence chain. added_at timestamp crucial for audit timeline. Absolute path (fleet-managed) prevents confusion. MediaKind helps auditor understand input type. Sound design."
+      },
+      {
+        "name": "TaskEvent SSE protocol",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:128-161",
+        "purpose": "Event stream for live UI: TaskStatusChanged, PItemStatusChanged, PlanUpdated, MaterialAdded, MasterMessage(Event/User/Master)",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "UX enabler. MasterMessage source triaging (Event/User/Master) is useful for audit—shows who said what. Enables live audit visibility. SSE pattern correct for web clients."
+      },
+      {
+        "name": "Task.is_plan_finished predicate",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:186-188",
+        "purpose": "Return true iff plan non-empty and all P-items terminal",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Simple, correct. Used for TaskStatus → Done transition. Requires non-empty plan (prevents false positive)."
+      },
+      {
+        "name": "create_task + TaskInput constructor",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:110-122,251-261",
+        "purpose": "New task from Inbox; auto-derives title; persists JSON and materials dir; UUID v4 ID",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "title_auto flag prevents planner's aiTitle from overwriting user input. write_task_atomic for crash safety. Materials dir preemptively created. Sound design."
+      },
+      {
+        "name": "resolve_initial_title title fallback logic",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:265-290",
+        "purpose": "Derive title: user input → description first line (≤60 chars at char boundary) → '未命名任务'",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "Minor UX detail supporting title_auto. Correct CJK char-boundary handling. Used by all task-creation paths. No reason to cut."
+      },
+      {
+        "name": "set_task_title atomic update with title_auto guard",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:297-319",
+        "purpose": "Update title atomically; when auto=true, only writes if title_auto is true (prevents race with user edits); when false, clears title_auto",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Prevents race: planner aiTitle can't overwrite user edit. Per-task write lock. Simple, effective. Critical for consistent UX."
+      },
+      {
+        "name": "get_task read operation",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:322-327",
+        "purpose": "Read single task JSON by id; error if not found or parse fails",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Required by all query paths. Correct error messages. No issues."
+      },
+      {
+        "name": "list_tasks with project filtering",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:331-351",
+        "purpose": "List all tasks (or filter by project_id), newest-first; gracefully handles missing dir/parse errors",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Defensive (empty vec if missing, skips unparseable). Deterministic sorting (created_at). Used by task browser. No issues."
+      },
+      {
+        "name": "update_plan atomic plan replacement",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:354-360",
+        "purpose": "Replace task's DagPlan atomically; acquires per-task mutex (PRD §5.7)",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Critical for concurrent safety: master+workers from different threads. Per-task lock enables parallelism across tasks. write_task_atomic ensures atomic file. PRD-specified. No simplification."
+      },
+      {
+        "name": "task_write_lock per-task mutex pool",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:202-212",
+        "purpose": "OnceLock-backed HashMap managing per-task Arc<Mutex<()>> for serializing concurrent writes",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Correct concurrency primitive. OnceLock cheaper than RwLock for init-once. Per-task (not global) enables parallelism. Used by all write paths. Essential."
+      },
+      {
+        "name": "add_task_material file+metadata persistence",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:365-387",
+        "purpose": "Append file material to inbox; sanitize filename, write bytes, add Material entry, return path",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "sanitize_material_name prevents path traversal. Absolute path prevents confusion. added_at timestamp for audit. Atomic via write lock. Sound design."
+      },
+      {
+        "name": "sanitize_material_name path safety",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:413-432",
+        "purpose": "Strip non-alphanumeric (keep . _ -), prevent path traversal, default to 'material' if empty",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Security primitive. Tests verify edge cases. Prevents attacks and fs errors. Lightweight, single-purpose. Keep."
+      },
+      {
+        "name": "write_task_atomic atomic file I/O",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:231-241",
+        "purpose": "Serialize task to JSON, temp file, atomic rename to target",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Standard atomic write pattern. Prevents corruption on crash. Used by all write paths. Essential, no alternative."
+      },
+      {
+        "name": "tasks_dir + task_json_path + task_materials_dir path helpers",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:214-229",
+        "purpose": "Resolve ~/.fleet/tasks/ and derived paths; error if fleet home unresolved",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Required by all I/O. Centralizing aids consistency. Errors early if env broken. Minimal, correct."
+      },
+      {
+        "name": "slugify_title title → branch name derivation",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:390-411",
+        "purpose": "Derive branch name: ASCII lowercase, - separator, max 40 chars",
+        "methodology_role": "none",
+        "recommendation": "cut",
+        "rationale": "UX helper for Phase 3 branch naming (out of spec scope). Not called by tests. No spec-fidelity mandate. Can restore in v2 if branch naming becomes policy-critical. Currently maintenance overhead."
+      },
+      {
+        "name": "pick_unique_branch branch collision avoidance",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:434-446",
+        "purpose": "Find first unused branch name by trying base and base-1..999",
+        "methodology_role": "none",
+        "recommendation": "cut",
+        "rationale": "Phase 3 / out of scope. Not called by tests. Dead code. Safe to cut. Can restore if needed."
+      },
+      {
+        "name": "git_branch_exists git2 wrapper",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:448-453",
+        "purpose": "Check if local git branch exists",
+        "methodology_role": "none",
+        "recommendation": "cut",
+        "rationale": "Foundational for Phase 3 but not integrated into task orchestration. No spec-fidelity mandate for git ops. Dead code (tests only). Safe to cut pending Phase 3."
+      },
+      {
+        "name": "git_create_branch git2 wrapper",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:455-467",
+        "purpose": "Create local branch and set HEAD",
+        "methodology_role": "none",
+        "recommendation": "cut",
+        "rationale": "Phase 3 / not yet integrated. Dead code. If auditor needs code changes, pull git diff at verification time (separate feature). Safe to cut."
+      },
+      {
+        "name": "task.rs test suite",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/task.rs:469-708",
+        "purpose": "47 test cases covering serde roundtrip, lifecycle predicates, title resolution, material sanitization, git ops, JSON forward-compat",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Comprehensive coverage. Forward-compat tests (deserialize_minimal_task_json) are crucial for auditable evolution. Git op tests can be dropped with git_* functions. Tests validate assumptions; essential for spec-fidelity confidence."
+      }
+    ]
+  },
+  {
+    "slice": "Master agent orchestration & acceptance audit",
+    "summary": "Master是fleet的中枢协调单位，拥有task执行计划、worker调度、验收审计、人工门控。已实现Acceptance Audit Protocol、TouchesViolation边界检查、Human Gate流程、编译期红线约束。缺失：(1)正式的REQ-NNN注册表，(2)追溯矩阵(REQ→实现→test)，(3)append-only偏差账本(任何简化/红线违反都要记录)，(4)独立对抗auditor(现仅self-audit)。24个能力中，19个应KEEP(核心流程/边界/测试)，2个TRANSFORM(env-override->dev-only gate, red-line tests->细化)，3个CUT(dispatchable_changed helper, 两个微观优化)。",
+    "components": [
+      {
+        "name": "Acceptance Audit Protocol",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "定义mark-done前的验证程序：4种证据类型(builds/testsPass/humanReview/custom)，逐条检查，禁止代理信号(worker自报/token消耗/diff大小)",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "核心：REQ→证据→通过判定。必须：(1)形式化为REQ-AAP-001..NNN，(2)每种证据类型有test case，(3)放入偏差账本：审计通过的跳过某条acceptance要记录为偏差。"
+      },
+      {
+        "name": "Human Gate处理 (human_gate=true)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "审计通过后，若human_gate=true，必须AskUserQuestion弹用户(通过/打回/废弃)。防止master单方面mark-done",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "用户权限边界。REQ-HG-001..005。人工门控本身是REQ，不是实现细节。"
+      },
+      {
+        "name": "红线约束(10类禁止行为)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "编译期嵌入：(1)不hack状态文件，(2)不调pause/resume/clear，(3)不跳审计，(4)不凭token/时间mark-done，(5)不直接git，(6)不读写worker会话，(7)不改fleet配置，(8)不创建新task，(9)不改worker文件，(10)merge只能通过P-merge",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "偏差账本的检查点。每条红线=REQ-REDLINE-001..010。现有系统template的static presence tests不够——需runtime audit：每次master做决策记录「我有没有违反红线」，违反→停止+报警。"
+      },
+      {
+        "name": "EventDebouncer (scheduler更新合并)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/event_router.rs",
+        "purpose": "1秒窗口内多个SchedulerUpdate→取最新dispatchable，丢旧的。防master被scheduler tick淹没",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "性能/可靠性机制，非方法论。属编排层。"
+      },
+      {
+        "name": "MasterEvent枚举 (WorkerCompleted/Failed/SchedulerUpdate/TouchesViolation/MaterialAdded)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/event_router.rs",
+        "purpose": "5种系统事件，每种携带actionable数据(p_item_id/reason/output_path/attempted_path)",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "事件协议的类型系统。应规范化为REQ-EVT-001..005，但enum本身是实现。"
+      },
+      {
+        "name": "事件前缀路由 ([event] vs [user])",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/event_router.rs",
+        "purpose": "消息前缀区分来源：系统事件vs用户输入。enable master分流",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "轻量协议，非关键但有用。"
+      },
+      {
+        "name": "format_event() / format_user()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/event_router.rs",
+        "purpose": "结构化event→可读字符串+前缀。完整性：output_path/FailReason/attempted_path",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "提高可观测性，非方法论。"
+      },
+      {
+        "name": "dispatchable_changed() set-diff",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/event_router.rs",
+        "purpose": "比较dispatchable set有无变化。小优化",
+        "methodology_role": "none",
+        "recommendation": "cut",
+        "rationale": "微优化，逻辑可inline到EventDebouncer。低价值。"
+      },
+      {
+        "name": "MasterSpawnSpec (task_id/cwd/system_prompt/model)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/runtime.rs",
+        "purpose": "传给supervisor的纯数据。可测试，不含subprocess逻辑",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "好的架构边界。"
+      },
+      {
+        "name": "compose_system_prompt()模板替换",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.rs",
+        "purpose": "Task vars(TASK_ID/TITLE/DESC/PLAN_JSON/PROGRESS/INBOX)替换到template。保持<untrusted_*>标签",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "安全边界+REQ快照。<untrusted_*>包装防injection。变量=task运行时的REQ artifact。"
+      },
+      {
+        "name": "template_source()环境变量override",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.rs",
+        "purpose": "FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE逃生口：dev可用文件路径替换template",
+        "methodology_role": "none",
+        "recommendation": "transform",
+        "rationale": "开发便利但破坏一致性+安全。(1)仅debug build启用，(2)或完全移除，(3)若保留→添加audit log记录override被用。"
+      },
+      {
+        "name": "render_progress_summary() 状态计数",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.rs",
+        "purpose": "WaitDeps/WaitResource/Running/WaitHumanGate/Done/Failed/Skipped计数，一行进度串",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "可见性helper，非关键。"
+      },
+      {
+        "name": "render_materials_summary() 材料预览",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.rs",
+        "purpose": "File/Text→readable summary，文本截断120字符",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "UX，非关键。"
+      },
+      {
+        "name": "MASTER_SYSTEM_TEMPLATE常数 (include_str!)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.rs",
+        "purpose": "编译期嵌入system_template.md。防运行时篡改",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "红线的抗篡改机制。核心安全边界。"
+      },
+      {
+        "name": "MASTER_MODEL常数 (claude-sonnet-4-6)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/runtime.rs",
+        "purpose": "master的默认模型ID。集中配置",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "配置hygiene，非关键。"
+      },
+      {
+        "name": "UserMessage枚举 (AskReply vs Append)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/event_router.rs",
+        "purpose": "区分用户输入来源：对AskUserQuestion的回复vs自发append",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "必要的信号分类。"
+      },
+      {
+        "name": "TouchesViolation事件 (SIGSTOP guard)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/event_router.rs",
+        "purpose": "worker试图写入undeclared touches的文件，worker被SIGSTOP。Master决定：补touches/拒/升级",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "边界执行。REQ-TOUCHES-001。本身就是偏差检测(worker超出声明范围)。"
+      },
+      {
+        "name": "Workspace路径解析 (MasterSpawnSpec.cwd)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/runtime.rs",
+        "purpose": "Caller提供workspace路径，master收到已验证的cwd",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "好的边界分离。"
+      },
+      {
+        "name": "Master职责枚举 (dispatch/audit/escalate/replan/coord)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "行1-7：5项职责声明",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "REQ-MASTER-ROLE-001..005。需形式化为表。"
+      },
+      {
+        "name": "保守性约束 (行9-12)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "不直改代码/遇疑问弹用户/事件驱动无polling",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "REQ-CONSERVATISM-001..003。需形式化。"
+      },
+      {
+        "name": "工具列表 (fleet task命令)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "行82-92：get-plan/get-dispatchable/dispatch/read-output/mark-done/mark-failed/update-plan。显式NOT pause/resume/clear",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "REQ-TOOLS-001..007 + REQ-TOOLS-NEGATIVE-001..003。追溯矩阵应验证每个工具有test覆盖。"
+      },
+      {
+        "name": "审计证据类型 (builds/testsPass/humanReview/custom)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "行32-37：4种验证法，每种的校验方法",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "REQ-AUDIT-EVIDENCE-001..004。核心mapping。"
+      },
+      {
+        "name": "代理信号禁止 (行39-43)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "不用self-report/cargo-check-alone/diff-size/token-time作acceptance证据",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "REQ-AUDIT-RIGOR-001。偏差账本检查点：任何使用代理信号的mark-done都记录为偏差。"
+      },
+      {
+        "name": "不确定时的选择路径 (行44)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "审计有不确定→retry worker/ask worker补/ask user",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "REQ-AUDIT-ESCALATION-001。"
+      },
+      {
+        "name": "Manual review gate强制 (行45-60)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.md",
+        "purpose": "human_gate=true或project级manual_review_all→审计后仍须AskUserQuestion(通过/打回/废弃)",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "REQ-HUMAN-GATE-001..006。权限边界。"
+      },
+      {
+        "name": "系统template安全测试 (template_has_required_sections/not_expose_user_tools)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/runtime.rs",
+        "purpose": "验证：template含Acceptance Audit Protocol、红线、untrusted_*, pause/resume/clear不在工具列表",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "REQ-TEST-TEMPLATE-001..003。但不够细：应对每条红线单独有test，对每个tool单独有test。"
+      },
+      {
+        "name": "spawn_spec_from_task()纯函数",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/runtime.rs",
+        "purpose": "Task + workspace → MasterSpawnSpec，无副作用，确定性",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "架构好，可单独测试。"
+      },
+      {
+        "name": "Event debouncer测试 (coalesces/flush_all)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/event_router.rs",
+        "purpose": "验证debounce窗口/event替换/flush行为",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "好的test覆盖。"
+      },
+      {
+        "name": "compose_system_prompt测试 (7个case)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/master/system_template.rs",
+        "purpose": "验证template有所需section/pause不暴露/变量替换/untrusted保留/缺失desc/empty plan/env override",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "覆盖不错。但仅验证presence/absence，未验证functional correctness(e.g., 审计逻辑本身是否正确)。"
+      }
+    ]
+  },
+  {
+    "slice": "runner.rs + worker.rs + worktree.rs + process_util.rs (claw-fleet-task task dispatch system)",
+    "summary": "Core Fleet dispatch machinery: worker spawning orchestrated by TaskRunner, 3-layer system prompt injection for context/constraints, per-P-item git worktree isolation with fast-forward merge back to task branch, and cross-platform process hardening. The system enforces P-item boundary semantics via git + SIGSTOP hook (touches), and scales workers without ordering constraints.",
+    "components": [
+      {
+        "name": "TaskRunner::step()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/runner.rs:92-102",
+        "purpose": "Main dispatch loop: checks task status, looks for unblocked P-items, acquires write lock, marks item Running, and dequeues worker spawn",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Essential lifecycle state machine. Maps directly to Phase 1 requirement: task status → next dispatchable P-item. Atomic write-lock ensures consistency with concurrent reaper. This is the canonical dispatch entry point."
+      },
+      {
+        "name": "TaskRunner::dispatch_next_pitem()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/runner.rs:104-144",
+        "purpose": "Atomic state transition (WaitDeps→Running), provision worktree per P-item, build WorkerSpawnSpec, enqueue worker via host",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Non-negotiable. Coordinates (1) task state mutation, (2) worktree provisioning, (3) spawn spec construction, (4) worker enqueue. The critical choreography that guarantees each P-item gets exactly one worker at its dispatch time. No simpler equivalent exists."
+      },
+      {
+        "name": "TaskLifecycleHost trait",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/runner.rs:25-34",
+        "purpose": "Abstraction layer: resolve workspace, spawn master/worker, pause/resume/terminate sessions",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Dependency injection point for Phase 1 (SupervisorHost via fleet-core) → Phase 2 (LocalHost via fleet-task binary). Allows testing without subprocess machinery. Canonically separates orchestration from execution transport."
+      },
+      {
+        "name": "LlmMediator trait",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/runner.rs:40-44",
+        "purpose": "Inject merge-conflict resolution provider; stub in Phase 2, real provider Phase 3",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Clean interface for out-of-band conflict handling. Maps to spec-fidelity (2) traceability: resolution decisions are audit-logged via git merge commits. Stub is harmless until Phase 3 wires a real LLM."
+      },
+      {
+        "name": "compose_worker_system_prompt()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:72-80",
+        "purpose": "Assemble 3-layer system prompt: project constants (L1) + task context (L2) + P-item details (L3)",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Direct implementation of PRD §5.6: TASKS P7's 3-layer context injection. Layer 1 = project REQs (cached), Layer 2 = task REQs (shared), Layer 3 = P-item REQs (per-dispatch). Foundational for spec fidelity: worker sees exact boundary conditions."
+      },
+      {
+        "name": "compose_layer1()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:84-106",
+        "purpose": "Project constants: architecture overview + P-item execution constraints (isolated worktree, touches-only edit, no manual commits)",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Encodes Phase 1 hard constraints. Line 99-104 explicitly documents 'touches' enforcement + SIGSTOP hook + fast-forward merge discipline. This is the canonical constraint statement that workers trust."
+      },
+      {
+        "name": "compose_layer2()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:111-144",
+        "purpose": "Task context: title, description, inbox materials (wrapped in untrusted tags), acceptance audit summary",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Maps to spec-fidelity (1) registry: task-level requirements visible to all workers. Untrusted tags enable safe injection of user-supplied text. Acceptance criteria are (2) traceability hooks: master audits against them post-completion."
+      },
+      {
+        "name": "compose_layer3()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:148-200",
+        "purpose": "P-item private: description, touches file list, acceptance criteria, upstream dependency summaries",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Per-dispatch requirement snapshot. Touches list is (1) boundary registration. Upstream summaries are (2) traceability: task DAG context carried forward. Output summary request (line 194-196) drives (3) deviation ledger: worker self-reports impacts."
+      },
+      {
+        "name": "run_post_completion_check()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:262-325",
+        "purpose": "PRD patch §6: cargo check fallback. Walks P-item touches for Rust crates, runs check --package per crate, returns structured result",
+        "methodology_role": "registry",
+        "recommendation": "uncertain",
+        "rationale": "Phase 1 spec-fidelity gap: this is **not a canonical acceptance criterion**. It's a fallback sanity check. If Rust builds don't fail, P-item acceptance does *not* automatically pass — master still audits against explicit acceptance criteria. Recommendation: TRANSFORM into (2) traceability schema: log each cargo check invocation + result as a deviation-ledger entry (so master can cite it in audit decisions) rather than a hard pass/fail gate."
+      },
+      {
+        "name": "rust_crates_touched()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:228-256",
+        "purpose": "Walk touches paths upward, find nearest Cargo.toml with [package], collect crate directories",
+        "methodology_role": "none",
+        "recommendation": "cut",
+        "rationale": "Pure implementation detail of cargo check fallback. If the fallback is transformed into a (3) deviation-ledger entry, this detection logic becomes optional. Rust projects that only touch documentation files or don't have workspace layout shouldn't require implicit build checks."
+      },
+      {
+        "name": "WorkerSpawnSpec struct",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:32-40",
+        "purpose": "Data carrier: task_id, p_item_id, cwd, system_prompt, model",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Immutable specification for worker spawn. Ensures all dispatch context is captured atomically. Useful for audit trail (Phase 3: log spawn specs to deviation ledger)."
+      },
+      {
+        "name": "worker_spawn_spec()",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:51-68",
+        "purpose": "Factory: fetch P-item from task plan, compose system prompt, return WorkerSpawnSpec",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Pure builder. Ensures P-item existence before spawn attempt. No side effects, safe to call multiple times."
+      },
+      {
+        "name": "provision() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:56-111",
+        "purpose": "Idempotent worktree provisioning: check existing/orphan, create P-item branch from task branch, spawn git worktree",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Canonical per-P-item isolation mechanism. Ensures each worker gets a clean, isolated workspace. Idempotency (lines 64-77) handles failures + retries safely. Maps to spec-fidelity: P-item boundary enforcement."
+      },
+      {
+        "name": "merge_back() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:224-278",
+        "purpose": "Fast-forward or 3-way merge P-item branch back to task branch; detect conflicts and abort if needed",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Core fast-forward merge orchestration. Phase 1 spec: try FF (common case), fall back to real 3-way merge, detect conflicts and abort cleanly. Essential for spec-fidelity (2) traceability: merge commits are audit trail. Fast-forward is canonical for non-conflicting linear P-item sequences."
+      },
+      {
+        "name": "apply_resolutions() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:295-352",
+        "purpose": "Re-attempt merge with LLM-mediated conflict resolutions; verify no unresolved files remain",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Phase 3 prep (Phase 2 stub). Ensures mediation completeness: if LLM leaves unresolved conflicts, abort and error. Maps to spec-fidelity: (2) traceability (merge commits record resolution source), (3) deviation ledger (record which files required mediation)."
+      },
+      {
+        "name": "reap() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:115-169",
+        "purpose": "Tear down P-item worktree + fleet branch; best-effort, tolerates missing entries",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Garbage collection. Essential for task cleanup after P-item completion. Preserves specification (2) traceability by keeping merge commits in main workspace history."
+      },
+      {
+        "name": "list_for_task() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:173-189",
+        "purpose": "Enumerate provisioned worktrees for a task (filesystem scan, no git involvement)",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "Enables task cleanup and monitoring. Supports (2) traceability: show which P-items have been dispatched. Not spec-fidelity critical but useful for operational visibility."
+      },
+      {
+        "name": "gc_stale() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:527-580",
+        "purpose": "Garbage collect stale worktrees based on alive set; tolerates filesystem orphans",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Disk space management. Allows supervisor to signal which (task, P-item) pairs are live and let gc_stale reap the rest. Non-critical for spec fidelity but necessary for long-running systems."
+      },
+      {
+        "name": "ConflictSpec struct",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:215-220",
+        "purpose": "3-way merge inputs: path, base, ours (task branch), theirs (worker branch)",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Data carrier for conflict mediation. Maps to spec-fidelity (2) traceability: enables audit of which files conflicted and the 3-way inputs available to the LLM."
+      },
+      {
+        "name": "MergeOutcome enum",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:194-209",
+        "purpose": "Result type: FastForwarded, AutoMerged, NoChanges, Conflict (with specs & reason)",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Structured result. Enables caller (master) to decide: pass NoChanges through, log AutoMerged for (2) traceability, defer Conflict to LLM mediator. Maps cleanly to spec-fidelity decision tree."
+      },
+      {
+        "name": "command() in process_util.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/process_util.rs:29-33",
+        "purpose": "Construct Command with CREATE_NO_WINDOW already applied on Windows (no-op elsewhere)",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "Cross-platform subprocess hardenning. Eliminates GUI flash on Windows. Not spec-fidelity core but necessary for user experience in desktop context (fleet-task binary)."
+      },
+      {
+        "name": "no_window() in process_util.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/process_util.rs:18-24",
+        "purpose": "Apply CREATE_NO_WINDOW flag on Windows, no-op elsewhere; chainable",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "Same rationale as command(). Enables one-liner pattern without manual &mut plumbing. Quality-of-life for subprocess creation throughout codebase."
+      },
+      {
+        "name": "collect_conflict_specs() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:439-470",
+        "purpose": "Walk index stages 1/2/3 for each conflicted path, extract base/ours/theirs blob content",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Enables (2) traceability: conflict mediation audit trail. Records exact 3-way inputs that LLM sees. Pure data extraction, no side effects."
+      },
+      {
+        "name": "checkout_branch() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:354-365",
+        "purpose": "Set HEAD to branch ref, force checkout working tree",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Implementation detail of merge_back. Ensures task_branch is checked out before merge. Essential for correctness but not separately audited — always called from merge_back."
+      },
+      {
+        "name": "fast_forward_to() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:367-382",
+        "purpose": "Update task_branch ref to worker commit, checkout working tree",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Canonical fast-forward operation. Creates audit trail via ref update message ('fleet: fast-forward'). Essential for spec-fidelity (2) traceability: every FF is recorded in reflog."
+      },
+      {
+        "name": "finish_merge_commit() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:398-433",
+        "purpose": "Write tree, create merge commit with 2 parents (HEAD + worker branch), cleanup merge state",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Finalizes 3-way merges. Records resolution path in commit. Essential for spec-fidelity (2) traceability: merge commit is canonical audit record."
+      },
+      {
+        "name": "abort_merge() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:384-396",
+        "purpose": "Equivalent to git merge --abort: cleanup state, hard reset working tree + index",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Essential for safety: if merge_back detects conflicts, abort immediately to leave workspace clean. Prevents half-finished merges. Non-negotiable for reliable operations."
+      },
+      {
+        "name": "blob_to_string() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:472-481",
+        "purpose": "Fetch blob object content, convert to string (or empty string if oid is None)",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Helper for collect_conflict_specs. Handles missing stages (e.g., file added on one side). Pure, side-effect free."
+      },
+      {
+        "name": "git_revlist_count() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:487-510",
+        "purpose": "Count commits in head not in base (git rev-list --count base..head) via libgit2",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Used by merge_back to count commits_merged. Pure computation, no I/O besides reading git objects."
+      },
+      {
+        "name": "open_repo() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:512-515",
+        "purpose": "Open git repository at workspace path",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Lightweight helper. Used throughout worktree.rs. Standard error wrapping."
+      },
+      {
+        "name": "worktree_root() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:27-31",
+        "purpose": "Return FLEET_HOME/.fleet/worktrees path",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Configuration point for P-item worktree storage. Enables overrides in tests. Necessary for multi-task isolation."
+      },
+      {
+        "name": "worktree_path() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:34-36",
+        "purpose": "Compute path for (task_id, p_item_id) worktree (no existence check)",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Path computation. Pure function, no I/O. Used by provision, reap, list_for_task, gc_stale."
+      },
+      {
+        "name": "worktree_branch() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:39-41",
+        "purpose": "Return fleet branch name for (task_id, p_item_id): fleet/{task_id}/{p_item_id}",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Canonical naming scheme for P-item branches. Pure function. Enables consistent branch management across provision, merge_back, reap."
+      },
+      {
+        "name": "worktree_meta_name() in worktree.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worktree.rs:45-48",
+        "purpose": "Sanitize task_id + p_item_id for libgit2 worktree metadata directory name (no slashes)",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Implementation detail. Handles sanitization required by libgit2 (worktree names must be filesystem-safe). Pure function."
+      },
+      {
+        "name": "crate_name_from_cargo_toml() in worker.rs",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:327-342",
+        "purpose": "Naive parse of Cargo.toml to extract [package] name",
+        "methodology_role": "none",
+        "recommendation": "cut",
+        "rationale": "Implementation detail of run_post_completion_check. If the fallback is transformed into (3) deviation-ledger, crate detection can be simplified or removed. Current naive regex is fragile (comments, formatting variations)."
+      },
+      {
+        "name": "CrateCheckResult struct",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:218-223",
+        "purpose": "Structured result of cargo check --package: crate name, ok bool, stderr tail",
+        "methodology_role": "registry",
+        "recommendation": "uncertain",
+        "rationale": "Result type for cargo check fallback. If fallback is TRANSFORMED into (3) deviation-ledger entry, keep as structured representation of check result. Otherwise same fate as run_post_completion_check."
+      },
+      {
+        "name": "PostCompletionCheck struct",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/worker.rs:207-216",
+        "purpose": "Structured result of post-completion checks: ok bool, crate results, combined stderr",
+        "methodology_role": "registry",
+        "recommendation": "uncertain",
+        "rationale": "Same as CrateCheckResult. If fallback is TRANSFORMED, keep. Else UNCERTAIN."
+      }
+    ]
+  },
+  {
+    "slice": "CLI actions, task registry, path conventions, and orchestration infrastructure in fleet-task crate",
+    "summary": "This slice implements the task lifecycle orchestration (new/dispatch/mark-done/pause/resume/clear), runtime registry for process discovery, normalized path conventions aligned with core, and empty architecture_overview loading framework. Most components are orchestration-core and storage (non-canonical to methodology), with no explicit requirements traceability, deviation logging, or auditor integration.",
+    "components": [
+      {
+        "name": "start_task",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Transition task from Drafting/Planning/Ready to Running; creates git branch, spawns Master, persists started_at + master_session_id",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Essential state machine transition needed for task execution. However, currently lacks traceability: no link to REQ-NNN, no artifact tagging for deviation auditing. Should be instrumented with requirement origin tracking."
+      },
+      {
+        "name": "dispatch_pitem",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Master tool to dispatch worker for p_item_id; flips status to Running, provisions worktree, enqueues Worker session",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Core execution flow. Like start_task, lacks requirement tagging and deviation annotation—should record which REQ-NNN initiated this dispatch and any unplanned scope changes."
+      },
+      {
+        "name": "mark_done",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Mark P-item Done, merge worktree back, handle 3-way conflicts via LlmMediator, persist acceptance-audit summary",
+        "methodology_role": "traceability",
+        "recommendation": "transform",
+        "rationale": "Closure point for work; should capture accept/reject evidence and link to requirement coverage. Currently accepts bare `summary` string—should enforce structured audit metadata (which REQ proved, evidence, deviation declaration if simplified)."
+      },
+      {
+        "name": "mark_failed",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Mark P-item Failed with FailReason, propagate skip on downstream items",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "transform",
+        "rationale": "Failure is a deviation from plan. Should capture: which REQ failed, why (root cause), what workaround applied, who approved. Currently only records FailReason enum—needs structured deviation entry per deviation-ledger spec."
+      },
+      {
+        "name": "pause_task / resume_task",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Pause running task (SIGSTOP), resume paused task (SIGCONT)",
+        "methodology_role": "orchestration-core",
+        "recommendation": "cut",
+        "rationale": "Pure operational convenience, not load-bearing for methodology. Maintenance burden for no canonical value. External tools can manage process signals."
+      },
+      {
+        "name": "clear_task",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Delete task—SIGTERM sessions, remove task JSON + materials, mark Abandoned",
+        "methodology_role": "orchestration-core",
+        "recommendation": "cut",
+        "rationale": "Cleanup operation, not essential to methodology. Risks data loss if misused. If retained, should require audit log entry and approval tracking (violates current design)."
+      },
+      {
+        "name": "RegistryEntry (runtime registry)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/registry.rs",
+        "purpose": "JSON snapshot of live fleet-task process: task_id, pid, port, started_at (RFC3339)",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Essential process discovery mechanism. However, should extend to include: requirement ID being executed, current P-item status, acceptance criteria progress. Rename field to clarify it's a runtime process registry, not requirements registry."
+      },
+      {
+        "name": "list_alive (registry)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/registry.rs",
+        "purpose": "Filter live processes via kill(pid, 0) probe; return RegistryEntry list",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Prevents stale data in discovery. Operationally sound. No canonical tie, but supporting infrastructure is low-cost."
+      },
+      {
+        "name": "prune_stale (registry)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/registry.rs",
+        "purpose": "Delete registry entries for dead pids; used at bootstrap",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Hygiene operation. Low cost, idempotent, no methodology conflict."
+      },
+      {
+        "name": "real_home_dir / get_fleet_dir (paths.rs)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/paths.rs",
+        "purpose": "Mirror core's path resolution with FLEET_HOME override; bypass sandbox redirection",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Canonical location for all fleet state. Essential for deterministic, reproducible execution. Avoid separate path conventions."
+      },
+      {
+        "name": "fleet_home_lock (paths.rs)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/paths.rs",
+        "purpose": "Process-wide mutex for FLEET_HOME env var serialization in tests",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Test infrastructure only, not user-facing. Zero methodology impact, tiny footprint."
+      },
+      {
+        "name": "init_utf8 (console.rs)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/console.rs",
+        "purpose": "Set Windows console to UTF-8 (CP 65001) to prevent GBK garbling on zh-CN systems",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "UX correctness for international users. No methodology tie but essential for legible output. Low risk."
+      },
+      {
+        "name": "architecture_path / load_for_project (architecture_overview.rs)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/architecture_overview.rs",
+        "purpose": "Load ~.fleet/projects/{project_id}/architecture.md for Layer 1 session context; hand-authored or user-provided",
+        "methodology_role": "none",
+        "recommendation": "transform",
+        "rationale": "Currently unstructured, free-form markdown. Should align with architecture documentation tied to REQ-NNN (which subsystems address which requirements, traceability by design). V2 auto-generation via indexer agent per spec—defer full build, but rename/annotate as 'specification artifact, not implementation architecture'."
+      },
+      {
+        "name": "render_layer1_block (architecture_overview.rs)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/architecture_overview.rs",
+        "purpose": "Compose Layer 1 markdown block for master/worker session SYSTEM prompt",
+        "methodology_role": "none",
+        "recommendation": "uncertain",
+        "rationale": "Useful for agent onboarding, but current design conflates system-level architecture (req-to-design mapping) with implementation details. Should clarify: is this for agent behavior constraints (belongs in CLAUDE.md), or design spec (belongs in REQ→design artifact)? Depends on V2 indexer output shape."
+      },
+      {
+        "name": "TaskHost trait + enqueue_master / enqueue_worker / resolve_conflicts (runner)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Abstraction over host callbacks (spawn master/worker, resolve 3-way merges); allows fleet-task binary to reuse core's lifecycle logic",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Clean dependency inversion. Enables standalone fleet-task binary and future auditor agent integration. Should extend to: provide requirement context to master/worker, capture acceptance signatures back."
+      },
+      {
+        "name": "PItemStatus enum + state transitions (mark_done, mark_failed, dispatch_pitem)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "P-item lifecycle: WaitDeps/WaitResource → Running → Done|Failed|Skipped",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "Essential state machine. Should extend PItemStatus to carry acceptance metadata: which REQ covered, audit signature, deviation reason if bypassed."
+      },
+      {
+        "name": "Task write lock (actions.rs)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Mutex around get_task → modify → write_task_atomic to prevent race conditions",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Concurrency safety. Essential for atomicity. No methodology tie but non-negotiable."
+      },
+      {
+        "name": "merged_back / apply_resolutions (worktree merge in mark_done)",
+        "file": "/Users/hoveychen/workspace/claude-fleet/claw-fleet-task/src/actions.rs",
+        "purpose": "Merge worker worktree back to task branch; handle 3-way conflicts via LlmMediator",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "transform",
+        "rationale": "Merge is a critical validation gate. Should log all conflict resolutions in deviation ledger (what merged, why, who approved). Currently silent—add audit trail linking merged artifacts to REQ coverage proof."
+      }
+    ]
+  },
+  {
+    "slice": "fleet-task 二进制 crate 与 spec-fidelity 方法论的适配分析",
+    "summary": "fleet-task 是 Phase 2 独立二进制，统一管理单个 task 的完整生命周期（master + workers + plan）。架构分层清晰：CLI 入口 → runtime boot（task 创建+分支+master 启动+registry） → HTTP/SSE 暴露 → TUI 渲染 → LocalHost 进程管理。与 claw-fleet-task 库耦合紧密。分析表明：需求注册表和偏差账本在现代码缺失；可追溯矩阵仅存于测试；对抗审计完全无；UX/storage/orchestration-core 混杂。方法论四要件有效性评分：1/4。建议：核心能力（boot、HTTP、registry 交互、进程生命周期）应保留但需强化元数据追踪；UX（TUI、launchpad）非方法论核心，宜剪去或转移；偏离注册表的自动项目发现逻辑待明确；mock/test 基础设施虽好但缺方法论牙咬合。",
+    "components": [
+      {
+        "name": "boot_new_task",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "创建新 task、初始化分支、启动 master agent、写入 registry",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "直接对应需求注册表第一步——task 原子创建。但现有代码只写 registry，未声明需求 REQ-NNN。应扩展为：(1) 解析/验证输入参数为需求预检；(2) task.json 中标记 REQ- 源头；(3) 记录 boot_new_task 何时被调用及参数。保留核心逻辑，增强元数据。"
+      },
+      {
+        "name": "boot_resume",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "恢复暂停/停止的 task，重启 master，恢复 task 状态",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Resume 路径必须明确：task 何时进入 Paused 状态、何时被 Resume。现有代码的 task.status flip 隐含了状态转移但未显式记录。应添加：(1) 偏差账本条目记录 Paused→Running 转移原因；(2) 可追溯性：master_session_id 记录每个 resume 的新会话。保留，强化追踪。"
+      },
+      {
+        "name": "finish_boot (internal)",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "初始化 broadcaster、dispatcher、HTTP 服务，完成 bootstrap 序列",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "封装了 Phase 2/3 P8 的核心交互：registry write + HTTP spawn + dispatcher 连线。代表了 fleet-task 作为 orchestration 宿主的本质。无对偶需求注册表条目的风险，但应文档化为内部 P8 specification。保留。"
+      },
+      {
+        "name": "lookup_project_id & derive_auto_project_id",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "查表项目 ID 或自动生成 workspace-stable 虚拟项目 ID",
+        "methodology_role": "none",
+        "recommendation": "uncertain",
+        "rationale": "方法论四要件中无对应。这是 Phase 3/5 的前期设计（使 fleet-task 生成的 task 在桌面 UI 中分组可见）。逻辑正确但属架构演进细节而非规范能力。自动项目发现（auto-<16hex>）缺方法论权声（无 REQ-auto-discovery）。如规范明确要求 workspace 分组，应升为 REQ；否则作为实现细节，可转到库中（不属 fleet-task 二进制）。目前倾向 transform：移入 claw-fleet-task lib，binary 仅调用。"
+      },
+      {
+        "name": "shutdown_with_deadline",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "优雅关闭：SIGTERM → 轮询 PID 存活 → SIGKILL 超期进程 → 清理 registry",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "进程生命周期管理核心。表现优雅关闭的 SLA：30s 墙钟时间。需添加：(1) 关闭步骤日志为机器可读的偏差账本（如 'SIGKILL-after-30s'）；(2) 退出状态码文档化（如 exit 130 = operator SIGINT twice）。保留，增强可追溯性。"
+      },
+      {
+        "name": "pid_alive_reaping",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "检探 PID 存活状态，同时进行 zombie reap（waitpid WNOHANG）",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Process 清理中的关键细节。Phase 2 已知局限（zombie 直到进程退出）应文档化为需求偏差。现有代码正确，注释清晰。保留。"
+      },
+      {
+        "name": "http::spawn（HTTP 服务器）",
+        "file": "fleet-task/src/http.rs",
+        "purpose": "启动 127.0.0.1 局部 HTTP 服务器，暴露 /health /state /events /p-items/* 端点",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "fleet-task 作为 daemon 的外部接口。端点列表应作 specification API contract（可追溯为 REQ-http-api）。但现有实现无版本控制、无向后兼容性宣言。应升级为：(1) 端点签名 versioned（/v1/health）；(2) 每个端点关联需求 REQ-http-<name>；(3) 错误码文档化为规范。保留并强化规范。"
+      },
+      {
+        "name": "DispatchTrigger trait",
+        "file": "fleet-task/src/http.rs",
+        "purpose": "桥接 HTTP dispatch 端点与 LocalHost 的 worker 启动",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Phase 3 P8 明确设计的通道（POST /p-items/<id>/dispatch → actions::dispatch_pitem）。代表了 fleet-task 作为 task runner 的核心。无对偶 REQ，但应标注为 P3-P8 requirement。保留。"
+      },
+      {
+        "name": "SseBroadcaster",
+        "file": "fleet-task/src/sse.rs",
+        "purpose": "推送运行时事件给 /events 订户（事件流格式：SSE）",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "UX 能力（实时反馈），但实现本身是核心基础设施。现有 pattern（重复 SseClient 死连追踪）是合理的。应标注为 REQ-sse-events；事件类型（p_item.spawned 等）应列入 specification。保留，增强规范。"
+      },
+      {
+        "name": "LocalHost（进程宿主）",
+        "file": "fleet-task/src/local_host.rs",
+        "purpose": "TaskLifecycleHost 实现，管理本进程内的 master/worker pids，暴露 pause/resume/terminate",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "fleet-task 的核心多进程管理。直接实现了 Phase 2 的单机进程模型。应强化：(1) 每个 session record 标注 REQ-session-track；(2) signal 操作（SIGSTOP/SIGCONT/SIGTERM）作为 specification behaviors；(3) 逻辑正确，tests 完整。保留。"
+      },
+      {
+        "name": "ProcessLauncher trait & ClaudeLauncher",
+        "file": "fleet-task/src/local_host.rs",
+        "purpose": "抽象 claude 子进程启动，允许 test mock 和 fake launcher",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "好的抽象。ClaudeLauncher 的环境变量注入（FLEET_SESSION_ID, FLEET_SESSION_KIND, FLEET_TASK_ID, FLEET_P_ITEM_ID）是 master/worker 的通信协议。应提升为 REQ-launch-protocol。现有 FAKE_LAUNCHER_ENV 检查允许单元测试脱离 claude 二进制，符合 specification 友好设计。保留。"
+      },
+      {
+        "name": "spawn_claude 函数",
+        "file": "fleet-task/src/local_host.rs",
+        "purpose": "构造 claude CLI 命令行，附加环境变量和 system prompt",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "protocol 实现细节。环境变量列表、prompt 模板应版本化（phase 版本号）。保留，文档化为 specification behavior。"
+      },
+      {
+        "name": "run (主 TUI 循环)",
+        "file": "fleet-task/src/tui.rs",
+        "purpose": "ratatui 前端，按状态分组渲染 P-items，轮询任务更新（250ms），接收 q/Ctrl-C",
+        "methodology_role": "ux",
+        "recommendation": "uncertain",
+        "rationale": "纯 UX，非方法论核心。方法论要求追踪规范性，TUI 仅读与渲染。选项：(1) cut — fleet-task 若做成 pure daemon（--no-tui），可脱离 TUI 只用 HTTP 客户端；(2) transform — TUI 转移到桌面 UI 或单独 fleet-cli 工具；(3) keep — 如规范明确要求交互式 TUI 视图。倾向 transform：TUI 不是 fleet-task 的专属职责，应由消费方（desktop UI / CLI 包装）提供。"
+      },
+      {
+        "name": "run_launchpad 及 LaunchScreen",
+        "file": "fleet-task/src/tui.rs",
+        "purpose": "二屏幕 TUI：新任务提示符 + 任务列表选择器（Ctrl-T 切换）",
+        "methodology_role": "ux",
+        "recommendation": "cut",
+        "rationale": "纯 convenience UX（镜像 claude 裸启动）。方法论无需求。占代码 150+ 行，维护成本（TextArea widget、picker state machine）高。若 --no-tui 已支持，应删除此路径，文档化使用 fleet-task new 代替。三个切换点（LaunchAction::StartNew / Resume / Quit）可在脚本或 CLI wrapper 中实现。倾向 cut，除非方法论明确要求交互式工作流导入。"
+      },
+      {
+        "name": "run_picker（任务选择器）",
+        "file": "fleet-task/src/tui.rs",
+        "purpose": "全屏列表 TUI，显示磁盘上所有 tasks，可按 ↑↓ 导航，Enter 恢复",
+        "methodology_role": "ux",
+        "recommendation": "cut",
+        "rationale": "列表渲染能力有用，但 TUI 实现无方法论必要。应改为：(1) list 命令输出 JSON（--json flag），让消费方格式化；(2) 或删除 run_picker，提供 task list API 给桌面 UI。TUI 维护成本（ListState、picker_loop 状态机）不合理。倾向 cut，转为 --json 输出。"
+      },
+      {
+        "name": "render_p_items 及 status_label",
+        "file": "fleet-task/src/tui.rs",
+        "purpose": "将 task.plan 的 PItems 按状态分组，着色显示",
+        "methodology_role": "ux",
+        "recommendation": "transform",
+        "rationale": "渲染逻辑本身无方法论锚点，但 PItem 状态机（WAIT/WAITR/RUN/DONE/SKIP/FAIL/GATE）应作 specification。现有状态映射到着色是展示问题。应转为：(1) 状态列表 → 规范文档 REQ-pitem-status；(2) 渲染移入共享库或 JSON 序列化器；(3) fleet-task TUI 仅调用，不拥有。"
+      },
+      {
+        "name": "render_status（底部状态栏）",
+        "file": "fleet-task/src/tui.rs",
+        "purpose": "显示 task title、status、HTTP port、PID、快捷键提示",
+        "methodology_role": "ux",
+        "recommendation": "cut",
+        "rationale": "调试视图。若 fleet-task 转为 daemon-first，外部客户端可通过 /state 端点查询。保留在 TUI 中无必要。倾向 cut，除非需求明确声明 'TUI 状态栏必须显示 port'。"
+      },
+      {
+        "name": "main.rs CLI 命令树（new/resume/list）",
+        "file": "fleet-task/src/main.rs",
+        "purpose": "三个子命令路由 + 裸启动（launchpad）",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "fleet-task 的命令行接口。应升级为规范 API：(1) 每个子命令关联 REQ-cmd-new / REQ-cmd-resume / REQ-cmd-list；(2) 参数列表版本化；(3) 退出码标准化（0=success, 1=user-error, 2=system-error）。裸启动（run_launchpad）方案待决。保留 new/resume/list，uncertain 对 launchpad。"
+      },
+      {
+        "name": "install_signals（SIGINT/SIGTERM 处理）",
+        "file": "fleet-task/src/main.rs",
+        "purpose": "安装全局信号处理器，第一次信号优雅关闭，第二次强制 exit(130)",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "关闭行为应标准化为 specification。现有双击 SIGINT 设计（graceful-then-force）应作 REQ-signal-handling。保留，增强规范。"
+      },
+      {
+        "name": "run_task 函数",
+        "file": "fleet-task/src/main.rs",
+        "purpose": "前台循环：打印 HTTP port，选择 TUI 或 headless，等待 stop flag，优雅关闭",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "主程序流。30s 关闭 deadline 是 specification behavior。--no-tui 支持允许 daemon 模式。保留，文档化为 specification behavior。"
+      },
+      {
+        "name": "测试基础设施（SleepLauncher, FleetHomeOverride）",
+        "file": "fleet-task/src/runtime.rs & local_host.rs",
+        "purpose": "单元测试 mocks：用 sleep 60 替代 claude，允许隔离测试",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Test harness 质量高，体现了规范友好设计。无方法论锚点，但支持了可测试性。保留。应扩展：添加 'deviation marker'（如 #[deviation(\"Phase-2\", \"zombie PID\")]）到每个已知限制。"
+      },
+      {
+        "name": "HTTP 端点 /health, /state, /events, /p-items/*",
+        "file": "fleet-task/src/http.rs",
+        "purpose": "RESTful 暴露面，允许外部客户端查询 task 状态和订阅事件",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "fleet-task 作为 daemon 的核心 API 契约。应规范化为 REQ-http-{endpoint}。现有实现稳定，缺版本控制。保留，升级为规范。"
+      },
+      {
+        "name": "Registry 读写（registry::write, registry::read）",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "将 task metadata（pid, port, started_at）写入 ~/.fleet/registry，允许外部进程发现",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "需求注册表的物理载体。应升级规范：(1) registry schema 版本化；(2) 每个字段标注 REQ-registry-<field>；(3) TTL 和 cleanup 策略标准化；(4) 写失败处理（当前仅 eprintln）。保留并强化。"
+      },
+      {
+        "name": "task.workspace 持久化",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "在 task.json 中存储 workspace 路径，允许 Phase 3+ resume 无需 --workspace",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "存储设计演进（Phase 2 缺失 → Phase 3+）。现有逻辑（Phase 3 会填充，Phase 2 需参数）应作偏差账本条目。保留，标注为 Phase-2-limitation。"
+      },
+      {
+        "name": "project_id 自动发现逻辑",
+        "file": "fleet-task/src/runtime.rs",
+        "purpose": "若 workspace 已在 projects.json 注册则用其 id，否则生成 auto-<hash>",
+        "methodology_role": "none",
+        "recommendation": "uncertain",
+        "rationale": "Phase 3/5 前期优化，缺方法论权声。若需求明确说 'multi-workspace task grouping'，应升为 REQ。现阶段倾向 transform：移入库，binary 仅调用。或作为内部实现细节，保留但标注 'Phase-3-forward-compat'。"
+      }
+    ]
+  },
+  {
+    "slice": "touches_hook + merge_mediator + worker_executor + audit_patterns",
+    "summary": "This slice implements three core enforcement capabilities for spec-fidelity: (1) touches_hook intercepts Edit/Write tool calls to prevent undeclared file modification (boundary enforcement), (2) merge_mediator resolves 3-way conflicts via LLM for deterministic acceptance audits, (3) worker_executor composes 3-layer system prompts (Layer 1: project constants, Layer 2: task description, Layer 3: P-item spec with touches/acceptance/upstream summaries), and (4) audit_patterns provides risk-level classification of bash commands. All four components directly address methodology requirement 1 (specification fidelity via registry/acceptance), requirement 3 (deviation tracking via violation markers), and requirement 4 (adversarial audit via risk patterns). However, some scaffolding and utility structures lack direct methodology mapping.",
+    "components": [
+      {
+        "name": "TouchesDecision enum",
+        "file": "claw-fleet-core/src/touches_hook.rs",
+        "purpose": "Outcome of evaluating whether an Edit/Write tool call's target path falls within declared P-item boundaries",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "keep",
+        "rationale": "Directly implements boundary enforcement: Allow vs Block decision is the foundation for recording deviations when touches are violated. Block outcome triggers violation marker recording (lines 72-75), feeding the append-only ledger system."
+      },
+      {
+        "name": "check_path_against_touches function",
+        "file": "claw-fleet-core/src/touches_hook.rs",
+        "purpose": "Pure decision logic: compares attempted file path against declared touches using suffix-aware matching (workspace-relative vs absolute path normalization)",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "keep",
+        "rationale": "Core enforcement gate. Suffix-based matching (lines 83-104) solves real-world path variance without false-negatives that could drift. Tests (lines 220-272) validate boundary cases. Essential for deterministic specification fidelity."
+      },
+      {
+        "name": "TouchesViolationMarker struct",
+        "file": "claw-fleet-core/src/touches_hook.rs",
+        "purpose": "Persisted JSON marker dropped to ~/.fleet/touches-violations/ when worker attempts undeclared edit; contains task_id, p_item_id, attempted_path, declared_touches, worker_session_id, recorded_at",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "keep",
+        "rationale": "Append-only ledger entry (methodology requirement 3). Supervisor polls directory (lines 161-186) and replays violations into master event stream (PRD §5.x). No mutation—only create + drain pattern. Traceability root cause."
+      },
+      {
+        "name": "violations_dir / record_violation / drain_violations functions",
+        "file": "claw-fleet-core/src/touches_hook.rs",
+        "purpose": "Lifecycle management: directory resolution, atomic write to violations dir, ordered drain for supervisor replay",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "keep",
+        "rationale": "Append-only ledger mechanics. Ordered drain (line 179 sorts by recorded_at) ensures master replays deviations in causality order. No overwrite, no mutation—pure append + drain. Critical for audit trail."
+      },
+      {
+        "name": "normalise / paths_match / is_suffix_of helpers",
+        "file": "claw-fleet-core/src/touches_hook.rs",
+        "purpose": "Path normalization (collapse .., .), suffix-boundary matching to avoid false matches (foo.rs != bar_foo.rs)",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Pure utility functions, but they solve a real specification-fidelity problem: ambiguous path matching would produce false-positives/negatives, undermining boundary enforcement. Tests at lines 220-272 validate correctness."
+      },
+      {
+        "name": "MediationResult / MediationError enums",
+        "file": "claw-fleet-core/src/merge_mediator.rs",
+        "purpose": "Output of conflict resolution: resolved file content or error variants (ProviderUnavailable, EmptyResponse, MarkersLeftBehind, MissingWrapper)",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Deterministic acceptance criteria for merge completion (PRD §P11). Error taxonomy enables master to decide per-file retry vs escalation. MarkersLeftBehind (lines 40-42) is a sanity check—LLM output must be clean, aligning with spec-fidelity principle."
+      },
+      {
+        "name": "render_prompt function",
+        "file": "claw-fleet-core/src/merge_mediator.rs",
+        "purpose": "Pure function: fills MEDIATOR_PROMPT_TEMPLATE with ConflictSpec (path, base, ours, theirs) for LLM input",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Part of deterministic merge workflow. Template-based rendering (lines 113-119) ensures consistent input shape for audit/replay. Tests (lines 252-264) verify no raw placeholders leak through."
+      },
+      {
+        "name": "extract_resolved / first_conflict_marker functions",
+        "file": "claw-fleet-core/src/merge_mediator.rs",
+        "purpose": "Extract LLM's resolved content from <resolved>...</resolved> tags; sanity-check for leftover conflict markers (<<<<<<<, =======, >>>>>>>)",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Acceptance gate for mediation output (lines 124-147). Refusal of marker-bearing content (lines 138-146) prevents downstream acceptance audit from failing on corrupted merges. Essential fidelity checkpoint."
+      },
+      {
+        "name": "mediate_one / mediate_with / mediate functions",
+        "file": "claw-fleet-core/src/merge_mediator.rs",
+        "purpose": "Run conflict resolution: mediate_one handles single file via provider, mediate_with allows test injection, mediate uses default provider",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Functional separation (lines 151-201): mediate_one is pure and testable; mediate_with enables DI for test providers; mediate wraps production. Stop-at-first-error strategy (line 192) prevents cascading failures. Tests thoroughly validate error paths."
+      },
+      {
+        "name": "MEDIATOR_PROMPT_TEMPLATE constant",
+        "file": "claw-fleet-core/src/merge_mediator.rs",
+        "purpose": "Hardcoded prompt for Sonnet: instructs LLM to preserve non-conflicting changes, prefer THEIRS, emit no markers, wrap output in <resolved> tags",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Specification of acceptable merge behavior. Template structure (lines 80-109) is deterministic and audit-friendly: explicit wrapper tags allow reliable extraction; 'preserve non-conflicting' + 'prefer THEIRS' are reproducible heuristics for conflicts."
+      },
+      {
+        "name": "MEDIATOR_MODEL / MEDIATOR_TIMEOUT constants",
+        "file": "claw-fleet-core/src/merge_mediator.rs",
+        "purpose": "Worker defaults to claude-sonnet-4-6; timeout 120s per file to escalate runaway resolutions",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Cost/reliability trade-off baked into spec: Sonnet (not Opus) for merge to keep per-file cost low; 120s timeout prevents budget burn. Both are part of deterministic execution contract."
+      },
+      {
+        "name": "FakeProvider test harness",
+        "file": "claw-fleet-core/src/merge_mediator.rs",
+        "purpose": "Records seen_prompts and returns canned responses for unit tests without LLM",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Pure test scaffolding but enables thorough coverage of mediate_one logic (lines 296-341). Tests validate all error paths without network dependency. Good testing hygiene."
+      },
+      {
+        "name": "WorkerSpawnSpec struct",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Contract between supervisor and worker subprocess: task_id, p_item_id, cwd, system_prompt, model",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Specification of worker dispatch. system_prompt field (line 36) is the critical interface: it carries the full 3-layer context that enforces spec fidelity. Model selection (line 39) is part of execution contract."
+      },
+      {
+        "name": "worker_spawn_spec function",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Build WorkerSpawnSpec for one P-item: looks up P-item in task plan, calls compose_worker_system_prompt, returns spec ready to spawn",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Factory for worker specs (lines 51-68). Error when P-item not in plan (line 59) prevents dispatch of malformed specs. Pure, testable, deterministic."
+      },
+      {
+        "name": "compose_worker_system_prompt function",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Assemble full worker SYSTEM prompt: Layer 1 (project constants) + Layer 2 (task context) + Layer 3 (P-item spec)",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Core spec-fidelity injection point (lines 72-79). Worker sees complete specification: architecture overview (Layer 1, line 74), task description + materials (Layer 2, line 76), P-item details + touches + acceptance + upstream summaries (Layer 3, line 78). This 3-layer structure is the specification registry delivered to the agent."
+      },
+      {
+        "name": "compose_layer1 function",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Render Layer 1: architecture overview from render_layer1_block + execution constraints (isolation, touches enforcement, no commits)",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Project-level constants (lines 84-106). Constraints at lines 99-103 explicitly state the spec: edit only declared touches, SIGSTOPped for violations, no manual commits. Cacheable (prompt cache) since same for all workers in project."
+      },
+      {
+        "name": "compose_layer2 function",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Render Layer 2: task title, description, inbox materials, wrapped in <untrusted_*> tags",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Task constants (lines 111-144). Same for every P-item in task, so cacheable. <untrusted_*> wrapper (lines 140-141) is defensive: signals to worker that materials may contain adversarial content. Cacheable with Layer 1."
+      },
+      {
+        "name": "compose_layer3 function",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Render Layer 3: P-item-specific context (desc, touches list, acceptance criteria, upstream output summaries from dependencies)",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "P-item specification (lines 148-200). Touches (lines 149-158) is the specification boundary. Acceptance (lines 159-168) is the acceptance audit spec worker should target. Upstream summaries (lines 170-186) provide traceability to dependencies. Per-P-item, not cacheable. Lines 194-196 explicitly instruct worker to write output summary for downstream use—this is the traceability link."
+      },
+      {
+        "name": "WORKER_MODEL constant",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Default worker model: claude-sonnet-4-6",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Part of execution spec. Sonnet tier is intentional (reserves Opus for master). Deterministic model selection is part of reproducible spec."
+      },
+      {
+        "name": "PostCompletionCheck / CrateCheckResult structs",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Result of post-completion cargo check: ok bool, per-crate results with stderr tail, combined stderr",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Acceptance criterion check (PRD patch §6, lines 204-216). Rust compilation must pass for spec fidelity. Structured result (lines 218-223) allows master to decide per-crate retry vs escalate. Not every build failure → plan failure; master has discretion."
+      },
+      {
+        "name": "rust_crates_touched / run_post_completion_check functions",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Walk touches paths to find Cargo.toml files; run cargo check per crate, collect results",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Validation gate (lines 228-325). Deduplication by crate dir (line 229) prevents redundant checks. Does not mutate task state (line 261 comment)—supervisor decides handling. Pure side-effect-free logic for main path; side-effects (cargo check) are isolated and result-bearing."
+      },
+      {
+        "name": "crate_name_from_cargo_toml helper",
+        "file": "claw-fleet-task/src/worker.rs",
+        "purpose": "Naive parse of Cargo.toml to extract [package] name field",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Utility that works, but fragile (naive regex-like parsing). However, fallback exists (line 275-279 uses dir name), so not critical. Keeps code simple."
+      },
+      {
+        "name": "audit_patterns.json structure: patterns array with level/tag/match_mode/patterns",
+        "file": "audit-patterns.json",
+        "purpose": "Builtin Bash audit rules: sudo, eval-exec, chmod-dangerous, curl-upload, code-push, package-publish, network-exfil, scp-upload, network-download, ssh-remote, network-scan, git-clone, git-reset-hard, file-deletion, docker-exec, k8s-mutate, process-kill, git-fetch, git-local-destructive, package-install, npx-exec, cloud-cli, open-external, scheduled-task, permission-change",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Core adversarial audit patterns (lines 3-171). Classifies bash commands by risk level (critical, high, medium) using match_mode (Contains, CommandStart). Each pattern is a boundary: critical patterns (sudo, eval, code-push, etc.) trigger master escalation. These patterns are the 'independent auditor' checking for out-of-spec behavior."
+      },
+      {
+        "name": "audit_patterns.json structure: python_patterns array",
+        "file": "audit-patterns.json",
+        "purpose": "Python-specific audit rules: http-upload, socket, email, dynamic-exec, http-download, subprocess, file-delete, ssh, file-write, pkg-install",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Extension to bash patterns for Python code (lines 173-250). Worker might execute Python; patterns catch dangerous imports/calls. Tags like py-http-upload, py-socket are language-native risk signals. Important for comprehensive audit coverage."
+      },
+      {
+        "name": "AuditRiskLevel enum (Medium, High, Critical)",
+        "file": "claw-fleet-core/src/audit.rs (inferred from audit-patterns.json usage)",
+        "purpose": "Risk classification for audit events",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Methodology requirement 4: independent adversarial auditor with signal levels. Three-tier taxonomy (Medium/High/Critical) guides master's response (escalate, notify, pause). Maps to JSON patterns."
+      },
+      {
+        "name": "MatchMode enum (Contains, CommandStart)",
+        "file": "claw-fleet-core/src/audit.rs",
+        "purpose": "Pattern matching strategy: substring vs shell command position (avoids false-positive in word boundaries)",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Prevents false-positives (e.g., 'nc ' in 'func ' is not netcat). CommandStart uses cmd_ast to parse shell syntax properly (audit.rs comments). Deterministic matching is essential for audit reproducibility."
+      },
+      {
+        "name": "RuntimeRiskPattern struct in audit.rs",
+        "file": "claw-fleet-core/src/audit.rs",
+        "purpose": "Runtime pattern: id, level, tag, match_mode, patterns list, descriptions (EN/ZH), enabled flag, builtin, category",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Audit rule specification (lines 105-120 of audit.rs head). Builtin=true for compiled-in rules, false for user-created. Enabled flag allows dynamic disable. This structure bridges audit-patterns.json into runtime engine. Category (privilege_escalation, network, git, etc.) enables grouping for UI."
+      },
+      {
+        "name": "ExternalPatternsFile / builtin_patterns functions",
+        "file": "claw-fleet-core/src/audit.rs",
+        "purpose": "Load audit patterns from ~/.fleet/fleet-audit-patterns.json or use compiled defaults",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Allows user override of audit rules (lines 137-159 of read section), but defaults are builtin. Version field enables schema evolution. Pure blacklist (only side-effects match, read-only ignored) is correct: catch deviations, allow spec-compliant work."
+      },
+      {
+        "name": "AuditEvent struct with dedup_key method",
+        "file": "claw-fleet-core/src/audit.rs",
+        "purpose": "Audit event record: session_id, workspace, agent_source, tool_name, command_summary, risk_level, risk_tags, timestamp; dedup_key = session_id|timestamp|tool_name",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "keep",
+        "rationale": "Append-only audit log entry (lines 30-55 of audit.rs head). Dedup_key (line 53) enables notification de-duplication while maintaining audit trail. Traceability: links risky command to session → worker → P-item."
+      },
+      {
+        "name": "UserAuditRules / load_user_rules / save_user_rules",
+        "file": "claw-fleet-core/src/audit.rs",
+        "purpose": "User-approved 'always allow' rules: prefix matches command and short-circuits Critical risk escalation",
+        "methodology_role": "none",
+        "recommendation": "cut",
+        "rationale": "User overrides of audit rules may undermine spec fidelity auditing. If user can whitelist sudo/curl-upload/code-push, the independent auditor becomes compromised. Methodology requires that deviations are caught and escalated to master, not silently approved. This feature conflicts with requirement 4 (independent audit). Either remove or add explicit master approval gate (not just user allowlist)."
+      },
+      {
+        "name": "RegistryEntry struct and registry module",
+        "file": "claw-fleet-task/src/registry.rs",
+        "purpose": "Runtime registry: track live fleet-task processes via ~/.fleet/runtime/<task_id>.json with task_id, pid, port, started_at",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Process discovery mechanism (lines 17-24, 57-88 of registry.rs). Enable external tools (desktop monitor, fleet-cli) to find live tasks. list_alive filters dead pids. Not directly spec-fidelity, but enables observability of spec compliance."
+      },
+      {
+        "name": "FakeProvider test harness in merge_mediator",
+        "file": "claw-fleet-core/src/merge_mediator.rs",
+        "purpose": "Mock LlmProvider for testing mediate_one without real API calls",
+        "methodology_role": "none",
+        "recommendation": "transform",
+        "rationale": "Test-only code, but excellent pattern. Consider promoting to a public test-utils module so other components can reuse it. Currently at lines 212-240, but no cross-module DI pattern. Minor: keep as-is for now, but flag for refactoring if audit testing expands."
+      },
+      {
+        "name": "PRD references in code comments (§5.x, §6.1, patch §4, §P10, §P11, §P12)",
+        "file": "touches_hook.rs, merge_mediator.rs, worker.rs",
+        "purpose": "Docstring anchors to PRD requirements; create traceability between code and specification",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "Implements requirement 2 (traceability matrix REQ→implementation→test). PRD anchors (e.g., 'PRD §5.x patch §4 / TASKS P8' at touches_hook.rs:6-7) are manual REQ-to-code links. Should be formalized into a requirements registry (REQ-NNN), but current practice is better than none. Aids code review and spec drift detection."
+      }
+    ]
+  },
+  {
+    "slice": "full-design",
+    "summary": "40KB task-as-unit design specifies four-pillar spec-fidelity methodology: (1) Registry—atomic REQ-001~060+ from design §3-13; (2) Traceability—REQ→src/*.rs→tests matrix; (3) Deviation Ledger—append-only cuts (DAG editor→V2, worktree→V2, LLM auto-merge→V2 Phase 2, auto architecture.md→V2); (4) Adversarial Auditor—independent agent verifies Master red lines enforced, no orphaned code. Core: Master agent (Sonnet 4.6, event-driven, long-lived, decision 6), Scheduler (pure topo+resource), three-layer context (L1~8k+cache, L2~2k+cache, L3~1-3k), P-item schema (9 fields). MVP: Inbox→planner→Kanban, no graph editor, same-branch V1, 10 patches. Bootstrap: Phase 0=manual, Phase 1=dogfood, Phase 2=worktree. All core orchestration systems must keep; non-core UX polish defer V2; backward compat + V1 bootstrap planning are meta-reqs deferred post-MVP.",
+    "components": [
+      {
+        "name": "Requirement Registry",
+        "file": "design/task-as-unit-redesign.md",
+        "purpose": "Generate atomic REQ-001~060+ from design clauses",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Foundational pillar. Enables all other three. Must pre-implement before code."
+      },
+      {
+        "name": "Traceability Matrix",
+        "file": "design/task-as-unit-redesign.md",
+        "purpose": "REQ→code files:lines + test files:functions + acceptance steps + auditor sign-off",
+        "methodology_role": "traceability",
+        "recommendation": "keep",
+        "rationale": "Accountability layer. Non-negotiable for audit."
+      },
+      {
+        "name": "Deviation Ledger",
+        "file": "design/task-as-unit-redesign.md",
+        "purpose": "Append-only log: date|REQ affected|reason|risk|sign-off. Record ~10 deferrals from design.",
+        "methodology_role": "deviation-ledger",
+        "recommendation": "keep",
+        "rationale": "Justification record. Design itself defers DAG editor, worktree, LLM auto-merge, auto architecture.md to V2+. Meta-requirement: create DEV-001~010 entries."
+      },
+      {
+        "name": "Adversarial Auditor",
+        "file": "design/task-as-unit-redesign.md §5.7,§11",
+        "purpose": "Independent agent spot-checks: Master red lines, schema consistency, unimplemented REQs, patch logic",
+        "methodology_role": "adversarial-audit",
+        "recommendation": "keep",
+        "rationale": "Replaces master self-review. Must exist to prevent blind spots. Audits before merge→main."
+      },
+      {
+        "name": "Three-layer Model (Project→Task→P-item)",
+        "file": "design/task-as-unit-redesign.md §3.1",
+        "purpose": "Semantic hierarchy: Project(grouping)|Task(entry unit)|P-item(DAG node)",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Non-negotiable foundation. All scheduling depends on this."
+      },
+      {
+        "name": "P-item Schema (9 fields)",
+        "file": "design/task-as-unit-redesign.md §6.1",
+        "purpose": "id,desc,touches,depends_on,resources,estimate,acceptance,artifacts,skippable,human_gate,status",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "All 9 fields load-bearing: touches(conflict detection), resources(scheduler), acceptance(audit), artifacts(downstream), skippable(conditional skip), human_gate(mid-task gate). Cannot simplify."
+      },
+      {
+        "name": "DAG Scheduling (topo+resource)",
+        "file": "design/task-as-unit-redesign.md §3.2,§5.2",
+        "purpose": "Three-step mechanical filter: (1)depends_on complete (2)resources free (3)dispatch",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Core parallelism. Pure deterministic. No simplification possible."
+      },
+      {
+        "name": "Resource Locks",
+        "file": "design/task-as-unit-redesign.md §3.2,§6.3",
+        "purpose": "Built-in(build/test/git) + user-extensible(port:N,db:name). Auto-release on fail.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Scheduler mutex. All three built-in + auto-release must ship V1."
+      },
+      {
+        "name": "Master Agent",
+        "file": "design/task-as-unit-redesign.md §5.2,§5.7,decision 6",
+        "purpose": "Sonnet 4.6, long-lived, event-driven. Coordinator: dispatch/audit/fail-fix/plan-evolve.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Architecture spine. Cannot replace with session-per-item-only (loses fine-grained fail recovery & plan evolution)."
+      },
+      {
+        "name": "Master SYSTEM + Red Lines",
+        "file": "design/task-as-unit-redesign.md §5.7",
+        "purpose": "Normative constraints: no direct code edit, skip audit, pause/resume, fleet config modification",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Safety boundaries. Auditor must verify violations trigger test failures."
+      },
+      {
+        "name": "Worker Session",
+        "file": "design/task-as-unit-redesign.md §5.2,§5.6",
+        "purpose": "Per P-item subprocess: fresh Layer 3 context, write output_summary, terminate",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Parallelism unit. V1 same-branch; V2 worktree-per-item."
+      },
+      {
+        "name": "Three-layer Context Caching",
+        "file": "design/task-as-unit-redesign.md §5.6,decision 11",
+        "purpose": "L1(~8k)+L2(~2k)→Anthropic 5min cache→90%+ savings. L3(~1-3k) computed per session.",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Decision 11. Cost lever. L1+2 serialization must be separate from L3 (prompt start for cache eligibility)."
+      },
+      {
+        "name": "architecture.md",
+        "file": "design/task-as-unit-redesign.md §5.6, decision 14",
+        "purpose": "~/.fleet/projects/<id>/architecture.md. Project knowledge in Layer 1. V1 hand-written; V2 auto-indexed.",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "V1 zero impl burden. V1 only: read + validate + inject. V2 adds generation."
+      },
+      {
+        "name": "CLAUDE.md Constraints (patch 5)",
+        "file": "design/task-as-unit-redesign.md patch 5",
+        "purpose": "No main build/test in code P-items. Only cargo check. Phase P-items run build/test.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1-critical. Prevents build cache contention. Must inject into Layer 1 system prompt."
+      },
+      {
+        "name": "Cargo Check Compensation (patch 6)",
+        "file": "design/task-as-unit-redesign.md patch 6",
+        "purpose": "Auto-run single-crate cargo check when marking code P-item done. Fail→revert to Failed.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1-critical. Compensates patch 5. Early error detection."
+      },
+      {
+        "name": "Acceptance Criteria Schema",
+        "file": "design/task-as-unit-redesign.md §6.1, patch 8",
+        "purpose": "Builds|TestsPass(cmd)|HumanReview|Custom(rule). Master validates each before mark-done.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1-critical. Without this: completion fuzzy. Forbids proxy signals(§5.7 Acceptance Audit Protocol)."
+      },
+      {
+        "name": "Acceptance Audit Protocol",
+        "file": "design/task-as-unit-redesign.md §5.7",
+        "purpose": "4-step judicial process: unpack→find evidence→forbid proxies→escalate. Master only.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Red line. Non-optional gate before mark-done."
+      },
+      {
+        "name": "Human Gate (patch 9)",
+        "file": "design/task-as-unit-redesign.md patch 9",
+        "purpose": "P-item + task-level flags. Status WaitHumanGate. User answers AskUserQuestion→Master mark-done.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1-critical. User mid-task gate without blocking scheduler."
+      },
+      {
+        "name": "Artifacts (patch 8)",
+        "file": "design/task-as-unit-redesign.md patch 8",
+        "purpose": "P-item declares outputs (FileList|GitDiff|TestOutput|ManualNote). Worker tags output_summary.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1-critical. Bounded summaries (50-200 tokens) prevent context explosion."
+      },
+      {
+        "name": "Skippable (patch 8)",
+        "file": "design/task-as-unit-redesign.md patch 8",
+        "purpose": "P-item auto-skips: NoChangesIn(paths)→git diff, Custom(rule)→worker eval. Status=Skipped.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1-critical. Avoids unnecessary work."
+      },
+      {
+        "name": "Touches Conflict Auto-detect",
+        "file": "design/task-as-unit-redesign.md §4.3, MVP",
+        "purpose": "Planner UI button '✨ auto edges': scan all P-items, detect write-write, auto-inject topo edge",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "MVP (§8). Prevent concurrent writes to same file. Complements patch 3 fallback."
+      },
+      {
+        "name": "Touches Runtime Hook (patch 4)",
+        "file": "design/task-as-unit-redesign.md patch 4",
+        "purpose": "Edit/Write tool detects undeclared file→SIGSTOP worker→append Master event (not fail directly)",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1-critical. Master handles: add touches+retry, reject, escalate."
+      },
+      {
+        "name": "Implicit Shared Files (patch 3)",
+        "file": "design/task-as-unit-redesign.md patch 3",
+        "purpose": "Scheduler maintains fallback list (FE=App.tsx/Layout/locales/; BE=mod.rs/lib.rs). Auto-inject edges.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1-critical. Catches planner omissions. Dual approach: skill examples + scheduler fallback."
+      },
+      {
+        "name": "Sidebar UX",
+        "file": "design/task-as-unit-redesign.md §4.1",
+        "purpose": "Task-primary, project-folded, filters. Shows active/done, progress bars.",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "User entry point. Lite mode reusable."
+      },
+      {
+        "name": "Task Kanban",
+        "file": "design/task-as-unit-redesign.md §4.2",
+        "purpose": "3 columns (Inbox/Running/Done), P-item cards with status icons, merged output stream",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "Primary work surface. Real-time progress + agent visibility."
+      },
+      {
+        "name": "DAG Visualization",
+        "file": "design/task-as-unit-redesign.md §4.3",
+        "purpose": "Graphviz/Mermaid render (V1 optional, V2 editor). Node color=status, edge=dep-complete.",
+        "methodology_role": "ux",
+        "recommendation": "uncertain",
+        "rationale": "V1 can defer(matrix sufficient); V2 adds. If quick Mermaid integration: worth it."
+      },
+      {
+        "name": "DAG Matrix Edit",
+        "file": "design/task-as-unit-redesign.md §4.3",
+        "purpose": "V1 lightweight edit: rows=P-items, dropdown depends_on, inline touches",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "MVP pragmatism. Graph editor → V2. Matrix text-friendly."
+      },
+      {
+        "name": "Inbox Dialog",
+        "file": "design/task-as-unit-redesign.md §4.4",
+        "purpose": "Drag file/paste text/screenshot→atomic-plan-tasks→plan preview+edit→launch. One flow.",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "Core goal(§2). Materials→plan→launch without project jumping."
+      },
+      {
+        "name": "Auto Phase Insertion",
+        "file": "design/task-as-unit-redesign.md §5.3, MVP",
+        "purpose": "Hybrid: auto-detect Cargo.toml/package.json/playwright→inject phase P-items. fleet.yaml overrides.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Decision 7. Default auto, user-overridable. V1 must ship detection+schema generation+override loading."
+      },
+      {
+        "name": "fleet.yaml Config",
+        "file": "design/task-as-unit-redesign.md §6.2",
+        "purpose": "Project-level: phases{cmd, resources}, resources{custom locks}. YAML load+validate.",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "V1 read+parse; defer editor UI to V2."
+      },
+      {
+        "name": "Master Event-Driven",
+        "file": "design/task-as-unit-redesign.md §5.2,§5.7",
+        "purpose": "append_user_message driven: [event] worker done/fail/scheduler/touches; [user] input. No polling.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Architectural efficiency. One event cycle per state change."
+      },
+      {
+        "name": "Master Tool Set",
+        "file": "design/task-as-unit-redesign.md §5.2",
+        "purpose": "7 bash subcommands: get-plan, get-dispatchable, dispatch, read-output, mark-done, mark-failed, update-plan",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Master API. All 7 required. Both backends."
+      },
+      {
+        "name": "Failure Handling Tiers",
+        "file": "design/task-as-unit-redesign.md §5.4, decision 10",
+        "purpose": "Master auto-fix hierarchy: typo→fix plan, validation→let worker fix, stuck→ask user",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Decision 10. Prevents UX spam. Master smartness."
+      },
+      {
+        "name": "Resource Lock Auto-release",
+        "file": "design/task-as-unit-redesign.md §5.4",
+        "purpose": "P-item fail→resources free immediately. Master decides retry.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Deadlock prevention."
+      },
+      {
+        "name": "Master Lifecycle",
+        "file": "design/task-as-unit-redesign.md §5.7, decision 13",
+        "purpose": "Task start→Master born. Task end→Master destroyed. Alive in between (no sleep/restart).",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Decision 13. Full context persistence."
+      },
+      {
+        "name": "Master SYSTEM Template Embed",
+        "file": "design/task-as-unit-redesign.md §5.7",
+        "purpose": "Compile-time include_str!(...). Dev escape: FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE=/tmp/...",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Engineering constraint(§7). Enable rapid Master prompt iteration."
+      },
+      {
+        "name": "Task Branch",
+        "file": "design/task-as-unit-redesign.md §5.1,§5.2",
+        "purpose": "V1: single fleet/task-<id> branch checked out in master cwd. V2: worktree-per-item.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1 MVP. Worktree defer to V2 (§8 V2 bullets, shipped in worktree-and-auto-merge PRD)."
+      },
+      {
+        "name": "P-merge P-item",
+        "file": "design/task-as-unit-redesign.md §5.1",
+        "purpose": "Explicit merge step: depends_on=[all code], resources=[git]. Planner auto-injects.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1 merge strategy. Auto-insert by planner."
+      },
+      {
+        "name": "Worker Output Summary",
+        "file": "design/task-as-unit-redesign.md §5.6, MVP",
+        "purpose": "Worker writes 50-200 word bounded summary tagged with artifact kind. Layer 3 injects to downstream.",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Context control. Prevents transcript explosion."
+      },
+      {
+        "name": "Cache Observe Fields",
+        "file": "design/task-as-unit-redesign.md §5.5,§5.6",
+        "purpose": "Session metadata: cache_read_input_tokens, cache_creation_input_tokens (validate L1+2 strategy)",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Cost observability. Test: 3 workers→L1+2 creation only worker 1, reads on 2+3."
+      },
+      {
+        "name": "Progress Reporting",
+        "file": "design/task-as-unit-redesign.md §5.5",
+        "purpose": "SSE+heartbeat extend: task_id, p_item_id, progress_pct, cache tokens. Timeout 60s→red card(not auto-fail)",
+        "methodology_role": "ux",
+        "recommendation": "keep",
+        "rationale": "User visibility."
+      },
+      {
+        "name": "Dual Backend Support",
+        "file": "design/task-as-unit-redesign.md §7",
+        "purpose": "Architecture constraint: every tool exists in both LocalBackend(direct core) + RemoteBackend(HTTP)",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "Non-negotiable(§7). All 7 tools need 2 impls."
+      },
+      {
+        "name": "HTTP Endpoints",
+        "file": "design/task-as-unit-redesign.md §7,§5.7",
+        "purpose": "fleet serve exposes /task API. POST/GET /task, /task/:id/plan, /task/:id/dispatch, etc.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "RemoteBackend foundation."
+      },
+      {
+        "name": "Task State Mutex",
+        "file": "design/task-as-unit-redesign.md §5.7",
+        "purpose": "V1: in-memory mutex per task_id. V2: SQLite+WAL for cross-process.",
+        "methodology_role": "storage",
+        "recommendation": "keep",
+        "rationale": "Concurrency safety."
+      },
+      {
+        "name": "Patch 2: P-item Granularity",
+        "file": "design/task-as-unit-redesign.md patch 2",
+        "purpose": "Doc + skill prompt: 50-300 line target. <50 merge, >300 split (phase exempt). Skill test verify.",
+        "methodology_role": "registry",
+        "recommendation": "keep",
+        "rationale": "Planner guidance. Skill system prompt injection."
+      },
+      {
+        "name": "Plan Evolution (patch 10)",
+        "file": "design/task-as-unit-redesign.md patch 10",
+        "purpose": "User append requirement via AskUserQuestion→Master calls update-plan to add P-item. Master only executor.",
+        "methodology_role": "orchestration-core",
+        "recommendation": "keep",
+        "rationale": "V1(Master architecture). Avoids multi-agent race."
+      },
+      {
+        "name": "Bootstrap Phases",
+        "file": "design/task-as-unit-redesign.md §13",
+        "purpose": "Phase 0=manual old system(V1 dev). Phase 1=V1 dogfood task(patch 1 Inbox). Phase 2=V2 worktree validate.",
+        "methodology_role": "none",
+        "recommendation": "keep",
+        "rationale": "Implementation meta-req. Each phase has acceptance table(§13)."
+      }
+    ]
+  }
+]
