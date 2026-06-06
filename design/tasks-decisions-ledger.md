@@ -67,3 +67,11 @@
 - **DEC-015** | **P15 手写 fleet.yaml 解析器**：claw-fleet-task 的 Cargo.toml（在 P15 touches 外）无 YAML 后端，P15 写了针对 REQ-047 schema 的行式解析器（拒绝不认识的形状而非静默丢弃）。已声明。后续若要全 YAML 兼容需单独加 serde_yaml 依赖。
 - **DEC-016** | **master-decisions.jsonl 新增**：P9 的结构化 master 决策日志写 `~/.fleet/master-decisions.jsonl`（claw-fleet-task 原无结构化日志设施）。best-effort，失败不阻断决策。
 - Wave 3 三项（P9/P10/P15）对抗审计全部 verdict=pass、build_claim 可信；REQ-013（P9）/REQ-003/004 行为测试（P9，DEC-010）已补齐。
+
+## Wave 4 执行后修正（2026-06-06，老板亲拍）
+
+- **DEC-017 ⚠️ 取代 DEC-005** | **REQ-035 改为「复用 Fleet 现有 audit trail」，不另造偏差旁路**。
+  - 触发：P11 按 DEC-005 最严读法实现「critical 永不可被白名单短路」，master 读 live guard 发现后果——`classify_hook_input_with_rules` 只在 critical 臂查白名单，非 critical 直接放行，故白名单**唯一**作用就是放行被审计**误判**为 critical 的可信命令（如 `patchwright-cli eval` 被 `eval ` 子串误判）。最严读法把白名单废了，误报每次弹确认。
+  - 老板裁定：复用 Fleet 自身那套 audit。master 核实 `claw_fleet_core::audit::extract_audit_events` **完全独立于白名单**——事后扫 session transcript，把每条 bash 命令（含被白名单放行执行的）都分类成 AuditEvent 进 AuditView。**所以根本不存在「静默」绕过**：现有审计 trail 已捕获一切。原 REQ-035 担心的「静默绕过」前提不成立。
+  - 新契约（P11-rework）：(1) 保留「规则须 `approved_by` 签名才生效」= require-approval 的牙齿；(2) **签名规则可短路 critical 提示**（恢复误报豁免的正当用途）；(3) **删除** P11 新造的 `guard_allow_decision`/`GuardAllowDecision`/`append_deferred_whitelist_deviation`/deviations.jsonl 旁路——冗余，「非静默」由现有 AuditEvent/AuditView 承接；(4) guard.rs 测试改为断言「已签名规则短路 critical，未签名不短路」。
+  - 净效果：少了一套并行机制（合「只做核心」），REQ-035 的「不静默」由既有审计保证。
