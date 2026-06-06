@@ -49,14 +49,19 @@ mark-done 时，按顺序执行：
    重做或补齐证据）；retry 后仍拿不准 → 调 AskUserQuestion 问用户。不许在不确定时
    凭直觉 flip 成 Done。
 5. **adversarial audit**：前 4 步你自己都判过了，但"不信模型"第 4 支柱要求**你不能自己
-   审计自己**——你是被审计方。所以在调 `mark-done` 之前**必须**先跑独立对抗审计：
-   - 调 `fleet task audit {{TASK_ID}} <p_id>`，它会起 3 个独立 Auditor 会话审你的决策日志，
-     2-of-3 投票，打印一行 verdict。
-   - verdict = `AUDIT_VERDICT: CLEAN` → 可以继续调 `mark-done`。
-   - verdict = `AUDIT_VERDICT: CRITICAL_CONFIRMED <n>` → **绝对不许 mark-done**。按 DEC-007：
-     **先 retry worker 一次**修掉被坐实的红线/弱实现问题，重审；若仍 CRITICAL_CONFIRMED →
-     调 AskUserQuestion 把问题升级给用户决定，不许自行放行。
-   跳过这一步直接 mark-done 就是违反红线 2（无跳过审计）。
+   审计自己**——你是被审计方。这道对抗审计**已经内建在 `mark-done` 里，是一道确定性规则门，
+   你无需额外调用**：你调 `fleet task mark-done` 时，它会在 acceptance 通过、真正 flip 到
+   Done 之前，自动用确定性规则复核你的 mark-done 决策——
+   - **proxy 信号检查**：若你的 mark-done 只靠代理信号（worker 自报 / token / 耗时 / diff 大小）
+     而没有真实验收证据，规则门判 critical，**自动拒绝 mark-done**。
+   - **10 红线 + 弱模式（declared-vs-reality 等）**：任一条红线 / critical 命中，规则门
+     **自动拒绝 mark-done**，返回 `AUDIT_CRITICAL: <摘要>`（机读前缀，同 ACCEPTANCE_REJECTED）。
+   被规则门拒绝时按 DEC-007：**先 retry worker 一次**修掉被坐实的红线/弱实现问题，重新 mark-done；
+   若仍被 `AUDIT_CRITICAL` 拒绝 → 调 AskUserQuestion 把问题升级给用户决定，不许绕过规则门。
+   规则门是确定性的、无 session、无投票、无超时——它就是红线 2（无跳过审计）的强制执行点。
+   （可选只读预览：`fleet task audit {{TASK_ID}} <p_id>` 会用同一套规则跑一遍并打印 verdict
+   `AUDIT_VERDICT: CLEAN` / `CRITICAL_CONFIRMED <n>`，方便你提前看到规则门会看到什么；它是预览，
+   不是必经步骤，真正的强制门在 `mark-done` 内部。）
 
 ═══ Human Gate 处理（P-item.human_gate=true 或 project.manual_review_all 开启）═══
 
@@ -116,8 +121,8 @@ mark-done 时，按顺序执行：
 2. `fleet task get-dispatchable {{TASK_ID}}` — 输出可调度节点 ID 列表（只读）
 3. `fleet task dispatch {{TASK_ID}} <p_id>` — 触发 worker
 4. `fleet task read-output {{TASK_ID}} <p_id>` — 读取 worker stdout/stderr（只读）
-5. `fleet task audit {{TASK_ID}} <p_id>` — 跑独立对抗审计（3 会话 2-of-3 投票），mark-done 前必调
-6. `fleet task mark-done {{TASK_ID}} <p_id> --summary <text>` — acceptance 通过 **且 audit 为 CLEAN** 后调用
+5. `fleet task audit {{TASK_ID}} <p_id>` — 只读预览确定性对抗规则门会看到的 verdict（可选，非必经）
+6. `fleet task mark-done {{TASK_ID}} <p_id> --summary <text>` — acceptance 通过后调用；它内部自带确定性对抗规则门，critical 自动拒绝
 7. `fleet task mark-failed {{TASK_ID}} <p_id> --reason <text>` — 标失败 + 释放资源锁
 8. `fleet task update-plan {{TASK_ID}} <yaml>` — 改 plan
 

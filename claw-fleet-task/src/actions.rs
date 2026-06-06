@@ -21,12 +21,18 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-use crate::acceptance::{self, AuditDecision};
+use crate::acceptance::{self, AcceptanceCheckResult, AuditDecision};
+// [WA-DEC] The Auditor is no longer an LLM-session quorum — only the
+// deterministic rule layer survives. We pull in the rule entrypoints
+// (`audit_mark_done`) plus the data model they consume (`MarkDoneRecord` /
+// `MarkDoneEvidence`) and emit (`AuditFinding` / `Severity`). The voting symbols
+// (`auditor_quorum_specs` / `tally_votes` / `AuditorSpawnSpec` / `ConfirmedFinding`)
+// are gone.
 use crate::auditor::{
-    auditor_quorum_specs, tally_votes, AuditFinding, AuditorSpawnSpec, ConfirmedFinding, Severity,
+    audit_mark_done, AuditFinding, MarkDoneEvidence, MarkDoneRecord, Severity,
 };
 use crate::master::spawn_spec_from_task;
-use crate::pitem::{ArtifactKind, FailReason, PItemId, PItemStatus};
+use crate::pitem::{AcceptanceCriterion, ArtifactKind, FailReason, PItemId, PItemStatus};
 use crate::runner::TaskHost;
 use crate::task::{
     get_task, git_create_branch, pick_unique_branch, slugify_title, task_json_path,
@@ -370,37 +376,16 @@ fn covered_reqs(item_desc: &str, parsed: &[ParsedDeviation]) -> Vec<String> {
     set
 }
 
-// ── WA2: live adversarial-audit orchestration (methodology pillar 4) ─────────
+// ── WA-DEC: in-process deterministic adversarial audit (methodology pillar 4) ─
 
-/// Spawns ONE independent Auditor session. The audit orchestrator
-/// ([`audit_pitem`]) drives three of these and 2-of-3 votes on their findings.
-///
-/// Abstracted as a trait for the same reason `dispatch_pitem` takes a
-/// `TaskHost`: the real launcher shells out to `claude` (it lives in
-/// `fleet-task`'s `ProcessLauncher`/`LocalHost`, which `claw-fleet-task` cannot
-/// reference without a dependency cycle), while tests supply a fake that writes
-/// canned `AuditFinding[]` JSON to the output path so the polling / tally /
-/// timeout logic can be exercised without a real Claude process.
-///
-/// `session_index` selects which of the 3 quorum specs to launch; `output_path`
-/// is where that session must deposit its findings JSON ([`audit_pitem`] polls
-/// it). Returns the spawned pid (unused by the orchestrator beyond liveness,
-/// but kept so a real launcher can be reaped/observed).
-pub trait AuditorLauncher {
-    fn launch_auditor(
-        &self,
-        session_index: usize,
-        spec: &AuditorSpawnSpec,
-        output_path: &std::path::Path,
-    ) -> Result<u32, String>;
-}
-
-/// The verdict line `audit_pitem` returns (and the CLI prints). `CriticalConfirmed`
-/// means at least one Critical finding cleared the 2-of-3 quorum — per WA3 the
-/// master MUST NOT mark-done. `Clean` means no Critical finding was confirmed.
+/// The verdict `audit_pitem` returns (and the CLI prints). `CriticalConfirmed`
+/// means the deterministic rules emitted at least one `Critical` / red-line
+/// finding — per the methodology the master MUST NOT mark-done. `Clean` means no
+/// Critical finding fired. [WA-DEC] There is no longer any voting: a Critical is
+/// a Critical the moment a single deterministic rule sees it; nothing to confirm.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuditVerdict {
-    /// `n` = number of Critical confirmed findings.
+    /// `n` = number of Critical findings the deterministic rules emitted.
     CriticalConfirmed(usize),
     Clean,
 }
@@ -418,23 +403,16 @@ impl AuditVerdict {
     }
 }
 
-/// Result of running the full quorum audit on one P-item.
+/// Result of running the in-process deterministic audit on one P-item.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuditOutcome {
     pub verdict: AuditVerdict,
-    /// The confirmed (2-of-3) findings, written to the audits ledger.
-    pub confirmed: Vec<ConfirmedFinding>,
-    /// Path the confirmed-findings JSON was written to.
+    /// Every finding the deterministic rules emitted (not just Critical ones),
+    /// written to the audits ledger.
+    pub findings: Vec<AuditFinding>,
+    /// Path the findings JSON was written to.
     pub written_to: PathBuf,
 }
-
-/// Default hard timeout for waiting on the 3 auditor sessions to deposit their
-/// findings. Generous enough for an Opus session to read the log and emit JSON;
-/// past it, a missing session is treated as a FAILURE (never a silent pass).
-pub const AUDITOR_HARD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(600);
-
-/// Per-poll sleep while waiting for auditor output files to appear.
-const AUDITOR_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_millis(500);
 
 fn audits_dir() -> Result<PathBuf, String> {
     crate::paths::get_fleet_dir()
@@ -442,148 +420,138 @@ fn audits_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "could not resolve fleet home dir".to_string())
 }
 
-/// A synthetic Critical finding standing in for an auditor session that never
-/// delivered (timed out / wrote unparseable output). [WA2] The spec is
-/// explicit: "超时按失败处理不能假装通过" — a non-responding auditor must NOT be
-/// read as a clean vote. We inject a distinct Critical per missing session so
-/// that if a majority of the quorum fails to report, the 2-of-3 tally surfaces
-/// a confirmed `auditor-timeout` Critical rather than a false CLEAN.
-fn timeout_finding(session_index: usize, output_path: &std::path::Path) -> AuditFinding {
-    AuditFinding {
-        severity: Severity::Critical,
-        category: "auditor-timeout".to_string(),
-        finding: format!(
-            "auditor session #{session_index} did not deliver findings before the hard timeout"
-        ),
-        evidence: format!(
-            "expected findings JSON at {} was missing or unparseable after {}s",
-            output_path.display(),
-            AUDITOR_HARD_TIMEOUT.as_secs()
-        ),
-        // Tie all timeout findings to the same REQ set so they share a dedup_key
-        // and a *quorum* of timeouts (>=2) confirms a single auditor-timeout
-        // Critical instead of N separate singletons.
-        req_affected: vec!["REQ-022".to_string(), "REQ-033".to_string()],
+/// [WA-DEC] Reconstruct a [`MarkDoneRecord`] from a P-item's *real* acceptance
+/// evidence. Each [`AcceptanceCheckResult`] the engine produced is mapped to the
+/// corresponding real [`MarkDoneEvidence`] (build/test exit codes, human
+/// approval, custom judgement) so the proxy-signal rule can verify mark-done
+/// rested on real evidence. A criterion that needs a human and was not approved
+/// contributes no evidence (it is deferred, not substantiated) — which is
+/// exactly what we want the rule to see.
+fn record_from_results(
+    p_item_id: &str,
+    declared: &[AcceptanceCriterion],
+    results: &[AcceptanceCheckResult],
+) -> MarkDoneRecord {
+    let evidence = results
+        .iter()
+        .filter_map(|r| match &r.criterion {
+            AcceptanceCriterion::Builds => Some(MarkDoneEvidence::BuildExit {
+                // Non-zero exit when the check didn't pass — the rule treats a
+                // failing build as substantiating nothing.
+                code: if r.passed { 0 } else { 1 },
+                tail: r.evidence.clone(),
+            }),
+            AcceptanceCriterion::TestsPass(cmd) => Some(MarkDoneEvidence::TestExit {
+                cmd: cmd.clone(),
+                code: if r.passed { 0 } else { 101 },
+                tail: r.evidence.clone(),
+            }),
+            AcceptanceCriterion::HumanReview => {
+                // Only a *passed* human review is real approval evidence; an
+                // unresolved/needs-human review substantiates nothing.
+                if r.passed {
+                    Some(MarkDoneEvidence::HumanApproval {
+                        approver: "human-gate".to_string(),
+                    })
+                } else {
+                    None
+                }
+            }
+            AcceptanceCriterion::Custom(rule) => {
+                if r.passed {
+                    Some(MarkDoneEvidence::CustomJudgement {
+                        rule: rule.clone(),
+                        note: r.evidence.clone(),
+                    })
+                } else {
+                    None
+                }
+            }
+        })
+        .collect();
+    MarkDoneRecord {
+        p_item_id: p_item_id.to_string(),
+        declared: declared.to_vec(),
+        evidence,
     }
 }
 
-/// [WA2] Run the live adversarial audit for one P-item: spawn 3 independent
-/// Auditor sessions, wait (with a hard timeout) for each to deposit its
-/// `AuditFinding[]` JSON, tally the 2-of-3 vote, persist the confirmed findings,
-/// and return the verdict.
-///
-/// Steps mirror the methodology's pillar 4:
-/// 1. Resolve the Master decision log (`~/.fleet/master-decisions.jsonl`) the
-///    auditors read, and build the 3 quorum specs via [`auditor_quorum_specs`].
-/// 2. Spawn each session through the [`AuditorLauncher`], handing it a distinct
-///    output path under `~/.fleet/audits/<task>_<p>/session_<idx>.json`.
-/// 3. Poll those files until all 3 are present+parseable, or [`AUDITOR_HARD_TIMEOUT`]
-///    elapses. A session that hasn't delivered by the deadline is recorded as a
-///    Critical `auditor-timeout` finding — NOT a silent clean vote.
-/// 4. [`tally_votes`] the per-session findings (2-of-3). Any confirmed Critical
-///    → `CriticalConfirmed`; otherwise `Clean`.
-/// 5. Write the confirmed findings to `~/.fleet/audits/<task>_<p>_<ts>.json`.
-///
-/// `timeout` lets tests shorten the wait; production passes
-/// [`AUDITOR_HARD_TIMEOUT`].
-pub fn audit_pitem(
+/// [WA-DEC] Persist a deterministic audit's findings to
+/// `~/.fleet/audits/<task>_<p>_<ts>.json` and return the path written.
+fn write_audit_findings(
     task_id: &str,
     p_item_id: &str,
-    launcher: &dyn AuditorLauncher,
-    timeout: std::time::Duration,
-) -> Result<AuditOutcome, String> {
-    let master_log = decisions_path()?;
-    let specs = auditor_quorum_specs(task_id, &master_log.to_string_lossy());
-
-    // Per-session output drop directory: ~/.fleet/audits/<task>_<p>/
-    let session_dir = audits_dir()?.join(format!("{task_id}_{p_item_id}"));
-    std::fs::create_dir_all(&session_dir)
-        .map_err(|e| format!("mkdir audit session dir {}: {e}", session_dir.display()))?;
-
-    // 2. Spawn each independent session, telling it where to write.
-    let output_paths: Vec<PathBuf> = specs
-        .iter()
-        .map(|s| session_dir.join(format!("session_{}.json", s.session_index)))
-        .collect();
-    // Remove any stale output from a prior audit so we never read old findings.
-    for p in &output_paths {
-        let _ = std::fs::remove_file(p);
-    }
-    for (idx, spec) in specs.iter().enumerate() {
-        // Spawn failure of one session is itself a failure to audit — record it
-        // as a timeout-style miss rather than aborting the whole audit (so the
-        // remaining sessions still vote and we never fall through to a fake pass).
-        let _ = launcher.launch_auditor(idx, spec, &output_paths[idx]);
-    }
-
-    // 3. Poll for each session's findings until all present or hard timeout.
-    let deadline = std::time::Instant::now() + timeout;
-    let mut per_session: Vec<Option<Vec<AuditFinding>>> = vec![None; specs.len()];
-    loop {
-        for (idx, path) in output_paths.iter().enumerate() {
-            if per_session[idx].is_some() {
-                continue;
-            }
-            if let Some(findings) = try_read_findings(path) {
-                per_session[idx] = Some(findings);
-            }
-        }
-        if per_session.iter().all(Option::is_some) {
-            break;
-        }
-        if std::time::Instant::now() >= deadline {
-            break; // hard timeout — remaining None sessions become timeouts below
-        }
-        std::thread::sleep(AUDITOR_POLL_INTERVAL);
-    }
-
-    // 4. Any session that never delivered counts as a Critical timeout (never a
-    //    silent clean vote). Then 2-of-3 tally.
-    let session_findings: Vec<Vec<AuditFinding>> = per_session
-        .into_iter()
-        .enumerate()
-        .map(|(idx, maybe)| maybe.unwrap_or_else(|| vec![timeout_finding(idx, &output_paths[idx])]))
-        .collect();
-    let confirmed = tally_votes(&session_findings);
-
-    let critical_count = confirmed
-        .iter()
-        .filter(|c| c.finding.severity == Severity::Critical)
-        .count();
-    let verdict = if critical_count > 0 {
-        AuditVerdict::CriticalConfirmed(critical_count)
-    } else {
-        AuditVerdict::Clean
-    };
-
-    // 5. Persist the confirmed findings to the audits ledger.
+    findings: &[AuditFinding],
+) -> Result<PathBuf, String> {
     let ts = chrono::Utc::now().timestamp();
     let written_to = audits_dir()?.join(format!("{task_id}_{p_item_id}_{ts}.json"));
     if let Some(parent) = written_to.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("mkdir audits dir: {e}"))?;
     }
-    let json = serde_json::to_string_pretty(&confirmed)
-        .map_err(|e| format!("serialize confirmed findings: {e}"))?;
+    let json = serde_json::to_string_pretty(findings)
+        .map_err(|e| format!("serialize audit findings: {e}"))?;
     std::fs::write(&written_to, json)
         .map_err(|e| format!("write audit ledger {}: {e}", written_to.display()))?;
+    Ok(written_to)
+}
 
-    Ok(AuditOutcome {
-        verdict,
-        confirmed,
-        written_to,
+/// `true` when any finding is a hard blocker — a `Critical` severity or a red-line
+/// category. [WA-DEC] This is the single predicate both the CLI preview and the
+/// mark-done hard gate use to decide whether the audit blocks.
+fn has_blocking_finding(findings: &[AuditFinding]) -> bool {
+    findings.iter().any(|f| {
+        f.severity == Severity::Critical
+            || crate::auditor::Category::red_lines()
+                .iter()
+                .any(|c| c.tag() == f.category)
     })
 }
 
-/// Try to read + parse one auditor session's `AuditFinding[]` JSON. Returns
-/// `None` when the file is absent, empty (still being written), or unparseable —
-/// the caller retries until the hard timeout. A successful parse of `[]` is a
-/// real "clean" vote and returns `Some(vec![])`.
-fn try_read_findings(path: &std::path::Path) -> Option<Vec<AuditFinding>> {
-    let content = std::fs::read_to_string(path).ok()?;
-    if content.trim().is_empty() {
-        return None; // file created but not yet flushed
-    }
-    serde_json::from_str::<Vec<AuditFinding>>(&content).ok()
+/// [WA-DEC] Run the deterministic adversarial audit for one P-item **in-process**
+/// — no session, no timeout, no voting. This is a *read-only preview* (the same
+/// rules `mark_done`'s hard gate runs): the master may call `fleet task audit`
+/// before mark-done to see what the gate will see, but mark-done enforces the gate
+/// itself regardless.
+///
+/// Steps:
+/// 1. Load the P-item's declared acceptance criteria + the persisted acceptance
+///    results (`acceptance::load_results`) — the real evidence the last audit
+///    gathered — and reconstruct a [`MarkDoneRecord`].
+/// 2. Run [`audit_mark_done`] (proxy-signal + declared-vs-reality rules) over it.
+/// 3. Any `Critical` / red-line finding → `CriticalConfirmed(n)`; otherwise
+///    `Clean`. Persist the findings to `~/.fleet/audits/`.
+pub fn audit_pitem(task_id: &str, p_item_id: &str) -> Result<AuditOutcome, String> {
+    let task = get_task(task_id)?;
+    let item = task
+        .plan
+        .get(p_item_id)
+        .ok_or_else(|| format!("p-item {p_item_id} not found in task {task_id}"))?;
+    let declared = item.acceptance.clone();
+
+    // Real acceptance evidence the engine last persisted for this P-item (empty
+    // when none ran yet — which itself surfaces as a proxy-only red line).
+    let results = acceptance::load_results(task_id, p_item_id).unwrap_or_default();
+    let record = record_from_results(p_item_id, &declared, &results);
+
+    // The deterministic rules — zero sessions, zero votes, zero timeout.
+    let findings = audit_mark_done(&record);
+
+    let critical_count = findings
+        .iter()
+        .filter(|f| f.severity == Severity::Critical)
+        .count();
+    let verdict = if has_blocking_finding(&findings) {
+        AuditVerdict::CriticalConfirmed(critical_count.max(1))
+    } else {
+        AuditVerdict::Clean
+    };
+
+    let written_to = write_audit_findings(task_id, p_item_id, &findings)?;
+    Ok(AuditOutcome {
+        verdict,
+        findings,
+        written_to,
+    })
 }
 
 /// Optional knobs for `start_task`. Today only carries `force_human_gate_all`
@@ -839,8 +807,53 @@ pub fn mark_done(
             ))
         }
         AuditDecision::AllPassed => {
-            // Every declared criterion gathered real passing evidence and no
-            // gate applies → safe to merge + flip Done.
+            // [WA-DEC] HARD GATE — the deterministic adversarial-rule layer runs
+            // here, AFTER acceptance/artifact/pending-deviation checks and BEFORE
+            // any merge or flip-to-Done. The Master is the被审计方; even though
+            // acceptance just reported AllPassed, we re-derive a MarkDoneRecord
+            // from the *real* evidence the acceptance engine gathered and run the
+            // proxy-signal / declared-vs-reality rules over it. Any Critical /
+            // red-line finding → refuse mark-done (never merge), with the
+            // machine-readable `AUDIT_CRITICAL:` prefix the master routes on
+            // (same style as ACCEPTANCE_REJECTED / PENDING_DEVIATION). No session,
+            // no timeout, no voting — a single rule seeing a red line is enough.
+            let record = record_from_results(p_item_id, &item_acceptance, &report.results);
+            let audit_findings = audit_mark_done(&record);
+            if has_blocking_finding(&audit_findings) {
+                let now = chrono::Utc::now().timestamp();
+                // Persist the findings to the audits ledger for the trail.
+                let _ = write_audit_findings(task_id, p_item_id, &audit_findings);
+                let summary: Vec<String> = audit_findings
+                    .iter()
+                    .filter(|f| {
+                        f.severity == Severity::Critical
+                            || crate::auditor::Category::red_lines()
+                                .iter()
+                                .any(|c| c.tag() == f.category)
+                    })
+                    .map(|f| format!("{}: {}", f.category, f.finding))
+                    .collect();
+                log_master_decision(&MasterDecision {
+                    task_id: task_id.to_string(),
+                    p_item_id: p_item_id.to_string(),
+                    kind: "mark-done".to_string(),
+                    timestamp: now,
+                    acceptance: acceptance_log.clone(),
+                    decision: Some("rejected".to_string()),
+                    deviations_recorded: recorded_ids,
+                    note: format!("adversarial audit hard gate blocked: {}", summary.join("; ")),
+                })
+                .ok();
+                return Err(format!(
+                    "AUDIT_CRITICAL: P-item {p_item_id} blocked by deterministic adversarial \
+                     audit — {} — not marked Done. Fix the red-line/critical finding(s) and \
+                     re-run mark-done",
+                    summary.join("; ")
+                ));
+            }
+
+            // Every declared criterion gathered real passing evidence, no gate
+            // applies, and the adversarial audit is clean → safe to merge + flip Done.
             let outcome = worktree::merge_back(&workspace, &task_branch, task_id, p_item_id)?;
             let outcome = if let MergeOutcome::Conflict { files, reason } = outcome {
                 let mediations = host.resolve_conflicts(&files).map_err(|e| {
@@ -1466,135 +1479,111 @@ mod tests {
         assert!(md.acceptance.iter().any(|a| a.contains("pass")));
     }
 
-    // ── [WA2] live adversarial-audit orchestration ──────────────────────────
+    // ── [WA-DEC] in-process deterministic adversarial audit + mark_done gate ──
 
-    /// Fake auditor launcher: instead of spawning `claude`, it immediately
-    /// writes the canned `AuditFinding[]` JSON the test wants each session to
-    /// "produce" to that session's output path. `per_session_json[i]` is the
-    /// JSON string for session i; `None` means "this session never writes"
-    /// (simulating a timeout / spawn miss).
-    struct FakeAuditorLauncher {
-        per_session_json: Vec<Option<String>>,
-    }
-    impl AuditorLauncher for FakeAuditorLauncher {
-        fn launch_auditor(
-            &self,
-            session_index: usize,
-            _spec: &AuditorSpawnSpec,
-            output_path: &std::path::Path,
-        ) -> Result<u32, String> {
-            if let Some(Some(json)) = self.per_session_json.get(session_index) {
-                if let Some(parent) = output_path.parent() {
-                    fs::create_dir_all(parent).unwrap();
-                }
-                fs::write(output_path, json).unwrap();
-            }
-            // Return a fake pid; the orchestrator only needs the file to appear.
-            Ok(100_000 + session_index as u32)
-        }
-    }
-
-    fn proxy_only_finding_json() -> String {
-        // A Critical no-proxy-signal finding, identical (same dedup_key) across
-        // sessions so 2 of them collude to confirm it.
-        r#"[{"severity":"critical","category":"no-proxy-signal","finding":"Master marked Done on proxy signals","evidence":"token count = 50000","reqAffected":["REQ-003","REQ-043"]}]"#.to_string()
-    }
-
-    /// [WA2] Two of three sessions report the same Critical → tally confirms it
-    /// (2-of-3) → verdict CRITICAL_CONFIRMED, and the confirmed findings are
-    /// written to the audits ledger. This is the "auditors collude on a real
-    /// red-line violation" path end to end through the orchestrator.
+    /// [WA-DEC] mark_done HARD GATE: a P-item whose acceptance audit would pass
+    /// (declared `Builds` and the workspace compiles) but whose evidence the
+    /// proxy-signal rule rejects must be blocked. We can't make a *passing*
+    /// acceptance produce proxy-only evidence directly, so this test exercises
+    /// the gate at the rule layer: the record built from clean Builds evidence is
+    /// clean (放行), while a proxy-only record is rejected. The gate predicate
+    /// (`has_blocking_finding`) is the exact one mark_done calls.
     #[test]
-    fn audit_pitem_two_of_three_critical_is_confirmed() {
+    fn wadec_gate_predicate_blocks_proxy_only_passes_clean() {
+        // proxy-only evidence → Critical no-proxy-signal → blocking.
+        let proxy = MarkDoneRecord {
+            p_item_id: "p1".into(),
+            declared: vec![AcceptanceCriterion::Builds],
+            evidence: vec![MarkDoneEvidence::TokenCount { tokens: 9000 }],
+        };
+        assert!(
+            has_blocking_finding(&audit_mark_done(&proxy)),
+            "proxy-only mark-done must be a blocking finding"
+        );
+        // real passing build evidence → no finding → not blocking.
+        let clean = MarkDoneRecord {
+            p_item_id: "p1".into(),
+            declared: vec![AcceptanceCriterion::Builds],
+            evidence: vec![MarkDoneEvidence::BuildExit { code: 0, tail: "ok".into() }],
+        };
+        assert!(
+            !has_blocking_finding(&audit_mark_done(&clean)),
+            "real passing evidence must not block"
+        );
+    }
+
+    /// [WA-DEC] End-to-end mark_done HARD GATE: a clean P-item (declared Builds +
+    /// TestsPass that both really pass) sails through the gate and is flipped
+    /// Done — proving the gate放行 a genuinely-clean mark-done. The proxy-only /
+    /// no-real-evidence reject path is already covered by
+    /// `req003_proxy_only_no_real_acceptance_is_rejected` (no acceptance criteria
+    /// → ACCEPTANCE_REJECTED before the gate) and the rule-layer test above.
+    #[test]
+    fn wadec_mark_done_clean_evidence_passes_gate() {
         let tmp_home = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp_home.path());
-        let launcher = FakeAuditorLauncher {
-            per_session_json: vec![
-                Some(proxy_only_finding_json()),
-                Some(proxy_only_finding_json()),
-                Some("[]".to_string()), // third auditor missed it
-            ],
-        };
-        let outcome = audit_pitem(
-            "t1",
+        let ws = compiling_workspace();
+        let item = pitem(
             "p1",
-            &launcher,
-            std::time::Duration::from_secs(5),
-        )
-        .unwrap();
-        assert_eq!(outcome.verdict, AuditVerdict::CriticalConfirmed(1));
-        assert_eq!(outcome.verdict.verdict_line(), "AUDIT_VERDICT: CRITICAL_CONFIRMED 1");
-        assert_eq!(outcome.confirmed.len(), 1);
-        assert_eq!(outcome.confirmed[0].finding.category, "no-proxy-signal");
-        assert_eq!(outcome.confirmed[0].votes, 2);
-        // The confirmed findings were persisted to the audits ledger.
-        assert!(outcome.written_to.exists(), "audit ledger file must be written");
-        let written = fs::read_to_string(&outcome.written_to).unwrap();
-        assert!(written.contains("no-proxy-signal"));
+            vec![AcceptanceCriterion::Builds, AcceptanceCriterion::TestsPass("cargo test t_ok".into())],
+            vec![ArtifactKind::TestOutput],
+            false,
+        );
+        write_task("t1", ws.path(), item);
+        let host = MockHost { workspace: ws.path().to_path_buf() };
+        // Real passing build+test evidence → audit_mark_done clean → gate放行.
+        let outcome = mark_done("t1", "p1", &ok_summary(), &host).unwrap();
+        assert_eq!(outcome, MergeOutcome::NoChanges);
+        assert_eq!(get_task("t1").unwrap().plan.get("p1").unwrap().status, PItemStatus::Done);
     }
 
-    /// [WA2] All three sessions report `[]` (clean) → verdict CLEAN, ledger
-    /// written with an empty confirmed list.
+    /// [WA-DEC] In-process `audit_pitem` read-only preview: a P-item with declared
+    /// criteria but NO persisted acceptance results → record has no real evidence
+    /// → the proxy-signal red line fires → verdict CRITICAL_CONFIRMED, findings
+    /// written to the audits ledger. No session, no timeout, no voting.
     #[test]
-    fn audit_pitem_all_clean_is_clean() {
+    fn wadec_audit_pitem_no_evidence_is_critical() {
         let tmp_home = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp_home.path());
-        let launcher = FakeAuditorLauncher {
-            per_session_json: vec![
-                Some("[]".to_string()),
-                Some("[]".to_string()),
-                Some("[]".to_string()),
-            ],
-        };
-        let outcome = audit_pitem(
-            "t1",
-            "p1",
-            &launcher,
-            std::time::Duration::from_secs(5),
-        )
-        .unwrap();
-        assert_eq!(outcome.verdict, AuditVerdict::Clean);
-        assert_eq!(outcome.verdict.verdict_line(), "AUDIT_VERDICT: CLEAN");
-        assert!(outcome.confirmed.is_empty());
-        assert!(outcome.written_to.exists());
-    }
-
-    /// [WA2] Spec red line: "超时按失败处理不能假装通过". When a majority of
-    /// auditor sessions never deliver (timeout / spawn miss), the verdict MUST
-    /// be CRITICAL_CONFIRMED (a confirmed `auditor-timeout`), NOT CLEAN. Here
-    /// only one session reports clean; the other two never write, so a
-    /// SHORT timeout fires and the two misses collude into a Critical timeout.
-    #[test]
-    fn audit_pitem_timeout_is_failure_not_silent_pass() {
-        let tmp_home = TempDir::new().unwrap();
-        let _o = FleetHomeOverride::new(tmp_home.path());
-        let launcher = FakeAuditorLauncher {
-            per_session_json: vec![
-                Some("[]".to_string()), // session 0 reports clean
-                None,                   // session 1 never delivers
-                None,                   // session 2 never delivers
-            ],
-        };
-        // Short timeout: the two missing sessions hit the deadline fast.
-        let outcome = audit_pitem(
-            "t1",
-            "p1",
-            &launcher,
-            std::time::Duration::from_millis(300),
-        )
-        .unwrap();
-        // 2 of 3 sessions failed → a confirmed Critical auditor-timeout.
+        let ws = compiling_workspace();
+        let item = pitem("p1", vec![AcceptanceCriterion::Builds], vec![ArtifactKind::FileList], false);
+        write_task("t1", ws.path(), item);
+        // No acceptance::persist_results call → load_results is empty → proxy-only.
+        let outcome = audit_pitem("t1", "p1").unwrap();
         assert!(
             matches!(outcome.verdict, AuditVerdict::CriticalConfirmed(n) if n >= 1),
-            "majority timeout must be CRITICAL_CONFIRMED, got {:?}",
+            "no real evidence must be CRITICAL_CONFIRMED, got {:?}",
             outcome.verdict
         );
-        assert_ne!(outcome.verdict, AuditVerdict::Clean, "timeout must NOT pass");
-        assert!(
-            outcome.confirmed.iter().any(|c| c.finding.category == "auditor-timeout"),
-            "a non-responding quorum must surface auditor-timeout: {:?}",
-            outcome.confirmed
-        );
+        assert_eq!(outcome.verdict.verdict_line(), "AUDIT_VERDICT: CRITICAL_CONFIRMED 1");
+        assert!(outcome.findings.iter().any(|f| f.category == "no-proxy-signal"));
+        assert!(outcome.written_to.exists(), "audit ledger file must be written");
+    }
+
+    /// [WA-DEC] In-process `audit_pitem` CLEAN preview: declared Builds + a
+    /// persisted *passing* build result → record carries real BuildExit(0) →
+    /// audit clean → verdict CLEAN.
+    #[test]
+    fn wadec_audit_pitem_real_evidence_is_clean() {
+        let tmp_home = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(tmp_home.path());
+        let ws = compiling_workspace();
+        let item = pitem("p1", vec![AcceptanceCriterion::Builds], vec![ArtifactKind::FileList], false);
+        write_task("t1", ws.path(), item);
+        // Persist a real passing Builds result so load_results returns evidence.
+        let results = vec![AcceptanceCheckResult {
+            criterion: AcceptanceCriterion::Builds,
+            passed: true,
+            evidence: "cargo check exit 0".into(),
+            needs_human: false,
+            checked_at: chrono::Utc::now().timestamp(),
+        }];
+        acceptance::persist_results("t1", "p1", &results).unwrap();
+        let outcome = audit_pitem("t1", "p1").unwrap();
+        assert_eq!(outcome.verdict, AuditVerdict::Clean);
+        assert_eq!(outcome.verdict.verdict_line(), "AUDIT_VERDICT: CLEAN");
+        assert!(outcome.findings.is_empty());
+        assert!(outcome.written_to.exists());
     }
 
     /// [REQ-042] mark_failed writes a structured decision log entry.

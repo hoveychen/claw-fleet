@@ -549,33 +549,47 @@ mod tests {
         assert!(MASTER_SYSTEM_TEMPLATE.contains("共 8 个专用工具"));
     }
 
-    // ───────── [WA3] mandatory adversarial-audit step before mark-done ─────────
+    // ───────── [WA-DEC] mark-done's built-in deterministic adversarial gate ─────
 
     #[test]
-    fn audit_protocol_has_mandatory_audit_step_before_mark_done() {
-        // [WA3] The Acceptance Audit Protocol must carry an explicit step that
-        // requires `fleet task audit` before mark-done — skipping it is framed
-        // as a red-line-2 violation.
+    fn audit_protocol_describes_builtin_deterministic_gate() {
+        // [WA-DEC] The adversarial audit is no longer a separate mandatory CLI
+        // step — it is a deterministic rule gate built INTO mark-done. The
+        // protocol must say so, and must say the master need not call it
+        // separately.
         assert!(
             MASTER_SYSTEM_TEMPLATE.contains("**adversarial audit**"),
-            "protocol must name the adversarial-audit step"
+            "protocol must still name the adversarial-audit step"
         );
         assert!(
-            MASTER_SYSTEM_TEMPLATE.contains("fleet task audit"),
-            "protocol must instruct calling `fleet task audit`"
+            MASTER_SYSTEM_TEMPLATE.contains("已经内建在 `mark-done` 里"),
+            "protocol must say the gate is built into mark-done"
         );
-        // The audit step must precede / gate mark-done explicitly.
         assert!(
-            MASTER_SYSTEM_TEMPLATE.contains("之前**必须**先跑独立对抗审计"),
-            "protocol must make audit mandatory before mark-done"
+            MASTER_SYSTEM_TEMPLATE.contains("你无需额外调用"),
+            "protocol must say the master need not invoke the audit separately"
+        );
+        // No-session / no-vote / no-timeout framing must be present.
+        assert!(
+            MASTER_SYSTEM_TEMPLATE.contains("无 session") && MASTER_SYSTEM_TEMPLATE.contains("无投票"),
+            "protocol must frame the gate as deterministic (no session / no vote)"
+        );
+        // The old quorum / mandatory-CLI wording must be gone.
+        assert!(
+            !MASTER_SYSTEM_TEMPLATE.contains("2-of-3"),
+            "the 2-of-3 voting language must be removed"
+        );
+        assert!(
+            !MASTER_SYSTEM_TEMPLATE.contains("3 个独立 Auditor 会话"),
+            "the 3-session quorum language must be removed"
         );
     }
 
     #[test]
-    fn audit_protocol_critical_confirmed_blocks_mark_done() {
-        // [WA3][DEC-007] A CRITICAL_CONFIRMED verdict must forbid mark-done and
-        // route to retry-worker-once then AskUserQuestion (never self-release).
-        // Pull the audit step body and assert the blocking + escalation wording.
+    fn audit_protocol_critical_auto_rejects_mark_done() {
+        // [WA-DEC][DEC-007] A critical / red-line finding must AUTO-reject
+        // mark-done (the gate returns AUDIT_CRITICAL) and route to
+        // retry-worker-once then AskUserQuestion (never self-release).
         let step = MASTER_SYSTEM_TEMPLATE
             .split("**adversarial audit**")
             .nth(1)
@@ -583,12 +597,10 @@ mod tests {
             .split("═══ Human Gate")
             .next()
             .unwrap_or("");
-        assert!(step.contains("CRITICAL_CONFIRMED"));
-        assert!(step.contains("CLEAN"));
-        assert!(
-            step.contains("绝对不许 mark-done"),
-            "a confirmed critical must hard-block mark-done"
-        );
+        assert!(step.contains("自动拒绝 mark-done"), "critical must auto-reject mark-done");
+        assert!(step.contains("AUDIT_CRITICAL"), "gate must surface the AUDIT_CRITICAL prefix");
+        assert!(step.contains("proxy 信号") || step.contains("代理信号"), "must mention proxy signals");
+        assert!(step.contains("红线"), "must mention the 10 red lines");
         assert!(step.contains("DEC-007"));
         assert!(step.contains("retry worker") || step.contains("retry"));
         assert!(step.contains("AskUserQuestion"));

@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
-use claw_fleet_task::auditor::AuditorSpawnSpec;
 use claw_fleet_task::master::MasterSpawnSpec;
 use claw_fleet_task::runner::{LlmMediator, Resolution, TaskLifecycleHost};
 use claw_fleet_task::task::Task;
@@ -38,32 +37,10 @@ pub struct SessionRecord {
 pub trait ProcessLauncher: Send + Sync {
     fn launch_master(&self, session_id: &str, spec: &MasterSpawnSpec) -> Result<u32, String>;
     fn launch_worker(&self, session_id: &str, spec: &WorkerSpawnSpec) -> Result<u32, String>;
-    /// [WA1] Spawn ONE independent adversarial Auditor session (methodology
-    /// pillar 4). The Auditor is *not* a worker: it edits no code, it reads the
-    /// Master decision log + the P-item's worker output/diff and emits a
-    /// structured `AuditFinding[]` JSON. Spawned with the compile-time-embedded
-    /// `AUDITOR_SYSTEM_PROMPT` carried on the spec (so its constitution cannot
-    /// be swapped at runtime) and on `AUDITOR_MODEL` (Opus-tier — an auditor
-    /// weaker than the Master it polices would be easy to fool).
-    ///
-    /// `output_path` is where this session must write its findings JSON; the
-    /// audit orchestrator (`actions::audit_pitem`) polls that file. The launcher
-    /// passes it both as an env var and in the spawn prompt so the session knows
-    /// exactly where to deposit its report.
-    ///
-    /// NOTE: the live driver for WA2 is the `fleet task audit` CLI subprocess
-    /// (which the master shells out to per WA3's template) using its own
-    /// `CliAuditorLauncher`. This in-fleet-task method exposes the same
-    /// capability through `LocalHost::audit_pitem` for a future in-process /
-    /// HTTP-route driver; today it is reached only through that method + tests,
-    /// hence the allow on the provided default-less trait method.
-    #[allow(dead_code)]
-    fn launch_auditor(
-        &self,
-        session_id: &str,
-        spec: &AuditorSpawnSpec,
-        output_path: &Path,
-    ) -> Result<u32, String>;
+    // [WA-DEC] `launch_auditor` removed: the adversarial audit is no longer an
+    // LLM session quorum. mark_done runs the deterministic rules in-process
+    // (see `actions::mark_done` / `actions::audit_pitem`), so the host no longer
+    // spawns auditor subprocesses.
 }
 
 /// Default launcher that shells out to the `claude` CLI on PATH. Mirrors the
@@ -109,48 +86,6 @@ impl ProcessLauncher for ClaudeLauncher {
             Some(&spec.task_id),
             Some(&spec.p_item_id),
             &[],
-        )
-    }
-
-    fn launch_auditor(
-        &self,
-        session_id: &str,
-        spec: &AuditorSpawnSpec,
-        output_path: &Path,
-    ) -> Result<u32, String> {
-        // [WA1] The prompt tells the auditor what to audit (the Master decision
-        // log on the spec) and *exactly where* to write its findings JSON. The
-        // output path is also passed as an env var (`FLEET_AUDITOR_OUTPUT`) so a
-        // session that loses the prompt thread can still find its drop location.
-        let prompt = format!(
-            "You are independent Auditor session #{idx} of a 3-session quorum for \
-             task `{task}`. Read the Master decision log at `{log}` (and any P-item \
-             worker output/diff it references), apply the red lines and weak-impl \
-             heuristics from your SYSTEM prompt, and write your `AuditFinding[]` JSON \
-             array to the file `{out}`. Write `[]` if you find nothing. Do NOT edit \
-             any code; you only observe and report. Stop when the file is written.",
-            idx = spec.session_index,
-            task = spec.task_id,
-            log = spec.master_log_path,
-            out = output_path.display(),
-        );
-        // The Auditor runs read-only against the Master log; cwd doesn't matter
-        // for its job, so we anchor it at the log's parent (the ~/.fleet dir).
-        let cwd = Path::new(&spec.master_log_path)
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| std::env::temp_dir());
-        spawn_claude(
-            session_id,
-            &cwd,
-            &prompt,
-            // The embedded auditor constitution travels on the spec.
-            Some(&spec.system_prompt),
-            Some(&spec.model),
-            "auditor",
-            Some(&spec.task_id),
-            None,
-            &[("FLEET_AUDITOR_OUTPUT", output_path.to_string_lossy().as_ref())],
         )
     }
 }
@@ -239,39 +174,6 @@ impl LocalHost {
 
     pub fn live_sessions(&self) -> Vec<SessionRecord> {
         self.sessions.lock().unwrap().values().cloned().collect()
-    }
-
-    /// [WA1+WA2] Run the live adversarial audit for a P-item in-process, driving
-    /// our `ProcessLauncher::launch_auditor` through `actions::audit_pitem`. This
-    /// is the in-fleet-task counterpart to the `fleet task audit` CLI command:
-    /// it lets the master (or the runtime) trigger the 3-session quorum audit
-    /// using the same launcher that spawns workers, so SIGSTOP/CONT/TERM and pid
-    /// tracking stay consistent. `timeout` is the auditor hard deadline (use
-    /// `actions::AUDITOR_HARD_TIMEOUT` for production).
-    #[allow(dead_code)]
-    pub fn audit_pitem(
-        &self,
-        task_id: &str,
-        p_item_id: &str,
-        timeout: std::time::Duration,
-    ) -> Result<claw_fleet_task::actions::AuditOutcome, String> {
-        // Adapt our `ProcessLauncher` (master/worker/auditor) to the narrower
-        // `AuditorLauncher` the orchestrator expects.
-        struct Adapter<'a>(&'a dyn ProcessLauncher);
-        impl claw_fleet_task::actions::AuditorLauncher for Adapter<'_> {
-            fn launch_auditor(
-                &self,
-                session_index: usize,
-                spec: &AuditorSpawnSpec,
-                output_path: &Path,
-            ) -> Result<u32, String> {
-                // Derive a stable session id per quorum member.
-                let session_id = format!("auditor-{}-{}", spec.task_id, session_index);
-                self.0.launch_auditor(&session_id, spec, output_path)
-            }
-        }
-        let adapter = Adapter(self.launcher.as_ref());
-        claw_fleet_task::actions::audit_pitem(task_id, p_item_id, &adapter, timeout)
     }
 
     /// Drop a tracked session — call after observing the subprocess exit.
@@ -389,7 +291,6 @@ mod tests {
     struct SleepLauncher {
         master_calls: AtomicU32,
         worker_calls: AtomicU32,
-        auditor_calls: AtomicU32,
         children: Mutex<Vec<std::process::Child>>,
     }
 
@@ -398,7 +299,6 @@ mod tests {
             Self {
                 master_calls: AtomicU32::new(0),
                 worker_calls: AtomicU32::new(0),
-                auditor_calls: AtomicU32::new(0),
                 children: Mutex::new(Vec::new()),
             }
         }
@@ -461,15 +361,6 @@ mod tests {
             _spec: &WorkerSpawnSpec,
         ) -> Result<u32, String> {
             self.worker_calls.fetch_add(1, Ordering::SeqCst);
-            self.spawn_sleeper()
-        }
-        fn launch_auditor(
-            &self,
-            _session_id: &str,
-            _spec: &AuditorSpawnSpec,
-            _output_path: &Path,
-        ) -> Result<u32, String> {
-            self.auditor_calls.fetch_add(1, Ordering::SeqCst);
             self.spawn_sleeper()
         }
     }
@@ -619,40 +510,6 @@ mod tests {
             spec: &WorkerSpawnSpec,
         ) -> Result<u32, String> {
             self.0.launch_worker(session_id, spec)
-        }
-        fn launch_auditor(
-            &self,
-            session_id: &str,
-            spec: &AuditorSpawnSpec,
-            output_path: &Path,
-        ) -> Result<u32, String> {
-            self.0.launch_auditor(session_id, spec, output_path)
-        }
-    }
-
-    /// [WA1] `launch_auditor` is invoked and spawns a real (sleeping) pid — the
-    /// ProcessLauncher contract now covers the adversarial Auditor session, not
-    /// just master/worker. We call it directly on the launcher (LocalHost has no
-    /// auditor-enqueue method; the audit orchestrator in `actions::audit_pitem`
-    /// drives the launcher itself).
-    #[test]
-    fn launch_auditor_spawns_a_tracked_pid() {
-        use claw_fleet_task::auditor::auditor_quorum_specs;
-        let launcher = SleepLauncher::new();
-        let specs = auditor_quorum_specs("t-aud", "/tmp/master-decisions.jsonl");
-        let out = std::env::temp_dir().join("wa1_audit_out_0.json");
-        let pid = launcher
-            .launch_auditor("aud-sid-0", &specs[0], &out)
-            .unwrap();
-        assert!(pid_alive(pid), "launch_auditor must spawn a live process");
-        assert_eq!(
-            launcher.auditor_calls.load(Ordering::SeqCst),
-            1,
-            "launch_auditor must be invoked exactly once"
-        );
-        // cleanup (Drop kills children too, but be explicit).
-        unsafe {
-            libc::kill(pid as libc::pid_t, libc::SIGTERM);
         }
     }
 }
