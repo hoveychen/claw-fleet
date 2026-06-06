@@ -49,6 +49,11 @@ pub struct SidecarCall {
     pub fingerprint: String,
     #[serde(rename = "promptLen")]
     pub prompt_len: usize,
+    /// First execution's full resolved prompt as a readable template
+    /// (interpolation points rendered as "…"), truncated for display. `None`
+    /// when the call had no string prompt.
+    #[serde(rename = "promptResolved", default)]
+    pub prompt_resolved: Option<String>,
 }
 
 /// Parsed harness output for one script.
@@ -197,14 +202,18 @@ fn run_node(harness: &Path, script: &Path, args: Option<&str>) -> Result<Sidecar
         .map_err(|e| SidecarError::BadOutput(format!("{e}; head={:?}", out.chars().take(80).collect::<String>())))
 }
 
+/// One process-wide lock serializing every test that reads/writes the global
+/// `FLEET_NODE_BIN` env var. It MUST be shared across modules (workflow_sidecar
+/// AND workflow) — separate per-module mutexes don't serialize a global, so a
+/// `workflow` test setting `/bin/false` would race a `workflow_sidecar` test
+/// reading `node` (and vice versa). Crate-visible so both test modules use it.
+#[cfg(test)]
+pub(crate) static NODE_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    /// Serializes tests that read/write the `FLEET_NODE_BIN` env var so cargo's
-    /// parallel runner can't let one test's override bleed into another.
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
+    use super::NODE_ENV_LOCK as ENV_LOCK;
 
     /// Probe whether `node` is runnable in this environment; tests that need it
     /// skip (return early) when absent so CI without node still passes.
@@ -235,7 +244,7 @@ return out
 
     #[test]
     fn extracts_static_parallel_then_single() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if !node_available() {
             eprintln!("skipping: node not available");
             return;
@@ -260,11 +269,35 @@ return out
         assert_eq!(synth.phase.as_deref(), Some("Synthesize"));
         assert_eq!(synth.label.as_deref(), Some("synthesize"));
         assert_eq!(synth.fingerprint, "Synthesize the findings: ");
+
+        // Display prompt: full resolved template. The probe's only interpolation
+        // (a.key) is literal data, so it fully resolves (no ellipsis); the synth
+        // interpolates a magic agent result, so its point renders as "…".
+        let probe_pr = probe
+            .prompt_resolved
+            .as_deref()
+            .expect("probe carries a resolved prompt");
+        assert!(
+            probe_pr.starts_with("Investigate aspect "),
+            "resolved head: {probe_pr:?}"
+        );
+        let synth_pr = synth
+            .prompt_resolved
+            .as_deref()
+            .expect("synth carries a resolved prompt");
+        assert!(
+            synth_pr.starts_with("Synthesize the findings: "),
+            "synth resolved head: {synth_pr:?}"
+        );
+        assert!(
+            synth_pr.contains('…'),
+            "magic interpolation rendered as ellipsis: {synth_pr:?}"
+        );
     }
 
     #[test]
     fn node_not_found_is_typed() {
-        let _g = ENV_LOCK.lock().unwrap();
+        let _g = ENV_LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         // An override that can't be a real binary → NodeNotFound, never a panic.
         std::env::set_var("FLEET_NODE_BIN", "/nonexistent/definitely-not-node-xyz");
         let r = extract(VIZ_PROBE, None);
