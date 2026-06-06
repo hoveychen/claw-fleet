@@ -60,3 +60,10 @@
 
 - **DEC-012** | **REQ-013 的 mark-done 侧校验下放 P9**：P6 实现了 acceptance 验证引擎（REQ-006/011/050，157 测试绿），但 REQ-013 要求的 output_summary 长度（50–200 字）+ artifact_kind 必选校验属于 mark-done API（actions.rs），不在 acceptance 引擎职责内 → 显式归入 P9。P6 已加 output_summary 字段与 [REQ-013] 锚点，P9 接校验逻辑。
 - **DEC-013（流程修正，非代码）** | **共享 worktree 下 auditor 的"scope violation"假阳性**：P6/P8 并行共用同一 prd worktree，P8 auditor 跑非范围 `git diff` 看到 P6 的 acceptance.rs 误判为"P8 越界 644 行"。master 已自查证实：改动文件 = P6∪P8 touches 并集，acceptance.rs(644)/deviation_ledger.rs(455) 各自完整、两 mod 各注册无覆盖，无越界无 clobber。与 wave1-P3 同款。**后续波次：auditor 改用 master 预先算好的 scoped diff，禁跑非范围 diff。**
+
+## Wave 3 执行后修正（2026-06-06）
+
+- **DEC-014（架构 smell，记录待后续）** | **crate 依赖方向反常 + deviation_ledger 放错 crate**：`claw-fleet-core` 依赖 `claw-fleet-task`（Cargo.toml:29），导致 P8 放在 core 的 `deviation_ledger.rs` 无法被 task 侧的 P9 mark_done 直接 import（会成环）。P9 因此在 actions.rs 镜像了 schema-identical 的 DeviationEntry，写同一 `~/.fleet/deviations.jsonl`，core 的 read_deviations() 与 P9 写入无损兼容。**功能正确但有重复**。后续可选清理：把 deviation_ledger 下沉到一个两 crate 都依赖的更底层 crate，消除镜像。不阻断本次合并。
+- **DEC-015** | **P15 手写 fleet.yaml 解析器**：claw-fleet-task 的 Cargo.toml（在 P15 touches 外）无 YAML 后端，P15 写了针对 REQ-047 schema 的行式解析器（拒绝不认识的形状而非静默丢弃）。已声明。后续若要全 YAML 兼容需单独加 serde_yaml 依赖。
+- **DEC-016** | **master-decisions.jsonl 新增**：P9 的结构化 master 决策日志写 `~/.fleet/master-decisions.jsonl`（claw-fleet-task 原无结构化日志设施）。best-effort，失败不阻断决策。
+- Wave 3 三项（P9/P10/P15）对抗审计全部 verdict=pass、build_claim 可信；REQ-013（P9）/REQ-003/004 行为测试（P9，DEC-010）已补齐。
