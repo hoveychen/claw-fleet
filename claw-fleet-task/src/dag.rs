@@ -65,6 +65,7 @@ where
 
 /// `Some(path)` if a cycle exists, where `path` walks one cycle witness with
 /// the closing node appended (so `path[0] == path[last]`). `None` if acyclic.
+// [REQ-002] Acyclicity primitive backing `DagPlan::validate`'s no-cycle gate.
 pub fn find_cycle<N, F>(nodes: &[N], deps_of: F) -> Option<Vec<N>>
 where
     N: Clone + Eq + Hash,

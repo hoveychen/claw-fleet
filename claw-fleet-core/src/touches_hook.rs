@@ -17,6 +17,21 @@
 //! This module is pure decision + file-write. The hook *handler binary*
 //! lives in `fleet-cli` as a hidden subcommand and the Tauri install path is
 //! in `claw-fleet-desktop`.
+//!
+//! ## Scope boundary — DEC-006 (Read is NOT intercepted) — [REQ-005] [REQ-036]
+//!
+//! This touches-boundary enforcement applies **only to the `Edit` and `Write`
+//! tool calls** (mutation of the worktree). `Read` (and other read-only tool
+//! calls — Grep / Glob / `cat`-style Bash) are deliberately NOT intercepted
+//! and NOT subject to the `touches` allow-list: a worker may freely read any
+//! file in the repo to understand context, only its *writes* are confined to
+//! the declared `touches`. This is a ratified product decision (DEC-006), not
+//! an oversight — do not "tighten" this to cover Read without re-opening that
+//! decision, because read-confinement would break legitimate cross-file
+//! reasoning (e.g. reading a sibling module to mirror its API). The hook
+//! handler binary in `fleet-cli` is responsible for only dispatching `Edit`/
+//! `Write` payloads into [`check_path_against_touches`]; this module never
+//! sees a `Read` event by design.
 
 use std::path::{Path, PathBuf};
 
@@ -33,7 +48,9 @@ pub enum TouchesDecision {
     /// any edit would be a bug we still want surfaced to master).
     Allow,
     /// Target path is **not** in `touches`. The supervisor should
-    /// SIGSTOP the worker and notify master.
+    /// SIGSTOP the worker and notify master, which then chooses one of three
+    /// resolutions — extend `touches`, reject the edit, or escalate to the
+    /// user. [REQ-036]
     Block {
         attempted_path: PathBuf,
         declared: Vec<PathBuf>,
@@ -50,6 +67,11 @@ pub enum TouchesDecision {
 /// the agent's tool call has the full path. Worse to false-positive (block
 /// legitimate edit, force user round-trip) than false-negative (silently
 /// drift; master will still catch via acceptance audit).
+///
+/// This is the runtime boundary check invoked for every `Edit`/`Write` tool
+/// call ([REQ-005]); an out-of-range path returns [`TouchesDecision::Block`],
+/// which the hook handler turns into a [`record_violation`] marker + worker
+/// SIGSTOP ([REQ-036]). `Read` calls never reach this function (DEC-006).
 pub fn check_path_against_touches(
     attempted_path: &Path,
     declared_touches: &[PathBuf],
@@ -117,7 +139,9 @@ fn normalise(p: &Path) -> PathBuf {
     out
 }
 
-/// Persisted marker file the supervisor polls.
+/// Persisted marker file the supervisor polls. One marker per out-of-`touches`
+/// edit attempt; the append-only `~/.fleet/touches-violations/` log of these is
+/// the physical carrier of the touches-violation deviation ledger. [REQ-009]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TouchesViolationMarker {
@@ -139,25 +163,47 @@ pub fn violations_dir() -> Result<PathBuf, String> {
         .ok_or_else(|| "could not resolve fleet home dir".to_string())
 }
 
-/// Persist a violation marker. Returns the file path written.
+/// Persist a violation marker. Returns the file path written. [REQ-009]
+///
+/// Append-only semantics: every call produces a **uniquely named** file — the
+/// name carries a random uuid segment in addition to `task.p_item.recorded_at`
+/// so two violations recorded within the same wall-clock second (same
+/// task/p-item) never collide and never overwrite an earlier marker. The write
+/// itself is atomic: we serialize to a sibling `.<uuid>.tmp` file then
+/// `rename` it into place (atomic on the same filesystem), so the supervisor's
+/// `drain_violations` reader never observes a half-written JSON. Any I/O
+/// failure is surfaced as an `Err(String)` — this function never panics, so a
+/// transient disk error degrades to a logged error at the call site rather
+/// than killing the hook handler.
 pub fn record_violation(marker: &TouchesViolationMarker) -> Result<PathBuf, String> {
     let dir = violations_dir()?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir violations dir: {e}"))?;
+    // Unique, non-colliding filename: a uuid segment guarantees no overwrite
+    // even when recorded_at (1s granularity) and task/p-item ids repeat.
+    let unique = uuid::Uuid::new_v4().simple().to_string();
     let filename = format!(
-        "{}.{}.{}.json",
-        marker.task_id,
-        marker.p_item_id,
-        marker.recorded_at
+        "{}.{}.{}.{}.json",
+        marker.task_id, marker.p_item_id, marker.recorded_at, unique
     );
-    let path = dir.join(filename);
+    let path = dir.join(&filename);
     let json = serde_json::to_string_pretty(marker).map_err(|e| format!("serialize: {e}"))?;
-    std::fs::write(&path, json).map_err(|e| format!("write marker: {e}"))?;
+    // Atomic write: temp-then-rename so a polling drain never reads a partial
+    // file. Temp lives in the same dir to keep the rename on one filesystem.
+    let tmp_path = dir.join(format!(".{unique}.tmp"));
+    std::fs::write(&tmp_path, &json).map_err(|e| format!("write marker tmp: {e}"))?;
+    std::fs::rename(&tmp_path, &path).map_err(|e| {
+        // Best-effort cleanup of the orphaned temp; ignore its error.
+        let _ = std::fs::remove_file(&tmp_path);
+        format!("rename marker into place: {e}")
+    })?;
     Ok(path)
 }
 
 /// Read & remove every pending violation marker. Returns them in
 /// timestamp order (oldest first) so the supervisor can replay them into
-/// the master in arrival order.
+/// the master in arrival order. This is the supervisor's periodic drain of the
+/// append-only violation log — the only operation permitted to delete markers
+/// (the recorder never overwrites or deletes). [REQ-009]
 pub fn drain_violations() -> Result<Vec<TouchesViolationMarker>, String> {
     let Ok(dir) = violations_dir() else { return Ok(vec![]) };
     if !dir.exists() {
@@ -311,6 +357,102 @@ mod tests {
         let _g = crate::session::fleet_home_lock();
         let tmp = TempDir::new().unwrap();
         let _override = FleetHomeOverride::new(tmp.path());
+        assert!(drain_violations().unwrap().is_empty());
+    }
+
+    // [REQ-005] acceptance: touches=['src/foo/'], attempt to write src/bar/ → block.
+    #[test]
+    fn req005_write_outside_declared_subtree_is_blocked() {
+        let d = check_path_against_touches(
+            Path::new("src/bar/thing.rs"),
+            &[pb("src/foo/")],
+        );
+        match d {
+            TouchesDecision::Block { attempted_path, declared } => {
+                assert_eq!(attempted_path, pb("src/bar/thing.rs"));
+                assert_eq!(declared, vec![pb("src/foo/")]);
+            }
+            _ => panic!("write to src/bar/ must be blocked when touches=['src/foo/']"),
+        }
+    }
+
+    // [REQ-036] acceptance: touches=['src/'], attempt to edit 'test/' → violation
+    // recorded (Block decision, then record_violation persists a marker the
+    // supervisor can drain to drive its extend/reject/escalate decision).
+    #[test]
+    fn req036_edit_outside_touches_records_violation_marker() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(tmp.path());
+
+        let decision = check_path_against_touches(
+            Path::new("test/integration.rs"),
+            &[pb("src/")],
+        );
+        let TouchesDecision::Block { attempted_path, declared } = decision else {
+            panic!("editing test/ must be blocked when touches=['src/']");
+        };
+
+        // The hook handler turns a Block into a persisted marker.
+        let marker = TouchesViolationMarker {
+            task_id: "task-x".into(),
+            p_item_id: "p3".into(),
+            attempted_path,
+            declared_touches: declared,
+            worker_session_id: Some("sess-x".into()),
+            recorded_at: 100,
+        };
+        let written = record_violation(&marker).unwrap();
+        assert!(written.exists(), "marker file must be persisted");
+
+        let drained = drain_violations().unwrap();
+        assert_eq!(drained.len(), 1);
+        assert_eq!(drained[0].attempted_path, pb("test/integration.rs"));
+        assert_eq!(drained[0].declared_touches, vec![pb("src/")]);
+    }
+
+    // [REQ-009] acceptance: write 10 violations, drain returns 10 in
+    // recorded_at order. Includes same-second / same-task collisions to prove
+    // unique-naming (no overwrite) holds even when task/p-item/recorded_at
+    // all repeat.
+    #[test]
+    fn req009_ten_violations_drain_ordered_no_overwrite() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = TempDir::new().unwrap();
+        let _override = FleetHomeOverride::new(tmp.path());
+
+        for i in 0..10i64 {
+            let marker = TouchesViolationMarker {
+                task_id: "t".into(),
+                p_item_id: "p".into(),
+                // Two markers share recorded_at=5 to force a same-second
+                // collision on the (task,p_item,recorded_at) key.
+                attempted_path: pb(&format!("src/v{i}.rs")),
+                declared_touches: vec![pb("src/allowed.rs")],
+                worker_session_id: None,
+                recorded_at: if i == 9 { 5 } else { i },
+            };
+            record_violation(&marker).unwrap();
+        }
+
+        // No marker overwrote another: all 10 files survive on disk.
+        let dir = violations_dir().unwrap();
+        let json_count = std::fs::read_dir(&dir)
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().and_then(|s| s.to_str()) == Some("json"))
+            .count();
+        assert_eq!(json_count, 10, "all 10 markers must persist (no overwrite)");
+
+        let drained = drain_violations().unwrap();
+        assert_eq!(drained.len(), 10, "drain returns all 10");
+        // Ordered by recorded_at ascending (oldest first).
+        let mut prev = i64::MIN;
+        for m in &drained {
+            assert!(m.recorded_at >= prev, "drain must be recorded_at-ordered");
+            prev = m.recorded_at;
+        }
+        // Drained dir is now empty.
         assert!(drain_violations().unwrap().is_empty());
     }
 }

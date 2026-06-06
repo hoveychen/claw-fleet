@@ -1,0 +1,356 @@
+# Fleet Tasks — Spec-Fidelity REQ Registry
+# 自动派生 (workflow wf_e1ca5630-eb9), 待老板 review。
+# triage 三标: source(design-stated|inferred) / confidence / blast_radius
+# 优先 review: source=inferred 或 blast_radius=high
+# 共 50 条
+requirements:
+  - id: REQ-001
+    description: "P-item 数据结构支持 9 个原子字段：id, desc, depends_on, touches, resources, estimate_secs, acceptance, artifacts, skippable, human_gate, status"
+    acceptance: "结构体定义包含全部 9 字段 + 各字段有 Serialize/Deserialize; 所有字段无 Option 包装（必填）; 单元测试验证字段序列化/反序列化往返一致"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/pitem.rs:18~50 已实现。这是整个调度系统的基础数据模型。P-item 本质是 DAG 节点的规范表示。"
+  - id: REQ-002
+    description: "DagPlan 容器实现不可变 HashMap<PItemId, PItem> 及其访问器，支持确定性 node_ids() 迭代"
+    acceptance: "get/get_mut/len 三个基础方法存在；node_ids() 按字典序或创建顺序返回，测试验证确定性；validate() 检查引用完整性和无环性"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/plan.rs:17~108。validate() 是追溯矩阵的第一关卡，用于预运行完整性检查。"
+  - id: REQ-003
+    description: "Acceptance Audit Protocol 禁止使用代理信号（worker 自报、token 消耗、diff 大小、耗时）来判定 P-item 完成状态"
+    acceptance: "Master SYSTEM template 明确列举 4 个禁止信号及其理由（§5.7 行 39~43）; mark-done 前代码显式枚举待检查的 acceptance criteria; 单元测试用仅含代理信号的 mock 输入→must fail，用 builds-pass→must succeed"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "REQ-043 衍生自此。这是方法论第 4 支柱（对抗审计）的核心红线。违反此 REQ 必须记录到偏差账本。"
+  - id: REQ-004
+    description: "Master 必须执行完整的 Acceptance Audit Protocol：枚举声明的验收条件、逐个查证、禁止代理信号、不确定时返回 worker 或问用户"
+    acceptance: "SYSTEM template 定义 4-step 流程（unpack→find evidence→forbid proxies→escalate）; 每个 P-item 状态转移到 Done 前，trace log 显示审计步骤执行;  unit test: TestsPass 条件缺失→mark-done 拒绝; HumanReview 条件→AskUserQuestion"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "Master 的核心职责之一（§5.2, decision 6）。可追溯矩阵应关联到 src/master/system_template.rs 中的具体审计实现。"
+  - id: REQ-005
+    description: "P-item.touches 字段强制声明该 P-item 被编辑的所有相对路径，运行时 Edit/Write 工具调用被 hook 拦截并检查是否在 touches 范围内"
+    acceptance: "Touches 作为 Vec<PathBuf>; 每个 Edit/Write 调用触发 check_path_against_touches(); 路径不在范围→SIGSTOP worker 并记录 TouchesViolationMarker; unit test: touches=['src/foo/']，试图写 src/bar/→must block"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-core/src/touches_hook.rs 已实现 hook 和 marker 记录。这是边界执行的核心，防止 P-item 意外越界。偏差账本应记录每个 violation。"
+  - id: REQ-006
+    description: "当 Master 决定 mark-done 时，必须显式检查 P-item.acceptance 中列举的每一个验收条件，按声明顺序逐个查证证据"
+    acceptance: "acceptance criteria enum variants (Builds, TestsPass, HumanReview, Custom) 各有 1+ acceptance criteria; mark-done 代码显式遍历并 check each; 若某条不通过→返回 Failed 或问用户; test: 声明 [Builds, TestsPass]，仅 Builds 通过→mark-done 拒绝"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "这是审计协议的执行部分。Master 必须在代码中显式枚举，不能隐含跳过。"
+  - id: REQ-007
+    description: "DagPlan.propagate_skip() 必须记录每个被跳过的 P-item 的决策原因、时间戳和触发者，以供偏差账本追踪"
+    acceptance: "propagate_skip 返回的每个 skip 记录包含 (p_item_id, skip_reason, skipped_at_timestamp, skipped_by_session_id); 偏差账本可查询哪些 P-item 因 upstream 失败被自动跳过; test: 上游 Failed→downstream Skipped，查偏差账本能追踪原因"
+    source: inferred
+    confidence: medium
+    blast_radius: medium
+    notes: "claw-fleet-task/src/plan.rs:166~203 的 propagate_skip 缺失时间戳和追踪信息。这是方法论第 3 支柱（偏差账本）的缺陷。"
+  - id: REQ-008
+    description: "所有运行时的 P-item 状态转移（WaitDeps → Running, Running → Done|Failed|Skipped）必须记录时间戳和关联的 REQ 源头"
+    acceptance: "Task.json 或单独的 audit log 包含每个状态转移的 (p_item_id, from_status, to_status, timestamp, triggered_by_req_id); 用户可查询某 P-item 何时进入哪个状态及原因; test: dispatch_next_pitem 记录时间戳，mark_done 记录完成时刻"
+    source: inferred
+    confidence: medium
+    blast_radius: medium
+    notes: "方法论第 2 支柱（可追溯矩阵）的实现。当前代码缺失 REQ 源头关联。"
+  - id: REQ-009
+    description: "TouchesViolationMarker append-only 日志必须在 ~/.fleet/touches-violations/ 中原子性写入，不允许覆盖或删除，仅允许 supervisor 定期 drain"
+    acceptance: "record_violation() 写入唯一命名的 JSON 文件（无覆盖）; drain_violations() 按 recorded_at 排序返回所有条目然后删除; 若写入失败→记录 error 但不 panic; test: 写 10 个 violation，drain 返回 10 个且有序"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "claw-fleet-core/src/touches_hook.rs:134~186 已实现。这是偏差账本的物理载体之一。"
+  - id: REQ-010
+    description: "Master 红线清单共 10 条，编译期嵌入 SYSTEM template 中，包括：无直接代码编辑、无跳过审计、无 pause/resume/clear、无代理信号、无直接 git、无 worker 会话读写、无改 fleet 配置、无创建新 task、无改 worker 文件、merge 仅通过 P-merge"
+    acceptance: "include_str!() 嵌入 system_template.md 中明确列举 10 条红线; 代码中有 10 个对应的 #[test] 验证每条红线被 template 提及; docstring 中说明每条的制裁（test fail/audit report）"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "这是 Master 安全边界的宪法级条款。claw-fleet-task/src/master/system_template.rs 是物理位置。Auditor 必须定期检查违反情况。"
+  - id: REQ-011
+    description: "Master 检查 P-item.human_gate 字段：若为 true，审计通过后必须进入 WaitHumanGate 状态，调用 AskUserQuestion，等用户回复后才 mark-done"
+    acceptance: "status=WaitHumanGate 存在于 PItemStatus enum; mark-done 前检查 human_gate 字段; test: human_gate=true→mark-done 返回 WaitHumanGate 状态，不直接 Done"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "用户权限边界（patch 9）。防止 Master 单方面标记完成。应与 AskUserQuestion 工具联动。"
+  - id: REQ-012
+    description: "P-item.acceptance 字段使用 enum 表示 4 种验证法：Builds、TestsPass(cmd)、HumanReview、Custom(rule)，Master 必须按声明顺序逐条检查"
+    acceptance: "enum AcceptanceCriterion { Builds, TestsPass(String), HumanReview, Custom(String) } 定义存在; pitem.rs 有 serialize/deserialize test; mark-done 遍历 acceptance[*] 并检查每一个; test: acceptance=[TestsPass('cargo test'), HumanReview]→检查两个都通过"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "pitem.rs:78~83 已有 enum 定义。这是可验证的验收标准的核心。"
+  - id: REQ-013
+    description: "Worker 必须在 P-item 完成后写入 output_summary，内容 50-200 字、标记为 artifact kind，供下游 P-item 的 Layer 3 context 注入"
+    acceptance: "output_summary field 存在于 mark-done API 参数; 字数检查：<50 warn，>200 truncate; artifact kind (FileList|GitDiff|TestOutput|ManualNote) 必选; test: 写 100 字 summary→layer3 能访问"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "方法论第 2 支柱（可追溯）的信息流。MVP（§5.6）要求。"
+  - id: REQ-014
+    description: "DagPlan.unblocked_items() 必须返回所有 status=WaitDeps 且其 depends_on 中所有 P-item 都已 terminal (Done|Failed|Skipped) 的节点"
+    acceptance: "算法：遍历 WaitDeps 节点，对每个 P-item，检查 depends_on 中所有 id 的状态; 未 terminal→留在 WaitDeps; 全 terminal→加入返回集; 返回集有序（按 node_ids）; test: 3 个节点 1←2, 1←3，1 Done 后解除对 2 的阻塞"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/plan.rs:113~130 已实现。这是调度器的核心原语。"
+  - id: REQ-015
+    description: "DagPlan.resource_conflicts() 必须检测所有竞争同一资源的 P-item 对，返回无重复的 ResourceConflict 集"
+    acceptance: "对每个 resource: [R1, R2]，找所有声明了 R 的 P-item; 组合所有对 (i,j) i<j; 去重; 返回 Vec<ResourceConflict> 有序（按 first_id, second_id）; test: P1[build], P2[build], P3[git]→返回 (P1,P2)"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/plan.rs:134~158。调度器用此判定是否能并发。"
+  - id: REQ-016
+    description: "WorkerSpawnSpec 必须包含 5 个字段：task_id, p_item_id, cwd, system_prompt, model，构成 worker subprocess 的完整规范"
+    acceptance: "struct WorkerSpawnSpec { task_id, p_item_id, cwd: PathBuf, system_prompt: String, model: String } 定义; 无 Option 字段（都必填）; Serialize/Deserialize 实现"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "claw-fleet-task/src/worker.rs:32~40。Worker 被这个 spec 唯一确定。"
+  - id: REQ-017
+    description: "compose_worker_system_prompt() 必须按顺序组装 3 层 context：Layer 1 (project constants ~8k)，Layer 2 (task description ~2k)，Layer 3 (P-item spec ~1-3k)，每层之间用清晰的 markdown 分隔符"
+    acceptance: "函数实现调用 compose_layer1 + compose_layer2 + compose_layer3 并按此顺序连接; 每层间有 '## Layer N: ...' 标题; 总长在 supervisor 可观察的 token 计数范围内; test: 调用 compose_worker_system_prompt 返回包含 3 个标题的字符串"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/worker.rs:72~79 已框架化。3 层结构是决策 11（缓存策略）的基础。"
+  - id: REQ-018
+    description: "Layer 1 必须包含项目常数（architecture.md 内容）和执行约束：P-item 仅可编辑 touches 声明的文件，违反触发 SIGSTOP，无手动 commit，worker 仅写 output_summary"
+    acceptance: "compose_layer1 输出包含 architecture.md 的 render_layer1_block 结果; 显式声明 3 条约束（touches-only, no commits, summary-only）; test: 约束文本出现在 system prompt 中"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/worker.rs:84~106。这是 worker 的行为规范的编译期绑定。"
+  - id: REQ-019
+    description: "Layer 2 必须包含 task 的 title、description、inbox materials (用 <untrusted_*> 包装)，以及 acceptance criteria 摘要"
+    acceptance: "compose_layer2 包含 Task.title, Task.description; 对每个 Material，渲染为 <untrusted_file>...</untrusted_file> 或 <untrusted_text>...</untrusted_text>; 列出 task 级的 acceptance criteria; test: 调用得到包含 <untrusted_*> 的字符串"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "claw-fleet-task/src/worker.rs:111~144。防止 prompt injection 通过 <untrusted_*> 标签。"
+  - id: REQ-020
+    description: "Layer 3 必须包含 P-item 的 desc, touches list, acceptance criteria, upstream dependencies 的 output_summary，并明确要求 worker 输出 output_summary"
+    acceptance: "compose_layer3 包含 P-item.desc, Vec<touches>, acceptance enum, 每个 depends_on 的 upstream P-item.output_summary; 最后有 '...write your output_summary to disk...' 指令; test: 调用返回包含 touches 文件列表和上游摘要的字符串"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/worker.rs:148~200。这是追溯性的关键信息流。"
+  - id: REQ-021
+    description: "Master 必须仅通过专用工具（dispatch/mark-done/mark-failed/update-plan）与 task 交互，不允许直接修改 task.json 或调用 git 命令"
+    acceptance: "SYSTEM template 中明确列举 7 个允许工具，显式禁止 git/edit/write/pause/resume/clear; 运行时检查：Auditor 扫描 Master 日志，验证无 subprocess 调用 git; test: 试图调用 git clone→SYSTEM prompt 拒绝（LLM 不执行）"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "红线 5 的具体化。Master 与 task 的接口必须经过 supervisor 宿主。"
+  - id: REQ-022
+    description: "Auditor 必须独立于 Master，定期检查 10 条红线的违反，并生成结构化的 violation report，投票式决策（3 个独立 Auditor 会话）"
+    acceptance: "Auditor agent 存在，system prompt 明确列举 10 条红线检查; 每 15 分钟或每个 master 决策后执行; 产生 JSON report {severity, category, finding, evidence, req_affected}; 3 个投票通过阈值为 2/3; test: mock master 违反红线→Auditor 报告 critical"
+    source: design-stated
+    confidence: medium
+    blast_radius: high
+    notes: "方法论第 4 支柱（对抗审计）。当前代码缺失 Auditor Agent。这是高优先级补充。"
+  - id: REQ-023
+    description: "需求注册表（req.json）必须存储所有 REQ-NNN 原子化条目，包括：id, title, description, acceptance_criteria, implementation_file, test_file, status, deviation_reason, deviation_approved_by"
+    acceptance: "req.json 存在于 ~/.fleet/registry/ 或 project 内; 每个 REQ 有至少 8 个字段; JSON schema 验证; 所有 implementation_file 都能 grep 出 [REQ-NNN] 标记; CI 脚本报告未实现的 REQ; test: 加载 req.json，遍历验证每个 REQ 有 test_file"
+    source: design-stated
+    confidence: medium
+    blast_radius: high
+    notes: "方法论第 1 支柱（需求注册表）的核心。当前代码无此物。需新建 registry/req.json 并完成映射。"
+  - id: REQ-024
+    description: "可追溯矩阵必须建立 REQ-NNN → src/file:line → test/func 的双向映射，CI 脚本自动验证覆盖率"
+    acceptance: "traceability.json 或 .md 包含表格：REQ | implementation | test | status; 代码中所有 implementation 都有 [REQ-NNN] 注释; grep -r '\\[REQ-' src/ 的结果与 req.json 的 id 列表相匹配（无孤立代码、无孤立 REQ）; CI: 若 [REQ-未实现] 数量 > threshold→fail"
+    source: design-stated
+    confidence: medium
+    blast_radius: high
+    notes: "方法论第 2 支柱（可追溯矩阵）。需建立 CI 检查脚本。"
+  - id: REQ-025
+    description: "偏差账本（deviations.jsonl）必须是 append-only 日志，记录每一个不符合 spec 的决策：id, date, affected_req, decision, rationale, risk_level, mitigation, approved_by, signed_off_at, status"
+    acceptance: "deviations.jsonl 存在; 每行一个 JSON 对象，按创建时间排序; 无追溯修改（只 append）; 每个条目有人工 approved_by 签名; 若 status != approved，master 应拒绝对应 P-item 的 done 操作; test: 记录一个 DEV 条目，verify no overwrite"
+    source: design-stated
+    confidence: medium
+    blast_radius: high
+    notes: "方法论第 3 支柱（偏差账本）。当前代码无此物。需新建 ~/.fleet/deviations.jsonl 并集成到 mark-done 逻辑。"
+  - id: REQ-026
+    description: "当 Worker 无法完全满足需求时，必须主动在 output_summary 中声明「简化」的原因、影响的 REQ，以便 Master 和 Auditor 记录到偏差账本"
+    acceptance: "output_summary 若包含 '简化声明' 或 '[DEVIATION]' 标记，Master 解析并创建 deviations.jsonl 条目; 条目包含 affected_req 列表和 mitigation; test: worker 输出含简化声明→check deviations.jsonl 有对应条目"
+    source: inferred
+    confidence: medium
+    blast_radius: medium
+    notes: "方法论的第 3 支柱的执行层。需在 worker 和 master 之间建立信号约定。"
+  - id: REQ-027
+    description: "Master 必须在 mark-done 前检查是否存在未批准的偏差（deviations.jsonl 中 status=pending），若有则询问用户是否继续"
+    acceptance: "mark-done 调用前查询 deviations.jsonl; 过滤 affected_req 包含该 P-item 相关 REQ 且 status != approved 的条目; 若找到→调用 AskUserQuestion 或返回 Failed; test: 添加 pending DEV→mark-done 停止"
+    source: inferred
+    confidence: medium
+    blast_radius: high
+    notes: "偏差账本的 enforcement 点。需在 mark-done 中增加检查。"
+  - id: REQ-028
+    description: "Auditor 必须检测「比 spec 弱」的实现模式：acceptance 强度下降、declared touches 范围缩小、dependency 链断开、resource 占用异常"
+    acceptance: "Auditor SYSTEM prompt 包含 4 个「弱」模式检测；每个模式有具体的 heuristic（如 TestsPass declared but output_summary 无提及）; 生成 weakness_report {pattern, evidence, req_affected}; 报告不建议修复，仅报告; test: mock 输出缺 TestsPass 证据→weakness report"
+    source: inferred
+    confidence: medium
+    blast_radius: medium
+    notes: "方法论第 4 支柱的关键延伸。当前 Auditor 缺失此逻辑。"
+  - id: REQ-029
+    description: "merge_back() 必须支持 3 种 outcome：FastForwarded (线性)、AutoMerged (git merge 成功)、Conflict (检出 ConflictSpec 等人工或 LLM 介入)"
+    acceptance: "MergeOutcome enum 有 3 个 variant; 返回值与实际 merge 结果匹配; Conflict case 包含 ConflictSpec vec; 无递归重试（每个 merge 最多一次 LLM mediation); test: 线性推进→FastForwarded, 并行改同文件→Conflict"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/worktree.rs:224~278。merge 的决定性逻辑。Conflict 应触发 LLM mediation。"
+  - id: REQ-030
+    description: "merge_mediator 必须对每个冲突文件调用 LLM，用固定 prompt 模板，要求输出 <resolved>...</resolved> 包装，拒绝含 conflict marker 的输出"
+    acceptance: "render_prompt 函数填充 MEDIATOR_PROMPT_TEMPLATE 并返回 LLM input; mediate_one 调用 LLM provider 并解析响应; extract_resolved 检查 <resolved> tags; 若发现 <<<< 或 ===== 或 >>>>→返回 MarkersLeftBehind error; test: 输入合法冲突→返回清洁 resolved content"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "claw-fleet-core/src/merge_mediator.rs:80~147 已框架化。MEDIATOR_PROMPT_TEMPLATE 是 spec，需精化。"
+  - id: REQ-031
+    description: "MergeMediator 的 MEDIATOR_PROMPT_TEMPLATE 必须包含明确指令：保留非冲突改动、favor THEIRS、不留 marker、用 <resolved> 包装"
+    acceptance: "template 包含英文指令（4 条以上），每条对应 1 个 heuristic; test case 验证：THEIRS 倾向（3-way merge 中用 theirs 解决），marker cleanup; test: LLM 倾向选择 THEIRS→verify resolve 内容来自 theirs 分支"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "claw-fleet-core/src/merge_mediator.rs:80~109 的 template 变量。决定了 merge 的可重复性和安全性。"
+  - id: REQ-032
+    description: "WorkerExecutor 在完成后必须运行 cargo check（Phase 2 patch 6 的 post-completion check），检查 touches 中涉及的 Rust crates，失败→记录但不自动 fail P-item"
+    acceptance: "run_post_completion_check() 走遍 touches，找 Cargo.toml，对每个 crate 运行 cargo check --package 并收集 stderr; 返回 PostCompletionCheck struct {ok, crate_results, combined_stderr}; 非 fatal（不改变 P-item 状态），但 Master 在 mark-done 后 review; test: touching Rust code→cargo check 运行，失败被记录"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "claw-fleet-task/src/worker.rs:262~325 已实现。这是对代码 P-item 的额外保障（patch 6）。"
+  - id: REQ-033
+    description: "Audit 模式文件（audit-patterns.json）必须包含至少 25 个预定义的 bash/python 审计规则，分为 critical/high/medium 三档，用 match_mode (Contains|CommandStart) 匹配"
+    acceptance: "audit-patterns.json 存在; patterns array 包含 >=25 个条目; 每个条目有 {level, tag, match_mode, patterns, descriptions}; level 为 critical/high/medium 之一; test: 加载规则，对样本 bash 命令分类（e.g. 'sudo rm -rf' → critical）"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "设计文档中未明确提及，但 audit-patterns.json 已存在且包含 170+ 行的规则集。这是 Auditor 对抗审计的基础。"
+  - id: REQ-034
+    description: "运行时 audit 事件必须被记录为 AuditEvent 结构，包含：session_id, workspace, agent_source, tool_name, command_summary, risk_level, risk_tags, timestamp，去重 key 为 session|timestamp|tool"
+    acceptance: "AuditEvent struct 定义包含 7+ 字段; dedup_key() 方法返回 session_id|timestamp|tool_name 的组合; 事件写入 audit.jsonl (append-only); test: 同一工具在同一秒调用 2 次→dedup_key 相同，UI 可去重通知"
+    source: inferred
+    confidence: medium
+    blast_radius: medium
+    notes: "当前代码缺失 AuditEvent 的统一结构。需定义并集成到 worker/master 的工具拦截层。"
+  - id: REQ-035
+    description: "User Audit Rules（白名单）必须删除或改为 require explicit master approval，不允许静默绕过 critical audit signals"
+    acceptance: "若保留白名单，每条白名单规则必须记录到 deviations.jsonl 并需人工签署; 或直接删除 UserAuditRules 模块; code review 验证无白名单 bypass critical 规则; test: sudo 命令白名单→仍被 Auditor 报告为 deferred 偏差"
+    source: inferred
+    confidence: high
+    blast_radius: high
+    notes: "方法论与当前设计有冲突。白名单削弱了独立审计的精神。需明确选择保留-需批准 或 删除。"
+  - id: REQ-036
+    description: "任何超出 P-item.touches 的文件修改尝试必须触发 TouchesViolationMarker 记录（via SIGSTOP hook），Master 决定：补充 touches、拒绝、升级"
+    acceptance: "Edit/Write tool hook 实现了 check_path_against_touches；若路径不在→record_violation; SIGSTOP worker 停止继续执行; 偏差账本可查询所有 touches violation; Master 事件处理 TouchesViolation，有 3 种选择（extend touches, reject, escalate）; test: touches=['src/'], 试编辑 'test/'→violation 记录"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-core/src/touches_hook.rs 已实现 marker 记录。master 决策逻辑需强化（当前仅记录，未决策）。"
+  - id: REQ-037
+    description: "Master 的 SYSTEM template 必须以 include_str!() 编译期嵌入，防止运行时篡改；开发环境可用 FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE 逃生口但仅 debug build"
+    acceptance: "claw-fleet-task/src/master/system_template.rs 使用 include_str!('system_template.md'); template_source() 检查 FLEET_MASTER_SYSTEM_TEMPLATE_OVERRIDE 仅在 cfg!(debug_assertions) 条件下; release build 无逃生口; test: debug 版本可覆盖，release 版本 ignore env"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/master/system_template.rs:177~194 已实现 template_source()。当前允许逃生口，需改为 debug-only。"
+  - id: REQ-038
+    description: "Worker 完成后必须写出 output_summary，格式为 50-200 字的文本，标记为 artifact kind (FileList|GitDiff|TestOutput|ManualNote)，供下游 P-item Layer 3 context 注入"
+    acceptance: "mark-done API 接受 output_summary 参数; 检查字数：<50 或 >200 警告但接受; 必须指定 artifact_kind; 下游 P-item 的 compose_layer3 包含 '依赖 <id> 的摘要：<summary>'；test: worker 输出 100 字摘要→downstream P-item 看到该摘要"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "claw-fleet-task/src/worker.rs:194~196 要求写 output summary。这是信息流的关键链接。"
+  - id: REQ-039
+    description: "任何 P-item 状态转移必须记录到持久化日志（task.json 内或单独 audit log），包含：timestamp, from_status, to_status, triggered_by (req_id|session_id|user_action)"
+    acceptance: "task.json 或 task_audit.jsonl 包含状态转移历史; 每条记录 (p_item_id, from, to, ts, trigger); 用户查询 P-item 历史→显示状态转移链; test: dispatch_next_pitem 后查历史，能看到 WaitDeps→Running 转移"
+    source: inferred
+    confidence: medium
+    blast_radius: medium
+    notes: "方法论第 2 支柱（可追溯）要求。当前代码仅在内存和 json 中存储状态，缺失时间戳和触发来源。"
+  - id: REQ-040
+    description: "provision() 必须为每个 P-item 创建 worktree isolation 环境，使用 git worktree add；merge_back() 和 reap() 管理生命周期"
+    acceptance: "provision(task_id, p_item_id) 调用 git worktree add; 若已存在→检查是否孤立（已完成但未清理）→可选清理; 返回 worktree 路径; merge_back() 执行 3-way merge; reap() 调用 git worktree remove; test: 两个 P-item 有独立 worktree，互不影响"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "claw-fleet-task/src/worktree.rs:56~111 已实现 provision。这是 V2 的核心特性，Phase 2 交付。"
+  - id: REQ-041
+    description: "fast_forward_merge 和 3-way merge 的过程中，所有 merge commits 必须包含识别信息（如 'fleet: merged P-item <id> from <worker_session>'），供 Auditor 追踪"
+    acceptance: "finish_merge_commit() 包含描述信息; merge commit msg 格式为 'fleet: merged <p_item_id> from session <sid> worker <worker_id>'; 用户 git log --oneline | grep fleet 能看到 fleet 的所有 merge; test: 调用 merge_back→Conflict→LLM mediation→new merge commit 包含标识"
+    source: inferred
+    confidence: medium
+    blast_radius: medium
+    notes: "claw-fleet-task/src/worktree.rs:398~433 的 finish_merge_commit。当前无标识信息。这对审计追踪至关重要。"
+  - id: REQ-042
+    description: "Master 必须记录每一个 dispatch_pitem 和 mark-done 的决策，包括决策时刻、affected P-item、acceptance 验证结果、偏差是否记录"
+    acceptance: "Master 运行日志（通过 Master session 的 SSE 事件或 trace file）包含 'dispatch P-item-<id> at <ts>', 'mark-done P-item-<id> acceptance=[Builds✓,TestsPass✓,...]'; 若有偏差→日志包含偏差 id; Auditor 可回放这些日志重现审计过程; test: 完整一个 task→Master log 包含所有决策事件"
+    source: inferred
+    confidence: medium
+    blast_radius: medium
+    notes: "方法论第 2 支柱（可追溯）的 Master 侧。当前 Master 日志可能不够结构化。需增强为 JSON event log。"
+  - id: REQ-043
+    description: "Auditor 必须检查每个 mark-done 的 acceptance criteria 是否真的被验证，禁止仅用 proxy signal（token count, elapsed time, worker self-report）通过验证"
+    acceptance: "Auditor 看 Master log 中的 mark-done 事件，查 acceptance criteria 列表; 反查 Master 是否有 'Builds passed'、'TestsPass cmd returned 0' 等实质证据; 若仅有 'token: 50000' 或 'time: 120s'→Auditor 报告 critical (REQ-003/004 违反); test: mock mark-done with only token evidence→Auditor rejects"
+    source: inferred
+    confidence: high
+    blast_radius: high
+    notes: "REQ-003 的 Auditor 执行版本。当前 Auditor 缺失此检查。这是独立审计的核心价值。"
+  - id: REQ-044
+    description: "所有 REQ-NNN 的实现必须在代码中用 [REQ-NNN] 注释标注，Auditor 用 grep 反向追踪实现与注册表的一致性"
+    acceptance: "代码中每个 REQ 的实现位置都有 // [REQ-NNN] 注释; grep -r '\\[REQ-' src/ 能找到所有实现; CI 脚本检查：代码中的 [REQ-NNN] 集合 == registry.json 中的 id 集合（无孤立代码、无孤立 REQ）; test: 加一个新的 [REQ-999]→CI 检查是否在 registry.json 中"
+    source: inferred
+    confidence: high
+    blast_radius: high
+    notes: "可追溯矩阵的基础设施。当前代码缺失此标注。这是自动化 REQ 覆盖率检查的前提。"
+  - id: REQ-045
+    description: "CI 流程必须在每次提交前运行 spec-fidelity 检查：验证 req.json integrity，检查覆盖率，检查偏差账本的批准状态，运行 Auditor 检查"
+    acceptance: "CI script check_spec_fidelity.sh 运行 3 个子检查：(1)req.json valid 且所有 REQ 有实现/test 或在 deviations.jsonl 的 approved 条目中；(2) code annotations [REQ-NNN] 与 registry 一致；(3) Auditor 检查的 critical finding 数量为 0; fail→push 被拒; test: 提交 pending deviations→CI fail"
+    source: inferred
+    confidence: medium
+    blast_radius: high
+    notes: "方法论闭环的最后一关。需新建 CI 脚本。当前无此检查，导致规范性无保证。"
+  - id: REQ-046
+    description: "architecture.md 必须存储在 ~/.fleet/projects/<project_id>/architecture.md，作为 Layer 1 的项目级常数，V1 手工编写，V2+ 自动索引"
+    acceptance: "path ~/.fleet/projects/<project_id>/architecture.md 存在; load_for_project 能读取并渲染为 Layer 1 block; render_layer1_block() 返回 markdown 内容; test: 创建项目，加 architecture.md→worker context 包含其内容"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "claw-fleet-task/src/architecture_overview.rs 已框架化。这是项目级需求的持久化位置。"
+  - id: REQ-047
+    description: "fleet.yaml 配置文件必须支持 phases{cmd, resources} 和 resources{custom_locks}，供 Planner 和 Scheduler 使用"
+    acceptance: "fleet.yaml YAML 文件包含 phases: [{ name, cmd, resources: [build|test|git|custom:*] }] 和 resources: { custom_X: { concurrency: N } }; load_fleet_config 解析并验证; test: 定义 custom:db 资源→scheduler 检测并避免冲突"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "设计文档 §6.2。当前代码未见 fleet.yaml 解析，应作为 V1 配置载体。"
+  - id: REQ-048
+    description: "P-item 的 skippable 字段支持两种跳过条件：NoChangesIn(paths) 自动检查 git diff，Custom(rule) 由 worker 评估，Master 记录每个自动跳过的原因到偏差账本"
+    acceptance: "enum SkipCondition { NoChangesIn(Vec<PathBuf>), Custom(String) } 定义; NoChangesIn 触发时调用 git diff，若无改动→auto-skip; Custom 触发时由 worker 评估，若判定应跳→worker 返回 skip_result; Master 调用 propagate_skip，记录每个 skip 到偏差账本; test: NoChangesIn=['src/']，不改 src/→auto-skip"
+    source: design-stated
+    confidence: high
+    blast_radius: medium
+    notes: "pitem.rs:96~99 已有 enum 定义。REQ-007 要求关联追踪。"
+  - id: REQ-049
+    description: "任何 P-item 的 resources 声明必须被 Scheduler 检查，竞争同一 resource 的 P-item 不能并发执行（via resource_conflicts 检测）"
+    acceptance: "P-item.resources: Vec<String> 包含资源名（build|test|git|custom:*）; Scheduler.resource_conflicts() 检测竞争; 若有冲突→不能并发调度; test: P1[build], P2[build], P3[git]→P1, P2 串行，P3 可与其中之一并行"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "pitem.rs 和 plan.rs:134~158 已实现。这是调度正确性的基础。"
+  - id: REQ-050
+    description: "Master 必须在标记 P-item 为 Done 前显式调用 acceptance audit 逻辑，不允许隐含跳过或由 worker 自报状态"
+    acceptance: "mark-done 实现逻辑为：(1) 查 acceptance criteria; (2) 对每个条件调用验证函数（check_builds, check_tests, ask_human, eval_custom）; (3) 全部通过→flip status=Done; (4) 任一失败→status=Failed; (5) 不确定→问用户; 代码可观察所有 4 步; test: 声明 [Builds, TestsPass]，仅 Builds 通过→拒绝 mark-done"
+    source: design-stated
+    confidence: high
+    blast_radius: high
+    notes: "这是红线 2 的具体化。REQ-004 和 REQ-006 的收敛点。Master 代码必须显式实现所有步骤，不能通过 LLM 隐含决策。"
