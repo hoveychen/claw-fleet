@@ -57,6 +57,7 @@ pub const RESET_GRACE: chrono::Duration = chrono::Duration::seconds(60);
 ///
 /// Returns `true` only when ALL of:
 /// - `config.enabled`
+/// - the session is NOT a subagent (`agent-*` transcripts can't be resumed)
 /// - the session is in `RateLimited` state with a `rate_limit` payload
 /// - `now >= resets_at + RESET_GRACE` (the wait has elapsed plus a grace
 ///   window so we don't race the reset boundary)
@@ -68,6 +69,12 @@ pub fn should_auto_resume(
     now: chrono::DateTime<chrono::Utc>,
 ) -> bool {
     if !config.enabled {
+        return false;
+    }
+    // Subagent transcripts (`agent-*.jsonl`) are not independently resumable:
+    // `claude --resume agent-X` always fails, leaving the session RateLimited
+    // so it re-fires forever. Never treat a subagent as a resume candidate.
+    if session.is_subagent {
         return false;
     }
     if session.status != crate::session::SessionStatus::RateLimited {
@@ -282,6 +289,19 @@ mod tests {
     fn blocked_when_disabled() {
         let cfg = AutoResumeConfig { enabled: false, max_wait_hours: 12 };
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-1, 5)));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+    }
+
+    #[test]
+    fn blocked_when_subagent() {
+        // Subagent transcripts (`agent-*.jsonl` under `<sid>/subagents/`) are
+        // not independently resumable — `claude --resume agent-X` always fails
+        // (observed 21303/21303 success=false in the field). They must never be
+        // auto-resume candidates regardless of rate-limit state, or the failed
+        // resume leaves them RateLimited and they re-fire forever with no cap.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
+        s.is_subagent = true;
         assert!(!should_auto_resume(&s, &cfg, Utc::now()));
     }
 
