@@ -202,6 +202,21 @@
   font-style: italic;
 }
 
+.resolvedPrompt {
+  margin: 8px 10px 0;
+  padding: 8px 10px;
+  background: var(--color-bg-subtle, rgba(127, 127, 127, 0.08));
+  border-radius: 6px;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
 .agentRows { display: flex; flex-direction: column; }
 .agentRow {
   padding: 7px 10px;
