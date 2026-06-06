@@ -1,0 +1,53 @@
+name: Spec Fidelity
+
+# [REQ-045] CI spec-fidelity gate.
+# Runs scripts/check_spec_fidelity.sh on every push and PR so that no commit
+# lands without passing the registry-integrity / annotation-closure /
+# build+test / deviation-ledger sub-gates. (The Auditor critical=0 sub-check is
+# a manual / out-of-CI gate — see the script's own banner; CI does not fake it.)
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: spec-fidelity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spec-fidelity:
+    name: Spec Fidelity Gate
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # Same desktop/system deps the CI test job installs — the spec-fidelity
+      # gate runs `cargo build/test --workspace`, which compiles the desktop
+      # crate and therefore needs the webkit/gtk/appindicator stack.
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            librsvg2-dev \
+            libglib2.0-dev \
+            libgtk-3-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev
+
+      - name: Setup protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run spec-fidelity gate
+        run: bash scripts/check_spec_fidelity.sh
