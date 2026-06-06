@@ -1215,7 +1215,9 @@
     "no_active_tasks": "暂无活跃 task",
     "no_projects": "还没有项目，先建一个吧",
     "manage_projects": "项目管理",
-    "new_task_for_project": "为 {{name}} 新建任务"
+    "new_task_for_project": "为 {{name}} 新建任务",
+    "tab_monitor": "会话",
+    "tab_tasks": "任务"
   },
   "master": {
     "chip_master": "Master",

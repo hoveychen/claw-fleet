@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, Play, Pause, Circle, Plus } from "lucide-react";
+import { Menu, Shield, Play, Pause, Circle, Plus, ListTodo } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useTasksStore, useUIStore } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
@@ -59,6 +59,13 @@ export function SessionList() {
     setShowNewProjectRequested,
   } = useUIStore();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
+  // Top-level sidebar tab derived from viewMode (no separate persisted state):
+  // the projects/tasks views live under the "tasks" tab, everything else
+  // (sessions / audit / report / memory / skills / plugins) under "monitor".
+  const sidebarTab: "monitor" | "tasks" =
+    PROJECTS_FEATURE_ENABLED && (viewMode === "tasks" || viewMode === "projects")
+      ? "tasks"
+      : "monitor";
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const [filter, setFilter] = useState("");
@@ -343,155 +350,192 @@ export function SessionList() {
           </svg>
         </button>
 
-        {/* Unified nav — Monitor views, Projects rail, system tools. */}
+        {/* Unified sidebar nav — top-level Monitor/Tasks tabs, then the
+            active tab's contents. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
-          <button
-            className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
-            onClick={() => {
-              if (!isSessionView) setViewMode(lastSessionViewMode);
-            }}
-          >
-            <span className={styles.nav_icon}><Menu size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("view_sessions")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("audit")}
-          >
-            <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("view_audit")}</span>
-            {unreadCriticalCount > 0 && (
-              <span className={styles.nav_badge}>{unreadCriticalCount}</span>
-            )}
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("report")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
-            <span className={styles.nav_label}>{t("view_report")}</span>
-          </button>
-
-          {PROJECTS_FEATURE_ENABLED && <div className={styles.nav_divider} />}
-
-          {/* Projects rail — one row per project (always all projects, not
-              just those with active tasks, so we never fall back to UUID). */}
-          {PROJECTS_FEATURE_ENABLED && !sidebarCollapsed && projects.length === 0 && (
-            <div className={styles.nav_empty}>{t("sidebar.no_projects", "No projects yet")}</div>
-          )}
-          {PROJECTS_FEATURE_ENABLED && !sidebarCollapsed && projects.map((p) => {
-            const projectTasks = tasksByProject.get(p.id) ?? [];
-            const isProjectActive =
-              viewMode === "tasks" &&
-              useProjectsStore.getState().selectedProjectId === p.id;
-            return (
-              <div key={p.id} className={styles.nav_task_group}>
-                <div className={`${styles.nav_project_row} ${isProjectActive ? styles.nav_project_row_active : ""}`}>
-                  <button
-                    type="button"
-                    className={styles.nav_project_group_name}
-                    onClick={() => openProject(p.id)}
-                    title={p.name}
-                  >
-                    {p.name}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.nav_project_add_btn}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openProjectInbox(p.id);
-                    }}
-                    title={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
-                    aria-label={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
-                  >
-                    <Plus size={12} strokeWidth={1.75} />
-                  </button>
-                </div>
-                {projectTasks.map((tk) => {
-                  const items = Object.values(tk.plan.items ?? {});
-                  const total = items.length;
-                  const done = items.filter((it) => {
-                    if (typeof it.status === "string") {
-                      return it.status === "done" || it.status === "skipped";
-                    }
-                    return false;
-                  }).length;
-                  const statusIcon: ReactNode =
-                    tk.status === "running" ? <Play size={10} strokeWidth={1.75} /> :
-                    tk.status === "paused" ? <Pause size={10} strokeWidth={1.75} /> :
-                    tk.status === "ready" ? <Circle size={10} strokeWidth={1.75} /> :
-                    tk.status === "planning" ? "✎" :
-                    tk.status === "drafting" ? "✎" :
-                    "•";
-                  return (
-                    <button
-                      key={tk.id}
-                      type="button"
-                      className={styles.nav_project_item}
-                      onClick={() => openTask(tk.id, tk.projectId)}
-                      title={`${tk.title} — ${tk.status}`}
-                    >
-                      <span className={styles.nav_task_icon}>{statusIcon}</span>
-                      <span className={styles.nav_project_name}>{tk.title}</span>
-                      {total > 0 && (
-                        <span className={styles.nav_project_chip} title={t("tasks.progress", "p-items done / total")}>
-                          {done}/{total}
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          })}
+          {/* Top-level tabs: Monitor group vs Tasks group. Shown only when the
+              projects/tasks feature is enabled; otherwise the nav is just the
+              monitor items. */}
           {PROJECTS_FEATURE_ENABLED && (
-            <button
-              className={styles.nav_item}
-              onClick={() => {
-                setShowNewProjectRequested(true);
-                setViewMode("projects");
-              }}
-              title={t("projects.new")}
-            >
-              <span className={styles.nav_icon}><Plus size={14} strokeWidth={1.5} /></span>
-              <span className={styles.nav_label}>{t("projects.new")}</span>
-            </button>
-          )}
-          {PROJECTS_FEATURE_ENABLED && (
-            <button
-              className={`${styles.nav_item} ${viewMode === "projects" ? styles.nav_active : ""}`}
-              onClick={() => setViewMode("projects")}
-              title={t("sidebar.manage_projects", "Manage projects")}
-            >
-              <span className={styles.nav_icon}>⚙</span>
-              <span className={styles.nav_label}>{t("sidebar.manage_projects", "Manage projects")}</span>
-            </button>
+            <div className={`${styles.sidebar_tabs}${sidebarCollapsed ? ` ${styles.sidebar_tabs_collapsed}` : ""}`}>
+              <button
+                type="button"
+                className={`${styles.sidebar_tab} ${sidebarTab === "monitor" ? styles.sidebar_tab_active : ""}`}
+                onClick={() => {
+                  if (sidebarTab !== "monitor") setViewMode(lastSessionViewMode);
+                }}
+                title={t("sidebar.tab_monitor", "会话")}
+              >
+                {sidebarCollapsed
+                  ? <Menu size={15} strokeWidth={1.6} />
+                  : <span className={styles.sidebar_tab_label}>{t("sidebar.tab_monitor", "会话")}</span>}
+              </button>
+              <button
+                type="button"
+                className={`${styles.sidebar_tab} ${sidebarTab === "tasks" ? styles.sidebar_tab_active : ""}`}
+                onClick={() => {
+                  if (sidebarTab !== "tasks") setViewMode("projects");
+                }}
+                title={t("sidebar.tab_tasks", "任务")}
+              >
+                {sidebarCollapsed
+                  ? <ListTodo size={15} strokeWidth={1.6} />
+                  : <span className={styles.sidebar_tab_label}>{t("sidebar.tab_tasks", "任务")}</span>}
+              </button>
+            </div>
           )}
 
-          <div className={styles.nav_divider} />
+          {/* ── Monitor tab: sessions / audit / report + memory / skills / plugins ── */}
+          {sidebarTab === "monitor" && (
+            <>
+              <button
+                className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
+                onClick={() => {
+                  if (!isSessionView) setViewMode(lastSessionViewMode);
+                }}
+              >
+                <span className={styles.nav_icon}><Menu size={14} strokeWidth={1.5} /></span>
+                <span className={styles.nav_label}>{t("view_sessions")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("audit")}
+              >
+                <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
+                <span className={styles.nav_label}>{t("view_audit")}</span>
+                {unreadCriticalCount > 0 && (
+                  <span className={styles.nav_badge}>{unreadCriticalCount}</span>
+                )}
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("report")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
+                <span className={styles.nav_label}>{t("view_report")}</span>
+              </button>
 
-          <button
-            className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("memory")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
-            <span className={styles.nav_label}>{t("view_memory")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("skills")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_skills")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("plugins")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_plugins")}</span>
-          </button>
+              <div className={styles.nav_divider} />
+
+              <button
+                className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("memory")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
+                <span className={styles.nav_label}>{t("view_memory")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("skills")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
+                <span className={styles.nav_label}>{t("view_skills")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("plugins")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
+                <span className={styles.nav_label}>{t("view_plugins")}</span>
+              </button>
+            </>
+          )}
+
+          {/* ── Tasks tab: project + task rail only (no other nav items) ── */}
+          {PROJECTS_FEATURE_ENABLED && sidebarTab === "tasks" && (
+            <>
+              {/* Projects rail — one row per project (always all projects, not
+                  just those with active tasks, so we never fall back to UUID). */}
+              {!sidebarCollapsed && projects.length === 0 && (
+                <div className={styles.nav_empty}>{t("sidebar.no_projects", "No projects yet")}</div>
+              )}
+              {!sidebarCollapsed && projects.map((p) => {
+                const projectTasks = tasksByProject.get(p.id) ?? [];
+                const isProjectActive =
+                  viewMode === "tasks" &&
+                  useProjectsStore.getState().selectedProjectId === p.id;
+                return (
+                  <div key={p.id} className={styles.nav_task_group}>
+                    <div className={`${styles.nav_project_row} ${isProjectActive ? styles.nav_project_row_active : ""}`}>
+                      <button
+                        type="button"
+                        className={styles.nav_project_group_name}
+                        onClick={() => openProject(p.id)}
+                        title={p.name}
+                      >
+                        {p.name}
+                      </button>
+                      <button
+                        type="button"
+                        className={styles.nav_project_add_btn}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openProjectInbox(p.id);
+                        }}
+                        title={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
+                        aria-label={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
+                      >
+                        <Plus size={12} strokeWidth={1.75} />
+                      </button>
+                    </div>
+                    {projectTasks.map((tk) => {
+                      const items = Object.values(tk.plan.items ?? {});
+                      const total = items.length;
+                      const done = items.filter((it) => {
+                        if (typeof it.status === "string") {
+                          return it.status === "done" || it.status === "skipped";
+                        }
+                        return false;
+                      }).length;
+                      const statusIcon: ReactNode =
+                        tk.status === "running" ? <Play size={10} strokeWidth={1.75} /> :
+                        tk.status === "paused" ? <Pause size={10} strokeWidth={1.75} /> :
+                        tk.status === "ready" ? <Circle size={10} strokeWidth={1.75} /> :
+                        tk.status === "planning" ? "✎" :
+                        tk.status === "drafting" ? "✎" :
+                        "•";
+                      return (
+                        <button
+                          key={tk.id}
+                          type="button"
+                          className={styles.nav_project_item}
+                          onClick={() => openTask(tk.id, tk.projectId)}
+                          title={`${tk.title} — ${tk.status}`}
+                        >
+                          <span className={styles.nav_task_icon}>{statusIcon}</span>
+                          <span className={styles.nav_project_name}>{tk.title}</span>
+                          {total > 0 && (
+                            <span className={styles.nav_project_chip} title={t("tasks.progress", "p-items done / total")}>
+                              {done}/{total}
+                            </span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
+              <button
+                className={styles.nav_item}
+                onClick={() => {
+                  setShowNewProjectRequested(true);
+                  setViewMode("projects");
+                }}
+                title={t("projects.new")}
+              >
+                <span className={styles.nav_icon}><Plus size={14} strokeWidth={1.5} /></span>
+                <span className={styles.nav_label}>{t("projects.new")}</span>
+              </button>
+              <button
+                className={`${styles.nav_item} ${viewMode === "projects" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("projects")}
+                title={t("sidebar.manage_projects", "Manage projects")}
+              >
+                <span className={styles.nav_icon}>⚙</span>
+                <span className={styles.nav_label}>{t("sidebar.manage_projects", "Manage projects")}</span>
+              </button>
+            </>
+          )}
         </nav>
 
         <div className={styles.separator} />
