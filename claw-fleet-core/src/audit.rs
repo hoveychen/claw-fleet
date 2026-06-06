@@ -53,7 +53,7 @@ pub struct AuditSummary {
 impl AuditEvent {
     /// A stable key for deduplication (notification tracking, read state, etc.).
     ///
-    /// [REQ-034] `AuditEvent` (10 fields ≥ the required 7) + `dedup_key()`
+    /// `AuditEvent` (10 fields ≥ the required 7) + `dedup_key()`
     /// returning `session_id|timestamp|tool_name`. Events are reconstructed from
     /// session history by [`extract_audit_events`].
     pub fn dedup_key(&self) -> String {
@@ -163,7 +163,7 @@ pub struct GuardAllowRule {
     #[serde(default)]
     pub source_tag: Option<String>,
     pub created_at: chrono::DateTime<chrono::Utc>,
-    /// [REQ-035] DEC-017: who signed off on this whitelist rule. A rule with
+    /// DEC-017: who signed off on this whitelist rule. A rule with
     /// `approved_by == None` is **unsigned** and MUST NOT take effect — the
     /// signature is the require-approval gate. A signed rule may short-circuit
     /// the guard prompt even for a Critical command (the classifier's false
@@ -176,7 +176,7 @@ pub struct GuardAllowRule {
 }
 
 impl GuardAllowRule {
-    /// [REQ-035] DEC-017: an allow rule is only live once a human has
+    /// DEC-017: an allow rule is only live once a human has
     /// signed it. Unsigned rules are inert — they neither short-circuit the
     /// guard nor count as "already allowed" in the UI.
     pub fn is_signed(&self) -> bool {
@@ -271,7 +271,7 @@ pub struct SuggestedRule {
 //
 // These are used when no external JSON file is present.
 //
-// [REQ-033] The audit rule set — `builtin_patterns` + `builtin_python_patterns`
+// The audit rule set — `builtin_patterns` + `builtin_python_patterns`
 // here, mirrored by the shipped `audit-patterns.json` and overridable via
 // `~/.fleet/fleet-audit-patterns.json` — must hold ≥ 25 rules spanning the three
 // `AuditRiskLevel` tiers (Critical / High / Medium). `get_patterns` loads them.
@@ -1016,7 +1016,7 @@ pub fn guard_prefix_matches(cmd: &str, prefix: &str) -> bool {
 
 /// Find the first signed guard allow rule whose prefix matches `cmd`, if any.
 ///
-/// [REQ-035] DEC-017 (supersedes DEC-005): the whitelist's one remaining gate
+/// DEC-017 (supersedes DEC-005): the whitelist's one remaining gate
 /// here is the **signature**. A rule with no `approved_by` signer is inert; a
 /// signed rule whose prefix matches `cmd` short-circuits the live guard prompt
 /// — **including for `Critical` commands**. That is deliberate: the whitelist's
@@ -1038,7 +1038,7 @@ pub fn match_guard_allow_rule_in<'a>(
     rules
         .guard_allow_rules
         .iter()
-        // [REQ-035] DEC-017: only signed rules are live — signature is the
+        // DEC-017: only signed rules are live — signature is the
         // require-approval gate.
         .filter(|r| r.is_signed())
         .find(|r| guard_prefix_matches(cmd, &r.prefix))
@@ -1061,7 +1061,7 @@ pub fn upsert_guard_allow_rule_in(
         prefix,
         source_tag,
         created_at: chrono::Utc::now(),
-        // [REQ-035] DEC-017: new rules are created UNSIGNED. They do not
+        // DEC-017: new rules are created UNSIGNED. They do not
         // take effect until a human signs them via `sign_guard_allow_rule_in`.
         // This closes the silent-bypass hole: simply clicking "always allow" no
         // longer grants a permanent critical-command exemption on its own.
@@ -1071,7 +1071,7 @@ pub fn upsert_guard_allow_rule_in(
     rule
 }
 
-/// [REQ-035] DEC-017: sign an existing guard allow rule, making it live.
+/// DEC-017: sign an existing guard allow rule, making it live.
 /// Returns the updated rule, or an error if the id is unknown. In-memory
 /// variant for unit-testing; [`sign_guard_allow_rule`] persists.
 pub fn sign_guard_allow_rule_in(
@@ -1101,7 +1101,7 @@ pub fn add_guard_allow_rule(prefix: String, source_tag: Option<String>) -> Guard
     rule
 }
 
-/// [REQ-035] DEC-017: persistently sign a guard allow rule so it takes
+/// DEC-017: persistently sign a guard allow rule so it takes
 /// effect. Loads the user rules, signs the rule by id, writes back.
 pub fn sign_guard_allow_rule(id: &str, approved_by: &str) -> Result<GuardAllowRule, String> {
     let mut rules = load_user_rules();
@@ -1542,7 +1542,7 @@ mod tests {
         });
     }
 
-    /// [REQ-033] The builtin audit rule set must hold ≥ 25 rules spanning all
+    /// The builtin audit rule set must hold ≥ 25 rules spanning all
     /// three `AuditRiskLevel` tiers (Critical / High / Medium).
     #[test]
     fn req033_pattern_set_has_25plus_rules_in_three_levels() {
@@ -1567,7 +1567,7 @@ mod tests {
         }
     }
 
-    /// [REQ-034] `AuditEvent::dedup_key()` is `session_id|timestamp|tool_name`.
+    /// `AuditEvent::dedup_key()` is `session_id|timestamp|tool_name`.
     #[test]
     fn req034_audit_event_dedup_key_format() {
         let ev = AuditEvent {
@@ -2112,7 +2112,7 @@ mod tests {
         // once signed: `git pull` = Medium, `npm install` = Medium.
         let a = upsert_guard_allow_rule_in(&mut rules, "git pull".into(), Some("git-fetch".into()));
         let b = upsert_guard_allow_rule_in(&mut rules, "npm install".into(), Some("package-install".into()));
-        // [REQ-035] DEC-017: sign both, otherwise they're inert.
+        // DEC-017: sign both, otherwise they're inert.
         sign_guard_allow_rule_in(&mut rules, &a.id, "boss").unwrap();
         sign_guard_allow_rule_in(&mut rules, &b.id, "boss").unwrap();
 
@@ -2163,7 +2163,7 @@ mod tests {
             "git pull".into(),
             Some("git-fetch".into()),
         );
-        // [REQ-035] DEC-017: rules are unsigned by default and inert; sign
+        // DEC-017: rules are unsigned by default and inert; sign
         // it so it counts as "already allowed".
         sign_guard_allow_rule_in(&mut rules, &r.id, "boss").unwrap();
 
@@ -2175,7 +2175,7 @@ mod tests {
         );
     }
 
-    // ── [REQ-035] DEC-017 enforcement tests ─────────────────────────────────
+    // ── DEC-017 enforcement tests ─────────────────────────────────
     //
     // DEC-017 (supersedes DEC-005): the whitelist's sole gate is the SIGNATURE.
     // A signed rule short-circuits the guard prompt (even for Critical commands
@@ -2225,7 +2225,7 @@ mod tests {
         assert!(!rules.guard_allow_rules[0].is_signed());
     }
 
-    /// [REQ-035] DEC-017: a signed rule short-circuits even a CRITICAL command
+    /// DEC-017: a signed rule short-circuits even a CRITICAL command
     /// (the substring classifier's false positives are exactly what the
     /// whitelist is for). Non-silence is guaranteed by the independent
     /// `extract_audit_events` transcript trail, not by this gate.

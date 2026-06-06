@@ -258,7 +258,7 @@ mod tests {
 
     #[test]
     fn classify_short_circuits_when_allow_rule_matches() {
-        // [REQ-035] DEC-017: a SIGNED allow rule may short-circuit even a
+        // DEC-017: a SIGNED allow rule may short-circuit even a
         // Critical command. `eval ` (trailing space) appears as a substring
         // inside `patchwright-cli eval "..."`, so the eval-exec builtin tags it
         // Critical — exactly the false-positive case the whitelist exists to
@@ -285,7 +285,7 @@ mod tests {
 
     #[test]
     fn classify_does_not_short_circuit_critical_for_unsigned_rule() {
-        // [REQ-035] DEC-017: the signature is the require-approval teeth. An
+        // DEC-017: the signature is the require-approval teeth. An
         // UNSIGNED rule (just clicking "always allow", never approved) must NOT
         // short-circuit a Critical command — it still needs confirmation. This
         // is the symmetric counterpart to the test above.

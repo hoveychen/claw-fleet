@@ -27,7 +27,7 @@ use crate::plan::DagPlan;
 /// The file name we look for at a project root.
 pub const FLEET_CONFIG_FILENAME: &str = "fleet.yaml";
 
-// [REQ-047] One declared phase: a named build/test/etc. command plus the
+// One declared phase: a named build/test/etc. command plus the
 // resources it holds while running. The Planner uses `cmd` to synthesise phase
 // P-items; the Scheduler uses `resources` to serialise contending phases.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,7 +37,7 @@ pub struct PhaseConfig {
     pub resources: Vec<ResourceName>,
 }
 
-// [REQ-047] A declared custom resource lock with a concurrency cap. `custom:db`
+// A declared custom resource lock with a concurrency cap. `custom:db`
 // with `concurrency: 1` is a mutex; `concurrency: 2` lets two holders run at
 // once. The Scheduler consults this to decide whether contending P-items may
 // run concurrently (see `runner::dispatchable_with_config`).
@@ -49,7 +49,7 @@ pub struct CustomResource {
     pub concurrency: u32,
 }
 
-// [REQ-047] Parsed fleet.yaml. Carries the declared phases and the custom
+// Parsed fleet.yaml. Carries the declared phases and the custom
 // resource concurrency map. Feeds both the Planner (phases) and the Scheduler
 // (custom resource caps).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -84,7 +84,7 @@ impl FleetConfig {
     /// The full set of resource names the Scheduler should be aware of:
     /// every custom resource declared here. Built-in `build` / `test` / `git`
     /// are implicit (concurrency 1) and need no declaration.
-    // [REQ-047] These are the "custom locks fed to the scheduler".
+    // These are the "custom locks fed to the scheduler".
     pub fn custom_lock_names(&self) -> Vec<ResourceName> {
         self.custom_resources.keys().cloned().collect()
     }
@@ -93,7 +93,7 @@ impl FleetConfig {
     /// any non-declared resource (built-ins like `build`/`test`/`git`, or an
     /// undeclared `custom:*`) is treated as a mutex (cap 1) so the Scheduler
     /// never over-parallelises an unknown lock.
-    // [REQ-047] The Scheduler reads this to decide how many holders a resource
+    // The Scheduler reads this to decide how many holders a resource
     // may have concurrently.
     pub fn concurrency_for(&self, resource: &str) -> u32 {
         self.custom_resources
@@ -106,7 +106,7 @@ impl FleetConfig {
     /// (or by the declared phases) is actually declared in `resources.custom`.
     /// Built-in resources (`build` / `test` / `git`) and non-custom scoped
     /// locks (`port:*`, `global:*`, …) are allowed without declaration.
-    // [REQ-047] Guards against a P-item referencing an undeclared custom lock,
+    // Guards against a P-item referencing an undeclared custom lock,
     // which would otherwise be silently treated as a mutex with no operator
     // intent behind it.
     pub fn validate_plan_resources(&self, plan: &DagPlan) -> Result<(), FleetConfigError> {
@@ -129,7 +129,7 @@ impl FleetConfig {
 /// `Ok(None)` when no fleet.yaml exists (config is optional — projects fall
 /// back to auto-detected phases). Returns `Ok(Some(_))` on a valid file and
 /// `Err` on read / validation failure.
-// [REQ-047] Entry point named in the acceptance criterion.
+// Entry point named in the acceptance criterion.
 pub fn load_fleet_config(project_root: &Path) -> Result<Option<FleetConfig>, FleetConfigError> {
     let path = project_root.join(FLEET_CONFIG_FILENAME);
     if !path.exists() {
@@ -143,7 +143,7 @@ pub fn load_fleet_config(project_root: &Path) -> Result<Option<FleetConfig>, Fle
 /// Parse + validate a fleet.yaml document from its text. Split out from
 /// `load_fleet_config` so tests can exercise the parser without touching the
 /// filesystem.
-// [REQ-047] Parsing + validation core. Recognised shape (design §6.2,
+// Parsing + validation core. Recognised shape (design §6.2,
 // REQ-047 acceptance):
 //
 // ```yaml
@@ -226,7 +226,7 @@ fn parse_phases(
                     ph.name
                 )));
             }
-            // [REQ-047] duplicate phase name -> error
+            // duplicate phase name -> error
             if !seen.insert(ph.name.clone()) {
                 return Err(FleetConfigError::Validation(format!(
                     "duplicate phase name {:?}",
@@ -370,7 +370,7 @@ fn parse_resources(
                      resources:, got {name:?}"
                 )));
             }
-            // [REQ-047] duplicate resource declaration -> error
+            // duplicate resource declaration -> error
             if cfg.custom_resources.contains_key(&name) {
                 return Err(FleetConfigError::Validation(format!(
                     "duplicate custom resource declaration {name:?}"
@@ -474,7 +474,7 @@ mod tests {
         }
     }
 
-    // [REQ-047] Parses the canonical fleet.yaml shape: phases list + custom
+    // Parses the canonical fleet.yaml shape: phases list + custom
     // resource concurrency map.
     #[test]
     fn parses_phases_and_custom_resources() {
@@ -505,7 +505,7 @@ resources:
         assert_eq!(cfg.custom_lock_names(), vec!["custom:db".to_string()]);
     }
 
-    // [REQ-047] custom resource with concurrency > 1 is parsed as a counting
+    // custom resource with concurrency > 1 is parsed as a counting
     // semaphore, not a mutex.
     #[test]
     fn custom_resource_concurrency_two() {
@@ -521,7 +521,7 @@ resources:
         assert_eq!(cfg.concurrency_for("custom:other"), 1);
     }
 
-    // [REQ-047] validation: duplicate phase name is rejected.
+    // validation: duplicate phase name is rejected.
     #[test]
     fn rejects_duplicate_phase_name() {
         let yaml = r#"
@@ -540,7 +540,7 @@ phases:
         );
     }
 
-    // [REQ-047] validation: unknown top-level key rejected (illegal shape).
+    // validation: unknown top-level key rejected (illegal shape).
     #[test]
     fn rejects_unknown_top_level_key() {
         let yaml = "garbage:\n  foo: bar\n";
@@ -548,7 +548,7 @@ phases:
         assert!(matches!(err, FleetConfigError::Validation(_)));
     }
 
-    // [REQ-047] validation: a phase referencing an undeclared custom resource
+    // validation: a phase referencing an undeclared custom resource
     // is rejected (illegal resource name relative to declarations).
     #[test]
     fn rejects_phase_with_undeclared_custom_resource() {
@@ -565,7 +565,7 @@ phases:
         );
     }
 
-    // [REQ-047] validation: concurrency must be a positive integer.
+    // validation: concurrency must be a positive integer.
     #[test]
     fn rejects_zero_concurrency() {
         let yaml = "resources:\n  custom:db:\n    concurrency: 0\n";
@@ -573,7 +573,7 @@ phases:
         assert!(matches!(err, FleetConfigError::Validation(_)));
     }
 
-    // [REQ-047] validate_plan_resources catches a P-item referencing an
+    // validate_plan_resources catches a P-item referencing an
     // undeclared custom lock.
     #[test]
     fn validate_plan_resources_flags_undeclared() {
@@ -588,7 +588,7 @@ phases:
         assert!(matches!(err, FleetConfigError::Validation(_)));
     }
 
-    // [REQ-047] missing file -> Ok(None) (config optional).
+    // missing file -> Ok(None) (config optional).
     #[test]
     fn missing_file_is_none() {
         let dir = tempfile::tempdir().unwrap();
@@ -596,7 +596,7 @@ phases:
         assert!(got.is_none());
     }
 
-    // [REQ-047] load_fleet_config reads + validates from disk.
+    // load_fleet_config reads + validates from disk.
     #[test]
     fn loads_from_disk() {
         let dir = tempfile::tempdir().unwrap();

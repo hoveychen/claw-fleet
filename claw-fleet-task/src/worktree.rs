@@ -54,7 +54,7 @@ fn worktree_meta_name(task_id: &str, p_item_id: &str) -> String {
 /// git, returns it unchanged. If the path is an orphan (exists on disk but
 /// not registered) it gets wiped and re-provisioned.
 ///
-/// [REQ-040] `provision` is the worktree-isolation entry point: it creates
+/// `provision` is the worktree-isolation entry point: it creates
 /// one `git worktree add`-style isolated checkout per P-item, recovers from
 /// orphaned dirs/branches left by a crashed prior run, and pairs with
 /// `merge_back` (3-way merge back to the task branch) and `reap` (worktree
@@ -198,7 +198,7 @@ pub fn list_for_task(task_id: &str) -> Result<Vec<PathBuf>, String> {
 /// Build the identifying message for a fleet merge commit so the Auditor
 /// can trace which P-item / session / worker produced it.
 ///
-/// [REQ-041] Every fleet-authored merge commit must carry identification in
+/// Every fleet-authored merge commit must carry identification in
 /// the form `fleet: merged <p_item_id> from session <sid> worker <worker>`,
 /// so `git log --oneline | grep fleet` surfaces all fleet merges and each
 /// line is traceable back to its origin.
@@ -222,7 +222,7 @@ fn fleet_merge_message(task_id: &str, p_item_id: &str, kind: &str) -> String {
 /// Outcome of `merge_back` for a P-item's worktree branch into the task
 /// branch.
 ///
-/// [REQ-029] Exactly three "something happened" outcomes are modelled:
+/// Exactly three "something happened" outcomes are modelled:
 /// `FastForwarded` (linear advance), `AutoMerged` (git's auto-merger
 /// resolved a divergence into a merge commit), and `Conflict` (a real
 /// 3-way conflict that needs LLM mediation or human intervention). The
@@ -298,7 +298,7 @@ pub fn merge_back(
         });
     }
     // Fall back to a real 3-way merge — let libgit2 try to auto-resolve.
-    // [REQ-041] Stamp the merge commit with fleet identification so the
+    // Stamp the merge commit with fleet identification so the
     // Auditor can trace it via `git log | grep fleet`.
     let msg = fleet_merge_message(task_id, p_item_id, "auto-merge");
     repo.merge(&[&annotated], None, None)
@@ -388,7 +388,7 @@ pub fn apply_resolutions(
             "mediation incomplete — {count} file(s) still unmerged after apply"
         ));
     }
-    // [REQ-041] Mediated merges also carry fleet identification (kind marks
+    // Mediated merges also carry fleet identification (kind marks
     // them as LLM-mediated for the Auditor's benefit).
     let msg = fleet_merge_message(task_id, p_item_id, "via Sonnet mediation");
     finish_merge_commit(&repo, &mut index, &msg, annotated.id())?;
@@ -1113,7 +1113,7 @@ mod tests {
         String::from_utf8_lossy(&out.stdout).trim().to_string()
     }
 
-    // [REQ-041] An auto-merge commit must identify the P-item and be
+    // An auto-merge commit must identify the P-item and be
     // discoverable via `git log | grep fleet`.
     #[test]
     fn auto_merge_commit_carries_fleet_identification() {
@@ -1153,7 +1153,7 @@ mod tests {
         );
     }
 
-    // [REQ-041] A mediated (apply_resolutions) merge commit must also carry
+    // A mediated (apply_resolutions) merge commit must also carry
     // fleet identification, distinguished as the mediation kind.
     #[test]
     fn mediated_merge_commit_carries_fleet_identification() {
@@ -1183,7 +1183,7 @@ mod tests {
         );
     }
 
-    // [REQ-041] When the worker runtime sets FLEET_SESSION_ID / FLEET_WORKER_ID,
+    // When the worker runtime sets FLEET_SESSION_ID / FLEET_WORKER_ID,
     // those real ids land in the merge commit (not the branch-name fallback).
     #[test]
     fn fleet_merge_message_uses_runtime_session_and_worker_ids() {
@@ -1213,7 +1213,7 @@ mod tests {
         );
     }
 
-    // [REQ-041] Absent runtime ids, the message still identifies the P-item
+    // Absent runtime ids, the message still identifies the P-item
     // and falls back to the deterministic worktree branch name for traceability.
     #[test]
     fn fleet_merge_message_falls_back_to_branch_when_env_absent() {
@@ -1235,7 +1235,7 @@ mod tests {
         );
     }
 
-    // [REQ-029] merge_back's three real outcomes are exercised by dedicated
+    // merge_back's three real outcomes are exercised by dedicated
     // tests; this one asserts the enum models exactly the FF / auto / conflict
     // trichotomy with the Conflict variant carrying the 3-way specs the LLM
     // mediator consumes — and that there is no built-in retry loop.
