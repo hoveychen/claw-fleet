@@ -18,6 +18,7 @@ pub use claw_fleet_task::dag;
 pub mod daily_report;
 pub mod decision_history;
 pub mod decision_panel_config;
+pub mod deviation_ledger;
 #[cfg(windows)]
 pub mod dpapi;
 pub mod elicitation;

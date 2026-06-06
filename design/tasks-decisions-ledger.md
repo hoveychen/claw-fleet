@@ -55,3 +55,8 @@
   - 处置：P14 worker 未执行任何删除（task.rs diff 为空），无损害。P14 从计划移除，task.rs 维持现状。
 - **DEC-010** | **P7 REQ-003/004 的行为测试下放到 P9**：P7 worker 只实现了 master template 文本强化（10 红线 / 4 禁信号 / 7 工具）+ 验证 template 提及，未写「mock 仅代理信号输入→必须 fail」「TestsPass 缺失→mark-done 拒绝」「HumanReview→AskUserQuestion」等行为测试。这些行为属于 mark_done（P9）的执行逻辑，非 template（P7）职责 → 显式归入 P9 acceptance，P7 仅留 template 层。
 - **DEC-011** | **P3 SIGSTOP / Master TouchesViolation 决策逻辑归 fleet-cli + P9**：touches_hook.rs 只做 check_path_against_touches + record_violation；SIGSTOP 投递（fleet-cli hook handler）和 Master 三选一决策（extend/reject/escalate）不在本模块，registry notes 已声明，非静默简化。
+
+## Wave 2 执行后修正（2026-06-06）
+
+- **DEC-012** | **REQ-013 的 mark-done 侧校验下放 P9**：P6 实现了 acceptance 验证引擎（REQ-006/011/050，157 测试绿），但 REQ-013 要求的 output_summary 长度（50–200 字）+ artifact_kind 必选校验属于 mark-done API（actions.rs），不在 acceptance 引擎职责内 → 显式归入 P9。P6 已加 output_summary 字段与 [REQ-013] 锚点，P9 接校验逻辑。
+- **DEC-013（流程修正，非代码）** | **共享 worktree 下 auditor 的"scope violation"假阳性**：P6/P8 并行共用同一 prd worktree，P8 auditor 跑非范围 `git diff` 看到 P6 的 acceptance.rs 误判为"P8 越界 644 行"。master 已自查证实：改动文件 = P6∪P8 touches 并集，acceptance.rs(644)/deviation_ledger.rs(455) 各自完整、两 mod 各注册无覆盖，无越界无 clobber。与 wave1-P3 同款。**后续波次：auditor 改用 master 预先算好的 scoped diff，禁跑非范围 diff。**

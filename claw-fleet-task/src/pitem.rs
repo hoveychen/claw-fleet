@@ -42,6 +42,11 @@ pub struct PItem {
     pub artifacts: Vec<ArtifactKind>,
     #[serde(default)]
     pub skippable: Option<SkipCondition>,
+    // [REQ-011][REQ-050] When `true`, the master must enter `WaitHumanGate`
+    // after the acceptance audit and ask the user before flipping to `Done` —
+    // it never marks done unilaterally. Precedence with the task-level
+    // `manual_review_all` flag is resolved by
+    // `crate::acceptance::requires_human_gate` (either side gates).
     #[serde(default)]
     pub human_gate: bool,
     /// Newly-emitted P-items (from the planner) omit status and start in
@@ -65,6 +70,9 @@ pub enum PItemStatus {
     WaitDeps,
     WaitResource,
     Running,
+    // [REQ-011] Acceptance passed but a human gate (P-item `human_gate` or task
+    // `manual_review_all`) is active — the audit yields `WaitHuman` and the
+    // master parks the P-item here until the user approves, instead of `Done`.
     WaitHumanGate,
     Done,
     Failed(FailReason),
