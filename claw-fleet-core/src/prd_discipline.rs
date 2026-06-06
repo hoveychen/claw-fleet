@@ -287,7 +287,29 @@ single-step changes, it is simply the finishing move once tests are green.\n\
   per-commit granularity. This `git merge --no-ff` IS the single \
   Rule-1-allowed commit on main; do not run any additional `git commit` \
   before or after it.\n\
-- **After a successful merge, clean up.** Run `git worktree remove \
+- **Before merging or removing the worktree, rescue gitignored / untracked \
+  artifacts the plan generated.** `git merge --no-ff` only carries across \
+  *committed* content. Anything matched by `.gitignore` — and any file you \
+  never `git add`ed — is never committed, so it lives **only** inside the \
+  worktree's working directory. `git worktree remove` then deletes that \
+  directory along with those files, and because they were never tracked there \
+  is no git object to recover them from: the data is gone for good. \
+  `.gitignore` means \"don't put this in version control\", NOT \"don't keep \
+  this\" — a generated dataset, a synthesized media file, a downloaded asset, \
+  a captured log {title} might want, an `.env` produced during the work, are \
+  all real data even though they're untracked. So before you remove anything, \
+  run `git status --ignored` (and check plain untracked files) inside the \
+  worktree. Routinely-regenerable dirs — `target/`, `node_modules/`, `dist/`, \
+  `.next/`, anything a committed build script rebuilds from scratch — need no \
+  rescue; skip them. But if the worktree holds a generated artifact that is \
+  NOT trivially reproducible from committed code (no generation script was \
+  committed, or the inputs are gone), STOP and surface it to {title} before \
+  removal: should the file be copied out of the worktree to a safe location, \
+  or should it actually be tracked (added to the merge, or removed from \
+  `.gitignore`)? Do not `git worktree remove` until that's resolved — removal \
+  is the irreversible step.\n\
+- **After a successful merge, clean up.** First confirm the rescue check above \
+  is done. Then run `git worktree remove \
   .worktrees/<task-id>` then `git branch -d prd/<task-id>`. If the merge \
   fails (conflict, post-merge build/test regression), resolve in place — do \
   NOT abandon the worktree, do NOT amend the merge commit, do NOT \
@@ -929,6 +951,30 @@ mod tests {
         assert!(
             r3_body.contains("Rule 3 is global"),
             "Rule 3 must call itself 'global' to overpower Rule 1's multi-step framing when read in isolation"
+        );
+    }
+
+    #[test]
+    fn render_rule_3_warns_about_gitignored_artifact_loss_on_worktree_remove() {
+        let g = render_guidance("Boss", "en");
+        let r3_pos = g.find("## Rule 3").expect("Rule 3 must exist");
+        let r3_end = g[r3_pos..].find("## Rule 4").expect("Rule 4 must follow");
+        let r3_body = &g[r3_pos..r3_pos + r3_end];
+        assert!(
+            r3_body.contains("only carries across"),
+            "Rule 3 must explain that `git merge --no-ff` only brings across committed content, so gitignored/untracked files never reach main"
+        );
+        assert!(
+            r3_body.contains("no git object to recover"),
+            "Rule 3 must spell out that `git worktree remove` deletes untracked files with no git object to recover them from — the irreversible data-loss step Boss flagged"
+        );
+        assert!(
+            r3_body.contains("don't put this in version control") && r3_body.contains("don't keep"),
+            "Rule 3 must correct the `.gitignore` misconception: ignored means not-version-controlled, NOT not-kept"
+        );
+        assert!(
+            r3_body.contains("git status --ignored"),
+            "Rule 3 must name the concrete pre-removal self-check command"
         );
     }
 
