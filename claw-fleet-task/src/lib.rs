@@ -13,3 +13,5 @@ pub mod worker;
 pub mod runner;
 pub mod actions;
 pub mod registry;
+pub mod auditor;
+pub mod fleet_config;
