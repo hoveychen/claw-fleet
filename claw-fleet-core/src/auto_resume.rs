@@ -89,9 +89,50 @@ pub fn should_auto_resume(
     wait <= max_wait
 }
 
+/// Pick which sessions to auto-resume on this tick, bounded by the number of
+/// available concurrency `slots`.
+///
+/// Without a bound, a single rescan tick can find hundreds of eligible
+/// sessions at once and fire `claude --resume` for every one of them
+/// simultaneously — each spawned process is ~150-200MB, so a few hundred at
+/// once is tens of GB of RSS (the 40GB runaway). `slots` is `cap - in_flight`
+/// computed by the caller, so the live auto-resume process count never exceeds
+/// the cap.
+///
+/// `skip(id)` returns true for sessions that should be passed over this tick
+/// (e.g. still within the debounce window, or backed off after repeated
+/// failures). Results preserve session-list order and never exceed `slots`.
+pub fn select_resume_candidates(
+    sessions: &[crate::session::SessionInfo],
+    config: &AutoResumeConfig,
+    now: chrono::DateTime<chrono::Utc>,
+    skip: impl Fn(&str) -> bool,
+    slots: usize,
+) -> Vec<(String, String)> {
+    sessions
+        .iter()
+        .filter(|s| should_auto_resume(s, config, now))
+        .filter(|s| !skip(&s.id))
+        .take(slots)
+        .map(|s| (s.id.clone(), s.workspace_path.clone()))
+        .collect()
+}
+
 /// Headlessly resume a rate-limited session by spawning
 /// `claude --resume <session_id> -p "continue"` detached in the given workspace.
 pub fn spawn_resume(session_id: &str, workspace_path: &str) -> Result<(), String> {
+    spawn_resume_tracked(session_id, workspace_path, |_success| {})
+}
+
+/// Like [`spawn_resume`] but invokes `on_exit(success)` from the reaper thread
+/// when the spawned process exits. The auto-resume scheduler uses this to
+/// decrement its in-flight counter (concurrency cap) and to record consecutive
+/// failures for backoff — see `maybe_fire_auto_resume`.
+pub fn spawn_resume_tracked(
+    session_id: &str,
+    workspace_path: &str,
+    on_exit: impl FnOnce(bool) + Send + 'static,
+) -> Result<(), String> {
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
         return Err("Claude CLI not found on PATH".to_string());
@@ -106,7 +147,7 @@ pub fn spawn_resume(session_id: &str, workspace_path: &str) -> Result<(), String
         workspace_path,
         stderr_log.display()
     ));
-    let pid = spawn_resume_with_path(&claude, session_id, workspace_path, &stderr_log)?;
+    let pid = spawn_resume_with_path(&claude, session_id, workspace_path, &stderr_log, on_exit)?;
     crate::log_debug(&format!(
         "resume_session: spawned pid {} for session {}",
         pid, session_id
@@ -122,6 +163,7 @@ fn spawn_resume_with_path(
     session_id: &str,
     workspace_path: &str,
     stderr_log: &Path,
+    on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<u32, String> {
     if !std::path::Path::new(workspace_path).is_dir() {
         return Err(format!("Workspace directory not found: {}", workspace_path));
@@ -168,6 +210,7 @@ fn spawn_resume_with_path(
     let log_path_owned = stderr_log.to_path_buf();
     std::thread::spawn(move || {
         let result = child.wait();
+        let success = matches!(&result, Ok(status) if status.success());
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -195,6 +238,8 @@ fn spawn_resume_with_path(
                 }
             }
         }
+        // Notify the scheduler the slot is free (and whether it succeeded).
+        on_exit(success);
     });
 
     Ok(pid)
@@ -292,6 +337,46 @@ mod tests {
         assert!(!should_auto_resume(&s, &cfg, Utc::now()));
     }
 
+    fn mk_eligible_with_id(id: &str) -> SessionInfo {
+        let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
+        s.id = id.to_string();
+        s
+    }
+
+    #[test]
+    fn select_caps_to_available_slots() {
+        // Five eligible sessions but only 2 concurrency slots free → fire 2.
+        // This is the core defense against the 40GB runaway: a tick that finds
+        // hundreds of eligible sessions must not spawn hundreds of processes.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let sessions: Vec<SessionInfo> =
+            (0..5).map(|i| mk_eligible_with_id(&format!("s{i}"))).collect();
+        let picked = select_resume_candidates(&sessions, &cfg, Utc::now(), |_| false, 2);
+        assert_eq!(picked.len(), 2, "must not exceed available slots");
+        assert_eq!(picked[0].0, "s0");
+        assert_eq!(picked[1].0, "s1");
+    }
+
+    #[test]
+    fn select_zero_slots_fires_nothing() {
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let sessions = vec![mk_eligible_with_id("s0")];
+        let picked = select_resume_candidates(&sessions, &cfg, Utc::now(), |_| false, 0);
+        assert!(picked.is_empty(), "no slots → fire nothing");
+    }
+
+    #[test]
+    fn select_skips_predicate_matches() {
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let sessions: Vec<SessionInfo> =
+            (0..3).map(|i| mk_eligible_with_id(&format!("s{i}"))).collect();
+        // Skip s1 (e.g. debounced / backed off) → only s0, s2 within 5 slots.
+        let picked =
+            select_resume_candidates(&sessions, &cfg, Utc::now(), |id| id == "s1", 5);
+        let ids: Vec<&str> = picked.iter().map(|(id, _)| id.as_str()).collect();
+        assert_eq!(ids, vec!["s0", "s2"]);
+    }
+
     #[test]
     fn blocked_when_subagent() {
         // Subagent transcripts (`agent-*.jsonl` under `<sid>/subagents/`) are
@@ -362,11 +447,16 @@ mod tests {
         std::fs::create_dir_all(&tmp).expect("create tmp dir");
         let log = tmp.join("stderr.log");
 
+        let exit_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let exit_flag_cb = exit_flag.clone();
         let pid = super::spawn_resume_with_path(
             "/bin/sh",
             "test-session-id",
             &tmp.to_string_lossy(),
             &log,
+            move |_success| {
+                exit_flag_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+            },
         )
         .expect("spawn should succeed");
         assert!(pid > 0, "pid should be non-zero");
@@ -411,6 +501,12 @@ mod tests {
                 .unwrap_or(false);
             assert!(!alive, "child pid {} should have been reaped", pid);
         }
+
+        // The reaper must have invoked on_exit so the scheduler frees the slot.
+        assert!(
+            exit_flag.load(std::sync::atomic::Ordering::SeqCst),
+            "on_exit callback was not invoked by the reaper",
+        );
 
         let _ = std::fs::remove_dir_all(&tmp);
     }

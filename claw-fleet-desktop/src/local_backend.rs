@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -229,6 +229,13 @@ impl LocalBackend {
         let auto_resume_last_fire: Arc<Mutex<HashMap<String, Instant>>> =
             Arc::new(Mutex::new(HashMap::new()));
 
+        // Count of auto-resume `claude --resume` processes currently alive.
+        // Bounds how many we fire per tick (cap - in_flight) so a tick that
+        // finds hundreds of eligible sessions can't spawn hundreds of ~150MB
+        // processes at once — that was the 40GB startup runaway. Decremented by
+        // each spawned process's reaper via the on_exit callback.
+        let auto_resume_in_flight: Arc<AtomicUsize> = Arc::new(AtomicUsize::new(0));
+
         // Cancellation flag for long-running threads. Flipped to false by `Drop`
         // so old threads exit when the backend is replaced.
         let running = Arc::new(AtomicBool::new(true));
@@ -333,6 +340,7 @@ impl LocalBackend {
         let analyzing2 = analyzing.clone();
         let idx_tx2 = index_tx.clone();
         let ar2 = auto_resume_last_fire.clone();
+        let arif2 = auto_resume_in_flight.clone();
 
         // Pre-compute each filesystem source's watch dirs for fast path matching.
         let source_watch_dirs: Vec<(usize, Vec<std::path::PathBuf>)> = sources
@@ -436,7 +444,7 @@ impl LocalBackend {
                         &locale2,
                         &llm_config2,
                     );
-                    maybe_fire_auto_resume(&sess2, &ar2);
+                    maybe_fire_auto_resume(&sess2, &ar2, &arif2);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
                     last_rescan = Instant::now();
@@ -466,6 +474,7 @@ impl LocalBackend {
             let analyzing3 = analyzing.clone();
             let idx_tx3 = index_tx.clone();
             let ar3 = auto_resume_last_fire.clone();
+            let arif3 = auto_resume_in_flight.clone();
 
             // Indices of polling sources — only these need rescanning on each tick.
             let poll_source_indices: HashSet<usize> = sources
@@ -545,7 +554,7 @@ impl LocalBackend {
                         &locale3,
                         &llm_config3,
                     );
-                    maybe_fire_auto_resume(&sess3, &ar3);
+                    maybe_fire_auto_resume(&sess3, &ar3, &arif3);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
                 }
@@ -559,13 +568,14 @@ impl LocalBackend {
         {
             let sess_ar = sessions.clone();
             let ar_ar = auto_resume_last_fire.clone();
+            let arif_ar = auto_resume_in_flight.clone();
             let running_ar = running.clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(30));
                 if !running_ar.load(Ordering::SeqCst) {
                     break;
                 }
-                maybe_fire_auto_resume(&sess_ar, &ar_ar);
+                maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar);
             });
         }
 
@@ -1295,14 +1305,25 @@ pub fn resume_session_impl(session_id: &str, workspace_path: &str) -> Result<(),
     claw_fleet_core::auto_resume::spawn_resume(session_id, workspace_path)
 }
 
-/// Scan the current session list for auto-resume candidates and fire them.
+/// Max number of `claude --resume` auto-resume processes alive at once. Each
+/// is a full Claude Code process (~150-200MB), so an unbounded fan-out of a
+/// few hundred is tens of GB of RSS — the startup runaway this caps.
+const AUTO_RESUME_MAX_CONCURRENT: usize = 4;
+
+/// Scan the current session list for auto-resume candidates and fire them,
+/// bounded by a global concurrency cap.
 ///
-/// Debounces so a given session can't be auto-resumed twice within 120s —
-/// if the spawned `claude --resume` hasn't appended a new turn to the JSONL
-/// yet on the next rescan tick, we won't spam duplicates.
+/// Two layers of protection against spamming:
+/// - **Debounce**: a given session can't be auto-resumed twice within 120s, so
+///   if the spawned `claude --resume` hasn't appended a new turn to the JSONL
+///   yet on the next rescan tick, we won't fire it again.
+/// - **Concurrency cap**: at most `AUTO_RESUME_MAX_CONCURRENT` resume processes
+///   run at once. A tick that finds 300 eligible sessions fires only enough to
+///   fill the free slots; `in_flight` is decremented by each process's reaper.
 fn maybe_fire_auto_resume(
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     last_fire: &Arc<Mutex<HashMap<String, Instant>>>,
+    in_flight: &Arc<AtomicUsize>,
 ) {
     let config = claw_fleet_core::auto_resume::AutoResumeConfig::load();
     if !config.enabled {
@@ -1310,31 +1331,53 @@ fn maybe_fire_auto_resume(
     }
     let now = chrono::Utc::now();
     let debounce = Duration::from_secs(120);
+
+    // Only fire enough to fill the free concurrency slots this tick.
+    let slots = AUTO_RESUME_MAX_CONCURRENT.saturating_sub(in_flight.load(Ordering::SeqCst));
+    if slots == 0 {
+        return;
+    }
+
     let candidates: Vec<(String, String)> = {
         let sess = sessions.lock().unwrap();
         let mut fire_map = last_fire.lock().unwrap();
         // Drop entries older than the debounce window so the map doesn't grow
         // unboundedly for sessions that come and go.
         fire_map.retain(|_, t| t.elapsed() < debounce * 10);
-        sess.iter()
-            .filter(|s| claw_fleet_core::auto_resume::should_auto_resume(s, &config, now))
-            .filter_map(|s| {
-                if let Some(t) = fire_map.get(&s.id) {
-                    if t.elapsed() < debounce {
-                        return None;
-                    }
-                }
-                fire_map.insert(s.id.clone(), Instant::now());
-                Some((s.id.clone(), s.workspace_path.clone()))
-            })
-            .collect()
+        let picked = claw_fleet_core::auto_resume::select_resume_candidates(
+            &sess,
+            &config,
+            now,
+            |id| fire_map.get(id).is_some_and(|t| t.elapsed() < debounce),
+            slots,
+        );
+        for (id, _) in &picked {
+            fire_map.insert(id.clone(), Instant::now());
+        }
+        picked
     };
+
     for (session_id, workspace_path) in candidates {
         log_debug(&format!(
-            "auto_resume: firing for session {} in {}",
-            session_id, workspace_path
+            "auto_resume: firing for session {} in {} (in_flight={})",
+            session_id,
+            workspace_path,
+            in_flight.load(Ordering::SeqCst)
         ));
-        if let Err(e) = resume_session_impl(&session_id, &workspace_path) {
+        // Reserve a slot now; the reaper releases it when the process exits.
+        in_flight.fetch_add(1, Ordering::SeqCst);
+        let in_flight_done = in_flight.clone();
+        let spawn_result = claw_fleet_core::auto_resume::spawn_resume_tracked(
+            &session_id,
+            &workspace_path,
+            move |_success| {
+                in_flight_done.fetch_sub(1, Ordering::SeqCst);
+            },
+        );
+        if let Err(e) = spawn_result {
+            // Spawn failed before any process exists → release the slot here,
+            // since no reaper will fire the on_exit callback.
+            in_flight.fetch_sub(1, Ordering::SeqCst);
             log_debug(&format!("auto_resume: failed for {}: {}", session_id, e));
         }
     }
