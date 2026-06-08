@@ -89,17 +89,24 @@ fn salvage_segment(seg: &str) -> Vec<SimpleCommand> {
     }
 }
 
-/// Split `cmd` on top-level shell connectors (`;`, newline, `&&`, `||`, `|`,
-/// background `&`), honouring single/double quotes and backslash escapes so we
-/// never split inside a quoted string.  Used only on the parse-failure
-/// fallback path, so subshell/`$()` boundaries are treated leniently — the
-/// goal is to recover argv heads, not to be a faithful shell tokenizer.
-fn split_top_level_connectors(cmd: &str) -> Vec<String> {
-    let mut segments = Vec::new();
+/// Split `cmd` on top-level shell connectors, returning each non-empty segment
+/// paired with the connector that *precedes* it (`None` for the first).  Used
+/// only on the parse-failure fallback path; see [`split_top_level_connectors`].
+fn split_top_level_segments(cmd: &str) -> Vec<(Option<Connector>, String)> {
+    let mut segments: Vec<(Option<Connector>, String)> = Vec::new();
     let mut cur = String::new();
+    // Connector that precedes the segment currently being accumulated.
+    let mut pending: Option<Connector> = None;
     let mut in_single = false;
     let mut in_double = false;
     let mut chars = cmd.chars().peekable();
+    let flush = |pending: &mut Option<Connector>,
+                     cur: &mut String,
+                     segments: &mut Vec<(Option<Connector>, String)>,
+                     next: Connector| {
+        segments.push((*pending, std::mem::take(cur)));
+        *pending = Some(next);
+    };
     while let Some(c) = chars.next() {
         if in_single {
             cur.push(c);
@@ -136,29 +143,46 @@ fn split_top_level_connectors(cmd: &str) -> Vec<String> {
                 in_double = true;
                 cur.push(c);
             }
-            ';' | '\n' => {
-                segments.push(std::mem::take(&mut cur));
-            }
+            ';' | '\n' => flush(&mut pending, &mut cur, &mut segments, Connector::Semi),
             '&' => {
-                if chars.peek() == Some(&'&') {
+                let conn = if chars.peek() == Some(&'&') {
                     chars.next();
-                }
-                segments.push(std::mem::take(&mut cur));
+                    Connector::And
+                } else {
+                    // Background `&` — closest structural match is a sequence.
+                    Connector::Semi
+                };
+                flush(&mut pending, &mut cur, &mut segments, conn);
             }
             '|' => {
-                if chars.peek() == Some(&'|') {
+                let conn = if chars.peek() == Some(&'|') {
                     chars.next();
-                }
-                segments.push(std::mem::take(&mut cur));
+                    Connector::Or
+                } else {
+                    Connector::Pipe
+                };
+                flush(&mut pending, &mut cur, &mut segments, conn);
             }
             _ => cur.push(c),
         }
     }
-    segments.push(cur);
+    segments.push((pending, cur));
     segments
         .into_iter()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .map(|(conn, s)| (conn, s.trim().to_string()))
+        .filter(|(_, s)| !s.is_empty())
+        .collect()
+}
+
+/// Split `cmd` on top-level shell connectors (`;`, newline, `&&`, `||`, `|`,
+/// background `&`), honouring single/double quotes and backslash escapes so we
+/// never split inside a quoted string.  Used only on the parse-failure
+/// fallback path, so subshell/`$()` boundaries are treated leniently — the
+/// goal is to recover argv heads, not to be a faithful shell tokenizer.
+fn split_top_level_connectors(cmd: &str) -> Vec<String> {
+    split_top_level_segments(cmd)
+        .into_iter()
+        .map(|(_, s)| s)
         .collect()
 }
 
@@ -672,21 +696,46 @@ pub fn extract_structured_view(cmd: &str) -> CommandView {
         }
     }
     if !parse_ok || builder.leaves.is_empty() {
-        // Fallback: keep the raw command as a single leaf so the UI still
-        // shows something readable.
+        // Parse failed (or yielded nothing).  Don't keep the partially-parsed
+        // prefix AND append the whole command flattened on top — that
+        // duplicates leaves and produces a `cd`-headed blob whose argv carries
+        // raw connectors (`;`, `|`) as tokens, which then mis-renders in the
+        // guard card.  Instead, rebuild from connector-split segments so every
+        // segment keeps its own argv head (mirrors `extract_simple_commands`).
+        let mut fb = ViewBuilder::new();
+        for (conn, seg) in split_top_level_segments(cmd) {
+            for (i, sc) in salvage_segment(&seg).into_iter().enumerate() {
+                let connector_before = if i == 0 { conn } else { Some(Connector::Semi) };
+                fb.push(
+                    CommandLeaf {
+                        argv: sc.argv,
+                        nested: None,
+                        triggering: false,
+                        already_allowed: false,
+                    },
+                    connector_before,
+                );
+            }
+        }
+        if !fb.leaves.is_empty() {
+            return fb.finish();
+        }
+        // Last resort (e.g. unterminated quote → no recoverable segments):
+        // keep the raw command as a single leaf so the UI still shows
+        // something readable.
         let argv = shell_words::split(cmd).unwrap_or_else(|_| {
             cmd.split_whitespace().map(|s| s.to_string()).collect()
         });
+        let mut single = ViewBuilder::new();
         if !argv.is_empty() {
-            builder
-                .leaves
-                .push(CommandLeaf {
-                    argv,
-                    nested: None,
-                    triggering: false,
-                    already_allowed: false,
-                });
+            single.leaves.push(CommandLeaf {
+                argv,
+                nested: None,
+                triggering: false,
+                already_allowed: false,
+            });
         }
+        return single.finish();
     }
     builder.finish()
 }
@@ -1489,6 +1538,46 @@ mod tests {
         // (shell-words may itself reject the unterminated quote; if so the
         // view ends up empty. Both outcomes are acceptable provided no panic.)
         let _ = v;
+    }
+
+    #[test]
+    fn view_compound_with_unparseable_segment_no_flat_blob() {
+        // Regression: a compound command where ONE segment uses non-shell
+        // syntax (a JS arrow function `() =>`) used to make the view append a
+        // duplicate giant leaf — the *whole* command flattened into one argv
+        // headed by `cd`, with shell connectors (`;`, `|`) surviving AS argv
+        // tokens.  That blob then mis-rendered in the guard card and got a
+        // stray `triggering=true`.  After the fix the view must expose each
+        // segment as its own leaf with its own head, and no leaf may contain a
+        // raw connector token.
+        let cmd = "cd /tmp/web ; ls dist/*.js | xargs basename ; cd /tmp \
+                   && patchwright-cli goto http://localhost:8899/x.html ; sleep 4 ; \
+                   patchwright-cli eval () => document.getElementById('result').textContent \
+                   | grep -oE '\\{.*\\}' | head -1";
+        let v = extract_structured_view(cmd);
+        for leaf in &v.leaves {
+            assert!(
+                !leaf.argv.iter().any(|t| matches!(t.as_str(), ";" | "|" | "&&" | "||" | "&")),
+                "no leaf may carry a raw shell connector as an argv token; got {:?}",
+                leaf.argv
+            );
+        }
+        // The eval segment must surface as a leaf headed by `patchwright-cli eval`.
+        assert!(
+            v.leaves.iter().any(|l| l.argv.starts_with(&[
+                "patchwright-cli".to_string(),
+                "eval".to_string()
+            ])),
+            "expected a `patchwright-cli eval` leaf; got {:?}",
+            v.leaves.iter().map(|l| &l.argv).collect::<Vec<_>>()
+        );
+        // And the `cd` leaf must be just `cd <dir>`, not the whole flattened chain.
+        let cd_leaves: Vec<_> = v.leaves.iter().filter(|l| l.argv.first().map(|s| s == "cd").unwrap_or(false)).collect();
+        assert!(
+            cd_leaves.iter().all(|l| l.argv.len() <= 2),
+            "a `cd` leaf ballooned into a flattened chain: {:?}",
+            cd_leaves.iter().map(|l| &l.argv).collect::<Vec<_>>()
+        );
     }
 
     #[test]
