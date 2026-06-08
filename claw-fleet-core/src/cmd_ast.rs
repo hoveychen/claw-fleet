@@ -49,12 +49,117 @@ pub fn extract_simple_commands(cmd: &str) -> Vec<SimpleCommand> {
     if let Some(simples) = try_parse(cmd) {
         return simples;
     }
-    // Fallback: dumb tokenise.  Better to over-match (and risk a false
-    // positive) than to miss the command entirely.
-    match shell_words::split(cmd) {
+    // Parse failed.  A single non-shell segment (e.g. a JS arrow function
+    // `patchwright-cli eval () => ...`) makes conch-parser reject the *entire*
+    // compound command, even though the other segments are perfectly ordinary.
+    // Collapsing the whole string into one flat argv via `shell_words::split`
+    // would headline it with the first word (`cd`) and silently destroy every
+    // other leaf's argv head — so prefix-based guard allow-rules like
+    // `patchwright-cli eval` could never match a leaf buried mid-chain.
+    //
+    // Instead, split on top-level connectors and salvage each segment on its
+    // own: a segment that parses cleanly contributes its real SimpleCommands,
+    // and only the genuinely-unparseable segment falls back to a tokenised
+    // argv (which still keeps its own argv head intact).
+    let segments = split_top_level_connectors(cmd);
+    if segments.len() > 1 {
+        let mut out = Vec::new();
+        for seg in &segments {
+            out.extend(salvage_segment(seg));
+        }
+        if !out.is_empty() {
+            return out;
+        }
+    }
+    salvage_segment(cmd)
+}
+
+/// Best-effort recovery of a single connector-free segment: try the real
+/// parser first, then fall back to a dumb `shell_words` tokenise.  Better to
+/// over-match (and risk a false positive) than to miss the command entirely.
+fn salvage_segment(seg: &str) -> Vec<SimpleCommand> {
+    if let Some(simples) = try_parse(seg) {
+        if !simples.is_empty() {
+            return simples;
+        }
+    }
+    match shell_words::split(seg) {
         Ok(argv) if !argv.is_empty() => vec![SimpleCommand { argv }],
         _ => Vec::new(),
     }
+}
+
+/// Split `cmd` on top-level shell connectors (`;`, newline, `&&`, `||`, `|`,
+/// background `&`), honouring single/double quotes and backslash escapes so we
+/// never split inside a quoted string.  Used only on the parse-failure
+/// fallback path, so subshell/`$()` boundaries are treated leniently — the
+/// goal is to recover argv heads, not to be a faithful shell tokenizer.
+fn split_top_level_connectors(cmd: &str) -> Vec<String> {
+    let mut segments = Vec::new();
+    let mut cur = String::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut chars = cmd.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_single {
+            cur.push(c);
+            if c == '\'' {
+                in_single = false;
+            }
+            continue;
+        }
+        if in_double {
+            cur.push(c);
+            if c == '\\' {
+                if let Some(&n) = chars.peek() {
+                    cur.push(n);
+                    chars.next();
+                }
+            } else if c == '"' {
+                in_double = false;
+            }
+            continue;
+        }
+        match c {
+            '\\' => {
+                cur.push(c);
+                if let Some(&n) = chars.peek() {
+                    cur.push(n);
+                    chars.next();
+                }
+            }
+            '\'' => {
+                in_single = true;
+                cur.push(c);
+            }
+            '"' => {
+                in_double = true;
+                cur.push(c);
+            }
+            ';' | '\n' => {
+                segments.push(std::mem::take(&mut cur));
+            }
+            '&' => {
+                if chars.peek() == Some(&'&') {
+                    chars.next();
+                }
+                segments.push(std::mem::take(&mut cur));
+            }
+            '|' => {
+                if chars.peek() == Some(&'|') {
+                    chars.next();
+                }
+                segments.push(std::mem::take(&mut cur));
+            }
+            _ => cur.push(c),
+        }
+    }
+    segments.push(cur);
+    segments
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn try_parse(cmd: &str) -> Option<Vec<SimpleCommand>> {
@@ -1110,6 +1215,28 @@ mod tests {
         // Either parser recovered something, or fallback returned empty —
         // neither should panic.
         assert!(v.iter().all(|argv| !argv.is_empty()) || v.is_empty());
+    }
+
+    #[test]
+    fn compound_with_unparseable_segment_keeps_other_leaves() {
+        // Regression: a long compound command where ONE segment uses
+        // non-shell syntax (a JS arrow function `() =>`) must not collapse the
+        // whole command into a single flat argv headed by the first word
+        // (`cd`).  If it did, prefix-based guard allow-rules like
+        // `patchwright-cli eval` would never match and the guard would prompt
+        // even though the user already signed an allow rule for it.
+        let cmd = "cd /tmp/web ; ls dist/*.js | xargs basename ; cd /tmp \
+                   && patchwright-cli goto http://localhost:8899/x.html ; sleep 4 ; \
+                   patchwright-cli eval () => document.getElementById('result').textContent \
+                   | grep -oE '\\{.*\\}' | head -1";
+        assert!(
+            cmd_matches_rule(cmd, "patchwright-cli eval"),
+            "the `patchwright-cli eval` leaf should still be recoverable from a \
+             compound command containing an unparseable JS-arrow segment"
+        );
+        // The unrelated leaves should also survive as their own commands.
+        assert!(contains_argv_prefix(cmd, &["patchwright-cli", "goto"]));
+        assert!(contains_argv_prefix(cmd, &["sleep"]));
     }
 
     #[test]
