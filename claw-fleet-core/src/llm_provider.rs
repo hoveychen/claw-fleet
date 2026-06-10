@@ -593,8 +593,9 @@ mod tests {
     fn claude_provider_lists_models() {
         let p = ClaudeCliProvider::new();
         let models = p.list_models();
-        assert_eq!(models.len(), 3);
-        assert_eq!(models[0].id, "opus");
+        assert_eq!(models.len(), 4);
+        assert_eq!(models[0].id, "fable");
+        assert!(models.iter().any(|m| m.id == "opus"));
     }
 
     #[test]
