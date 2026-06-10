@@ -62,12 +62,14 @@ pub const COST_TIER_30_150: ModelCosts = ModelCosts {
     web_search: 0.01,
 };
 
-// Mythos (incl. -preview): 5x current Opus 4.6 tier = $25 / $125 per Mtok.
-pub const COST_TIER_MYTHOS: ModelCosts = ModelCosts {
-    input: 25.0,
-    output: 125.0,
-    cache_write: 31.25,
-    cache_read: 2.5,
+// Fable 5 / Mythos 5 tier: $10 / $50 per Mtok (per Anthropic's published
+// pricing, 2026-06). Shared by `claude-fable-5` and `claude-mythos-5`
+// (incl. the invitation-only `-preview`).
+pub const COST_TIER_10_50: ModelCosts = ModelCosts {
+    input: 10.0,
+    output: 50.0,
+    cache_write: 12.5,
+    cache_read: 1.0,
     web_search: 0.01,
 };
 
@@ -102,10 +104,11 @@ const DEFAULT_UNKNOWN_COST: ModelCosts = COST_TIER_5_25;
 pub fn get_model_costs(model: &str) -> ModelCosts {
     let m = model.to_ascii_lowercase();
 
-    // Mythos (and -preview / dated variants). Substring match tolerates
-    // `claude-mythos-preview`, `claude-mythos-1-20260101`, etc.
-    if m.contains("mythos") {
-        return COST_TIER_MYTHOS;
+    // Fable 5 and Mythos 5 share the $10/$50 tier. Substring match tolerates
+    // `claude-fable-5`, the `fable` alias, `claude-mythos-preview`,
+    // `claude-mythos-1-20260101`, etc.
+    if m.contains("fable") || m.contains("mythos") {
+        return COST_TIER_10_50;
     }
 
     // Opus 4.x tier routing. Substring matching is fragile because
@@ -213,7 +216,8 @@ mod tests {
 
     #[test]
     fn mythos_pricing_and_preview_variants() {
-        // 1M input + 1M output on Mythos = $25 + $125 = $150.
+        // Mythos 5 is officially $10/$50 per Mtok (same tier as Fable 5).
+        // 1M input + 1M output = $10 + $50 = $60.
         let usage = TurnUsage {
             input_tokens: 1_000_000,
             output_tokens: 1_000_000,
@@ -221,14 +225,32 @@ mod tests {
         };
         for model in [
             "claude-mythos-preview",
+            "claude-mythos-5",
             "claude-mythos-1-20260101",
             "mythos",
             "Claude-Mythos-Preview-20260101",
         ] {
             let cost = turn_cost_usd(model, &usage);
             assert!(
-                (cost - 150.0).abs() < 1e-9,
+                (cost - 60.0).abs() < 1e-9,
                 "model {model} priced wrong: {cost}"
+            );
+        }
+    }
+
+    #[test]
+    fn fable_pricing() {
+        // Claude Fable 5: $10/$50 per Mtok. 1M input + 1M output = $60.
+        let usage = TurnUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            ..Default::default()
+        };
+        for model in ["claude-fable-5", "fable", "Claude-Fable-5"] {
+            let cost = turn_cost_usd(model, &usage);
+            assert!(
+                (cost - 60.0).abs() < 1e-9,
+                "model {model} priced wrong: {cost} (expected 60.0 @ $10/$50 tier)"
             );
         }
     }
