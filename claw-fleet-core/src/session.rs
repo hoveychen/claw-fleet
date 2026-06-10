@@ -946,9 +946,9 @@ fn claude_family_version(model_lower: &str, family: &str) -> Option<(u32, u32)> 
 /// Note Sonnet 4 / 4.5 are 200K models: Sonnet 4's brief 1M was a public-beta
 /// header, not the default, and Sonnet 4.5 never shipped 1M.
 fn claude_model_supports_1m(model_lower: &str) -> bool {
-    // Mythos preview's dated id is invitation-only / unpublished, so match the
-    // family substring rather than a version.
-    if model_lower.contains("mythos") {
+    // Fable 5 and Mythos always ship a 1M window. Their family tokens carry no
+    // opus/sonnet-style version, so match the substring rather than a version.
+    if model_lower.contains("fable") || model_lower.contains("mythos") {
         return true;
     }
     // Opus and Sonnet share the same 4.6+ gate; Haiku never qualifies.
@@ -3344,6 +3344,18 @@ mod tests {
         // substring; assert on a representative id shape.
         assert_eq!(
             context_window_for_model("claude-mythos-preview", 530_000),
+            Some(1_000_000)
+        );
+    }
+
+    #[test]
+    fn context_window_fable_is_1m() {
+        // Claude Fable 5 (claude-fable-5) ships with a 1M window. It's a new
+        // family token, so the opus/sonnet version gate doesn't match it —
+        // it must be whitelisted like mythos. Without this, the denominator
+        // defaults to 200K and the UI shows a fake "ctx 100%".
+        assert_eq!(
+            context_window_for_model("claude-fable-5", 530_000),
             Some(1_000_000)
         );
     }
