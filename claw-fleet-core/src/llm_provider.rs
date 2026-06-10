@@ -235,6 +235,7 @@ impl LlmProvider for ClaudeCliProvider {
 
     fn list_models(&self) -> Vec<LlmModel> {
         vec![
+            LlmModel { id: "fable".into(), display_name: "Fable".into() },
             LlmModel { id: "opus".into(), display_name: "Opus".into() },
             LlmModel { id: "sonnet".into(), display_name: "Sonnet".into() },
             LlmModel { id: "haiku".into(), display_name: "Haiku".into() },
