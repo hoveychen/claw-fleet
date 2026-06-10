@@ -235,6 +235,7 @@ impl LlmProvider for ClaudeCliProvider {
 
     fn list_models(&self) -> Vec<LlmModel> {
         vec![
+            LlmModel { id: "fable".into(), display_name: "Fable".into() },
             LlmModel { id: "opus".into(), display_name: "Opus".into() },
             LlmModel { id: "sonnet".into(), display_name: "Sonnet".into() },
             LlmModel { id: "haiku".into(), display_name: "Haiku".into() },
@@ -592,8 +593,9 @@ mod tests {
     fn claude_provider_lists_models() {
         let p = ClaudeCliProvider::new();
         let models = p.list_models();
-        assert_eq!(models.len(), 3);
-        assert_eq!(models[0].id, "opus");
+        assert_eq!(models.len(), 4);
+        assert_eq!(models[0].id, "fable");
+        assert!(models.iter().any(|m| m.id == "opus"));
     }
 
     #[test]
