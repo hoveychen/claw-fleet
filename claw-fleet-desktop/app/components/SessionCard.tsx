@@ -307,10 +307,16 @@ export function formatModel(model: string): string {
   // e.g. "claude-opus-4-5-20251101" → "Opus 4.5"
   //      "claude-sonnet-4-6"        → "Sonnet 4.6"
   //      "claude-haiku-4-5-20251001"→ "Haiku 4.5"
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const m = model.match(/claude-(\w+)-([\d]+)-([\d]+)/);
   if (m) {
-    const name = m[1].charAt(0).toUpperCase() + m[1].slice(1);
-    return `${name} ${m[2]}.${m[3]}`;
+    return `${cap(m[1])} ${m[2]}.${m[3]}`;
+  }
+  // Single-version families, e.g. "claude-fable-5" → "Fable 5",
+  // "claude-mythos-5" → "Mythos 5".
+  const single = model.match(/^claude-([a-z]+)-(\d+)$/i);
+  if (single) {
+    return `${cap(single[1])} ${single[2]}`;
   }
   return model;
 }
