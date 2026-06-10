@@ -946,11 +946,9 @@ fn claude_family_version(model_lower: &str, family: &str) -> Option<(u32, u32)> 
 /// Note Sonnet 4 / 4.5 are 200K models: Sonnet 4's brief 1M was a public-beta
 /// header, not the default, and Sonnet 4.5 never shipped 1M.
 fn claude_model_supports_1m(model_lower: &str) -> bool {
-    // Fable 5 and Mythos always ship a 1M window. Their family tokens carry no
-    // opus/sonnet-style version, so match the substring rather than a version.
-    if model_lower.contains("fable") || model_lower.contains("mythos") {
-        return true;
-    }
+    // Always-1M families (Fable, Mythos) are handled unconditionally by
+    // `claude_model_always_1m` before this version-gated check is reached, so
+    // they're intentionally not matched here.
     // Opus and Sonnet share the same 4.6+ gate; Haiku never qualifies.
     for family in ["opus", "sonnet"] {
         if let Some((major, minor)) = claude_family_version(model_lower, family) {
@@ -958,6 +956,16 @@ fn claude_model_supports_1m(model_lower: &str) -> bool {
         }
     }
     false
+}
+
+/// Claude families that ship a 1M window on **every** release, with no 200K
+/// variant. Unlike the opus/sonnet version gate (whose 1M is only *inferred*
+/// once a turn's observed input exceeds 200K — Claude Code never writes the
+/// `[1m]` flag to JSONL), these report 1M unconditionally, from the first turn:
+///   * Claude Fable 5 (`claude-fable-5`) — always 1M.
+///   * Mythos / Mythos research preview (Project Glasswing) — always 1M.
+fn claude_model_always_1m(model_lower: &str) -> bool {
+    model_lower.contains("fable") || model_lower.contains("mythos")
 }
 
 /// Best-effort lookup of a model's input-context-window size (in tokens).
@@ -978,11 +986,21 @@ pub fn context_window_for_model(model: &str, observed_max_input_tokens: u64) -> 
     let m = model.to_lowercase();
 
     // ── Anthropic / Claude ──────────────────────────────────────────────
-    if m.starts_with("claude-") || m == "opus" || m == "sonnet" || m == "haiku" {
+    if m.starts_with("claude-")
+        || m == "opus"
+        || m == "sonnet"
+        || m == "haiku"
+        || claude_model_always_1m(&m)
+    {
         // Explicit `[1m]` suffix — the canonical Claude Code marker.
         // Doesn't appear in JSONL today, but kept for correctness if that
         // ever changes.
         if m.contains("[1m]") {
+            return Some(1_000_000);
+        }
+        // Always-1M families (Fable, Mythos) have no 200K variant — report 1M
+        // unconditionally so a fresh session doesn't briefly read 200K.
+        if claude_model_always_1m(&m) {
             return Some(1_000_000);
         }
         // Inferred 1M: a turn's total input exceeds the 200K window. Only
@@ -3358,6 +3376,22 @@ mod tests {
             context_window_for_model("claude-fable-5", 530_000),
             Some(1_000_000)
         );
+    }
+
+    #[test]
+    fn context_window_fable_mythos_always_1m_even_with_low_observed() {
+        // Fable 5 and Mythos 5 have no 200K variant — they are always 1M.
+        // Unlike opus/sonnet (whose 1M is inferred only once a turn exceeds
+        // 200K), these must report 1M from the very first turn, when observed
+        // input is still tiny. Otherwise a fresh Fable session briefly shows a
+        // fake 200K window / inflated ctx-%.
+        for model in ["claude-fable-5", "fable", "claude-mythos-5", "claude-mythos-preview"] {
+            assert_eq!(
+                context_window_for_model(model, 0),
+                Some(1_000_000),
+                "{model} should report 1M regardless of observed tokens"
+            );
+        }
     }
 
     #[test]
