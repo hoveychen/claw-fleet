@@ -437,16 +437,20 @@ pub fn decode_workspace_path_with_parts(parts: &[&str]) -> String {
     let mut current = String::new(); // built path so far (e.g. "/Users/hoveychen")
     let mut i = 0;
     while i < parts.len() {
+        // Build a map of (encoded dir name) → (real dir name) for the current
+        // level. Claude collapses `/`, `.` AND `_` all into `-`, so the real
+        // on-disk directory name may differ from the dash-joined candidate by a
+        // `.` or `_` — matching real entries by their re-encoded form recovers
+        // names like `kol_dash` that a `-`→`/`-only decode cannot.
+        let level_dirs = read_level_dirs(&current);
+
         // Try longest remaining segment first: join parts[i..] with '-', then parts[i..len-1], etc.
         let mut matched = false;
         // Try from longest (all remaining parts) down to single part
         for end in (i + 1..=parts.len()).rev() {
             let candidate_segment = parts[i..end].join("-");
-            let candidate_path = format!("{}/{}", current, candidate_segment);
-            // Use TCC-safe exists check to avoid triggering macOS permission
-            // dialogs for protected directories (~/Music, ~/Pictures, etc.).
-            if crate::tcc::safe_exists(std::path::Path::new(&candidate_path)) {
-                current = candidate_path;
+            if let Some(real) = level_dirs.get(&candidate_segment) {
+                current = format!("{}/{}", current, real);
                 i = end;
                 matched = true;
                 break;
@@ -459,6 +463,59 @@ pub fn decode_workspace_path_with_parts(parts: &[&str]) -> String {
         }
     }
     current
+}
+
+/// Re-encode a single directory entry name the way Claude Code encodes paths:
+/// `/`, `.`, and `_` all collapse to `-`. (An entry name never contains `/`,
+/// but `.` and `_` are common.)
+fn encode_path_segment(name: &str) -> String {
+    name.chars()
+        .map(|c| if c == '.' || c == '_' { '-' } else { c })
+        .collect()
+}
+
+/// List the immediate sub-directories of `parent` (empty string = filesystem
+/// root) keyed by their Claude-encoded name. A directory literally named with
+/// `-` wins over a `.`/`_` collision so an exact path still round-trips.
+///
+/// TCC-safe: never reads a protected directory, and resolves an entry's type
+/// from the readdir `d_type` (no per-entry `stat`) so listing `~` doesn't fire a
+/// macOS permission dialog for `~/Documents`, `~/Downloads`, etc. Symlinks are
+/// only followed when their target is not TCC-protected.
+fn read_level_dirs(parent: &str) -> std::collections::HashMap<String, String> {
+    let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let dir = if parent.is_empty() { "/" } else { parent };
+    let dir_path = std::path::Path::new(dir);
+    if crate::tcc::is_tcc_protected(dir_path) {
+        return map;
+    }
+    let Ok(entries) = std::fs::read_dir(dir_path) else {
+        return map;
+    };
+    for entry in entries.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        let is_dir = match entry.file_type() {
+            Ok(ft) if ft.is_dir() => true,
+            Ok(ft) if ft.is_symlink() => {
+                let target = entry.path();
+                !crate::tcc::is_tcc_protected(&target) && target.is_dir()
+            }
+            _ => false,
+        };
+        if !is_dir {
+            continue;
+        }
+        let key = encode_path_segment(&name);
+        // A literal name (no `.`/`_` rewritten) is the unambiguous decoding, so
+        // let it overwrite any earlier `.`/`_` collision; otherwise keep the
+        // first seen.
+        if name == key || !map.contains_key(&key) {
+            map.insert(key, name);
+        }
+    }
+    map
 }
 
 fn encode_workspace_path(path: &str) -> String {
@@ -3595,6 +3652,55 @@ mod tests {
         assert!(
             !ids.contains(&gone_id),
             "session whose workspace was deleted must be filtered out: {ids:?}"
+        );
+    }
+
+    /// Regression: Claude Code encodes `/`, `.` AND `_` all to `-` in the
+    /// projects dir name, so a live workspace whose name contains `_` (or `.`)
+    /// must still resolve back to its real on-disk path and stay visible. The
+    /// lossy `-`→`/`-only decode hid every such session (e.g. `kol_dash`).
+    #[test]
+    fn scan_keeps_sessions_whose_workspace_name_has_underscore() {
+        use std::path::Path;
+        let tmp = tempfile::tempdir().unwrap();
+
+        let claude_dir = tmp.path().join("claude_home");
+        let projects = claude_dir.join("projects");
+        fs::create_dir_all(&projects).unwrap();
+
+        let write_session = |proj_dir: &Path, id: &str| {
+            fs::create_dir_all(proj_dir).unwrap();
+            let line = json!({
+                "type": "user",
+                "message": {"role": "user", "content": "hi"},
+                "timestamp": "2026-06-14T00:00:00.000Z"
+            });
+            fs::write(proj_dir.join(format!("{id}.jsonl")), format!("{line}\n")).unwrap();
+        };
+
+        // Mimic Claude Code's path encoding: every `/`, `.`, and `_` becomes `-`.
+        let claude_encode = |p: &Path| -> String {
+            p.to_string_lossy()
+                .chars()
+                .map(|c| if c == '/' || c == '.' || c == '_' { '-' } else { c })
+                .collect()
+        };
+
+        // A live workspace whose directory name contains an underscore.
+        let us_ws = tmp.path().join("kol_dash");
+        fs::create_dir_all(&us_ws).unwrap();
+        let us_encoded = claude_encode(&us_ws);
+        let us_id = "33333333-3333-3333-3333-333333333333";
+        write_session(&projects.join(&us_encoded), us_id);
+
+        let cache = ScanCache::new();
+        let sessions = scan_claude_sessions(&claude_dir, &cache);
+        let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+
+        assert!(
+            ids.contains(&us_id),
+            "session in an existing workspace with an underscore in its name \
+             must remain visible: {ids:?}"
         );
     }
 }
