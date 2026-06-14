@@ -1778,6 +1778,18 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             .cloned()
             .unwrap_or_else(|| decode_workspace_path(&encoded));
 
+        // Hide sessions whose workspace directory no longer exists — e.g. a git
+        // worktree that was removed. Their transcripts linger under
+        // ~/.claude/projects/<encoded>/ and would otherwise show as permanently
+        // RateLimited cards with a Resume button that can never work (`claude
+        // --resume` bails the moment it sees the cwd is gone). Skip TCC-protected
+        // paths: we can't stat them without triggering a macOS permission dialog,
+        // so we never hide those (decode already left them naively decoded).
+        let ws_path = Path::new(&workspace_path);
+        if !crate::tcc::is_tcc_protected(ws_path) && !ws_path.is_dir() {
+            continue;
+        }
+
         let ws_name = workspace_name(&workspace_path);
         let ide_name = ide.map(|s| s.ide_name.clone());
 
@@ -3533,6 +3545,57 @@ mod tests {
         super::prune_dead_holders(&mut holders);
         assert_eq!(holders.len(), 1, "exactly the matching entry survives");
         assert_eq!(holders[0].start_time_secs, real);
+    }
+
+    /// Regression: sessions whose workspace directory no longer exists (e.g. a
+    /// deleted git worktree) must be filtered out of the scan, while sessions
+    /// whose workspace still exists stay visible.
+    #[test]
+    fn scan_hides_sessions_whose_workspace_was_deleted() {
+        use std::path::Path;
+        let tmp = tempfile::tempdir().unwrap();
+
+        let claude_dir = tmp.path().join("claude_home");
+        let projects = claude_dir.join("projects");
+        fs::create_dir_all(&projects).unwrap();
+
+        // A minimal but parseable session JSONL written `now` (well within the
+        // 7-day freshness window parse_session_info requires).
+        let write_session = |proj_dir: &Path, id: &str| {
+            fs::create_dir_all(proj_dir).unwrap();
+            let line = json!({
+                "type": "user",
+                "message": {"role": "user", "content": "hi"},
+                "timestamp": "2026-06-14T00:00:00.000Z"
+            });
+            fs::write(proj_dir.join(format!("{id}.jsonl")), format!("{line}\n")).unwrap();
+        };
+
+        // Workspace that still exists on disk → its session must survive.
+        let live_ws = tmp.path().join("live-workspace");
+        fs::create_dir_all(&live_ws).unwrap();
+        let live_encoded = live_ws.to_string_lossy().replace('/', "-");
+        let live_id = "11111111-1111-1111-1111-111111111111";
+        write_session(&projects.join(&live_encoded), live_id);
+
+        // Workspace that was deleted (never created) → its session must be hidden.
+        let gone_ws = tmp.path().join("deleted-worktree");
+        let gone_encoded = gone_ws.to_string_lossy().replace('/', "-");
+        let gone_id = "22222222-2222-2222-2222-222222222222";
+        write_session(&projects.join(&gone_encoded), gone_id);
+
+        let cache = ScanCache::new();
+        let sessions = scan_claude_sessions(&claude_dir, &cache);
+        let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+
+        assert!(
+            ids.contains(&live_id),
+            "session in an existing workspace must remain visible: {ids:?}"
+        );
+        assert!(
+            !ids.contains(&gone_id),
+            "session whose workspace was deleted must be filtered out: {ids:?}"
+        );
     }
 }
 
