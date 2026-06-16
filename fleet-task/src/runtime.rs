@@ -12,12 +12,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use claw_fleet_task::actions::{self, StartOpts};
-use claw_fleet_task::orchestrator::{Orchestrator, OrchestratorStep, ReviewGate, ReviewVerdict};
-use claw_fleet_task::pitem::PItem;
+use claw_fleet_task::orchestrator::{Orchestrator, OrchestratorStep, ReviewGate};
 use claw_fleet_task::planning;
 use claw_fleet_task::runner::TaskLifecycleHost;
 use claw_fleet_task::task::{
-    create_task, get_task, write_task_atomic, Task, TaskInput, TaskStatus,
+    create_task, get_task, write_task_atomic, TaskInput, TaskStatus,
 };
 
 use claw_fleet_task::registry::{self, RegistryEntry};
@@ -145,20 +144,6 @@ fn finish_boot(task_id: String, host: Arc<LocalHost>) -> Result<Bootstrap, Strin
         host,
         broadcaster,
     })
-}
-
-/// Placeholder review gate used until P6 wires the real isolated review
-/// session. It approves every P-item — clearly a stub, NOT a real `/goal`
-/// review. P6 replaces this with a session that actually judges the worker's
-/// diff/summary against the acceptance criteria.
-//
-// TODO(P6): swap for the real LLM review session via `launch_review`.
-pub struct StubReviewGate;
-
-impl ReviewGate for StubReviewGate {
-    fn review(&self, _task: &Task, _p_item: &PItem) -> Result<ReviewVerdict, String> {
-        Ok(ReviewVerdict { achieved: true, gaps: vec![] })
-    }
 }
 
 /// Drive the task to completion with the deterministic orchestrator. Loops
