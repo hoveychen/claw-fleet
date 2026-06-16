@@ -9,10 +9,22 @@ import {
   type KanbanColumn,
   type Project,
 } from "../store";
-import { FolderGit2 } from "lucide-react";
+import { FolderGit2, Search } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import styles from "./ProjectsView.module.css";
 import { PROJECTS_FEATURE_ENABLED } from "../featureFlags";
+import type { TaskStatus } from "../types";
+
+const STATUS_FILTERS: ("all" | TaskStatus)[] = [
+  "all",
+  "running",
+  "reviewing",
+  "awaitingAcceptance",
+  "paused",
+  "drafting",
+  "done",
+  "abandoned",
+];
 
 type DialogMode =
   | { type: "create" }
@@ -30,7 +42,6 @@ export function ProjectsView() {
   const setSelectedId = useProjectsStore((s) => s.setSelectedProjectId);
   const [dialog, setDialog] = useState<DialogMode>(null);
   const [error, setError] = useState<string | null>(null);
-  const [listCollapsed, setListCollapsed] = useState(false);
   const showNewProjectRequested = useUIStore((s) => s.showNewProjectRequested);
   const setShowNewProjectRequested = useUIStore((s) => s.setShowNewProjectRequested);
 
@@ -66,20 +77,6 @@ export function ProjectsView() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.header}>
-        <h2 className={styles.title}>{t("projects.title")}</h2>
-        <button
-          type="button"
-          className={styles.action_btn}
-          onClick={() => {
-            setError(null);
-            setDialog({ type: "create" });
-          }}
-        >
-          + {t("projects.new")}
-        </button>
-      </div>
-
       {!loaded ? (
         <p className={styles.empty}>{t("scanning")}</p>
       ) : projects.length === 0 ? (
@@ -95,56 +92,25 @@ export function ProjectsView() {
             },
           }}
         />
+      ) : selected ? (
+        <ProjectPage
+          project={selected}
+          sessionCount={sessionCountByProject.get(selected.id) ?? 0}
+          onEdit={() => {
+            setError(null);
+            setDialog({ type: "edit", project: selected });
+          }}
+          onDelete={() => {
+            setError(null);
+            setDialog({ type: "delete", project: selected });
+          }}
+        />
       ) : (
-        <div className={styles.body}>
-          {!listCollapsed && (
-            <ul className={styles.list_pane} style={{ listStyle: "none", margin: 0 }}>
-              {projects.map((p) => (
-                <li
-                  key={p.id}
-                  className={`${styles.list_item} ${selectedId === p.id ? styles.list_item_active : ""}`}
-                  onClick={() => {
-                    setSelectedId(p.id);
-                    setListCollapsed(true);
-                  }}
-                >
-                  <div className={styles.list_item_title}>{p.name}</div>
-                  <div className={styles.list_item_sub}>
-                    <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {p.workspace}
-                    </span>
-                    <span className={styles.chip}>
-                      {sessionCountByProject.get(p.id) ?? 0}
-                    </span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-
-          <div className={styles.detail_pane}>
-            {selected ? (
-              <ProjectDetail
-                project={selected}
-                sessionCount={sessionCountByProject.get(selected.id) ?? 0}
-                listCollapsed={listCollapsed}
-                onToggleList={() => setListCollapsed((v) => !v)}
-                onEdit={() => {
-                  setError(null);
-                  setDialog({ type: "edit", project: selected });
-                }}
-                onDelete={() => {
-                  setError(null);
-                  setDialog({ type: "delete", project: selected });
-                }}
-                onProjectChanged={load}
-                t={t}
-              />
-            ) : (
-              <p className={styles.empty}>{t("projects.select_prompt")}</p>
-            )}
-          </div>
-        </div>
+        <EmptyState
+          icon={<FolderGit2 size={28} strokeWidth={1.5} />}
+          title={t("projects.select_title", "Select a project")}
+          subtitle={t("projects.select_prompt")}
+        />
       )}
 
       {dialog?.type === "create" && (
@@ -153,9 +119,10 @@ export function ProjectsView() {
           onCancel={() => setDialog(null)}
           onSubmit={async (input) => {
             try {
-              await invoke<Project>("create_project", { input });
+              const created = await invoke<Project>("create_project", { input });
               setDialog(null);
               await load();
+              setSelectedId(created.id);
             } catch (e) {
               setError(String(e));
             }
@@ -216,35 +183,35 @@ export function ProjectsView() {
   );
 }
 
-function ProjectDetail({
+function ProjectPage({
   project,
   sessionCount,
-  listCollapsed,
-  onToggleList,
   onEdit,
   onDelete,
-  onProjectChanged: _onProjectChanged,
-  t,
 }: {
   project: Project;
   sessionCount: number;
-  listCollapsed: boolean;
-  onToggleList: () => void;
   onEdit: () => void;
   onDelete: () => void;
-  onProjectChanged: () => void;
-  t: (k: string, opts?: Record<string, unknown>) => string;
 }) {
+  const { t } = useTranslation();
   const tasks = useTasksStore((s) => s.tasks);
   const refreshTasks = useTasksStore((s) => s.refresh);
   const setSelectedTaskId = useTasksStore((s) => s.setSelectedTaskId);
+  const setSelectedProjectId = useProjectsStore((s) => s.setSelectedProjectId);
   const setViewMode = useUIStore((s) => s.setViewMode);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | TaskStatus>("all");
 
   useEffect(() => {
     refreshTasks(project.id);
   }, [project.id, refreshTasks]);
 
-  const projectTasks = tasks.filter((tk) => tk.projectId === project.id);
+  const projectTasks = useMemo(
+    () => tasks.filter((tk) => tk.projectId === project.id),
+    [tasks, project.id],
+  );
+
   const activeCount = projectTasks.filter(
     (tk) => tk.status !== "done" && tk.status !== "abandoned",
   ).length;
@@ -271,81 +238,133 @@ function ProjectDetail({
     return `${Math.round(s / 8640) / 10}d`;
   };
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return projectTasks
+      .filter((tk) => statusFilter === "all" || tk.status === statusFilter)
+      .filter(
+        (tk) =>
+          !q ||
+          tk.title.toLowerCase().includes(q) ||
+          (tk.description ?? "").toLowerCase().includes(q),
+      )
+      .sort((a, b) => (b.startedAt ?? b.createdAt) - (a.startedAt ?? a.createdAt));
+  }, [projectTasks, statusFilter, search]);
+
   const openTask = (taskId: string) => {
     setSelectedTaskId(taskId);
     setViewMode("tasks");
   };
+  const newTask = () => {
+    setSelectedProjectId(project.id);
+    setSelectedTaskId(null);
+    setViewMode("tasks");
+  };
+
+  const planProgress = (tk: (typeof projectTasks)[number]) => {
+    const items = Object.values(tk.plan.items ?? {});
+    const total = items.length;
+    const done = items.filter(
+      (it) => typeof it.status === "string" && (it.status === "done" || it.status === "skipped"),
+    ).length;
+    return { total, done };
+  };
 
   return (
-    <div className={styles.main_pane}>
-      <div className={styles.detail_main}>
-        <div className={styles.detail_header}>
-          <button
-            type="button"
-            className={styles.list_toggle}
-            onClick={onToggleList}
-            title={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
-            aria-label={listCollapsed ? t("projects.show_list") : t("projects.hide_list")}
-          >
-            {listCollapsed ? "›" : "‹"}
+    <div className={styles.project_page}>
+      <div className={styles.detail_header}>
+        <h3 className={styles.detail_title}>{project.name}</h3>
+        <div className={styles.detail_actions}>
+          <button type="button" className={styles.new_task_btn} onClick={newTask}>
+            + {t("tasks.new_task", "New task")}
           </button>
-          <h3 className={styles.detail_title}>{project.name}</h3>
-          <div className={styles.detail_actions}>
-            <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
-            <button type="button" onClick={onDelete} className={styles.danger}>
-              {t("projects.delete")}
-            </button>
-          </div>
+          <button type="button" onClick={onEdit}>{t("projects.edit")}</button>
+          <button type="button" onClick={onDelete} className={styles.danger}>
+            {t("projects.delete")}
+          </button>
         </div>
-        <dl className={styles.kv} style={{ marginBottom: 8 }}>
-          <dt>{t("projects.workspace")}</dt>
-          <dd>{project.workspace}</dd>
-          <dt>{t("projects.concurrency")}</dt>
-          <dd>{project.concurrency}</dd>
-          <dt>{t("projects.session_count")}</dt>
-          <dd>{sessionCount}</dd>
-        </dl>
-        <div className={styles.project_metrics}>
-          <div className={styles.metric}>
-            <div className={styles.metric_value}>{activeCount}</div>
-            <div className={styles.metric_label}>{t("projects.metric_active_tasks")}</div>
-          </div>
-          <div className={styles.metric}>
-            <div className={styles.metric_value}>{doneThisWeek}</div>
-            <div className={styles.metric_label}>{t("projects.metric_done_this_week")}</div>
-          </div>
-          <div className={styles.metric}>
-            <div className={styles.metric_value}>{avgDurationSecs != null ? formatDuration(avgDurationSecs) : "—"}</div>
-            <div className={styles.metric_label}>{t("projects.metric_avg_duration")}</div>
-          </div>
-          <div className={styles.metric}>
-            <div className={styles.metric_value}>{longestRunningSecs ? formatDuration(longestRunningSecs) : "—"}</div>
-            <div className={styles.metric_label}>{t("projects.metric_longest_running")}</div>
-          </div>
-        </div>
-        {projectTasks.length > 0 && (
-          <div className={styles.project_tasks}>
-            <h4 className={styles.project_tasks_title}>{t("projects.tasks_in_project")}</h4>
-            <ul className={styles.project_tasks_list}>
-              {projectTasks.slice(0, 10).map((tk) => (
-                <li key={tk.id}>
-                  <button
-                    type="button"
-                    className={styles.project_task_row}
-                    onClick={() => openTask(tk.id)}
-                    title={tk.title}
-                  >
-                    <span className={`${styles.project_task_status} ${styles[`project_task_status_${tk.status}`] ?? ""}`}>
-                      {tk.status}
-                    </span>
-                    <span className={styles.project_task_title}>{tk.title}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
       </div>
+      <div className={styles.workspace_line} title={project.workspace}>
+        {project.workspace}
+        <span className={styles.workspace_sep}>·</span>
+        {t("projects.concurrency")}: {project.concurrency}
+        <span className={styles.workspace_sep}>·</span>
+        {t("projects.session_count")}: {sessionCount}
+      </div>
+
+      <div className={styles.project_metrics}>
+        <div className={styles.metric}>
+          <div className={styles.metric_value}>{activeCount}</div>
+          <div className={styles.metric_label}>{t("projects.metric_active_tasks")}</div>
+        </div>
+        <div className={styles.metric}>
+          <div className={styles.metric_value}>{doneThisWeek}</div>
+          <div className={styles.metric_label}>{t("projects.metric_done_this_week")}</div>
+        </div>
+        <div className={styles.metric}>
+          <div className={styles.metric_value}>{avgDurationSecs != null ? formatDuration(avgDurationSecs) : "—"}</div>
+          <div className={styles.metric_label}>{t("projects.metric_avg_duration")}</div>
+        </div>
+        <div className={styles.metric}>
+          <div className={styles.metric_value}>{longestRunningSecs ? formatDuration(longestRunningSecs) : "—"}</div>
+          <div className={styles.metric_label}>{t("projects.metric_longest_running")}</div>
+        </div>
+      </div>
+
+      <div className={styles.task_toolbar}>
+        <div className={styles.search_box}>
+          <Search size={14} strokeWidth={1.6} />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={t("projects.search_tasks", "Search tasks…")}
+          />
+        </div>
+        <select
+          className={styles.status_select}
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as "all" | TaskStatus)}
+        >
+          {STATUS_FILTERS.map((s) => (
+            <option key={s} value={s}>
+              {s === "all"
+                ? t("projects.filter_all", "All statuses")
+                : t(`tasks.status.${s}`, s)}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {projectTasks.length === 0 ? (
+        <p className={styles.empty}>{t("empty_state.tasks_title")}</p>
+      ) : filtered.length === 0 ? (
+        <p className={styles.empty}>{t("projects.no_match", "No tasks match the filter.")}</p>
+      ) : (
+        <ul className={styles.project_tasks_list}>
+          {filtered.map((tk) => {
+            const { total, done } = planProgress(tk);
+            return (
+              <li key={tk.id}>
+                <button
+                  type="button"
+                  className={styles.project_task_row}
+                  onClick={() => openTask(tk.id)}
+                  title={tk.title}
+                >
+                  <span className={`${styles.project_task_status} ${styles[`project_task_status_${tk.status}`] ?? ""}`}>
+                    {t(`tasks.status.${tk.status}`, tk.status)}
+                  </span>
+                  <span className={styles.project_task_title}>{tk.title}</span>
+                  {total > 0 && (
+                    <span className={styles.project_task_progress}>{done}/{total}</span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </div>
   );
 }

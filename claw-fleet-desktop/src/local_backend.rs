@@ -1853,6 +1853,13 @@ impl Backend for LocalBackend {
         tasks
     }
 
+    fn get_task_deliverables(
+        &self,
+        task_id: &str,
+    ) -> Result<claw_fleet_core::deliverables::TaskDeliverables, String> {
+        claw_fleet_core::deliverables::compute_task_deliverables(task_id)
+    }
+
     fn update_plan(&self, task_id: &str, plan: crate::plan::DagPlan) -> Result<(), String> {
         crate::task::update_plan(task_id, plan)
     }

@@ -48,13 +48,6 @@ export type Theme = "dark" | "light" | "system";
 export type ViewMode = "list" | "gallery" | "audit" | "report" | "memory" | "skills" | "plugins" | "projects" | "tasks";
 export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
 
-/** Transient "open the InboxDialog for this project" request. Set by the
- *  sidebar's per-project `+` button; consumed by TasksView on mount/update
- *  to open the dialog with `defaultProjectId` pre-filled, then cleared. */
-export interface InboxRequest {
-  projectId: string | null;
-}
-
 interface UIState {
   theme: Theme;
   viewMode: ViewMode;
@@ -66,7 +59,6 @@ interface UIState {
   sidebarCollapsed: boolean;
   mascotVisible: boolean;
   showMobileAccess: boolean;
-  inboxRequest: InboxRequest | null;
   /** Same pattern for the "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   showNewProjectRequested: boolean;
@@ -82,8 +74,6 @@ interface UIState {
   setSidebarCollapsed: (on: boolean) => void;
   setMascotVisible: (on: boolean) => void;
   setShowMobileAccess: (v: boolean) => void;
-  requestInbox: (projectId: string | null) => void;
-  clearInboxRequest: () => void;
   setShowNewProjectRequested: (v: boolean) => void;
   setLiteDecisionHistorySessionId: (id: string | null) => void;
   /** When true, the DecisionPanel renders as a minimized bar at the bottom
@@ -114,7 +104,6 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   mascotVisible: getItem("mascot-visible") === "true",
   showMobileAccess: false,
-  inboxRequest: null,
   showNewProjectRequested: false,
   liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
@@ -152,8 +141,6 @@ export const useUIStore = create<UIState>((set) => ({
     set({ mascotVisible: on });
   },
   setShowMobileAccess: (v) => set({ showMobileAccess: v }),
-  requestInbox: (projectId) => set({ inboxRequest: { projectId } }),
-  clearInboxRequest: () => set({ inboxRequest: null }),
   setShowNewProjectRequested: (v) => set({ showNewProjectRequested: v }),
   setLiteDecisionHistorySessionId: (id) =>
     set({ liteDecisionHistorySessionId: id }),

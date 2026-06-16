@@ -586,3 +586,103 @@
   white-space: nowrap;
   font-size: 13px;
 }
+
+/* ── Rebuilt project page (P3): single-project view with task list ───────── */
+
+.project_page {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px;
+  overflow-y: auto;
+}
+
+.workspace_line {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin: 2px 0 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace_sep {
+  margin: 0 8px;
+  opacity: 0.5;
+}
+
+.new_task_btn {
+  background: var(--color-accent) !important;
+  border-color: var(--color-accent) !important;
+  color: #fff !important;
+  font-weight: 600;
+}
+
+.task_toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 12px;
+}
+
+.search_box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  padding: 7px 11px;
+  color: var(--color-text-muted);
+}
+
+.search_box input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  color: var(--color-text);
+  font-size: 13px;
+  font-family: inherit;
+}
+
+.search_box input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.status_select {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  padding: 7px 11px;
+  color: var(--color-text);
+  font-size: 13px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.project_task_progress {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+}
+
+.project_task_status_reviewing,
+.project_task_status_awaitingAcceptance {
+  background: rgba(122, 160, 250, 0.16);
+  border-color: rgba(122, 160, 250, 0.3);
+  color: #7aa0fa;
+}
+
+.project_task_status_abandoned {
+  opacity: 0.55;
+}

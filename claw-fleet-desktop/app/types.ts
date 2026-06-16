@@ -993,6 +993,9 @@ export interface Task {
    * session's `aiTitle` may still overwrite. Flips to false the moment the
    * user edits the title via `update_task_title`. */
   titleAuto?: boolean;
+  /** Optional per-task model override (composer selector). Drives the
+   *  planning/master session; null falls back to the default planner model. */
+  model?: string | null;
 }
 
 export interface TaskInput {
@@ -1001,6 +1004,28 @@ export interface TaskInput {
    * `description` and flips `titleAuto = true`. */
   title?: string;
   description?: string;
+  /** Optional per-task model override picked in the composer. */
+  model?: string;
+}
+
+/** One changed file in a task's branch diff (see `claw_fleet_task::deliverables`). */
+export interface DeliverableFile {
+  path: string;
+  /** "added" | "modified" | "deleted" | "renamed" | "copied" | "other" */
+  change: string;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+/** Per-file diff stat of a task's branch vs its fork point off the default
+ *  branch. `branch`/`base` are null when the task hasn't started yet. */
+export interface TaskDeliverables {
+  branch: string | null;
+  base: string | null;
+  files: DeliverableFile[];
+  totalAdditions: number;
+  totalDeletions: number;
 }
 
 /** Helper: extract `Done`/`Skipped`/`Failed`/`Running` from a PItemStatus

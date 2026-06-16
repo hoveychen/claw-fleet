@@ -364,6 +364,7 @@ mod tests {
         let _override = FleetHomeOverride::new(tmp.path());
 
         let task = create_task(TaskInput {
+            model: None,
             project_id: "proj".into(),
             title: "smoke".into(),
             description: String::new(),
@@ -410,6 +411,7 @@ mod tests {
         let _override = FleetHomeOverride::new(tmp.path());
 
         let mut task = create_task(TaskInput {
+            model: None,
             project_id: "proj".into(),
             title: "smoke".into(),
             description: String::new(),
@@ -436,6 +438,7 @@ mod tests {
         let _override = FleetHomeOverride::new(tmp.path());
 
         let task = create_task(TaskInput {
+            model: None,
             project_id: "proj".into(),
             title: "smoke".into(),
             description: String::new(),
