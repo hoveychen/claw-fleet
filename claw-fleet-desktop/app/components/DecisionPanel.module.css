@@ -781,6 +781,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  flex-shrink: 0;
+  max-width: 260px;
+  white-space: nowrap;
 }
 
 .btn_always_allow code {
@@ -789,6 +792,12 @@
   border-radius: 4px;
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11px;
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
 }
 
 .btn_always_allow:hover {
