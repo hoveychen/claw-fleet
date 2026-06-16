@@ -216,19 +216,10 @@ fn user_rules_path() -> Option<std::path::PathBuf> {
 /// Load user audit rules from disk.  Returns defaults if the file is absent or
 /// malformed.
 pub fn load_user_rules() -> UserAuditRules {
-    let mut rules: UserAuditRules = user_rules_path()
+    user_rules_path()
         .and_then(|p| std::fs::read_to_string(&p).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    // One-shot backfill: rules created before click-to-sign are unsigned and
-    // therefore inert. The original "always allow" click was the approval, so
-    // sign them here. Persist only when something changed, making this a true
-    // one-time migration regardless of whether the desktop app or the short
-    // lived `fleet guard` hook hits it first.
-    if sign_legacy_unsigned_rules(&mut rules) {
-        save_user_rules(&rules);
-    }
-    rules
+        .unwrap_or_default()
 }
 
 /// Persist user audit rules to disk.
@@ -1023,23 +1014,24 @@ pub fn guard_prefix_matches(cmd: &str, prefix: &str) -> bool {
     crate::cmd_ast::cmd_matches_rule(cmd, prefix)
 }
 
-/// Find the first signed guard allow rule whose prefix matches `cmd`, if any.
+/// Find the first guard allow rule whose prefix matches `cmd`, if any.
 ///
-/// DEC-017 (supersedes DEC-005): the whitelist's one remaining gate
-/// here is the **signature**. A rule with no `approved_by` signer is inert; a
-/// signed rule whose prefix matches `cmd` short-circuits the live guard prompt
-/// — **including for `Critical` commands**. That is deliberate: the whitelist's
-/// legitimate job is to wave through a trusted command that the substring-based
-/// classifier mis-flags as Critical (e.g. `patchwright-cli eval …` tripping the
-/// `eval-exec` tag). Requiring a human signature first is the require-approval
-/// teeth REQ-035 asked for.
+/// There is no signature gate: any rule present in the allow list short-circuits
+/// the live guard prompt — **including for `Critical` commands**. That is
+/// deliberate: the whitelist's legitimate job is to wave through a trusted
+/// command that the substring-based classifier mis-flags as Critical (e.g.
+/// `patchwright-cli eval …` tripping the `eval-exec` tag). On a single-user
+/// desktop the act of clicking "always allow" IS the approval, so the earlier
+/// DEC-017 two-step signature ceremony (create unsigned, then a separate human
+/// signs) was pure friction — it had no second approver and left every rule
+/// inert, which is what produced the "already in the allow list yet still
+/// prompts" bug. `approvedBy` survives only as an optional audit record of who
+/// added the rule; it no longer gates matching.
 ///
 /// This is NOT a silent bypass: `extract_audit_events` scans the session
 /// transcript completely independently of the whitelist and records every bash
-/// command — including ones a signed rule let through — as an `AuditEvent` in
-/// the `AuditView`. The audit trail therefore captures everything, so REQ-035's
-/// "no silent bypass" requirement is satisfied by the existing trail rather than
-/// by a parallel deviation-logging mechanism (see DEC-017).
+/// command — including ones an allow rule let through — as an `AuditEvent` in
+/// the `AuditView`. The audit trail therefore captures everything.
 pub fn match_guard_allow_rule_in<'a>(
     rules: &'a UserAuditRules,
     cmd: &str,
@@ -1047,9 +1039,6 @@ pub fn match_guard_allow_rule_in<'a>(
     rules
         .guard_allow_rules
         .iter()
-        // DEC-017: only signed rules are live — signature is the
-        // require-approval gate.
-        .filter(|r| r.is_signed())
         .find(|r| guard_prefix_matches(cmd, &r.prefix))
 }
 
@@ -1101,71 +1090,13 @@ pub fn sign_guard_allow_rule_in(
     Ok(rule.clone())
 }
 
-/// The signer stamped on guard allow rules approved on this machine.
-///
-/// Fleet desktop is single-user, so the person clicking "always allow" *is* the
-/// approver — there is no separate admin to counter-sign. We record the OS
-/// username in DEC-017's `approved_by` audit field rather than leaving the rule
-/// unsigned (and therefore inert). Falls back to `"local"` when the environment
-/// exposes no username.
-pub fn current_signer() -> String {
-    std::env::var("USER")
-        .or_else(|_| std::env::var("USERNAME"))
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| "local".to_string())
-}
-
-/// In-memory click-to-allow path: upsert a rule and immediately sign it with
-/// [`current_signer`]. On a single-user desktop the "always allow" click is the
-/// approval, so the rule must be live at once — the old two-step DEC-017
-/// ceremony (create unsigned, then a separate human signs) assumed a multi-user
-/// approver that doesn't exist here, and its missing second step left every
-/// rule inert (the "already in the allow list yet still prompts" bug).
-///
-/// Kept distinct from [`upsert_guard_allow_rule_in`] (which still produces an
-/// UNSIGNED rule) so the DEC-017 "unsigned rule is inert" filter and its tests
-/// keep exercising the `is_signed()` gate for rules that were never approved.
-pub fn add_signed_guard_allow_rule_in(
-    rules: &mut UserAuditRules,
-    prefix: String,
-    source_tag: Option<String>,
-) -> GuardAllowRule {
-    let rule = upsert_guard_allow_rule_in(rules, prefix, source_tag);
-    if !rule.is_signed() {
-        let _ = sign_guard_allow_rule_in(rules, &rule.id, &current_signer());
-    }
-    rules
-        .guard_allow_rules
-        .iter()
-        .find(|r| r.id == rule.id)
-        .cloned()
-        .unwrap_or(rule)
-}
-
-/// One-shot migration for rules created before click-to-sign: a legacy rule
-/// carries `approved_by: None` and is inert, even though the user's original
-/// "always allow" click *was* the approval. Sign every unsigned rule with
-/// [`current_signer`]. Returns `true` if any rule changed (so the caller can
-/// persist only when needed).
-pub fn sign_legacy_unsigned_rules(rules: &mut UserAuditRules) -> bool {
-    let signer = current_signer();
-    let mut changed = false;
-    for r in rules.guard_allow_rules.iter_mut() {
-        if !r.is_signed() {
-            r.approved_by = Some(signer.clone());
-            changed = true;
-        }
-    }
-    changed
-}
-
-/// Persistent variant of [`add_signed_guard_allow_rule_in`] — loads the user
-/// rules file, upserts + signs the rule, and writes the file back.
+/// Persistent variant of [`upsert_guard_allow_rule_in`] — loads the user rules
+/// file, upserts the rule, and writes the file back. The rule is live as soon
+/// as it is in the list; there is no signature gate (see
+/// [`match_guard_allow_rule_in`]).
 pub fn add_guard_allow_rule(prefix: String, source_tag: Option<String>) -> GuardAllowRule {
     let mut rules = load_user_rules();
-    let rule = add_signed_guard_allow_rule_in(&mut rules, prefix, source_tag);
+    let rule = upsert_guard_allow_rule_in(&mut rules, prefix, source_tag);
     save_user_rules(&rules);
     rule
 }
@@ -2252,143 +2183,67 @@ mod tests {
     // rule is inert. "No silent bypass" is guaranteed by the independent
     // `extract_audit_events` transcript trail, NOT by a parallel deviation log.
 
-    /// DEC-017: an UNSIGNED whitelist rule is inert — it neither
-    /// short-circuits the guard (`match_guard_allow_rule_in` → None) nor marks
-    /// a leaf `already_allowed`. Signing it makes it live.
+    /// Single-user desktop: a rule that's in the allow list short-circuits the
+    /// guard regardless of signature. The DEC-017 signature *gate* has been
+    /// removed — clicking "always allow" IS the approval, so there is no second
+    /// step; `approvedBy` survives only as an audit record. "No silent bypass"
+    /// is still guaranteed by the independent `extract_audit_events` trail.
     #[test]
-    fn req035_unsigned_rule_has_no_effect() {
+    fn allow_rule_matches_regardless_of_signature() {
         reset();
         let mut rules = UserAuditRules::default();
-        // `git pull` is non-critical, so the only thing stopping the match is
-        // the missing signature.
+        // An UNSIGNED rule (the only kind `upsert_guard_allow_rule_in` produces)
+        // must still short-circuit — there is no signature gate any more.
         upsert_guard_allow_rule_in(&mut rules, "git pull".into(), Some("git-fetch".into()));
-
-        // Unsigned → no match.
         assert!(
-            match_guard_allow_rule_in(&rules, "git pull origin main").is_none(),
-            "unsigned rule must NOT short-circuit"
+            match_guard_allow_rule_in(&rules, "git pull origin main").is_some(),
+            "an allow-listed rule must short-circuit even without a signature"
         );
         let view = crate::cmd_ast::extract_structured_view("git pull origin main");
         let flags = classify_leaves_with_rules(&view, &rules);
         assert!(flags[0].triggering, "git pull still trips the audit");
-        assert!(!flags[0].already_allowed, "unsigned rule must not mark already_allowed");
-
-        // Sign it → now it applies.
-        let id = rules.guard_allow_rules[0].id.clone();
-        sign_guard_allow_rule_in(&mut rules, &id, "boss").unwrap();
         assert!(
-            match_guard_allow_rule_in(&rules, "git pull origin main").is_some(),
-            "signed rule short-circuits"
+            flags[0].already_allowed,
+            "an allow-listed rule marks the leaf already_allowed regardless of signature"
         );
     }
 
-    /// Click-to-sign: `add_signed_guard_allow_rule_in` produces a LIVE rule in
-    /// one step — no separate human signature needed. This is the single-user
-    /// desktop contract that replaces DEC-017's two-step ceremony.
+    /// The `sign_guard_allow_rule_in` API still validates its inputs (non-empty
+    /// signer, known id) — it now only stamps the optional `approvedBy` audit
+    /// field and no longer gates matching.
     #[test]
-    fn click_to_sign_rule_is_live_immediately() {
-        reset();
-        let mut rules = UserAuditRules::default();
-        // `git push` is Critical — exactly the false-positive case the whitelist
-        // exists for. One click must make it short-circuit.
-        let r = add_signed_guard_allow_rule_in(
-            &mut rules,
-            "git push".into(),
-            Some("code-push".into()),
-        );
-        assert!(r.is_signed(), "click-to-allow rule must be signed on create");
-        assert_eq!(r.approved_by.as_deref(), Some(current_signer().as_str()));
-        assert!(
-            match_guard_allow_rule_in(&rules, "git push origin main").is_some(),
-            "a click-to-signed rule short-circuits without a second approval step"
-        );
-    }
-
-    /// Re-clicking "always allow" on a prefix that already has a legacy UNSIGNED
-    /// rule signs that existing rule in place (rather than leaving it inert).
-    #[test]
-    fn click_to_sign_revives_legacy_unsigned_rule() {
-        reset();
-        let mut rules = UserAuditRules::default();
-        // Simulate a legacy rule persisted before click-to-sign.
-        rules.guard_allow_rules.push(GuardAllowRule {
-            id: "legacy-1".into(),
-            prefix: "git push".into(),
-            source_tag: Some("code-push".into()),
-            created_at: chrono::Utc::now(),
-            approved_by: None,
-        });
-        assert!(
-            match_guard_allow_rule_in(&rules, "git push origin main").is_none(),
-            "precondition: legacy unsigned rule is inert"
-        );
-        let r = add_signed_guard_allow_rule_in(&mut rules, "git push".into(), None);
-        assert_eq!(r.id, "legacy-1", "re-click must reuse the existing rule");
-        assert!(r.is_signed(), "re-click signs the legacy rule in place");
-        assert_eq!(rules.guard_allow_rules.len(), 1, "no duplicate rule created");
-        assert!(match_guard_allow_rule_in(&rules, "git push origin main").is_some());
-    }
-
-    /// Load-time migration backfills every legacy unsigned rule, and is
-    /// idempotent (a second pass changes nothing).
-    #[test]
-    fn sign_legacy_unsigned_rules_backfills_and_is_idempotent() {
-        let mut rules = UserAuditRules::default();
-        for (i, prefix) in ["git push", "curl POST"].iter().enumerate() {
-            rules.guard_allow_rules.push(GuardAllowRule {
-                id: format!("legacy-{i}"),
-                prefix: (*prefix).into(),
-                source_tag: None,
-                created_at: chrono::Utc::now(),
-                approved_by: None,
-            });
-        }
-        assert!(sign_legacy_unsigned_rules(&mut rules), "first pass signs them");
-        assert!(rules.guard_allow_rules.iter().all(|r| r.is_signed()));
-        assert!(
-            !sign_legacy_unsigned_rules(&mut rules),
-            "second pass is a no-op — nothing left to sign"
-        );
-    }
-
-    /// DEC-017: signing requires a non-empty signer; whitespace-only is rejected
-    /// and an unknown id errors. This is the require-approval check with teeth.
-    #[test]
-    fn req035_sign_requires_real_signer_and_known_id() {
+    fn sign_requires_real_signer_and_known_id() {
         let mut rules = UserAuditRules::default();
         let r = upsert_guard_allow_rule_in(&mut rules, "git pull".into(), None);
         assert!(sign_guard_allow_rule_in(&mut rules, &r.id, "   ").is_err());
         assert!(sign_guard_allow_rule_in(&mut rules, "no-such-id", "boss").is_err());
-        // Sanity: the rule is still unsigned after the failed attempts.
+        // Sanity: the audit field is untouched after the failed attempts.
         assert!(!rules.guard_allow_rules[0].is_signed());
     }
 
-    /// DEC-017: a signed rule short-circuits even a CRITICAL command
-    /// (the substring classifier's false positives are exactly what the
-    /// whitelist is for). Non-silence is guaranteed by the independent
-    /// `extract_audit_events` transcript trail, not by this gate.
+    /// An allow rule short-circuits even a CRITICAL command — that is the whole
+    /// point of the whitelist (the substring classifier's false positives are
+    /// exactly what it's for). With the signature gate removed, this holds
+    /// regardless of whether the rule carries an `approvedBy` audit stamp.
+    /// Non-silence is guaranteed by the independent `extract_audit_events` trail.
     #[test]
-    fn req035_signed_rule_short_circuits_critical() {
+    fn allow_rule_short_circuits_critical_regardless_of_signature() {
         reset();
         let mut rules = UserAuditRules::default();
-        // `git push` carries the `code-push` Critical tag.
+        // `git push` carries the `code-push` Critical tag; unsigned rule matches.
         let r = upsert_guard_allow_rule_in(&mut rules, "git push".into(), Some("code-push".into()));
-        sign_guard_allow_rule_in(&mut rules, &r.id, "boss").unwrap();
-
-        // Signed + prefix-matching → the critical command IS short-circuited.
         let hit = match_guard_allow_rule_in(&rules, "git push origin main");
         assert!(
             hit.is_some(),
-            "DEC-017: a signed whitelist rule short-circuits a Critical command"
+            "a whitelisted rule short-circuits a Critical command without any signature"
         );
         assert_eq!(hit.unwrap().id, r.id);
 
-        // An UNSIGNED rule matching another critical tag does NOT short-circuit.
-        let r2 = upsert_guard_allow_rule_in(&mut rules, "sudo".into(), Some("sudo".into()));
-        let _ = r2; // left unsigned on purpose
+        // A second unsigned rule for another critical tag ALSO short-circuits.
+        upsert_guard_allow_rule_in(&mut rules, "sudo".into(), Some("sudo".into()));
         assert!(
-            match_guard_allow_rule_in(&rules, "sudo rm -rf /tmp/x").is_none(),
-            "DEC-017: an unsigned rule is inert even for a Critical command"
+            match_guard_allow_rule_in(&rules, "sudo rm -rf /tmp/x").is_some(),
+            "an unsigned rule is live now that the signature gate is gone"
         );
     }
 
