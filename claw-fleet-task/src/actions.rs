@@ -1008,6 +1008,30 @@ pub fn resume_task(task_id: &str, host: &dyn TaskHost) -> Result<(), String> {
     Ok(())
 }
 
+/// Final acceptance (P7): the user confirms a fully-reviewed task. Flips
+/// `AwaitingAcceptance` → `Done` and stamps `completed_at`. Idempotent on an
+/// already-Done task; errors if the task is not awaiting acceptance (you can't
+/// accept something still running / drafting). No host signalling needed — the
+/// orchestrator already finished and reaped every worker before parking the
+/// task in `AwaitingAcceptance`.
+pub fn accept_task(task_id: &str) -> Result<(), String> {
+    let lock = task_write_lock(task_id);
+    let _g = lock.lock().expect("task write mutex poisoned");
+    let mut task = get_task(task_id)?;
+    if matches!(task.status, TaskStatus::Done) {
+        return Ok(());
+    }
+    if !matches!(task.status, TaskStatus::AwaitingAcceptance) {
+        return Err(format!(
+            "task {task_id} is not awaiting acceptance (status: {:?})",
+            task.status
+        ));
+    }
+    task.status = TaskStatus::Done;
+    task.completed_at = Some(chrono::Utc::now().timestamp());
+    write_task_atomic(&task)
+}
+
 /// Clear (delete) a task — host SIGTERM, then remove task json + materials.
 pub fn clear_task(task_id: &str, host: &dyn TaskHost) -> Result<(), String> {
     let lock = task_write_lock(task_id);
@@ -1546,5 +1570,31 @@ mod tests {
         let md = decisions.last().unwrap();
         assert_eq!(md.kind, "mark-failed");
         assert_eq!(md.decision.as_deref(), Some("failed"));
+    }
+
+    #[test]
+    fn accept_task_flips_awaiting_acceptance_to_done() {
+        let tmp = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(tmp.path());
+        let mut task = crate::task::Task::drafting("t-acc".into(), "p".into(), "x".into(), 0);
+        task.status = TaskStatus::AwaitingAcceptance;
+        write_task_atomic(&task).unwrap();
+
+        accept_task("t-acc").unwrap();
+        let after = get_task("t-acc").unwrap();
+        assert!(matches!(after.status, TaskStatus::Done));
+        assert!(after.completed_at.is_some());
+        // Idempotent on an already-Done task.
+        assert!(accept_task("t-acc").is_ok());
+    }
+
+    #[test]
+    fn accept_task_rejects_non_awaiting() {
+        let tmp = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(tmp.path());
+        let mut task = crate::task::Task::drafting("t-run".into(), "p".into(), "x".into(), 0);
+        task.status = TaskStatus::Running;
+        write_task_atomic(&task).unwrap();
+        assert!(accept_task("t-run").is_err(), "can't accept a still-running task");
     }
 }
