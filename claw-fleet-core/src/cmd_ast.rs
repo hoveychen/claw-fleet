@@ -528,7 +528,55 @@ pub fn argv_has_rule_prefix(argv: &[String], rule_tokens: &[String]) -> bool {
     {
         return true;
     }
+    // Final strategy: the command "signature" (`argv[0]` + the first bare-word
+    // subcommand). This skips not just flags but also *separated flag values*,
+    // paths and URLs sitting between the binary and its subcommand — the case
+    // the naive `strip_flag_tokens` misses (e.g. `git -C /path push`, where
+    // `/path` is `-C`'s value and is left behind, so `["git","/path","push"]`
+    // never starts with `["git","push"]`).
+    let sig = leaf_signature(argv);
+    if !sig.is_empty() && starts_with_tokens(&sig, rule_tokens) {
+        return true;
+    }
+    if stripped.len() != argv.len() {
+        let sig_stripped = leaf_signature(stripped);
+        if !sig_stripped.is_empty() && starts_with_tokens(&sig_stripped, rule_tokens) {
+            return true;
+        }
+    }
     false
+}
+
+/// A subcommand token is a bare word: it starts with an ASCII letter and
+/// contains only `[A-Za-z0-9_-]`. This excludes flags (`-x`), separated flag
+/// values that are paths (`/path`, `./x`), URLs (`https://…`), `KEY=VAL`,
+/// `$VAR`, and quoted expressions — none of which are reusable as a
+/// "<tool> <subcommand>" allow prefix.
+fn looks_like_subcommand(tok: &str) -> bool {
+    let mut chars = tok.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    tok.chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// The allow-rule "signature" of a leaf: `argv[0]` followed by the first
+/// bare-word subcommand (see [`looks_like_subcommand`]), skipping any flags,
+/// flag values, paths and URLs in between. Mirrors the frontend's
+/// `computeLeafAllowPrefix` so a rule built from one matches the other. A tool
+/// with no bare-word subcommand (e.g. `curl -X POST https://…`) yields just
+/// `[argv[0]]`, which a bare-`curl` rule still matches as a length-1 prefix.
+fn leaf_signature(argv: &[String]) -> Vec<String> {
+    let Some(head) = argv.first() else {
+        return Vec::new();
+    };
+    let mut sig = vec![head.clone()];
+    if let Some(sub) = argv.iter().skip(1).find(|t| looks_like_subcommand(t)) {
+        sig.push(sub.clone());
+    }
+    sig
 }
 
 /// A flag token is one starting with `-` and at least 2 chars long. A bare
@@ -1433,6 +1481,56 @@ mod tests {
             "patchwright-cli -s=clw screenshot foo.png",
             "patchwright-cli eval"
         ));
+    }
+
+    #[test]
+    fn rule_matches_through_separated_flag_value() {
+        // `-C /path` is a flag with a *separated* value; the naive flag-stripper
+        // leaves `/path` behind. The signature strategy skips it so a clean
+        // `git push` rule still matches.
+        assert!(cmd_matches_rule(
+            "git -C /Users/me/repo push origin main",
+            "git push"
+        ));
+        // Multiple separated flag values before the subcommand.
+        assert!(cmd_matches_rule(
+            "git -c http.proxy=x -C /tmp/r commit -m hi",
+            "git commit"
+        ));
+    }
+
+    #[test]
+    fn signature_strategy_still_blocks_wrong_subcommand() {
+        // Skipping the path value must not whitelist a different subcommand.
+        assert!(!cmd_matches_rule(
+            "git -C /Users/me/repo status",
+            "git push"
+        ));
+    }
+
+    #[test]
+    fn bare_tool_rule_matches_when_no_subcommand() {
+        // `curl -X POST https://…` has no bare-word subcommand → a bare `curl`
+        // rule (length-1 signature prefix) still matches.
+        assert!(cmd_matches_rule(
+            "curl -X POST https://api.example.com/v1",
+            "curl"
+        ));
+        // …but a bare `curl` rule must NOT match a different binary.
+        assert!(!cmd_matches_rule("wget https://x", "curl"));
+    }
+
+    #[test]
+    fn looks_like_subcommand_excludes_values_and_paths() {
+        assert!(looks_like_subcommand("push"));
+        assert!(looks_like_subcommand("eval"));
+        assert!(looks_like_subcommand("sub-cmd"));
+        assert!(!looks_like_subcommand("/dev/null"));
+        assert!(!looks_like_subcommand("https://x.com"));
+        assert!(!looks_like_subcommand("KEY=VAL"));
+        assert!(!looks_like_subcommand("$VAR"));
+        assert!(!looks_like_subcommand("-X"));
+        assert!(!looks_like_subcommand("file.txt"));
     }
 
     #[test]

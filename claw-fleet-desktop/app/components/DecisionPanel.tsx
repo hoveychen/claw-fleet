@@ -77,23 +77,29 @@ function TaskMasterChip({ sessionId }: { sessionId: string | null | undefined })
 // ── Guard card renderer ────────────────────────────────────────────────────
 
 /**
- * A token is a CLI flag (e.g. `-s=clw`, `--verbose`) — exclude it from the
- * remembered prefix so `patchwright-cli -s=clw eval ...` becomes
- * `patchwright-cli eval` and not `patchwright-cli -s=clw`.
+ * A reusable subcommand is a bare lowercase word: git's `push`, docker's
+ * `exec`, patchwright-cli's `eval`. We deliberately EXCLUDE not just flags
+ * (`-s=clw`, `--verbose`) but also separated flag values, paths, URLs,
+ * `KEY=VAL` and uppercase args — e.g. `curl -X POST https://…` has no real
+ * subcommand, so its prefix should fall back to bare `curl` rather than the
+ * un-reusable `curl POST` / `curl https://specific-url`. Mirrors the backend's
+ * `looks_like_subcommand` so the remembered prefix actually matches later runs.
  */
-function isFlagToken(tok: string): boolean {
-  return tok.length > 1 && tok.startsWith("-");
+function looksLikeSubcommand(tok: string): boolean {
+  return /^[a-z][a-z0-9_-]*$/.test(tok);
 }
 
 /**
- * Prefix for a single AST leaf: `argv[0]` plus the first non-flag token after
- * it (the "subcommand" in the `git push` / `npm test` / `patchwright-cli eval`
- * sense).  Falls back to just `argv[0]` if every later token is a flag.
+ * Prefix for a single AST leaf: `argv[0]` plus the first bare-word subcommand
+ * after it (the "subcommand" in the `git push` / `npm test` / `patchwright-cli
+ * eval` sense), skipping flags, flag values, paths and URLs in between. Falls
+ * back to just `argv[0]` when there is no bare-word subcommand (e.g. `curl`,
+ * `git -C /path` with no later subcommand).
  */
 function computeLeafAllowPrefix(argv: string[]): string {
   const head = argv[0];
   if (!head) return "";
-  const sub = argv.slice(1).find((t) => !isFlagToken(t));
+  const sub = argv.slice(1).find((t) => looksLikeSubcommand(t));
   return sub ? `${head} ${sub}` : head;
 }
 
