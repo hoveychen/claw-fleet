@@ -216,10 +216,19 @@ fn user_rules_path() -> Option<std::path::PathBuf> {
 /// Load user audit rules from disk.  Returns defaults if the file is absent or
 /// malformed.
 pub fn load_user_rules() -> UserAuditRules {
-    user_rules_path()
+    let mut rules: UserAuditRules = user_rules_path()
         .and_then(|p| std::fs::read_to_string(&p).ok())
         .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    // One-shot backfill: rules created before click-to-sign are unsigned and
+    // therefore inert. The original "always allow" click was the approval, so
+    // sign them here. Persist only when something changed, making this a true
+    // one-time migration regardless of whether the desktop app or the short
+    // lived `fleet guard` hook hits it first.
+    if sign_legacy_unsigned_rules(&mut rules) {
+        save_user_rules(&rules);
+    }
+    rules
 }
 
 /// Persist user audit rules to disk.
@@ -1092,11 +1101,71 @@ pub fn sign_guard_allow_rule_in(
     Ok(rule.clone())
 }
 
-/// Persistent variant of [`upsert_guard_allow_rule_in`] — loads the user rules
-/// file, upserts the rule, and writes the file back.
+/// The signer stamped on guard allow rules approved on this machine.
+///
+/// Fleet desktop is single-user, so the person clicking "always allow" *is* the
+/// approver — there is no separate admin to counter-sign. We record the OS
+/// username in DEC-017's `approved_by` audit field rather than leaving the rule
+/// unsigned (and therefore inert). Falls back to `"local"` when the environment
+/// exposes no username.
+pub fn current_signer() -> String {
+    std::env::var("USER")
+        .or_else(|_| std::env::var("USERNAME"))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "local".to_string())
+}
+
+/// In-memory click-to-allow path: upsert a rule and immediately sign it with
+/// [`current_signer`]. On a single-user desktop the "always allow" click is the
+/// approval, so the rule must be live at once — the old two-step DEC-017
+/// ceremony (create unsigned, then a separate human signs) assumed a multi-user
+/// approver that doesn't exist here, and its missing second step left every
+/// rule inert (the "already in the allow list yet still prompts" bug).
+///
+/// Kept distinct from [`upsert_guard_allow_rule_in`] (which still produces an
+/// UNSIGNED rule) so the DEC-017 "unsigned rule is inert" filter and its tests
+/// keep exercising the `is_signed()` gate for rules that were never approved.
+pub fn add_signed_guard_allow_rule_in(
+    rules: &mut UserAuditRules,
+    prefix: String,
+    source_tag: Option<String>,
+) -> GuardAllowRule {
+    let rule = upsert_guard_allow_rule_in(rules, prefix, source_tag);
+    if !rule.is_signed() {
+        let _ = sign_guard_allow_rule_in(rules, &rule.id, &current_signer());
+    }
+    rules
+        .guard_allow_rules
+        .iter()
+        .find(|r| r.id == rule.id)
+        .cloned()
+        .unwrap_or(rule)
+}
+
+/// One-shot migration for rules created before click-to-sign: a legacy rule
+/// carries `approved_by: None` and is inert, even though the user's original
+/// "always allow" click *was* the approval. Sign every unsigned rule with
+/// [`current_signer`]. Returns `true` if any rule changed (so the caller can
+/// persist only when needed).
+pub fn sign_legacy_unsigned_rules(rules: &mut UserAuditRules) -> bool {
+    let signer = current_signer();
+    let mut changed = false;
+    for r in rules.guard_allow_rules.iter_mut() {
+        if !r.is_signed() {
+            r.approved_by = Some(signer.clone());
+            changed = true;
+        }
+    }
+    changed
+}
+
+/// Persistent variant of [`add_signed_guard_allow_rule_in`] — loads the user
+/// rules file, upserts + signs the rule, and writes the file back.
 pub fn add_guard_allow_rule(prefix: String, source_tag: Option<String>) -> GuardAllowRule {
     let mut rules = load_user_rules();
-    let rule = upsert_guard_allow_rule_in(&mut rules, prefix, source_tag);
+    let rule = add_signed_guard_allow_rule_in(&mut rules, prefix, source_tag);
     save_user_rules(&rules);
     rule
 }
@@ -2210,6 +2279,75 @@ mod tests {
         assert!(
             match_guard_allow_rule_in(&rules, "git pull origin main").is_some(),
             "signed rule short-circuits"
+        );
+    }
+
+    /// Click-to-sign: `add_signed_guard_allow_rule_in` produces a LIVE rule in
+    /// one step — no separate human signature needed. This is the single-user
+    /// desktop contract that replaces DEC-017's two-step ceremony.
+    #[test]
+    fn click_to_sign_rule_is_live_immediately() {
+        reset();
+        let mut rules = UserAuditRules::default();
+        // `git push` is Critical — exactly the false-positive case the whitelist
+        // exists for. One click must make it short-circuit.
+        let r = add_signed_guard_allow_rule_in(
+            &mut rules,
+            "git push".into(),
+            Some("code-push".into()),
+        );
+        assert!(r.is_signed(), "click-to-allow rule must be signed on create");
+        assert_eq!(r.approved_by.as_deref(), Some(current_signer().as_str()));
+        assert!(
+            match_guard_allow_rule_in(&rules, "git push origin main").is_some(),
+            "a click-to-signed rule short-circuits without a second approval step"
+        );
+    }
+
+    /// Re-clicking "always allow" on a prefix that already has a legacy UNSIGNED
+    /// rule signs that existing rule in place (rather than leaving it inert).
+    #[test]
+    fn click_to_sign_revives_legacy_unsigned_rule() {
+        reset();
+        let mut rules = UserAuditRules::default();
+        // Simulate a legacy rule persisted before click-to-sign.
+        rules.guard_allow_rules.push(GuardAllowRule {
+            id: "legacy-1".into(),
+            prefix: "git push".into(),
+            source_tag: Some("code-push".into()),
+            created_at: chrono::Utc::now(),
+            approved_by: None,
+        });
+        assert!(
+            match_guard_allow_rule_in(&rules, "git push origin main").is_none(),
+            "precondition: legacy unsigned rule is inert"
+        );
+        let r = add_signed_guard_allow_rule_in(&mut rules, "git push".into(), None);
+        assert_eq!(r.id, "legacy-1", "re-click must reuse the existing rule");
+        assert!(r.is_signed(), "re-click signs the legacy rule in place");
+        assert_eq!(rules.guard_allow_rules.len(), 1, "no duplicate rule created");
+        assert!(match_guard_allow_rule_in(&rules, "git push origin main").is_some());
+    }
+
+    /// Load-time migration backfills every legacy unsigned rule, and is
+    /// idempotent (a second pass changes nothing).
+    #[test]
+    fn sign_legacy_unsigned_rules_backfills_and_is_idempotent() {
+        let mut rules = UserAuditRules::default();
+        for (i, prefix) in ["git push", "curl POST"].iter().enumerate() {
+            rules.guard_allow_rules.push(GuardAllowRule {
+                id: format!("legacy-{i}"),
+                prefix: (*prefix).into(),
+                source_tag: None,
+                created_at: chrono::Utc::now(),
+                approved_by: None,
+            });
+        }
+        assert!(sign_legacy_unsigned_rules(&mut rules), "first pass signs them");
+        assert!(rules.guard_allow_rules.iter().all(|r| r.is_signed()));
+        assert!(
+            !sign_legacy_unsigned_rules(&mut rules),
+            "second pass is a no-op — nothing left to sign"
         );
     }
 
