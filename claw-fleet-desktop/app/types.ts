@@ -1003,6 +1003,26 @@ export interface TaskInput {
   description?: string;
 }
 
+/** One changed file in a task's branch diff (see `claw_fleet_task::deliverables`). */
+export interface DeliverableFile {
+  path: string;
+  /** "added" | "modified" | "deleted" | "renamed" | "copied" | "other" */
+  change: string;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+}
+
+/** Per-file diff stat of a task's branch vs its fork point off the default
+ *  branch. `branch`/`base` are null when the task hasn't started yet. */
+export interface TaskDeliverables {
+  branch: string | null;
+  base: string | null;
+  files: DeliverableFile[];
+  totalAdditions: number;
+  totalDeletions: number;
+}
+
 /** Helper: extract `Done`/`Skipped`/`Failed`/`Running` from a PItemStatus
  * (the failed variant has a payload, so structural narrowing is awkward
  * without a helper). */

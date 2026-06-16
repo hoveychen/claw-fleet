@@ -471,6 +471,14 @@ impl crate::backend::Backend for RemoteBackend {
             .get(&format!("/tasks/get?id={}", encode_path(task_id)))
     }
 
+    fn get_task_deliverables(
+        &self,
+        task_id: &str,
+    ) -> Result<claw_fleet_core::deliverables::TaskDeliverables, String> {
+        self.probe
+            .get(&format!("/tasks/deliverables?id={}", encode_path(task_id)))
+    }
+
     fn list_tasks(&self, project_id: Option<&str>) -> Vec<claw_fleet_core::task::Task> {
         let path = match project_id {
             Some(p) => format!("/tasks/list?project_id={}", encode_path(p)),

@@ -441,6 +441,15 @@ pub trait Backend: Send + Sync {
     fn list_tasks(&self, _project_id: Option<&str>) -> Vec<crate::task::Task> {
         Vec::new()
     }
+    /// Deliverables for a task: the per-file diff stat of its branch against
+    /// the fork point off the default branch. Empty (not an error) for tasks
+    /// that haven't started yet. Powers the detail page's Deliverables section.
+    fn get_task_deliverables(
+        &self,
+        _task_id: &str,
+    ) -> Result<crate::deliverables::TaskDeliverables, String> {
+        Err("task system not implemented in this backend yet".into())
+    }
     /// Replace the task's `plan` (master tool — see PRD §5.7 / P20).
     /// Caller must hold the per-task write mutex (master runtime owns this in
     /// production); the LocalBackend impl will acquire it internally.
