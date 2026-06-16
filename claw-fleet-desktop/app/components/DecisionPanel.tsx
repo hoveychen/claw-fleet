@@ -235,6 +235,29 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         </div>
       )}
 
+      <div className={styles.block_reason_row}>
+        <input
+          type="text"
+          className={styles.block_reason_input}
+          placeholder={t(
+            "guard.block_reason_placeholder",
+            "Reason for AI (optional)",
+          )}
+          value={blockReason}
+          onChange={(e) => setBlockReason(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleBlock();
+            }
+          }}
+          aria-label={t(
+            "guard.block_reason_placeholder",
+            "Reason for AI (optional)",
+          )}
+        />
+      </div>
+
       <div className={styles.actions}>
         <button className={`${styles.btn} ${styles.btn_allow}`} onClick={handleAllow}>
           {t("guard.allow", "Allow")}
@@ -279,26 +302,6 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
             )}
           </div>
         )}
-        <input
-          type="text"
-          className={styles.block_reason_input}
-          placeholder={t(
-            "guard.block_reason_placeholder",
-            "Reason for AI (optional)",
-          )}
-          value={blockReason}
-          onChange={(e) => setBlockReason(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleBlock();
-            }
-          }}
-          aria-label={t(
-            "guard.block_reason_placeholder",
-            "Reason for AI (optional)",
-          )}
-        />
         <button className={`${styles.btn} ${styles.btn_block}`} onClick={handleBlock}>
           {t("guard.block", "Block")}
         </button>
