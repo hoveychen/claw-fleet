@@ -116,6 +116,7 @@ fn full_lifecycle_create_update_material_start() {
 
     // create_task: file appears on disk.
     let task = task::create_task(TaskInput {
+            model: None,
         project_id: proj.id.clone(),
         title: "Add Bookmarks UI".into(),
         description: "see Inbox materials".into(),
@@ -212,6 +213,7 @@ fn pause_resume_clear_full_cycle() {
     })
     .unwrap();
     let t = task::create_task(TaskInput {
+            model: None,
         project_id: proj.id,
         title: "demo".into(),
         description: String::new(),
@@ -256,6 +258,7 @@ fn start_task_preps_branch_and_running_without_master() {
     })
     .unwrap();
     let t = task::create_task(TaskInput {
+            model: None,
         project_id: proj.id,
         title: "prep check".into(),
         description: "".into(),
@@ -286,6 +289,7 @@ fn dispatch_pitem_enqueues_worker_session_and_records_agent_session_id() {
     })
     .unwrap();
     let t = task::create_task(TaskInput {
+            model: None,
         project_id: proj.id,
         title: "worker spawn check".into(),
         description: "".into(),
@@ -346,6 +350,7 @@ fn clear_task_terminates_linked_sessions_and_marks_complete() {
     })
     .unwrap();
     let t = task::create_task(TaskInput {
+            model: None,
         project_id: proj.id,
         title: "terminate test".into(),
         description: "".into(),
@@ -420,6 +425,7 @@ fn start_task_picks_unique_branch_when_slug_collides() {
     assert!(pre_status.success(), "pre-create branch");
 
     let t = task::create_task(TaskInput {
+            model: None,
         project_id: proj.id,
         title: "demo task".into(),
         description: String::new(),

@@ -993,6 +993,9 @@ export interface Task {
    * session's `aiTitle` may still overwrite. Flips to false the moment the
    * user edits the title via `update_task_title`. */
   titleAuto?: boolean;
+  /** Optional per-task model override (composer selector). Drives the
+   *  planning/master session; null falls back to the default planner model. */
+  model?: string | null;
 }
 
 export interface TaskInput {
@@ -1001,6 +1004,8 @@ export interface TaskInput {
    * `description` and flips `titleAuto = true`. */
   title?: string;
   description?: string;
+  /** Optional per-task model override picked in the composer. */
+  model?: string;
 }
 
 /** One changed file in a task's branch diff (see `claw_fleet_task::deliverables`). */

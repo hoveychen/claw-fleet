@@ -516,6 +516,10 @@ function MetricsRail({ task }: { task: Task }) {
       />
       <Metric label={t("detail.metric_cost", "Cost")} value={cost != null ? `$${cost.toFixed(2)}` : "—"} />
 
+      {task.model && (
+        <Metric label={t("detail.metric_model", "Planner model")} value={task.model.replace(/^claude-/, "").replace(/-\d{8}$/, "")} />
+      )}
+
       {summary.failed > 0 && (
         <Metric label={t("detail.metric_failed", "Failed P-items")} value={String(summary.failed)} danger />
       )}

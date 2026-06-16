@@ -57,6 +57,12 @@ pub struct Task {
     /// human-typed title from the old InboxDialog is never overwritten.
     #[serde(default)]
     pub title_auto: bool,
+    /// Optional per-task model override picked in the composer. When set, the
+    /// planning/master session runs on this model instead of the default
+    /// `planning::PLANNER_MODEL`. `None` (and legacy task JSONs) fall back to
+    /// the default. Workers/review keep their own defaults.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -122,6 +128,10 @@ pub struct TaskInput {
     pub title: String,
     #[serde(default)]
     pub description: String,
+    /// Optional per-task model override (composer model selector). Threaded
+    /// onto the created `Task` and used for the planning/master session.
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 /// SSE events pushed by `subscribe_task_events`. The Master agent's
@@ -182,6 +192,7 @@ impl Task {
             workspace: None,
             master_session_id: None,
             title_auto: false,
+            model: None,
         }
     }
 
@@ -258,6 +269,7 @@ pub fn create_task(input: TaskInput) -> Result<Task, String> {
     let mut task = Task::drafting(id, input.project_id, title, now);
     task.description = input.description;
     task.title_auto = title_auto;
+    task.model = input.model.filter(|m| !m.trim().is_empty());
     fs::create_dir_all(task_materials_dir(&task.id)?).map_err(|e| format!("mkdir materials: {e}"))?;
     write_task_atomic(&task)?;
     Ok(task)
@@ -571,6 +583,7 @@ mod tests {
     #[test]
     fn task_input_roundtrip() {
         let input = TaskInput {
+            model: None,
             project_id: "p1".into(),
             title: "demo".into(),
             description: "details".into(),

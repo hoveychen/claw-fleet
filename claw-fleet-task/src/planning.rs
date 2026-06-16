@@ -26,7 +26,13 @@ pub fn planner_spawn_spec(task: &Task, cwd: PathBuf) -> PlannerSpawnSpec {
         task_id: task.id.clone(),
         cwd,
         system_prompt: compose_planner_system_prompt(task),
-        model: PLANNER_MODEL.to_string(),
+        // Per-task model override (composer selector) wins; otherwise the
+        // strong default planning model.
+        model: task
+            .model
+            .clone()
+            .filter(|m| !m.trim().is_empty())
+            .unwrap_or_else(|| PLANNER_MODEL.to_string()),
     }
 }
 
@@ -144,6 +150,19 @@ mod tests {
         let spec = planner_spawn_spec(&task, PathBuf::from("/ws"));
         assert!(spec.system_prompt.contains("(空)"), "empty desc placeholder");
         assert!(spec.system_prompt.contains("(无)"), "no-materials placeholder");
+    }
+
+    #[test]
+    fn per_task_model_override_wins_over_default() {
+        let mut task = task_with("x");
+        // No override → default planner model.
+        assert_eq!(planner_spawn_spec(&task, PathBuf::from("/ws")).model, PLANNER_MODEL);
+        // Override set → used verbatim.
+        task.model = Some("claude-sonnet-4-6".into());
+        assert_eq!(planner_spawn_spec(&task, PathBuf::from("/ws")).model, "claude-sonnet-4-6");
+        // Blank override → ignored, falls back to default.
+        task.model = Some("   ".into());
+        assert_eq!(planner_spawn_spec(&task, PathBuf::from("/ws")).model, PLANNER_MODEL);
     }
 
     #[test]
