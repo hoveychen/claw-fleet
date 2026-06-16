@@ -457,6 +457,11 @@ pub trait Backend: Send + Sync {
     fn start_task(&self, _task_id: &str) -> Result<(), String> {
         Err("task system not implemented in this backend yet".into())
     }
+    /// P7 final acceptance: flip a task from `AwaitingAcceptance` to `Done`
+    /// once the user confirms the completed work.
+    fn accept_task(&self, _task_id: &str) -> Result<(), String> {
+        Err("task system not implemented in this backend yet".into())
+    }
     /// Manually rename a task. Clears `title_auto` so the master-session
     /// aiTitle reconcile pass will not overwrite the new value. Trims input
     /// and rejects empty titles.

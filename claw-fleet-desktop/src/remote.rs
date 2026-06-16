@@ -503,6 +503,15 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/tasks/start", &Req { task_id })
     }
 
+    fn accept_task(&self, task_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Req<'a> {
+            task_id: &'a str,
+        }
+        self.probe.post_json_ok("/tasks/accept", &Req { task_id })
+    }
+
     fn set_task_title(&self, task_id: &str, new_title: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         #[serde(rename_all = "camelCase")]

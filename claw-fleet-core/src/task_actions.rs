@@ -59,6 +59,12 @@ pub fn clear_task(task_id: &str) -> Result<(), String> {
     actions::clear_task(task_id, &SupervisorHost)
 }
 
+/// P7 final acceptance: user confirms a task parked in `AwaitingAcceptance`,
+/// flipping it to `Done`. No host needed — the orchestrator already finished.
+pub fn accept_task(task_id: &str) -> Result<(), String> {
+    actions::accept_task(task_id)
+}
+
 /// Reconcile Task status against its master FleetSession on disk. Called by
 /// the supervisor tick: if the master session has exited AND the task's plan
 /// is fully terminal, flip the task to Done. Returns the number of tasks
