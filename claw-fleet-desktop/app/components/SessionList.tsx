@@ -1,11 +1,11 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, Play, Pause, Circle, Plus, ListTodo } from "lucide-react";
+import { Menu, Shield, Plus, ListTodo, FolderGit2 } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useTasksStore, useUIStore } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
-import type { SessionInfo } from "../types";
+import type { SessionInfo, TaskStatus } from "../types";
 import { GalleryView } from "./GalleryView";
 import { SessionEmptyState } from "./EmptyState";
 import { MascotEyes } from "./MascotEyes";
@@ -32,6 +32,26 @@ const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
 const DEFAULT_WIDTH = 280;
 
+/** Status-dot colour for a task row in the sidebar's Tasks section. Mirrors
+ *  the StatusBadge palette used on the detail page. */
+function taskStatusColor(status: TaskStatus): string {
+  switch (status) {
+    case "running":
+      return "#f0875a";
+    case "reviewing":
+    case "awaitingAcceptance":
+      return "#7aa0fa";
+    case "paused":
+      return "#d0a85a";
+    case "drafting":
+      return "#9a9aa0";
+    case "done":
+      return "#5ac88c";
+    default:
+      return "#6b6b72"; // abandoned
+  }
+}
+
 function getSavedWidth(): number {
   const saved = getItem("sidebar-width");
   if (saved) {
@@ -55,7 +75,6 @@ export function SessionList() {
     mascotVisible,
     showMobileAccess,
     setShowMobileAccess,
-    requestInbox,
     setShowNewProjectRequested,
   } = useUIStore();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
@@ -76,25 +95,34 @@ export function SessionList() {
   const [mobileActive, setMobileActive] = useState(false);
   const projects = useProjectsStore((s) => s.projects);
   const tasks = useTasksStore((s) => s.tasks);
+  const selectedProjectId = useProjectsStore((s) => s.selectedProjectId);
+  const selectedTaskId = useTasksStore((s) => s.selectedTaskId);
   const setSelectedProjectId = useProjectsStore((s) => s.setSelectedProjectId);
   const setSelectedTaskId = useTasksStore((s) => s.setSelectedTaskId);
   const usageRing = useUsageRing();
 
-  // Active tasks for the Projects-tab drill-down: anything NOT in a terminal
-  // state (Done / Abandoned). PRD §5.x / TASKS P9.
-  const activeTasks = tasks.filter(
-    (t) => t.status !== "done" && t.status !== "abandoned",
-  );
-  // Group by project id for the sidebar list. Stable per-call.
-  const tasksByProject = (() => {
-    const m = new Map<string, typeof activeTasks>();
-    for (const tk of activeTasks) {
-      const list = m.get(tk.projectId) ?? [];
-      list.push(tk);
-      m.set(tk.projectId, list);
+  // Tasks section in the sidebar lists every task (across all projects),
+  // sorted so the things needing attention float to the top: running /
+  // reviewing / awaiting first, then drafting / paused, then terminal
+  // (done / abandoned). Ties broken by most-recent activity.
+  const taskSortRank = (s: TaskStatus): number => {
+    switch (s) {
+      case "running":
+      case "reviewing":
+      case "awaitingAcceptance":
+        return 0;
+      case "paused":
+      case "drafting":
+        return 1;
+      default:
+        return 2; // done / abandoned
     }
-    return m;
-  })();
+  };
+  const allTasksSorted = [...tasks].sort((a, b) => {
+    const r = taskSortRank(a.status) - taskSortRank(b.status);
+    if (r !== 0) return r;
+    return (b.startedAt ?? b.createdAt) - (a.startedAt ?? a.createdAt);
+  });
 
   const openTask = useCallback(
     (taskId: string, projectId: string) => {
@@ -105,29 +133,24 @@ export function SessionList() {
     [setSelectedProjectId, setSelectedTaskId, setViewMode],
   );
 
-  // Click a project in the sidebar → open its task list (cards). Clears
-  // selectedTaskId so TasksView shows the list phase rather than a stale
-  // task detail.
+  // Click a project in the PROJECTS section → open that project's page
+  // (task list + search/filter). Clears selectedTaskId so a stale task
+  // detail doesn't linger.
   const openProject = useCallback(
     (projectId: string) => {
       setSelectedProjectId(projectId);
       setSelectedTaskId(null);
-      setViewMode("tasks");
+      setViewMode("projects");
     },
     [setSelectedProjectId, setSelectedTaskId, setViewMode],
   );
 
-  // Click the per-project `+` button → open InboxDialog with that project
-  // pre-filled, and land on the project's tasks view.
-  const openProjectInbox = useCallback(
-    (projectId: string) => {
-      setSelectedProjectId(projectId);
-      setSelectedTaskId(null);
-      requestInbox(projectId);
-      setViewMode("tasks");
-    },
-    [setSelectedProjectId, setSelectedTaskId, requestInbox, setViewMode],
-  );
+  // Click "+ New task" → land on the Tasks page with no task selected, which
+  // renders the centered composer (the default new-task entry point).
+  const openNewTask = useCallback(() => {
+    setSelectedTaskId(null);
+    setViewMode("tasks");
+  }, [setSelectedTaskId, setViewMode]);
 
   // Sidebar 5s coalesced poller: mobile-access status indicator + projects
   // store + tasks store. Three independent setInterval timers used to fire on
@@ -441,98 +464,100 @@ export function SessionList() {
             </>
           )}
 
-          {/* ── Tasks tab: project + task rail only (no other nav items) ── */}
-          {PROJECTS_FEATURE_ENABLED && sidebarTab === "tasks" && (
+          {/* ── Tasks tab: two always-expanded sections — Projects + Tasks ── */}
+          {PROJECTS_FEATURE_ENABLED && sidebarTab === "tasks" && !sidebarCollapsed && (
             <>
-              {/* Projects rail — one row per project (always all projects, not
-                  just those with active tasks, so we never fall back to UUID). */}
-              {!sidebarCollapsed && projects.length === 0 && (
+              {/* PROJECTS section — every project as a clickable row. Click
+                  opens the project's page (task list + search). */}
+              <div className={styles.nav_section_header}>
+                <span className={styles.nav_section_title}>{t("sidebar.section_projects", "Projects")}</span>
+                <span className={styles.nav_section_count}>{projects.length}</span>
+              </div>
+              {projects.length === 0 && (
                 <div className={styles.nav_empty}>{t("sidebar.no_projects", "No projects yet")}</div>
               )}
-              {!sidebarCollapsed && projects.map((p) => {
-                const projectTasks = tasksByProject.get(p.id) ?? [];
-                const isProjectActive =
-                  viewMode === "tasks" &&
-                  useProjectsStore.getState().selectedProjectId === p.id;
+              {projects.map((p) => {
+                const isProjectActive = viewMode === "projects" && selectedProjectId === p.id;
+                const projectTaskCount = tasks.filter((tk) => tk.projectId === p.id).length;
                 return (
-                  <div key={p.id} className={styles.nav_task_group}>
-                    <div className={`${styles.nav_project_row} ${isProjectActive ? styles.nav_project_row_active : ""}`}>
-                      <button
-                        type="button"
-                        className={styles.nav_project_group_name}
-                        onClick={() => openProject(p.id)}
-                        title={p.name}
-                      >
-                        {p.name}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.nav_project_add_btn}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openProjectInbox(p.id);
-                        }}
-                        title={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
-                        aria-label={t("sidebar.new_task_for_project", "New task for {{name}}", { name: p.name })}
-                      >
-                        <Plus size={12} strokeWidth={1.75} />
-                      </button>
-                    </div>
-                    {projectTasks.map((tk) => {
-                      const items = Object.values(tk.plan.items ?? {});
-                      const total = items.length;
-                      const done = items.filter((it) => {
-                        if (typeof it.status === "string") {
-                          return it.status === "done" || it.status === "skipped";
-                        }
-                        return false;
-                      }).length;
-                      const statusIcon: ReactNode =
-                        tk.status === "running" ? <Play size={10} strokeWidth={1.75} /> :
-                        tk.status === "paused" ? <Pause size={10} strokeWidth={1.75} /> :
-                        tk.status === "reviewing" ? <Circle size={10} strokeWidth={1.75} /> :
-                        tk.status === "awaitingAcceptance" ? <Circle size={10} strokeWidth={1.75} /> :
-                        tk.status === "drafting" ? "✎" :
-                        "•";
-                      return (
-                        <button
-                          key={tk.id}
-                          type="button"
-                          className={styles.nav_project_item}
-                          onClick={() => openTask(tk.id, tk.projectId)}
-                          title={`${tk.title} — ${tk.status}`}
-                        >
-                          <span className={styles.nav_task_icon}>{statusIcon}</span>
-                          <span className={styles.nav_project_name}>{tk.title}</span>
-                          {total > 0 && (
-                            <span className={styles.nav_project_chip} title={t("tasks.progress", "p-items done / total")}>
-                              {done}/{total}
-                            </span>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`${styles.nav_project_item} ${isProjectActive ? styles.nav_project_item_active : ""}`}
+                    onClick={() => openProject(p.id)}
+                    title={p.workspace}
+                  >
+                    <span className={styles.nav_task_icon}><FolderGit2 size={12} strokeWidth={1.6} /></span>
+                    <span className={styles.nav_project_name}>{p.name}</span>
+                    {projectTaskCount > 0 && (
+                      <span className={styles.nav_project_chip}>{projectTaskCount}</span>
+                    )}
+                  </button>
                 );
               })}
               <button
-                className={styles.nav_item}
+                type="button"
+                className={styles.nav_section_add}
                 onClick={() => {
                   setShowNewProjectRequested(true);
                   setViewMode("projects");
                 }}
                 title={t("projects.new")}
               >
-                <span className={styles.nav_icon}><Plus size={14} strokeWidth={1.5} /></span>
-                <span className={styles.nav_label}>{t("projects.new")}</span>
+                <Plus size={13} strokeWidth={1.6} />
+                <span>{t("projects.new")}</span>
               </button>
+
+              <div className={styles.nav_divider} />
+
+              {/* TASKS section — every task across all projects. Click opens
+                  the task detail. */}
+              <div className={styles.nav_section_header}>
+                <span className={styles.nav_section_title}>{t("sidebar.section_tasks", "Tasks")}</span>
+                <span className={styles.nav_section_count}>{tasks.length}</span>
+              </div>
+              {tasks.length === 0 && (
+                <div className={styles.nav_empty}>{t("sidebar.no_tasks", "No tasks yet")}</div>
+              )}
+              {allTasksSorted.map((tk) => {
+                const isTaskActive = viewMode === "tasks" && selectedTaskId === tk.id;
+                const proj = projects.find((p) => p.id === tk.projectId);
+                const items = Object.values(tk.plan.items ?? {});
+                const total = items.length;
+                const done = items.filter(
+                  (it) => typeof it.status === "string" && (it.status === "done" || it.status === "skipped"),
+                ).length;
+                return (
+                  <button
+                    key={tk.id}
+                    type="button"
+                    className={`${styles.nav_project_item} ${isTaskActive ? styles.nav_project_item_active : ""}`}
+                    onClick={() => openTask(tk.id, tk.projectId)}
+                    title={`${tk.title} — ${tk.status}`}
+                  >
+                    <span
+                      className={styles.nav_task_status_dot}
+                      style={{ background: taskStatusColor(tk.status) }}
+                    />
+                    <span className={styles.nav_project_name}>{tk.title}</span>
+                    {total > 0 && (
+                      <span className={styles.nav_project_chip} title={t("tasks.progress", "p-items done / total")}>
+                        {done}/{total}
+                      </span>
+                    )}
+                    {proj && <span className={styles.nav_task_project_chip}>{proj.name}</span>}
+                  </button>
+                );
+              })}
               <button
-                className={`${styles.nav_item} ${viewMode === "projects" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("projects")}
-                title={t("sidebar.manage_projects", "Manage projects")}
+                type="button"
+                className={styles.nav_section_add}
+                onClick={openNewTask}
+                disabled={projects.length === 0}
+                title={projects.length === 0 ? t("tasks.create_project_first", "Create a project first") : t("tasks.new_task", "New task")}
               >
-                <span className={styles.nav_icon}>⚙</span>
-                <span className={styles.nav_label}>{t("sidebar.manage_projects", "Manage projects")}</span>
+                <Plus size={13} strokeWidth={1.6} />
+                <span>{t("tasks.new_task", "New task")}</span>
               </button>
             </>
           )}
