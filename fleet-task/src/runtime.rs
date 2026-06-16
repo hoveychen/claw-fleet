@@ -1,16 +1,19 @@
 //! Glue layer that boots a new (or resumed) task in the current process:
-//! creates / loads the task json, opens the git branch, spawns the master
-//! via the given `ProcessLauncher`, writes a runtime registry entry, and
-//! starts the HTTP server.
+//! creates / loads the task json, opens the git branch (via `start_task`),
+//! writes a runtime registry entry, and starts the HTTP server. The task is
+//! then driven by the deterministic [`run_orchestrator_loop`] — no LLM master.
 //!
 //! Pure of CLI / TUI concerns so the boot path is unit-testable with a
 //! `SleepLauncher` against a tempdir git repo. `main.rs` only handles arg
-//! parsing and the foreground wait loop.
+//! parsing, the orchestrator thread, and the foreground wait loop.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use claw_fleet_task::actions::{self, StartOpts};
+use claw_fleet_task::orchestrator::{Orchestrator, OrchestratorStep, ReviewGate};
+use claw_fleet_task::planning;
 use claw_fleet_task::runner::TaskLifecycleHost;
 use claw_fleet_task::task::{
     create_task, get_task, write_task_atomic, TaskInput, TaskStatus,
@@ -32,7 +35,6 @@ pub struct Bootstrap {
     pub http_handle: HttpHandle,
     pub host: Arc<LocalHost>,
     pub broadcaster: SseBroadcaster,
-    pub master_session_id: String,
 }
 
 pub struct NewTaskArgs {
@@ -72,12 +74,24 @@ pub fn boot_new_task(
     })?;
 
     let host = Arc::new(LocalHost::with_launcher(args.workspace, launcher));
+    // Prepare the task (branch + Running); the orchestrator loop drives it.
     actions::start_task(&task.id, &*host, StartOpts::default())?;
+    maybe_launch_planner(&task.id, &host)?;
+    finish_boot(task.id, host)
+}
 
-    let master_sid = get_task(&task.id)?
-        .master_session_id
-        .ok_or_else(|| "actions::start_task did not stamp master_session_id".to_string())?;
-    finish_boot(task.id, host, master_sid)
+/// P5: if the task has no plan yet, spawn the single interactive planner
+/// session. The orchestrator idles on the empty plan until the planner writes
+/// the DAG via `fleet task update-plan`, then dispatches workers. No-op when a
+/// plan already exists (e.g. resuming a planned task).
+fn maybe_launch_planner(task_id: &str, host: &LocalHost) -> Result<(), String> {
+    let task = get_task(task_id)?;
+    if !task.plan.is_empty() {
+        return Ok(());
+    }
+    let spec = planning::planner_spawn_spec(&task, host.workspace().to_path_buf());
+    host.enqueue_planner(&spec)?;
+    Ok(())
 }
 
 pub fn boot_resume(
@@ -99,18 +113,13 @@ pub fn boot_resume(
         task.status = TaskStatus::Running;
         write_task_atomic(&task)?;
     }
+    // Idempotent on already-Running tasks; (re)stamps branch/workspace.
     actions::start_task(&task_id, &*host, StartOpts::default())?;
-    let master_sid = get_task(&task_id)?
-        .master_session_id
-        .ok_or_else(|| "actions::start_task did not stamp master_session_id".to_string())?;
-    finish_boot(task_id, host, master_sid)
+    maybe_launch_planner(&task_id, &host)?;
+    finish_boot(task_id, host)
 }
 
-fn finish_boot(
-    task_id: String,
-    host: Arc<LocalHost>,
-    master_sid: String,
-) -> Result<Bootstrap, String> {
+fn finish_boot(task_id: String, host: Arc<LocalHost>) -> Result<Bootstrap, String> {
     let broadcaster = SseBroadcaster::new();
     let dispatcher: Arc<dyn http::DispatchTrigger> = Arc::new(LocalDispatcher {
         task_id: task_id.clone(),
@@ -134,8 +143,52 @@ fn finish_boot(
         http_handle,
         host,
         broadcaster,
-        master_session_id: master_sid,
     })
+}
+
+/// Drive the task to completion with the deterministic orchestrator. Loops
+/// `Orchestrator::step`, sleeping on `Idle`, until the plan completes or
+/// `stop` is set. Runs on its own thread (spawned by `main.rs`).
+pub fn run_orchestrator_loop(
+    task_id: String,
+    host: Arc<LocalHost>,
+    gate: Arc<dyn ReviewGate + Send + Sync>,
+    stop: Arc<AtomicBool>,
+) {
+    let orch = Orchestrator::new(task_id.clone());
+    // A persistently-failing step (e.g. a review session that never produces a
+    // parseable verdict) must NOT spin forever re-spawning claude. Bound the
+    // consecutive errors; on the limit, stop driving and leave the task for the
+    // user to inspect rather than burning quota in a tight loop.
+    const MAX_CONSECUTIVE_ERRORS: u32 = 5;
+    let mut consecutive_errors = 0u32;
+    while !stop.load(Ordering::SeqCst) {
+        match orch.step(&*host, &*gate) {
+            Ok(OrchestratorStep::PlanComplete) => break,
+            Ok(OrchestratorStep::Idle) => {
+                consecutive_errors = 0;
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            Ok(_) => {
+                // A transition happened; loop immediately to take the next.
+                consecutive_errors = 0;
+            }
+            Err(e) => {
+                consecutive_errors += 1;
+                eprintln!(
+                    "[orchestrator] task {task_id} step error ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}"
+                );
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    eprintln!(
+                        "[orchestrator] task {task_id}: too many consecutive errors — \
+                         stopping the driver (task left in place for inspection)."
+                    );
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+    }
 }
 
 /// Read the desktop's `projects.json` (under `<home>/.claude/fleet/`, mirroring
@@ -278,7 +331,6 @@ fn pid_alive_reaping(_pid: u32) -> bool {
 mod tests {
     use super::*;
     use crate::local_host::ProcessLauncher;
-    use claw_fleet_task::master::MasterSpawnSpec;
     use claw_fleet_task::paths::fleet_home_lock;
     use claw_fleet_task::worker::WorkerSpawnSpec;
     use std::process::{Command, Stdio};
@@ -328,10 +380,21 @@ mod tests {
         }
     }
     impl ProcessLauncher for SleepLauncher {
-        fn launch_master(&self, _s: &str, _spec: &MasterSpawnSpec) -> Result<u32, String> {
+        fn launch_planner(
+            &self,
+            _s: &str,
+            _spec: &claw_fleet_task::spawn_specs::PlannerSpawnSpec,
+        ) -> Result<u32, String> {
             self.spawn()
         }
         fn launch_worker(&self, _s: &str, _spec: &WorkerSpawnSpec) -> Result<u32, String> {
+            self.spawn()
+        }
+        fn launch_review(
+            &self,
+            _s: &str,
+            _spec: &claw_fleet_task::spawn_specs::ReviewSpawnSpec,
+        ) -> Result<u32, String> {
             self.spawn()
         }
     }
@@ -356,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn boot_new_task_creates_task_branch_master_and_registry() {
+    fn boot_new_task_creates_task_branch_and_registry() {
         let _g = fleet_home_lock();
         let home = tempfile::TempDir::new().unwrap();
         let ws = tempfile::TempDir::new().unwrap();
@@ -373,18 +436,21 @@ mod tests {
         )
         .unwrap();
 
-        // Task persisted to disk in Running state with a branch and master sid.
+        // Task persisted to disk in Running state with a branch — the
+        // deterministic orchestrator (not a master session) drives it.
         let loaded = claw_fleet_task::task::get_task(&boot.task_id).unwrap();
         assert!(matches!(
             loaded.status,
             claw_fleet_task::task::TaskStatus::Running
         ));
         assert!(loaded.task_branch.is_some());
-        assert_eq!(loaded.master_session_id.as_deref(), Some(boot.master_session_id.as_str()));
         assert_eq!(loaded.description, "do the thing");
 
-        // LocalHost has exactly one tracked session (the master).
-        assert_eq!(boot.host.live_sessions().len(), 1);
+        // A new task has no plan yet, so boot launches the single interactive
+        // planner session (P5). No master is ever spawned.
+        let live = boot.host.live_sessions();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].kind, crate::local_host::SessionKind::Planner);
 
         // Registry has our entry pointing at the http port.
         let entry = registry::read(&boot.task_id).unwrap().unwrap();

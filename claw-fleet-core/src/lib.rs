@@ -35,7 +35,6 @@ pub mod interaction_mode_test;
 pub mod jsonl_tail;
 pub mod launchd;
 pub mod llm_provider;
-pub use claw_fleet_task::master;
 pub mod llm_usage;
 pub mod mcp_injector;
 pub mod mcp_ipc;
@@ -50,10 +49,6 @@ pub mod permissions_injector;
 pub mod phase_detector;
 pub use claw_fleet_task::process_util;
 pub use claw_fleet_task::actions;
-// [WA2] Expose the auditor data/decision layer so `fleet task audit` (wired in
-// fleet-cli, which depends on core not the task crate directly) can name the
-// AuditorSpawnSpec it spawns sessions from.
-pub use claw_fleet_task::auditor;
 pub use claw_fleet_task::paths;
 pub use claw_fleet_task::pitem;
 pub use claw_fleet_task::plan;

@@ -27,22 +27,6 @@ pub fn start_task(task_id: &str) -> Result<(), String> {
     actions::start_task(task_id, &SupervisorHost, opts)
 }
 
-pub fn mark_done(
-    task_id: &str,
-    p_item_id: &str,
-    summary: &str,
-) -> Result<claw_fleet_task::worktree::MergeOutcome, String> {
-    actions::mark_done(task_id, p_item_id, summary, &SupervisorHost)
-}
-
-pub fn mark_failed(
-    task_id: &str,
-    p_item_id: &str,
-    reason: claw_fleet_task::pitem::FailReason,
-) -> Result<Vec<claw_fleet_task::pitem::PItemId>, String> {
-    actions::mark_failed(task_id, p_item_id, reason, &SupervisorHost)
-}
-
 pub fn dispatch_pitem(task_id: &str, p_item_id: &str) -> Result<(), String> {
     actions::dispatch_pitem(task_id, p_item_id, &SupervisorHost)
 }
@@ -57,6 +41,12 @@ pub fn resume_task(task_id: &str) -> Result<(), String> {
 
 pub fn clear_task(task_id: &str) -> Result<(), String> {
     actions::clear_task(task_id, &SupervisorHost)
+}
+
+/// P7 final acceptance: user confirms a task parked in `AwaitingAcceptance`,
+/// flipping it to `Done`. No host needed — the orchestrator already finished.
+pub fn accept_task(task_id: &str) -> Result<(), String> {
+    actions::accept_task(task_id)
 }
 
 /// Reconcile Task status against its master FleetSession on disk. Called by
