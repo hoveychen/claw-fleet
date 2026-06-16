@@ -419,6 +419,10 @@ impl OrchestratorHost for LocalHost {
             .task_branch
             .as_deref()
             .ok_or_else(|| format!("task {} has no task_branch", task.id))?;
+        // The worker never commits (its contract forbids it). Commit its
+        // uncommitted changes onto the worker branch first, or merge_back would
+        // see an empty branch and silently drop the work.
+        worktree::commit_worktree(&task.id, p_item_id, &format!("fleet: {p_item_id} worker output"))?;
         let outcome = worktree::merge_back(&self.workspace, task_branch, &task.id, p_item_id)?;
         if let claw_fleet_task::worktree::MergeOutcome::Conflict { files, reason } = &outcome {
             return Err(format!(
