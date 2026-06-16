@@ -331,7 +331,21 @@ mod tests {
         fn launch_master(&self, _s: &str, _spec: &MasterSpawnSpec) -> Result<u32, String> {
             self.spawn()
         }
+        fn launch_planner(
+            &self,
+            _s: &str,
+            _spec: &claw_fleet_task::spawn_specs::PlannerSpawnSpec,
+        ) -> Result<u32, String> {
+            self.spawn()
+        }
         fn launch_worker(&self, _s: &str, _spec: &WorkerSpawnSpec) -> Result<u32, String> {
+            self.spawn()
+        }
+        fn launch_review(
+            &self,
+            _s: &str,
+            _spec: &claw_fleet_task::spawn_specs::ReviewSpawnSpec,
+        ) -> Result<u32, String> {
             self.spawn()
         }
     }
