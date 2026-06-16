@@ -8,7 +8,6 @@ pub mod acceptance;
 pub mod plan;
 pub mod worktree;
 pub mod task;
-pub mod master;
 pub mod architecture_overview;
 pub mod worker;
 pub mod spawn_specs;

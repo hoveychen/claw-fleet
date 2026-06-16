@@ -12,16 +12,16 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 
-use claw_fleet_task::master::MasterSpawnSpec;
+use claw_fleet_task::asset_inject;
+use claw_fleet_task::orchestrator::OrchestratorHost;
 use claw_fleet_task::runner::{LlmMediator, Resolution, TaskLifecycleHost};
 use claw_fleet_task::spawn_specs::{PlannerSpawnSpec, ReviewSpawnSpec};
 use claw_fleet_task::task::Task;
-use claw_fleet_task::worker::WorkerSpawnSpec;
-use claw_fleet_task::worktree::ConflictSpec;
+use claw_fleet_task::worker::{worker_spawn_spec, WorkerSpawnSpec};
+use claw_fleet_task::worktree::{self, ConflictSpec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionKind {
-    Master,
     Planner,
     Worker,
     Review,
@@ -45,7 +45,6 @@ pub struct SessionRecord {
 ///   bypassPermissions --no-session-persistence`, assets injected via the
 ///   spec's `system_prompt`.
 pub trait ProcessLauncher: Send + Sync {
-    fn launch_master(&self, session_id: &str, spec: &MasterSpawnSpec) -> Result<u32, String>;
     fn launch_planner(&self, session_id: &str, spec: &PlannerSpawnSpec) -> Result<u32, String>;
     fn launch_worker(&self, session_id: &str, spec: &WorkerSpawnSpec) -> Result<u32, String>;
     fn launch_review(&self, session_id: &str, spec: &ReviewSpawnSpec) -> Result<u32, String>;
@@ -81,26 +80,6 @@ pub struct ClaudeSpawn<'a> {
 pub struct ClaudeLauncher;
 
 impl ProcessLauncher for ClaudeLauncher {
-    fn launch_master(&self, session_id: &str, spec: &MasterSpawnSpec) -> Result<u32, String> {
-        let prompt = format!(
-            "Task `{}` is starting. Inspect the plan, pick the first \
-             dispatchable P-item, and proceed per the Acceptance Audit Protocol.",
-            spec.task_id
-        );
-        spawn_claude(&ClaudeSpawn {
-            session_id,
-            cwd: &spec.cwd,
-            prompt: &prompt,
-            system_prompt: Some(&spec.system_prompt),
-            model: Some(spec.model),
-            kind_env: "master",
-            task_id: Some(&spec.task_id),
-            p_item_id: None,
-            isolation: Isolation::Interactive,
-            plugin_dirs: &[],
-        })
-    }
-
     fn launch_planner(&self, session_id: &str, spec: &PlannerSpawnSpec) -> Result<u32, String> {
         let prompt = format!(
             "Task `{}` needs a plan. Clarify the requirements with the user \
@@ -329,21 +308,6 @@ impl TaskLifecycleHost for LocalHost {
         Ok(self.workspace.clone())
     }
 
-    fn enqueue_master(&self, spec: &MasterSpawnSpec) -> Result<String, String> {
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let pid = self.launcher.launch_master(&session_id, spec)?;
-        self.sessions.lock().unwrap().insert(
-            session_id.clone(),
-            SessionRecord {
-                session_id: session_id.clone(),
-                pid,
-                kind: SessionKind::Master,
-                p_item_id: None,
-            },
-        );
-        Ok(session_id)
-    }
-
     fn enqueue_worker(&self, spec: &WorkerSpawnSpec) -> Result<String, String> {
         let session_id = uuid::Uuid::new_v4().to_string();
         let pid = self.launcher.launch_worker(&session_id, spec)?;
@@ -395,33 +359,105 @@ impl TaskLifecycleHost for LocalHost {
 
 impl LlmMediator for LocalHost {
     fn resolve_conflicts(&self, _files: &[ConflictSpec]) -> Result<Vec<Resolution>, String> {
-        // Phase 2 stub: fleet-task's LocalHost doesn't yet have an LLM
-        // provider wired up. mark_done's call site bubbles this error back
-        // to the master agent, which can retry or escalate via the human
-        // gate. Phase 3 plumbs a real provider through here.
-        Err("LLM merge mediation not configured for fleet-task (Phase 3)".into())
+        // fleet-task's LocalHost has no LLM merge provider wired up; a real
+        // merge conflict surfaces as an orchestrator error for the user.
+        Err("LLM merge mediation not configured for fleet-task".into())
     }
+}
+
+impl OrchestratorHost for LocalHost {
+    /// Provision the P-item's worktree, build its worker spec, inject the
+    /// transplanted assets (P2: engineering principles + relevant memory) into
+    /// the system prompt, and spawn the worker. Returns the worker session id.
+    fn dispatch_worker(&self, task: &Task, p_item_id: &str) -> Result<String, String> {
+        let task_branch = task
+            .task_branch
+            .as_deref()
+            .ok_or_else(|| format!("task {} has no task_branch — call start_task first", task.id))?;
+        let cwd = worktree::provision(&self.workspace, task_branch, &task.id, p_item_id)?;
+        let mut spec = worker_spawn_spec(task, p_item_id, cwd)?;
+        // 方案 S: a safe-mode worker lost the user's principles + project
+        // memory; transplant them back via the appended system prompt.
+        let p_item = task
+            .plan
+            .get(p_item_id)
+            .ok_or_else(|| format!("p-item {p_item_id} not found"))?;
+        let principles = asset_inject::compose_engineering_principles();
+        let memory = asset_inject::relevant_memory(task, p_item);
+        spec.system_prompt = if memory.is_empty() {
+            format!("{}\n\n{principles}", spec.system_prompt)
+        } else {
+            format!("{}\n\n{principles}\n\n{memory}", spec.system_prompt)
+        };
+        self.enqueue_worker(&spec)
+    }
+
+    fn session_finished(&self, session_id: &str) -> bool {
+        let pid = self
+            .sessions
+            .lock()
+            .unwrap()
+            .get(session_id)
+            .map(|r| r.pid);
+        match pid {
+            Some(pid) => !pid_alive(pid),
+            // Unknown session id → treat as finished so the loop doesn't wedge.
+            None => true,
+        }
+    }
+
+    /// Merge the P-item's worktree branch back into the task branch and reap
+    /// the worktree. A real merge conflict is surfaced as an error (the
+    /// orchestrator escalates to the user rather than auto-resolving).
+    fn merge_and_reap(&self, task: &Task, p_item_id: &str) -> Result<(), String> {
+        let task_branch = task
+            .task_branch
+            .as_deref()
+            .ok_or_else(|| format!("task {} has no task_branch", task.id))?;
+        let outcome = worktree::merge_back(&self.workspace, task_branch, &task.id, p_item_id)?;
+        if let claw_fleet_task::worktree::MergeOutcome::Conflict { files, reason } = &outcome {
+            return Err(format!(
+                "merge conflict on {} file(s) merging {p_item_id}: {reason}",
+                files.len()
+            ));
+        }
+        worktree::reap(&self.workspace, &task.id, p_item_id)
+    }
+}
+
+/// True if `pid` is still running. Uses `waitpid(WNOHANG)` to reap our own
+/// exited children (the worker/review subprocesses we spawned) so a finished
+/// session reads as not-alive rather than lingering as a zombie.
+#[cfg(unix)]
+fn pid_alive(pid: u32) -> bool {
+    let target = pid as libc::pid_t;
+    let mut status: libc::c_int = 0;
+    let r = unsafe { libc::waitpid(target, &mut status, libc::WNOHANG) };
+    if r == target {
+        return false; // just reaped → dead
+    }
+    unsafe { libc::kill(target, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn pid_alive(_pid: u32) -> bool {
+    false
 }
 
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
     use std::sync::Arc;
 
     /// Test launcher that spawns a long-running `sleep` instead of `claude`.
     /// Real signals against real pids prove the SIGSTOP / SIGTERM plumbing.
     struct SleepLauncher {
-        master_calls: AtomicU32,
-        worker_calls: AtomicU32,
         children: Mutex<Vec<std::process::Child>>,
     }
 
     impl SleepLauncher {
         fn new() -> Self {
             Self {
-                master_calls: AtomicU32::new(0),
-                worker_calls: AtomicU32::new(0),
                 children: Mutex::new(Vec::new()),
             }
         }
@@ -470,14 +506,6 @@ mod tests {
     }
 
     impl ProcessLauncher for SleepLauncher {
-        fn launch_master(
-            &self,
-            _session_id: &str,
-            _spec: &MasterSpawnSpec,
-        ) -> Result<u32, String> {
-            self.master_calls.fetch_add(1, Ordering::SeqCst);
-            self.spawn_sleeper()
-        }
         fn launch_planner(
             &self,
             _session_id: &str,
@@ -490,7 +518,6 @@ mod tests {
             _session_id: &str,
             _spec: &WorkerSpawnSpec,
         ) -> Result<u32, String> {
-            self.worker_calls.fetch_add(1, Ordering::SeqCst);
             self.spawn_sleeper()
         }
         fn launch_review(
@@ -511,15 +538,6 @@ mod tests {
         }
     }
 
-    fn make_master_spec(task_id: &str, cwd: &Path) -> MasterSpawnSpec {
-        MasterSpawnSpec {
-            task_id: task_id.into(),
-            cwd: cwd.to_path_buf(),
-            system_prompt: "sys".into(),
-            model: "claude-sonnet-4-6",
-        }
-    }
-
     fn make_worker_spec(task_id: &str, p_id: &str, cwd: &Path) -> WorkerSpawnSpec {
         WorkerSpawnSpec {
             task_id: task_id.into(),
@@ -529,29 +547,6 @@ mod tests {
             // WorkerSpawnSpec.model is an owned String now.
             model: "claude-sonnet-4-6".to_string(),
         }
-    }
-
-    fn pid_alive(pid: u32) -> bool {
-        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
-    }
-
-    #[test]
-    fn enqueue_master_records_pid() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let launcher = Arc::new(SleepLauncher::new());
-        let host = LocalHost::with_launcher(
-            tmp.path().to_path_buf(),
-            Box::new(SleepLauncherRef(launcher.clone())),
-        );
-        let spec = make_master_spec("t1", tmp.path());
-        let sid = host.enqueue_master(&spec).unwrap();
-        let live = host.live_sessions();
-        assert_eq!(live.len(), 1);
-        assert_eq!(live[0].session_id, sid);
-        assert_eq!(live[0].kind, SessionKind::Master);
-        assert!(pid_alive(live[0].pid));
-        // cleanup
-        host.terminate_task_sessions("t1").unwrap();
     }
 
     #[test]
@@ -580,7 +575,7 @@ mod tests {
             tmp.path().to_path_buf(),
             Box::new(SleepLauncherRef(launcher.clone())),
         );
-        let _ = host.enqueue_master(&make_master_spec("t1", tmp.path())).unwrap();
+        let _ = host.enqueue_planner(&make_planner_spec("t1", tmp.path())).unwrap();
         let _ = host.enqueue_worker(&make_worker_spec("t1", "p1", tmp.path())).unwrap();
         let pids: Vec<u32> = host.live_sessions().iter().map(|r| r.pid).collect();
         assert_eq!(pids.len(), 2);
@@ -602,7 +597,7 @@ mod tests {
             tmp.path().to_path_buf(),
             Box::new(SleepLauncherRef(launcher.clone())),
         );
-        let _ = host.enqueue_master(&make_master_spec("t1", tmp.path())).unwrap();
+        let _ = host.enqueue_planner(&make_planner_spec("t1", tmp.path())).unwrap();
         let _ = host.enqueue_worker(&make_worker_spec("t1", "p1", tmp.path())).unwrap();
 
         let paused = host.pause_task_sessions("t1").unwrap();
@@ -621,7 +616,7 @@ mod tests {
             tmp.path().to_path_buf(),
             Box::new(SleepLauncherRef(launcher.clone())),
         );
-        let sid = host.enqueue_master(&make_master_spec("t1", tmp.path())).unwrap();
+        let sid = host.enqueue_planner(&make_planner_spec("t1", tmp.path())).unwrap();
         assert_eq!(host.live_sessions().len(), 1);
         let rec = host.forget(&sid).unwrap();
         assert_eq!(rec.session_id, sid);
@@ -634,13 +629,6 @@ mod tests {
     /// but the tests want to share the same `SleepLauncher` for cleanup.
     struct SleepLauncherRef(Arc<SleepLauncher>);
     impl ProcessLauncher for SleepLauncherRef {
-        fn launch_master(
-            &self,
-            session_id: &str,
-            spec: &MasterSpawnSpec,
-        ) -> Result<u32, String> {
-            self.0.launch_master(session_id, spec)
-        }
         fn launch_planner(
             &self,
             session_id: &str,

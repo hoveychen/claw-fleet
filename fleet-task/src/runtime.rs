@@ -1,19 +1,22 @@
 //! Glue layer that boots a new (or resumed) task in the current process:
-//! creates / loads the task json, opens the git branch, spawns the master
-//! via the given `ProcessLauncher`, writes a runtime registry entry, and
-//! starts the HTTP server.
+//! creates / loads the task json, opens the git branch (via `start_task`),
+//! writes a runtime registry entry, and starts the HTTP server. The task is
+//! then driven by the deterministic [`run_orchestrator_loop`] — no LLM master.
 //!
 //! Pure of CLI / TUI concerns so the boot path is unit-testable with a
 //! `SleepLauncher` against a tempdir git repo. `main.rs` only handles arg
-//! parsing and the foreground wait loop.
+//! parsing, the orchestrator thread, and the foreground wait loop.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use claw_fleet_task::actions::{self, StartOpts};
+use claw_fleet_task::orchestrator::{Orchestrator, OrchestratorStep, ReviewGate, ReviewVerdict};
+use claw_fleet_task::pitem::PItem;
 use claw_fleet_task::runner::TaskLifecycleHost;
 use claw_fleet_task::task::{
-    create_task, get_task, write_task_atomic, TaskInput, TaskStatus,
+    create_task, get_task, write_task_atomic, Task, TaskInput, TaskStatus,
 };
 
 use claw_fleet_task::registry::{self, RegistryEntry};
@@ -32,7 +35,6 @@ pub struct Bootstrap {
     pub http_handle: HttpHandle,
     pub host: Arc<LocalHost>,
     pub broadcaster: SseBroadcaster,
-    pub master_session_id: String,
 }
 
 pub struct NewTaskArgs {
@@ -72,12 +74,9 @@ pub fn boot_new_task(
     })?;
 
     let host = Arc::new(LocalHost::with_launcher(args.workspace, launcher));
+    // Prepare the task (branch + Running); the orchestrator loop drives it.
     actions::start_task(&task.id, &*host, StartOpts::default())?;
-
-    let master_sid = get_task(&task.id)?
-        .master_session_id
-        .ok_or_else(|| "actions::start_task did not stamp master_session_id".to_string())?;
-    finish_boot(task.id, host, master_sid)
+    finish_boot(task.id, host)
 }
 
 pub fn boot_resume(
@@ -99,18 +98,12 @@ pub fn boot_resume(
         task.status = TaskStatus::Running;
         write_task_atomic(&task)?;
     }
+    // Idempotent on already-Running tasks; (re)stamps branch/workspace.
     actions::start_task(&task_id, &*host, StartOpts::default())?;
-    let master_sid = get_task(&task_id)?
-        .master_session_id
-        .ok_or_else(|| "actions::start_task did not stamp master_session_id".to_string())?;
-    finish_boot(task_id, host, master_sid)
+    finish_boot(task_id, host)
 }
 
-fn finish_boot(
-    task_id: String,
-    host: Arc<LocalHost>,
-    master_sid: String,
-) -> Result<Bootstrap, String> {
+fn finish_boot(task_id: String, host: Arc<LocalHost>) -> Result<Bootstrap, String> {
     let broadcaster = SseBroadcaster::new();
     let dispatcher: Arc<dyn http::DispatchTrigger> = Arc::new(LocalDispatcher {
         task_id: task_id.clone(),
@@ -134,8 +127,48 @@ fn finish_boot(
         http_handle,
         host,
         broadcaster,
-        master_session_id: master_sid,
     })
+}
+
+/// Placeholder review gate used until P6 wires the real isolated review
+/// session. It approves every P-item — clearly a stub, NOT a real `/goal`
+/// review. P6 replaces this with a session that actually judges the worker's
+/// diff/summary against the acceptance criteria.
+//
+// TODO(P6): swap for the real LLM review session via `launch_review`.
+pub struct StubReviewGate;
+
+impl ReviewGate for StubReviewGate {
+    fn review(&self, _task: &Task, _p_item: &PItem) -> Result<ReviewVerdict, String> {
+        Ok(ReviewVerdict { achieved: true, gaps: vec![] })
+    }
+}
+
+/// Drive the task to completion with the deterministic orchestrator. Loops
+/// `Orchestrator::step`, sleeping on `Idle`, until the plan completes or
+/// `stop` is set. Runs on its own thread (spawned by `main.rs`).
+pub fn run_orchestrator_loop(
+    task_id: String,
+    host: Arc<LocalHost>,
+    gate: Arc<dyn ReviewGate + Send + Sync>,
+    stop: Arc<AtomicBool>,
+) {
+    let orch = Orchestrator::new(task_id.clone());
+    while !stop.load(Ordering::SeqCst) {
+        match orch.step(&*host, &*gate) {
+            Ok(OrchestratorStep::PlanComplete) => break,
+            Ok(OrchestratorStep::Idle) => {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+            }
+            Ok(_) => {
+                // A transition happened; loop immediately to take the next.
+            }
+            Err(e) => {
+                eprintln!("[orchestrator] task {task_id} step error: {e}");
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+    }
 }
 
 /// Read the desktop's `projects.json` (under `<home>/.claude/fleet/`, mirroring
@@ -278,7 +311,6 @@ fn pid_alive_reaping(_pid: u32) -> bool {
 mod tests {
     use super::*;
     use crate::local_host::ProcessLauncher;
-    use claw_fleet_task::master::MasterSpawnSpec;
     use claw_fleet_task::paths::fleet_home_lock;
     use claw_fleet_task::worker::WorkerSpawnSpec;
     use std::process::{Command, Stdio};
@@ -328,9 +360,6 @@ mod tests {
         }
     }
     impl ProcessLauncher for SleepLauncher {
-        fn launch_master(&self, _s: &str, _spec: &MasterSpawnSpec) -> Result<u32, String> {
-            self.spawn()
-        }
         fn launch_planner(
             &self,
             _s: &str,
@@ -370,7 +399,7 @@ mod tests {
     }
 
     #[test]
-    fn boot_new_task_creates_task_branch_master_and_registry() {
+    fn boot_new_task_creates_task_branch_and_registry() {
         let _g = fleet_home_lock();
         let home = tempfile::TempDir::new().unwrap();
         let ws = tempfile::TempDir::new().unwrap();
@@ -387,18 +416,19 @@ mod tests {
         )
         .unwrap();
 
-        // Task persisted to disk in Running state with a branch and master sid.
+        // Task persisted to disk in Running state with a branch — the
+        // deterministic orchestrator (not a master session) drives it.
         let loaded = claw_fleet_task::task::get_task(&boot.task_id).unwrap();
         assert!(matches!(
             loaded.status,
             claw_fleet_task::task::TaskStatus::Running
         ));
         assert!(loaded.task_branch.is_some());
-        assert_eq!(loaded.master_session_id.as_deref(), Some(boot.master_session_id.as_str()));
         assert_eq!(loaded.description, "do the thing");
 
-        // LocalHost has exactly one tracked session (the master).
-        assert_eq!(boot.host.live_sessions().len(), 1);
+        // No master is spawned at boot anymore — the orchestrator thread
+        // dispatches workers on demand, so there are zero tracked sessions.
+        assert_eq!(boot.host.live_sessions().len(), 0);
 
         // Registry has our entry pointing at the http port.
         let entry = registry::read(&boot.task_id).unwrap().unwrap();

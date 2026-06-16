@@ -320,48 +320,39 @@ fn pause_resume_clear_full_cycle() {
     assert!(task::get_task(&t.id).is_err());
 }
 
+// `start_task_enqueues_master_session_*` was deleted in the task-subsystem
+// rebuild: start_task no longer spawns an LLM master. It now only preps the
+// task (branch + Running); the deterministic orchestrator dispatches workers.
+// Branch prep is covered by `start_task_picks_unique_branch_when_slug_collides`.
+
 #[test]
-fn start_task_enqueues_master_session_and_records_master_session_id() {
+fn start_task_preps_branch_and_running_without_master() {
     let _g = FLEET_HOME_LOCK.lock().unwrap();
-    let home = fresh_tmp("master-spawn");
+    let home = fresh_tmp("start-prep");
     let _override = FleetHomeOverride::new(&home);
 
-    let workspace = fresh_tmp("master-spawn-ws");
+    let workspace = fresh_tmp("start-prep-ws");
     git_init_repo(&workspace);
     let proj = project::create_project(ProjectInput {
         name: "demo".into(),
         workspace: workspace.to_string_lossy().to_string(),
         concurrency: Some(1),
-            manual_review_all: None,
+        manual_review_all: None,
     })
     .unwrap();
     let t = task::create_task(TaskInput {
         project_id: proj.id,
-        title: "master spawn check".into(),
+        title: "prep check".into(),
         description: "".into(),
     })
     .unwrap();
 
     task::start_task(&t.id).expect("start_task");
     let after = task::get_task(&t.id).unwrap();
-    let master_sid = after
-        .master_session_id
-        .as_ref()
-        .expect("master_session_id must be set after start_task");
-
-    // Persisted FleetSession should be the Master kind, queued, with task linkage.
-    let sessions = project::list_fleet_sessions();
-    let s = sessions
-        .iter()
-        .find(|s| s.id == *master_sid)
-        .expect("master session persisted");
-    assert!(matches!(s.session_kind, project::SessionKind::Master));
-    assert_eq!(s.task_id.as_deref(), Some(t.id.as_str()));
-    assert_eq!(s.status, project::DEFAULT_COLUMN_QUEUED);
-    assert!(s.system_prompt.is_some(), "system_prompt must be filled");
-    assert_eq!(s.model.as_deref(), Some("claude-sonnet-4-6"));
-    // Master is expedited so it doesn't compete with regular kanban queue.
-    assert!(s.expedited);
+    // Prepped for the orchestrator: Running + branch, NO master session.
+    assert!(matches!(after.status, TaskStatus::Running));
+    assert!(after.task_branch.is_some());
+    assert!(after.master_session_id.is_none(), "no master is spawned anymore");
 }
 
 #[test]
@@ -445,42 +436,7 @@ fn clear_task_terminates_linked_sessions_and_marks_complete() {
         description: "".into(),
     })
     .unwrap();
-    task::start_task(&t.id).expect("start_task");
-    let master_sid = task::get_task(&t.id).unwrap().master_session_id.unwrap();
-
-    task::clear_task(&t.id).expect("clear_task");
-
-    // task json gone.
-    assert!(task::get_task(&t.id).is_err());
-    // master FleetSession marked complete with task-cleared note.
-    let sessions = project::list_fleet_sessions();
-    let s = sessions.iter().find(|s| s.id == master_sid).expect("session still recorded");
-    assert_eq!(s.status, project::DEFAULT_COLUMN_COMPLETE);
-    assert!(s.note.as_deref().unwrap_or("").contains("task cleared"));
-    assert!(s.pid.is_none());
-}
-
-#[test]
-fn reconcile_flips_task_to_done_when_master_exited_and_plan_terminal() {
-    let _g = FLEET_HOME_LOCK.lock().unwrap();
-    let home = fresh_tmp("reconcile");
-    let _override = FleetHomeOverride::new(&home);
-
-    let workspace = fresh_tmp("reconcile-ws");
-    git_init_repo(&workspace);
-    let proj = project::create_project(ProjectInput {
-        name: "demo".into(),
-        workspace: workspace.to_string_lossy().to_string(),
-        concurrency: Some(1),
-            manual_review_all: None,
-    })
-    .unwrap();
-    let t = task::create_task(TaskInput {
-        project_id: proj.id,
-        title: "done check".into(),
-        description: "".into(),
-    })
-    .unwrap();
+    // Link a session to the task by dispatching a worker (no master spawn now).
     let plan = DagPlan::from_items(vec![PItem {
         id: "p1".into(),
         desc: "x".into(),
@@ -496,31 +452,34 @@ fn reconcile_flips_task_to_done_when_master_exited_and_plan_terminal() {
     }]);
     task::update_plan(&t.id, plan).unwrap();
     task::start_task(&t.id).expect("start_task");
-    // Pretend the worker ran and master finished its audit.
-    task::mark_done(&t.id, "p1", "ok").unwrap();
-    let master_sid = task::get_task(&t.id).unwrap().master_session_id.unwrap();
+    task::dispatch_pitem(&t.id, "p1").unwrap();
+    let worker_sid = task::get_task(&t.id)
+        .unwrap()
+        .plan
+        .get("p1")
+        .unwrap()
+        .agent_session_id
+        .clone()
+        .unwrap();
 
-    // Reconcile is a no-op while master FleetSession is still queued.
-    let n = task::reconcile_task_completion().expect("reconcile");
-    assert_eq!(n, 0);
-    assert!(matches!(task::get_task(&t.id).unwrap().status, TaskStatus::Running));
+    task::clear_task(&t.id).expect("clear_task");
 
-    // Simulate master subprocess exit: mark its FleetSession complete + pid None.
-    let mut sessions = project::list_fleet_sessions();
-    for s in sessions.iter_mut() {
-        if s.id == master_sid {
-            s.status = project::DEFAULT_COLUMN_COMPLETE.into();
-            s.pid = None;
-        }
-    }
-    project::save_fleet_sessions(&sessions).unwrap();
-
-    let n = task::reconcile_task_completion().expect("reconcile");
-    assert_eq!(n, 1);
-    let after = task::get_task(&t.id).unwrap();
-    assert!(matches!(after.status, TaskStatus::Done));
-    assert!(after.completed_at.is_some());
+    // task json gone.
+    assert!(task::get_task(&t.id).is_err());
+    // The linked worker FleetSession was marked complete with a task-cleared note.
+    let sessions = project::list_fleet_sessions();
+    let s = sessions.iter().find(|s| s.id == worker_sid).expect("session still recorded");
+    assert_eq!(s.status, project::DEFAULT_COLUMN_COMPLETE);
+    assert!(s.note.as_deref().unwrap_or("").contains("task cleared"));
+    assert!(s.pid.is_none());
 }
+
+// `reconcile_flips_task_to_done_when_master_exited` was deleted in the
+// task-subsystem rebuild: there is no master session to key reconciliation on
+// anymore. The deterministic orchestrator settles a finished plan itself
+// (`OrchestratorStep::PlanComplete` → AwaitingAcceptance); P7 reworks the
+// core reconcile path to that terminal state. `reconcile_task_completion`
+// short-circuits (no `master_session_id`) and is a no-op in the meantime.
 
 #[test]
 fn start_task_picks_unique_branch_when_slug_collides() {
