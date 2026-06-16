@@ -31,7 +31,6 @@ use crate::acceptance::{self, AcceptanceCheckResult, AuditDecision};
 use crate::auditor::{
     audit_mark_done, AuditFinding, MarkDoneEvidence, MarkDoneRecord, Severity,
 };
-use crate::master::spawn_spec_from_task;
 use crate::pitem::{AcceptanceCriterion, FailReason, PItemId, PItemStatus};
 use crate::runner::TaskHost;
 use crate::task::{
@@ -548,12 +547,16 @@ pub struct StartOpts {
     pub force_human_gate_all: bool,
 }
 
-/// Transition a Drafting / Planning / Ready task to Running. Creates a fresh
-/// `fleet/<slug>` git branch in the workspace returned by
-/// `host.workspace_for_task`, spawns the Master session via
-/// `host.enqueue_master`, stamps `started_at` + `master_session_id`, and
-/// persists `task_branch`. Idempotent: returns `Ok` immediately if the task
-/// is already running.
+/// Prepare a Drafting task for the deterministic orchestrator and flip it to
+/// Running. Creates a fresh `fleet/<slug>` git branch in the workspace returned
+/// by `host.workspace_for_task`, persists `task_branch` + `workspace`, stamps
+/// `started_at`, and flips `status` to Running. Idempotent: returns `Ok`
+/// immediately if the task is already running.
+///
+/// Rebuilt (task-subsystem-rebuild): this no longer spawns an LLM master — the
+/// `fleet-task` process drives the plan via `orchestrator::Orchestrator::step`.
+/// `start_task` is now pure task-prep; the `host` is used only to resolve the
+/// workspace.
 pub fn start_task(task_id: &str, host: &dyn TaskHost, opts: StartOpts) -> Result<(), String> {
     let lock = task_write_lock(task_id);
     let _g = lock.lock().expect("task write mutex poisoned");
@@ -566,8 +569,8 @@ pub fn start_task(task_id: &str, host: &dyn TaskHost, opts: StartOpts) -> Result
     let branch = pick_unique_branch(&workspace, &slug)?;
     git_create_branch(&workspace, &branch)?;
     task.task_branch = Some(branch);
-    // Phase 3: persist workspace so out-of-process tools (fleet-cli, master
-    // tool calls) can find the working tree without a project table lookup.
+    // Persist workspace so out-of-process tools (fleet-cli, the orchestrator)
+    // can find the working tree without a project-table lookup.
     task.workspace = Some(workspace.clone());
     task.status = TaskStatus::Running;
     task.started_at = Some(chrono::Utc::now().timestamp());
@@ -577,15 +580,7 @@ pub fn start_task(task_id: &str, host: &dyn TaskHost, opts: StartOpts) -> Result
         }
     }
     write_task_atomic(&task)?;
-    let spec = spawn_spec_from_task(&task, workspace.clone())?;
-    match host.enqueue_master(&spec) {
-        Ok(master_sid) => {
-            task.master_session_id = Some(master_sid);
-            write_task_atomic(&task)?;
-            Ok(())
-        }
-        Err(e) => Err(format!("master enqueue failed: {e}")),
-    }
+    Ok(())
 }
 
 /// Mark a P-item Done — the full mark-done acceptance gate (P9).
@@ -1077,9 +1072,6 @@ mod tests {
     impl TaskLifecycleHost for MockHost {
         fn workspace_for_task(&self, _task: &Task) -> Result<PathBuf, String> {
             Ok(self.workspace.clone())
-        }
-        fn enqueue_master(&self, _spec: &crate::master::MasterSpawnSpec) -> Result<String, String> {
-            Ok("master-sid".into())
         }
         fn enqueue_worker(&self, _spec: &crate::worker::WorkerSpawnSpec) -> Result<String, String> {
             Ok("worker-sid".into())

@@ -8,7 +8,6 @@
 
 use std::path::PathBuf;
 
-use claw_fleet_task::master::MasterSpawnSpec;
 use claw_fleet_task::runner::{LlmMediator, Resolution, TaskLifecycleHost};
 use claw_fleet_task::task::Task;
 use claw_fleet_task::worker::WorkerSpawnSpec;
@@ -25,10 +24,6 @@ impl TaskLifecycleHost for SupervisorHost {
                 format!("project {} not found for task {}", task.project_id, task.id)
             })?;
         Ok(PathBuf::from(&project.workspace))
-    }
-
-    fn enqueue_master(&self, spec: &MasterSpawnSpec) -> Result<String, String> {
-        crate::supervisor::enqueue_master(spec)
     }
 
     fn enqueue_worker(&self, spec: &WorkerSpawnSpec) -> Result<String, String> {

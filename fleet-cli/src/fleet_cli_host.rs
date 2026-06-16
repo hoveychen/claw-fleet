@@ -23,7 +23,6 @@
 
 use std::path::PathBuf;
 
-use claw_fleet_core::master::MasterSpawnSpec;
 use claw_fleet_core::registry;
 use claw_fleet_core::runner::{LlmMediator, Resolution, TaskLifecycleHost};
 use claw_fleet_core::task::Task;
@@ -48,14 +47,6 @@ impl TaskLifecycleHost for FleetCliHost {
                 )
             })?;
         Ok(PathBuf::from(&project.workspace))
-    }
-
-    fn enqueue_master(&self, _spec: &MasterSpawnSpec) -> Result<String, String> {
-        Err(
-            "fleet-cli cannot enqueue master; spawn fleet-task instead \
-             (`fleet-task new` or via the desktop launcher)"
-                .into(),
-        )
     }
 
     fn enqueue_worker(&self, _spec: &WorkerSpawnSpec) -> Result<String, String> {
