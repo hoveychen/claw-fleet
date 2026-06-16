@@ -588,6 +588,111 @@
   color: var(--color-text-muted);
 }
 
+/* ── Two-section sidebar (Projects + Tasks), each always expanded ────────── */
+
+.nav_section_header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 4px;
+  margin-top: 4px;
+}
+
+.nav_section_title {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-dim);
+  opacity: 0.8;
+}
+
+.nav_section_count {
+  margin-left: auto;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border-radius: 9px;
+  padding: 1px 7px;
+  line-height: 1.4;
+}
+
+.nav_project_item_active {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+:global([data-platform]) .nav_project_item_active {
+  background: rgba(255, 255, 255, 0.09);
+}
+:global([data-platform][data-theme="light"]) .nav_project_item_active {
+  background: rgba(0, 0, 0, 0.07);
+}
+
+.nav_project_item_active .nav_project_name {
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+/* Status dot for task rows in the Tasks section. */
+.nav_task_status_dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+/* Small project-name chip trailing a task row. */
+.nav_task_project_chip {
+  font-size: 9px;
+  color: var(--color-text-muted);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  padding: 1px 5px;
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* "+ New project" / "+ New task" affordance at the bottom of each section. */
+.nav_section_add {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px 6px 16px;
+  margin-top: 2px;
+  border: none;
+  background: none;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+
+.nav_section_add:hover {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+:global([data-platform]) .nav_section_add:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+:global([data-platform][data-theme="light"]) .nav_section_add:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.nav_section_add:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 :global([data-platform]) .nav_divider {
   background: rgba(255, 255, 255, 0.08);
 }

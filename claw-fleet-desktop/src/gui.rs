@@ -1790,6 +1790,14 @@ fn get_task(
 }
 
 #[tauri::command]
+fn get_task_deliverables(
+    state: tauri::State<AppState>,
+    task_id: String,
+) -> Result<claw_fleet_core::deliverables::TaskDeliverables, String> {
+    state.backend.read().unwrap().get_task_deliverables(&task_id)
+}
+
+#[tauri::command]
 fn list_tasks(
     state: tauri::State<AppState>,
     project_id: Option<String>,
@@ -3663,6 +3671,7 @@ pub fn run() {
             set_fleet_session_status,
             create_task,
             get_task,
+            get_task_deliverables,
             list_tasks,
             update_task_plan,
             start_task,

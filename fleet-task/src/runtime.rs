@@ -68,6 +68,7 @@ pub fn boot_new_task(
     let project_id = lookup_project_id(&args.workspace)
         .unwrap_or_else(|| derive_auto_project_id(&args.workspace));
     let task = create_task(TaskInput {
+            model: None,
         project_id,
         title: args.title.clone(),
         description: args.prompt,

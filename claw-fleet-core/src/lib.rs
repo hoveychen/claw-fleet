@@ -49,6 +49,7 @@ pub mod permissions_injector;
 pub mod phase_detector;
 pub use claw_fleet_task::process_util;
 pub use claw_fleet_task::actions;
+pub use claw_fleet_task::deliverables;
 pub use claw_fleet_task::paths;
 pub use claw_fleet_task::pitem;
 pub use claw_fleet_task::plan;

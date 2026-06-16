@@ -160,6 +160,7 @@ mod tests {
         unsafe { std::env::set_var("FLEET_HOME", tmp.path()) };
 
         let task = create_task(TaskInput {
+            model: None,
             project_id: "proj".into(),
             title: "smoke".into(),
             description: String::new(),
