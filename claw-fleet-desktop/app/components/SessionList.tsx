@@ -490,8 +490,8 @@ export function SessionList() {
                       const statusIcon: ReactNode =
                         tk.status === "running" ? <Play size={10} strokeWidth={1.75} /> :
                         tk.status === "paused" ? <Pause size={10} strokeWidth={1.75} /> :
-                        tk.status === "ready" ? <Circle size={10} strokeWidth={1.75} /> :
-                        tk.status === "planning" ? "✎" :
+                        tk.status === "reviewing" ? <Circle size={10} strokeWidth={1.75} /> :
+                        tk.status === "awaitingAcceptance" ? <Circle size={10} strokeWidth={1.75} /> :
                         tk.status === "drafting" ? "✎" :
                         "•";
                       return (

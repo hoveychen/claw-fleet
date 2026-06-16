@@ -196,8 +196,8 @@ function TaskCard({
   const icon: ReactNode =
     task.status === "running" ? <Play size={11} strokeWidth={1.75} /> :
     task.status === "paused" ? <Pause size={11} strokeWidth={1.75} /> :
-    task.status === "ready" ? <Circle size={11} strokeWidth={1.75} /> :
-    task.status === "planning" ? "✎" :
+    task.status === "reviewing" ? <Circle size={11} strokeWidth={1.75} /> :
+    task.status === "awaitingAcceptance" ? <Circle size={11} strokeWidth={1.75} /> :
     task.status === "drafting" ? "✎" :
     task.status === "done" ? "✓" :
     task.status === "abandoned" ? "⤼" :
@@ -275,11 +275,7 @@ function TaskDetailHeader({
   const { t } = useTranslation();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const canStart =
-    !starting &&
-    (task.status === "drafting" ||
-      task.status === "planning" ||
-      task.status === "ready");
+  const canStart = !starting && task.status === "drafting";
   const handleStart = async () => {
     setStarting(true);
     setStartError(null);
@@ -429,16 +425,16 @@ function TaskDetailBody({ task }: { task: Task }) {
   const items = Object.values(task.plan.items);
 
   // Column buckets per PRD §4.5 "Kanban for P-items":
-  // - pending: WaitDeps / WaitResource
-  // - active: Running / WaitHumanGate
+  // - pending: WaitDeps
+  // - active: Running / Reviewing / WaitHumanGate
   // - resolved: Done / Skipped / Failed
   const pending: PItem[] = [];
   const active: PItem[] = [];
   const resolved: PItem[] = [];
   for (const p of items) {
     const k = pItemStatusKey(p.status);
-    if (k === "waitDeps" || k === "waitResource") pending.push(p);
-    else if (k === "running" || k === "waitHumanGate") active.push(p);
+    if (k === "waitDeps") pending.push(p);
+    else if (k === "running" || k === "reviewing" || k === "waitHumanGate") active.push(p);
     else resolved.push(p);
   }
   for (const arr of [pending, active, resolved]) {
@@ -570,10 +566,10 @@ function pItemIcon(status: PItemStatus): string {
   switch (key) {
     case "waitDeps":
       return "🔒";
-    case "waitResource":
-      return "⏳";
     case "running":
       return "▶";
+    case "reviewing":
+      return "🔍";
     case "waitHumanGate":
       return "👁";
     case "done":
@@ -597,7 +593,7 @@ function summarisePlan(task: Task) {
     const k = pItemStatusKey(p.status);
     if (k === "done") done += 1;
     else if (k === "failed") failed += 1;
-    else if (k === "running" || k === "waitHumanGate") running += 1;
+    else if (k === "running" || k === "reviewing" || k === "waitHumanGate") running += 1;
   }
   return { total, done, failed, running };
 }

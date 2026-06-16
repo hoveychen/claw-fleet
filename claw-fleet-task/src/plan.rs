@@ -1,16 +1,16 @@
 //! `DagPlan` — task-level container for a set of `PItem` nodes plus the
-//! plan-level operations the scheduler needs (topology, blocked-set computation,
-//! resource-conflict detection, skip propagation).
+//! plan-level operations the orchestrator needs (topology, blocked-set
+//! computation, skip propagation).
 //!
 //! Pure DAG primitives live in `crate::dag`; this module specialises them for
-//! `PItem` state. Defined per PRD §6.1 (design/task-as-unit-redesign.md).
+//! `PItem` state.
 
 use std::collections::{HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::dag;
-use crate::pitem::{PItem, PItemId, PItemStatus, ResourceName};
+use crate::pitem::{PItem, PItemId, PItemStatus};
 
 // Task-level container: an immutable-by-convention map of P-item id →
 // P-item plus the accessors the scheduler needs. `node_ids()` gives a
@@ -20,14 +20,6 @@ use crate::pitem::{PItem, PItemId, PItemStatus, ResourceName};
 #[serde(rename_all = "camelCase")]
 pub struct DagPlan {
     pub items: HashMap<PItemId, PItem>,
-}
-
-/// A pair of items contending for the same resource.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResourceConflict {
-    pub a: PItemId,
-    pub b: PItemId,
-    pub resource: ResourceName,
 }
 
 /// One auto-skip event produced by [`DagPlan::propagate_skip_with_evidence`].
@@ -164,46 +156,6 @@ impl DagPlan {
         out
     }
 
-    /// All pairs `(a, b, resource)` in `candidates` that contend for the same
-    /// resource. Each *pair* appears at most once (`a < b`), even when the two
-    /// items share several resources — the lexicographically-smallest shared
-    /// resource is reported. The returned vec is ordered by `(a, b)` so the
-    /// scheduler sees a deterministic, duplicate-free conflict set.
-    //Resource-conflict detection: the scheduler refuses to
-    // run a conflicting pair concurrently. Pairs are de-duplicated and sorted so
-    // two items contending on multiple resources don't double-count.
-    pub fn resource_conflicts(&self, candidates: &[PItemId]) -> Vec<ResourceConflict> {
-        let mut sorted: Vec<&PItemId> = candidates.iter().collect();
-        sorted.sort();
-        sorted.dedup();
-        let mut out = Vec::new();
-        for i in 0..sorted.len() {
-            for j in (i + 1)..sorted.len() {
-                let a = sorted[i];
-                let b = sorted[j];
-                let (Some(pa), Some(pb)) = (self.items.get(a), self.items.get(b)) else {
-                    continue;
-                };
-                let set_a: HashSet<&ResourceName> = pa.resources.iter().collect();
-                // Report the smallest shared resource so the pair is emitted at
-                // most once and the choice is deterministic.
-                let shared = pb
-                    .resources
-                    .iter()
-                    .filter(|r| set_a.contains(*r))
-                    .min();
-                if let Some(r) = shared {
-                    out.push(ResourceConflict {
-                        a: a.clone(),
-                        b: b.clone(),
-                        resource: r.clone(),
-                    });
-                }
-            }
-        }
-        out
-    }
-
     /// Transitively flip every `WaitDeps` descendant of a `Failed` ancestor
     /// to `Skipped`. Already-terminal descendants are left alone. Returns the
     /// sorted set of newly-skipped IDs.
@@ -237,10 +189,9 @@ impl DagPlan {
     /// value). `session_id` is the master/scheduler session driving the skip,
     /// if any.
     ///
-    /// The returned records are the evidence the master (P9) turns into
-    /// `WaitDeps/WaitResource → Skipped` entries in the state-transition audit
-    /// log (`task-audit.jsonl`, via `claw_fleet_core::deviation_ledger`) so each
-    /// auto-skip's (from, to, ts, trigger=REQ-007) is persisted.
+    /// The returned records are the evidence the orchestrator turns into
+    /// `WaitDeps → Skipped` entries in the task's audit log so each auto-skip's
+    /// (from, to, ts, trigger) is persisted.
     pub fn propagate_skip_with_evidence(
         &mut self,
         now: i64,
@@ -275,7 +226,7 @@ impl DagPlan {
                     let Some(child) = self.items.get_mut(&c) else {
                         continue;
                     };
-                    if matches!(child.status, PItemStatus::WaitDeps | PItemStatus::WaitResource) {
+                    if matches!(child.status, PItemStatus::WaitDeps) {
                         child.status = PItemStatus::Skipped;
                         newly_skipped.push(SkipRecord {
                             p_item_id: c.clone(),
@@ -302,17 +253,13 @@ mod tests {
     use super::*;
     use crate::pitem::{FailReason, PItemStatus};
 
-    fn item(id: &str, deps: &[&str], resources: &[&str], status: PItemStatus) -> PItem {
+    fn item(id: &str, deps: &[&str], status: PItemStatus) -> PItem {
         PItem {
             id: id.into(),
             desc: id.into(),
             touches: vec![],
             depends_on: deps.iter().map(|s| (*s).to_string()).collect(),
-            resources: resources.iter().map(|s| (*s).to_string()).collect(),
-            estimate_secs: None,
             acceptance: vec![],
-            artifacts: vec![],
-            skippable: None,
             human_gate: false,
             status,
             agent_session_id: None,
@@ -325,9 +272,9 @@ mod tests {
     #[test]
     fn topo_sort_orders_deps_before_dependants() {
         let plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::WaitDeps),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
-            item("c", &["b"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::WaitDeps),
+            item("b", &["a"], PItemStatus::WaitDeps),
+            item("c", &["b"], PItemStatus::WaitDeps),
         ]);
         let order = plan.topo_sort().unwrap();
         let pos = |x: &str| order.iter().position(|s| s == x).unwrap();
@@ -337,8 +284,8 @@ mod tests {
     #[test]
     fn cycle_detect_returns_witness() {
         let plan = DagPlan::from_items(vec![
-            item("a", &["b"], &[], PItemStatus::WaitDeps),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &["b"], PItemStatus::WaitDeps),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
         let cycle = plan.cycle_detect().expect("cycle expected");
         assert_eq!(cycle.first(), cycle.last());
@@ -347,7 +294,7 @@ mod tests {
 
     #[test]
     fn validate_missing_dep() {
-        let plan = DagPlan::from_items(vec![item("a", &["ghost"], &[], PItemStatus::WaitDeps)]);
+        let plan = DagPlan::from_items(vec![item("a", &["ghost"], PItemStatus::WaitDeps)]);
         match plan.validate() {
             Err(PlanValidationError::MissingDep { referenced_by, missing }) => {
                 assert_eq!(referenced_by, "a");
@@ -360,8 +307,8 @@ mod tests {
     #[test]
     fn validate_cycle() {
         let plan = DagPlan::from_items(vec![
-            item("a", &["b"], &[], PItemStatus::WaitDeps),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &["b"], PItemStatus::WaitDeps),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
         assert!(matches!(
             plan.validate(),
@@ -375,14 +322,14 @@ mod tests {
     #[test]
     fn node_ids_is_deterministic_across_insertion_order() {
         let forward = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::WaitDeps),
-            item("b", &[], &[], PItemStatus::WaitDeps),
-            item("c", &[], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::WaitDeps),
+            item("b", &[], PItemStatus::WaitDeps),
+            item("c", &[], PItemStatus::WaitDeps),
         ]);
         let reversed = DagPlan::from_items(vec![
-            item("c", &[], &[], PItemStatus::WaitDeps),
-            item("b", &[], &[], PItemStatus::WaitDeps),
-            item("a", &[], &[], PItemStatus::WaitDeps),
+            item("c", &[], PItemStatus::WaitDeps),
+            item("b", &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::WaitDeps),
         ]);
         assert_eq!(forward.node_ids(), vec!["a", "b", "c"]);
         assert_eq!(forward.node_ids(), reversed.node_ids());
@@ -391,7 +338,7 @@ mod tests {
     /// Basic accessors exist and behave: get / get_mut / len.
     #[test]
     fn basic_accessors() {
-        let mut plan = DagPlan::from_items(vec![item("a", &[], &[], PItemStatus::WaitDeps)]);
+        let mut plan = DagPlan::from_items(vec![item("a", &[], PItemStatus::WaitDeps)]);
         assert_eq!(plan.len(), 1);
         assert!(plan.get("a").is_some());
         assert!(plan.get("missing").is_none());
@@ -405,9 +352,9 @@ mod tests {
     #[test]
     fn unblocked_items_registry_scenario_1_unblocks_2_and_3() {
         let mut plan = DagPlan::from_items(vec![
-            item("1", &[], &[], PItemStatus::WaitDeps),
-            item("2", &["1"], &[], PItemStatus::WaitDeps),
-            item("3", &["1"], &[], PItemStatus::WaitDeps),
+            item("1", &[], PItemStatus::WaitDeps),
+            item("2", &["1"], PItemStatus::WaitDeps),
+            item("3", &["1"], PItemStatus::WaitDeps),
         ]);
         // Node 1 has no deps, so it is the only thing unblocked initially; 2 and
         // 3 still wait on it.
@@ -420,9 +367,9 @@ mod tests {
     #[test]
     fn unblocked_items_requires_all_deps_settled() {
         let plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Done),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
-            item("c", &["a", "b"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Done),
+            item("b", &["a"], PItemStatus::WaitDeps),
+            item("c", &["a", "b"], PItemStatus::WaitDeps),
         ]);
         // Only "b" is unblocked — "c" still waits on "b".
         assert_eq!(plan.unblocked_items(), vec!["b".to_string()]);
@@ -431,8 +378,8 @@ mod tests {
     #[test]
     fn unblocked_items_ignores_already_running() {
         let plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Done),
-            item("b", &["a"], &[], PItemStatus::Running),
+            item("a", &[], PItemStatus::Done),
+            item("b", &["a"], PItemStatus::Running),
         ]);
         assert!(plan.unblocked_items().is_empty());
     }
@@ -440,95 +387,21 @@ mod tests {
     #[test]
     fn unblocked_items_treats_skipped_as_settled() {
         let plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Skipped),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Skipped),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
         assert_eq!(plan.unblocked_items(), vec!["b".to_string()]);
     }
 
     #[test]
-    fn resource_conflicts_finds_shared_locks() {
-        let plan = DagPlan::from_items(vec![
-            item("a", &[], &["build"], PItemStatus::WaitDeps),
-            item("b", &[], &["build"], PItemStatus::WaitDeps),
-            item("c", &[], &["test"], PItemStatus::WaitDeps),
-        ]);
-        let conflicts = plan.resource_conflicts(&["a".into(), "b".into(), "c".into()]);
-        assert_eq!(conflicts.len(), 1);
-        assert_eq!(conflicts[0].a, "a");
-        assert_eq!(conflicts[0].b, "b");
-        assert_eq!(conflicts[0].resource, "build");
-    }
-
-    ///Registry scenario: P1[build], P2[build], P3[git] →
-    /// exactly one conflict (P1,P2 on build); P3 conflicts with no one.
-    #[test]
-    fn resource_conflicts_registry_scenario_p1_p2_on_build() {
-        let plan = DagPlan::from_items(vec![
-            item("P1", &[], &["build"], PItemStatus::WaitDeps),
-            item("P2", &[], &["build"], PItemStatus::WaitDeps),
-            item("P3", &[], &["git"], PItemStatus::WaitDeps),
-        ]);
-        let conflicts = plan.resource_conflicts(&["P1".into(), "P2".into(), "P3".into()]);
-        assert_eq!(conflicts.len(), 1);
-        assert_eq!(conflicts[0].a, "P1");
-        assert_eq!(conflicts[0].b, "P2");
-        assert_eq!(conflicts[0].resource, "build");
-    }
-
-    /// Two items sharing *multiple* resources must yield a single
-    /// conflict entry for the pair (deduplicated), not one per shared resource.
-    #[test]
-    fn resource_conflicts_dedups_pairs_sharing_multiple_resources() {
-        let plan = DagPlan::from_items(vec![
-            item("a", &[], &["build", "test"], PItemStatus::WaitDeps),
-            item("b", &[], &["test", "build"], PItemStatus::WaitDeps),
-        ]);
-        let conflicts = plan.resource_conflicts(&["a".into(), "b".into()]);
-        assert_eq!(conflicts.len(), 1, "pair must appear once, not once per shared resource");
-        assert_eq!(conflicts[0].a, "a");
-        assert_eq!(conflicts[0].b, "b");
-        // Smallest shared resource is reported deterministically.
-        assert_eq!(conflicts[0].resource, "build");
-    }
-
-    /// Output is ordered by (a, b) regardless of candidate input order.
-    #[test]
-    fn resource_conflicts_ordered_by_pair() {
-        let plan = DagPlan::from_items(vec![
-            item("a", &[], &["build"], PItemStatus::WaitDeps),
-            item("b", &[], &["build"], PItemStatus::WaitDeps),
-            item("c", &[], &["build"], PItemStatus::WaitDeps),
-        ]);
-        // Feed candidates in scrambled order.
-        let conflicts = plan.resource_conflicts(&["c".into(), "a".into(), "b".into()]);
-        let pairs: Vec<(&str, &str)> = conflicts
-            .iter()
-            .map(|c| (c.a.as_str(), c.b.as_str()))
-            .collect();
-        assert_eq!(pairs, vec![("a", "b"), ("a", "c"), ("b", "c")]);
-    }
-
-    #[test]
-    fn resource_conflicts_empty_when_disjoint() {
-        let plan = DagPlan::from_items(vec![
-            item("a", &[], &["build"], PItemStatus::WaitDeps),
-            item("b", &[], &["test"], PItemStatus::WaitDeps),
-        ]);
-        assert!(plan
-            .resource_conflicts(&["a".into(), "b".into()])
-            .is_empty());
-    }
-
-    #[test]
     fn propagate_skip_marks_transitive_descendants() {
         let mut plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Failed(FailReason::BuildFailed)),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
-            item("c", &["b"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Failed(FailReason::BuildFailed)),
+            item("b", &["a"], PItemStatus::WaitDeps),
+            item("c", &["b"], PItemStatus::WaitDeps),
             // Unrelated chain — should stay WaitDeps.
-            item("x", &[], &[], PItemStatus::Done),
-            item("y", &["x"], &[], PItemStatus::WaitDeps),
+            item("x", &[], PItemStatus::Done),
+            item("y", &["x"], PItemStatus::WaitDeps),
         ]);
         let skipped = plan.propagate_skip();
         assert_eq!(skipped, vec!["b".to_string(), "c".to_string()]);
@@ -540,9 +413,9 @@ mod tests {
     #[test]
     fn propagate_skip_does_not_overwrite_terminal() {
         let mut plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Failed(FailReason::BuildFailed)),
+            item("a", &[], PItemStatus::Failed(FailReason::BuildFailed)),
             // Already Done — don't touch.
-            item("b", &["a"], &[], PItemStatus::Done),
+            item("b", &["a"], PItemStatus::Done),
         ]);
         let skipped = plan.propagate_skip();
         assert!(skipped.is_empty());
@@ -554,8 +427,8 @@ mod tests {
         // PRD §6.1 convention: only Failed poisons. Skipped should leave kids alone
         // (they may still be runnable through other deps).
         let mut plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Skipped),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Skipped),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
         let skipped = plan.propagate_skip();
         assert!(skipped.is_empty());
@@ -569,9 +442,9 @@ mod tests {
     #[test]
     fn req007_propagate_skip_with_evidence_carries_reason_ts_session() {
         let mut plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Failed(FailReason::BuildFailed)),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
-            item("c", &["b"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Failed(FailReason::BuildFailed)),
+            item("b", &["a"], PItemStatus::WaitDeps),
+            item("c", &["b"], PItemStatus::WaitDeps),
         ]);
         let records =
             plan.propagate_skip_with_evidence(1_717_000_000, Some("sess-master".into()));
@@ -603,9 +476,9 @@ mod tests {
     fn req007_bare_propagate_skip_matches_evidence_ids() {
         let make = || {
             DagPlan::from_items(vec![
-                item("a", &[], &[], PItemStatus::Failed(FailReason::BuildFailed)),
-                item("b", &["a"], &[], PItemStatus::WaitDeps),
-                item("c", &["b"], &[], PItemStatus::WaitDeps),
+                item("a", &[], PItemStatus::Failed(FailReason::BuildFailed)),
+                item("b", &["a"], PItemStatus::WaitDeps),
+                item("c", &["b"], PItemStatus::WaitDeps),
             ])
         };
         let mut p1 = make();
@@ -624,8 +497,8 @@ mod tests {
     #[test]
     fn req007_no_failure_no_skip_records() {
         let mut plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Done),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Done),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
         let records = plan.propagate_skip_with_evidence(5, Some("s".into()));
         assert!(records.is_empty());
@@ -635,8 +508,8 @@ mod tests {
     #[test]
     fn serde_roundtrip_plan() {
         let plan = DagPlan::from_items(vec![
-            item("a", &[], &["build"], PItemStatus::WaitDeps),
-            item("b", &["a"], &[], PItemStatus::Done),
+            item("a", &[], PItemStatus::WaitDeps),
+            item("b", &["a"], PItemStatus::Done),
         ]);
         let json = serde_json::to_string(&plan).unwrap();
         let back: DagPlan = serde_json::from_str(&json).unwrap();
