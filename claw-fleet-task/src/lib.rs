@@ -3,6 +3,7 @@ pub mod process_util;
 pub mod paths;
 pub mod dag;
 pub mod pitem;
+pub mod asset_inject;
 pub mod acceptance;
 pub mod plan;
 pub mod worktree;
