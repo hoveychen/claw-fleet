@@ -12,6 +12,7 @@ pub mod master;
 pub mod architecture_overview;
 pub mod worker;
 pub mod spawn_specs;
+pub mod orchestrator;
 pub mod runner;
 pub mod actions;
 pub mod registry;
