@@ -1079,6 +1079,34 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/tasks/deliverables" if request.method() == &tiny_http::Method::Get => {
+                let id = query.get("id").cloned().unwrap_or_default();
+                if id.is_empty() {
+                    let _ = request.respond(
+                        tiny_http::Response::from_string(r#"{"error":"missing id"}"#)
+                            .with_status_code(400)
+                            .with_header(json_header),
+                    );
+                    continue;
+                }
+                match crate::deliverables::compute_task_deliverables(&id) {
+                    Ok(d) => {
+                        let body = serde_json::to_string(&d).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/tasks/create" if request.method() == &tiny_http::Method::Post => {
                 let mut buf = String::new();
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
