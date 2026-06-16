@@ -156,17 +156,35 @@ pub fn run_orchestrator_loop(
     stop: Arc<AtomicBool>,
 ) {
     let orch = Orchestrator::new(task_id.clone());
+    // A persistently-failing step (e.g. a review session that never produces a
+    // parseable verdict) must NOT spin forever re-spawning claude. Bound the
+    // consecutive errors; on the limit, stop driving and leave the task for the
+    // user to inspect rather than burning quota in a tight loop.
+    const MAX_CONSECUTIVE_ERRORS: u32 = 5;
+    let mut consecutive_errors = 0u32;
     while !stop.load(Ordering::SeqCst) {
         match orch.step(&*host, &*gate) {
             Ok(OrchestratorStep::PlanComplete) => break,
             Ok(OrchestratorStep::Idle) => {
+                consecutive_errors = 0;
                 std::thread::sleep(std::time::Duration::from_millis(300));
             }
             Ok(_) => {
                 // A transition happened; loop immediately to take the next.
+                consecutive_errors = 0;
             }
             Err(e) => {
-                eprintln!("[orchestrator] task {task_id} step error: {e}");
+                consecutive_errors += 1;
+                eprintln!(
+                    "[orchestrator] task {task_id} step error ({consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}"
+                );
+                if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                    eprintln!(
+                        "[orchestrator] task {task_id}: too many consecutive errors — \
+                         stopping the driver (task left in place for inspection)."
+                    );
+                    break;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(500));
             }
         }

@@ -108,9 +108,15 @@ fn render_acceptance(criteria: &[AcceptanceCriterion]) -> String {
         .join("\n")
 }
 
-/// Parse the review session's stdout into a [`ReviewVerdict`]. Robust to both
-/// raw schema output (`{achieved, gaps}`) and the `--output-format json`
-/// envelope (`{..., "result": "<json string or object>"}`).
+/// Parse the review session's stdout into a [`ReviewVerdict`].
+///
+/// `claude -p --output-format json --json-schema` returns an envelope whose
+/// schema-conforming object lives in `structured_output` (the `result` field
+/// holds the model's free-text reply, NOT the structured data — verified
+/// against the real CLI). This is robust to three shapes:
+/// 1. envelope with `structured_output: {achieved, gaps}` (the real path);
+/// 2. envelope with `result` as a JSON string/object (older/alt shapes);
+/// 3. raw `{achieved, gaps}` (no envelope).
 pub fn parse_verdict(stdout: &str) -> Result<ReviewVerdict, String> {
     let trimmed = stdout.trim();
     if trimmed.is_empty() {
@@ -119,13 +125,16 @@ pub fn parse_verdict(stdout: &str) -> Result<ReviewVerdict, String> {
     let outer: serde_json::Value = serde_json::from_str(trimmed)
         .map_err(|e| format!("review output is not JSON: {e}"))?;
 
-    // Dig out the verdict object: prefer a `result` field (the --output-format
-    // json envelope), which may itself be a JSON string or an object.
-    let verdict = match outer.get("result") {
-        Some(serde_json::Value::String(s)) => serde_json::from_str::<serde_json::Value>(s)
-            .map_err(|e| format!("review `result` string is not JSON: {e}"))?,
-        Some(obj @ serde_json::Value::Object(_)) => obj.clone(),
-        _ => outer,
+    let verdict = if let Some(so @ serde_json::Value::Object(_)) = outer.get("structured_output") {
+        // The --json-schema structured field — the canonical location.
+        so.clone()
+    } else {
+        match outer.get("result") {
+            Some(serde_json::Value::String(s)) => serde_json::from_str::<serde_json::Value>(s)
+                .map_err(|e| format!("review `result` string is not JSON: {e}"))?,
+            Some(obj @ serde_json::Value::Object(_)) => obj.clone(),
+            _ => outer,
+        }
     };
 
     let achieved = verdict
@@ -204,6 +213,19 @@ mod tests {
         .unwrap();
         assert!(!v.achieved);
         assert_eq!(v.gaps, vec!["diff 里没有 login 函数", "测试未添加"]);
+    }
+
+    /// The real `claude -p --output-format json --json-schema` shape: the
+    /// verdict is under `structured_output`; `result` holds free text (which
+    /// must NOT be parsed as the verdict). Verified against claude 2.1.x.
+    #[test]
+    fn parse_real_structured_output_envelope() {
+        let stdout = r#"{"type":"result","subtype":"success","is_error":false,
+            "result":"Review complete.",
+            "structured_output":{"achieved":false,"gaps":["hello.txt 未创建"]}}"#;
+        let v = parse_verdict(stdout).unwrap();
+        assert!(!v.achieved);
+        assert_eq!(v.gaps, vec!["hello.txt 未创建"]);
     }
 
     #[test]
