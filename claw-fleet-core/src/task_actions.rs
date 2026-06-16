@@ -27,22 +27,6 @@ pub fn start_task(task_id: &str) -> Result<(), String> {
     actions::start_task(task_id, &SupervisorHost, opts)
 }
 
-pub fn mark_done(
-    task_id: &str,
-    p_item_id: &str,
-    summary: &str,
-) -> Result<claw_fleet_task::worktree::MergeOutcome, String> {
-    actions::mark_done(task_id, p_item_id, summary, &SupervisorHost)
-}
-
-pub fn mark_failed(
-    task_id: &str,
-    p_item_id: &str,
-    reason: claw_fleet_task::pitem::FailReason,
-) -> Result<Vec<claw_fleet_task::pitem::PItemId>, String> {
-    actions::mark_failed(task_id, p_item_id, reason, &SupervisorHost)
-}
-
 pub fn dispatch_pitem(task_id: &str, p_item_id: &str) -> Result<(), String> {
     actions::dispatch_pitem(task_id, p_item_id, &SupervisorHost)
 }
