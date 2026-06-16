@@ -32,7 +32,7 @@ use crate::auditor::{
     audit_mark_done, AuditFinding, MarkDoneEvidence, MarkDoneRecord, Severity,
 };
 use crate::master::spawn_spec_from_task;
-use crate::pitem::{AcceptanceCriterion, ArtifactKind, FailReason, PItemId, PItemStatus};
+use crate::pitem::{AcceptanceCriterion, FailReason, PItemId, PItemStatus};
 use crate::runner::TaskHost;
 use crate::task::{
     get_task, git_create_branch, pick_unique_branch, slugify_title, task_json_path,
@@ -93,22 +93,6 @@ pub fn validate_output_summary(summary: &str) -> SummaryValidation {
         original_chars,
         too_short,
         truncated,
-    }
-}
-
-/// artifact_kind is mandatory on a Done P-item. The mark-done call
-/// site has no artifact-kind parameter (the signature is shared with the core
-/// wrapper + fleet-cli, both outside P9's touches), so the kind is read from
-/// the P-item's own `artifacts` field, which the planner declares. An empty
-/// `artifacts` list means the worker never tagged an artifact kind → reject.
-fn require_artifact_kind(artifacts: &[ArtifactKind]) -> Result<(), String> {
-    if artifacts.is_empty() {
-        Err("REQ-013: output_summary must declare an artifact_kind \
-             (FileList|GitDiff|TestOutput|ManualNote); the P-item's `artifacts` \
-             list is empty"
-            .to_string())
-    } else {
-        Ok(())
     }
 }
 
@@ -644,7 +628,7 @@ pub fn mark_done(
         .ok_or_else(|| format!("task {task_id} has no task_branch"))?;
 
     // Snapshot the P-item shape we need before any mutation.
-    let (item_desc, item_acceptance, item_artifacts, human_gate) = {
+    let (item_desc, item_acceptance, human_gate) = {
         let item = task
             .plan
             .get(p_item_id)
@@ -652,13 +636,11 @@ pub fn mark_done(
         (
             item.desc.clone(),
             item.acceptance.clone(),
-            item.artifacts.clone(),
             item.human_gate,
         )
     };
 
-    // 1.[DEC-012] output_summary validation + mandatory artifact_kind.
-    require_artifact_kind(&item_artifacts)?;
+    // 1. output_summary validation.
     let validated = validate_output_summary(summary);
 
     // 2.parse worker-declared simplifications → Pending
@@ -757,7 +739,7 @@ pub fn mark_done(
             // evidence (or was missing/empty). Do NOT mark Done.
             let now = chrono::Utc::now().timestamp();
             if let Some(item) = task.plan.get_mut(p_item_id) {
-                item.status = PItemStatus::Failed(FailReason::AcceptanceRejected);
+                item.status = PItemStatus::Failed(FailReason::ReviewRejected);
                 item.completed_at = Some(now);
                 item.output_summary = Some(validated.stored.clone());
             }
@@ -962,7 +944,7 @@ pub fn dispatch_pitem(
             .get_mut(p_item_id)
             .ok_or_else(|| format!("p-item {p_item_id} not found in task {task_id}"))?;
         match &item.status {
-            PItemStatus::WaitDeps | PItemStatus::WaitResource => {
+            PItemStatus::WaitDeps => {
                 item.status = PItemStatus::Running;
                 item.started_at = Some(now);
             }
@@ -1054,7 +1036,7 @@ pub fn clear_task(task_id: &str, host: &dyn TaskHost) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pitem::{AcceptanceCriterion, ArtifactKind, PItem, PItemStatus};
+    use crate::pitem::{AcceptanceCriterion, PItem, PItemStatus};
     use crate::plan::DagPlan;
     use crate::runner::{LlmMediator, Resolution, TaskLifecycleHost};
     use crate::task::{Task, TaskStatus};
@@ -1143,17 +1125,13 @@ mod tests {
         dir
     }
 
-    fn pitem(id: &str, acceptance: Vec<AcceptanceCriterion>, artifacts: Vec<ArtifactKind>, human_gate: bool) -> PItem {
+    fn pitem(id: &str, acceptance: Vec<AcceptanceCriterion>, human_gate: bool) -> PItem {
         PItem {
             id: id.into(),
             desc: "do the thing".into(),
             touches: vec![],
             depends_on: vec![],
-            resources: vec![],
-            estimate_secs: None,
             acceptance,
-            artifacts,
-            skippable: None,
             human_gate,
             status: PItemStatus::Running,
             agent_session_id: None,
@@ -1225,12 +1203,6 @@ mod tests {
         let v = validate_output_summary(&s);
         assert_eq!(v.original_chars, 60);
         assert!(!v.truncated, "60 chars is within 200, must not truncate");
-    }
-
-    #[test]
-    fn req013_artifact_kind_mandatory() {
-        assert!(require_artifact_kind(&[]).is_err(), "empty artifacts must reject");
-        assert!(require_artifact_kind(&[ArtifactKind::GitDiff]).is_ok());
     }
 
     // ──deviation-marker parsing ──────────────────────────
@@ -1313,7 +1285,7 @@ mod tests {
         let _o = FleetHomeOverride::new(tmp_home.path());
         let ws = compiling_workspace();
         // No acceptance criteria at all, no human gate → only proxy signals left.
-        let item = pitem("p1", vec![], vec![ArtifactKind::ManualNote], false);
+        let item = pitem("p1", vec![],false);
         write_task("t1", ws.path(), item);
         let host = MockHost { workspace: ws.path().to_path_buf() };
         let err = mark_done("t1", "p1", &ok_summary(), &host).unwrap_err();
@@ -1332,7 +1304,7 @@ mod tests {
         let tmp_home = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp_home.path());
         let ws = compiling_workspace();
-        let item = pitem("p1", vec![], vec![ArtifactKind::ManualNote], true);
+        let item = pitem("p1", vec![],true);
         write_task("t1", ws.path(), item);
         let host = MockHost { workspace: ws.path().to_path_buf() };
         let err = mark_done("t1", "p1", &ok_summary(), &host).unwrap_err();
@@ -1355,18 +1327,17 @@ mod tests {
                 AcceptanceCriterion::Builds,
                 AcceptanceCriterion::TestsPass("cargo test t_bad".into()),
             ],
-            vec![ArtifactKind::TestOutput],
             false,
         );
         write_task("t1", ws.path(), item);
         let host = MockHost { workspace: ws.path().to_path_buf() };
         let err = mark_done("t1", "p1", &ok_summary(), &host).unwrap_err();
         assert!(err.starts_with("ACCEPTANCE_REJECTED"), "got: {err}");
-        // P-item must be Failed(AcceptanceRejected), not Done.
+        // P-item must be Failed(ReviewRejected), not Done.
         let task = get_task("t1").unwrap();
         assert_eq!(
             task.plan.get("p1").unwrap().status,
-            PItemStatus::Failed(FailReason::AcceptanceRejected)
+            PItemStatus::Failed(FailReason::ReviewRejected)
         );
     }
 
@@ -1381,7 +1352,6 @@ mod tests {
         let item = pitem(
             "p1",
             vec![AcceptanceCriterion::Builds, AcceptanceCriterion::HumanReview],
-            vec![ArtifactKind::GitDiff],
             false,
         );
         write_task("t1", ws.path(), item);
@@ -1400,25 +1370,11 @@ mod tests {
         let tmp_home = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp_home.path());
         let ws = compiling_workspace();
-        let item = pitem("p1", vec![AcceptanceCriterion::Builds], vec![ArtifactKind::FileList], true);
+        let item = pitem("p1", vec![AcceptanceCriterion::Builds],true);
         write_task("t1", ws.path(), item);
         let host = MockHost { workspace: ws.path().to_path_buf() };
         let err = mark_done("t1", "p1", &ok_summary(), &host).unwrap_err();
         assert!(err.starts_with("WAIT_HUMAN"), "got: {err}");
-    }
-
-    /// artifact_kind 必选 — a P-item with empty `artifacts` is
-    /// rejected by mark_done before any audit runs.
-    #[test]
-    fn req013_mark_done_rejects_missing_artifact_kind() {
-        let tmp_home = TempDir::new().unwrap();
-        let _o = FleetHomeOverride::new(tmp_home.path());
-        let ws = compiling_workspace();
-        let item = pitem("p1", vec![AcceptanceCriterion::Builds], vec![], false);
-        write_task("t1", ws.path(), item);
-        let host = MockHost { workspace: ws.path().to_path_buf() };
-        let err = mark_done("t1", "p1", &ok_summary(), &host).unwrap_err();
-        assert!(err.contains("REQ-013"), "got: {err}");
     }
 
     ///[DEC-007] A worker-declared `[DEVIATION]` touching the P-item's
@@ -1430,7 +1386,7 @@ mod tests {
         let tmp_home = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp_home.path());
         let ws = compiling_workspace();
-        let item = pitem("p1", vec![AcceptanceCriterion::Builds], vec![ArtifactKind::ManualNote], false);
+        let item = pitem("p1", vec![AcceptanceCriterion::Builds],false);
         write_task("t1", ws.path(), item);
         let host = MockHost { workspace: ws.path().to_path_buf() };
         let summary = format!(
@@ -1459,7 +1415,6 @@ mod tests {
         let item = pitem(
             "p1",
             vec![AcceptanceCriterion::Builds, AcceptanceCriterion::TestsPass("cargo test t_ok".into())],
-            vec![ArtifactKind::TestOutput],
             false,
         );
         write_task("t1", ws.path(), item);
@@ -1526,7 +1481,6 @@ mod tests {
         let item = pitem(
             "p1",
             vec![AcceptanceCriterion::Builds, AcceptanceCriterion::TestsPass("cargo test t_ok".into())],
-            vec![ArtifactKind::TestOutput],
             false,
         );
         write_task("t1", ws.path(), item);
@@ -1546,7 +1500,7 @@ mod tests {
         let tmp_home = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp_home.path());
         let ws = compiling_workspace();
-        let item = pitem("p1", vec![AcceptanceCriterion::Builds], vec![ArtifactKind::FileList], false);
+        let item = pitem("p1", vec![AcceptanceCriterion::Builds],false);
         write_task("t1", ws.path(), item);
         // No acceptance::persist_results call → load_results is empty → proxy-only.
         let outcome = audit_pitem("t1", "p1").unwrap();
@@ -1568,7 +1522,7 @@ mod tests {
         let tmp_home = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp_home.path());
         let ws = compiling_workspace();
-        let item = pitem("p1", vec![AcceptanceCriterion::Builds], vec![ArtifactKind::FileList], false);
+        let item = pitem("p1", vec![AcceptanceCriterion::Builds],false);
         write_task("t1", ws.path(), item);
         // Persist a real passing Builds result so load_results returns evidence.
         let results = vec![AcceptanceCheckResult {
@@ -1592,7 +1546,7 @@ mod tests {
         let tmp_home = TempDir::new().unwrap();
         let _o = FleetHomeOverride::new(tmp_home.path());
         let ws = compiling_workspace();
-        let item = pitem("p1", vec![AcceptanceCriterion::Builds], vec![ArtifactKind::FileList], false);
+        let item = pitem("p1", vec![AcceptanceCriterion::Builds],false);
         write_task("t1", ws.path(), item);
         let host = MockHost { workspace: ws.path().to_path_buf() };
         let _ = mark_failed("t1", "p1", FailReason::BuildFailed, &host).unwrap();

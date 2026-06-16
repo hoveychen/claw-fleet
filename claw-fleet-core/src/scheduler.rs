@@ -1,28 +1,20 @@
-//! P-item scheduler: pick the next set of P-items the supervisor can dispatch
-//! given (a) current plan state and (b) the set of resource locks currently
-//! held by running workers.
+//! P-item scheduler helpers: which P-items can the orchestrator dispatch
+//! right now, plus the "✨ auto-complete touches edges" suggestion engine.
 //!
-//! The scheduler is pure — it does not hold the resource locks itself. The
-//! supervisor / Master agent owns the live `HashSet<ResourceName>` and asks
-//! the scheduler "what can I dispatch right now?". This keeps the scheduler
-//! testable in isolation and lets the Master mock different lock states when
-//! reasoning about plan changes.
+//! The scheduler is pure — `dispatchable()` is just the dependency-graph
+//! unblocked set (resource scheduling was removed in the task-subsystem
+//! rebuild; the deterministic orchestrator dispatches strictly by topology).
 //!
-//! Three responsibilities:
-//! 1. `dispatchable()` — topology + resource-lock filter → candidate set.
+//! Two responsibilities:
+//! 1. `dispatchable()` — topology → candidate set.
 //! 2. `suggest_touches_edges()` — UI "✨ auto-complete touches edges" button:
 //!    surface P-items whose `touches` overlap (directly or via the implicit
-//!    shared-file fallback list, PRD patch §3) without an existing edge.
-//! 3. `IMPLICIT_SHARED_FILES` — the patch §3 fallback list of files that
-//!    almost any UI / backend P-item touches and the planner tends to omit.
-//!
-//! See PRD §5.2 (Master + Worker + Scheduler architecture) and patch §3
-//! (Implicit shared files) in `design/task-as-unit-redesign.md`.
+//!    shared-file fallback list) without an existing edge.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crate::pitem::{PItemId, ResourceName};
+use crate::pitem::PItemId;
 use crate::plan::DagPlan;
 
 /// Files that almost any P-item in their domain touches but planners
@@ -73,46 +65,22 @@ pub struct Dispatch {
     pub error: Option<String>,
 }
 
-/// Compute the set of P-items the supervisor should hand to workers right
-/// now. The returned list is **non-conflicting** — no two returned items
-/// share a resource, and none of them conflict with `currently_held`.
-///
-/// Selection order: alphabetical by P-item id, so the same plan state with
-/// the same held-set always yields the same dispatch (helps tests and the
-/// scheduler's "did anything change?" diff).
+/// Compute the set of P-items the orchestrator should hand to workers right
+/// now — every `WaitDeps` item whose dependencies are all settled. Selection
+/// order is alphabetical by P-item id (via `unblocked_items`) so the same plan
+/// state always yields the same dispatch.
 ///
 /// On cycle: returns `ready: vec![]` with `error` describing the cycle so
-/// the supervisor can escalate to the user (don't silently freeze).
-pub fn dispatchable(plan: &DagPlan, currently_held: &HashSet<ResourceName>) -> Dispatch {
+/// the orchestrator can escalate to the user (don't silently freeze).
+pub fn dispatchable(plan: &DagPlan) -> Dispatch {
     if let Some(cycle) = plan.cycle_detect() {
         return Dispatch {
             ready: vec![],
             error: Some(format!("plan contains a cycle: {cycle:?}")),
         };
     }
-    let candidates = plan.unblocked_items();
-    let mut selected: Vec<PItemId> = Vec::new();
-    let mut would_hold: HashSet<ResourceName> = HashSet::new();
-    for id in candidates {
-        let Some(item) = plan.get(&id) else { continue };
-        let conflicts_external = item
-            .resources
-            .iter()
-            .any(|r| currently_held.contains(r));
-        if conflicts_external {
-            continue;
-        }
-        let conflicts_internal = item.resources.iter().any(|r| would_hold.contains(r));
-        if conflicts_internal {
-            continue;
-        }
-        for r in &item.resources {
-            would_hold.insert(r.clone());
-        }
-        selected.push(id);
-    }
     Dispatch {
-        ready: selected,
+        ready: plan.unblocked_items(),
         error: None,
     }
 }
@@ -226,17 +194,13 @@ mod tests {
     use super::*;
     use crate::pitem::{FailReason, PItem, PItemStatus};
 
-    fn item(id: &str, deps: &[&str], resources: &[&str], status: PItemStatus) -> PItem {
+    fn item(id: &str, deps: &[&str], status: PItemStatus) -> PItem {
         PItem {
             id: id.into(),
             desc: id.into(),
             touches: vec![],
             depends_on: deps.iter().map(|s| (*s).to_string()).collect(),
-            resources: resources.iter().map(|s| (*s).to_string()).collect(),
-            estimate_secs: None,
             acceptance: vec![],
-            artifacts: vec![],
-            skippable: None,
             human_gate: false,
             status,
             agent_session_id: None,
@@ -247,66 +211,40 @@ mod tests {
     }
 
     fn item_touches(id: &str, deps: &[&str], touches: &[&str], status: PItemStatus) -> PItem {
-        let mut p = item(id, deps, &[], status);
+        let mut p = item(id, deps, status);
         p.touches = touches.iter().map(PathBuf::from).collect();
         p
     }
 
-    fn held(names: &[&str]) -> HashSet<ResourceName> {
-        names.iter().map(|s| (*s).to_string()).collect()
-    }
-
     #[test]
-    fn dispatches_unblocked_items_with_no_resources() {
+    fn dispatches_unblocked_items() {
         let plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::WaitDeps),
-            item("b", &[], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::WaitDeps),
+            item("b", &[], PItemStatus::WaitDeps),
         ]);
-        let d = dispatchable(&plan, &held(&[]));
+        let d = dispatchable(&plan);
         assert!(d.error.is_none());
         assert_eq!(d.ready, vec!["a".to_string(), "b".to_string()]);
     }
 
     #[test]
-    fn skips_items_blocked_by_external_resource_lock() {
-        let plan = DagPlan::from_items(vec![
-            item("a", &[], &["build"], PItemStatus::WaitDeps),
-            item("b", &[], &["test"], PItemStatus::WaitDeps),
-        ]);
-        let d = dispatchable(&plan, &held(&["build"]));
-        assert_eq!(d.ready, vec!["b".to_string()]);
-    }
-
-    #[test]
-    fn serializes_internal_resource_conflict() {
-        // Both items want `build` — only one should be dispatched.
-        let plan = DagPlan::from_items(vec![
-            item("a", &[], &["build"], PItemStatus::WaitDeps),
-            item("b", &[], &["build"], PItemStatus::WaitDeps),
-        ]);
-        let d = dispatchable(&plan, &held(&[]));
-        assert_eq!(d.ready.len(), 1);
-        assert_eq!(d.ready[0], "a"); // alphabetical → 'a' wins
-    }
-
-    #[test]
     fn waits_for_deps_done() {
         let plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Running),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Running),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
-        let d = dispatchable(&plan, &held(&[]));
+        let d = dispatchable(&plan);
         assert!(d.ready.is_empty());
     }
 
     #[test]
     fn skip_propagation_unblocks_downstream() {
-        // PRD §6.1: only Failed poisons. Skipped should still unblock.
+        // Only Failed poisons. Skipped should still unblock.
         let plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Skipped),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Skipped),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
-        let d = dispatchable(&plan, &held(&[]));
+        let d = dispatchable(&plan);
         assert_eq!(d.ready, vec!["b".to_string()]);
     }
 
@@ -316,25 +254,25 @@ mod tests {
         // WaitDeps and the scheduler refuses to dispatch (Failed parent
         // never satisfies `unblocks_downstream`).
         let mut plan = DagPlan::from_items(vec![
-            item("a", &[], &[], PItemStatus::Failed(FailReason::BuildFailed)),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &[], PItemStatus::Failed(FailReason::BuildFailed)),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
-        assert!(dispatchable(&plan, &held(&[])).ready.is_empty());
+        assert!(dispatchable(&plan).ready.is_empty());
 
         // Once propagate_skip flips 'b' to Skipped, it leaves WaitDeps and
         // no longer surfaces as dispatchable either.
         plan.propagate_skip();
-        assert!(dispatchable(&plan, &held(&[])).ready.is_empty());
+        assert!(dispatchable(&plan).ready.is_empty());
         assert!(matches!(plan.get("b").unwrap().status, PItemStatus::Skipped));
     }
 
     #[test]
     fn cycle_returns_error_not_empty_silent() {
         let plan = DagPlan::from_items(vec![
-            item("a", &["b"], &[], PItemStatus::WaitDeps),
-            item("b", &["a"], &[], PItemStatus::WaitDeps),
+            item("a", &["b"], PItemStatus::WaitDeps),
+            item("b", &["a"], PItemStatus::WaitDeps),
         ]);
-        let d = dispatchable(&plan, &held(&[]));
+        let d = dispatchable(&plan);
         assert!(d.ready.is_empty());
         assert!(d.error.as_ref().is_some_and(|e| e.contains("cycle")));
     }

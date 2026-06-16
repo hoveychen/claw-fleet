@@ -483,8 +483,6 @@ fn main() {
 // ── Task subcommand dispatcher ────────────────────────────────────────────────
 
 fn cmd_task(action: TaskCommands) {
-    use std::collections::HashSet;
-
     fn die(msg: String) -> ! {
         eprintln!("error: {msg}");
         std::process::exit(1);
@@ -502,12 +500,9 @@ fn cmd_task(action: TaskCommands) {
         }
         TaskCommands::GetDispatchable { task_id, json } => {
             let task = claw_fleet_core::task::get_task(&task_id).unwrap_or_else(|e| die(e));
-            // CLI doesn't track in-flight resource locks (the supervisor does).
-            // For V1: assume nothing is held, return the scheduler's answer
-            // given only plan state. P7/P19 integration will plumb the
-            // live resource set through.
-            let dispatch =
-                claw_fleet_core::scheduler::dispatchable(&task.plan, &HashSet::new());
+            // Dispatch is purely by dependency topology now (resource
+            // scheduling was removed in the task-subsystem rebuild).
+            let dispatch = claw_fleet_core::scheduler::dispatchable(&task.plan);
             if let Some(e) = &dispatch.error {
                 die(e.clone());
             }

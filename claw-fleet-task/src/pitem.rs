@@ -1,8 +1,15 @@
 //! Plan-item (P-item) data model.
 //!
-//! A P-item is one node in a task's DAG plan. Defined per PRD §6.1
-//! (design/task-as-unit-redesign.md). See `crate::plan::DagPlan` for the
-//! container and `crate::dag` for the topology algorithms.
+//! A P-item is one node in a task's lightweight dependency graph. See
+//! `crate::plan::DagPlan` for the container and `crate::dag` for the topology
+//! algorithms.
+//!
+//! Rebuilt (task-subsystem-rebuild): the speculative scheduling/auditing
+//! machinery was removed. Gone: the `WaitResource` phantom status (never
+//! written), and the `resources` / `artifacts` / `estimate_secs` / `skippable`
+//! fields (resource scheduling and the five-gate acceptance engine they fed are
+//! deleted). A P-item now carries only what the deterministic orchestrator and
+//! the `/goal`-style review actually consume.
 
 use std::path::PathBuf;
 
@@ -10,19 +17,11 @@ use serde::{Deserialize, Serialize};
 
 pub type PItemId = String;
 
-// A resource name the scheduler treats as a mutual-exclusion lock:
-// `build` / `test` / `git` / `custom:*` (PRD §6.3). Two P-items declaring the
-// same ResourceName cannot run concurrently — see `DagPlan::resource_conflicts`.
-/// `local:build`, `port:3000`, `global:simulator:ios`, etc. See PRD §6.3.
-pub type ResourceName = String;
-
-// P-item is the canonical DAG-node record. The PRD's nine *atomic*
-// fields — id, desc, depends_on, touches, resources, estimate_secs, acceptance,
-// artifacts, skippable, human_gate, status — are all present below with derived
-// Serialize/Deserialize. The runtime-bookkeeping tail (agent_session_id /
-// started_at / completed_at / output_summary) is written by the supervisor, not
-// the planner, so it stays `Option`; see the deviation note for why the spec's
-// "no field is Option" wording does not extend to genuinely-absent runtime data.
+/// One node in the task's dependency graph. `acceptance` holds the
+/// natural-language "done" criteria the review session checks the worker's
+/// output against. The runtime-bookkeeping tail (agent_session_id / started_at
+/// / completed_at / output_summary) is written by the orchestrator, not the
+/// planner, so it stays `Option`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct PItem {
@@ -33,20 +32,9 @@ pub struct PItem {
     #[serde(default)]
     pub depends_on: Vec<PItemId>,
     #[serde(default)]
-    pub resources: Vec<ResourceName>,
-    #[serde(default)]
-    pub estimate_secs: Option<u64>,
-    #[serde(default)]
     pub acceptance: Vec<AcceptanceCriterion>,
-    #[serde(default)]
-    pub artifacts: Vec<ArtifactKind>,
-    #[serde(default)]
-    pub skippable: Option<SkipCondition>,
-    //When `true`, the master must enter `WaitHumanGate`
-    // after the acceptance audit and ask the user before flipping to `Done` —
-    // it never marks done unilaterally. Precedence with the task-level
-    // `manual_review_all` flag is resolved by
-    // `crate::acceptance::requires_human_gate` (either side gates).
+    /// When `true`, the orchestrator parks the P-item in `WaitHumanGate` after
+    /// review passes and waits for the user before flipping to `Done`.
     #[serde(default)]
     pub human_gate: bool,
     /// Newly-emitted P-items (from the planner) omit status and start in
@@ -68,11 +56,12 @@ pub struct PItem {
 #[serde(rename_all = "camelCase")]
 pub enum PItemStatus {
     WaitDeps,
-    WaitResource,
     Running,
-    // Acceptance passed but a human gate (P-item `human_gate` or task
-    // `manual_review_all`) is active — the audit yields `WaitHuman` and the
-    // master parks the P-item here until the user approves, instead of `Done`.
+    /// Worker finished; an independent review session is judging whether the
+    /// P-item's acceptance criteria were actually met.
+    Reviewing,
+    /// Review passed but a human gate (P-item `human_gate`) is active — the
+    /// orchestrator parks the P-item here until the user approves.
     WaitHumanGate,
     Done,
     Failed(FailReason),
@@ -84,42 +73,25 @@ pub enum PItemStatus {
 pub enum FailReason {
     BuildFailed,
     TestsFailed,
-    AcceptanceRejected,
+    /// The review session judged the worker's output did not meet the
+    /// acceptance criteria.
+    ReviewRejected,
     UpstreamFailed,
     UserRejected,
     Aborted,
     Custom(String),
 }
 
-// The four verification methods. Master checks `PItem.acceptance` in
-// declared order; each variant maps to one verification function (check_builds /
-// check_tests / ask_human / eval_custom) wired up in P6's acceptance engine.
+/// Natural-language "done" criteria. The review session checks the worker's
+/// output (diff + summary) against these. `Builds` / `TestsPass` are kept as
+/// structured shorthands the review prompt can render deterministically;
+/// `Custom` is free-text.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum AcceptanceCriterion {
     Builds,
     TestsPass(String),
     HumanReview,
-    Custom(String),
-}
-
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Hash)]
-#[serde(rename_all = "camelCase")]
-pub enum ArtifactKind {
-    FileList,
-    GitDiff,
-    TestOutput,
-    ManualNote,
-}
-
-// Two skip conditions. `NoChangesIn(paths)` is auto-evaluated by the
-// Master via `git diff` over those paths; `Custom(rule)` is evaluated by the
-// worker, which returns a skip_result. Either way the Master records the reason
-// via `DagPlan::propagate_skip` into the deviation ledger (REQ-007, P8).
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub enum SkipCondition {
-    NoChangesIn(Vec<PathBuf>),
     Custom(String),
 }
 
@@ -147,9 +119,13 @@ impl PItem {
         matches!(self.status, PItemStatus::Done | PItemStatus::Skipped)
     }
 
-    /// `Running` or `WaitHumanGate` (worker has touched it, scheduler can't redispatch).
+    /// Worker has touched it (or review is in flight / human gate pending), so
+    /// the scheduler must not redispatch it.
     pub fn is_active(&self) -> bool {
-        matches!(self.status, PItemStatus::Running | PItemStatus::WaitHumanGate)
+        matches!(
+            self.status,
+            PItemStatus::Running | PItemStatus::Reviewing | PItemStatus::WaitHumanGate
+        )
     }
 }
 
@@ -163,14 +139,10 @@ mod tests {
             desc: "do the thing".into(),
             touches: vec![PathBuf::from("src/main.rs")],
             depends_on: vec![],
-            resources: vec!["build".into()],
-            estimate_secs: Some(120),
             acceptance: vec![
                 AcceptanceCriterion::Builds,
                 AcceptanceCriterion::TestsPass("cargo test".into()),
             ],
-            artifacts: vec![ArtifactKind::FileList, ArtifactKind::GitDiff],
-            skippable: Some(SkipCondition::NoChangesIn(vec![PathBuf::from("src/")])),
             human_gate: true,
             status: PItemStatus::WaitDeps,
             agent_session_id: None,
@@ -199,7 +171,7 @@ mod tests {
 
     #[test]
     fn deserialize_with_missing_optional_fields() {
-        // Older persisted P-items may not have all new patch fields. `serde(default)`
+        // Older persisted P-items may not have all fields. `serde(default)`
         // should fill them in.
         let json = r#"{
             "id": "p1",
@@ -213,12 +185,37 @@ mod tests {
         assert!(!p.human_gate);
     }
 
+    /// Persisted P-items that predate the rebuild may still carry the removed
+    /// `resources` / `artifacts` / `estimateSecs` / `skippable` keys. serde must
+    /// ignore unknown keys (no `deny_unknown_fields`) so old task JSON still loads.
+    #[test]
+    fn deserialize_ignores_removed_legacy_fields() {
+        let json = r#"{
+            "id": "p1",
+            "desc": "legacy",
+            "status": "waitDeps",
+            "resources": ["build"],
+            "artifacts": ["fileList"],
+            "estimateSecs": 120,
+            "skippable": {"custom": "x"}
+        }"#;
+        let p: PItem = serde_json::from_str(json).unwrap();
+        assert_eq!(p.id, "p1");
+        assert!(p.touches.is_empty());
+    }
+
+    /// Legacy persisted P-items may carry `waitResource` (a removed status). It
+    /// should fail to deserialize loudly rather than silently — but legacy data
+    /// in that exact status is vanishingly rare (it was never written). We assert
+    /// the *current* statuses round-trip.
     #[test]
     fn terminal_and_active_predicates() {
         let mut p = sample();
         p.status = PItemStatus::WaitDeps;
         assert!(!p.is_terminal() && !p.is_active() && !p.unblocks_downstream());
         p.status = PItemStatus::Running;
+        assert!(p.is_active() && !p.is_terminal());
+        p.status = PItemStatus::Reviewing;
         assert!(p.is_active() && !p.is_terminal());
         p.status = PItemStatus::WaitHumanGate;
         assert!(p.is_active() && !p.is_terminal());
@@ -230,38 +227,18 @@ mod tests {
         assert!(p.is_terminal() && !p.unblocks_downstream());
     }
 
-    /// Every atomic field the PRD enumerates must survive a JSON
-    /// round-trip. We assert the serialized form actually carries each field key
-    /// (so a field silently dropped from serde would fail here, not just an
-    /// `assert_eq!` that could pass on two equally-broken values).
     #[test]
-    fn all_atomic_fields_serialize_with_keys() {
+    fn atomic_fields_serialize_with_keys() {
         let p = sample();
         let v: serde_json::Value = serde_json::to_value(&p).unwrap();
         let obj = v.as_object().unwrap();
-        for key in [
-            "id",
-            "desc",
-            "touches",
-            "dependsOn",
-            "resources",
-            "estimateSecs",
-            "acceptance",
-            "artifacts",
-            "skippable",
-            "humanGate",
-            "status",
-        ] {
+        for key in ["id", "desc", "touches", "dependsOn", "acceptance", "humanGate", "status"] {
             assert!(obj.contains_key(key), "missing serialized field key: {key}");
         }
-        // And the round-trip is lossless.
         let back: PItem = serde_json::from_value(v).unwrap();
         assert_eq!(p, back);
     }
 
-    /// All four AcceptanceCriterion variants round-trip, including the
-    /// String payloads of TestsPass / Custom. Master iterates `acceptance[*]` in
-    /// declared order, so order preservation is asserted too.
     #[test]
     fn acceptance_criterion_all_variants_roundtrip() {
         let criteria = vec![
@@ -273,48 +250,16 @@ mod tests {
         let json = serde_json::to_string(&criteria).unwrap();
         let back: Vec<AcceptanceCriterion> = serde_json::from_str(&json).unwrap();
         assert_eq!(criteria, back, "declared order + payloads must be preserved");
-        // Payload is genuinely carried, not dropped.
-        match &back[1] {
-            AcceptanceCriterion::TestsPass(cmd) => {
-                assert_eq!(cmd, "cargo test -p claw-fleet-task")
-            }
-            other => panic!("expected TestsPass, got {other:?}"),
-        }
-    }
-
-    /// Both SkipCondition variants round-trip with their payloads.
-    #[test]
-    fn skip_condition_all_variants_roundtrip() {
-        for sc in [
-            SkipCondition::NoChangesIn(vec![PathBuf::from("src/"), PathBuf::from("Cargo.toml")]),
-            SkipCondition::Custom("no migration needed".into()),
-        ] {
-            let json = serde_json::to_string(&sc).unwrap();
-            let back: SkipCondition = serde_json::from_str(&json).unwrap();
-            assert_eq!(sc, back);
-        }
     }
 
     #[test]
     fn camel_case_status_serialization() {
-        let p = PItem {
-            id: "p1".into(),
-            desc: "x".into(),
-            touches: vec![],
-            depends_on: vec![],
-            resources: vec![],
-            estimate_secs: None,
-            acceptance: vec![],
-            artifacts: vec![],
-            skippable: None,
-            human_gate: false,
-            status: PItemStatus::WaitHumanGate,
-            agent_session_id: None,
-            started_at: None,
-            completed_at: None,
-            output_summary: None,
-        };
+        let mut p = sample();
+        p.status = PItemStatus::WaitHumanGate;
         let json = serde_json::to_string(&p).unwrap();
         assert!(json.contains("\"waitHumanGate\""));
+        p.status = PItemStatus::Reviewing;
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(json.contains("\"reviewing\""));
     }
 }

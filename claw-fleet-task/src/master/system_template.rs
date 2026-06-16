@@ -92,12 +92,12 @@ fn render_progress_summary(task: &Task) -> String {
         return "(no plan yet — call `fleet task get-plan` after planner runs)".into();
     }
     let total = task.plan.items.len();
-    let mut counts = [0usize; 7]; // WaitDeps, WaitResource, Running, WaitHumanGate, Done, Failed, Skipped
+    let mut counts = [0usize; 7]; // WaitDeps, Running, Reviewing, WaitHumanGate, Done, Failed, Skipped
     for p in task.plan.items.values() {
         match p.status {
             PItemStatus::WaitDeps => counts[0] += 1,
-            PItemStatus::WaitResource => counts[1] += 1,
-            PItemStatus::Running => counts[2] += 1,
+            PItemStatus::Running => counts[1] += 1,
+            PItemStatus::Reviewing => counts[2] += 1,
             PItemStatus::WaitHumanGate => counts[3] += 1,
             PItemStatus::Done => counts[4] += 1,
             PItemStatus::Failed(_) => counts[5] += 1,
@@ -105,14 +105,14 @@ fn render_progress_summary(task: &Task) -> String {
         }
     }
     format!(
-        "total={total}  done={d}  failed={f}  skipped={s}  running={r}  waitGate={g}  waitDeps={wd}  waitResource={wr}",
+        "total={total}  done={d}  failed={f}  skipped={s}  running={r}  reviewing={rv}  waitGate={g}  waitDeps={wd}",
         d = counts[4],
         f = counts[5],
         s = counts[6],
-        r = counts[2],
+        r = counts[1],
+        rv = counts[2],
         g = counts[3],
-        wd = counts[0],
-        wr = counts[1]
+        wd = counts[0]
     )
 }
 
@@ -150,11 +150,7 @@ mod tests {
             desc: "first".into(),
             touches: vec![],
             depends_on: vec![],
-            resources: vec![],
-            estimate_secs: None,
             acceptance: vec![],
-            artifacts: vec![],
-            skippable: None,
             human_gate: false,
             status: PItemStatus::WaitDeps,
             agent_session_id: None,
