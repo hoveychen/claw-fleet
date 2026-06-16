@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 
 mod http;
 mod local_host;
+mod review_gate;
 mod runtime;
 mod sse;
 mod tui;
@@ -185,13 +186,15 @@ fn run_task(boot: runtime::Bootstrap, no_tui: bool) -> anyhow::Result<()> {
     install_signals(stop.clone());
 
     // Drive the task deterministically on a background thread — no LLM master.
-    // The review gate is a stub until P6 wires the real isolated review session.
+    // After each worker exits, the real isolated review session (P6) judges
+    // whether the P-item's acceptance was actually met before merging.
     let orch_handle = {
         let task_id = boot.task_id.clone();
         let host = boot.host.clone();
         let stop = stop.clone();
+        let workspace = host.workspace().to_path_buf();
         let gate: Arc<dyn claw_fleet_task::orchestrator::ReviewGate + Send + Sync> =
-            Arc::new(runtime::StubReviewGate);
+            Arc::new(review_gate::RealReviewGate { workspace });
         std::thread::spawn(move || {
             runtime::run_orchestrator_loop(task_id, host, gate, stop);
         })
