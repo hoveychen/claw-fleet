@@ -23,7 +23,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use crate::pitem::{AcceptanceCriterion, PItem, PItemId, PItemStatus, ResourceName};
+use crate::pitem::{AcceptanceCriterion, PItem, PItemId, PItemStatus};
 
 /// What kind of phase P-item to inject. Order matters for `dependsOn`
 /// chaining: `Build` runs before `Test` runs before `E2e`.
@@ -44,7 +44,9 @@ pub struct DetectedPhase {
     pub kind: PhaseKind,
     pub id: PItemId,
     pub command: String,
-    pub resources: Vec<ResourceName>,
+    /// Free-text resource hints retained for display; no longer drives
+    /// scheduling (resource scheduling was removed in the rebuild).
+    pub resources: Vec<String>,
 }
 
 /// Built-in detection over a project root. Pure file-existence checks; no
@@ -143,11 +145,7 @@ pub fn phases_to_pitems(phases: &[DetectedPhase], predecessor_ids: &[PItemId]) -
             ),
             touches: vec![],
             depends_on: deps,
-            resources: ph.resources.clone(),
-            estimate_secs: None,
             acceptance,
-            artifacts: vec![],
-            skippable: None,
             human_gate: false,
             status: PItemStatus::WaitDeps,
             agent_session_id: None,
@@ -193,7 +191,7 @@ pub struct FleetYamlConfig {
 pub struct FleetYamlPhase {
     pub cmd: String,
     #[serde(default)]
-    pub resources: Vec<ResourceName>,
+    pub resources: Vec<String>,
 }
 
 /// V1 placeholder. The `FleetYamlConfig` schema is defined so V2 can wire a

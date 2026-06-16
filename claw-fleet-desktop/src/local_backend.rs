@@ -1890,6 +1890,10 @@ impl Backend for LocalBackend {
         .map_err(|e| e.to_string())
     }
 
+    fn accept_task(&self, task_id: &str) -> Result<(), String> {
+        crate::task::accept_task(task_id)
+    }
+
     fn set_task_title(&self, task_id: &str, new_title: &str) -> Result<(), String> {
         crate::task::set_task_title(task_id, new_title, false)
     }

@@ -87,19 +87,21 @@ fn examples_default_status_to_wait_deps() {
 
 #[test]
 fn complex_example_exercises_full_schema_surface() {
-    // Spot-check that the "complex" example uses every PItem patch field —
-    // acceptance, artifacts, skippable, humanGate, resources — so the
-    // skill examples teach the planner the full surface.
+    // Spot-check that the "complex" example uses every PItem field the rebuilt
+    // model still carries — touches, dependsOn, acceptance, humanGate — so the
+    // skill examples teach the planner the full (slimmed) surface. The removed
+    // resources / artifacts / skippable fields are ignored on deserialize, so
+    // the skill YAMLs still load even though they predate the rebuild; updating
+    // the skill prompt to drop them is P5 planning-session work.
     let items = load("complex", COMPLEX);
     let any_human_gate = items.iter().any(|p| p.human_gate);
-    let any_skippable = items.iter().any(|p| p.skippable.is_some());
-    let any_artifact = items.iter().any(|p| !p.artifacts.is_empty());
-    let any_resource = items.iter().any(|p| !p.resources.is_empty());
+    let any_touches = items.iter().any(|p| !p.touches.is_empty());
+    let any_deps = items.iter().any(|p| !p.depends_on.is_empty());
     let any_acceptance = items.iter().any(|p| !p.acceptance.is_empty());
     assert!(
-        any_human_gate && any_skippable && any_artifact && any_resource && any_acceptance,
-        "complex.yaml must demonstrate the full schema: \
-         humanGate={any_human_gate} skippable={any_skippable} artifacts={any_artifact} \
-         resources={any_resource} acceptance={any_acceptance}"
+        any_human_gate && any_touches && any_deps && any_acceptance,
+        "complex.yaml must demonstrate the schema: \
+         humanGate={any_human_gate} touches={any_touches} dependsOn={any_deps} \
+         acceptance={any_acceptance}"
     );
 }

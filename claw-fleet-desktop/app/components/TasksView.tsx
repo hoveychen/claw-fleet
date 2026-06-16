@@ -40,6 +40,7 @@ export function TasksView() {
     setSelectedTaskId,
     refresh,
     startTask,
+    acceptTask,
     updateTaskTitle,
   } = useTasksStore();
 
@@ -87,6 +88,7 @@ export function TasksView() {
           project={taskProject}
           onBack={() => setSelectedTaskId(null)}
           onStart={() => startTask(selectedTask.id)}
+          onAccept={() => acceptTask(selectedTask.id)}
           onRename={(title) => updateTaskTitle(selectedTask.id, title)}
         />
         <TaskDetailBody task={selectedTask} />
@@ -196,8 +198,8 @@ function TaskCard({
   const icon: ReactNode =
     task.status === "running" ? <Play size={11} strokeWidth={1.75} /> :
     task.status === "paused" ? <Pause size={11} strokeWidth={1.75} /> :
-    task.status === "ready" ? <Circle size={11} strokeWidth={1.75} /> :
-    task.status === "planning" ? "✎" :
+    task.status === "reviewing" ? <Circle size={11} strokeWidth={1.75} /> :
+    task.status === "awaitingAcceptance" ? <Circle size={11} strokeWidth={1.75} /> :
     task.status === "drafting" ? "✎" :
     task.status === "done" ? "✓" :
     task.status === "abandoned" ? "⤼" :
@@ -264,22 +266,22 @@ function TaskDetailHeader({
   project,
   onBack,
   onStart,
+  onAccept,
   onRename,
 }: {
   task: Task;
   project: Project | null;
   onBack: () => void;
   onStart: () => Promise<void>;
+  onAccept: () => Promise<void>;
   onRename: (title: string) => Promise<void>;
 }) {
   const { t } = useTranslation();
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
-  const canStart =
-    !starting &&
-    (task.status === "drafting" ||
-      task.status === "planning" ||
-      task.status === "ready");
+  const [accepting, setAccepting] = useState(false);
+  const canStart = !starting && task.status === "drafting";
+  const canAccept = !accepting && task.status === "awaitingAcceptance";
   const handleStart = async () => {
     setStarting(true);
     setStartError(null);
@@ -289,6 +291,17 @@ function TaskDetailHeader({
       setStartError(String((e as { message?: string })?.message ?? e));
     } finally {
       setStarting(false);
+    }
+  };
+  const handleAccept = async () => {
+    setAccepting(true);
+    setStartError(null);
+    try {
+      await onAccept();
+    } catch (e) {
+      setStartError(String((e as { message?: string })?.message ?? e));
+    } finally {
+      setAccepting(false);
     }
   };
   return (
@@ -313,20 +326,33 @@ function TaskDetailHeader({
         <div className={styles.detail_header_right}>
           <StatusBadge status={task.status} />
           {useRuntimeTasksStore.getState().byTaskId[task.id] && <LiveDot />}
-          <button
-            className={styles.btn_primary}
-            onClick={handleStart}
-            disabled={!canStart}
-            title={
-              canStart
-                ? ""
-                : t("tasks.already_running", "Task is already running or done.")
-            }
-          >
-            {starting
-              ? t("tasks.starting", "Starting…")
-              : `▶ ${t("tasks.start", "Start")}`}
-          </button>
+          {task.status === "awaitingAcceptance" ? (
+            <button
+              className={styles.btn_primary}
+              onClick={handleAccept}
+              disabled={!canAccept}
+              title={t("tasks.accept_hint", "All work reviewed — accept to mark the task done.")}
+            >
+              {accepting
+                ? t("tasks.accepting", "Accepting…")
+                : `✓ ${t("tasks.accept", "Accept")}`}
+            </button>
+          ) : (
+            <button
+              className={styles.btn_primary}
+              onClick={handleStart}
+              disabled={!canStart}
+              title={
+                canStart
+                  ? ""
+                  : t("tasks.already_running", "Task is already running or done.")
+              }
+            >
+              {starting
+                ? t("tasks.starting", "Starting…")
+                : `▶ ${t("tasks.start", "Start")}`}
+            </button>
+          )}
         </div>
       </div>
       {startError && (
@@ -429,16 +455,16 @@ function TaskDetailBody({ task }: { task: Task }) {
   const items = Object.values(task.plan.items);
 
   // Column buckets per PRD §4.5 "Kanban for P-items":
-  // - pending: WaitDeps / WaitResource
-  // - active: Running / WaitHumanGate
+  // - pending: WaitDeps
+  // - active: Running / Reviewing / WaitHumanGate
   // - resolved: Done / Skipped / Failed
   const pending: PItem[] = [];
   const active: PItem[] = [];
   const resolved: PItem[] = [];
   for (const p of items) {
     const k = pItemStatusKey(p.status);
-    if (k === "waitDeps" || k === "waitResource") pending.push(p);
-    else if (k === "running" || k === "waitHumanGate") active.push(p);
+    if (k === "waitDeps") pending.push(p);
+    else if (k === "running" || k === "reviewing" || k === "waitHumanGate") active.push(p);
     else resolved.push(p);
   }
   for (const arr of [pending, active, resolved]) {
@@ -456,10 +482,15 @@ function TaskDetailBody({ task }: { task: Task }) {
 
       {items.length === 0 && (
         <div className={styles.no_plan}>
-          {t(
-            "tasks.no_plan_yet",
-            "No plan yet. The planner runs once you draft the task description and attach materials.",
-          )}
+          {task.status === "running"
+            ? t(
+                "tasks.planning_in_progress",
+                "Planning session is clarifying the requirements with you — answer its decision cards; the plan appears here once it's written.",
+              )
+            : t(
+                "tasks.no_plan_yet",
+                "No plan yet. Start the task to launch the interactive planning session.",
+              )}
         </div>
       )}
 
@@ -570,10 +601,10 @@ function pItemIcon(status: PItemStatus): string {
   switch (key) {
     case "waitDeps":
       return "🔒";
-    case "waitResource":
-      return "⏳";
     case "running":
       return "▶";
+    case "reviewing":
+      return "🔍";
     case "waitHumanGate":
       return "👁";
     case "done":
@@ -597,7 +628,7 @@ function summarisePlan(task: Task) {
     const k = pItemStatusKey(p.status);
     if (k === "done") done += 1;
     else if (k === "failed") failed += 1;
-    else if (k === "running" || k === "waitHumanGate") running += 1;
+    else if (k === "running" || k === "reviewing" || k === "waitHumanGate") running += 1;
   }
   return { total, done, failed, running };
 }

@@ -102,61 +102,6 @@ pub fn enqueue(form: LauncherForm) -> Result<FleetSession, String> {
     Ok(new)
 }
 
-/// Enqueue a **Master** session for `task_id` using the prebuilt
-/// `MasterSpawnSpec`. The session id is pre-allocated, persisted to disk in
-/// status=queued, and the supervisor's next `tick()` will spawn the actual
-/// Claude Code subprocess via `--append-system-prompt` + `--model`.
-///
-/// Returns the freshly-allocated FleetSession id — callers should also store
-/// it into the `Task.master_session_id` field via `task::set_master_session`.
-///
-/// PRD §5.7 / TASKS P19 — Master cwd is the task's `fleet/<slug>` working
-/// tree (carried in the spec), expedited so the master starts even when the
-/// project's concurrency slot is full of regular kanban sessions.
-pub fn enqueue_master(spec: &crate::master::MasterSpawnSpec) -> Result<String, String> {
-    let projects = project::list_projects();
-    let task = crate::task::get_task(&spec.task_id)?;
-    let proj = projects
-        .iter()
-        .find(|p| p.id == task.project_id)
-        .ok_or_else(|| format!("project {} not found for task {}", task.project_id, task.id))?;
-    let id = uuid::Uuid::new_v4().to_string();
-    let initial_prompt = format!(
-        "Task `{}` ({}) is starting. Inspect the plan with `fleet task get-plan`, \
-         pick the first dispatchable P-item via `fleet task get-dispatchable`, and \
-         proceed per the Acceptance Audit Protocol.",
-        task.title, task.id
-    );
-    let session = FleetSession {
-        id: id.clone(),
-        project_id: proj.id.clone(),
-        workspace: spec.cwd.to_string_lossy().to_string(),
-        fleetsession_path: None,
-        prompt: initial_prompt,
-        context_files: vec![],
-        status: DEFAULT_COLUMN_QUEUED.into(),
-        note: Some(format!("master: task {}", task.id)),
-        created_at: now_ms(),
-        started_at: None,
-        completed_at: None,
-        pid: None,
-        // Master must start even when project concurrency is saturated by
-        // legacy kanban sessions — the master IS the slot manager for its
-        // task's worker cluster.
-        expedited: true,
-        final_by_agent: false,
-        session_kind: project::SessionKind::Master,
-        task_id: Some(task.id.clone()),
-        p_item_id: None,
-        system_prompt: Some(spec.system_prompt.clone()),
-        model: Some(spec.model.to_string()),
-    };
-    let mut sessions = project::list_fleet_sessions();
-    sessions.push(session);
-    project::save_fleet_sessions(&sessions)?;
-    Ok(id)
-}
-
 /// Enqueue a **Worker** session for `(task_id, p_item_id)` using the prebuilt
 /// `WorkerSpawnSpec`. Same pattern as `enqueue_master`: pre-allocate the
 /// session id, persist queued, supervisor tick spawns the subprocess.

@@ -12,6 +12,7 @@ use clap::{Parser, Subcommand};
 
 mod http;
 mod local_host;
+mod review_gate;
 mod runtime;
 mod sse;
 mod tui;
@@ -184,6 +185,21 @@ fn run_task(boot: runtime::Bootstrap, no_tui: bool) -> anyhow::Result<()> {
     let stop = Arc::new(AtomicBool::new(false));
     install_signals(stop.clone());
 
+    // Drive the task deterministically on a background thread — no LLM master.
+    // After each worker exits, the real isolated review session (P6) judges
+    // whether the P-item's acceptance was actually met before merging.
+    let orch_handle = {
+        let task_id = boot.task_id.clone();
+        let host = boot.host.clone();
+        let stop = stop.clone();
+        let workspace = host.workspace().to_path_buf();
+        let gate: Arc<dyn claw_fleet_task::orchestrator::ReviewGate + Send + Sync> =
+            Arc::new(review_gate::RealReviewGate { workspace });
+        std::thread::spawn(move || {
+            runtime::run_orchestrator_loop(task_id, host, gate, stop);
+        })
+    };
+
     if no_tui {
         while !stop.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(200));
@@ -197,6 +213,10 @@ fn run_task(boot: runtime::Bootstrap, no_tui: bool) -> anyhow::Result<()> {
     }
 
     eprintln!("fleet-task shutting down (30s deadline)…");
+    // Signal the orchestrator thread to stop and let it unwind before we reap
+    // subprocesses, so it doesn't dispatch a new worker mid-shutdown.
+    stop.store(true, Ordering::SeqCst);
+    let _ = orch_handle.join();
     runtime::shutdown_with_deadline(boot, Duration::from_secs(30));
     Ok(())
 }

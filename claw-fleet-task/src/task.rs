@@ -62,17 +62,20 @@ pub struct Task {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum TaskStatus {
-    /// User is still drafting in Inbox (no plan yet).
+    /// User is still drafting in Inbox, or the planning session is clarifying
+    /// requirements and building the DAG. No `start_task` yet.
     Drafting,
-    /// Planner is generating the DAG.
-    Planning,
-    /// Plan generated, awaiting `start_task`.
-    Ready,
-    /// Master + workers actively running.
+    /// Orchestrator is dispatching workers / reviews per the dependency graph.
     Running,
-    /// `pause` issued — master + workers SIGSTOPped.
+    /// `pause` issued — orchestrator + sessions SIGSTOPped.
     Paused,
-    /// All P-items terminal (Done / Skipped / Failed) and master finalised.
+    /// All P-items terminal (Done / Skipped / Failed); a final review pass is
+    /// judging the task as a whole before it goes to the user.
+    Reviewing,
+    /// Review passed; the task is parked waiting for the user's final
+    /// acceptance (see P7). The user confirms → `Done`.
+    AwaitingAcceptance,
+    /// User accepted the completed task.
     Done,
     /// User invoked `clear` — kept around briefly for audit before deletion.
     Abandoned,
@@ -478,11 +481,7 @@ mod tests {
             desc: id.into(),
             touches: vec![],
             depends_on: vec![],
-            resources: vec![],
-            estimate_secs: None,
             acceptance: vec![],
-            artifacts: vec![],
-            skippable: None,
             human_gate: false,
             status,
             agent_session_id: None,
@@ -649,12 +648,12 @@ mod tests {
             "id": "t1",
             "projectId": "p1",
             "title": "demo",
-            "status": "ready",
+            "status": "running",
             "createdAt": 1700000000
         }"#;
         let t: Task = serde_json::from_str(json).unwrap();
         assert_eq!(t.id, "t1");
-        assert!(matches!(t.status, TaskStatus::Ready));
+        assert!(matches!(t.status, TaskStatus::Running));
         assert!(t.plan.is_empty());
         assert!(t.inbox_materials.is_empty());
     }

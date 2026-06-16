@@ -319,6 +319,56 @@ pub fn merge_back(
     })
 }
 
+/// Commit the worker's uncommitted changes in the P-item worktree onto its
+/// `fleet/<task>/<p>` branch so [`merge_back`] can carry them. The worker never
+/// commits (its contract forbids it — see `worker.rs`); the deterministic
+/// orchestrator owns the commit, right after the worker exits and the review
+/// passes, before merging. Returns `Ok(true)` if a commit was made, `Ok(false)`
+/// if the worktree had no changes to commit.
+///
+/// Without this step `merge_back` would `rev-list task_branch..worker_branch`
+/// to 0 (the worker's edits live only in the working tree, never on the branch)
+/// and silently return `NoChanges`, losing the work.
+pub fn commit_worktree(task_id: &str, p_item_id: &str, message: &str) -> Result<bool, String> {
+    let wt = worktree_path(task_id, p_item_id)?;
+    if !wt.exists() {
+        return Err(format!("worktree missing: {}", wt.display()));
+    }
+    let git = |args: &[&str]| -> Result<std::process::Output, String> {
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(&wt)
+            .args(args)
+            .output()
+            .map_err(|e| format!("git {}: {e}", args.join(" ")))
+    };
+    let add = git(&["add", "-A"])?;
+    if !add.status.success() {
+        return Err(String::from_utf8_lossy(&add.stderr).trim().to_string());
+    }
+    // Nothing staged → nothing to commit.
+    let status = git(&["status", "--porcelain"])?;
+    if String::from_utf8_lossy(&status.stdout).trim().is_empty() {
+        return Ok(false);
+    }
+    // Pass an explicit identity so the commit succeeds even when the repo has
+    // no user.name/user.email configured.
+    let commit = git(&[
+        "-c",
+        "user.email=fleet@local",
+        "-c",
+        "user.name=fleet",
+        "commit",
+        "-q",
+        "-m",
+        message,
+    ])?;
+    if !commit.status.success() {
+        return Err(String::from_utf8_lossy(&commit.stderr).trim().to_string());
+    }
+    Ok(true)
+}
+
 /// Re-attempt the merge using LLM-mediated resolutions for each conflict.
 ///
 /// Takes `(path, resolved_content)` tuples (the mediator's output, but
@@ -867,6 +917,71 @@ mod tests {
         let _ = provision(repo.path(), "main", "task-a", "p1").unwrap();
         let outcome = merge_back(repo.path(), "main", "task-a", "p1").unwrap();
         assert_eq!(outcome, MergeOutcome::NoChanges);
+    }
+
+    /// Documents the gap the orchestrator must bridge: a real worker leaves its
+    /// changes UNCOMMITTED (its contract forbids committing), and `merge_back`
+    /// merges the *branch* — so without `commit_worktree` the work is invisible
+    /// and silently dropped as `NoChanges`.
+    #[test]
+    fn merge_back_loses_uncommitted_worker_changes_without_commit() {
+        let _g = crate::paths::fleet_home_lock();
+        let fh = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(fh.path());
+        let repo = TempDir::new().unwrap();
+        init_repo(repo.path(), "main");
+
+        let wt = provision(repo.path(), "main", "task-a", "p1").unwrap();
+        // Real worker behaviour: edit a file, do NOT commit.
+        fs::write(wt.join("feature.txt"), "hello\n").unwrap();
+        let outcome = merge_back(repo.path(), "main", "task-a", "p1").unwrap();
+        assert_eq!(
+            outcome,
+            MergeOutcome::NoChanges,
+            "uncommitted worker changes are NOT merged — orchestrator must commit_worktree first"
+        );
+        assert!(!repo.path().join("feature.txt").exists());
+    }
+
+    /// The fix: `commit_worktree` commits the worker's uncommitted changes onto
+    /// the worker branch, after which `merge_back` fast-forwards them into the
+    /// task branch.
+    #[test]
+    fn commit_worktree_then_merge_back_carries_worker_changes() {
+        let _g = crate::paths::fleet_home_lock();
+        let fh = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(fh.path());
+        let repo = TempDir::new().unwrap();
+        init_repo(repo.path(), "main");
+
+        let wt = provision(repo.path(), "main", "task-a", "p1").unwrap();
+        // Real worker: edits, no commit.
+        fs::write(wt.join("feature.txt"), "hello\n").unwrap();
+
+        let committed = commit_worktree("task-a", "p1", "fleet: worker p1").unwrap();
+        assert!(committed, "uncommitted changes must produce a commit");
+
+        let outcome = merge_back(repo.path(), "main", "task-a", "p1").unwrap();
+        assert_eq!(outcome, MergeOutcome::FastForwarded { commits_merged: 1 });
+        assert_eq!(
+            fs::read_to_string(repo.path().join("feature.txt")).unwrap(),
+            "hello\n"
+        );
+    }
+
+    /// `commit_worktree` is a no-op (returns false) when the worker changed
+    /// nothing — the orchestrator then treats the P-item as a clean no-op merge.
+    #[test]
+    fn commit_worktree_noop_when_worktree_clean() {
+        let _g = crate::paths::fleet_home_lock();
+        let fh = TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(fh.path());
+        let repo = TempDir::new().unwrap();
+        init_repo(repo.path(), "main");
+
+        let _ = provision(repo.path(), "main", "task-a", "p1").unwrap();
+        let committed = commit_worktree("task-a", "p1", "fleet: worker p1").unwrap();
+        assert!(!committed, "a clean worktree must not produce a commit");
     }
 
     #[test]

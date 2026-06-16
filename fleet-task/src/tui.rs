@@ -117,8 +117,8 @@ fn render_p_items(task: &Task) -> Vec<ListItem<'static>> {
 fn status_label(status: &PItemStatus) -> (&'static str, Color) {
     match status {
         PItemStatus::WaitDeps => ("WAIT", Color::DarkGray),
-        PItemStatus::WaitResource => ("WAITR", Color::Cyan),
         PItemStatus::Running => ("RUN", Color::Yellow),
+        PItemStatus::Reviewing => ("REVIEW", Color::Cyan),
         PItemStatus::Done => ("DONE", Color::Green),
         PItemStatus::Skipped => ("SKIP", Color::Gray),
         PItemStatus::Failed(_) => ("FAIL", Color::Red),
@@ -184,9 +184,9 @@ fn launchpad_loop<B: ratatui::backend::Backend>(
     let mut tasks = list_tasks(None);
     tasks.sort_by_key(|t| {
         let primary = match t.status {
-            TaskStatus::Running => 0,
-            TaskStatus::Paused => 1,
-            TaskStatus::Ready | TaskStatus::Planning | TaskStatus::Drafting => 2,
+            TaskStatus::Running | TaskStatus::Reviewing => 0,
+            TaskStatus::Paused | TaskStatus::AwaitingAcceptance => 1,
+            TaskStatus::Drafting => 2,
             TaskStatus::Done | TaskStatus::Abandoned => 3,
         };
         (primary, -t.created_at)
@@ -385,9 +385,9 @@ pub fn run_picker() -> io::Result<PickerOutcome> {
     // Show running first, then by created_at desc.
     tasks.sort_by_key(|t| {
         let primary = match t.status {
-            TaskStatus::Running => 0,
-            TaskStatus::Paused => 1,
-            TaskStatus::Ready | TaskStatus::Planning | TaskStatus::Drafting => 2,
+            TaskStatus::Running | TaskStatus::Reviewing => 0,
+            TaskStatus::Paused | TaskStatus::AwaitingAcceptance => 1,
+            TaskStatus::Drafting => 2,
             TaskStatus::Done | TaskStatus::Abandoned => 3,
         };
         (primary, -t.created_at)
@@ -513,7 +513,8 @@ fn task_status_color(status: &TaskStatus) -> Style {
     let c = match status {
         TaskStatus::Running => Color::Yellow,
         TaskStatus::Paused => Color::Magenta,
-        TaskStatus::Ready | TaskStatus::Planning => Color::Cyan,
+        TaskStatus::Reviewing => Color::Cyan,
+        TaskStatus::AwaitingAcceptance => Color::Blue,
         TaskStatus::Drafting => Color::DarkGray,
         TaskStatus::Done => Color::Green,
         TaskStatus::Abandoned => Color::DarkGray,
@@ -552,11 +553,7 @@ mod tests {
             desc: format!("desc {id}"),
             touches: vec![],
             depends_on: vec![],
-            resources: vec![],
-            estimate_secs: None,
             acceptance: vec![],
-            artifacts: vec![],
-            skippable: None,
             human_gate: false,
             status,
             agent_session_id: None,

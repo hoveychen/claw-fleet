@@ -921,8 +921,8 @@ export interface DailyReportStats {
 
 export type PItemStatus =
   | "waitDeps"
-  | "waitResource"
   | "running"
+  | "reviewing"
   | "waitHumanGate"
   | "done"
   | "skipped"
@@ -931,7 +931,7 @@ export type PItemStatus =
 export type FailReason =
   | "buildFailed"
   | "testsFailed"
-  | "acceptanceRejected"
+  | "reviewRejected"
   | "upstreamFailed"
   | "userRejected"
   | "aborted"
@@ -943,22 +943,12 @@ export type AcceptanceCriterion =
   | { testsPass: string }
   | { custom: string };
 
-export type ArtifactKind = "fileList" | "gitDiff" | "testOutput" | "manualNote";
-
-export type SkipCondition =
-  | { noChangesIn: string[] }
-  | { custom: string };
-
 export interface PItem {
   id: string;
   desc: string;
   touches: string[];
   dependsOn: string[];
-  resources: string[];
-  estimateSecs?: number | null;
   acceptance: AcceptanceCriterion[];
-  artifacts: ArtifactKind[];
-  skippable?: SkipCondition | null;
   humanGate: boolean;
   status: PItemStatus;
   agentSessionId?: string | null;
@@ -973,10 +963,10 @@ export interface DagPlan {
 
 export type TaskStatus =
   | "drafting"
-  | "planning"
-  | "ready"
   | "running"
   | "paused"
+  | "reviewing"
+  | "awaitingAcceptance"
   | "done"
   | "abandoned";
 
