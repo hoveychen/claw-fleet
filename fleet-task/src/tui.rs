@@ -594,6 +594,7 @@ mod tests {
         let _override = FleetHomeOverride::new(tmp.path());
 
         let mut task = create_task(TaskInput {
+            model: None,
             project_id: "p".into(),
             title: "T".into(),
             description: String::new(),

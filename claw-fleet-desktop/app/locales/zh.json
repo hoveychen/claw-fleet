@@ -1281,7 +1281,8 @@
     "attach": "添加附件",
     "create": "创建任务",
     "creating": "创建中…",
-    "pick_project_first": "请先选一个工作目录"
+    "pick_project_first": "请先选一个工作目录",
+    "model_hint": "规划会话使用的模型"
   },
   "detail": {
     "section_timeline": "来龙去脉",
@@ -1308,6 +1309,7 @@
     "metric_in": "输入 {{n}}",
     "metric_cost": "成本",
     "metric_failed": "失败的 P-item",
+    "metric_model": "规划模型",
     "metric_action": "当前",
     "action_running": "执行 P-item 中",
     "action_reviewing": "审查中",

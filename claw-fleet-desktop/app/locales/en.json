@@ -1284,7 +1284,8 @@
     "attach": "Attach files",
     "create": "Create task",
     "creating": "Creating…",
-    "pick_project_first": "Pick a working directory first"
+    "pick_project_first": "Pick a working directory first",
+    "model_hint": "Model for the planning session"
   },
   "detail": {
     "section_timeline": "Story",
@@ -1311,6 +1312,7 @@
     "metric_in": "in {{n}}",
     "metric_cost": "Cost",
     "metric_failed": "Failed P-items",
+    "metric_model": "Planner model",
     "metric_action": "Current",
     "action_running": "Executing P-items",
     "action_reviewing": "Reviewing",

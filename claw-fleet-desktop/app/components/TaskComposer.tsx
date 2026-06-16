@@ -60,6 +60,16 @@ function nextPmId(): string {
   return `pm-${Date.now()}-${pmCounter}`;
 }
 
+// Model choices for the planning/master session. "" = backend default
+// (planning::PLANNER_MODEL). Only the planning session honors this override;
+// workers/review keep their own defaults (no per-task plumbing for those).
+const MODEL_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Default (Opus 4.8)" },
+  { value: "claude-opus-4-8", label: "Opus 4.8" },
+  { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+];
+
 export function TaskComposer({ defaultProjectId, onCreated }: Props) {
   const { t } = useTranslation();
   const projects = useProjectsStore((s) => s.projects);
@@ -70,6 +80,7 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
     defaultProjectId ?? projects[0]?.id ?? "",
   );
   const [description, setDescription] = useState("");
+  const [model, setModel] = useState<string>("");
   const [materials, setMaterials] = useState<PendingMaterial[]>([]);
   const [dragOver, setDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -190,7 +201,11 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      const input: TaskInput = { projectId, description: description.trim() };
+      const input: TaskInput = {
+        projectId,
+        description: description.trim(),
+        ...(model ? { model } : {}),
+      };
       const task = await invoke<Task>("create_task", { input });
 
       const failures: string[] = [];
@@ -341,6 +356,17 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
             >
               <Paperclip size={16} strokeWidth={1.6} />
             </button>
+            <select
+              className={styles.model_select}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={submitting}
+              title={t("composer.model_hint", "Model for the planning session")}
+            >
+              {MODEL_OPTIONS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
             <span className={styles.action_spacer} />
             <button
               type="button"

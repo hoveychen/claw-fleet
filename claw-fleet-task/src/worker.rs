@@ -463,6 +463,7 @@ mod tests {
             workspace: None,
             master_session_id: None,
             title_auto: false,
+            model: None,
         }
     }
 

@@ -202,6 +202,16 @@
   flex: 1;
 }
 
+.model_select {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 5px 9px;
+  color: var(--color-text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
 .icon_btn {
   display: inline-flex;
   align-items: center;
