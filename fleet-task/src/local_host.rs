@@ -244,6 +244,11 @@ impl LocalHost {
         self.sessions.lock().unwrap().values().cloned().collect()
     }
 
+    /// The project workspace this host's task runs in (worktree base / planner cwd).
+    pub fn workspace(&self) -> &Path {
+        &self.workspace
+    }
+
     /// Drop a tracked session — call after observing the subprocess exit.
     pub fn forget(&self, session_id: &str) -> Option<SessionRecord> {
         self.sessions.lock().unwrap().remove(session_id)
