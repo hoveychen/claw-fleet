@@ -319,39 +319,15 @@ enum TaskCommands {
         task_id: String,
         p_id: String,
     },
-    /// Mark a P-item Done with an acceptance-audit summary. Master tool.
-    MarkDone {
-        task_id: String,
-        p_id: String,
-        #[arg(long)]
-        summary: String,
-    },
-    /// Mark a P-item Failed; releases the resource lock immediately. Master tool.
-    MarkFailed {
-        task_id: String,
-        p_id: String,
-        #[arg(long)]
-        reason: String,
-    },
     /// Replace the task's plan with a new YAML document. Reads from stdin
-    /// when `--from-stdin`, otherwise from `--file <path>`. Master tool.
+    /// when `--from-stdin`, otherwise from `--file <path>`. Used by the
+    /// planning session to write the DAG.
     UpdatePlan {
         task_id: String,
         #[arg(long)]
         from_stdin: bool,
         #[arg(long)]
         file: Option<std::path::PathBuf>,
-    },
-    /// [WA-DEC] Run the deterministic adversarial audit on a P-item, in-process —
-    /// no session, no timeout, no voting. Reconstructs the P-item's MarkDoneRecord
-    /// from its persisted acceptance evidence, runs the proxy-signal / red-line
-    /// rules, writes the findings to `~/.fleet/audits/`, and prints a verdict line
-    /// (`AUDIT_VERDICT: CRITICAL_CONFIRMED <n>` or `AUDIT_VERDICT: CLEAN`), exiting
-    /// 2 on a critical. Read-only PREVIEW only: mark-done runs the same rule gate
-    /// itself, so this command is informational and not a required step.
-    Audit {
-        task_id: String,
-        p_id: String,
     },
     /// Delete a task's json + materials dir. **Does not touch any running
     /// fleet-task process** — kill that separately (e.g. SIGTERM the pid in
@@ -537,57 +513,6 @@ fn cmd_task(action: TaskCommands) {
                 )),
             }
         }
-        TaskCommands::MarkDone {
-            task_id,
-            p_id,
-            summary,
-        } => {
-            // Phase 3: route through FleetCliHost so we read `task.workspace`
-            // (persisted on `start_task`) instead of relying on the project
-            // table — fleet-task spawns tasks with the synthetic
-            // `fleet-task-local` project that has no entry.
-            let outcome = claw_fleet_core::actions::mark_done(
-                &task_id,
-                &p_id,
-                &summary,
-                &crate::fleet_cli_host::FleetCliHost,
-            )
-            .unwrap_or_else(|e| die(e));
-            match outcome {
-                claw_fleet_core::worktree::MergeOutcome::FastForwarded { commits_merged } => {
-                    println!("done (fast-forwarded {commits_merged} commit(s))");
-                }
-                claw_fleet_core::worktree::MergeOutcome::AutoMerged { commits_merged } => {
-                    println!("done (auto-merged {commits_merged} commit(s))");
-                }
-                claw_fleet_core::worktree::MergeOutcome::NoChanges => {
-                    println!("done (no commits to merge)");
-                }
-                claw_fleet_core::worktree::MergeOutcome::Conflict { .. } => {
-                    // mark_done returns Err on conflict; this arm is
-                    // unreachable but keeps the match exhaustive.
-                    println!("done (conflict)");
-                }
-            }
-        }
-        TaskCommands::MarkFailed {
-            task_id,
-            p_id,
-            reason,
-        } => {
-            let fr = claw_fleet_core::pitem::FailReason::Custom(reason);
-            let skipped = claw_fleet_core::actions::mark_failed(
-                &task_id,
-                &p_id,
-                fr,
-                &crate::fleet_cli_host::FleetCliHost,
-            )
-            .unwrap_or_else(|e| die(e));
-            println!("failed");
-            for s in skipped {
-                println!("propagated skip: {s}");
-            }
-        }
         TaskCommands::UpdatePlan {
             task_id,
             from_stdin,
@@ -617,30 +542,6 @@ fn cmd_task(action: TaskCommands) {
             }
             claw_fleet_core::task::update_plan(&task_id, plan).unwrap_or_else(|e| die(e));
             println!("plan updated");
-        }
-        TaskCommands::Audit { task_id, p_id } => {
-            // [WA-DEC] In-process deterministic audit (read-only preview). No
-            // launcher, no quorum, no timeout — `audit_pitem` rebuilds the
-            // MarkDoneRecord from the P-item's persisted acceptance evidence,
-            // runs the proxy-signal / red-line rules, and persists the findings.
-            let outcome = claw_fleet_core::actions::audit_pitem(&task_id, &p_id)
-                .unwrap_or_else(|e| die(e));
-            // The verdict line is the contract the master parses.
-            println!("{}", outcome.verdict.verdict_line());
-            eprintln!(
-                "audit: {} finding(s) written to {}",
-                outcome.findings.len(),
-                outcome.written_to.display()
-            );
-            // Non-zero exit on a critical so callers (and the master's shell) can
-            // branch on the process status as well as the stdout line. This is a
-            // read-only preview and does not itself block anything else.
-            if matches!(
-                outcome.verdict,
-                claw_fleet_core::actions::AuditVerdict::CriticalConfirmed(_)
-            ) {
-                std::process::exit(2);
-            }
         }
         TaskCommands::Clear { task_id } => {
             // File-only delete: bypass the legacy SupervisorHost terminate
