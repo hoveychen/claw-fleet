@@ -335,6 +335,7 @@ interface TasksState {
   refreshLastScope: () => Promise<void>;
   createTask: (input: TaskInput) => Promise<Task>;
   startTask: (taskId: string) => Promise<void>;
+  acceptTask: (taskId: string) => Promise<void>;
   updateTaskTitle: (taskId: string, title: string) => Promise<void>;
 }
 
@@ -364,6 +365,14 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   startTask: async (taskId) => {
     await invoke("start_task", { taskId });
     // Refetch — start_task flips status + sets task_branch.
+    const fresh = await invoke<Task>("get_task", { taskId });
+    set({
+      tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
+    });
+  },
+  acceptTask: async (taskId) => {
+    // P7 final acceptance: AwaitingAcceptance → Done.
+    await invoke("accept_task", { taskId });
     const fresh = await invoke<Task>("get_task", { taskId });
     set({
       tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
