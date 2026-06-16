@@ -11,6 +11,7 @@ pub mod task;
 pub mod architecture_overview;
 pub mod worker;
 pub mod spawn_specs;
+pub mod planning;
 pub mod orchestrator;
 pub mod runner;
 pub mod actions;

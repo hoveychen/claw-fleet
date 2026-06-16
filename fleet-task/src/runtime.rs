@@ -14,6 +14,7 @@ use std::sync::Arc;
 use claw_fleet_task::actions::{self, StartOpts};
 use claw_fleet_task::orchestrator::{Orchestrator, OrchestratorStep, ReviewGate, ReviewVerdict};
 use claw_fleet_task::pitem::PItem;
+use claw_fleet_task::planning;
 use claw_fleet_task::runner::TaskLifecycleHost;
 use claw_fleet_task::task::{
     create_task, get_task, write_task_atomic, Task, TaskInput, TaskStatus,
@@ -76,7 +77,22 @@ pub fn boot_new_task(
     let host = Arc::new(LocalHost::with_launcher(args.workspace, launcher));
     // Prepare the task (branch + Running); the orchestrator loop drives it.
     actions::start_task(&task.id, &*host, StartOpts::default())?;
+    maybe_launch_planner(&task.id, &host)?;
     finish_boot(task.id, host)
+}
+
+/// P5: if the task has no plan yet, spawn the single interactive planner
+/// session. The orchestrator idles on the empty plan until the planner writes
+/// the DAG via `fleet task update-plan`, then dispatches workers. No-op when a
+/// plan already exists (e.g. resuming a planned task).
+fn maybe_launch_planner(task_id: &str, host: &LocalHost) -> Result<(), String> {
+    let task = get_task(task_id)?;
+    if !task.plan.is_empty() {
+        return Ok(());
+    }
+    let spec = planning::planner_spawn_spec(&task, host.workspace().to_path_buf());
+    host.enqueue_planner(&spec)?;
+    Ok(())
 }
 
 pub fn boot_resume(
@@ -100,6 +116,7 @@ pub fn boot_resume(
     }
     // Idempotent on already-Running tasks; (re)stamps branch/workspace.
     actions::start_task(&task_id, &*host, StartOpts::default())?;
+    maybe_launch_planner(&task_id, &host)?;
     finish_boot(task_id, host)
 }
 
@@ -426,9 +443,11 @@ mod tests {
         assert!(loaded.task_branch.is_some());
         assert_eq!(loaded.description, "do the thing");
 
-        // No master is spawned at boot anymore — the orchestrator thread
-        // dispatches workers on demand, so there are zero tracked sessions.
-        assert_eq!(boot.host.live_sessions().len(), 0);
+        // A new task has no plan yet, so boot launches the single interactive
+        // planner session (P5). No master is ever spawned.
+        let live = boot.host.live_sessions();
+        assert_eq!(live.len(), 1);
+        assert_eq!(live[0].kind, crate::local_host::SessionKind::Planner);
 
         // Registry has our entry pointing at the http port.
         let entry = registry::read(&boot.task_id).unwrap().unwrap();
