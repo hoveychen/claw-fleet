@@ -1825,6 +1825,11 @@ fn accept_task(state: tauri::State<AppState>, task_id: String) -> Result<(), Str
 }
 
 #[tauri::command]
+fn clear_task(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
+    state.backend.read().unwrap().clear_task(&task_id)
+}
+
+#[tauri::command]
 fn list_runtime_tasks(
     state: tauri::State<AppState>,
 ) -> Vec<claw_fleet_core::registry::RegistryEntry> {
@@ -3676,6 +3681,7 @@ pub fn run() {
             update_task_plan,
             start_task,
             accept_task,
+            clear_task,
             list_runtime_tasks,
             fleet_task_state,
             fleet_task_dispatch,
