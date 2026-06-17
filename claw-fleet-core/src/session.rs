@@ -174,22 +174,20 @@ pub fn get_fleet_dir() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod test_lock {
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::sync::MutexGuard;
 
-    fn lock_inner() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    /// Acquire the cross-module `FLEET_HOME` mutex, tolerating poison from a
-    /// prior test's panic (the panic is a logic failure inside the critical
-    /// section, not data corruption — recovering is safe and lets the rest
-    /// of the suite still serialise).
+    /// Acquire the cross-module `FLEET_HOME` mutex. Delegates to the single
+    /// process-wide mutex in `claw_fleet_task::paths` so EVERY test that mutates
+    /// the global `FLEET_HOME` env serialises on ONE lock — not just core's own
+    /// tests. Previously this kept its own private static `Mutex`, so a core
+    /// test holding it (e.g. `supervisor::tests`) could run concurrently with a
+    /// task-crate test holding `claw_fleet_task::paths::fleet_home_lock` (e.g.
+    /// `task_actions::accept_merge_tests`); both flip the global `FLEET_HOME`
+    /// and clobbered each other's `fleet-sessions.json`, intermittently failing
+    /// the supervisor `pending_input_*` / `migrate_zombie_*` tests under the
+    /// parallel test runner. Poison tolerance lives in the task-crate impl.
     pub fn fleet_home_lock() -> MutexGuard<'static, ()> {
-        match lock_inner().lock() {
-            Ok(g) => g,
-            Err(p) => p.into_inner(),
-        }
+        claw_fleet_task::paths::fleet_home_lock()
     }
 }
 
