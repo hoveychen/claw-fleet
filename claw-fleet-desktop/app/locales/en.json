@@ -1272,6 +1272,7 @@
     "section_plan": "Plan",
     "plan_kanban": "Board",
     "plan_dag": "Dependencies",
+    "plan_failures": "Why it failed",
     "section_deliverables": "Deliverables",
     "tl_created": "Task created",
     "tl_materials": "{{count}} material(s) attached",

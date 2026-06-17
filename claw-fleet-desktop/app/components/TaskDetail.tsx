@@ -458,7 +458,34 @@ function PlanKanban({ task }: { task: Task }) {
           </div>
         ))}
       </div>
+
+      <FailureReasons items={items} />
     </section>
+  );
+}
+
+// Lists why each rejected P-item failed (persisted failure_gaps) — so a red node
+// in the kanban/DAG is explained instead of leaving the user guessing.
+function FailureReasons({ items }: { items: PItem[] }) {
+  const { t } = useTranslation();
+  const failed = items.filter(
+    (p) => pItemStatusKey(p.status) === "failed" && (p.failureGaps?.length ?? 0) > 0,
+  );
+  if (failed.length === 0) return null;
+  return (
+    <div className={styles.failures}>
+      <div className={styles.subhead}>{t("detail.plan_failures", "失败原因")}</div>
+      {failed.map((p) => (
+        <div key={p.id} className={styles.failure_item}>
+          <span className={styles.failure_id}>{p.id}</span>
+          <ul className={styles.failure_gaps}>
+            {(p.failureGaps ?? []).map((g, i) => (
+              <li key={i}>{g}</li>
+            ))}
+          </ul>
+        </div>
+      ))}
+    </div>
   );
 }
 
