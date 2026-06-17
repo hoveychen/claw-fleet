@@ -680,3 +680,50 @@
   font-size: 13px;
   font-weight: 500;
 }
+
+/* ── e2e verification banner ────────────────────────────────────────────────── */
+
+.e2e_ok {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--color-success);
+  background: rgba(74, 222, 128, 0.08);
+  border: 1px solid rgba(74, 222, 128, 0.25);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.e2e_fail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-error-fg);
+  background: rgba(239, 107, 107, 0.1);
+  border: 1px solid rgba(239, 107, 107, 0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.e2e_fail_head {
+  font-weight: 600;
+}
+
+.e2e_cmd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  word-break: break-all;
+}
+
+.e2e_gaps {
+  margin: 2px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--color-text);
+  line-height: 1.45;
+}
