@@ -59,12 +59,13 @@ pub fn boot_new_task(
     // visible in the Kanban/TasksView grouped by project.
     //
     // When no registered project owns this workspace, fall back to a
-    // *workspace-stable* synthetic id (`derive_auto_project_id`) so the
-    // desktop can auto-discover one virtual project per distinct workspace
-    // (see `claw_fleet_core::project::list_projects_discovered`). The old
-    // constant `fleet-task-local` collapsed every unregistered workspace
-    // into a single bucket; we only fall back to it when the workspace path
-    // can't be canonicalised.
+    // *workspace-stable* synthetic id (`derive_auto_project_id`) so repeated
+    // CLI runs in the same workspace share one project_id. The desktop no
+    // longer synthesises a "virtual project" from such ids — the task simply
+    // shows in the rebuilt TasksView's flat task list — but a stable id keeps
+    // those tasks grouped consistently. The old constant `fleet-task-local`
+    // collapsed every unregistered workspace into a single bucket; we only fall
+    // back to it when the workspace path can't be canonicalised.
     let project_id = lookup_project_id(&args.workspace)
         .unwrap_or_else(|| derive_auto_project_id(&args.workspace));
     let task = create_task(TaskInput {

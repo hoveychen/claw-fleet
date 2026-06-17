@@ -1764,11 +1764,12 @@ impl Backend for LocalBackend {
     // ── Projects ──────────────────────────────────────────────────────────────
 
     fn list_projects(&self) -> Vec<crate::project::Project> {
-        // Auto-discover: registered projects PLUS a virtual project for every
-        // task workspace no registered project owns, so a task started via
-        // `fleet-task new` on an unregistered workspace still surfaces in the
-        // desktop (mirrors how sessions are scanned rather than registered).
-        crate::project::list_projects_discovered()
+        // Registered projects only. Tasks whose project_id isn't registered
+        // (e.g. started via `fleet-task new` on an unregistered workspace) are
+        // still visible in the rebuilt TasksView's flat task list — we no
+        // longer synthesise phantom "virtual projects" for them (those were a
+        // leftover of the old project-grouped sidebar and couldn't be deleted).
+        crate::project::list_projects()
     }
 
     fn create_project(
