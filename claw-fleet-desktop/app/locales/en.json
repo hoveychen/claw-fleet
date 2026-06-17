@@ -465,18 +465,6 @@
     "resultChars": "{{n}} chars",
     "noAgents": "No agent activity recorded yet."
   },
-  "detail": {
-    "following": "Auto-following",
-    "scroll_to_latest": "Scroll to latest",
-    "load_more": "Load {{count}} more messages",
-    "load_earlier": "Load earlier messages",
-    "loading_earlier": "Loading earlier messages…",
-    "tab_decisions": "Decisions",
-    "tab_skills": "Skills",
-    "tab_messages": "Messages",
-    "tab_tokens": "Tokens",
-    "tab_workflow": "Workflow"
-  },
   "token_spend": {
     "loading": "Loading token breakdown…",
     "no_data": "No data",
@@ -1274,20 +1262,17 @@
       "abandoned": "Abandoned"
     }
   },
-  "composer": {
-    "greeting": "What should Fleet build?",
-    "hint": "Pick a working directory, describe the task, and Fleet will plan and execute it.",
-    "workdir": "Working directory",
-    "no_project": "No project — browse to pick one",
-    "browse": "Browse folder…",
-    "placeholder": "Describe the task…  (Enter to create, Shift+Enter for a new line)",
-    "attach": "Attach files",
-    "create": "Create task",
-    "creating": "Creating…",
-    "pick_project_first": "Pick a working directory first",
-    "model_hint": "Model for the planning session"
-  },
   "detail": {
+    "following": "Auto-following",
+    "scroll_to_latest": "Scroll to latest",
+    "load_more": "Load {{count}} more messages",
+    "load_earlier": "Load earlier messages",
+    "loading_earlier": "Loading earlier messages…",
+    "tab_decisions": "Decisions",
+    "tab_skills": "Skills",
+    "tab_messages": "Messages",
+    "tab_tokens": "Tokens",
+    "tab_workflow": "Workflow",
     "section_timeline": "Story",
     "section_plan": "Plan",
     "section_deliverables": "Deliverables",
@@ -1658,6 +1643,17 @@
     "attach_error_dismiss": "Dismiss"
   },
   "composer": {
+    "greeting": "What should Fleet build?",
+    "hint": "Pick a working directory, describe the task, and Fleet will plan and execute it.",
+    "workdir": "Working directory",
+    "no_project": "No project — browse to pick one",
+    "browse": "Browse folder…",
+    "task_placeholder": "Describe the task…  (Enter to create, Shift+Enter for a new line)",
+    "attach": "Attach files",
+    "create": "Create task",
+    "creating": "Creating…",
+    "pick_project_first": "Pick a working directory first",
+    "model_hint": "Model for the planning session",
     "placeholder": "Type a message…",
     "attach_tooltip": "Attach file or image",
     "attach_title": "Choose files or images",
