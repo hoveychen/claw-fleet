@@ -41,6 +41,11 @@ pub fn dispatch_pitem(task_id: &str, p_item_id: &str) -> Result<(), String> {
     actions::dispatch_pitem(task_id, p_item_id, &SupervisorHost)
 }
 
+/// Reset a failed task-level e2e so the live orchestrator re-runs it.
+pub fn rerun_task_e2e(task_id: &str) -> Result<(), String> {
+    actions::rerun_task_e2e(task_id)
+}
+
 #[cfg(test)]
 mod accept_merge_tests {
     use super::*;
