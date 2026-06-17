@@ -1305,7 +1305,9 @@
     "action_done": "Completed",
     "action_abandoned": "Abandoned",
     "e2e_passed": "End-to-end verification passed",
-    "e2e_failed": "End-to-end verification failed — task held before acceptance"
+    "e2e_failed": "End-to-end verification failed — task held before acceptance",
+    "e2e_rerun": "Re-run e2e",
+    "e2e_rerunning": "Re-running…"
   },
   "settings": {
     "title": "Settings",

@@ -24,6 +24,7 @@ export function TasksView() {
     refresh,
     startTask,
     acceptTask,
+    rerunTaskE2e,
     updateTaskTitle,
     deleteTask,
   } = useTasksStore();
@@ -48,6 +49,7 @@ export function TasksView() {
           onBack={() => setSelectedTaskId(null)}
           onStart={() => startTask(selectedTask.id)}
           onAccept={(mode) => acceptTask(selectedTask.id, mode)}
+          onRerunE2e={() => rerunTaskE2e(selectedTask.id)}
           onRename={(title) => updateTaskTitle(selectedTask.id, title)}
           onDelete={() => deleteTask(selectedTask.id)}
         />

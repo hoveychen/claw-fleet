@@ -91,6 +91,7 @@ export function TaskDetail({
   onBack,
   onStart,
   onAccept,
+  onRerunE2e,
   onRename,
   onDelete,
 }: {
@@ -99,6 +100,7 @@ export function TaskDetail({
   onBack: () => void;
   onStart: () => Promise<void>;
   onAccept: (mode: AcceptMode) => Promise<void>;
+  onRerunE2e: () => Promise<void>;
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
@@ -107,7 +109,7 @@ export function TaskDetail({
       <DetailHeader task={task} project={project} onBack={onBack} onStart={onStart} onAccept={onAccept} onRename={onRename} onDelete={onDelete} />
       <div className={styles.layout}>
         <div className={styles.main}>
-          <E2eBanner task={task} />
+          <E2eBanner task={task} onRerunE2e={onRerunE2e} />
           <Timeline task={task} />
           <PlanKanban task={task} />
           <Deliverables task={task} />
@@ -270,8 +272,9 @@ function EditableTitle({ task, onRename }: { task: Task; onRename: (title: strin
 // Surfaces the task-level e2e outcome. A FAILED run is why a task can sit in
 // `running` with every P-item done but no acceptance prompt — without this the
 // UI would be silent about it.
-function E2eBanner({ task }: { task: Task }) {
+function E2eBanner({ task, onRerunE2e }: { task: Task; onRerunE2e: () => Promise<void> }) {
   const { t } = useTranslation();
+  const [rerunning, setRerunning] = useState(false);
   const e2e = task.e2e;
   if (!e2e) return null;
   if (e2e.passed) {
@@ -282,6 +285,14 @@ function E2eBanner({ task }: { task: Task }) {
       </div>
     );
   }
+  const rerun = async () => {
+    setRerunning(true);
+    try {
+      await onRerunE2e();
+    } finally {
+      setRerunning(false);
+    }
+  };
   return (
     <div className={styles.e2e_fail}>
       <div className={styles.e2e_fail_head}>
@@ -295,6 +306,9 @@ function E2eBanner({ task }: { task: Task }) {
           ))}
         </ul>
       )}
+      <button className={styles.e2e_rerun} onClick={rerun} disabled={rerunning}>
+        {rerunning ? t("detail.e2e_rerunning", "Re-running…") : t("detail.e2e_rerun", "Re-run e2e")}
+      </button>
     </div>
   );
 }
