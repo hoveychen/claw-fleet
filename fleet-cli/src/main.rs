@@ -3,6 +3,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 mod feishu;
 mod fleet_cli_host;
+mod task_runtime;
 
 use claw_fleet_core::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
 use claw_fleet_core::agent_source::{build_sources, find_source_for_path};
@@ -298,6 +299,52 @@ enum Commands {
         #[command(subcommand)]
         action: TaskCommands,
     },
+    /// [internal] Own one task's lifecycle in this process (master + workers +
+    /// plan). The desktop spawns `fleet task-runtime resume <id>`; bare
+    /// invocation opens the launchpad. Was the standalone `fleet-task` binary.
+    #[command(hide = true)]
+    TaskRuntime {
+        #[command(subcommand)]
+        cmd: Option<TaskRuntimeCommand>,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum TaskRuntimeCommand {
+    /// Start a new task in the given workspace and spawn its master agent.
+    New {
+        /// Project workspace directory (must be a git repo).
+        #[arg(long)]
+        workspace: std::path::PathBuf,
+        /// Initial task description / prompt for the master agent.
+        #[arg(long)]
+        prompt: String,
+        /// Task title; defaults to the prompt's first 40 chars.
+        #[arg(long)]
+        title: Option<String>,
+        /// Skip the TUI; run as a headless HTTP-only daemon.
+        #[arg(long, default_value_t = false)]
+        no_tui: bool,
+    },
+    /// Resume an existing task by id (`~/.fleet/tasks/<id>.json`).
+    Resume {
+        /// Task id to resume.
+        task_id: String,
+        /// Workspace directory.
+        #[arg(long)]
+        workspace: std::path::PathBuf,
+        #[arg(long, default_value_t = false)]
+        no_tui: bool,
+    },
+    /// Open a TUI picker over all tasks on disk; Enter resumes the highlighted
+    /// task.
+    List {
+        /// Override the workspace path for the resumed task.
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
+        #[arg(long, default_value_t = false)]
+        no_tui: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -403,7 +450,8 @@ fn main() {
             | Commands::Elicitation
             | Commands::Mcp
             | Commands::PlanApproval
-            | Commands::PrdContext => {
+            | Commands::PrdContext
+            | Commands::TaskRuntime { .. } => {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
                     match &cli.command {
                         Commands::Serve { .. } => "serve",
@@ -413,6 +461,7 @@ fn main() {
                         Commands::Mcp => "mcp",
                         Commands::PlanApproval => "plan-approval",
                         Commands::PrdContext => "prd-context",
+                        Commands::TaskRuntime { .. } => "task-runtime",
                         _ => unreachable!(),
                     }
                 );
@@ -453,6 +502,16 @@ fn main() {
             SessionCommands::Resume => cmd_session_resume(),
         },
         Commands::Task { action } => cmd_task(action),
+        Commands::TaskRuntime { cmd } => cmd_task_runtime(cmd),
+    }
+}
+
+// ── task-runtime dispatcher (folded-in fleet-task lifecycle) ──────────────────
+
+fn cmd_task_runtime(cmd: Option<TaskRuntimeCommand>) {
+    if let Err(e) = task_runtime::run(cmd) {
+        eprintln!("error: {e:#}");
+        std::process::exit(1);
     }
 }
 
