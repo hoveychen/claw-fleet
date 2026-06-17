@@ -960,7 +960,7 @@ mod tests {
     /// End-to-end check: the agent's Stop hook drops a sentinel into
     /// `~/.fleet/idle/<sid>.json` (via `crate::idle::mark_idle`). The
     /// supervisor's `pending_session_ids()` must include that sid in its
-    /// pending set so Pass 1.5 will flip the kanban card to Pending. After
+    /// pending set so Pass 1.5 will flip the session to Pending. After
     /// `clear_idle`, the sid must drop out of the set.
     #[test]
     fn idle_sentinel_appears_in_pending_session_ids() {

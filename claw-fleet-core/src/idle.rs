@@ -2,8 +2,8 @@
 //!
 //! Produced by `Stop` / `UserPromptSubmit` Claude Code hooks (which call
 //! `fleet session idle` / `fleet session resume`). Consumed by the supervisor's
-//! `pending_session_ids()` to flip the kanban card from Running → Pending when
-//! the agent has yielded its turn.
+//! `pending_session_ids()` to flip the session's status from Running → Pending
+//! when the agent has yielded its turn.
 //!
 //! Why a separate file-based sentinel instead of `fleet session status pending`:
 //! the supervisor's `tick_macos` reconciles `FleetSession.status` every 2–5s by
