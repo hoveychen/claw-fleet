@@ -1831,6 +1831,11 @@ fn accept_task(
 }
 
 #[tauri::command]
+fn rerun_task_e2e(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
+    state.backend.read().unwrap().rerun_task_e2e(&task_id)
+}
+
+#[tauri::command]
 fn clear_task(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
     state.backend.read().unwrap().clear_task(&task_id)
 }
@@ -3687,6 +3692,7 @@ pub fn run() {
             update_task_plan,
             start_task,
             accept_task,
+            rerun_task_e2e,
             clear_task,
             list_runtime_tasks,
             fleet_task_state,
