@@ -189,6 +189,30 @@ pub fn accept_task(task_id: &str) -> Result<(), String> {
     write_task_atomic(&task)
 }
 
+/// Reset a task's recorded e2e outcome so the orchestrator re-runs the
+/// task-level e2e gate. Valid only while the task is `Running` with a recorded
+/// FAILED e2e — that's exactly the state a failed e2e leaves the task in, and
+/// the fleet-task daemon is still idling its orchestrator loop (it never
+/// reached `PlanComplete`), so clearing `task.e2e` makes the next tick re-run
+/// `verify.e2e`. Errors if the task isn't in that state (nothing to re-run).
+pub fn rerun_task_e2e(task_id: &str) -> Result<(), String> {
+    let lock = task_write_lock(task_id);
+    let _g = lock.lock().expect("task write mutex poisoned");
+    let mut task = get_task(task_id)?;
+    if !matches!(task.status, TaskStatus::Running) {
+        return Err(format!(
+            "task {task_id} is not running (status: {:?})",
+            task.status
+        ));
+    }
+    match &task.e2e {
+        Some(o) if !o.passed => {}
+        _ => return Err(format!("task {task_id} has no failed e2e to re-run")),
+    }
+    task.e2e = None;
+    write_task_atomic(&task)
+}
+
 /// Clear (delete) a task — host SIGTERM, then remove task json + materials.
 pub fn clear_task(task_id: &str, host: &dyn TaskHost) -> Result<(), String> {
     let lock = task_write_lock(task_id);
@@ -259,5 +283,44 @@ mod tests {
         task.status = TaskStatus::Running;
         write_task_atomic(&task).unwrap();
         assert!(accept_task("t-run").is_err(), "can't accept a still-running task");
+    }
+
+    fn failed_e2e() -> crate::task::E2eOutcome {
+        crate::task::E2eOutcome {
+            command: "e2e".into(),
+            passed: false,
+            gaps: vec!["boom".into()],
+            ran_at: 1,
+        }
+    }
+
+    #[test]
+    fn rerun_e2e_clears_failed_outcome_when_running() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(tmp.path());
+        let mut task = Task::drafting("t-e2e".into(), "p".into(), "x".into(), 0);
+        task.status = TaskStatus::Running;
+        task.e2e = Some(failed_e2e());
+        write_task_atomic(&task).unwrap();
+
+        rerun_task_e2e("t-e2e").unwrap();
+        assert!(get_task("t-e2e").unwrap().e2e.is_none(), "e2e must be cleared for re-run");
+    }
+
+    #[test]
+    fn rerun_e2e_errors_when_no_failed_e2e() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _o = FleetHomeOverride::new(tmp.path());
+        let mut task = Task::drafting("t-e2e2".into(), "p".into(), "x".into(), 0);
+        task.status = TaskStatus::Running;
+        task.e2e = None; // nothing failed
+        write_task_atomic(&task).unwrap();
+        assert!(rerun_task_e2e("t-e2e2").is_err());
+
+        // A passed e2e also has nothing to re-run.
+        let mut t2 = get_task("t-e2e2").unwrap();
+        t2.e2e = Some(crate::task::E2eOutcome { command: "e2e".into(), passed: true, gaps: vec![], ran_at: 1 });
+        write_task_atomic(&t2).unwrap();
+        assert!(rerun_task_e2e("t-e2e2").is_err());
     }
 }

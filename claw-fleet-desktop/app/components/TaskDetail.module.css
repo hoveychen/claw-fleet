@@ -727,3 +727,63 @@
   color: var(--color-text);
   line-height: 1.45;
 }
+
+/* ── P-item failure reasons ─────────────────────────────────────────────────── */
+
+.failures {
+  margin-top: 14px;
+}
+
+.failure_item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  background: rgba(239, 107, 107, 0.08);
+  border: 1px solid rgba(239, 107, 107, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.failure_id {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-error-fg);
+}
+
+.failure_gaps {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--color-text);
+  line-height: 1.45;
+  min-width: 0;
+  word-break: break-word;
+}
+
+.e2e_rerun {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.e2e_rerun:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: var(--color-bg-card-hover);
+}
+
+.e2e_rerun:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

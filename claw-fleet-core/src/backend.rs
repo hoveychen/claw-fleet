@@ -477,6 +477,11 @@ pub trait Backend: Send + Sync {
     ) -> Result<(), String> {
         Err("task system not implemented in this backend yet".into())
     }
+    /// Re-run a task's task-level e2e gate after a failed run (clears the
+    /// recorded outcome so the live orchestrator re-runs `verify.e2e`).
+    fn rerun_task_e2e(&self, _task_id: &str) -> Result<(), String> {
+        Err("task system not implemented in this backend yet".into())
+    }
     /// Delete a task: terminate its linked sessions, then remove the task json
     /// and its materials dir from disk. Used by the UI's task delete action.
     fn clear_task(&self, _task_id: &str) -> Result<(), String> {

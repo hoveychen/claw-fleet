@@ -1269,6 +1269,7 @@
     "section_plan": "计划",
     "plan_kanban": "看板",
     "plan_dag": "依赖图",
+    "plan_failures": "失败原因",
     "section_deliverables": "交付物",
     "tl_created": "任务创建",
     "tl_materials": "附带 {{count}} 个素材",
@@ -1301,7 +1302,9 @@
     "action_done": "已完成",
     "action_abandoned": "已放弃",
     "e2e_passed": "端到端验证通过",
-    "e2e_failed": "端到端验证未通过 —— 任务已在验收前拦下"
+    "e2e_failed": "端到端验证未通过 —— 任务已在验收前拦下",
+    "e2e_rerun": "重跑 e2e",
+    "e2e_rerunning": "重跑中…"
   },
   "settings": {
     "title": "设置",
