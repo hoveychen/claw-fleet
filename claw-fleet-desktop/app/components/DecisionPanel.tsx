@@ -1786,8 +1786,8 @@ export function DecisionPanel({
   );
 
   // Inline detail column is normal-mode only; lite has its own chip flow.
-  // SessionDetail in standalone mode owns its own state (no shared store with
-  // the KanbanView drawer), so the two can coexist on different sessions.
+  // SessionDetail in standalone mode owns its own state (no shared global
+  // store), so two detail views can coexist on different sessions.
   const inlineDetailActive = !compact && historyOpen && !!activeSessionInfo;
 
   useEffect(() => {

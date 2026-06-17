@@ -22,8 +22,7 @@
 }
 
 /* Active session hint: neutral, parallels GalleryView .group[data-active]
-   and KanbanView .card[data-active] — stronger hairline + lifted shadow,
-   no hue. */
+   — stronger hairline + lifted shadow, no hue. */
 .card.active {
   border-color: var(--color-border-strong);
   box-shadow: var(--shadow-card-hover);
