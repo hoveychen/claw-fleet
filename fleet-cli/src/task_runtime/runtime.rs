@@ -21,9 +21,9 @@ use claw_fleet_task::task::{
 
 use claw_fleet_task::registry::{self, RegistryEntry};
 
-use crate::http::{self, HttpHandle, ServerConfig};
-use crate::local_host::{LocalHost, ProcessLauncher};
-use crate::sse::SseBroadcaster;
+use crate::task_runtime::http::{self, HttpHandle, ServerConfig};
+use crate::task_runtime::local_host::{LocalHost, ProcessLauncher};
+use crate::task_runtime::sse::SseBroadcaster;
 
 /// Synthetic project id used when `fleet-task` boots without a desktop-side
 /// project entry. Phase 3 will let real project ids flow through; until then
@@ -332,7 +332,7 @@ fn pid_alive_reaping(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::local_host::ProcessLauncher;
+    use crate::task_runtime::local_host::ProcessLauncher;
     use claw_fleet_task::paths::fleet_home_lock;
     use claw_fleet_task::worker::WorkerSpawnSpec;
     use std::process::{Command, Stdio};
@@ -452,7 +452,7 @@ mod tests {
         // planner session (P5). No master is ever spawned.
         let live = boot.host.live_sessions();
         assert_eq!(live.len(), 1);
-        assert_eq!(live[0].kind, crate::local_host::SessionKind::Planner);
+        assert_eq!(live[0].kind, crate::task_runtime::local_host::SessionKind::Planner);
 
         // Registry has our entry pointing at the http port.
         let entry = registry::read(&boot.task_id).unwrap().unwrap();
