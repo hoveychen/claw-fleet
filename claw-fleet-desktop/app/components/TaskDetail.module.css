@@ -764,3 +764,26 @@
   min-width: 0;
   word-break: break-word;
 }
+
+.e2e_rerun {
+  align-self: flex-start;
+  margin-top: 4px;
+  font-size: 12px;
+  padding: 4px 12px;
+  border-radius: 7px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.e2e_rerun:hover:not(:disabled) {
+  border-color: var(--color-accent);
+  background: var(--color-bg-card-hover);
+}
+
+.e2e_rerun:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
