@@ -61,6 +61,17 @@ export function TasksView() {
         defaultProjectId={selectedProjectId}
         onCreated={async (task) => {
           setSelectedTaskId(task.id);
+          // Auto-start: creating a task means the user wants it to run, so kick
+          // off planning immediately instead of stranding it in `drafting`
+          // behind a manual ▶ Start click. start_task creates the fleet/<slug>
+          // git branch + flips to running. If it fails (e.g. the workspace
+          // isn't a git repo) the task stays in `drafting` and TaskDetail's
+          // Start button is the recovery path — so we swallow the error here.
+          try {
+            await startTask(task.id);
+          } catch {
+            /* leave in drafting; Start button surfaces the error on retry */
+          }
           await refresh(selectedProjectId ?? undefined);
         }}
       />
