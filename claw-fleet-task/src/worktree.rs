@@ -445,6 +445,119 @@ pub fn apply_resolutions(
     Ok(MergeOutcome::AutoMerged { commits_merged: 1 })
 }
 
+/// Merge `feature_branch` into `into_branch` (whole-branch). Used by
+/// `accept_task`'s merge-back: feature = `fleet/<slug>`, into = base branch.
+/// Mirrors [`merge_back`]'s FF→auto-merge→Conflict logic but between two
+/// arbitrary named branches. Checks out `into_branch` first so the merge lands
+/// there; on conflict the merge is aborted (workspace left clean) and the
+/// `ConflictSpec`s returned for LLM mediation.
+pub fn merge_branch_into(
+    workspace: &Path,
+    feature_branch: &str,
+    into_branch: &str,
+    commit_message: &str,
+) -> Result<MergeOutcome, String> {
+    let repo = open_repo(workspace)?;
+    let feature = repo
+        .find_branch(feature_branch, BranchType::Local)
+        .map_err(|e| format!("find branch {feature_branch}: {}", e.message()))?;
+    let count = git_revlist_count(workspace, into_branch, feature_branch)?;
+    if count == 0 {
+        return Ok(MergeOutcome::NoChanges);
+    }
+    checkout_branch(&repo, into_branch)?;
+    let feature_ref = feature.into_reference();
+    let annotated = repo
+        .reference_to_annotated_commit(&feature_ref)
+        .map_err(|e| format!("annotate {feature_branch}: {}", e.message()))?;
+    let (analysis, _pref) = repo
+        .merge_analysis(&[&annotated])
+        .map_err(|e| format!("merge analysis: {}", e.message()))?;
+    if analysis.contains(MergeAnalysis::ANALYSIS_FASTFORWARD) {
+        fast_forward_to(&repo, into_branch, annotated.id())?;
+        return Ok(MergeOutcome::FastForwarded { commits_merged: count });
+    }
+    repo.merge(&[&annotated], None, None)
+        .map_err(|e| format!("merge {feature_branch}: {}", e.message()))?;
+    let mut index = repo
+        .index()
+        .map_err(|e| format!("read index after merge: {}", e.message()))?;
+    if index.has_conflicts() {
+        let files = collect_conflict_specs(workspace)?;
+        let reason = format!("3-way merge of {feature_branch} into {into_branch} has conflicts");
+        abort_merge(&repo)?;
+        return Ok(MergeOutcome::Conflict { files, reason });
+    }
+    finish_merge_commit(&repo, &mut index, commit_message, annotated.id())?;
+    Ok(MergeOutcome::AutoMerged { commits_merged: count })
+}
+
+/// LLM-mediated re-merge of `feature_branch` into `into_branch` using
+/// `(path, resolved_content)` tuples. Two-branch analogue of
+/// [`apply_resolutions`]; the caller supplies the mediator output.
+pub fn apply_branch_merge_resolutions(
+    workspace: &Path,
+    feature_branch: &str,
+    into_branch: &str,
+    commit_message: &str,
+    resolutions: &[(PathBuf, String)],
+) -> Result<MergeOutcome, String> {
+    let repo = open_repo(workspace)?;
+    checkout_branch(&repo, into_branch)?;
+    let feature = repo
+        .find_branch(feature_branch, BranchType::Local)
+        .map_err(|e| format!("find branch {feature_branch}: {}", e.message()))?;
+    let feature_ref = feature.into_reference();
+    let annotated = repo
+        .reference_to_annotated_commit(&feature_ref)
+        .map_err(|e| format!("annotate {feature_branch}: {}", e.message()))?;
+    repo.merge(&[&annotated], None, None)
+        .map_err(|e| format!("merge {feature_branch}: {}", e.message()))?;
+    let mut index = repo
+        .index()
+        .map_err(|e| format!("read index: {}", e.message()))?;
+    for (rel_path, content) in resolutions {
+        let abs = workspace.join(rel_path);
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| format!("create dir {}: {e}", parent.display()))?;
+        }
+        std::fs::write(&abs, content.as_bytes())
+            .map_err(|e| format!("write {}: {e}", rel_path.display()))?;
+        if let Err(e) = index
+            .add_path(rel_path)
+            .map_err(|e| format!("index add {}: {}", rel_path.display(), e.message()))
+        {
+            abort_merge(&repo)?;
+            return Err(e);
+        }
+    }
+    index
+        .write()
+        .map_err(|e| format!("write index: {}", e.message()))?;
+    if index.has_conflicts() {
+        let count = index.iter().filter(|e| entry_stage(e) > 0).count();
+        abort_merge(&repo)?;
+        return Err(format!(
+            "mediation incomplete — {count} file(s) still unmerged after apply"
+        ));
+    }
+    finish_merge_commit(&repo, &mut index, commit_message, annotated.id())?;
+    Ok(MergeOutcome::AutoMerged { commits_merged: 1 })
+}
+
+/// Delete a local branch — used after a successful merge-back to clean up
+/// `fleet/<slug>`. Errors if the branch is currently checked out or missing.
+pub fn delete_local_branch(workspace: &Path, branch: &str) -> Result<(), String> {
+    let repo = open_repo(workspace)?;
+    let mut b = repo
+        .find_branch(branch, BranchType::Local)
+        .map_err(|e| format!("find branch {branch}: {}", e.message()))?;
+    b.delete()
+        .map_err(|e| format!("delete branch {branch}: {}", e.message()))?;
+    Ok(())
+}
+
 fn checkout_branch(repo: &Repository, branch: &str) -> Result<(), String> {
     let refname = format!("refs/heads/{branch}");
     repo.find_reference(&refname)
@@ -1381,5 +1494,83 @@ mod tests {
             }
             other => panic!("expected Conflict, got {other:?}"),
         }
+    }
+
+    // ── task→base merge-back (P2: accept) ────────────────────────────────────
+
+    #[test]
+    fn merge_branch_into_fast_forwards() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path(), "main");
+        run_git(dir.path(), &["checkout", "-q", "-b", "fleet/x"]);
+        commit_in_worktree(dir.path(), "feat.txt", "feature\n", "feat work");
+        run_git(dir.path(), &["checkout", "-q", "main"]);
+        let out = merge_branch_into(dir.path(), "fleet/x", "main", "fleet: merge").unwrap();
+        assert!(matches!(out, MergeOutcome::FastForwarded { .. }), "got {out:?}");
+        // main now carries the feature file.
+        assert!(dir.path().join("feat.txt").exists());
+    }
+
+    #[test]
+    fn merge_branch_into_no_changes_when_feature_not_ahead() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path(), "main");
+        run_git(dir.path(), &["branch", "fleet/x"]); // same commit, no divergence
+        assert_eq!(
+            merge_branch_into(dir.path(), "fleet/x", "main", "m").unwrap(),
+            MergeOutcome::NoChanges
+        );
+    }
+
+    #[test]
+    fn merge_branch_into_reports_conflict() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path(), "main");
+        commit_in_worktree(dir.path(), "c.txt", "base\n", "seed");
+        run_git(dir.path(), &["checkout", "-q", "-b", "fleet/x"]);
+        commit_in_worktree(dir.path(), "c.txt", "feature\n", "feat side");
+        run_git(dir.path(), &["checkout", "-q", "main"]);
+        commit_in_worktree(dir.path(), "c.txt", "mainside\n", "main side");
+        match merge_branch_into(dir.path(), "fleet/x", "main", "m").unwrap() {
+            MergeOutcome::Conflict { files, .. } => {
+                assert!(files.iter().any(|f| f.path.ends_with("c.txt")));
+            }
+            other => panic!("expected Conflict, got {other:?}"),
+        }
+        // Conflict aborted → workspace clean (no merge in progress).
+        let st = std::process::Command::new("git")
+            .arg("-C").arg(dir.path()).args(["status", "--porcelain"]).output().unwrap();
+        assert!(String::from_utf8_lossy(&st.stdout).trim().is_empty(), "workspace must be clean after abort");
+    }
+
+    #[test]
+    fn apply_branch_merge_resolutions_resolves_and_commits() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path(), "main");
+        commit_in_worktree(dir.path(), "c.txt", "base\n", "seed");
+        run_git(dir.path(), &["checkout", "-q", "-b", "fleet/x"]);
+        commit_in_worktree(dir.path(), "c.txt", "feature\n", "feat side");
+        run_git(dir.path(), &["checkout", "-q", "main"]);
+        commit_in_worktree(dir.path(), "c.txt", "mainside\n", "main side");
+        // Confirm it really conflicts first.
+        assert!(matches!(
+            merge_branch_into(dir.path(), "fleet/x", "main", "m").unwrap(),
+            MergeOutcome::Conflict { .. }
+        ));
+        // Now mediate with a resolved content.
+        let res = vec![(PathBuf::from("c.txt"), "resolved\n".to_string())];
+        let out = apply_branch_merge_resolutions(dir.path(), "fleet/x", "main", "fleet: mediated", &res).unwrap();
+        assert!(matches!(out, MergeOutcome::AutoMerged { .. }), "got {out:?}");
+        assert_eq!(std::fs::read_to_string(dir.path().join("c.txt")).unwrap(), "resolved\n");
+    }
+
+    #[test]
+    fn delete_local_branch_removes_it() {
+        let dir = TempDir::new().unwrap();
+        init_repo(dir.path(), "main");
+        run_git(dir.path(), &["branch", "fleet/x"]);
+        delete_local_branch(dir.path(), "fleet/x").unwrap();
+        // Second delete errors (already gone).
+        assert!(delete_local_branch(dir.path(), "fleet/x").is_err());
     }
 }
