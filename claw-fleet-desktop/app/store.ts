@@ -317,6 +317,11 @@ interface TasksState {
   /// `tasks-updated` event handler can re-run with the same scope without
   /// the caller having to thread the current selection through.
   lastProjectId: string | null;
+  /// Per-task start failure messages. Auto-start (on task creation) used to
+  /// swallow its error silently, leaving the task stranded in `drafting` with no
+  /// hint why; this records the failure so TaskDetail can surface it without the
+  /// user having to click Start again.
+  startErrors: Record<string, string>;
   setSelectedTaskId: (id: string | null) => void;
   refresh: (projectId?: string) => Promise<void>;
   refreshLastScope: () => Promise<void>;
@@ -333,6 +338,7 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   selectedTaskId: null,
   loaded: false,
   lastProjectId: null,
+  startErrors: {},
   setSelectedTaskId: (id) => set({ selectedTaskId: id }),
   refresh: async (projectId) => {
     try {
@@ -352,11 +358,22 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     return task;
   },
   startTask: async (taskId) => {
-    await invoke("start_task", { taskId });
-    // Refetch — start_task flips status + sets task_branch.
+    try {
+      await invoke("start_task", { taskId });
+    } catch (e) {
+      // Record so callers that don't surface the throw themselves (the
+      // auto-start on creation) still leave a visible reason on the task.
+      const message = String((e as { message?: string })?.message ?? e);
+      set({ startErrors: { ...get().startErrors, [taskId]: message } });
+      throw e;
+    }
+    // Success — clear any prior start error and refetch (start_task flips
+    // status + sets task_branch).
+    const { [taskId]: _cleared, ...rest } = get().startErrors;
     const fresh = await invoke<Task>("get_task", { taskId });
     set({
       tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
+      startErrors: rest,
     });
   },
   acceptTask: async (taskId, mode = "mergeBack") => {
