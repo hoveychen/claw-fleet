@@ -1866,14 +1866,22 @@ impl Backend for LocalBackend {
     }
 
     fn start_task(&self, task_id: &str) -> Result<(), String> {
-        // Phase 3 hard-cut: spawn the fleet-task binary instead of going
-        // through the legacy supervisor path. The binary creates the master
-        // session in-process and publishes a runtime registry entry; we
-        // block briefly until that entry shows up so the GUI immediately
-        // sees the task as "live".
+        // Non-blocking start: spawn the `fleet task-runtime` process and return
+        // immediately. The runtime creates the master session in-process,
+        // flips the task to Running and publishes a registry entry; the runtime
+        // registry watcher (runtime_registry.rs, 1s poll) lights up the live
+        // badge asynchronously. We do NOT block on that handshake — the old 10s
+        // synchronous wait spuriously failed on the first cold launch after an
+        // update (Gatekeeper assessing the freshly-installed sidecar exceeded
+        // 10s) even though the runtime came up fine seconds later.
+        //
+        // A `BinaryMissing` / spawn error still surfaces synchronously so an
+        // impossible start fails fast. A runtime that spawns but never registers
+        // (a real crash) is caught by the background watcher below, which calls
+        // mark_task_start_failed → reverts Running→Drafting + records the reason.
         let task = crate::task::get_task(task_id)?;
         // Prefer the registered project's workspace; but a task started via
-        // `fleet-task new` on an unregistered workspace has no registered
+        // `fleet task-runtime new` on an unregistered workspace has no registered
         // project (its project_id is a synthetic `auto-<hash>`). In that case
         // fall back to the workspace the task itself stamped at start time, so
         // auto-discovered tasks remain (re)startable from the desktop instead
@@ -1889,13 +1897,30 @@ impl Backend for LocalBackend {
                     task.project_id
                 )
             })?;
-        crate::fleet_task_spawn::spawn_fleet_task_resume(
-            task_id,
-            &workspace,
-            std::time::Duration::from_secs(10),
-        )
-        .map(|_| ())
-        .map_err(|e| e.to_string())
+        // Fresh attempt — clear any stale failure reason from a prior start.
+        let _ = crate::task::clear_task_start_error(task_id);
+        let mut child = crate::fleet_task_spawn::spawn_fleet_task_detached(task_id, &workspace)
+            .map_err(|e| e.to_string())?;
+        // Background readiness watcher — never blocks the UI. Generous timeout
+        // tolerates a cold first-launch; on genuine failure it records the
+        // reason on the task (surfaced via Task.start_error on both backends).
+        let tid = task_id.to_string();
+        std::thread::Builder::new()
+            .name("fleet-task-start-watch".into())
+            .spawn(move || {
+                match crate::fleet_task_spawn::await_registry(
+                    &tid,
+                    &mut child,
+                    std::time::Duration::from_secs(45),
+                ) {
+                    Ok(_) => { /* live — runtime_registry watcher shows the badge */ }
+                    Err(e) => {
+                        let _ = crate::task::mark_task_start_failed(&tid, &e.to_string());
+                    }
+                }
+            })
+            .map_err(|e| format!("spawn start watcher: {e}"))?;
+        Ok(())
     }
 
     fn accept_task(
