@@ -464,6 +464,7 @@ mod tests {
             master_session_id: None,
             title_auto: false,
             model: None,
+            e2e: None,
         }
     }
 
