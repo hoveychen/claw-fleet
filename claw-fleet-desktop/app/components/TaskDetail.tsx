@@ -15,7 +15,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { ArrowLeft, GitBranch, Eye, FileText, Plus, Minus, Trash2 } from "lucide-react";
 import styles from "./TaskDetail.module.css";
-import { useSessionsStore, type Project } from "../store";
+import { useSessionsStore, useTasksStore, type Project } from "../store";
 import { useRuntimeTasksStore } from "../runtimeTasksStore";
 import type { AcceptMode, PItem, PItemStatus, Task, TaskStatus, TaskDeliverables, TaskTokenBreakdown } from "../types";
 import { pItemStatusKey } from "../types";
@@ -135,6 +135,10 @@ function DetailHeader({
 }) {
   const { t } = useTranslation();
   const isLive = useRuntimeTasksStore((s) => Boolean(s.byTaskId[task.id]));
+  // Auto-start (on task creation) records its failure here instead of throwing
+  // to a handler — surface it so a task stranded in `drafting` shows why,
+  // without the user having to click Start to find out.
+  const autoStartError = useTasksStore((s) => s.startErrors[task.id]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -224,7 +228,11 @@ function DetailHeader({
           <code>{task.taskBranch}</code>
         </div>
       )}
-      {error && <div className={styles.error}>{t("tasks.start_failed", "Start failed: {{message}}", { message: error })}</div>}
+      {(error ?? autoStartError) && (
+        <div className={styles.error}>
+          {t("tasks.start_failed", "Start failed: {{message}}", { message: error ?? autoStartError })}
+        </div>
+      )}
     </>
   );
 }
