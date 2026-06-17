@@ -164,11 +164,12 @@ function App() {
 
   // Phase 5: subscribe to tasks-updated emitted by the backend's
   // TasksDirWatcher whenever an out-of-process tool (e.g. `fleet-task new`)
-  // creates / modifies / removes a task json. Re-runs list_tasks with the
-  // last-used project scope so the user doesn't have to switch projects.
+  // creates / modifies / removes a task json. Re-runs list_tasks for the full
+  // task list (project views filter client-side) so the user doesn't have to
+  // switch projects.
   useEffect(() => {
     const un = listen("tasks-updated", () => {
-      useTasksStore.getState().refreshLastScope();
+      useTasksStore.getState().refresh();
     });
     return () => {
       un.then((fn) => fn());
