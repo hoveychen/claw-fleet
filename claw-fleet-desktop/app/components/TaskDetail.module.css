@@ -100,6 +100,66 @@
 
 .header_actions {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.delete_btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: transparent;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.delete_btn:hover {
+  background: rgba(239, 107, 107, 0.12);
+  border-color: rgba(239, 107, 107, 0.4);
+  color: #ef6b6b;
+}
+
+.confirm_row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.confirm_text {
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.danger_btn {
+  background: #ef6b6b;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 13px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.danger_btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.cancel_btn {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  cursor: pointer;
 }
 
 .primary_btn {
