@@ -135,9 +135,14 @@ function DetailHeader({
 }) {
   const { t } = useTranslation();
   const isLive = useRuntimeTasksStore((s) => Boolean(s.byTaskId[task.id]));
-  // Auto-start (on task creation) records its failure here instead of throwing
-  // to a handler — surface it so a task stranded in `drafting` shows why,
-  // without the user having to click Start to find out.
+  // Start failures surface from three places, in priority order:
+  //  - `error`: a manual Start click that threw synchronously (e.g. binary
+  //    missing) — most immediate.
+  //  - `task.startError`: the backend's async reason, carried on the Task so it
+  //    works for both LocalBackend and RemoteBackend (start is non-blocking;
+  //    the watcher/reconcile records it after start_task already returned).
+  //  - `autoStartError`: the frontend store fallback for the sync auto-start
+  //    throw on task creation.
   const autoStartError = useTasksStore((s) => s.startErrors[task.id]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -228,9 +233,11 @@ function DetailHeader({
           <code>{task.taskBranch}</code>
         </div>
       )}
-      {(error ?? autoStartError) && (
+      {(error ?? task.startError ?? autoStartError) && (
         <div className={styles.error}>
-          {t("tasks.start_failed", "Start failed: {{message}}", { message: error ?? autoStartError })}
+          {t("tasks.start_failed", "Start failed: {{message}}", {
+            message: error ?? task.startError ?? autoStartError,
+          })}
         </div>
       )}
     </>
