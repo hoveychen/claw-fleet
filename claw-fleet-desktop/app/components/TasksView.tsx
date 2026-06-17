@@ -31,8 +31,8 @@ export function TasksView() {
 
   useEffect(() => {
     refreshProjects();
-    refresh(selectedProjectId ?? undefined);
-  }, [refreshProjects, refresh, selectedProjectId]);
+    refresh();
+  }, [refreshProjects, refresh]);
 
   const selectedTask = useMemo(
     () => tasks.find((tk) => tk.id === selectedTaskId) ?? null,
@@ -74,7 +74,7 @@ export function TasksView() {
           } catch {
             /* leave in drafting; Start button surfaces the error on retry */
           }
-          await refresh(selectedProjectId ?? undefined);
+          await refresh();
         }}
       />
     </div>

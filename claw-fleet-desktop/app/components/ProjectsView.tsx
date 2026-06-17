@@ -204,7 +204,9 @@ function ProjectPage({
   const [statusFilter, setStatusFilter] = useState<"all" | TaskStatus>("all");
 
   useEffect(() => {
-    refreshTasks(project.id);
+    // Fetch the full task list; `projectTasks` below filters to this project
+    // client-side. A project-scoped fetch would clobber the sidebar's full list.
+    refreshTasks();
   }, [project.id, refreshTasks]);
 
   const projectTasks = useMemo(
