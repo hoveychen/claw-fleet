@@ -117,6 +117,19 @@ pub enum TaskStatus {
     Abandoned,
 }
 
+/// How `accept_task` finalises a reviewed task.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AcceptMode {
+    /// Merge `fleet/<slug>` back into the recorded base branch (LLM-mediated on
+    /// conflict), delete the task branch, then flip the task `Done`. Default.
+    #[default]
+    MergeBack,
+    /// Just flip the task `Done`; leave `fleet/<slug>` in place for the user to
+    /// merge / PR themselves.
+    KeepBranch,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", tag = "kind")]
 pub enum Material {
@@ -235,6 +248,21 @@ impl Task {
         let repo = git2::Repository::open(workspace).ok()?;
         let head = repo.head().ok()?;
         head.shorthand().map(|s| s.to_string())
+    }
+
+    /// Resolve the branch `accept_task`'s merge-back should target: the recorded
+    /// `base_branch` if present, else the first existing of `main` / `master`
+    /// in `workspace`. `None` when neither can be determined. Lives here (not in
+    /// claw-fleet-core) so the git2 lookup stays on the task side.
+    pub fn resolve_base_branch(&self, workspace: &Path) -> Option<String> {
+        if let Some(b) = self.base_branch.clone().filter(|b| !b.trim().is_empty()) {
+            return Some(b);
+        }
+        let repo = git2::Repository::open(workspace).ok()?;
+        ["main", "master"]
+            .into_iter()
+            .find(|b| repo.find_branch(b, git2::BranchType::Local).is_ok())
+            .map(|b| b.to_string())
     }
 
     /// `true` when no P-item is still pending or active.
