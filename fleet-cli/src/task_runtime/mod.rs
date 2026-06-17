@@ -1,14 +1,17 @@
-//! `fleet-task` — Phase 2 standalone binary that owns one task's complete
-//! lifecycle (master + workers + plan) in a single process.
+//! `task-runtime` — the task lifecycle owner, folded into the `fleet` CLI as a
+//! hidden subcommand (was the standalone `fleet-task` binary before it was
+//! merged in). Owns one task's complete lifecycle (master + workers + plan) in
+//! a single process; the desktop spawns `fleet task-runtime resume <id>`.
 //!
-//! See `TASKS.md` plan `fleet-task-binary` for the full Phase 2 scope.
+//! `main()` stays synchronous: the orchestrator runs on a `std::thread`, the
+//! HTTP server is `tiny_http`, and signals are handled with libc — there is no
+//! tokio runtime here.
 
-use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use crate::TaskRuntimeCommand;
 
 mod http;
 mod local_host;
@@ -17,66 +20,14 @@ mod runtime;
 mod sse;
 mod tui;
 
-#[derive(Parser, Debug)]
-#[command(name = "fleet-task", version, about = "Run one task's lifecycle in this process. Run with no arguments to open the task picker (resume) — mirrors how `claude` lists recents on bare invocation.")]
-struct Cli {
-    #[command(subcommand)]
-    command: Option<Command>,
-}
-
-#[derive(Subcommand, Debug)]
-enum Command {
-    /// Start a new task in the given workspace and spawn its master agent.
-    New {
-        /// Project workspace directory (must be a git repo).
-        #[arg(long)]
-        workspace: PathBuf,
-        /// Initial task description / prompt for the master agent.
-        #[arg(long)]
-        prompt: String,
-        /// Task title; defaults to the prompt's first 40 chars.
-        #[arg(long)]
-        title: Option<String>,
-        /// Skip the TUI; run as a headless HTTP-only daemon.
-        #[arg(long, default_value_t = false)]
-        no_tui: bool,
-    },
-    /// Resume an existing task by id (`~/.fleet/tasks/<id>.json`).
-    Resume {
-        /// Task id to resume.
-        task_id: String,
-        /// Workspace directory (Phase 2 doesn't persist it in task.json yet).
-        #[arg(long)]
-        workspace: PathBuf,
-        #[arg(long, default_value_t = false)]
-        no_tui: bool,
-    },
-    /// Open a TUI picker over all tasks on disk; Enter resumes the
-    /// highlighted task. Uses `task.workspace` (persisted by Phase 3+
-    /// `start_task`); supply `--workspace` to override for older tasks.
-    List {
-        /// Override the workspace path for the resumed task. When omitted,
-        /// fleet-task reads it from `task.workspace`; errors if neither is
-        /// set (legacy task json from before Phase 3).
-        #[arg(long)]
-        workspace: Option<PathBuf>,
-        #[arg(long, default_value_t = false)]
-        no_tui: bool,
-    },
-}
-
-fn main() -> anyhow::Result<()> {
-    claw_fleet_task::console::init_utf8();
-    let cli = Cli::parse();
-    // Default behaviour with no subcommand: open the launchpad — a textarea
-    // for entering a new prompt in `$PWD`, with Ctrl-T to switch to the
-    // resume picker. Mirrors `claude`'s bare-invocation UX (prompt waiting +
-    // shortcut to recents).
-    let Some(command) = cli.command else {
+/// Dispatch a `fleet task-runtime` invocation. `None` (bare `task-runtime`)
+/// opens the launchpad, mirroring `claude`'s bare-invocation UX.
+pub fn run(command: Option<TaskRuntimeCommand>) -> anyhow::Result<()> {
+    let Some(command) = command else {
         return run_launchpad();
     };
     match command {
-        Command::New {
+        TaskRuntimeCommand::New {
             workspace,
             prompt,
             title,
@@ -96,7 +47,7 @@ fn main() -> anyhow::Result<()> {
                 no_tui,
             )
         }
-        Command::Resume {
+        TaskRuntimeCommand::Resume {
             task_id,
             workspace,
             no_tui,
@@ -105,7 +56,7 @@ fn main() -> anyhow::Result<()> {
                 .map_err(anyhow::Error::msg)?,
             no_tui,
         ),
-        Command::List { workspace, no_tui } => {
+        TaskRuntimeCommand::List { workspace, no_tui } => {
             let outcome = tui::run_picker().map_err(anyhow::Error::from)?;
             match outcome {
                 tui::PickerOutcome::Empty => {
@@ -163,7 +114,7 @@ fn run_launchpad() -> anyhow::Result<()> {
             let ws = task.workspace.clone().ok_or_else(|| {
                 anyhow::anyhow!(
                     "task {task_id} has no persisted workspace (pre-Phase-3); \
-                     use `fleet-task resume {task_id} --workspace=...` instead"
+                     use `fleet task-runtime resume {task_id} --workspace=...` instead"
                 )
             })?;
             run_task(
@@ -177,7 +128,7 @@ fn run_launchpad() -> anyhow::Result<()> {
 
 fn run_task(boot: runtime::Bootstrap, no_tui: bool) -> anyhow::Result<()> {
     eprintln!(
-        "fleet-task running task {} on http://127.0.0.1:{} (pid {})",
+        "fleet task-runtime running task {} on http://127.0.0.1:{} (pid {})",
         boot.task_id,
         boot.http_handle.port,
         std::process::id()
@@ -212,7 +163,7 @@ fn run_task(boot: runtime::Bootstrap, no_tui: bool) -> anyhow::Result<()> {
         let _ = tui::run(ctx, stop.clone());
     }
 
-    eprintln!("fleet-task shutting down (30s deadline)…");
+    eprintln!("fleet task-runtime shutting down (30s deadline)…");
     // Signal the orchestrator thread to stop and let it unwind before we reap
     // subprocesses, so it doesn't dispatch a new worker mid-shutdown.
     stop.store(true, Ordering::SeqCst);

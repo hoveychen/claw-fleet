@@ -17,7 +17,7 @@ use std::time::Duration;
 use serde::Serialize;
 use tiny_http::{Header, Method, Response, Server};
 
-use crate::sse::SseBroadcaster;
+use crate::task_runtime::sse::SseBroadcaster;
 
 /// Wired by Phase 3 P8: `fleet-task`'s runtime supplies a dispatcher that
 /// routes incoming `POST /p-items/<id>/dispatch` to

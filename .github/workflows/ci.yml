@@ -54,7 +54,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run unit tests
-        run: cargo test --release -p fleet-cli -p claw-fleet-core -p claw-fleet-task -p fleet-task
+        run: cargo test --release -p fleet-cli -p claw-fleet-core -p claw-fleet-task
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Tag push only — Linux CLI binaries.
@@ -279,20 +279,6 @@ jobs:
           # Standalone CLI release artifact.
           cp "claw-fleet-desktop/binaries/${{ matrix.sidecar_name }}" "dist/${{ matrix.cli_artifact }}"
 
-          # fleet-task sidecar (task lifecycle owner) — same universal lipo so
-          # the desktop app can spawn it next to its own executable. NOT a
-          # standalone release artifact; bundled via externalBin only.
-          TASK_SIDECAR="${{ matrix.sidecar_name }}"
-          TASK_SIDECAR="fleet-task-${TASK_SIDECAR#fleet-}"
-          cargo build --release -p fleet-task --target aarch64-apple-darwin
-          cargo build --release -p fleet-task --target x86_64-apple-darwin
-          lipo -create \
-            target/aarch64-apple-darwin/release/fleet-task \
-            target/x86_64-apple-darwin/release/fleet-task \
-            -output "claw-fleet-desktop/binaries/${TASK_SIDECAR}"
-          chmod +x "claw-fleet-desktop/binaries/${TASK_SIDECAR}"
-          cp "claw-fleet-desktop/binaries/${TASK_SIDECAR}" target/universal-apple-darwin/release/fleet-task
-
       - name: Build sidecar CLI (Windows)
         if: matrix.build_sidecar && runner.os == 'Windows'
         shell: bash
@@ -303,28 +289,6 @@ jobs:
              "claw-fleet-desktop/binaries/${{ matrix.sidecar_name }}"
           cp "target/${{ matrix.rust_target }}/release/fleet-cli.exe" \
              "dist/${{ matrix.cli_artifact }}.exe"
-
-          # fleet-task sidecar (task lifecycle owner) — bundled via externalBin.
-          TASK_SIDECAR="${{ matrix.sidecar_name }}"
-          TASK_SIDECAR="fleet-task-${TASK_SIDECAR#fleet-}"
-          cargo build --release -p fleet-task --target ${{ matrix.rust_target }}
-          cp "target/${{ matrix.rust_target }}/release/fleet-task.exe" \
-             "claw-fleet-desktop/binaries/${TASK_SIDECAR}"
-
-      # fleet-task sidecar (Linux) — built natively on this runner. The desktop
-      # binary itself is glibc-2.35 (built here), so a same-runner native
-      # fleet-task matches its compat; the zigbuild-2.17 probe path that `fleet`
-      # uses is only for the standalone CLI / remote SSH probes, not a local
-      # sidecar. No fleet-task probe is needed for arm64 (no arm64 desktop bundle).
-      - name: Build fleet-task sidecar (Linux)
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          mkdir -p claw-fleet-desktop/binaries
-          cargo build --release -p fleet-task --target ${{ matrix.rust_target }}
-          cp "target/${{ matrix.rust_target }}/release/fleet-task" \
-             "claw-fleet-desktop/binaries/fleet-task-${{ matrix.rust_target }}"
-          chmod +x "claw-fleet-desktop/binaries/fleet-task-${{ matrix.rust_target }}"
 
       - name: Upload standalone CLI artifact
         if: matrix.build_sidecar
@@ -369,8 +333,6 @@ jobs:
 
           if [ "$RUNNER_OS" = "Linux" ]; then
             cp "${{ matrix.sidecar_name }}" fleet-linux
-            # deb.files maps /usr/bin/fleet-task → binaries/fleet-task-linux
-            cp "fleet-task-${{ matrix.rust_target }}" fleet-task-linux
           fi
 
           cd ../resources
