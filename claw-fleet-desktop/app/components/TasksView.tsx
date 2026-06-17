@@ -47,7 +47,7 @@ export function TasksView() {
           project={taskProject}
           onBack={() => setSelectedTaskId(null)}
           onStart={() => startTask(selectedTask.id)}
-          onAccept={() => acceptTask(selectedTask.id)}
+          onAccept={(mode) => acceptTask(selectedTask.id, mode)}
           onRename={(title) => updateTaskTitle(selectedTask.id, title)}
           onDelete={() => deleteTask(selectedTask.id)}
         />
