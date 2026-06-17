@@ -1440,3 +1440,60 @@
 .tab_plan .tab_icon {
   color: #8a5cf6;
 }
+
+/* ── Preceding agent narration (above a question card) ──────────────────────
+ * The plain-text the agent emitted between the user's last input and this
+ * question. Sits at the top of .card_scroll, visually recessed and quieter than
+ * the question itself so it reads as "context", not the ask. Boss scrolls up
+ * into it; the question is the default-visible surface below. */
+.preceding {
+  border-left: 2px solid rgba(var(--color-accent-rgb), 0.35);
+  padding: 2px 0 2px 10px;
+  margin: 0 0 12px;
+  opacity: 0.85;
+}
+.preceding_label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-secondary);
+  margin-bottom: 6px;
+}
+.preceding_msg {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+.preceding_msg:last-child {
+  margin-bottom: 0;
+}
+.preceding_msg p {
+  margin: 0 0 0.4em;
+}
+.preceding_msg p:last-child {
+  margin-bottom: 0;
+}
+.preceding_msg code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--color-bg);
+  padding: 1px 4px;
+  border-radius: 4px;
+}
+.preceding_msg pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--color-bg);
+  padding: 6px 8px;
+  border-radius: 4px;
+  margin: 0.3em 0;
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
