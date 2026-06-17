@@ -19,7 +19,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Paperclip, FolderOpen, ArrowUp, ChevronDown, Check } from "lucide-react";
 import styles from "./TaskComposer.module.css";
-import { useProjectsStore, type Project } from "../store";
+import { useProjectsStore, useTasksStore, type Project } from "../store";
 import type { MediaKind, Task, TaskInput } from "../types";
 
 interface Props {
@@ -77,6 +77,11 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
   const projects = useProjectsStore((s) => s.projects);
   const refreshProjects = useProjectsStore((s) => s.refresh);
   const setSelectedProjectId = useProjectsStore((s) => s.setSelectedProjectId);
+  // Create through the store (not a bare invoke) so the new task is seeded into
+  // the tasks array immediately — otherwise the parent's setSelectedTaskId can't
+  // render TaskDetail until a later refresh lands, which is what made the jump to
+  // the new task feel delayed.
+  const createTask = useTasksStore((s) => s.createTask);
 
   const [projectId, setProjectId] = useState<string>(
     defaultProjectId ?? projects[0]?.id ?? "",
@@ -230,7 +235,7 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
         description: description.trim(),
         ...(model ? { model } : {}),
       };
-      const task = await invoke<Task>("create_task", { input });
+      const task = await createTask(input);
 
       const failures: string[] = [];
       for (const m of materials) {

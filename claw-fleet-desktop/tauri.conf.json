@@ -36,7 +36,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/fleet"],
+    "externalBin": ["binaries/fleet", "binaries/fleet-task"],
     "resources": ["resources/*"],
     "macOS": {
       "minimumSystemVersion": "10.15",
@@ -52,7 +52,8 @@
     "linux": {
       "deb": {
         "files": {
-          "/usr/bin/fleet": "binaries/fleet-linux"
+          "/usr/bin/fleet": "binaries/fleet-linux",
+          "/usr/bin/fleet-task": "binaries/fleet-task-linux"
         }
       }
     }

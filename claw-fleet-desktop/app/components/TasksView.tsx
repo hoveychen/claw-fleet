@@ -61,20 +61,21 @@ export function TasksView() {
     <div className={styles.root}>
       <TaskComposer
         defaultProjectId={selectedProjectId}
-        onCreated={async (task) => {
+        onCreated={(task) => {
+          // The task is already seeded into the store by createTask, so
+          // selecting it renders TaskDetail immediately (no waiting on a
+          // refresh round-trip — that delay is what made the jump feel slow).
           setSelectedTaskId(task.id);
           // Auto-start: creating a task means the user wants it to run, so kick
           // off planning immediately instead of stranding it in `drafting`
           // behind a manual ▶ Start click. start_task creates the fleet/<slug>
-          // git branch + flips to running. If it fails (e.g. the workspace
-          // isn't a git repo) the task stays in `drafting` and TaskDetail's
-          // Start button is the recovery path — so we swallow the error here.
-          try {
-            await startTask(task.id);
-          } catch {
-            /* leave in drafting; Start button surfaces the error on retry */
-          }
-          await refresh();
+          // git branch + flips to running. If it fails (e.g. the fleet-task
+          // binary is missing, or the workspace isn't a git repo) the task
+          // stays in `drafting`; the reason is recorded in store.startErrors and
+          // surfaced by TaskDetail — no longer swallowed silently.
+          void startTask(task.id).catch(() => {
+            /* reason recorded in store.startErrors; TaskDetail shows it */
+          });
         }}
       />
     </div>
