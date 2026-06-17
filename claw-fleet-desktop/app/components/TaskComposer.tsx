@@ -314,7 +314,7 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder={t("composer.placeholder", "Describe the task…  (Enter to create, Shift+Enter for a new line)")}
+            placeholder={t("composer.task_placeholder", "Describe the task…  (Enter to create, Shift+Enter for a new line)")}
             disabled={submitting}
             rows={1}
           />
