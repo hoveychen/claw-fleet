@@ -55,18 +55,15 @@ impl std::fmt::Display for SpawnError {
 impl std::error::Error for SpawnError {}
 
 /// Spawn `fleet task-runtime resume <task_id> --workspace <ws> --no-tui` and
-/// wait for the runtime registry to publish the corresponding entry (proves
-/// the HTTP server bound + master started).
-///
-/// Returns the registry entry once visible; errors otherwise. Caller owns
-/// the spawned process implicitly — once detached, the desktop app no
-/// longer tracks it; the task-runtime process is responsible for its own
-/// lifecycle and self-cleans the registry on exit.
-pub fn spawn_fleet_task_resume(
+/// return the child handle WITHOUT waiting for it to come up. Start is
+/// non-blocking: the desktop returns immediately and the runtime registry
+/// watcher (runtime_registry.rs) flips the task to live asynchronously when
+/// the entry appears. A `BinaryMissing` / `Spawn` error here still surfaces
+/// synchronously so an impossible start fails fast.
+pub fn spawn_fleet_task_detached(
     task_id: &str,
     workspace: &std::path::Path,
-    appear_timeout: Duration,
-) -> Result<registry::RegistryEntry, SpawnError> {
+) -> Result<std::process::Child, SpawnError> {
     let bin = resolve_fleet_task_binary().ok_or(SpawnError::BinaryMissing)?;
     claw_fleet_core::process_util::command(&bin)
         .arg("task-runtime")
@@ -79,12 +76,28 @@ pub fn spawn_fleet_task_resume(
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .map_err(|e| SpawnError::Spawn(e.to_string()))?;
+        .map_err(|e| SpawnError::Spawn(e.to_string()))
+}
 
+/// Block up to `appear_timeout` for the runtime registry entry to publish
+/// (proves the HTTP server bound + master started). Polls every 100ms and
+/// also reaps the child: if it exits before registering we fail immediately
+/// rather than waiting out the whole timeout. Intended to run on a background
+/// thread so the UI is never blocked.
+pub fn await_registry(
+    task_id: &str,
+    child: &mut std::process::Child,
+    appear_timeout: Duration,
+) -> Result<registry::RegistryEntry, SpawnError> {
     let deadline = Instant::now() + appear_timeout;
     while Instant::now() < deadline {
         if let Ok(Some(entry)) = registry::read(task_id) {
             return Ok(entry);
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            return Err(SpawnError::Spawn(format!(
+                "task-runtime exited before registering ({status})"
+            )));
         }
         std::thread::sleep(Duration::from_millis(100));
     }
