@@ -118,11 +118,13 @@ jobs:
           APP="extracted/Claw Fleet.app"
 
           if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
-            echo "Signing sidecar (fleet CLI) with non-sandbox entitlements..."
-            codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
-              --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
-              --options runtime \
-              "$APP/Contents/MacOS/fleet"
+            for sc in fleet fleet-task; do
+              echo "Signing sidecar $sc with non-sandbox entitlements..."
+              codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
+                --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
+                --options runtime \
+                "$APP/Contents/MacOS/$sc"
+            done
             echo "Signing app bundle with sandbox entitlements..."
             codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
               --entitlements claw-fleet-desktop/entitlements.plist \
