@@ -40,33 +40,45 @@ export OPENSSL_STATIC=1
 TARGET=$(rustc -vV | sed -n 's|host: ||p')
 echo "==> Target: $TARGET"
 
-# 1. Build fleet CLI sidecar (debug)
-echo "==> Building fleet CLI..."
-cargo build -p fleet-cli
+# 1. Build fleet CLI + fleet-task sidecars (debug)
+#    fleet-task owns the task lifecycle (Phase 3 hard-cut): the desktop app
+#    spawns it next to its own executable (resolve_fleet_task_binary), so it
+#    MUST be bundled alongside the fleet CLI or every task start fails with
+#    "fleet-task binary not found".
+echo "==> Building fleet CLI + fleet-task..."
+cargo build -p fleet-cli -p fleet-task
 
-# 2. Copy compiled binary into binaries/ so Tauri bundles the real binary.
+# 2. Copy compiled binaries into binaries/ so Tauri bundles the real binary.
 #    Only update if content differs — Tauri's externalBin watcher invalidates
 #    the desktop crate's build script on any mtime change in binaries/,
 #    which forces a recompile even when nothing actually changed.
 mkdir -p claw-fleet-desktop/binaries
-SRC="target/debug/fleet-cli"
-DST="claw-fleet-desktop/binaries/fleet-$TARGET"
-if [[ ! -f "$DST" ]] || ! cmp -s "$SRC" "$DST"; then
-  cp "$SRC" "$DST"
-  chmod +x "$DST"
-  echo "==> Copied fleet CLI → $DST"
-else
-  echo "==> fleet CLI sidecar unchanged at $DST (skip copy)"
-fi
 
-# Linux: deb.files needs a generic fleet-linux name
-if [[ "$(uname)" == "Linux" ]]; then
-  LINUX_DST="claw-fleet-desktop/binaries/fleet-linux"
-  if [[ ! -f "$LINUX_DST" ]] || ! cmp -s "$DST" "$LINUX_DST"; then
-    cp "$DST" "$LINUX_DST"
-    chmod +x "$LINUX_DST"
+# stage_sidecar <target-dir-binary-name> <externalBin-base-name>
+# Copies target/debug/<bin> → binaries/<base>-$TARGET only when content differs,
+# and mirrors a generic <base>-linux name for deb.files on Linux.
+stage_sidecar() {
+  local bin="$1" base="$2"
+  local src="target/debug/$bin"
+  local dst="claw-fleet-desktop/binaries/$base-$TARGET"
+  if [[ ! -f "$dst" ]] || ! cmp -s "$src" "$dst"; then
+    cp "$src" "$dst"
+    chmod +x "$dst"
+    echo "==> Copied $bin → $dst"
+  else
+    echo "==> $bin sidecar unchanged at $dst (skip copy)"
   fi
-fi
+  if [[ "$(uname)" == "Linux" ]]; then
+    local linux_dst="claw-fleet-desktop/binaries/$base-linux"
+    if [[ ! -f "$linux_dst" ]] || ! cmp -s "$dst" "$linux_dst"; then
+      cp "$dst" "$linux_dst"
+      chmod +x "$linux_dst"
+    fi
+  fi
+}
+
+stage_sidecar fleet-cli  fleet
+stage_sidecar fleet-task fleet-task
 
 # 3. Install frontend deps (pnpm, matching CI). tauri's beforeBuildCommand runs
 #    `pnpm build`, and `npx tauri` itself resolves @tauri-apps/cli from
@@ -81,12 +93,12 @@ echo "==> Building Tauri app... (VITE_PROJECTS_ENABLED=$VITE_PROJECTS_ENABLED)"
 (cd claw-fleet-desktop && npx tauri build --debug --bundles app)
 
 # 5. Sign with entitlements (macOS only)
-#    Sign the fleet CLI sidecar FIRST with its own (non-sandbox) entitlements,
-#    then sign the outer app bundle. Using --deep would overwrite the sidecar
-#    signature with the app's sandbox entitlements, causing SIGTRAP when the
-#    sidecar is invoked externally (e.g. by Claude Code hooks).
+#    Sign EACH sidecar FIRST with its own (non-sandbox) entitlements, then the
+#    outer app bundle. Using --deep would overwrite the sidecar signatures with
+#    the app's sandbox entitlements, causing SIGTRAP when a sidecar is invoked
+#    externally (e.g. fleet by Claude Code hooks, fleet-task by the supervisor).
 APP_BUNDLE="target/debug/bundle/macos/Claw Fleet.app"
-SIDECAR="$APP_BUNDLE/Contents/MacOS/fleet"
+SIDECARS=("$APP_BUNDLE/Contents/MacOS/fleet" "$APP_BUNDLE/Contents/MacOS/fleet-task")
 if [[ ! -d "$APP_BUNDLE" ]]; then
   echo "==> App bundle not produced at $APP_BUNDLE — skipping macOS post-steps."
   echo "Done! Build stamp: $BUILD_STAMP"
@@ -94,21 +106,25 @@ if [[ ! -d "$APP_BUNDLE" ]]; then
 fi
 
 if [[ -n "$APPLE_SIGNING_IDENTITY" ]]; then
-  echo "==> Signing sidecar (fleet CLI) with non-sandbox entitlements..."
-  codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
-    --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
-    --options runtime \
-    "$SIDECAR"
+  for sc in "${SIDECARS[@]}"; do
+    echo "==> Signing sidecar $(basename "$sc") with non-sandbox entitlements..."
+    codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
+      --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
+      --options runtime \
+      "$sc"
+  done
   echo "==> Signing app bundle with sandbox entitlements..."
   codesign --force --sign "$APPLE_SIGNING_IDENTITY" \
     --entitlements claw-fleet-desktop/entitlements.plist \
     --options runtime \
     "$APP_BUNDLE"
 else
-  echo "==> Ad-hoc signing sidecar with non-sandbox entitlements..."
-  codesign --force --sign - \
-    --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
-    "$SIDECAR"
+  for sc in "${SIDECARS[@]}"; do
+    echo "==> Ad-hoc signing sidecar $(basename "$sc") with non-sandbox entitlements..."
+    codesign --force --sign - \
+      --entitlements claw-fleet-desktop/entitlements-sidecar.plist \
+      "$sc"
+  done
   echo "==> Ad-hoc signing app bundle with entitlements..."
   codesign --force --sign - \
     --entitlements claw-fleet-desktop/entitlements.plist \
