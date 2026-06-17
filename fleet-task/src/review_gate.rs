@@ -46,6 +46,14 @@ impl ReviewGate for RealReviewGate {
             Default::default()
         });
         if let Err(gaps) = verify::run_mechanical_gate(p_item, &cfg, &wt) {
+            // Diagnostic: make it visible that the *mechanical* gate (not the
+            // LLM) rejected this P-item, and why — otherwise a Failed P-item is
+            // indistinguishable from an LLM rejection in the logs.
+            eprintln!(
+                "[review] {} mechanical gate FAILED — rejecting without LLM: {}",
+                p_item.id,
+                gaps.join(" | ")
+            );
             return Ok(ReviewVerdict { achieved: false, gaps });
         }
 
