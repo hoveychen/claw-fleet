@@ -465,6 +465,7 @@ mod tests {
             title_auto: false,
             model: None,
             e2e: None,
+            base_branch: None,
         }
     }
 

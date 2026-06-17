@@ -69,6 +69,13 @@ pub struct Task {
     /// `AwaitingAcceptance` so a broken integration can't be silently accepted.
     #[serde(default)]
     pub e2e: Option<E2eOutcome>,
+    /// The branch HEAD pointed at when `start_task` forked the task branch —
+    /// recorded BEFORE `git_create_branch` switches HEAD to `fleet/<slug>`, so
+    /// `accept_task`'s merge-back knows which branch to merge into. `None` for
+    /// legacy tasks (pre-this-field) and tasks not yet started; the merge-back
+    /// path then falls back to a main/master heuristic.
+    #[serde(default)]
+    pub base_branch: Option<String>,
 }
 
 /// Outcome of the task-level e2e command configured in `fleet.yaml`'s
@@ -108,6 +115,19 @@ pub enum TaskStatus {
     Done,
     /// User invoked `clear` — kept around briefly for audit before deletion.
     Abandoned,
+}
+
+/// How `accept_task` finalises a reviewed task.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum AcceptMode {
+    /// Merge `fleet/<slug>` back into the recorded base branch (LLM-mediated on
+    /// conflict), delete the task branch, then flip the task `Done`. Default.
+    #[default]
+    MergeBack,
+    /// Just flip the task `Done`; leave `fleet/<slug>` in place for the user to
+    /// merge / PR themselves.
+    KeepBranch,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -217,7 +237,32 @@ impl Task {
             title_auto: false,
             model: None,
             e2e: None,
+            base_branch: None,
         }
+    }
+
+    /// Current checked-out branch shorthand of `workspace` (e.g. `main`), or
+    /// `None` when detached / unreadable. Recorded as `base_branch` at
+    /// `start_task` so the eventual merge-back targets the right branch.
+    pub fn current_branch(workspace: &Path) -> Option<String> {
+        let repo = git2::Repository::open(workspace).ok()?;
+        let head = repo.head().ok()?;
+        head.shorthand().map(|s| s.to_string())
+    }
+
+    /// Resolve the branch `accept_task`'s merge-back should target: the recorded
+    /// `base_branch` if present, else the first existing of `main` / `master`
+    /// in `workspace`. `None` when neither can be determined. Lives here (not in
+    /// claw-fleet-core) so the git2 lookup stays on the task side.
+    pub fn resolve_base_branch(&self, workspace: &Path) -> Option<String> {
+        if let Some(b) = self.base_branch.clone().filter(|b| !b.trim().is_empty()) {
+            return Some(b);
+        }
+        let repo = git2::Repository::open(workspace).ok()?;
+        ["main", "master"]
+            .into_iter()
+            .find(|b| repo.find_branch(b, git2::BranchType::Local).is_ok())
+            .map(|b| b.to_string())
     }
 
     /// `true` when no P-item is still pending or active.
@@ -705,6 +750,24 @@ mod tests {
         let tree = repo.find_tree(tree_oid).expect("find tree");
         repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
             .expect("initial commit");
+    }
+
+    #[test]
+    fn current_branch_reports_checked_out_branch() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        init_repo_with_first_commit(tmp.path());
+        // Fresh repo's default branch (master or main depending on git config).
+        let b = Task::current_branch(tmp.path()).expect("should read a branch");
+        assert!(!b.is_empty());
+        // After creating + switching to a task branch, current_branch tracks it.
+        git_create_branch(tmp.path(), "fleet/demo").unwrap();
+        assert_eq!(Task::current_branch(tmp.path()).as_deref(), Some("fleet/demo"));
+    }
+
+    #[test]
+    fn current_branch_none_when_not_a_repo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        assert!(Task::current_branch(tmp.path()).is_none());
     }
 
     #[test]

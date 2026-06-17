@@ -16,6 +16,7 @@ pub mod orchestrator;
 pub mod review;
 pub mod verify_config;
 pub mod verify;
+pub mod merge_prompt;
 pub mod runner;
 pub mod actions;
 pub mod registry;

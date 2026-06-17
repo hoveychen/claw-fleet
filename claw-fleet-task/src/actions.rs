@@ -56,6 +56,11 @@ pub fn start_task(task_id: &str, host: &dyn TaskHost, opts: StartOpts) -> Result
     let workspace = host.workspace_for_task(&task)?;
     let slug = slugify_title(&task.title);
     let branch = pick_unique_branch(&workspace, &slug)?;
+    // Record the branch we're forking from BEFORE git_create_branch switches
+    // HEAD to fleet/<slug> — accept_task's merge-back targets this branch.
+    if task.base_branch.is_none() {
+        task.base_branch = crate::task::Task::current_branch(&workspace);
+    }
     git_create_branch(&workspace, &branch)?;
     task.task_branch = Some(branch);
     // Persist workspace so out-of-process tools (fleet-cli, the orchestrator)

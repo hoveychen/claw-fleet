@@ -1011,6 +1011,9 @@ export interface E2eOutcome {
   ranAt: number;
 }
 
+/** How `accept_task` finalises a reviewed task (mirrors Rust `AcceptMode`). */
+export type AcceptMode = "mergeBack" | "keepBranch";
+
 export interface TaskInput {
   projectId: string;
   /** Optional. When omitted the backend derives a placeholder from

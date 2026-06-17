@@ -1820,8 +1820,14 @@ fn start_task(state: tauri::State<AppState>, task_id: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn accept_task(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
-    state.backend.read().unwrap().accept_task(&task_id)
+fn accept_task(
+    state: tauri::State<AppState>,
+    task_id: String,
+    mode: Option<crate::task::AcceptMode>,
+) -> Result<(), String> {
+    // Default to MergeBack (合回+清理) when the caller omits the mode.
+    let mode = mode.unwrap_or_default();
+    state.backend.read().unwrap().accept_task(&task_id, mode)
 }
 
 #[tauri::command]

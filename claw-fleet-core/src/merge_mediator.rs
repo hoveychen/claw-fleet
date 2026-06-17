@@ -73,98 +73,14 @@ pub const MEDIATOR_MODEL: &str = "claude-sonnet-4-6";
 /// single file blows past this, escalate.
 pub const MEDIATOR_TIMEOUT: Duration = Duration::from_secs(120);
 
-/// Prompt template. Filled with the file path + 3-way contents, wrapped so
-/// the LLM's output is easy to extract. The wrapper tags are intentional
-/// — relying on the LLM to emit "just the file" is fragile; the tags let
-/// us strip preamble noise deterministically.
-///
-/// The template encodes four explicit heuristics, one per
-/// numbered instruction: (1) preserve every non-conflicting change from
-/// both sides; (2) favor THEIRS (the incoming worker branch) on overlap
-/// unless OURS clearly supersedes; (3) leave NO conflict markers; (4) emit
-/// the complete file content wrapped in `<resolved>...</resolved>`. The
-/// THEIRS bias is the load-bearing rule for repeatability — workers own the
-/// P-item's changes, so their version is authoritative on genuine overlap.
-pub const MEDIATOR_PROMPT_TEMPLATE: &str = "You are resolving a 3-way merge conflict for a single file. \
-You will be given the common ancestor (BASE), the current branch's version (OURS), and \
-the incoming branch's version (THEIRS). Produce a single resolved version that:
-
-1. Preserves every non-conflicting change from both sides.
-2. For changes that overlap, prefer the intent of THEIRS unless OURS clearly supersedes it.
-3. Must contain NO conflict markers (no `<<<<<<<`, `=======`, `>>>>>>>`).
-4. Must be the complete, ready-to-write file content — not a diff, not commentary.
-
-Wrap the resolved file content in exactly these tags so it can be extracted:
-
-<resolved>
-<file content here>
-</resolved>
-
-Path: {PATH}
-
-<base>
-{BASE}
-</base>
-
-<ours>
-{OURS}
-</ours>
-
-<theirs>
-{THEIRS}
-</theirs>
-
-Now emit the resolved file inside <resolved>...</resolved>. Nothing else.";
-
-/// Render the prompt for one conflict. Pure function; testable without an
-/// LLM.
-///
-/// Fills `MEDIATOR_PROMPT_TEMPLATE` with the conflicted file's
-/// path and 3-way (BASE/OURS/THEIRS) contents — this is the fixed prompt
-/// each per-file LLM call receives.
-pub fn render_prompt(spec: &ConflictSpec) -> String {
-    MEDIATOR_PROMPT_TEMPLATE
-        .replace("{PATH}", &spec.path.display().to_string())
-        .replace("{BASE}", &spec.base)
-        .replace("{OURS}", &spec.ours)
-        .replace("{THEIRS}", &spec.theirs)
-}
-
-/// Extract the resolved content from the LLM's response. Returns the inner
-/// text between `<resolved>` and `</resolved>` (newlines trimmed at the
-/// boundaries). Pure function.
-///
-/// Enforces the `<resolved>...</resolved>` wrapper contract: a
-/// response lacking the tags yields `None`, which `mediate_one` surfaces as
-/// `MissingWrapper` rather than guessing at unwrapped output.
-pub fn extract_resolved(response: &str) -> Option<String> {
-    let start = response.find("<resolved>")?;
-    let after_open = &response[start + "<resolved>".len()..];
-    let end = after_open.find("</resolved>")?;
-    let inner = &after_open[..end];
-    // Trim a single leading newline (the prompt asks the LLM to put content
-    // on its own line after the opening tag, so a `\n` is expected there).
-    let trimmed = inner.strip_prefix('\n').unwrap_or(inner);
-    let trimmed = trimmed.strip_suffix('\n').unwrap_or(trimmed);
-    Some(trimmed.to_string())
-}
-
-/// Sanity check: no conflict markers in the resolved content. Returns the
-/// first offending marker if any.
-///
-/// Rejects any resolved content still containing `<<<<<<<`,
-/// `=======`, or `>>>>>>>` — `mediate_one` turns a hit into the
-/// `MarkersLeftBehind` error so we never write half-resolved conflicts.
-pub fn first_conflict_marker(content: &str) -> Option<String> {
-    for marker in ["<<<<<<<", "=======", ">>>>>>>"] {
-        for line in content.lines() {
-            if line.starts_with(marker) {
-                return Some(line.to_string());
-            }
-        }
-    }
-    None
-}
+// Prompt template + pure response parsing moved to `claw-fleet-task`'s
+// `merge_prompt` module so `fleet-task`'s LocalHost (which spawns `claude`
+// directly, with no dependency on this crate) shares one copy. Re-exported here
+// to keep `merge_mediator::{render_prompt, extract_resolved, ...}` callers and
+// tests working unchanged.
+pub use claw_fleet_task::merge_prompt::{
+    extract_resolved, first_conflict_marker, render_prompt, MEDIATOR_PROMPT_TEMPLATE,
+};
 
 /// Mediate one conflict via the supplied provider. Caller owns the
 /// provider so tests can swap in fakes.
