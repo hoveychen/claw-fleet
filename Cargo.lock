@@ -930,6 +930,7 @@ dependencies = [
  "libc",
  "serde",
  "serde_json",
+ "serde_yaml",
  "tempfile",
  "uuid",
  "windows-sys 0.59.0",
