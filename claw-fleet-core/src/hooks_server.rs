@@ -161,6 +161,12 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         Ok(n) => eprintln!("[fleet serve] recovered {n} zombie session(s) on startup"),
         Err(e) => eprintln!("[fleet serve] zombie recovery failed: {e}"),
     }
+    // Task-store analogue: revert tasks left Running whose runtime is gone.
+    match crate::task::migrate_zombie_running_tasks() {
+        Ok(0) => {}
+        Ok(n) => eprintln!("[fleet serve] recovered {n} zombie running task(s) on startup"),
+        Err(e) => eprintln!("[fleet serve] zombie task recovery failed: {e}"),
+    }
     match crate::supervisor::gc_orphan_worktrees() {
         Ok(0) => {}
         Ok(n) => eprintln!("[fleet serve] reaped {n} orphan worktree(s) on startup"),

@@ -1004,6 +1004,11 @@ export interface Task {
    *  out of AwaitingAcceptance — the UI surfaces this so a task stuck in
    *  `running` after all P-items are done explains itself. */
   e2e?: E2eOutcome | null;
+  /** Why the most recent start failed to bring the runtime up. Set
+   *  asynchronously (start is non-blocking) and carried on the Task so both
+   *  backends surface the same reason; a failed start also reverts the task to
+   *  `drafting`. Cleared on the next start attempt. */
+  startError?: string | null;
 }
 
 /** Task-level e2e verification outcome (mirrors Rust `E2eOutcome`). */
