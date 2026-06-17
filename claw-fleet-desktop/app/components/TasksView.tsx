@@ -25,6 +25,7 @@ export function TasksView() {
     startTask,
     acceptTask,
     updateTaskTitle,
+    deleteTask,
   } = useTasksStore();
 
   useEffect(() => {
@@ -48,6 +49,7 @@ export function TasksView() {
           onStart={() => startTask(selectedTask.id)}
           onAccept={() => acceptTask(selectedTask.id)}
           onRename={(title) => updateTaskTitle(selectedTask.id, title)}
+          onDelete={() => deleteTask(selectedTask.id)}
         />
       </div>
     );
