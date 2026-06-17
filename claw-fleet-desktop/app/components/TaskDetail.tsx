@@ -363,16 +363,70 @@ function PlanKanban({ task }: { task: Task }) {
   }
   for (const arr of [pending, active, resolved]) arr.sort((a, b) => a.id.localeCompare(b.id));
 
+  // Dependency layers for the DAG: level = longest dependency chain.
+  const levels = computeLevels(task.plan.items);
+  const maxLevel = levels.size > 0 ? Math.max(...Array.from(levels.values())) : 0;
+  const columns: PItem[][] = Array.from({ length: maxLevel + 1 }, () => []);
+  for (const id of Object.keys(task.plan.items)) columns[levels.get(id) ?? 0].push(task.plan.items[id]);
+  for (const col of columns) col.sort((a, b) => a.id.localeCompare(b.id));
+
   return (
     <section className={styles.section}>
       <h3 className={styles.section_title}>{t("detail.section_plan", "计划")}</h3>
+
+      {/* Kanban — status distribution at a glance */}
+      <div className={styles.subhead}>{t("detail.plan_kanban", "看板")}</div>
       <div className={styles.kanban}>
         <KanbanColumn title={t("tasks.col_pending", "Pending")} items={pending} />
         <KanbanColumn title={t("tasks.col_active", "Active")} items={active} highlight />
         <KanbanColumn title={t("tasks.col_resolved", "Resolved")} items={resolved} />
       </div>
+
+      {/* DAG — dependency structure */}
+      <div className={styles.subhead}>{t("detail.plan_dag", "依赖图")}</div>
+      <div className={styles.dag}>
+        {columns.map((col, ci) => (
+          <div key={ci} className={styles.dag_col_wrap}>
+            <div className={styles.dag_col}>
+              {col.map((p) => (
+                <div
+                  key={p.id}
+                  className={styles.dag_node}
+                  style={{ borderLeftColor: pItemColor(p.status) }}
+                  title={`${p.id} — ${pItemStatusKey(p.status)}\n${p.desc}`}
+                >
+                  <div className={styles.dag_node_head}>
+                    <span className={styles.dag_dot} style={{ background: pItemColor(p.status) }} />
+                    <span className={styles.dag_id}>{p.id}</span>
+                    {p.humanGate && <Eye size={11} strokeWidth={1.6} className={styles.dag_gate} />}
+                  </div>
+                  <div className={styles.dag_desc}>{p.desc}</div>
+                </div>
+              ))}
+            </div>
+            {ci < columns.length - 1 && <div className={styles.dag_arrow}>→</div>}
+          </div>
+        ))}
+      </div>
     </section>
   );
+}
+
+function computeLevels(items: Record<string, PItem>): Map<string, number> {
+  const level = new Map<string, number>();
+  const visiting = new Set<string>();
+  const depth = (id: string): number => {
+    if (level.has(id)) return level.get(id)!;
+    if (visiting.has(id)) return 0; // cycle guard
+    visiting.add(id);
+    const deps = items[id]?.dependsOn ?? [];
+    const d = deps.length === 0 ? 0 : 1 + Math.max(...deps.map((dep) => (items[dep] ? depth(dep) : -1)));
+    visiting.delete(id);
+    level.set(id, d);
+    return d;
+  };
+  for (const id of Object.keys(items)) depth(id);
+  return level;
 }
 
 function KanbanColumn({ title, items, highlight }: { title: string; items: PItem[]; highlight?: boolean }) {
