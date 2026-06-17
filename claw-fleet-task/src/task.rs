@@ -76,6 +76,15 @@ pub struct Task {
     /// path then falls back to a main/master heuristic.
     #[serde(default)]
     pub base_branch: Option<String>,
+    /// Why the most recent `start_task` failed to bring the runtime up, set
+    /// asynchronously (start is non-blocking — it spawns `fleet task-runtime`
+    /// and returns immediately). `None` when never-started or started cleanly;
+    /// cleared at the next start attempt. Carried on the Task (not a local
+    /// Tauri event) so both LocalBackend and RemoteBackend surface the same
+    /// reason. A failed start also reverts `status` Running→Drafting so the
+    /// Start button re-enables.
+    #[serde(default)]
+    pub start_error: Option<String>,
 }
 
 /// Outcome of the task-level e2e command configured in `fleet.yaml`'s
@@ -238,6 +247,7 @@ impl Task {
             model: None,
             e2e: None,
             base_branch: None,
+            start_error: None,
         }
     }
 
@@ -398,6 +408,39 @@ pub fn set_task_title(task_id: &str, new_title: &str, auto: bool) -> Result<(), 
     } else {
         task.title = trimmed.to_string();
         task.title_auto = false;
+    }
+    write_task_atomic(&task)
+}
+
+/// Clear any prior start-failure reason. Called at the start of a (re)start
+/// attempt so a fresh attempt doesn't carry a stale error. No-op (no write)
+/// when already clear.
+pub fn clear_task_start_error(task_id: &str) -> Result<(), String> {
+    let lock = task_write_lock(task_id);
+    let _g = lock.lock().expect("task write mutex poisoned");
+    let mut task = get_task(task_id)?;
+    if task.start_error.is_some() {
+        task.start_error = None;
+        write_task_atomic(&task)?;
+    }
+    Ok(())
+}
+
+/// Record an asynchronous start failure (start is non-blocking — the runtime is
+/// spawned detached and may fail to come up after `start_task` already
+/// returned). Sets `start_error`, and if the task is still `Running` (the
+/// runtime flipped status but then died / never registered) reverts it to
+/// `Drafting` so the Start button re-enables. Status is left untouched for any
+/// non-Running state (e.g. the child crashed before flipping to Running, so the
+/// task is already back in Drafting). Callers MUST confirm the runtime is
+/// actually dead before calling this — it does not check liveness itself.
+pub fn mark_task_start_failed(task_id: &str, reason: &str) -> Result<(), String> {
+    let lock = task_write_lock(task_id);
+    let _g = lock.lock().expect("task write mutex poisoned");
+    let mut task = get_task(task_id)?;
+    task.start_error = Some(reason.to_string());
+    if matches!(task.status, TaskStatus::Running) {
+        task.status = TaskStatus::Drafting;
     }
     write_task_atomic(&task)
 }
@@ -622,6 +665,78 @@ mod tests {
         let json = serde_json::to_string(&t).unwrap();
         let back: Task = serde_json::from_str(&json).unwrap();
         assert_eq!(t, back);
+    }
+
+    #[test]
+    fn start_error_defaults_none_for_legacy_json() {
+        let t = Task::drafting("t1".into(), "p1".into(), "x".into(), 0);
+        assert!(t.start_error.is_none());
+        // Simulate a pre-field task json: serialize, drop the key, re-parse.
+        let mut v = serde_json::to_value(&t).unwrap();
+        v.as_object_mut().unwrap().remove("startError");
+        let back: Task = serde_json::from_value(v).unwrap();
+        assert!(back.start_error.is_none());
+        // And a value round-trips.
+        let mut t2 = t.clone();
+        t2.start_error = Some("boom".into());
+        let j = serde_json::to_string(&t2).unwrap();
+        assert_eq!(
+            serde_json::from_str::<Task>(&j).unwrap().start_error.as_deref(),
+            Some("boom")
+        );
+    }
+
+    #[test]
+    fn mark_start_failed_reverts_running_and_clear_resets() {
+        let _lock = crate::paths::fleet_home_lock();
+        let prev = std::env::var_os("FLEET_HOME");
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        let mut t = Task::drafting("tid".into(), "p".into(), "x".into(), 0);
+        t.status = TaskStatus::Running;
+        write_task_atomic(&t).unwrap();
+
+        mark_task_start_failed("tid", "registry entry did not appear").unwrap();
+        let after = get_task("tid").unwrap();
+        assert!(
+            matches!(after.status, TaskStatus::Drafting),
+            "Running reverts to Drafting so Start re-enables"
+        );
+        assert_eq!(
+            after.start_error.as_deref(),
+            Some("registry entry did not appear")
+        );
+
+        clear_task_start_error("tid").unwrap();
+        assert!(get_task("tid").unwrap().start_error.is_none());
+
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+    }
+
+    #[test]
+    fn mark_start_failed_on_drafting_keeps_status() {
+        let _lock = crate::paths::fleet_home_lock();
+        let prev = std::env::var_os("FLEET_HOME");
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        // Child crashed before flipping to Running → task already Drafting.
+        let t = Task::drafting("tid2".into(), "p".into(), "x".into(), 0);
+        write_task_atomic(&t).unwrap();
+
+        mark_task_start_failed("tid2", "boom").unwrap();
+        let after = get_task("tid2").unwrap();
+        assert!(matches!(after.status, TaskStatus::Drafting));
+        assert_eq!(after.start_error.as_deref(), Some("boom"));
+
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
     }
 
     #[test]
