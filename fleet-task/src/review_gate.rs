@@ -15,7 +15,7 @@ use std::process::Command;
 use claw_fleet_task::asset_inject;
 use claw_fleet_task::orchestrator::{ReviewGate, ReviewVerdict};
 use claw_fleet_task::pitem::PItem;
-use claw_fleet_task::{review, worktree};
+use claw_fleet_task::{review, verify, verify_config, worktree};
 use claw_fleet_task::task::Task;
 
 /// Production review gate. `workspace` is the project root (fallback cwd when
@@ -33,6 +33,22 @@ impl ReviewGate for RealReviewGate {
             .ok()
             .filter(|p| p.exists())
             .unwrap_or_else(|| self.workspace.clone());
+
+        // Mechanical gate FIRST: run the P-item's executable acceptance criteria
+        // (Builds / TestsPass) in the worktree for real. Exit codes are ground
+        // truth — if any fails we reject without ever asking the LLM, so a
+        // worker that "claims done" but doesn't compile/pass can't slip past a
+        // model eyeballing the diff. Config from <workspace>/fleet.yaml; an
+        // unreadable file degrades to "no mechanical gate" (logged) rather than
+        // bricking every review.
+        let cfg = verify_config::read_verify_config(&self.workspace).unwrap_or_else(|e| {
+            eprintln!("[review] fleet.yaml verify config unreadable, skipping mechanical gate: {e}");
+            Default::default()
+        });
+        if let Err(gaps) = verify::run_mechanical_gate(p_item, &cfg, &wt) {
+            return Ok(ReviewVerdict { achieved: false, gaps });
+        }
+
         let task_branch = task.task_branch.as_deref().unwrap_or("HEAD");
         let diff = git_diff(&wt, task_branch).unwrap_or_else(|e| {
             format!("(could not compute diff: {e})")

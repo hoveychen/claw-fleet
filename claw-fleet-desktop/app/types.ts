@@ -996,6 +996,19 @@ export interface Task {
   /** Optional per-task model override (composer selector). Drives the
    *  planning/master session; null falls back to the default planner model. */
   model?: string | null;
+  /** Result of the task-level e2e verification pass. Present once the plan
+   *  finished and `verify.e2e` (fleet.yaml) ran. A failed run keeps the task
+   *  out of AwaitingAcceptance — the UI surfaces this so a task stuck in
+   *  `running` after all P-items are done explains itself. */
+  e2e?: E2eOutcome | null;
+}
+
+/** Task-level e2e verification outcome (mirrors Rust `E2eOutcome`). */
+export interface E2eOutcome {
+  command: string;
+  passed: boolean;
+  gaps: string[];
+  ranAt: number;
 }
 
 export interface TaskInput {

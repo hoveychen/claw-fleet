@@ -1295,7 +1295,9 @@
     "action_paused": "已暂停",
     "action_drafting": "草稿 / 规划中",
     "action_done": "已完成",
-    "action_abandoned": "已放弃"
+    "action_abandoned": "已放弃",
+    "e2e_passed": "端到端验证通过",
+    "e2e_failed": "端到端验证未通过 —— 任务已在验收前拦下"
   },
   "settings": {
     "title": "设置",
