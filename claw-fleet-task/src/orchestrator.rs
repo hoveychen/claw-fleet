@@ -220,10 +220,14 @@ impl Orchestrator {
             });
         }
 
-        // Rejected: fail the P-item and skip everything it poisons.
+        // Rejected: fail the P-item and skip everything it poisons. Persist the
+        // gaps onto the P-item (covers both an LLM verdict and a mechanical-gate
+        // rejection — both arrive here as `verdict.gaps`) so the UI can explain
+        // the red node instead of dropping the reason into a transient step.
         if let Some(p) = task.plan.get_mut(id) {
             p.status = PItemStatus::Failed(FailReason::ReviewRejected);
             p.completed_at = Some(now());
+            p.failure_gaps = verdict.gaps.clone();
         }
         task.plan.propagate_skip();
         write_task_atomic(task)?;
@@ -371,6 +375,7 @@ mod tests {
             started_at: None,
             completed_at: None,
             output_summary: None,
+            failure_gaps: Vec::new(),
         }
     }
 
@@ -523,6 +528,11 @@ mod tests {
         let rejected = orch.step(&host, &gate).unwrap(); // review rejects a
         assert_eq!(rejected, OrchestratorStep::Rejected("a".into(), vec!["missing tests".into()]));
         assert_eq!(status_of("a"), PItemStatus::Failed(FailReason::ReviewRejected));
+        // The rejection gaps are persisted onto the P-item (A: UI can explain it).
+        assert_eq!(
+            get_task("t1").unwrap().plan.get("a").unwrap().failure_gaps,
+            vec!["missing tests".to_string()]
+        );
         // a never merged.
         assert!(host.merged.borrow().is_empty());
         // b was poisoned → Skipped, never dispatched.

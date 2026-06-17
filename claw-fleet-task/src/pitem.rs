@@ -50,6 +50,12 @@ pub struct PItem {
     pub completed_at: Option<i64>,
     #[serde(default)]
     pub output_summary: Option<String>,
+    /// Why this P-item was rejected, when `status` is `Failed(ReviewRejected)`:
+    /// the review gate's gaps (LLM verdict) or the mechanical gate's failed
+    /// command + output tail. Persisted so the UI can explain a red P-item
+    /// instead of leaving the user guessing. Empty for non-rejected items.
+    #[serde(default)]
+    pub failure_gaps: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -149,6 +155,7 @@ mod tests {
             started_at: None,
             completed_at: None,
             output_summary: None,
+            failure_gaps: Vec::new(),
         }
     }
 

@@ -172,6 +172,7 @@ mod tests {
             started_at: Some(1),
             completed_at: None,
             output_summary: summary.map(|s| s.into()),
+            failure_gaps: Vec::new(),
         }
     }
 

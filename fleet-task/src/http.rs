@@ -339,6 +339,7 @@ mod tests {
             started_at: None,
             completed_at: None,
             output_summary: None,
+            failure_gaps: Vec::new(),
         }
     }
 

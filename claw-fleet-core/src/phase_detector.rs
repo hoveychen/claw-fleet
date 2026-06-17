@@ -152,6 +152,7 @@ pub fn phases_to_pitems(phases: &[DetectedPhase], predecessor_ids: &[PItemId]) -
             started_at: None,
             completed_at: None,
             output_summary: None,
+            failure_gaps: Vec::new(),
         });
         prev = Some(ph.id.clone());
     }
