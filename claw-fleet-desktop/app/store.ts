@@ -313,13 +313,13 @@ interface TasksState {
   tasks: Task[];
   selectedTaskId: string | null;
   loaded: boolean;
-  /// Phase 5: remembers the projectId argument of the last refresh so the
-  /// `tasks-updated` event handler can re-run with the same scope without
-  /// the caller having to thread the current selection through.
-  lastProjectId: string | null;
   setSelectedTaskId: (id: string | null) => void;
-  refresh: (projectId?: string) => Promise<void>;
-  refreshLastScope: () => Promise<void>;
+  /// Always fetches the FULL task list across all projects — the sidebar
+  /// renders this shared array unfiltered, while the project/task views filter
+  /// it client-side (`tasks.filter(projectId)`). A project-scoped fetch here
+  /// would clobber the sidebar's full list, so there is deliberately no
+  /// projectId parameter.
+  refresh: () => Promise<void>;
   createTask: (input: TaskInput) => Promise<Task>;
   startTask: (taskId: string) => Promise<void>;
   acceptTask: (taskId: string, mode?: AcceptMode) => Promise<void>;
@@ -332,19 +332,14 @@ export const useTasksStore = create<TasksState>((set, get) => ({
   tasks: [],
   selectedTaskId: null,
   loaded: false,
-  lastProjectId: null,
   setSelectedTaskId: (id) => set({ selectedTaskId: id }),
-  refresh: async (projectId) => {
+  refresh: async () => {
     try {
-      const tasks = await invoke<Task[]>("list_tasks", { projectId: projectId ?? null });
-      set({ tasks, loaded: true, lastProjectId: projectId ?? null });
+      const tasks = await invoke<Task[]>("list_tasks", { projectId: null });
+      set({ tasks, loaded: true });
     } catch {
-      set({ loaded: true, lastProjectId: projectId ?? null });
+      set({ loaded: true });
     }
-  },
-  refreshLastScope: async () => {
-    const pid = get().lastProjectId;
-    return get().refresh(pid ?? undefined);
   },
   createTask: async (input) => {
     const task = await invoke<Task>("create_task", { input });
