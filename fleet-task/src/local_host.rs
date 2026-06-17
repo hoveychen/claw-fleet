@@ -16,9 +16,10 @@ use claw_fleet_task::asset_inject;
 use claw_fleet_task::orchestrator::OrchestratorHost;
 use claw_fleet_task::runner::{LlmMediator, Resolution, TaskLifecycleHost};
 use claw_fleet_task::spawn_specs::{PlannerSpawnSpec, ReviewSpawnSpec};
-use claw_fleet_task::task::Task;
+use claw_fleet_task::task::{E2eOutcome, Task};
 use claw_fleet_task::worker::{worker_spawn_spec, WorkerSpawnSpec};
 use claw_fleet_task::worktree::{self, ConflictSpec};
+use claw_fleet_task::{verify, verify_config};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionKind {
@@ -431,6 +432,67 @@ impl OrchestratorHost for LocalHost {
             ));
         }
         worktree::reap(&self.workspace, &task.id, p_item_id)
+    }
+
+    fn run_task_e2e(&self, task: &Task) -> Result<Option<E2eOutcome>, String> {
+        let cfg = verify_config::read_verify_config(&self.workspace)?;
+        let Some(cmd) = cfg.e2e.filter(|c| !c.trim().is_empty()) else {
+            return Ok(None); // no e2e configured → orchestrator proceeds to acceptance
+        };
+        let task_branch = task
+            .task_branch
+            .as_deref()
+            .ok_or_else(|| format!("task {} has no task_branch for e2e", task.id))?;
+
+        // Run e2e against the finished task-branch state in a throwaway detached
+        // worktree so the user's own checkout is never disturbed. `--detach`
+        // checks out the commit (not the branch), so it never collides with a
+        // branch already checked out elsewhere.
+        let wt_dir = worktree::worktree_root()?.join(&task.id).join("__e2e__");
+        let remove = |dir: &Path| {
+            let _ = Command::new("git")
+                .arg("-C")
+                .arg(&self.workspace)
+                .args(["worktree", "remove", "--force"])
+                .arg(dir)
+                .output();
+        };
+        remove(&wt_dir); // clear any stale leftover first
+        let add = Command::new("git")
+            .arg("-C")
+            .arg(&self.workspace)
+            .args(["worktree", "add", "--detach"])
+            .arg(&wt_dir)
+            .arg(task_branch)
+            .output()
+            .map_err(|e| format!("git worktree add for e2e: {e}"))?;
+        if !add.status.success() {
+            return Err(format!(
+                "git worktree add for e2e failed: {}",
+                String::from_utf8_lossy(&add.stderr).trim()
+            ));
+        }
+
+        let run = verify::run_check(&cmd, &wt_dir);
+        remove(&wt_dir); // best-effort reap
+
+        let mut gaps = Vec::new();
+        if !run.ok {
+            gaps.push(format!("e2e 命令 `{}` 未通过（退出码非 0）", run.command));
+            if !run.output_tail.is_empty() {
+                gaps.push(format!("输出末尾：{}", run.output_tail));
+            }
+        }
+        let ran_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        Ok(Some(E2eOutcome {
+            command: cmd,
+            passed: run.ok,
+            gaps,
+            ran_at,
+        }))
     }
 }
 
