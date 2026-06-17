@@ -189,6 +189,18 @@ impl LocalBackend {
                 "[BACKEND-INIT] zombie recovery failed: {e}"
             )),
         }
+        // Task-store analogue: revert any task left `Running` whose
+        // task-runtime process is gone (host crash / quit / a start that never
+        // registered) back to Drafting so the Start button re-enables.
+        match crate::task::migrate_zombie_running_tasks() {
+            Ok(0) => {}
+            Ok(n) => log_debug(&format!(
+                "[BACKEND-INIT] recovered {n} zombie running task(s)"
+            )),
+            Err(e) => log_debug(&format!(
+                "[BACKEND-INIT] zombie task recovery failed: {e}"
+            )),
+        }
 
         // Start the outbound Feishu WS long-connection if credentials already
         // exist (no-op otherwise). Idempotent. card.action.trigger arrives over

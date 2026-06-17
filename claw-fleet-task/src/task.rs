@@ -445,6 +445,31 @@ pub fn mark_task_start_failed(task_id: &str, reason: &str) -> Result<(), String>
     write_task_atomic(&task)
 }
 
+/// Startup recovery for the task store: any task still `Running` whose
+/// `fleet task-runtime` process is no longer alive (not in the live registry)
+/// is reverted to `Drafting` with a `start_error`. Without this a runtime that
+/// died — host crash, app quit, or a start that spawned but never registered —
+/// strands the task "running" with the Start button greyed out and no recovery
+/// path. This is the task-store analogue of
+/// `claw_fleet_core::supervisor::migrate_zombie_running` (which only covers the
+/// legacy fleet_sessions table). Startup-only, so it never races an in-flight
+/// start that hasn't registered yet. Returns the number of tasks recovered.
+pub fn migrate_zombie_running_tasks() -> Result<usize, String> {
+    let alive: std::collections::HashSet<String> = crate::registry::list_alive()
+        .unwrap_or_default()
+        .into_iter()
+        .map(|e| e.task_id)
+        .collect();
+    let mut migrated = 0usize;
+    for t in list_tasks(None) {
+        if matches!(t.status, TaskStatus::Running) && !alive.contains(&t.id) {
+            mark_task_start_failed(&t.id, "runtime not running — recovered on startup")?;
+            migrated += 1;
+        }
+    }
+    Ok(migrated)
+}
+
 /// Read a single task by id.
 pub fn get_task(task_id: &str) -> Result<Task, String> {
     let path = task_json_path(task_id)?;
@@ -711,6 +736,50 @@ mod tests {
         clear_task_start_error("tid").unwrap();
         assert!(get_task("tid").unwrap().start_error.is_none());
 
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+    }
+
+    #[test]
+    fn zombie_running_tasks_reverts_dead_keeps_alive() {
+        let _lock = crate::paths::fleet_home_lock();
+        let prev = std::env::var_os("FLEET_HOME");
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        // Dead running task — no registry entry.
+        let mut dead = Task::drafting("dead".into(), "p".into(), "x".into(), 0);
+        dead.status = TaskStatus::Running;
+        write_task_atomic(&dead).unwrap();
+
+        // Alive running task — registry entry with this (alive) test process pid.
+        let mut alive = Task::drafting("alive".into(), "p".into(), "x".into(), 0);
+        alive.status = TaskStatus::Running;
+        write_task_atomic(&alive).unwrap();
+        crate::registry::write(&crate::registry::RegistryEntry {
+            task_id: "alive".into(),
+            pid: std::process::id(),
+            port: 12345,
+            started_at: "2026-01-01T00:00:00Z".into(),
+        })
+        .unwrap();
+
+        // Drafting task — untouched.
+        write_task_atomic(&Task::drafting("draft".into(), "p".into(), "x".into(), 0)).unwrap();
+
+        let n = migrate_zombie_running_tasks().unwrap();
+        assert_eq!(n, 1, "only the dead running task is recovered");
+        assert!(matches!(get_task("dead").unwrap().status, TaskStatus::Drafting));
+        assert!(get_task("dead").unwrap().start_error.is_some());
+        assert!(
+            matches!(get_task("alive").unwrap().status, TaskStatus::Running),
+            "task with a live runtime stays Running"
+        );
+        assert!(matches!(get_task("draft").unwrap().status, TaskStatus::Drafting));
+
+        crate::registry::remove("alive").ok();
         match prev {
             Some(p) => std::env::set_var("FLEET_HOME", p),
             None => std::env::remove_var("FLEET_HOME"),
