@@ -1597,7 +1597,8 @@
     "install_error": "Failed to install hooks: {{error}}"
   },
   "decision": {
-    "pending": "Pending decisions"
+    "pending": "Pending decisions",
+    "preceding_label": "Agent said while working"
   },
   "guard": {
     "title": "Critical Command Detected",
