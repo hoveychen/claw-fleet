@@ -40,13 +40,12 @@ export OPENSSL_STATIC=1
 TARGET=$(rustc -vV | sed -n 's|host: ||p')
 echo "==> Target: $TARGET"
 
-# 1. Build fleet CLI + fleet-task sidecars (debug)
-#    fleet-task owns the task lifecycle (Phase 3 hard-cut): the desktop app
-#    spawns it next to its own executable (resolve_fleet_task_binary), so it
-#    MUST be bundled alongside the fleet CLI or every task start fails with
-#    "fleet-task binary not found".
-echo "==> Building fleet CLI + fleet-task..."
-cargo build -p fleet-cli -p fleet-task
+# 1. Build fleet CLI sidecar (debug)
+#    The task lifecycle runtime is folded into this binary as the hidden
+#    `fleet task-runtime` subcommand, so the single `fleet` sidecar covers
+#    both the CLI and the task runtime the desktop spawns.
+echo "==> Building fleet CLI..."
+cargo build -p fleet-cli
 
 # 2. Copy compiled binaries into binaries/ so Tauri bundles the real binary.
 #    Only update if content differs — Tauri's externalBin watcher invalidates
@@ -77,8 +76,7 @@ stage_sidecar() {
   fi
 }
 
-stage_sidecar fleet-cli  fleet
-stage_sidecar fleet-task fleet-task
+stage_sidecar fleet-cli fleet
 
 # 3. Install frontend deps (pnpm, matching CI). tauri's beforeBuildCommand runs
 #    `pnpm build`, and `npx tauri` itself resolves @tauri-apps/cli from
@@ -93,12 +91,13 @@ echo "==> Building Tauri app... (VITE_PROJECTS_ENABLED=$VITE_PROJECTS_ENABLED)"
 (cd claw-fleet-desktop && npx tauri build --debug --bundles app)
 
 # 5. Sign with entitlements (macOS only)
-#    Sign EACH sidecar FIRST with its own (non-sandbox) entitlements, then the
-#    outer app bundle. Using --deep would overwrite the sidecar signatures with
-#    the app's sandbox entitlements, causing SIGTRAP when a sidecar is invoked
-#    externally (e.g. fleet by Claude Code hooks, fleet-task by the supervisor).
+#    Sign the sidecar FIRST with its own (non-sandbox) entitlements, then the
+#    outer app bundle. Using --deep would overwrite the sidecar signature with
+#    the app's sandbox entitlements, causing SIGTRAP when the sidecar is invoked
+#    externally (e.g. fleet by Claude Code hooks, or `fleet task-runtime` by the
+#    desktop). Kept as a loop so adding sidecars later stays a one-line change.
 APP_BUNDLE="target/debug/bundle/macos/Claw Fleet.app"
-SIDECARS=("$APP_BUNDLE/Contents/MacOS/fleet" "$APP_BUNDLE/Contents/MacOS/fleet-task")
+SIDECARS=("$APP_BUNDLE/Contents/MacOS/fleet")
 if [[ ! -d "$APP_BUNDLE" ]]; then
   echo "==> App bundle not produced at $APP_BUNDLE — skipping macOS post-steps."
   echo "Done! Build stamp: $BUILD_STAMP"
