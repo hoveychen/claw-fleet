@@ -298,79 +298,129 @@
   color: var(--color-text-dim);
 }
 
-/* ── DAG ─────────────────────────────────────────────────────────────────── */
+/* ── P-item kanban (Pending / Active / Resolved) ─────────────────────────── */
 
-.dag {
-  display: flex;
-  align-items: flex-start;
-  gap: 0;
-  overflow-x: auto;
+.kanban {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.kb_col {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: 10px;
-  padding: 16px;
+  padding: 10px;
+  min-width: 0;
 }
 
-.dag_col_wrap {
+.kb_col_active {
+  border-color: rgba(240, 135, 90, 0.4);
+  background: rgba(240, 135, 90, 0.05);
+}
+
+.kb_col_head {
   display: flex;
   align-items: center;
-  gap: 0;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-text-dim);
+  margin-bottom: 8px;
 }
 
-.dag_col {
+.kb_count {
+  background: var(--color-bg-card);
+  border-radius: 9px;
+  padding: 1px 7px;
+  font-size: 10px;
+  color: var(--color-text-muted);
+}
+
+.kb_col_body {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
-.dag_arrow {
+.kb_empty {
+  font-size: 12px;
   color: var(--color-text-muted);
-  font-size: 16px;
-  margin: 0 10px;
-  flex-shrink: 0;
+  text-align: center;
+  padding: 6px 0;
 }
 
-.dag_node {
+.kb_card {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-left-width: 3px;
+  border-left: 3px solid var(--color-border);
   border-radius: 9px;
   padding: 8px 11px;
-  min-width: 110px;
-  max-width: 160px;
 }
 
-.dag_node_head {
+.kb_card_head {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.dag_dot {
+.kb_dot {
   width: 8px;
   height: 8px;
   border-radius: 50%;
   flex-shrink: 0;
 }
 
-.dag_id {
+.kb_id {
   font-weight: 600;
   font-size: 12px;
 }
 
-.dag_gate {
+.kb_gate {
   margin-left: auto;
   color: #7aa0fa;
 }
 
-.dag_desc {
-  font-size: 11px;
+.kb_desc {
+  font-size: 11.5px;
+  color: var(--color-text);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.kb_gate_pending {
+  font-size: 10.5px;
+  color: #7aa0fa;
+  margin-top: 5px;
+}
+
+.kb_touches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.kb_touches code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
   color: var(--color-text-muted);
-  margin-top: 3px;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  background: var(--color-bg-secondary);
+  border-radius: 4px;
+  padding: 1px 5px;
+  max-width: 100%;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kb_touches span {
+  font-size: 10px;
+  color: var(--color-text-muted);
 }
 
 /* ── deliverables ─────────────────────────────────────────────────────────── */
