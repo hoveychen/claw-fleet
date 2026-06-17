@@ -31,7 +31,7 @@ export function SessionDetail({
   /** When set, the component runs in standalone mode: its own local
    *  session/messages state, independent from the global useDetailStore.
    *  Used by DecisionPanel's inline detail column so it doesn't fight the
-   *  KanbanView drawer over the singleton store. No live tail in this mode —
+   *  global detail store. No live tail in this mode —
    *  messages are a snapshot (pending decisions block the agent anyway). */
   sessionInfo?: SessionInfo | null;
 } = {}) {
