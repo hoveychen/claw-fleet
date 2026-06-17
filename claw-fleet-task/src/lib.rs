@@ -14,6 +14,8 @@ pub mod spawn_specs;
 pub mod planning;
 pub mod orchestrator;
 pub mod review;
+pub mod verify_config;
+pub mod verify;
 pub mod runner;
 pub mod actions;
 pub mod registry;

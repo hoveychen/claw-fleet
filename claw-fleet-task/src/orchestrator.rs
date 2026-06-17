@@ -19,7 +19,7 @@
 //!   --review rejected--> Failed(ReviewRejected) (+ propagate_skip)`
 
 use crate::pitem::{FailReason, PItem, PItemId, PItemStatus};
-use crate::task::{get_task, task_write_lock, write_task_atomic, Task, TaskStatus};
+use crate::task::{get_task, task_write_lock, write_task_atomic, E2eOutcome, Task, TaskStatus};
 
 /// The review session's verdict on a finished P-item.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -48,6 +48,13 @@ pub trait OrchestratorHost {
     /// Merge the P-item's worktree branch back into the task branch and reap
     /// the worktree. Called only after the review passed.
     fn merge_and_reap(&self, task: &Task, p_item_id: &str) -> Result<(), String>;
+    /// Run the task-level e2e command (from `fleet.yaml`'s `verify.e2e`) against
+    /// the finished task branch. `Ok(None)` when no e2e command is configured
+    /// (→ task proceeds straight to `AwaitingAcceptance`); `Ok(Some(outcome))`
+    /// when it ran (outcome carries pass/fail). Default: no e2e configured.
+    fn run_task_e2e(&self, _task: &Task) -> Result<Option<E2eOutcome>, String> {
+        Ok(None)
+    }
 }
 
 /// Outcome of a single [`Orchestrator::step`].
@@ -69,6 +76,10 @@ pub enum OrchestratorStep {
     Idle,
     /// Every P-item is terminal; the task moved to `AwaitingAcceptance` (P7).
     PlanComplete,
+    /// Plan finished but the task-level e2e command failed. The task is kept
+    /// OUT of `AwaitingAcceptance` (stays `Running`) with the failure recorded
+    /// on `task.e2e`. Carries the e2e gaps.
+    E2eFailed(Vec<String>),
 }
 
 /// Drives one task. Cheap to construct; holds only the task id.
@@ -140,9 +151,29 @@ impl Orchestrator {
             return Ok(OrchestratorStep::Dispatched(id));
         }
 
-        // 4. Nothing active, nothing dispatchable. If the plan is finished the
-        //    task goes to AwaitingAcceptance (P7 routes the final user gate).
+        // 4. Nothing active, nothing dispatchable. If the plan is finished, run
+        //    the task-level e2e gate (if configured) before parking the task in
+        //    AwaitingAcceptance (P7 routes the final user gate).
         if task.is_plan_finished() {
+            // If a prior tick already recorded a FAILED e2e, don't re-run and
+            // don't auto-accept — the task stays Running with the failure
+            // visible. (A passing e2e falls through to AwaitingAcceptance.)
+            if matches!(&task.e2e, Some(o) if !o.passed) {
+                return Ok(OrchestratorStep::Idle);
+            }
+            // Run e2e once (only when not yet recorded).
+            if task.e2e.is_none() {
+                if let Some(outcome) = host.run_task_e2e(&task)? {
+                    let passed = outcome.passed;
+                    let gaps = outcome.gaps.clone();
+                    task.e2e = Some(outcome);
+                    write_task_atomic(&task)?;
+                    if !passed {
+                        // Stay Running; the failure is recorded on task.e2e.
+                        return Ok(OrchestratorStep::E2eFailed(gaps));
+                    }
+                }
+            }
             task.status = TaskStatus::AwaitingAcceptance;
             write_task_atomic(&task)?;
             return Ok(OrchestratorStep::PlanComplete);
@@ -257,6 +288,8 @@ mod tests {
         dispatched: RefCell<Vec<String>>,
         merged: RefCell<Vec<String>>,
         next_sid: RefCell<u32>,
+        /// What `run_task_e2e` returns. `None` → no e2e configured.
+        e2e: RefCell<Option<E2eOutcome>>,
     }
     impl FakeHost {
         fn new() -> Self {
@@ -265,10 +298,14 @@ mod tests {
                 dispatched: RefCell::new(Vec::new()),
                 merged: RefCell::new(Vec::new()),
                 next_sid: RefCell::new(0),
+                e2e: RefCell::new(None),
             }
         }
         fn mark_finished(&self, sid: &str) {
             self.finished.borrow_mut().insert(sid.to_string());
+        }
+        fn set_e2e(&self, outcome: E2eOutcome) {
+            *self.e2e.borrow_mut() = Some(outcome);
         }
     }
     impl OrchestratorHost for FakeHost {
@@ -285,6 +322,9 @@ mod tests {
         fn merge_and_reap(&self, _task: &Task, p_item_id: &str) -> Result<(), String> {
             self.merged.borrow_mut().push(p_item_id.to_string());
             Ok(())
+        }
+        fn run_task_e2e(&self, _task: &Task) -> Result<Option<E2eOutcome>, String> {
+            Ok(self.e2e.borrow().clone())
         }
     }
 
@@ -379,6 +419,72 @@ mod tests {
         // 5. plan finished → AwaitingAcceptance.
         assert_eq!(orch.step(&host, &gate).unwrap(), OrchestratorStep::PlanComplete);
         assert!(matches!(get_task("t1").unwrap().status, TaskStatus::AwaitingAcceptance));
+    }
+
+    /// Drive a single P-item "a" through dispatch → review → merge → Done so the
+    /// next `step()` hits the plan-finished (e2e) branch.
+    fn drive_single_item_to_done(orch: &Orchestrator, host: &FakeHost, gate: &FakeGate) {
+        orch.step(host, gate).unwrap(); // dispatch
+        let sid = get_task("t1").unwrap().plan.get("a").unwrap().agent_session_id.clone().unwrap();
+        host.mark_finished(&sid);
+        orch.step(host, gate).unwrap(); // → Reviewing
+        orch.step(host, gate).unwrap(); // → Merged + Done
+        assert_eq!(status_of("a"), PItemStatus::Done);
+    }
+
+    #[test]
+    fn e2e_pass_proceeds_to_awaiting_acceptance() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _o = HomeOverride::new(tmp.path());
+        running_task(vec![pitem("a", &[], false)]);
+        let host = FakeHost::new();
+        host.set_e2e(E2eOutcome {
+            command: "e2e.sh".into(),
+            passed: true,
+            gaps: vec![],
+            ran_at: 1,
+        });
+        let gate = FakeGate::always_pass();
+        let orch = Orchestrator::new("t1");
+
+        drive_single_item_to_done(&orch, &host, &gate);
+
+        // Plan finished → e2e runs + passes → AwaitingAcceptance, outcome recorded.
+        assert_eq!(orch.step(&host, &gate).unwrap(), OrchestratorStep::PlanComplete);
+        let t = get_task("t1").unwrap();
+        assert!(matches!(t.status, TaskStatus::AwaitingAcceptance));
+        assert_eq!(t.e2e.as_ref().map(|o| o.passed), Some(true));
+    }
+
+    #[test]
+    fn e2e_fail_keeps_task_out_of_acceptance() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let _o = HomeOverride::new(tmp.path());
+        running_task(vec![pitem("a", &[], false)]);
+        let host = FakeHost::new();
+        host.set_e2e(E2eOutcome {
+            command: "e2e.sh".into(),
+            passed: false,
+            gaps: vec!["e2e exited 1".into()],
+            ran_at: 1,
+        });
+        let gate = FakeGate::always_pass();
+        let orch = Orchestrator::new("t1");
+
+        drive_single_item_to_done(&orch, &host, &gate);
+
+        // Plan finished → e2e runs + FAILS → E2eFailed, task stays Running.
+        assert_eq!(
+            orch.step(&host, &gate).unwrap(),
+            OrchestratorStep::E2eFailed(vec!["e2e exited 1".into()])
+        );
+        let t = get_task("t1").unwrap();
+        assert!(matches!(t.status, TaskStatus::Running), "must NOT auto-accept on e2e fail");
+        assert_eq!(t.e2e.as_ref().map(|o| o.passed), Some(false));
+
+        // A subsequent tick must NOT re-run e2e nor auto-accept — it idles.
+        assert_eq!(orch.step(&host, &gate).unwrap(), OrchestratorStep::Idle);
+        assert!(matches!(get_task("t1").unwrap().status, TaskStatus::Running));
     }
 
     #[test]

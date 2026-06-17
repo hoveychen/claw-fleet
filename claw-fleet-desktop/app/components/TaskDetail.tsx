@@ -107,6 +107,7 @@ export function TaskDetail({
       <DetailHeader task={task} project={project} onBack={onBack} onStart={onStart} onAccept={onAccept} onRename={onRename} onDelete={onDelete} />
       <div className={styles.layout}>
         <div className={styles.main}>
+          <E2eBanner task={task} />
           <Timeline task={task} />
           <PlanKanban task={task} />
           <Deliverables task={task} />
@@ -246,6 +247,40 @@ function EditableTitle({ task, onRename }: { task: Task; onRename: (title: strin
       {task.title}
       {task.titleAuto && <span className={styles.title_auto}>✎</span>}
     </h1>
+  );
+}
+
+// ── e2e verification banner ───────────────────────────────────────────────────
+
+// Surfaces the task-level e2e outcome. A FAILED run is why a task can sit in
+// `running` with every P-item done but no acceptance prompt — without this the
+// UI would be silent about it.
+function E2eBanner({ task }: { task: Task }) {
+  const { t } = useTranslation();
+  const e2e = task.e2e;
+  if (!e2e) return null;
+  if (e2e.passed) {
+    return (
+      <div className={styles.e2e_ok}>
+        ✓ {t("detail.e2e_passed", "End-to-end verification passed")}
+        <code className={styles.e2e_cmd}>{e2e.command}</code>
+      </div>
+    );
+  }
+  return (
+    <div className={styles.e2e_fail}>
+      <div className={styles.e2e_fail_head}>
+        ⚠ {t("detail.e2e_failed", "End-to-end verification failed — task held before acceptance")}
+      </div>
+      <code className={styles.e2e_cmd}>{e2e.command}</code>
+      {e2e.gaps.length > 0 && (
+        <ul className={styles.e2e_gaps}>
+          {e2e.gaps.map((g, i) => (
+            <li key={i}>{g}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

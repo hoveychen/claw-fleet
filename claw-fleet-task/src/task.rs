@@ -63,6 +63,29 @@ pub struct Task {
     /// the default. Workers/review keep their own defaults.
     #[serde(default)]
     pub model: Option<String>,
+    /// Result of the task-level end-to-end verification pass (P4). `None` until
+    /// the orchestrator runs it (after every P-item is terminal, before
+    /// `AwaitingAcceptance`). A failed run keeps the task OUT of
+    /// `AwaitingAcceptance` so a broken integration can't be silently accepted.
+    #[serde(default)]
+    pub e2e: Option<E2eOutcome>,
+}
+
+/// Outcome of the task-level e2e command configured in `fleet.yaml`'s
+/// `verify.e2e`. Recorded on the `Task` so the UI / user can see why a finished
+/// plan didn't reach acceptance.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct E2eOutcome {
+    /// The command that was run (from `verify.e2e`).
+    pub command: String,
+    /// `true` when the command exited 0.
+    pub passed: bool,
+    /// On failure, the command line + tail of its output.
+    #[serde(default)]
+    pub gaps: Vec<String>,
+    /// Unix timestamp of the run.
+    pub ran_at: i64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -193,6 +216,7 @@ impl Task {
             master_session_id: None,
             title_auto: false,
             model: None,
+            e2e: None,
         }
     }
 

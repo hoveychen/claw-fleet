@@ -1298,7 +1298,9 @@
     "action_paused": "Paused",
     "action_drafting": "Drafting / planning",
     "action_done": "Completed",
-    "action_abandoned": "Abandoned"
+    "action_abandoned": "Abandoned",
+    "e2e_passed": "End-to-end verification passed",
+    "e2e_failed": "End-to-end verification failed — task held before acceptance"
   },
   "settings": {
     "title": "Settings",
