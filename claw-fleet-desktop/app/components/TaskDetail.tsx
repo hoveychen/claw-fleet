@@ -108,7 +108,7 @@ export function TaskDetail({
       <div className={styles.layout}>
         <div className={styles.main}>
           <Timeline task={task} />
-          <DagView task={task} />
+          <PlanKanban task={task} />
           <Deliverables task={task} />
         </div>
         <MetricsRail task={task} />
@@ -330,31 +330,12 @@ function Timeline({ task }: { task: Task }) {
   );
 }
 
-// ── DAG plan visualization ────────────────────────────────────────────────
+// ── P-item kanban (Pending / Active / Resolved) ──────────────────────────────
 
-function computeLevels(items: Record<string, PItem>): Map<string, number> {
-  const level = new Map<string, number>();
-  const visiting = new Set<string>();
-  const depth = (id: string): number => {
-    if (level.has(id)) return level.get(id)!;
-    if (visiting.has(id)) return 0; // cycle guard
-    visiting.add(id);
-    const item = items[id];
-    const deps = item?.dependsOn ?? [];
-    const d = deps.length === 0 ? 0 : 1 + Math.max(...deps.map((dep) => (items[dep] ? depth(dep) : -1)));
-    visiting.delete(id);
-    level.set(id, d);
-    return d;
-  };
-  for (const id of Object.keys(items)) depth(id);
-  return level;
-}
-
-function DagView({ task }: { task: Task }) {
+function PlanKanban({ task }: { task: Task }) {
   const { t } = useTranslation();
-  const items = task.plan.items;
-  const ids = Object.keys(items);
-  if (ids.length === 0) {
+  const items = Object.values(task.plan.items);
+  if (items.length === 0) {
     return (
       <section className={styles.section}>
         <h3 className={styles.section_title}>{t("detail.section_plan", "计划")}</h3>
@@ -366,40 +347,76 @@ function DagView({ task }: { task: Task }) {
       </section>
     );
   }
-  const levels = computeLevels(items);
-  const maxLevel = Math.max(...Array.from(levels.values()));
-  const columns: PItem[][] = Array.from({ length: maxLevel + 1 }, () => []);
-  for (const id of ids) columns[levels.get(id) ?? 0].push(items[id]);
-  for (const col of columns) col.sort((a, b) => a.id.localeCompare(b.id));
+
+  // Column buckets:
+  //  - pending : waitDeps
+  //  - active  : running / reviewing / waitHumanGate
+  //  - resolved: done / skipped / failed
+  const pending: PItem[] = [];
+  const active: PItem[] = [];
+  const resolved: PItem[] = [];
+  for (const p of items) {
+    const k = pItemStatusKey(p.status);
+    if (k === "waitDeps") pending.push(p);
+    else if (k === "running" || k === "reviewing" || k === "waitHumanGate") active.push(p);
+    else resolved.push(p);
+  }
+  for (const arr of [pending, active, resolved]) arr.sort((a, b) => a.id.localeCompare(b.id));
 
   return (
     <section className={styles.section}>
-      <h3 className={styles.section_title}>{t("detail.section_plan", "计划")} (DAG)</h3>
-      <div className={styles.dag}>
-        {columns.map((col, ci) => (
-          <div key={ci} className={styles.dag_col_wrap}>
-            <div className={styles.dag_col}>
-              {col.map((p) => (
-                <div
-                  key={p.id}
-                  className={styles.dag_node}
-                  style={{ borderColor: pItemColor(p.status) }}
-                  title={`${p.id} — ${pItemStatusKey(p.status)}\n${p.desc}`}
-                >
-                  <div className={styles.dag_node_head}>
-                    <span className={styles.dag_dot} style={{ background: pItemColor(p.status) }} />
-                    <span className={styles.dag_id}>{p.id}</span>
-                    {p.humanGate && <Eye size={11} strokeWidth={1.6} className={styles.dag_gate} />}
-                  </div>
-                  <div className={styles.dag_desc}>{p.desc}</div>
-                </div>
-              ))}
-            </div>
-            {ci < columns.length - 1 && <div className={styles.dag_arrow}>→</div>}
-          </div>
-        ))}
+      <h3 className={styles.section_title}>{t("detail.section_plan", "计划")}</h3>
+      <div className={styles.kanban}>
+        <KanbanColumn title={t("tasks.col_pending", "Pending")} items={pending} />
+        <KanbanColumn title={t("tasks.col_active", "Active")} items={active} highlight />
+        <KanbanColumn title={t("tasks.col_resolved", "Resolved")} items={resolved} />
       </div>
     </section>
+  );
+}
+
+function KanbanColumn({ title, items, highlight }: { title: string; items: PItem[]; highlight?: boolean }) {
+  return (
+    <div className={`${styles.kb_col} ${highlight ? styles.kb_col_active : ""}`}>
+      <div className={styles.kb_col_head}>
+        <span>{title}</span>
+        <span className={styles.kb_count}>{items.length}</span>
+      </div>
+      <div className={styles.kb_col_body}>
+        {items.length === 0 && <div className={styles.kb_empty}>—</div>}
+        {items.map((p) => (
+          <PItemCard key={p.id} pitem={p} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function PItemCard({ pitem }: { pitem: PItem }) {
+  const { t } = useTranslation();
+  const k = pItemStatusKey(pitem.status);
+  return (
+    <div className={styles.kb_card} style={{ borderLeftColor: pItemColor(pitem.status) }}>
+      <div className={styles.kb_card_head}>
+        <span className={styles.kb_dot} style={{ background: pItemColor(pitem.status) }} />
+        <span className={styles.kb_id}>{pitem.id}</span>
+        {pitem.humanGate && <Eye size={11} strokeWidth={1.6} className={styles.kb_gate} />}
+      </div>
+      <div className={styles.kb_desc}>{pitem.desc}</div>
+      {k === "waitHumanGate" && (
+        <div className={styles.kb_gate_pending}>
+          {t("tasks.waiting_for_user_review", "等待用户审核 — 请在 Decision Panel 处理")}
+        </div>
+      )}
+      {pitem.touches.length > 0 && (
+        <div className={styles.kb_touches}>
+          {pitem.touches.slice(0, 3).map((f) => (
+            <code key={f}>{f}</code>
+          ))}
+          {pitem.touches.length > 3 && <span>+{pitem.touches.length - 3}</span>}
+        </div>
+      )}
+    </div>
   );
 }
 
