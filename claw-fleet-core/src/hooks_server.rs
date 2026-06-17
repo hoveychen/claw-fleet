@@ -1220,12 +1220,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 #[serde(rename_all = "camelCase")]
                 struct Body {
                     task_id: String,
+                    #[serde(default)]
+                    mode: claw_fleet_task::task::AcceptMode,
                 }
                 let mut buf = String::new();
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
                 let parsed: Result<Body, _> = serde_json::from_str(&buf);
                 match parsed {
-                    Ok(b) => match crate::task::accept_task(&b.task_id) {
+                    Ok(b) => match crate::task::accept_task_with_mode(&b.task_id, b.mode) {
                         Ok(()) => {
                             let _ = request.respond(
                                 tiny_http::Response::from_string(r#"{"ok":true}"#)

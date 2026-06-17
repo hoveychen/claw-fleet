@@ -1898,8 +1898,12 @@ impl Backend for LocalBackend {
         .map_err(|e| e.to_string())
     }
 
-    fn accept_task(&self, task_id: &str) -> Result<(), String> {
-        crate::task::accept_task(task_id)
+    fn accept_task(
+        &self,
+        task_id: &str,
+        mode: crate::task::AcceptMode,
+    ) -> Result<(), String> {
+        crate::task::accept_task_with_mode(task_id, mode)
     }
 
     fn clear_task(&self, task_id: &str) -> Result<(), String> {

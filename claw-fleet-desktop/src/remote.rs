@@ -511,13 +511,18 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/tasks/start", &Req { task_id })
     }
 
-    fn accept_task(&self, task_id: &str) -> Result<(), String> {
+    fn accept_task(
+        &self,
+        task_id: &str,
+        mode: crate::task::AcceptMode,
+    ) -> Result<(), String> {
         #[derive(serde::Serialize)]
         #[serde(rename_all = "camelCase")]
         struct Req<'a> {
             task_id: &'a str,
+            mode: crate::task::AcceptMode,
         }
-        self.probe.post_json_ok("/tasks/accept", &Req { task_id })
+        self.probe.post_json_ok("/tasks/accept", &Req { task_id, mode })
     }
 
     fn clear_task(&self, task_id: &str) -> Result<(), String> {
