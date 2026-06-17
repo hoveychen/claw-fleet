@@ -17,7 +17,7 @@ import { ArrowLeft, GitBranch, Eye, FileText, Plus, Minus, Trash2 } from "lucide
 import styles from "./TaskDetail.module.css";
 import { useSessionsStore, type Project } from "../store";
 import { useRuntimeTasksStore } from "../runtimeTasksStore";
-import type { PItem, PItemStatus, Task, TaskStatus, TaskDeliverables, TaskTokenBreakdown } from "../types";
+import type { AcceptMode, PItem, PItemStatus, Task, TaskStatus, TaskDeliverables, TaskTokenBreakdown } from "../types";
 import { pItemStatusKey } from "../types";
 
 // ── shared helpers ──────────────────────────────────────────────────────────
@@ -98,7 +98,7 @@ export function TaskDetail({
   project: Project | null;
   onBack: () => void;
   onStart: () => Promise<void>;
-  onAccept: () => Promise<void>;
+  onAccept: (mode: AcceptMode) => Promise<void>;
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
@@ -127,7 +127,7 @@ function DetailHeader({
   project: Project | null;
   onBack: () => void;
   onStart: () => Promise<void>;
-  onAccept: () => Promise<void>;
+  onAccept: (mode: AcceptMode) => Promise<void>;
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
 }) {
@@ -167,9 +167,24 @@ function DetailHeader({
         </div>
         <div className={styles.header_actions}>
           {task.status === "awaitingAcceptance" ? (
-            <button className={styles.primary_btn} onClick={() => run(onAccept)} disabled={!canAccept}>
-              {busy ? t("tasks.accepting", "Accepting…") : `✓ ${t("tasks.accept", "Accept")}`}
-            </button>
+            <>
+              <button
+                className={styles.primary_btn}
+                onClick={() => run(() => onAccept("mergeBack"))}
+                disabled={!canAccept}
+                title={t("tasks.accept_merge_hint", "Merge the task branch back into its base branch, then delete it")}
+              >
+                {busy ? t("tasks.accepting", "Accepting…") : `✓ ${t("tasks.accept_merge", "Accept & merge")}`}
+              </button>
+              <button
+                className={styles.cancel_btn}
+                onClick={() => run(() => onAccept("keepBranch"))}
+                disabled={!canAccept}
+                title={t("tasks.accept_keep_hint", "Accept without merging — keep the branch to merge / PR yourself")}
+              >
+                {t("tasks.accept_keep", "Keep branch")}
+              </button>
+            </>
           ) : (
             <button className={styles.primary_btn} onClick={() => run(onStart)} disabled={!canStart}>
               {busy ? t("tasks.starting", "Starting…") : `▶ ${t("tasks.start", "Start")}`}

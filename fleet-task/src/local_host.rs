@@ -364,11 +364,53 @@ impl TaskLifecycleHost for LocalHost {
 }
 
 impl LlmMediator for LocalHost {
-    fn resolve_conflicts(&self, _files: &[ConflictSpec]) -> Result<Vec<Resolution>, String> {
-        // fleet-task's LocalHost has no LLM merge provider wired up; a real
-        // merge conflict surfaces as an orchestrator error for the user.
-        Err("LLM merge mediation not configured for fleet-task".into())
+    fn resolve_conflicts(&self, files: &[ConflictSpec]) -> Result<Vec<Resolution>, String> {
+        // One `claude` call per conflicted file (mirrors review_gate's spawn
+        // pattern; fleet-task can't depend on core's `merge_mediator`, so it
+        // shares only the pure prompt/parse helpers in claw_fleet_task).
+        let mut out = Vec::with_capacity(files.len());
+        for spec in files {
+            let prompt = claw_fleet_task::merge_prompt::render_prompt(spec);
+            let stdout = run_mediation_claude(&self.workspace, &prompt)?;
+            let resolved = claw_fleet_task::merge_prompt::extract_resolved(&stdout).ok_or_else(|| {
+                format!("mediator response for {} missing <resolved> wrapper", spec.path.display())
+            })?;
+            if let Some(marker) = claw_fleet_task::merge_prompt::first_conflict_marker(&resolved) {
+                return Err(format!(
+                    "mediator left conflict marker `{marker}` in {}",
+                    spec.path.display()
+                ));
+            }
+            out.push(Resolution { path: spec.path.clone(), resolved_content: resolved });
+        }
+        Ok(out)
     }
+}
+
+/// Spawn an isolated `claude` session to resolve one merge conflict. Plain-text
+/// output (the prompt asks for `<resolved>...</resolved>` tags). Mirrors
+/// `review_gate::run_review`'s safe-mode invocation.
+fn run_mediation_claude(cwd: &Path, prompt: &str) -> Result<String, String> {
+    let mut cmd = claw_fleet_task::process_util::command("claude");
+    cmd.current_dir(cwd)
+        .arg("--print")
+        .arg("--safe-mode")
+        .arg("--permission-mode")
+        .arg("bypassPermissions")
+        .arg("--no-session-persistence")
+        .arg("--model")
+        .arg("claude-sonnet-4-6")
+        .arg(prompt)
+        .env("FLEET_SESSION_KIND", "merge-mediator");
+    let out = cmd.output().map_err(|e| format!("spawn mediation claude: {e}"))?;
+    if !out.status.success() {
+        return Err(format!(
+            "mediation claude exited with {}: {}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
 }
 
 impl OrchestratorHost for LocalHost {
@@ -425,11 +467,18 @@ impl OrchestratorHost for LocalHost {
         // see an empty branch and silently drop the work.
         worktree::commit_worktree(&task.id, p_item_id, &format!("fleet: {p_item_id} worker output"))?;
         let outcome = worktree::merge_back(&self.workspace, task_branch, &task.id, p_item_id)?;
-        if let claw_fleet_task::worktree::MergeOutcome::Conflict { files, reason } = &outcome {
-            return Err(format!(
-                "merge conflict on {} file(s) merging {p_item_id}: {reason}",
-                files.len()
-            ));
+        if let claw_fleet_task::worktree::MergeOutcome::Conflict { files, .. } = &outcome {
+            // LLM-mediate the conflict instead of failing the P-item outright.
+            // resolve_conflicts spawns claude per file; apply_resolutions re-runs
+            // the merge with the resolved content and commits. A mediation
+            // failure still surfaces as an error (P-item fails) — but a real
+            // 3-way conflict no longer dead-ends the merge.
+            let resolutions: Vec<(std::path::PathBuf, String)> = self
+                .resolve_conflicts(files)?
+                .into_iter()
+                .map(|r| (r.path, r.resolved_content))
+                .collect();
+            worktree::apply_resolutions(&self.workspace, &task.id, p_item_id, &resolutions)?;
         }
         worktree::reap(&self.workspace, &task.id, p_item_id)
     }

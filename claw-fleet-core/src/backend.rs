@@ -467,8 +467,14 @@ pub trait Backend: Send + Sync {
         Err("task system not implemented in this backend yet".into())
     }
     /// P7 final acceptance: flip a task from `AwaitingAcceptance` to `Done`
-    /// once the user confirms the completed work.
-    fn accept_task(&self, _task_id: &str) -> Result<(), String> {
+    /// once the user confirms the completed work. `mode` selects whether to
+    /// merge `fleet/<slug>` back into its base branch + delete it (`MergeBack`)
+    /// or leave the branch for the user (`KeepBranch`).
+    fn accept_task(
+        &self,
+        _task_id: &str,
+        _mode: claw_fleet_task::task::AcceptMode,
+    ) -> Result<(), String> {
         Err("task system not implemented in this backend yet".into())
     }
     /// Delete a task: terminate its linked sessions, then remove the task json
