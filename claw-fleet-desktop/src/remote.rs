@@ -525,6 +525,15 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/tasks/accept", &Req { task_id, mode })
     }
 
+    fn rerun_task_e2e(&self, task_id: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Req<'a> {
+            task_id: &'a str,
+        }
+        self.probe.post_json_ok("/tasks/rerun_e2e", &Req { task_id })
+    }
+
     fn clear_task(&self, task_id: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         #[serde(rename_all = "camelCase")]

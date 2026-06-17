@@ -165,6 +165,7 @@ fn full_lifecycle_create_update_material_start() {
             started_at: None,
             completed_at: None,
             output_summary: None,
+            failure_gaps: Vec::new(),
         },
         PItem {
             id: "p2".into(),
@@ -178,6 +179,7 @@ fn full_lifecycle_create_update_material_start() {
             started_at: None,
             completed_at: None,
             output_summary: None,
+            failure_gaps: Vec::new(),
         },
     ]);
     task::update_plan(&task.id, plan.clone()).expect("update_plan");
@@ -307,6 +309,7 @@ fn dispatch_pitem_enqueues_worker_session_and_records_agent_session_id() {
         started_at: None,
         completed_at: None,
         output_summary: None,
+        failure_gaps: Vec::new(),
     }]);
     task::update_plan(&t.id, plan).unwrap();
 
@@ -369,6 +372,7 @@ fn clear_task_terminates_linked_sessions_and_marks_complete() {
         started_at: None,
         completed_at: None,
         output_summary: None,
+        failure_gaps: Vec::new(),
     }]);
     task::update_plan(&t.id, plan).unwrap();
     task::start_task(&t.id).expect("start_task");

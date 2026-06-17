@@ -1906,6 +1906,10 @@ impl Backend for LocalBackend {
         crate::task::accept_task_with_mode(task_id, mode)
     }
 
+    fn rerun_task_e2e(&self, task_id: &str) -> Result<(), String> {
+        crate::task::rerun_task_e2e(task_id)
+    }
+
     fn clear_task(&self, task_id: &str) -> Result<(), String> {
         crate::task::clear_task(task_id)
     }

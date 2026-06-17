@@ -323,6 +323,7 @@ interface TasksState {
   createTask: (input: TaskInput) => Promise<Task>;
   startTask: (taskId: string) => Promise<void>;
   acceptTask: (taskId: string, mode?: AcceptMode) => Promise<void>;
+  rerunTaskE2e: (taskId: string) => Promise<void>;
   updateTaskTitle: (taskId: string, title: string) => Promise<void>;
   deleteTask: (taskId: string) => Promise<void>;
 }
@@ -363,6 +364,14 @@ export const useTasksStore = create<TasksState>((set, get) => ({
     // merge fleet/<slug> back into its base branch + delete it (mergeBack) or
     // leave the branch for the user (keepBranch).
     await invoke("accept_task", { taskId, mode });
+    const fresh = await invoke<Task>("get_task", { taskId });
+    set({
+      tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
+    });
+  },
+  rerunTaskE2e: async (taskId) => {
+    // Clear the failed e2e outcome so the live orchestrator re-runs verify.e2e.
+    await invoke("rerun_task_e2e", { taskId });
     const fresh = await invoke<Task>("get_task", { taskId });
     set({
       tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
