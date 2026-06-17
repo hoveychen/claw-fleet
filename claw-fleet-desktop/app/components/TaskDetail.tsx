@@ -692,8 +692,15 @@ function MetricsRail({ task }: { task: Task }) {
   const inTok = breakdown ? breakdown.totalsUsage.inputTokens : null;
   const cost = breakdown?.totalsEstimatedCostUsd ?? null;
 
+  // While `running` but the plan is still empty, the task is in its
+  // interactive planning phase — not yet executing P-items. Reuse the same
+  // judgement the kanban uses (items.length === 0) so the rail, ring and
+  // kanban agree instead of contradicting each other.
+  const planning = task.status === "running" && Object.keys(task.plan.items).length === 0;
+
   const currentAction =
-    task.status === "running" ? t("detail.action_running", "Executing P-items")
+    planning ? t("detail.action_planning", "Planning")
+    : task.status === "running" ? t("detail.action_running", "Executing P-items")
     : task.status === "reviewing" ? t("detail.action_reviewing", "Reviewing")
     : task.status === "awaitingAcceptance" ? t("detail.action_awaiting", "Awaiting your acceptance")
     : task.status === "paused" ? t("detail.action_paused", "Paused")
@@ -708,9 +715,11 @@ function MetricsRail({ task }: { task: Task }) {
           className={styles.ring}
           style={{ background: `conic-gradient(${statusColor(task.status)} ${pct}%, var(--color-bg-secondary) ${pct}%)` }}
         >
-          <span className={styles.ring_inner}>{summary.done}/{summary.total}</span>
+          <span className={styles.ring_inner}>{planning ? "···" : `${summary.done}/${summary.total}`}</span>
         </div>
-        <div className={styles.ring_label}>{t("detail.metric_progress", "P-item progress")}</div>
+        <div className={styles.ring_label}>
+          {planning ? t("detail.action_planning", "Planning") : t("detail.metric_progress", "P-item progress")}
+        </div>
       </div>
 
       <Metric label={t("detail.metric_time", "Elapsed")} value={elapsed != null ? fmtDuration(elapsed) : "—"} />

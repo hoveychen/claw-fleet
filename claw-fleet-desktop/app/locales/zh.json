@@ -1295,6 +1295,7 @@
     "metric_model": "规划模型",
     "metric_action": "当前",
     "action_running": "执行 P-item 中",
+    "action_planning": "规划中",
     "action_reviewing": "审查中",
     "action_awaiting": "等待你验收",
     "action_paused": "已暂停",
