@@ -462,18 +462,6 @@
     "resultChars": "{{n}} 字符",
     "noAgents": "暂无代理活动记录。"
   },
-  "detail": {
-    "following": "自动跟随中",
-    "scroll_to_latest": "滚动到最新",
-    "load_more": "加载前 {{count}} 条消息",
-    "load_earlier": "加载更早的消息",
-    "loading_earlier": "正在加载更早的消息…",
-    "tab_decisions": "决策",
-    "tab_skills": "Skills",
-    "tab_messages": "对话",
-    "tab_tokens": "Token",
-    "tab_workflow": "Workflow"
-  },
   "token_spend": {
     "loading": "正在分析 token 花销…",
     "no_data": "无数据",
@@ -1271,20 +1259,17 @@
       "abandoned": "已放弃"
     }
   },
-  "composer": {
-    "greeting": "想让 Fleet 做点什么？",
-    "hint": "先选一个工作目录，描述任务，Fleet 会规划并执行它。",
-    "workdir": "工作目录",
-    "no_project": "还没有项目 — 浏览选一个",
-    "browse": "浏览文件夹…",
-    "placeholder": "描述任务…（Enter 创建，Shift+Enter 换行）",
-    "attach": "添加附件",
-    "create": "创建任务",
-    "creating": "创建中…",
-    "pick_project_first": "请先选一个工作目录",
-    "model_hint": "规划会话使用的模型"
-  },
   "detail": {
+    "following": "自动跟随中",
+    "scroll_to_latest": "滚动到最新",
+    "load_more": "加载前 {{count}} 条消息",
+    "load_earlier": "加载更早的消息",
+    "loading_earlier": "正在加载更早的消息…",
+    "tab_decisions": "决策",
+    "tab_skills": "Skills",
+    "tab_messages": "对话",
+    "tab_tokens": "Token",
+    "tab_workflow": "Workflow",
     "section_timeline": "来龙去脉",
     "section_plan": "计划",
     "section_deliverables": "交付物",
@@ -1655,6 +1640,17 @@
     "attach_error_dismiss": "关闭"
   },
   "composer": {
+    "greeting": "想让 Fleet 做点什么？",
+    "hint": "先选一个工作目录，描述任务，Fleet 会规划并执行它。",
+    "workdir": "工作目录",
+    "no_project": "还没有项目 — 浏览选一个",
+    "browse": "浏览文件夹…",
+    "task_placeholder": "描述任务…（Enter 创建，Shift+Enter 换行）",
+    "attach": "添加附件",
+    "create": "创建任务",
+    "creating": "创建中…",
+    "pick_project_first": "请先选一个工作目录",
+    "model_hint": "规划会话使用的模型",
     "placeholder": "输入消息…",
     "attach_tooltip": "附加文件或图片",
     "attach_title": "选择文件或图片",
