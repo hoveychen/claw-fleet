@@ -157,6 +157,43 @@ mod accept_merge_tests {
         assert!(!branch_exists(ws, "fleet/x"));
     }
 
+    /// REAL LLM mediation — spawns `claude` to resolve an actual conflict.
+    /// `#[ignore]`d so normal runs don't need claude/quota; run explicitly with
+    /// `cargo test -p claw-fleet-core --ignored accept_merge_real`. Asserts the
+    /// real `merge_mediator` produces a marker-free merge, deletes the branch,
+    /// and the task reaches Done — the one thing fake-mediator tests can't prove.
+    #[test]
+    #[ignore = "spawns real claude; run with --ignored"]
+    fn accept_merge_real_llm_resolves_conflict() {
+        let home = tempfile::TempDir::new().unwrap();
+        let _o = HomeOverride::new(home.path());
+        let wsd = tempfile::TempDir::new().unwrap();
+        let ws = wsd.path();
+        init_ws(ws);
+        write_file(ws, "greeting.txt", "hello world\n");
+        git(ws, &["add", "-A"]);
+        git(ws, &["commit", "-q", "-m", "seed"]);
+        git(ws, &["checkout", "-q", "-b", "fleet/x"]);
+        write_file(ws, "greeting.txt", "hello fleet\n");
+        git(ws, &["add", "-A"]);
+        git(ws, &["commit", "-q", "-m", "feat side"]);
+        git(ws, &["checkout", "-q", "main"]);
+        write_file(ws, "greeting.txt", "hi world\n");
+        git(ws, &["add", "-A"]);
+        git(ws, &["commit", "-q", "-m", "main side"]);
+        let id = make_task(home.path(), ws);
+
+        accept_task_with_mode(&id, AcceptMode::MergeBack).unwrap();
+
+        let merged = std::fs::read_to_string(ws.join("greeting.txt")).unwrap();
+        assert!(
+            !merged.contains("<<<<<<<") && !merged.contains(">>>>>>>"),
+            "real mediation must leave no conflict markers; got: {merged:?}"
+        );
+        assert!(!branch_exists(ws, "fleet/x"), "branch deleted after mediated merge");
+        assert!(matches!(get_task(&id).unwrap().status, TaskStatus::Done));
+    }
+
     #[test]
     fn keep_branch_mode_leaves_branch_and_flips_done() {
         let home = tempfile::TempDir::new().unwrap();
