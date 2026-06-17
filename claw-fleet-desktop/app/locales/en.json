@@ -1298,6 +1298,7 @@
     "metric_model": "Planner model",
     "metric_action": "Current",
     "action_running": "Executing P-items",
+    "action_planning": "Planning",
     "action_reviewing": "Reviewing",
     "action_awaiting": "Awaiting your acceptance",
     "action_paused": "Paused",
