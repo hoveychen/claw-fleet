@@ -727,3 +727,40 @@
   color: var(--color-text);
   line-height: 1.45;
 }
+
+/* ── P-item failure reasons ─────────────────────────────────────────────────── */
+
+.failures {
+  margin-top: 14px;
+}
+
+.failure_item {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  font-size: 12px;
+  background: rgba(239, 107, 107, 0.08);
+  border: 1px solid rgba(239, 107, 107, 0.25);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+
+.failure_id {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-error-fg);
+}
+
+.failure_gaps {
+  margin: 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  color: var(--color-text);
+  line-height: 1.45;
+  min-width: 0;
+  word-break: break-word;
+}

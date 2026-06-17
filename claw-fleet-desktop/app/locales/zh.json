@@ -1269,6 +1269,7 @@
     "section_plan": "计划",
     "plan_kanban": "看板",
     "plan_dag": "依赖图",
+    "plan_failures": "失败原因",
     "section_deliverables": "交付物",
     "tl_created": "任务创建",
     "tl_materials": "附带 {{count}} 个素材",

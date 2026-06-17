@@ -955,6 +955,9 @@ export interface PItem {
   startedAt?: number | null;
   completedAt?: number | null;
   outputSummary?: string | null;
+  /** Why this P-item was rejected (review / mechanical-gate gaps), when
+   *  `status` is `failed`. Empty/absent for non-rejected items. */
+  failureGaps?: string[];
 }
 
 export interface DagPlan {
