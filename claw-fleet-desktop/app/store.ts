@@ -324,6 +324,7 @@ interface TasksState {
   startTask: (taskId: string) => Promise<void>;
   acceptTask: (taskId: string) => Promise<void>;
   updateTaskTitle: (taskId: string, title: string) => Promise<void>;
+  deleteTask: (taskId: string) => Promise<void>;
 }
 
 export const useTasksStore = create<TasksState>((set, get) => ({
@@ -371,6 +372,14 @@ export const useTasksStore = create<TasksState>((set, get) => ({
       tasks: get().tasks.map((t) =>
         t.id === taskId ? { ...t, title, titleAuto: false } : t,
       ),
+    });
+  },
+  deleteTask: async (taskId) => {
+    // Terminates linked sessions + removes the task json/materials on disk.
+    await invoke("clear_task", { taskId });
+    set({
+      tasks: get().tasks.filter((t) => t.id !== taskId),
+      selectedTaskId: get().selectedTaskId === taskId ? null : get().selectedTaskId,
     });
   },
 }));

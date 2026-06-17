@@ -471,6 +471,11 @@ pub trait Backend: Send + Sync {
     fn accept_task(&self, _task_id: &str) -> Result<(), String> {
         Err("task system not implemented in this backend yet".into())
     }
+    /// Delete a task: terminate its linked sessions, then remove the task json
+    /// and its materials dir from disk. Used by the UI's task delete action.
+    fn clear_task(&self, _task_id: &str) -> Result<(), String> {
+        Err("task system not implemented in this backend yet".into())
+    }
     /// Manually rename a task. Clears `title_auto` so the master-session
     /// aiTitle reconcile pass will not overwrite the new value. Trims input
     /// and rejects empty titles.

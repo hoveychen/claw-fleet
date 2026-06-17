@@ -13,7 +13,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
-import { ArrowLeft, GitBranch, Eye, FileText, Plus, Minus } from "lucide-react";
+import { ArrowLeft, GitBranch, Eye, FileText, Plus, Minus, Trash2 } from "lucide-react";
 import styles from "./TaskDetail.module.css";
 import { useSessionsStore, type Project } from "../store";
 import { useRuntimeTasksStore } from "../runtimeTasksStore";
@@ -92,6 +92,7 @@ export function TaskDetail({
   onStart,
   onAccept,
   onRename,
+  onDelete,
 }: {
   task: Task;
   project: Project | null;
@@ -99,10 +100,11 @@ export function TaskDetail({
   onStart: () => Promise<void>;
   onAccept: () => Promise<void>;
   onRename: (title: string) => Promise<void>;
+  onDelete: () => Promise<void>;
 }) {
   return (
     <div className={styles.root}>
-      <DetailHeader task={task} project={project} onBack={onBack} onStart={onStart} onAccept={onAccept} onRename={onRename} />
+      <DetailHeader task={task} project={project} onBack={onBack} onStart={onStart} onAccept={onAccept} onRename={onRename} onDelete={onDelete} />
       <div className={styles.layout}>
         <div className={styles.main}>
           <Timeline task={task} />
@@ -118,7 +120,7 @@ export function TaskDetail({
 // ── header ──────────────────────────────────────────────────────────────────
 
 function DetailHeader({
-  task, project, onBack, onStart, onAccept, onRename,
+  task, project, onBack, onStart, onAccept, onRename, onDelete,
 }: {
   task: Task;
   project: Project | null;
@@ -126,11 +128,13 @@ function DetailHeader({
   onStart: () => Promise<void>;
   onAccept: () => Promise<void>;
   onRename: (title: string) => Promise<void>;
+  onDelete: () => Promise<void>;
 }) {
   const { t } = useTranslation();
   const isLive = useRuntimeTasksStore((s) => Boolean(s.byTaskId[task.id]));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const canStart = !busy && task.status === "drafting";
   const canAccept = !busy && task.status === "awaitingAcceptance";
 
@@ -168,6 +172,30 @@ function DetailHeader({
           ) : (
             <button className={styles.primary_btn} onClick={() => run(onStart)} disabled={!canStart}>
               {busy ? t("tasks.starting", "Starting…") : `▶ ${t("tasks.start", "Start")}`}
+            </button>
+          )}
+          {confirmDelete ? (
+            <div className={styles.confirm_row}>
+              <span className={styles.confirm_text}>{t("tasks.delete_confirm", "Delete this task?")}</span>
+              <button
+                className={styles.danger_btn}
+                disabled={busy}
+                onClick={() => run(async () => { await onDelete(); })}
+              >
+                {busy ? t("tasks.deleting", "Deleting…") : t("tasks.delete", "Delete")}
+              </button>
+              <button className={styles.cancel_btn} disabled={busy} onClick={() => setConfirmDelete(false)}>
+                {t("cancel", "Cancel")}
+              </button>
+            </div>
+          ) : (
+            <button
+              className={styles.delete_btn}
+              onClick={() => setConfirmDelete(true)}
+              title={t("tasks.delete", "Delete")}
+              aria-label={t("tasks.delete", "Delete")}
+            >
+              <Trash2 size={15} strokeWidth={1.7} />
             </button>
           )}
         </div>
