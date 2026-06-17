@@ -198,8 +198,41 @@ fn spawn_claude(spawn: &ClaudeSpawn) -> Result<u32, String> {
             .map_err(|e| format!("spawn fake (sleep): {e}"))?;
         return Ok(child.id());
     }
-    let mut cmd = claw_fleet_task::process_util::command("claude");
+    // Resolve claude's ABSOLUTE path (honouring the user's "Claude binary"
+    // override) rather than relying on bare `claude` on PATH. The desktop app,
+    // launched from Finder/Dock, hands spawned children a stripped GUI PATH
+    // (/usr/bin:/bin:…) without the user's shell additions (~/.local/bin,
+    // homebrew, nvm), so bare `claude` failed with "No such file or directory".
+    let config = claw_fleet_core::claude_binary::ClaudeBinaryConfig::load();
+    let bin = claw_fleet_core::claude_binary::resolve(config.override_path.as_deref())
+        .ok_or_else(|| {
+            "claude CLI not found (searched PATH + ~/.local/bin, homebrew, nvm). \
+             Set the Claude binary path in Fleet Settings → Connection."
+                .to_string()
+        })?;
+    let mut cmd = claw_fleet_task::process_util::command(&bin.path);
     cmd.current_dir(spawn.cwd);
+    // Enrich PATH so the resolved claude (and any child tooling it shells out
+    // to) can still find common user-installed binaries despite the stripped
+    // GUI env — prepend claude's own dir + the usual install locations.
+    {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(dir) = std::path::Path::new(&bin.path).parent().and_then(|p| p.to_str()) {
+            parts.push(dir.to_string());
+        }
+        if let Some(home) =
+            claw_fleet_core::paths::real_home_dir().and_then(|h| h.to_str().map(str::to_string))
+        {
+            parts.push(format!("{home}/.local/bin"));
+            parts.push(format!("{home}/.bun/bin"));
+        }
+        parts.push("/opt/homebrew/bin".into());
+        parts.push("/usr/local/bin".into());
+        if let Some(existing) = std::env::var_os("PATH").and_then(|p| p.into_string().ok()) {
+            parts.push(existing);
+        }
+        cmd.env("PATH", parts.join(":"));
+    }
     for arg in build_claude_args(spawn) {
         cmd.arg(arg);
     }
