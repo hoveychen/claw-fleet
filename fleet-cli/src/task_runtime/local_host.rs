@@ -15,7 +15,7 @@ use std::sync::Mutex;
 use claw_fleet_task::asset_inject;
 use claw_fleet_task::orchestrator::OrchestratorHost;
 use claw_fleet_task::runner::{LlmMediator, Resolution, TaskLifecycleHost};
-use claw_fleet_task::spawn_specs::{PlannerSpawnSpec, ReviewSpawnSpec};
+use claw_fleet_task::spawn_specs::PlannerSpawnSpec;
 use claw_fleet_task::task::{E2eOutcome, Task};
 use claw_fleet_task::worker::{worker_spawn_spec, WorkerSpawnSpec};
 use claw_fleet_task::worktree::{self, ConflictSpec};
@@ -25,7 +25,6 @@ use claw_fleet_task::{verify, verify_config};
 pub enum SessionKind {
     Planner,
     Worker,
-    Review,
 }
 
 /// Per-session log file capturing the spawned `claude`'s stderr:
@@ -66,22 +65,29 @@ pub struct SessionRecord {
     pub session_id: String,
     pub pid: u32,
     pub kind: SessionKind,
+    /// Which P-item this session belongs to (None for the planner). Recorded on
+    /// every worker spawn and asserted in tests, but no production code reads it
+    /// yet — the P7 SSE event payloads will. Kept rather than dropped so the
+    /// session→P-item association isn't lost in the meantime.
+    #[allow(dead_code)]
     pub p_item_id: Option<String>,
 }
 
 /// Trait for actually launching a Claude (or test-fake) subprocess. Lets us
 /// unit-test `LocalHost` without depending on the real `claude` CLI.
 ///
-/// Three isolation tiers (方案 S), all funnelled through [`spawn_claude`]:
+/// Two isolation tiers (方案 S), both funnelled through [`spawn_claude`]:
 /// - **planner** — interactive: NO safe-mode, keeps AskUserQuestion/fleet__ask,
 ///   inherits the user's config, persists.
-/// - **worker / review** — isolated: `--safe-mode --permission-mode
-///   bypassPermissions --no-session-persistence`, assets injected via the
-///   spec's `system_prompt`.
+/// - **worker** — isolated: `--safe-mode --permission-mode bypassPermissions
+///   --no-session-persistence`, assets injected via the spec's `system_prompt`.
+///
+/// Review is NOT spawned here: it runs synchronously through
+/// `review_gate::RealReviewGate` (P6), which shells out to `claude` and parses
+/// the structured verdict inline rather than tracking an async session.
 pub trait ProcessLauncher: Send + Sync {
     fn launch_planner(&self, session_id: &str, spec: &PlannerSpawnSpec) -> Result<u32, String>;
     fn launch_worker(&self, session_id: &str, spec: &WorkerSpawnSpec) -> Result<u32, String>;
-    fn launch_review(&self, session_id: &str, spec: &ReviewSpawnSpec) -> Result<u32, String>;
 }
 
 /// The isolation tier a spawned session runs under. `Interactive` keeps the
@@ -152,28 +158,6 @@ impl ProcessLauncher for ClaudeLauncher {
             task_id: Some(&spec.task_id),
             p_item_id: Some(&spec.p_item_id),
             // Isolated: safe-mode + bypass + no-persistence.
-            isolation: Isolation::Sandboxed,
-            plugin_dirs: &[],
-        })
-    }
-
-    fn launch_review(&self, session_id: &str, spec: &ReviewSpawnSpec) -> Result<u32, String> {
-        let prompt = format!(
-            "Review P-item `{}`: judge whether its acceptance criteria were \
-             actually met by the worker's diff/summary in the SYSTEM prompt. \
-             Return the structured verdict, then stop.",
-            spec.p_item_id
-        );
-        spawn_claude(&ClaudeSpawn {
-            session_id,
-            cwd: &spec.cwd,
-            prompt: &prompt,
-            system_prompt: Some(&spec.system_prompt),
-            model: Some(&spec.model),
-            kind_env: "review",
-            task_id: Some(&spec.task_id),
-            p_item_id: Some(&spec.p_item_id),
-            // Isolated: same sandbox as workers.
             isolation: Isolation::Sandboxed,
             plugin_dirs: &[],
         })
@@ -299,14 +283,6 @@ pub struct LocalHost {
 }
 
 impl LocalHost {
-    pub fn new(workspace: PathBuf) -> Self {
-        Self {
-            workspace,
-            sessions: Mutex::new(HashMap::new()),
-            launcher: Box::new(ClaudeLauncher),
-        }
-    }
-
     pub fn with_launcher(workspace: PathBuf, launcher: Box<dyn ProcessLauncher>) -> Self {
         Self {
             workspace,
@@ -325,6 +301,10 @@ impl LocalHost {
     }
 
     /// Drop a tracked session — call after observing the subprocess exit.
+    /// Covered by `forget_removes_session_record`; no production caller reaps
+    /// individual sessions yet (shutdown signals them all at once), so the
+    /// per-session reaper is kept for tests + the eventual P7 event loop.
+    #[allow(dead_code)]
     pub fn forget(&self, session_id: &str) -> Option<SessionRecord> {
         self.sessions.lock().unwrap().remove(session_id)
     }
@@ -341,23 +321,6 @@ impl LocalHost {
                 pid,
                 kind: SessionKind::Planner,
                 p_item_id: None,
-            },
-        );
-        Ok(session_id)
-    }
-
-    /// Spawn the isolated review session for a P-item (P6). Tracked as
-    /// [`SessionKind::Review`]; returns its session id.
-    pub fn enqueue_review(&self, spec: &ReviewSpawnSpec) -> Result<String, String> {
-        let session_id = uuid::Uuid::new_v4().to_string();
-        let pid = self.launcher.launch_review(&session_id, spec)?;
-        self.sessions.lock().unwrap().insert(
-            session_id.clone(),
-            SessionRecord {
-                session_id: session_id.clone(),
-                pid,
-                kind: SessionKind::Review,
-                p_item_id: Some(spec.p_item_id.clone()),
             },
         );
         Ok(session_id)
@@ -714,13 +677,6 @@ mod tests {
         ) -> Result<u32, String> {
             self.spawn_sleeper()
         }
-        fn launch_review(
-            &self,
-            _session_id: &str,
-            _spec: &ReviewSpawnSpec,
-        ) -> Result<u32, String> {
-            self.spawn_sleeper()
-        }
     }
 
     impl Drop for SleepLauncher {
@@ -837,13 +793,6 @@ mod tests {
         ) -> Result<u32, String> {
             self.0.launch_worker(session_id, spec)
         }
-        fn launch_review(
-            &self,
-            session_id: &str,
-            spec: &ReviewSpawnSpec,
-        ) -> Result<u32, String> {
-            self.0.launch_review(session_id, spec)
-        }
     }
 
     // ── isolation-tier argv tests ────────────────────────────────────────────
@@ -907,18 +856,8 @@ mod tests {
         }
     }
 
-    fn make_review_spec(task_id: &str, p_id: &str, cwd: &Path) -> ReviewSpawnSpec {
-        ReviewSpawnSpec {
-            task_id: task_id.into(),
-            p_item_id: p_id.into(),
-            cwd: cwd.to_path_buf(),
-            system_prompt: "sys".into(),
-            model: "claude-sonnet-4-6".to_string(),
-        }
-    }
-
     #[test]
-    fn enqueue_planner_and_review_track_their_kinds() {
+    fn enqueue_planner_tracks_kind() {
         let tmp = tempfile::TempDir::new().unwrap();
         let launcher = Arc::new(SleepLauncher::new());
         let host = LocalHost::with_launcher(
@@ -926,14 +865,11 @@ mod tests {
             Box::new(SleepLauncherRef(launcher.clone())),
         );
         let psid = host.enqueue_planner(&make_planner_spec("t1", tmp.path())).unwrap();
-        let rsid = host.enqueue_review(&make_review_spec("t1", "p1", tmp.path())).unwrap();
         let live = host.live_sessions();
-        assert_eq!(live.len(), 2);
+        assert_eq!(live.len(), 1);
         let planner = live.iter().find(|r| r.session_id == psid).unwrap();
-        let review = live.iter().find(|r| r.session_id == rsid).unwrap();
         assert_eq!(planner.kind, SessionKind::Planner);
-        assert_eq!(review.kind, SessionKind::Review);
-        assert_eq!(review.p_item_id.as_deref(), Some("p1"));
+        assert_eq!(planner.p_item_id, None);
         host.terminate_task_sessions("t1").unwrap();
     }
 }
