@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
@@ -12,6 +12,7 @@ import {
   useUIStore,
 } from "../store";
 import { safeMarkdownComponents, safeRemarkPlugins } from "../markdown/safeLinks";
+import { usePrecedingAgentMessages } from "../hooks/usePrecedingAgentMessages";
 import type {
   DecisionHistoryRecord,
   ElicitationAttachment,
@@ -312,6 +313,63 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
 
 // ── Elicitation card renderer (multi-step wizard) ─────────────────────────
 
+/**
+ * The agent's plain-text narration since the user's last input, prepended above
+ * a question card. Renders as the first child inside `.card_scroll`; on first
+ * load it scrolls the card so the question (its next sibling) sits at the top,
+ * so Boss can scroll *up* to read what the agent buried in the turn leading up
+ * to the question. Renders nothing when there's no narration.
+ */
+function PrecedingAgentMessagesRegion({
+  sessionId,
+  requestId,
+}: {
+  sessionId: string;
+  requestId: string;
+}) {
+  const { t } = useTranslation();
+  const { messages, loading } = usePrecedingAgentMessages(sessionId, requestId);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const scrolledFor = useRef<string | null>(null);
+
+  // Once narration is in, scroll the enclosing `.card_scroll` so the region
+  // sits just above the fold and the question is at the top. Done once per
+  // request so we don't yank the view back while Boss is scrolling.
+  useLayoutEffect(() => {
+    if (!messages.length || scrolledFor.current === requestId) return;
+    const root = rootRef.current;
+    if (!root) return;
+    let el: HTMLElement | null = root.parentElement;
+    while (el) {
+      const oy = getComputedStyle(el).overflowY;
+      if (oy === "auto" || oy === "scroll") break;
+      el = el.parentElement;
+    }
+    if (!el) return;
+    const rootRect = root.getBoundingClientRect();
+    const containerRect = el.getBoundingClientRect();
+    el.scrollTop += rootRect.bottom - containerRect.top;
+    scrolledFor.current = requestId;
+  }, [messages.length, requestId]);
+
+  if (loading || !messages.length) return null;
+
+  return (
+    <div ref={rootRef} className={styles.preceding}>
+      <div className={styles.preceding_label}>
+        {t("decision.preceding_label", "Agent said while working")}
+      </div>
+      {messages.map((m, i) => (
+        <div key={m.uuid ?? i} className={styles.preceding_msg}>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
+            {m.text}
+          </ReactMarkdown>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function ElicitationCard({ decision, compact = false }: { decision: ElicitationDecision; compact?: boolean }) {
   const { t } = useTranslation();
   const {
@@ -387,6 +445,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   return (
     <div className={`${styles.card} ${styles.card_flex}`}>
       <div className={styles.card_scroll}>
+      <PrecedingAgentMessagesRegion sessionId={request.sessionId} requestId={request.id} />
       <div className={styles.card_header}>
         <svg
           className={styles.card_icon_question}
@@ -1338,6 +1397,7 @@ function FleetAskCard({
   return (
     <div className={`${styles.card} ${styles.card_flex}`}>
       <div className={styles.card_scroll}>
+      <PrecedingAgentMessagesRegion sessionId={request.sessionId} requestId={request.id} />
       <div className={styles.card_header}>
         <svg
           className={styles.card_icon_question}
