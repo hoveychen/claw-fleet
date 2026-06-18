@@ -34,6 +34,10 @@ pub struct Bootstrap {
     pub task_id: String,
     pub http_handle: HttpHandle,
     pub host: Arc<LocalHost>,
+    /// Handle the runtime loop will broadcast plan-advance events through once
+    /// P7 wires it in. The HTTP server already serves `/events` from its own
+    /// clone of this broadcaster, so the field is held (not read) until then.
+    #[allow(dead_code)]
     pub broadcaster: SseBroadcaster,
 }
 
@@ -284,6 +288,10 @@ fn derive_auto_project_id(workspace: &std::path::Path) -> String {
     format!("auto-{:016x}", h.finish())
 }
 
+/// 30s-deadline convenience wrapper over [`shutdown_with_deadline`]. `main.rs`
+/// calls the deadline form directly; this shorthand is used by tests (and kept
+/// as the documented default-timeout entry point).
+#[allow(dead_code)]
 pub fn shutdown(boot: Bootstrap) {
     shutdown_with_deadline(boot, std::time::Duration::from_secs(30));
 }
@@ -430,13 +438,6 @@ mod tests {
             self.spawn()
         }
         fn launch_worker(&self, _s: &str, _spec: &WorkerSpawnSpec) -> Result<u32, String> {
-            self.spawn()
-        }
-        fn launch_review(
-            &self,
-            _s: &str,
-            _spec: &claw_fleet_task::spawn_specs::ReviewSpawnSpec,
-        ) -> Result<u32, String> {
             self.spawn()
         }
     }
