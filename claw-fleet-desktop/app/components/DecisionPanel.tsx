@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { invoke } from "@tauri-apps/api/core";
@@ -314,11 +314,11 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
 // ── Elicitation card renderer (multi-step wizard) ─────────────────────────
 
 /**
- * The agent's plain-text narration since the user's last input, prepended above
- * a question card. Renders as the first child inside `.card_scroll`; on first
- * load it scrolls the card so the question (its next sibling) sits at the top,
- * so Boss can scroll *up* to read what the agent buried in the turn leading up
- * to the question. Renders nothing when there's no narration.
+ * The agent's plain-text narration since the user's last input, shown above a
+ * question card. Collapsed by default to a single slim hint bar ("Agent said N
+ * more things while working") so the question stays the focus; clicking the bar
+ * expands an inner scrollable region with the full narration and the card grows
+ * to fit. Renders nothing when there's no narration.
  */
 function PrecedingAgentMessagesRegion({
   sessionId,
@@ -329,43 +329,55 @@ function PrecedingAgentMessagesRegion({
 }) {
   const { t } = useTranslation();
   const { messages, loading } = usePrecedingAgentMessages(sessionId, requestId);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const scrolledFor = useRef<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
 
-  // Once narration is in, scroll the enclosing `.card_scroll` so the region
-  // sits just above the fold and the question is at the top. Done once per
-  // request so we don't yank the view back while Boss is scrolling.
-  useLayoutEffect(() => {
-    if (!messages.length || scrolledFor.current === requestId) return;
-    const root = rootRef.current;
-    if (!root) return;
-    let el: HTMLElement | null = root.parentElement;
-    while (el) {
-      const oy = getComputedStyle(el).overflowY;
-      if (oy === "auto" || oy === "scroll") break;
-      el = el.parentElement;
-    }
-    if (!el) return;
-    const rootRect = root.getBoundingClientRect();
-    const containerRect = el.getBoundingClientRect();
-    el.scrollTop += rootRect.bottom - containerRect.top;
-    scrolledFor.current = requestId;
-  }, [messages.length, requestId]);
+  // Collapse again whenever a fresh question arrives for this card so the next
+  // decision opens focused on the question, not someone's old expanded state.
+  useEffect(() => {
+    setExpanded(false);
+  }, [requestId]);
 
   if (loading || !messages.length) return null;
 
   return (
-    <div ref={rootRef} className={styles.preceding}>
-      <div className={styles.preceding_label}>
-        {t("decision.preceding_label", "Agent said while working")}
-      </div>
-      {messages.map((m, i) => (
-        <div key={m.uuid ?? i} className={styles.preceding_msg}>
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
-            {m.text}
-          </ReactMarkdown>
+    <div className={`${styles.preceding} ${expanded ? styles.preceding_open : ""}`}>
+      <button
+        type="button"
+        className={styles.preceding_toggle}
+        onClick={() => setExpanded((v) => !v)}
+        aria-expanded={expanded}
+      >
+        <svg
+          className={`${styles.preceding_chevron} ${expanded ? styles.preceding_chevron_open : ""}`}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+        <span className={styles.preceding_toggle_label}>
+          {expanded
+            ? t("decision.preceding_label", "Agent said while working")
+            : t("decision.preceding_hint", {
+                n: messages.length,
+                defaultValue: "Agent said {{n}} more while working",
+              })}
+        </span>
+      </button>
+      {expanded && (
+        <div className={styles.preceding_body}>
+          {messages.map((m, i) => (
+            <div key={m.uuid ?? i} className={styles.preceding_msg}>
+              <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
+                {m.text}
+              </ReactMarkdown>
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }

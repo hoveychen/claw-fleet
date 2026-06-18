@@ -1443,22 +1443,66 @@
 
 /* ── Preceding agent narration (above a question card) ──────────────────────
  * The plain-text the agent emitted between the user's last input and this
- * question. Sits at the top of .card_scroll, visually recessed and quieter than
- * the question itself so it reads as "context", not the ask. Boss scrolls up
- * into it; the question is the default-visible surface below. */
+ * question. Collapsed by default to a single slim hint bar so the question
+ * stays the focus; clicking the bar expands .preceding_body (an inner scroll
+ * region) and the card grows to fit. */
 .preceding {
-  border-left: 2px solid rgba(var(--color-accent-rgb), 0.35);
-  padding: 2px 0 2px 10px;
-  margin: 0 0 12px;
-  opacity: 0.85;
+  margin: 0 0 10px;
 }
-.preceding_label {
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+.preceding_open {
+  border-left: 2px solid rgba(var(--color-accent-rgb), 0.35);
+  padding-left: 10px;
+}
+/* The always-visible collapsed/expanded toggle bar. */
+.preceding_toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
   color: var(--color-text-secondary);
-  margin-bottom: 6px;
+  text-align: left;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.preceding_toggle:hover {
+  background: rgba(var(--color-accent-rgb), 0.08);
+  color: var(--color-text);
+}
+.preceding_chevron {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+.preceding_chevron_open {
+  transform: rotate(180deg);
+}
+.preceding_toggle_label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+/* Expanded narration body: bounded height with its own scroll so a long
+ * history never pushes the question off-screen — the card grows up to this
+ * cap, then the body scrolls. */
+.preceding_body {
+  max-height: 38vh;
+  overflow-y: auto;
+  margin-top: 6px;
+  padding-right: 4px;
+}
+.preceding_body::-webkit-scrollbar {
+  width: 8px;
+}
+.preceding_body::-webkit-scrollbar-thumb {
+  background: rgba(var(--color-accent-rgb), 0.3);
+  border-radius: 5px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
 }
 .preceding_msg {
   font-size: 12px;
