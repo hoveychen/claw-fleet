@@ -1911,27 +1911,51 @@ impl Backend for LocalBackend {
             })?;
         // Fresh attempt — clear any stale failure reason from a prior start.
         let _ = crate::task::clear_task_start_error(task_id);
-        let mut child = crate::fleet_task_spawn::spawn_fleet_task_detached(task_id, &workspace)
-            .map_err(|e| e.to_string())?;
-        // Background readiness watcher — never blocks the UI. Generous timeout
-        // tolerates a cold first-launch; on genuine failure it records the
-        // reason on the task (surfaced via Task.start_error on both backends).
+        // Prefer the out-of-sandbox `fleet serve` daemon to spawn the runtime:
+        // the desktop app is macOS-sandboxed, and a runtime it spawns directly
+        // inherits that sandbox, so the planner/worker `claude` can't read the
+        // login keychain and exits "Not logged in". serve runs under launchd
+        // outside the sandbox, so a runtime it parents is unsandboxed too.
+        // Fall back to a local spawn when serve isn't running (e.g. dev runs of
+        // the desktop, which aren't sandboxed anyway).
         let tid = task_id.to_string();
-        std::thread::Builder::new()
-            .name("fleet-task-start-watch".into())
-            .spawn(move || {
-                match crate::fleet_task_spawn::await_registry(
-                    &tid,
-                    &mut child,
-                    std::time::Duration::from_secs(45),
-                ) {
-                    Ok(_) => { /* live — runtime_registry watcher shows the badge */ }
-                    Err(e) => {
-                        let _ = crate::task::mark_task_start_failed(&tid, &e.to_string());
-                    }
-                }
-            })
-            .map_err(|e| format!("spawn start watcher: {e}"))?;
+        match crate::fleet_task_spawn::spawn_via_serve(task_id, &workspace) {
+            Ok(()) => {
+                std::thread::Builder::new()
+                    .name("fleet-task-start-watch".into())
+                    .spawn(move || {
+                        if let Err(e) = crate::fleet_task_spawn::await_registry_polling(
+                            &tid,
+                            std::time::Duration::from_secs(45),
+                        ) {
+                            let _ = crate::task::mark_task_start_failed(&tid, &e.to_string());
+                        }
+                    })
+                    .map_err(|e| format!("spawn start watcher: {e}"))?;
+            }
+            Err(serve_err) => {
+                eprintln!(
+                    "[start_task] serve daemon unavailable ({serve_err}); \
+                     falling back to local spawn (sandboxed desktop builds will \
+                     hit the keychain auth issue)"
+                );
+                let mut child =
+                    crate::fleet_task_spawn::spawn_fleet_task_detached(task_id, &workspace)
+                        .map_err(|e| e.to_string())?;
+                std::thread::Builder::new()
+                    .name("fleet-task-start-watch".into())
+                    .spawn(move || {
+                        if let Err(e) = crate::fleet_task_spawn::await_registry(
+                            &tid,
+                            &mut child,
+                            std::time::Duration::from_secs(45),
+                        ) {
+                            let _ = crate::task::mark_task_start_failed(&tid, &e.to_string());
+                        }
+                    })
+                    .map_err(|e| format!("spawn start watcher: {e}"))?;
+            }
+        }
         Ok(())
     }
 
