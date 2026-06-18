@@ -201,6 +201,12 @@ pub fn run_orchestrator_loop(
                 if let Some(reason) = planner_failure(&host) {
                     eprintln!("[orchestrator] task {task_id}: {reason} — failing start");
                     let _ = claw_fleet_task::task::mark_task_start_failed(&task_id, &reason);
+                    // Signal the host process to shut down: with an empty plan and
+                    // a dead planner there is nothing left to drive, and the
+                    // `--no-tui` main loop only exits when `stop` is set. Without
+                    // this the runtime lingers registered (the original silent-hang
+                    // symptom) even though the task is back to Drafting.
+                    stop.store(true, Ordering::SeqCst);
                     break;
                 }
                 std::thread::sleep(std::time::Duration::from_millis(300));
