@@ -1595,7 +1595,8 @@
   },
   "decision": {
     "pending": "待处理决策",
-    "preceding_label": "Agent 过程中的说明"
+    "preceding_label": "Agent 过程中的说明",
+    "preceding_hint": "Agent 过程中还说了 {{n}} 段"
   },
   "guard": {
     "title": "检测到高危命令",
