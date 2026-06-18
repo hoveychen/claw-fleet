@@ -86,7 +86,7 @@ fn fleet_cli_task_dispatch_routes_via_http_to_fleet_task() {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
-        .expect("spawn fleet-task");
+        .expect("spawn fleet-cli task-runtime");
 
     // Wait until the registry entry shows up so we know the HTTP server is
     // bound and ready.
