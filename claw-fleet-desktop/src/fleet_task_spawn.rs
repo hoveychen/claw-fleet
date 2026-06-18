@@ -122,6 +122,83 @@ pub fn spawn_fleet_task_detached(
         .map_err(|e| SpawnError::Spawn(e.to_string()))
 }
 
+/// Resolve the running `fleet serve` daemon's base URL + auth token from the
+/// shared files it publishes (`~/.claude/fleet/port`, `~/.claude/fleet/token`).
+/// `None` when the daemon isn't installed/running (no port file yet) — callers
+/// fall back to a local spawn.
+fn serve_base_url_and_token() -> Option<(String, String)> {
+    let port_path = claw_fleet_core::launchd::port_file_path()?;
+    let port: u16 = std::fs::read_to_string(&port_path)
+        .ok()?
+        .trim()
+        .parse()
+        .ok()?;
+    if port == 0 {
+        return None;
+    }
+    let token_path = claw_fleet_core::launchd::token_file_path()?;
+    let token = std::fs::read_to_string(&token_path).ok()?.trim().to_string();
+    if token.is_empty() {
+        return None;
+    }
+    Some((format!("http://127.0.0.1:{port}"), token))
+}
+
+/// Ask the (unsandboxed) `fleet serve` daemon to spawn the task-runtime so the
+/// planner/worker `claude` can read the login keychain. Returns `Ok(())` once
+/// serve reports the process spawned; the runtime registry watcher then lights
+/// up the live badge exactly as with a local spawn. `Err` means serve is
+/// unreachable or refused — the caller falls back to a local spawn.
+pub fn spawn_via_serve(task_id: &str, workspace: &std::path::Path) -> Result<(), SpawnError> {
+    let (base, token) =
+        serve_base_url_and_token().ok_or_else(|| SpawnError::Spawn("serve daemon not running".into()))?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|e| SpawnError::Spawn(format!("http client: {e}")))?;
+    let resp = client
+        .get(format!("{base}/spawn_task_runtime"))
+        .header("Authorization", format!("Bearer {token}"))
+        .query(&[("task_id", task_id), ("workspace", &workspace.to_string_lossy())])
+        .send()
+        .map_err(|e| SpawnError::Spawn(format!("serve request failed: {e}")))?;
+    if !resp.status().is_success() {
+        let code = resp.status();
+        let body = resp.text().unwrap_or_default();
+        return Err(SpawnError::Spawn(format!(
+            "serve /spawn_task_runtime returned {code}: {body}"
+        )));
+    }
+    Ok(())
+}
+
+/// Poll the runtime registry until the task's entry publishes (proves the
+/// out-of-sandbox runtime bound its HTTP server) or `appear_timeout` elapses.
+/// Used after [`spawn_via_serve`], where no local child handle exists to reap;
+/// on timeout the task-runtime log tail is folded into the error so a
+/// crash-before-register stays diagnosable.
+pub fn await_registry_polling(
+    task_id: &str,
+    appear_timeout: Duration,
+) -> Result<registry::RegistryEntry, SpawnError> {
+    let deadline = Instant::now() + appear_timeout;
+    while Instant::now() < deadline {
+        if let Ok(Some(entry)) = registry::read(task_id) {
+            return Ok(entry);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let tail = tail_runtime_log(task_id, 4096);
+    if tail.is_empty() {
+        Err(SpawnError::RegistryTimeout(task_id.into()))
+    } else {
+        let last = tail.lines().last().unwrap_or(&tail);
+        Err(SpawnError::Spawn(format!(
+            "task-runtime did not register in time: {last}"
+        )))
+    }
+}
+
 /// Block up to `appear_timeout` for the runtime registry entry to publish
 /// (proves the HTTP server bound + master started). Polls every 100ms and
 /// also reaps the child: if it exits before registering we fail immediately
