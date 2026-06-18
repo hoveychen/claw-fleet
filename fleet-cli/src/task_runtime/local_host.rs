@@ -28,6 +28,39 @@ pub enum SessionKind {
     Review,
 }
 
+/// Per-session log file capturing the spawned `claude`'s stderr:
+/// `<fleet_dir>/logs/session-<session_id>.log`. Without this the planner's
+/// startup failure (e.g. "Not logged in" when the process is sandboxed and
+/// can't reach the keychain) went to `/dev/null`, leaving a silent hang with
+/// no diagnosable cause. The orchestrator reads this on a dead-planner check.
+pub fn session_log_path(session_id: &str) -> Option<PathBuf> {
+    let dir = claw_fleet_task::paths::get_fleet_dir()?.join("logs");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join(format!("session-{session_id}.log")))
+}
+
+/// Last `max_bytes` of a session's captured stderr, trimmed. Empty when the log
+/// is missing/unreadable.
+pub fn tail_session_log(session_id: &str, max_bytes: u64) -> String {
+    use std::io::{Read, Seek, SeekFrom};
+    let Some(path) = session_log_path(session_id) else {
+        return String::new();
+    };
+    let Ok(meta) = std::fs::metadata(&path) else {
+        return String::new();
+    };
+    let Ok(mut f) = std::fs::File::open(&path) else {
+        return String::new();
+    };
+    let start = meta.len().saturating_sub(max_bytes);
+    if start > 0 {
+        let _ = f.seek(SeekFrom::Start(start));
+    }
+    let mut buf = String::new();
+    let _ = f.read_to_string(&mut buf);
+    buf.trim().to_string()
+}
+
 #[derive(Debug, Clone)]
 pub struct SessionRecord {
     pub session_id: String,
@@ -244,9 +277,17 @@ fn spawn_claude(spawn: &ClaudeSpawn) -> Result<u32, String> {
     if let Some(p) = spawn.p_item_id {
         cmd.env("FLEET_P_ITEM_ID", p);
     }
+    // Capture stderr to a per-session log (truncated per start) so a startup
+    // failure — e.g. the planner exiting "Not logged in" under the sandbox —
+    // is diagnosable instead of vanishing into /dev/null. Fall back to null if
+    // the log file can't be created so spawning never fails just for logging.
+    let stderr = session_log_path(spawn.session_id)
+        .and_then(|p| std::fs::File::create(p).ok())
+        .map(Stdio::from)
+        .unwrap_or_else(Stdio::null);
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(stderr);
     let child = cmd.spawn().map_err(|e| format!("spawn claude: {e}"))?;
     Ok(child.id())
 }
