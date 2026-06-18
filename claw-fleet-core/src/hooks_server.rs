@@ -8,6 +8,56 @@ pub mod sse;
 
 pub use sse::{handle_sse_upgrade, SseBroadcaster, SseClient};
 
+/// Where a spawned `fleet task-runtime` process's stderr is captured. Must match
+/// the path the desktop reads in `fleet_task_spawn::task_runtime_log_path` so a
+/// crash-before-register stays diagnosable: `<fleet_dir>/logs/task-runtime-<id>.log`.
+fn task_runtime_log_path(task_id: &str) -> Option<std::path::PathBuf> {
+    let dir = crate::paths::get_fleet_dir()?.join("logs");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join(format!("task-runtime-{task_id}.log")))
+}
+
+/// Spawn `fleet task-runtime resume <task_id> --workspace <ws> --no-tui` as a
+/// child of THIS process and return its pid. Called from the `/spawn_task_runtime`
+/// endpoint so that `fleet serve` — which runs outside the desktop app's macOS
+/// sandbox (launchd `com.claudefleet.serve`, ppid launchd) — is the parent.
+/// A task-runtime spawned here is therefore unsandboxed too, so the planner /
+/// worker `claude` it launches can read the user's login-keychain credentials.
+/// Spawning from the sandboxed desktop app instead leaves the child confined and
+/// `claude` exits with "Not logged in".
+///
+/// The child's stderr is captured to `task_runtime_log_path` (truncated per
+/// start), not `/dev/null`, so a crash-before-register is recoverable. A reaper
+/// thread waits on the child so it doesn't linger as a zombie under the
+/// long-lived serve process when the task eventually finishes.
+fn spawn_task_runtime_detached(task_id: &str, workspace: &str) -> Result<u32, String> {
+    let bin = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    let stderr = task_runtime_log_path(task_id)
+        .and_then(|p| std::fs::File::create(p).ok())
+        .map(std::process::Stdio::from)
+        .unwrap_or_else(std::process::Stdio::null);
+    let child = crate::process_util::command(&bin)
+        .arg("task-runtime")
+        .arg("resume")
+        .arg(task_id)
+        .arg("--workspace")
+        .arg(workspace)
+        .arg("--no-tui")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(stderr)
+        .spawn()
+        .map_err(|e| format!("spawn task-runtime: {e}"))?;
+    let pid = child.id();
+    // Reap on exit so the task-runtime doesn't become a zombie under serve
+    // (KeepAlive=true, so serve outlives every task it spawns).
+    std::thread::spawn(move || {
+        let mut child = child;
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
 pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     use std::io::{Read, Seek, SeekFrom};
     use std::sync::{Arc, Mutex};
@@ -481,6 +531,36 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 {
                     let _ = (pid, force);
                     let _ = request.respond(tiny_http::Response::empty(400));
+                }
+            }
+
+            // Spawn a task-runtime as a child of this (unsandboxed) serve
+            // process so the planner/worker `claude` can reach the login
+            // keychain. The desktop POSTs here instead of spawning directly,
+            // which would inherit its macOS sandbox and break `claude` auth.
+            "/spawn_task_runtime" => {
+                let task_id = query.get("task_id").cloned().unwrap_or_default();
+                let workspace = query.get("workspace").cloned().unwrap_or_default();
+                if task_id.is_empty() || workspace.is_empty() {
+                    let _ = request.respond(tiny_http::Response::empty(400));
+                    continue;
+                }
+                match spawn_task_runtime_detached(&task_id, &workspace) {
+                    Ok(pid) => {
+                        let body = format!(r#"{{"ok":true,"pid":{pid}}}"#);
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body =
+                            format!(r#"{{"error":{}}}"#, serde_json::to_string(&e).unwrap());
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
                 }
             }
 
