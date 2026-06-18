@@ -1594,7 +1594,8 @@
     "install_error": "安装 hooks 失败：{{error}}"
   },
   "decision": {
-    "pending": "待处理决策"
+    "pending": "待处理决策",
+    "preceding_label": "Agent 过程中的说明"
   },
   "guard": {
     "title": "检测到高危命令",
