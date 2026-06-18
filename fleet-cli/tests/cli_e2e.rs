@@ -1,12 +1,15 @@
-//! End-to-end test driving `fleet-cli task` against a live `fleet-task`
+//! End-to-end test driving `fleet-cli task` against a live task-runtime
 //! subprocess. Verifies Phase 3+ HTTP routing for `dispatch` and the
 //! local-host fallback for `mark-done`.
 //!
-//! Requires both binaries to be built (`cargo build`) — the test resolves
-//! them next to its own test exe under `target/debug/`. Uses
-//! `FLEET_TASK_FAKE_LAUNCHER=1` so neither side needs a real claude CLI.
+//! The task-runtime lifecycle (formerly the standalone `fleet-task` binary)
+//! is now folded into `fleet-cli` as the hidden `task-runtime` subcommand, so
+//! both the driver and the daemon are the same `fleet-cli` binary — only that
+//! one binary needs to be built (`cargo build`); the test resolves it next to
+//! its own test exe under `target/debug/`. Uses `FLEET_TASK_FAKE_LAUNCHER=1`
+//! so neither side needs a real claude CLI.
 //!
-//! Unix-only: the fake launcher invoked inside fleet-task spawns the
+//! Unix-only: the fake launcher invoked inside task-runtime spawns the
 //! `sleep` shell command, and the shutdown path here uses SIGTERM.
 
 #![cfg(unix)]
@@ -62,14 +65,13 @@ fn fleet_cli_task_dispatch_routes_via_http_to_fleet_task() {
     let workspace = tempfile::TempDir::new().unwrap();
     init_git(workspace.path());
 
-    let fleet_task = bin_path("fleet-task");
     let fleet_cli = bin_path("fleet-cli");
-    assert!(fleet_task.is_file(), "fleet-task not at {}", fleet_task.display());
     assert!(fleet_cli.is_file(), "fleet-cli not at {}", fleet_cli.display());
 
-    // Spawn fleet-task to own the lifecycle. Fake launcher replaces claude
-    // with `sleep 60` so we don't need the real CLI in CI.
-    let mut server = Command::new(&fleet_task)
+    // Spawn `fleet-cli task-runtime new` to own the lifecycle. Fake launcher
+    // replaces claude with `sleep 60` so we don't need the real CLI in CI.
+    let mut server = Command::new(&fleet_cli)
+        .arg("task-runtime")
         .arg("new")
         .arg("--workspace")
         .arg(workspace.path())
@@ -95,7 +97,7 @@ fn fleet_cli_task_dispatch_routes_via_http_to_fleet_task() {
         }
         if Instant::now() > deadline {
             let _ = server.kill();
-            panic!("fleet-task never wrote a registry entry");
+            panic!("task-runtime never wrote a registry entry");
         }
         std::thread::sleep(Duration::from_millis(100));
     };
@@ -142,7 +144,7 @@ fn fleet_cli_task_dispatch_routes_via_http_to_fleet_task() {
         "dispatch didn't route via HTTP. stderr={stderr}"
     );
 
-    // SIGTERM the fleet-task subprocess and confirm clean exit.
+    // SIGTERM the task-runtime subprocess and confirm clean exit.
     #[cfg(unix)]
     unsafe {
         libc::kill(server.id() as libc::pid_t, libc::SIGTERM);
@@ -155,7 +157,7 @@ fn fleet_cli_task_dispatch_routes_via_http_to_fleet_task() {
                 if Instant::now() > exit_deadline {
                     let _ = server.kill();
                     let _ = server.wait();
-                    panic!("fleet-task did not exit within 40s of SIGTERM");
+                    panic!("task-runtime did not exit within 40s of SIGTERM");
                 }
                 std::thread::sleep(Duration::from_millis(200));
             }
