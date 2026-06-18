@@ -22,7 +22,7 @@ use claw_fleet_task::task::{
 use claw_fleet_task::registry::{self, RegistryEntry};
 
 use crate::task_runtime::http::{self, HttpHandle, ServerConfig};
-use crate::task_runtime::local_host::{LocalHost, ProcessLauncher};
+use crate::task_runtime::local_host::{self, LocalHost, ProcessLauncher, SessionKind};
 use crate::task_runtime::sse::SseBroadcaster;
 
 /// Synthetic project id used when `fleet-task` boots without a desktop-side
@@ -158,6 +158,33 @@ pub fn run_orchestrator_loop(
     stop: Arc<AtomicBool>,
 ) {
     let orch = Orchestrator::new(task_id.clone());
+    // Planner-liveness guard. While the plan is still empty the orchestrator has
+    // nothing to dispatch and idles, waiting for the interactive planning
+    // session to write the DAG via `fleet task update-plan`. If that session
+    // dies first (e.g. the sandboxed-spawn keychain failure where `claude` exits
+    // "Not logged in"), the plan would never arrive and the task would idle
+    // forever — the silent 9-minute hang. Detect the dead planner and fail the
+    // task start with the captured reason instead.
+    let planner_failure = |host: &LocalHost| -> Option<String> {
+        let task = get_task(&task_id).ok()?;
+        if !task.plan.is_empty() {
+            return None;
+        }
+        let planner = host
+            .live_sessions()
+            .into_iter()
+            .find(|r| r.kind == SessionKind::Planner)?;
+        if pid_alive_reaping(planner.pid) {
+            return None;
+        }
+        let tail = local_host::tail_session_log(&planner.session_id, 4096);
+        Some(if tail.is_empty() {
+            "planning session exited before producing a plan (no output captured)".to_string()
+        } else {
+            let last = tail.lines().last().unwrap_or(&tail);
+            format!("planning session exited before producing a plan: {last}")
+        })
+    };
     // A persistently-failing step (e.g. a review session that never produces a
     // parseable verdict) must NOT spin forever re-spawning claude. Bound the
     // consecutive errors; on the limit, stop driving and leave the task for the
@@ -169,6 +196,13 @@ pub fn run_orchestrator_loop(
             Ok(OrchestratorStep::PlanComplete) => break,
             Ok(OrchestratorStep::Idle) => {
                 consecutive_errors = 0;
+                // Nothing to dispatch — if that's because the planner died with
+                // an empty plan, fail the start instead of idling forever.
+                if let Some(reason) = planner_failure(&host) {
+                    eprintln!("[orchestrator] task {task_id}: {reason} — failing start");
+                    let _ = claw_fleet_task::task::mark_task_start_failed(&task_id, &reason);
+                    break;
+                }
                 std::thread::sleep(std::time::Duration::from_millis(300));
             }
             Ok(_) => {
