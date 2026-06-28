@@ -344,6 +344,21 @@ mod tests {
         assert_eq!(parsed.reason, None);
         assert!(parsed.always_allow.is_none());
     }
+
+    #[test]
+    fn truncate_command_does_not_split_multibyte_chars() {
+        // Each '中' is 3 bytes; with max=10 the byte index 10 lands *inside*
+        // the 4th character (bytes 9..12), so a naive `&cmd[..10]` slice panics
+        // with "byte index 10 is not a char boundary". This reproduces the
+        // crash seen in get_guard_context (gui.rs) on long CJK assistant text.
+        let cmd = "中".repeat(20); // 60 bytes
+        let out = truncate_command(&cmd, 10);
+        // Round down to the previous char boundary (byte 9 = 3 whole chars),
+        // then append the ellipsis — never panic.
+        assert_eq!(out, "中中中…");
+        // ASCII / short inputs are unaffected.
+        assert_eq!(truncate_command("ls -la", 100), "ls -la");
+    }
 }
 
 // ── Guard logic (used by `fleet guard` CLI) ─────────────────────────────────
@@ -423,13 +438,21 @@ pub fn new_request_id() -> String {
     Uuid::new_v4().to_string()
 }
 
-/// Truncate a command for display.
+/// Truncate a string to at most `max` bytes for display, appending an ellipsis.
+///
+/// `max` is a *byte* budget. To avoid slicing through a multi-byte UTF-8
+/// sequence (CJK is 3 bytes per char), the cut point is rounded down to the
+/// previous char boundary — otherwise `&cmd[..max]` panics when `max` lands
+/// mid-character, which crashed the whole desktop app via get_guard_context.
 pub fn truncate_command(cmd: &str, max: usize) -> String {
     if cmd.len() <= max {
-        cmd.to_string()
-    } else {
-        format!("{}…", &cmd[..max])
+        return cmd.to_string();
     }
+    let mut end = max;
+    while end > 0 && !cmd.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…", &cmd[..end])
 }
 
 // ── LLM analysis prompt ─────────────────────────────────────────────────────
