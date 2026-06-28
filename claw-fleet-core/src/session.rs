@@ -1713,6 +1713,19 @@ pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
         info.cost_speed_usd_per_min = 0.0;
     }
 
+    // A rate-limited session is blocked by the API and generating nothing, but
+    // its 5-minute speed window still holds the burst of output tokens emitted
+    // just before the limit hit — so `token_speed` stays frozen at a high value
+    // and keeps inflating fleet-wide totals (observed: ~21 RateLimited agents
+    // contributing thousands of ghost tok/s while only a handful were actually
+    // streaming). Unlike WaitingInput/Delegating there is no age at which a
+    // rate-limited session resumes generating, so zero it immediately. The
+    // RateLimited *status* is preserved so the UI can still show the limit card.
+    if matches!(info.status, SessionStatus::RateLimited) {
+        info.token_speed = 0.0;
+        info.cost_speed_usd_per_min = 0.0;
+    }
+
     // Thresholds must mirror `determine_status` so the cache-hit path (which
     // reuses a stale SessionInfo and only calls this function) agrees with
     // the cache-miss path (which re-parses the JSONL). Specifically,
@@ -3141,6 +3154,28 @@ mod tests {
         assert_eq!(s.token_speed, 0.0);
         assert_eq!(s.cost_speed_usd_per_min, 0.0);
         assert_eq!(s.status, SessionStatus::Delegating);
+    }
+
+    #[test]
+    fn age_out_rate_limited_zeros_speed() {
+        // A rate-limited agent is blocked by the API and generating nothing,
+        // but its 5-minute window still holds the pre-ratelimit burst tokens,
+        // so `token_speed` stays frozen at a high value. Without zeroing it,
+        // every rate-limited session keeps inflating the fleet-wide totals
+        // (observed live: 21 RateLimited agents contributing ~2730 ghost tok/s
+        // against only ~230 tok/s of real generation). Zero immediately —
+        // there is no age at which a rate-limited session is generating.
+        let mut s = make_session(SessionStatus::RateLimited);
+        s.token_speed = 200.0;
+        s.cost_speed_usd_per_min = 4.0;
+        age_out_status(&mut s, 0.0);
+        assert_eq!(s.token_speed, 0.0, "rate-limited session must not report speed");
+        assert_eq!(s.cost_speed_usd_per_min, 0.0);
+        assert_eq!(
+            s.status,
+            SessionStatus::RateLimited,
+            "status stays RateLimited so the UI can still show the limit card"
+        );
     }
 
     #[test]
