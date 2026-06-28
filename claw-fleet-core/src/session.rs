@@ -1710,6 +1710,7 @@ pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
     ) && age_secs >= 30.0
     {
         info.token_speed = 0.0;
+        info.agent_token_speed = 0.0;
         info.cost_speed_usd_per_min = 0.0;
     }
 
@@ -1723,6 +1724,7 @@ pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
     // RateLimited *status* is preserved so the UI can still show the limit card.
     if matches!(info.status, SessionStatus::RateLimited) {
         info.token_speed = 0.0;
+        info.agent_token_speed = 0.0;
         info.cost_speed_usd_per_min = 0.0;
     }
 
@@ -1746,6 +1748,7 @@ pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
     if idle {
         info.status = SessionStatus::Idle;
         info.token_speed = 0.0;
+        info.agent_token_speed = 0.0;
         info.cost_speed_usd_per_min = 0.0;
     }
 }
@@ -3176,6 +3179,35 @@ mod tests {
             SessionStatus::RateLimited,
             "status stays RateLimited so the UI can still show the limit card"
         );
+    }
+
+    #[test]
+    fn age_out_zeros_agent_token_speed_rollup() {
+        // The per-card rollup (agent_token_speed = own speed + every subagent's
+        // speed) must also drop when a session ages out. age_out_status used to
+        // zero only token_speed, leaving agent_token_speed frozen at the value
+        // it held when the session was last active — so an idle card with zero
+        // live subagents still displayed a stale "0.0 · 64.0" second number
+        // (verified live: 9 idle ashare-mon mains showed nonzero rollups while
+        // pointing at 0 subagents). The post-age-out subagent rollup re-adds any
+        // genuinely-active subagent afterwards, so zeroing the base here is safe.
+        for status in [
+            SessionStatus::WaitingInput,
+            SessionStatus::Delegating,
+            SessionStatus::RateLimited,
+            SessionStatus::Streaming, // ages to Idle at >=120s
+        ] {
+            let mut s = make_session(status.clone());
+            s.token_speed = 50.0;
+            s.agent_token_speed = 600.0;
+            s.cost_speed_usd_per_min = 3.0;
+            age_out_status(&mut s, 300.0);
+            assert_eq!(s.token_speed, 0.0, "own speed must zero for {status:?}");
+            assert_eq!(
+                s.agent_token_speed, 0.0,
+                "rollup (agent_token_speed) must zero for {status:?}"
+            );
+        }
     }
 
     #[test]
