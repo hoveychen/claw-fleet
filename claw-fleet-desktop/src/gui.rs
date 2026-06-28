@@ -2292,15 +2292,82 @@ const DECISION_FLOAT_MIN_H: f64 = 200.0;
 const DECISION_FLOAT_MAX_H_RATIO: f64 = 0.7;
 const DECISION_FLOAT_MAX_W_RATIO: f64 = 0.9;
 
+/// macOS: visible work area (Dock + menu bar excluded) of the screen under the
+/// cursor, expressed in Tauri's top-left logical coordinate space as
+/// `(x_left, y_top, width, height)`. Returns `None` if AppKit yields no screens.
+///
+/// Tauri's `Monitor::size()` reports the full screen frame, which ignores the
+/// Dock — so a bottom-anchored window computed from it slides behind the Dock.
+/// `NSScreen.visibleFrame` is the only source that already subtracts the Dock
+/// and menu bar, regardless of Dock edge, size, or auto-hide state.
+#[cfg(target_os = "macos")]
+fn macos_cursor_screen_visible_frame() -> Option<(f64, f64, f64, f64)> {
+    use objc2::runtime::AnyObject;
+    use objc2::{class, msg_send};
+    use objc2_foundation::{NSPoint, NSRect};
+
+    unsafe {
+        // Cursor in Cocoa global coords (origin = bottom-left of the main screen, y up).
+        let mouse: NSPoint = msg_send![class!(NSEvent), mouseLocation];
+
+        let screens: *mut AnyObject = msg_send![class!(NSScreen), screens];
+        if screens.is_null() {
+            return None;
+        }
+        let count: usize = msg_send![screens, count];
+        if count == 0 {
+            return None;
+        }
+
+        // screens[0] owns the global origin; its full height flips Cocoa's
+        // y-up space into Tauri's y-down space.
+        let primary: *mut AnyObject = msg_send![screens, objectAtIndex: 0usize];
+        let primary_frame: NSRect = msg_send![primary, frame];
+        let primary_h = primary_frame.size.height;
+
+        // Pick the screen the cursor sits on; fall back to the primary screen.
+        let mut chosen = primary;
+        for i in 0..count {
+            let s: *mut AnyObject = msg_send![screens, objectAtIndex: i];
+            let f: NSRect = msg_send![s, frame];
+            if mouse.x >= f.origin.x
+                && mouse.x < f.origin.x + f.size.width
+                && mouse.y >= f.origin.y
+                && mouse.y < f.origin.y + f.size.height
+            {
+                chosen = s;
+                break;
+            }
+        }
+
+        let vf: NSRect = msg_send![chosen, visibleFrame];
+        let x_left = vf.origin.x;
+        // Cocoa top edge (y up) → Tauri top edge (y down from primary top).
+        let y_top = primary_h - (vf.origin.y + vf.size.height);
+        Some((x_left, y_top, vf.size.width, vf.size.height))
+    }
+}
+
 /// Logical top-left position that anchors a `w × h` window at the bottom-center
 /// of the monitor under the cursor, plus that monitor's logical width/height
-/// so callers can clamp size against the screen. Falls back to the primary
-/// monitor, then to (120, 120) with screen size None.
+/// so callers can clamp size against the screen. On macOS the anchor and size
+/// bounds use the screen's *visible* work area (Dock + menu bar excluded);
+/// elsewhere it uses the full monitor frame. Falls back to the primary monitor,
+/// then to (120, 120) with screen size None.
 fn decision_float_target_position_for(
     app: &tauri::AppHandle,
     w: f64,
     h: f64,
 ) -> (f64, f64, Option<(f64, f64)>) {
+    // macOS: anchor against the visible work area so the window never slides
+    // behind the Dock or under the menu bar.
+    #[cfg(target_os = "macos")]
+    if let Some((vx, vy, vw, vh)) = macos_cursor_screen_visible_frame() {
+        let x = vx + (vw - w) / 2.0;
+        let y = vy + vh - h - DECISION_FLOAT_BOTTOM_MARGIN;
+        return (x, y, Some((vw, vh)));
+    }
+
     let cursor = app.cursor_position().ok();
     let monitors = app.available_monitors().unwrap_or_default();
 
