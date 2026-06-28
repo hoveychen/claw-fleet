@@ -1377,11 +1377,10 @@ fn get_guard_context(state: tauri::State<AppState>, session_id: String) -> Strin
 
         if !text_parts.is_empty() {
             let combined = text_parts.join("\n");
-            // Truncate to ~2000 chars for the LLM prompt.
-            if combined.len() > 2000 {
-                return format!("{}…", &combined[..2000]);
-            }
-            return combined;
+            // Truncate to ~2000 bytes for the LLM prompt. Use the char-safe
+            // helper: a raw `&combined[..2000]` panics when byte 2000 lands
+            // inside a multi-byte char (CJK), which crashed the whole app.
+            return claw_fleet_core::guard::truncate_command(&combined, 2000);
         }
     }
 
