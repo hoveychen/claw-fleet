@@ -265,6 +265,10 @@ export interface TaskPlanSummary {
   planCount: number;
   done: number;
   total: number;
+  /** Display name of the most-recently-modified active plan (its `**Plan:**` title or sentinel id). */
+  currentPlan?: string;
+  /** First still-pending top-level task in the focused plan (e.g. `**P3** — …`). */
+  currentTask?: string;
 }
 
 /** One checkbox line in a TASKS.md plan (detail view). */
