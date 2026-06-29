@@ -318,6 +318,12 @@ pub trait Backend: Send + Sync {
     fn get_memory_content(&self, path: &str) -> Result<String, String>;
     fn get_memory_history(&self, path: &str) -> Vec<MemoryHistoryEntry>;
 
+    // ── TASKS.md plans ─────────────────────────────────────────────────────────
+    /// All PRD plans (with full task items) visible to a session whose
+    /// workspace root is `workspace_path` — scans the same source set the
+    /// `fleet prd-context` hook injects (main checkout + sibling worktrees).
+    fn get_task_plans(&self, workspace_path: &str) -> Vec<crate::prd_tasks::TaskPlanDetail>;
+
     // ── Skills ────────────────────────────────────────────────────────────────
     fn list_skills(&self) -> Vec<SkillItem>;
     fn get_skill_content(&self, path: &str) -> Result<String, String>;

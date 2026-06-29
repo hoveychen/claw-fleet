@@ -1270,6 +1270,8 @@
     "tab_messages": "Messages",
     "tab_tokens": "Tokens",
     "tab_workflow": "Workflow",
+    "tab_tasks": "Tasks",
+    "tasks_anonymous": "(anonymous plan)",
     "section_timeline": "Story",
     "section_plan": "Plan",
     "plan_kanban": "Board",

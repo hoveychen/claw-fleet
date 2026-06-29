@@ -1267,6 +1267,8 @@
     "tab_messages": "对话",
     "tab_tokens": "Token",
     "tab_workflow": "Workflow",
+    "tab_tasks": "任务",
+    "tasks_anonymous": "(匿名计划)",
     "section_timeline": "来龙去脉",
     "section_plan": "计划",
     "plan_kanban": "看板",

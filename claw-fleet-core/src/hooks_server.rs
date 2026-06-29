@@ -827,6 +827,18 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/task_plans" => {
+                let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
+                let workspace_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
+                let plans = crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(
+                    &workspace_path,
+                ));
+                let body = serde_json::to_string(&plans).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             "/skills" => {
                 let items = skills::scan_all_skills();
                 let body = serde_json::to_string(&items).unwrap_or_default();
