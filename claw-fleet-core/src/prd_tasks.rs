@@ -41,6 +41,16 @@ pub struct TaskPlanSummary {
     pub plan_count: u32,
     pub done: u32,
     pub total: u32,
+    /// Display name of the "currently focused" plan — the most recently modified
+    /// active block (its `**Plan:**` title, falling back to its sentinel id).
+    /// `None` for a single legacy anonymous block with no title.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_plan: Option<String>,
+    /// First still-pending top-level task in the focused plan (e.g. `**P3** — …`).
+    /// `None` when the focused plan has no pending task (shouldn't happen for an
+    /// active plan, but kept optional for safety).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_task: Option<String>,
 }
 
 /// One checkbox line in a plan, for the full task-list view.
@@ -355,6 +365,34 @@ pub fn parse_task_items(body: &str) -> Vec<TaskItem> {
     items
 }
 
+/// Extract a plan's display name from its `**Plan:** …` line, if present.
+/// Trims the `**Plan:**` marker and surrounding whitespace.
+pub fn extract_plan_name(body: &str) -> Option<String> {
+    for line in body.lines() {
+        let t = line.trim();
+        // Accept `**Plan:** xxx` and the bare `Plan: xxx` fallback.
+        let Some(rest) = t
+            .strip_prefix("**Plan:**")
+            .or_else(|| t.strip_prefix("Plan:"))
+        else {
+            continue;
+        };
+        let name = rest.trim().trim_end_matches("**").trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+    None
+}
+
+/// First still-pending top-level task in a plan body (the `- [ ]` text), or
+/// `None` when every top-level task is done.
+pub fn first_pending_task(body: &str) -> Option<String> {
+    body.lines()
+        .find(|l| is_pending_task_line(l))
+        .map(|l| checkbox_text(l))
+}
+
 /// Strip the `- [ ] ` / `- [x] ` prefix and return the trimmed task text.
 fn checkbox_text(line: &str) -> String {
     let rest = line.trim_start().strip_prefix("- ").unwrap_or(line);
@@ -533,10 +571,27 @@ pub fn summarize_workspace_tasks(cwd: &Path) -> Option<TaskPlanSummary> {
         done += d;
         total += t;
     }
+    // "Currently focused" plan = the most recently modified active block. When
+    // a session works one of several plans across worktrees, the file it just
+    // ticked a checkbox in has the newest mtime. NB: plans sharing one TASKS.md
+    // have identical mtime, so within a file this falls back to the first active
+    // plan in scan order (reduce keeps the earlier block on an mtime tie).
+    let focused = deduped
+        .iter()
+        .reduce(|a, b| if b.mtime > a.mtime { b } else { a });
+    let (current_plan, current_task) = match focused {
+        Some(b) => (
+            extract_plan_name(&b.body).or_else(|| b.id.clone()),
+            first_pending_task(&b.body),
+        ),
+        None => (None, None),
+    };
     Some(TaskPlanSummary {
         plan_count: deduped.len() as u32,
         done,
         total,
+        current_plan,
+        current_task,
     })
 }
 
@@ -966,7 +1021,79 @@ trailing notes outside\n";
         )
         .unwrap();
         let s = summarize_workspace_tasks(main).expect("summary");
-        assert_eq!(s, TaskPlanSummary { plan_count: 1, done: 1, total: 3 });
+        assert_eq!(s.plan_count, 1);
+        assert_eq!(s.done, 1);
+        assert_eq!(s.total, 3);
+        // Single plan → it is the focused one; current task is the first pending.
+        assert_eq!(s.current_task.as_deref(), Some("**P2** — todo"));
+    }
+
+    #[test]
+    fn extract_plan_name_reads_plan_marker() {
+        let body = "intro\n\n**Plan:** Migrate auth crate\n\n- [ ] P1\n";
+        assert_eq!(extract_plan_name(body).as_deref(), Some("Migrate auth crate"));
+        assert_eq!(extract_plan_name("no plan line\n- [ ] P1\n"), None);
+    }
+
+    #[test]
+    fn first_pending_task_skips_done() {
+        let body = "- [x] **P1** — done\n- [ ] **P2** — next\n- [ ] **P3** — later\n";
+        assert_eq!(first_pending_task(body).as_deref(), Some("**P2** — next"));
+        assert_eq!(first_pending_task("- [x] all done\n"), None);
+    }
+
+    #[test]
+    fn summarize_picks_plan_name_as_current_plan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"x\" -->\n\
+**Plan:** 重构会话中间件\n\
+- [x] **P1** — done\n\
+- [ ] **P2** — 当前任务\n\
+<!-- fleet:prd:end id=\"x\" -->\n",
+        )
+        .unwrap();
+        let s = summarize_workspace_tasks(main).expect("summary");
+        assert_eq!(s.current_plan.as_deref(), Some("重构会话中间件"));
+        assert_eq!(s.current_task.as_deref(), Some("**P2** — 当前任务"));
+    }
+
+    #[test]
+    fn summarize_focused_plan_is_newest_file_across_worktrees() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"old\" -->\n\
+**Plan:** 旧计划\n- [ ] **P1** — 旧任务\n\
+<!-- fleet:prd:end id=\"old\" -->\n",
+        )
+        .unwrap();
+        let wt = main.join(".worktrees").join("feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        let wt_tasks = wt.join("TASKS.md");
+        std::fs::write(
+            &wt_tasks,
+            "<!-- fleet:prd:begin id=\"new\" -->\n\
+**Plan:** 新计划\n- [ ] **P1** — 新任务\n\
+<!-- fleet:prd:end id=\"new\" -->\n",
+        )
+        .unwrap();
+        // Make the worktree file strictly newer so it wins the focus.
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&wt_tasks)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        let s = summarize_workspace_tasks(main).expect("summary");
+        assert_eq!(s.plan_count, 2);
+        assert_eq!(s.current_plan.as_deref(), Some("新计划"));
+        assert_eq!(s.current_task.as_deref(), Some("**P1** — 新任务"));
     }
 
     #[test]
