@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { ask } from "@tauri-apps/plugin-dialog";
-import { useFleetManagedStore, useSessionsStore } from "../store";
+import { useDetailStore, useFleetManagedStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import styles from "./SessionCard.module.css";
 
@@ -343,6 +343,7 @@ export function useMultiSource() {
 
 export function SessionCard({ session, isSelected, onClick, variant, hideHeader, subagentCount }: Props) {
   const { t } = useTranslation();
+  const openDetail = useDetailStore((s) => s.open);
   const multiSource = useMultiSource();
   const fleetManagedIds = useFleetManagedStore((s) => s.managedIds);
   const isFleetManaged = !session.isSubagent && fleetManagedIds.has(session.id);
@@ -552,25 +553,49 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
         })()
       )}
 
-      {/* TASKS.md plan progress row */}
+      {/* TASKS.md plan progress row — click to open the detail Tasks tab */}
       {session.taskPlan && session.taskPlan.total > 0 && (
         (() => {
           const tp = session.taskPlan!;
           const donePct = (tp.done / tp.total) * 100;
+          const stripMd = (s: string) => s.replace(/\*\*/g, "");
+          const planName = tp.currentPlan ? stripMd(tp.currentPlan) : null;
+          const currentTask = tp.currentTask ? stripMd(tp.currentTask) : null;
           const tip = t("card.tip_task_plan", {
             done: tp.done,
             total: tp.total,
             plans: tp.planCount,
           });
+          const openTasks = (e: React.SyntheticEvent) => {
+            e.stopPropagation();
+            openDetail(session, undefined, "tasks");
+          };
           return (
-            <div className={styles.taskplan_row} title={tip}>
-              <span className={styles.taskplan_icon} aria-hidden>📋</span>
-              <div className={styles.taskplan_bar} role="progressbar" aria-valuenow={tp.done} aria-valuemax={tp.total}>
-                <div className={styles.taskplan_bar_done} style={{ width: `${donePct}%` }} />
+            <div
+              className={styles.taskplan_row}
+              title={tip}
+              role="button"
+              tabIndex={0}
+              onClick={openTasks}
+              onKeyDown={(e) => e.key === "Enter" && openTasks(e)}
+            >
+              <div className={styles.taskplan_head}>
+                <span className={styles.taskplan_icon} aria-hidden>📋</span>
+                {planName && (
+                  <span className={styles.taskplan_name} title={planName}>{planName}</span>
+                )}
+                {tp.planCount > 1 && (
+                  <span className={styles.taskplan_more} title={t("card.task_plan_plans", { count: tp.planCount })}>
+                    +{tp.planCount - 1}
+                  </span>
+                )}
+                <div className={styles.taskplan_bar} role="progressbar" aria-valuenow={tp.done} aria-valuemax={tp.total}>
+                  <div className={styles.taskplan_bar_done} style={{ width: `${donePct}%` }} />
+                </div>
+                <span className={styles.taskplan_count}>{tp.done}/{tp.total}</span>
               </div>
-              <span className={styles.taskplan_count}>{tp.done}/{tp.total}</span>
-              {tp.planCount > 1 && (
-                <span className={styles.taskplan_label}>{t("card.task_plan_plans", { count: tp.planCount })}</span>
+              {currentTask && (
+                <div className={styles.taskplan_current} title={currentTask}>{currentTask}</div>
               )}
             </div>
           );
