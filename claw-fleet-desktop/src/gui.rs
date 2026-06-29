@@ -1616,6 +1616,14 @@ fn get_memory_history(path: String, state: tauri::State<AppState>) -> Vec<memory
 }
 
 #[tauri::command]
+fn get_task_plans(
+    workspace_path: String,
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
+    state.backend.read().unwrap().get_task_plans(&workspace_path)
+}
+
+#[tauri::command]
 fn get_claude_md_content(workspace_path: String) -> Result<String, String> {
     memory::read_claude_md(&workspace_path)
 }
@@ -3728,6 +3736,7 @@ pub fn run() {
             get_source_usage,
             list_memories,
             get_memory_content,
+            get_task_plans,
             get_memory_history,
             get_claude_md_content,
             promote_memory,

@@ -58,6 +58,7 @@ pub use claw_fleet_task::runner;
 pub mod plan_approval;
 pub mod plugins;
 pub mod prd_discipline;
+pub mod prd_tasks;
 pub mod project;
 pub mod supervisor;
 pub mod rate_limit_parser;

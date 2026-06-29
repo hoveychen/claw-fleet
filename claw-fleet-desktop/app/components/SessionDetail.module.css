@@ -250,6 +250,79 @@
   overflow: auto;
 }
 
+/* TASKS.md plans panel */
+.tasks_panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 12px;
+}
+
+.tasks_plan {
+  margin-bottom: 14px;
+}
+
+.tasks_plan_head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.tasks_plan_id {
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.tasks_plan_count {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
+.tasks_plan_source {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-dim);
+  font-size: 10px;
+}
+
+.tasks_items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tasks_item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.tasks_item_done .tasks_text {
+  color: var(--color-text-dim);
+  text-decoration: line-through;
+}
+
+.tasks_check {
+  flex: 0 0 auto;
+  color: var(--color-success, #3fb950);
+}
+
+.tasks_text {
+  flex: 1 1 auto;
+  min-width: 0;
+  word-break: break-word;
+}
+
 /* Path (rendered inside the header, no separate row/border) */
 .path {
   font-size: 10px;
