@@ -373,6 +373,10 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&format!("/memory_history?path={}", encode_path(path))).unwrap_or_default()
     }
 
+    fn get_task_plans(&self, workspace_path: &str) -> Vec<crate::prd_tasks::TaskPlanDetail> {
+        self.probe.get(&format!("/task_plans?path={}", encode_path(workspace_path))).unwrap_or_default()
+    }
+
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
         self.probe.get("/skills").unwrap_or_default()
     }
