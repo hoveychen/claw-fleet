@@ -306,6 +306,55 @@
   font-style: italic;
 }
 
+/* TASKS.md plan progress */
+.taskplan_row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  line-height: 1.4;
+}
+
+.taskplan_icon {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.taskplan_bar {
+  position: relative;
+  flex: 0 0 54px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--color-border);
+  overflow: hidden;
+}
+
+.taskplan_bar_done {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: var(--color-success, #3fb950);
+  transition: width 0.2s;
+}
+
+.taskplan_count {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
+.taskplan_label {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* Footer */
 .footer {
   display: flex;
