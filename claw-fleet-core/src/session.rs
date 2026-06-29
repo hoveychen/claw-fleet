@@ -116,6 +116,12 @@ pub struct SessionInfo {
     /// session card.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub todos: Option<crate::session_todos::TodoSummary>,
+    /// Aggregate TASKS.md plan progress for this session's workspace (active
+    /// plans only, across the main checkout + sibling worktrees). `None` when
+    /// PRD Discipline isn't in use (no TASKS.md / no active plan). Drives the
+    /// compact task-progress row on the session card.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub task_plan: Option<crate::prd_tasks::TaskPlanSummary>,
     /// Number of times this session was context-compacted (auto or manual /compact).
     #[serde(default)]
     pub compact_count: u32,
@@ -1605,6 +1611,7 @@ pub fn parse_session_info(
     let model = meta_model.or_else(|| extract_model(&last_n));
     let last_skill = extract_last_skill(&last_n);
     let todos = crate::session_todos::latest_todo_summary_from_lines(&all_lines);
+    let task_plan = crate::prd_tasks::summarize_workspace_tasks(Path::new(&workspace_path));
 
     // Prefer explicit thinking level from meta; fall back to detecting thinking blocks
     let thinking_level = meta_thinking_level.or_else(|| {
@@ -1647,6 +1654,7 @@ pub fn parse_session_info(
         last_outcome: None,
         rate_limit,
         todos,
+        task_plan,
         compact_count: stats.compact_count,
         compact_pre_tokens: stats.compact_pre_tokens,
         compact_post_tokens: stats.compact_post_tokens,
@@ -2390,6 +2398,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
+            task_plan: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,

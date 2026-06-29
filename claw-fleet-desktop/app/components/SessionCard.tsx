@@ -552,6 +552,31 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
         })()
       )}
 
+      {/* TASKS.md plan progress row */}
+      {session.taskPlan && session.taskPlan.total > 0 && (
+        (() => {
+          const tp = session.taskPlan!;
+          const donePct = (tp.done / tp.total) * 100;
+          const tip = t("card.tip_task_plan", {
+            done: tp.done,
+            total: tp.total,
+            plans: tp.planCount,
+          });
+          return (
+            <div className={styles.taskplan_row} title={tip}>
+              <span className={styles.taskplan_icon} aria-hidden>📋</span>
+              <div className={styles.taskplan_bar} role="progressbar" aria-valuenow={tp.done} aria-valuemax={tp.total}>
+                <div className={styles.taskplan_bar_done} style={{ width: `${donePct}%` }} />
+              </div>
+              <span className={styles.taskplan_count}>{tp.done}/{tp.total}</span>
+              {tp.planCount > 1 && (
+                <span className={styles.taskplan_label}>{t("card.task_plan_plans", { count: tp.planCount })}</span>
+              )}
+            </div>
+          );
+        })()
+      )}
+
       {/* Footer row */}
       <div className={styles.footer}>
         <TokenSpeed session={session} />
