@@ -462,7 +462,10 @@ interface DetailState {
   /** True iff the rendered messages cover the full transcript (no more earlier
    * history to fetch). */
   fullyLoaded: boolean;
-  open: (session: SessionInfo, searchQuery?: string) => Promise<void>;
+  /** Tab SessionDetail should select on open (e.g. "tasks" when the user clicks
+   * the card's plan-progress row). Consumed once on mount, then irrelevant. */
+  initialTab: string | null;
+  open: (session: SessionInfo, searchQuery?: string, initialTab?: string) => Promise<void>;
   close: () => Promise<void>;
   loadEarlier: () => Promise<void>;
   appendMessages: (msgs: RawMessage[]) => void;
@@ -486,8 +489,9 @@ export const useDetailStore = create<DetailState>((set, get) => ({
   searchQuery: null,
   loadedTail: null,
   fullyLoaded: false,
+  initialTab: null,
 
-  open: async (session, searchQuery) => {
+  open: async (session, searchQuery, initialTab) => {
     await get().close();
 
     set({
@@ -497,6 +501,7 @@ export const useDetailStore = create<DetailState>((set, get) => ({
       searchQuery: searchQuery ?? null,
       loadedTail: INITIAL_TAIL,
       fullyLoaded: false,
+      initialTab: initialTab ?? null,
     });
 
     const rawMessages = await invoke<RawMessage[]>("get_messages_tail", {
