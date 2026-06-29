@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useSessionsStore } from "../store";
-import type { DecisionHistoryRecord, RawMessage, SessionInfo } from "../types";
+import type { DecisionHistoryRecord, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
 import { SkillHistory } from "./SkillHistory";
@@ -131,11 +131,12 @@ export function SessionDetail({
   // or when viewing a subagent (show sibling tabs + parent).
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowing, setIsFollowing] = useState(true);
-  type ViewTab = "decisions" | "skills" | "messages" | "tokens" | "workflow";
+  type ViewTab = "decisions" | "skills" | "messages" | "tokens" | "workflow" | "tasks";
   const [viewTab, setViewTab] = useState<ViewTab>("decisions");
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const [decisionsLoaded, setDecisionsLoaded] = useState(false);
+  const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
 
   // Claude Code Workflow runs for this session → reconstructed DAG, surfaced as
   // a session-level "Workflow" tab (not inline in the conversation). Publishing
@@ -194,6 +195,28 @@ export function SessionDetail({
     if (!decisionsLoaded || userPickedTab) return;
     setViewTab(decisionRecords.length > 0 ? "decisions" : "messages");
   }, [decisionsLoaded, decisionRecords.length, userPickedTab]);
+
+  // TASKS.md plans for this session's workspace (full task-item list). Fetched
+  // through the Backend trait so it works for both local and remote sessions.
+  const workspacePath = liveSession?.workspacePath;
+  useEffect(() => {
+    if (!workspacePath) {
+      setTaskPlans([]);
+      return;
+    }
+    let cancelled = false;
+    invoke<TaskPlanDetail[]>("get_task_plans", { workspacePath })
+      .then((r) => {
+        if (!cancelled) setTaskPlans(r ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setTaskPlans([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath]);
+  const hasTaskPlans = taskPlans.length > 0;
 
   const pickTab = useCallback((tab: ViewTab) => {
     setUserPickedTab(true);
@@ -424,6 +447,14 @@ export function SessionDetail({
             >
               {t("detail.tab_tokens")}
             </button>
+            {hasTaskPlans && (
+              <button
+                className={`${styles.view_tab} ${viewTab === "tasks" ? styles.view_tab_active : ""}`}
+                onClick={() => pickTab("tasks")}
+              >
+                {t("detail.tab_tasks")}
+              </button>
+            )}
             {hasWorkflows && (
               <button
                 className={`${styles.view_tab} ${viewTab === "workflow" ? styles.view_tab_active : ""}`}
@@ -449,6 +480,44 @@ export function SessionDetail({
               jsonlPath={liveSession.jsonlPath}
               workspacePath={liveSession.workspacePath}
             />
+          )}
+
+          {viewTab === "tasks" && (
+            <div className={styles.tasks_panel}>
+              {taskPlans.map((plan, pi) => {
+                const done = plan.items.filter((it) => it.done).length;
+                return (
+                  <div key={plan.id ?? `plan-${pi}`} className={styles.tasks_plan}>
+                    <div className={styles.tasks_plan_head}>
+                      <span className={styles.tasks_plan_id}>
+                        {plan.id ?? t("detail.tasks_anonymous")}
+                      </span>
+                      <span className={styles.tasks_plan_count}>
+                        {done}/{plan.items.length}
+                      </span>
+                      {plan.source && (
+                        <span className={styles.tasks_plan_source} title={plan.source}>
+                          {plan.source}
+                        </span>
+                      )}
+                    </div>
+                    <ul className={styles.tasks_items}>
+                      {plan.items.map((it, ii) => (
+                        <li
+                          key={ii}
+                          className={`${styles.tasks_item} ${it.done ? styles.tasks_item_done : ""}`}
+                        >
+                          <span className={styles.tasks_check} aria-hidden>
+                            {it.done ? "☑" : "☐"}
+                          </span>
+                          <span className={styles.tasks_text}>{it.text}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                );
+              })}
+            </div>
           )}
 
           {viewTab === "workflow" && (

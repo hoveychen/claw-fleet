@@ -63,6 +63,8 @@ export interface SessionInfo {
   rateLimit?: RateLimitState | null;
   /** Snapshot of the latest TodoWrite state; absent when the session has never invoked TodoWrite. */
   todos?: TodoSummary | null;
+  /** Aggregate TASKS.md plan progress for this session's workspace; absent when PRD Discipline isn't in use. */
+  taskPlan?: TaskPlanSummary | null;
   /** Number of times this session was context-compacted (auto or manual /compact). */
   compactCount?: number;
   /** Sum of context sizes (in tokens) right before each compaction. */
@@ -256,6 +258,27 @@ export interface TodoSummary {
   pending: number;
   /** activeForm of the first in-progress todo; absent when nothing is in progress. */
   currentActive?: string;
+}
+
+/** Aggregate TASKS.md progress across the session workspace's active plans. */
+export interface TaskPlanSummary {
+  planCount: number;
+  done: number;
+  total: number;
+}
+
+/** One checkbox line in a TASKS.md plan (detail view). */
+export interface TaskItem {
+  text: string;
+  done: boolean;
+}
+
+/** A TASKS.md plan with all of its task items (detail view). */
+export interface TaskPlanDetail {
+  id?: string | null;
+  /** Relative source path when the plan lives in a worktree; absent for the main checkout. */
+  source?: string | null;
+  items: TaskItem[];
 }
 
 // ── Message / content block types ───────────────────────────────────────────
