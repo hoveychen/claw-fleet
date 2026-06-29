@@ -2355,29 +2355,46 @@ fn cmd_prd_context() {
         return;
     }
 
-    let raw = load_sourced_blocks(&sources);
-    if raw.is_empty() {
-        return;
-    }
+    // `collect_from_sources` returns active blocks AND any structural problems
+    // (unterminated/mismatched/malformed sentinels). We never rewrite the file;
+    // problems become a warning so a broken block doesn't silently disappear.
+    let (raw, problems) = collect_from_sources(&sources, true);
+    let warning = render_problem_warning(&problems);
+
     let deduped = dedup_blocks_keep_latest_mtime(raw);
-    if deduped.is_empty() {
-        return;
-    }
-
     let rendered = render_with_sources(&deduped, main_root.as_deref());
-    if rendered.trim().is_empty() {
+
+    // Nothing to inject: no active plan parsed AND no problem detected → the
+    // original silent no-op.
+    if deduped.is_empty() && warning.is_none() {
         return;
     }
 
-    let n = deduped.len();
-    let plan_word = if n == 1 { "plan" } else { "plans" };
     let sources_list = sources
         .iter()
         .map(|p| format!("  - {}", p.display()))
         .collect::<Vec<_>>()
         .join("\n");
-    let reminder = format!(
-        "<system-reminder>\n\
+
+    let reminder = if deduped.is_empty() {
+        // A TASKS.md exists and looks broken, but no active plan parsed out of
+        // it. Inject a warning-only reminder so the agent fixes the file
+        // instead of losing the plan to silent degradation.
+        let warn = warning.unwrap_or_default();
+        format!(
+            "<system-reminder>\n{warn}\n\nSources scanned:\n{sources_list}\n</system-reminder>",
+        )
+    } else {
+        let n = deduped.len();
+        let plan_word = if n == 1 { "plan" } else { "plans" };
+        // Empty when no problems → output is byte-identical to the pre-warning
+        // behaviour for clean files.
+        let warn_block = match &warning {
+            Some(w) => format!("\n\n{w}"),
+            None => String::new(),
+        };
+        format!(
+            "<system-reminder>\n\
 The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
 Discipline mode) holds {n} active {plan_word} below — merged across the \
 main checkout and any sibling worktrees. This file is the durable macro \
@@ -2390,9 +2407,10 @@ file wins — keep a given `id` in exactly one file.\n\
 \n\
 Sources scanned:\n{sources_list}\n\
 \n\
-{rendered}\n\
+{rendered}{warn_block}\n\
 </system-reminder>",
-    );
+        )
+    };
 
     let out = serde_json::json!({
         "hookSpecificOutput": {
