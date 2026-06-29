@@ -491,6 +491,25 @@ pub fn display_source(
     Some(to_string(source))
 }
 
+/// Format detected sentinel problems into a warning block for the hook
+/// injection. Returns `None` when there are no problems. We never auto-rewrite
+/// TASKS.md — this nudges the agent to repair it so a broken block doesn't
+/// silently vanish from the macro plan.
+pub fn render_problem_warning(problems: &[(PathBuf, SentinelProblem)]) -> Option<String> {
+    if problems.is_empty() {
+        return None;
+    }
+    let mut out = String::from(
+        "⚠️ 检测到 TASKS.md 可能损坏(受影响的块已被跳过,未自动改写文件)。\
+请检查并修正以下 sentinel,否则相关计划不会被注入:",
+    );
+    for (path, prob) in problems {
+        let p = path.display().to_string().replace('\\', "/");
+        out.push_str(&format!("\n  - {p}: {}", prob.describe()));
+    }
+    Some(out)
+}
+
 // ── High-level workspace queries (Backend) ────────────────────────────────────
 
 /// Aggregate active-plan progress for the workspace containing `cwd`. Scans
@@ -948,6 +967,36 @@ trailing notes outside\n";
         .unwrap();
         let s = summarize_workspace_tasks(main).expect("summary");
         assert_eq!(s, TaskPlanSummary { plan_count: 1, done: 1, total: 3 });
+    }
+
+    #[test]
+    fn render_problem_warning_none_when_clean() {
+        assert_eq!(render_problem_warning(&[]), None);
+    }
+
+    #[test]
+    fn render_problem_warning_lists_each_problem_with_path() {
+        let probs = vec![
+            (
+                PathBuf::from("/repo/TASKS.md"),
+                SentinelProblem::UnterminatedBegin {
+                    id: Some("alpha".to_string()),
+                },
+            ),
+            (
+                PathBuf::from("/repo/.worktrees/x/TASKS.md"),
+                SentinelProblem::IdMismatch {
+                    begin_id: Some("a".to_string()),
+                    end_id: Some("b".to_string()),
+                },
+            ),
+        ];
+        let out = render_problem_warning(&probs).expect("warning");
+        assert!(out.contains("TASKS.md 可能损坏"));
+        assert!(out.contains("/repo/TASKS.md"));
+        assert!(out.contains("没有匹配的 `end`"));
+        assert!(out.contains("/repo/.worktrees/x/TASKS.md"));
+        assert!(out.contains("id 不一致"));
     }
 
     #[test]
