@@ -312,6 +312,22 @@
   text-decoration: line-through;
 }
 
+.tasks_item_current {
+  background: var(--color-hover, rgba(127, 127, 127, 0.1));
+  border-radius: 4px;
+  padding-left: 4px;
+  margin-left: -4px;
+}
+
+.tasks_item_current .tasks_text {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.tasks_item_current .tasks_check {
+  color: var(--color-accent);
+}
+
 .tasks_check {
   flex: 0 0 auto;
   color: var(--color-success, #3fb950);

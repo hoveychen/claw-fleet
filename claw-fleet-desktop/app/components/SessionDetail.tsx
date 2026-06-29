@@ -196,6 +196,17 @@ export function SessionDetail({
     setViewTab(decisionRecords.length > 0 ? "decisions" : "messages");
   }, [decisionsLoaded, decisionRecords.length, userPickedTab]);
 
+  // Honor an explicit initial tab (e.g. the user clicked the card's plan row →
+  // open straight to "tasks"). Declared after the default-tab effect so it wins;
+  // marking userPickedTab stops the default from overriding once decisions load.
+  useEffect(() => {
+    if (isStandalone) return;
+    const tab = global.initialTab;
+    if (!tab) return;
+    setUserPickedTab(true);
+    setViewTab(tab as ViewTab);
+  }, [isStandalone, global.session?.id, global.initialTab]);
+
   // TASKS.md plans for this session's workspace (full task-item list). Fetched
   // through the Backend trait so it works for both local and remote sessions.
   const workspacePath = liveSession?.workspacePath;
@@ -486,6 +497,9 @@ export function SessionDetail({
             <div className={styles.tasks_panel}>
               {taskPlans.map((plan, pi) => {
                 const done = plan.items.filter((it) => it.done).length;
+                // The first still-pending item is "current" for this plan —
+                // the visible answer to "做到第几个 P 了".
+                const currentIdx = plan.items.findIndex((it) => !it.done);
                 return (
                   <div key={plan.id ?? `plan-${pi}`} className={styles.tasks_plan}>
                     <div className={styles.tasks_plan_head}>
@@ -502,17 +516,20 @@ export function SessionDetail({
                       )}
                     </div>
                     <ul className={styles.tasks_items}>
-                      {plan.items.map((it, ii) => (
-                        <li
-                          key={ii}
-                          className={`${styles.tasks_item} ${it.done ? styles.tasks_item_done : ""}`}
-                        >
-                          <span className={styles.tasks_check} aria-hidden>
-                            {it.done ? "☑" : "☐"}
-                          </span>
-                          <span className={styles.tasks_text}>{it.text}</span>
-                        </li>
-                      ))}
+                      {plan.items.map((it, ii) => {
+                        const isCurrent = ii === currentIdx;
+                        return (
+                          <li
+                            key={ii}
+                            className={`${styles.tasks_item} ${it.done ? styles.tasks_item_done : ""} ${isCurrent ? styles.tasks_item_current : ""}`}
+                          >
+                            <span className={styles.tasks_check} aria-hidden>
+                              {it.done ? "☑" : isCurrent ? "▶" : "☐"}
+                            </span>
+                            <span className={styles.tasks_text}>{it.text}</span>
+                          </li>
+                        );
+                      })}
                     </ul>
                   </div>
                 );
