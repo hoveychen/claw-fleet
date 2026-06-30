@@ -156,7 +156,7 @@ sentinel pair, identified by a unique `id`:\n\
 ```markdown\n\
 # TASKS\n\
 \n\
-<!-- fleet:prd:begin id=\"auth-refactor\" -->\n\
+<!-- fleet:prd:begin id=\"auth-refactor\" v=\"2\" -->\n\
 \n\
 **Plan:** Migrate session middleware to the new auth crate\n\
 \n\
@@ -166,7 +166,7 @@ sentinel pair, identified by a unique `id`:\n\
 \n\
 <!-- fleet:prd:end id=\"auth-refactor\" -->\n\
 \n\
-<!-- fleet:prd:begin id=\"prd-multiplan\" -->\n\
+<!-- fleet:prd:begin id=\"prd-multiplan\" v=\"2\" -->\n\
 \n\
 **Plan:** Teach TASKS.md to host parallel plans\n\
 \n\
@@ -175,6 +175,10 @@ sentinel pair, identified by a unique `id`:\n\
 \n\
 <!-- fleet:prd:end id=\"prd-multiplan\" -->\n\
 ```\n\
+\n\
+The `v=\"2\"` attribute on the `begin` sentinel marks the **v2 schema**. The \
+`end` sentinel needs only the matching `id`. Legacy v1 blocks (no `v=\"2\"`) \
+still work; run `fleet plan migrate` to upgrade an old TASKS.md in place.\n\
 \n\
 **Rules for working with multi-plan TASKS.md:**\n\
 \n\
@@ -196,9 +200,33 @@ sentinel pair, identified by a unique `id`:\n\
    redundant, surface that to {title} rather than collapsing them yourself; \
    the other block may belong to a session you can't see.\n\
 \n\
+### Update plans with `fleet plan`, not by hand-editing\n\
+\n\
+Prefer the `fleet plan` subcommands over editing TASKS.md markdown directly. \
+They make the same file change **and** record which session is working which \
+plan/P, with a timestamp — so the desktop app can show *your* current plan and \
+P even when several sessions share one TASKS.md (Fleet knows your \
+`FLEET_SESSION_ID`; you can't read the wall clock yourself). Commands:\n\
+\n\
+- `fleet plan check <id> <P>` — tick a task done (`[ ]`→`[x]`) and mark this \
+  session focused on `<id>`. e.g. `fleet plan check auth-refactor P2`.\n\
+- `fleet plan uncheck <id> <P>` — untick.\n\
+- `fleet plan start <id> [P]` — declare you're now working `<id>` (no file \
+  change; sets your current P, defaults to the first pending).\n\
+- `fleet plan create <id> --title \"...\"` — add a new v2 plan block.\n\
+- `fleet plan add <id> <P> --text \"...\"` — append a pending task.\n\
+- `fleet plan migrate` — upgrade this workspace's v1 TASKS.md to v2 (idempotent).\n\
+- `fleet plan list` / `fleet plan get <id>` — read.\n\
+\n\
+Call `fleet plan start <id>` when you begin a plan, and `fleet plan check` as \
+you finish each P. Hand-editing still works (the file is the source of truth \
+for checkboxes), but then your session's *current P* falls back to a guess.\n\
+\n\
 Rules of thumb for the format itself:\n\
-- Use `- [ ]` for pending and `- [x]` for done. Don't invent new statuses; \
-  the simple checkbox is the contract.\n\
+- Use `- [ ]` for pending and `- [x]` for done (`fleet plan check/uncheck` \
+  write these for you). Don't invent new statuses; the simple checkbox is the \
+  contract — \"who is working what right now\" is tracked by Fleet, not by a \
+  marker in the file.\n\
 - Keep P-task titles ≤ 60 chars. Long acceptance notes go in sub-bullets.\n\
 - {language_line}\n\
 \n\
@@ -661,6 +689,16 @@ mod tests {
         assert!(
             g.contains("- [ ]") && g.contains("- [x]"),
             "guidance must specify the checkbox format so completion state is machine-readable"
+        );
+    }
+
+    #[test]
+    fn render_teaches_v2_and_fleet_plan() {
+        let g = render_guidance("Boss", "en");
+        assert!(g.contains("v=\"2\""), "guidance must show the v2 sentinel attribute");
+        assert!(
+            g.contains("fleet plan check") && g.contains("fleet plan migrate"),
+            "guidance must teach the fleet plan subcommands for updating plans"
         );
     }
 
