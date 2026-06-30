@@ -761,7 +761,16 @@ pub fn render_problem_warning(problems: &[(PathBuf, SentinelProblem)]) -> Option
 /// Aggregate active-plan progress for the workspace containing `cwd`. Scans
 /// the same source set the hook injects (main checkout + sibling worktrees).
 /// `None` when no TASKS.md exists or no plan is active.
-pub fn summarize_workspace_tasks(cwd: &Path) -> Option<TaskPlanSummary> {
+///
+/// `session_id`, when given, selects the focused plan from the per-session
+/// side-channel (`task_progress`) — the precise, attribution-correct signal
+/// recorded by `fleet plan` subcommands. Without a side-channel record (legacy
+/// hand-edited files, non-Fleet sessions) it falls back to the most-recently-
+/// modified active block.
+pub fn summarize_workspace_tasks(
+    cwd: &Path,
+    session_id: Option<&str>,
+) -> Option<TaskPlanSummary> {
     let main_root = discover_main_checkout_root(cwd);
     let sources = collect_task_sources(cwd, main_root.as_deref());
     if sources.is_empty() {
@@ -779,21 +788,28 @@ pub fn summarize_workspace_tasks(cwd: &Path) -> Option<TaskPlanSummary> {
         done += d;
         total += t;
     }
-    // "Currently focused" plan = the most recently modified active block. When
-    // a session works one of several plans across worktrees, the file it just
-    // ticked a checkbox in has the newest mtime. NB: plans sharing one TASKS.md
-    // have identical mtime, so within a file this falls back to the first active
-    // plan in scan order (reduce keeps the earlier block on an mtime tie).
+    // Fallback focus = most recently modified active block. Within one TASKS.md
+    // (equal mtime) `reduce` keeps the first in scan order.
     let focused = deduped
         .iter()
         .reduce(|a, b| if b.mtime > a.mtime { b } else { a });
-    let (current_plan, current_task) = match focused {
+    let (mut current_plan, mut current_task) = match focused {
         Some(b) => (
             extract_plan_name(&b.body).or_else(|| b.id.clone()),
             first_pending_task(&b.body),
         ),
         None => (None, None),
     };
+    // Precise per-session focus: if this session recorded a focus via a
+    // `fleet plan` subcommand and that plan is still active, use it.
+    if let Some(sid) = session_id {
+        if let Some(rec) = crate::task_progress::read(sid) {
+            if let Some(block) = deduped.iter().find(|b| b.id.as_deref() == Some(rec.plan_id.as_str())) {
+                current_plan = extract_plan_name(&block.body).or_else(|| block.id.clone());
+                current_task = rec.current_task.clone().or_else(|| first_pending_task(&block.body));
+            }
+        }
+    }
     Some(TaskPlanSummary {
         plan_count: deduped.len() as u32,
         done,
@@ -1379,12 +1395,46 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let s = summarize_workspace_tasks(main).expect("summary");
+        let s = summarize_workspace_tasks(main, None).expect("summary");
         assert_eq!(s.plan_count, 1);
         assert_eq!(s.done, 1);
         assert_eq!(s.total, 3);
         // Single plan → it is the focused one; current task is the first pending.
         assert_eq!(s.current_task.as_deref(), Some("**P2** — todo"));
+    }
+
+    #[test]
+    fn summarize_session_focus_overrides_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"alpha\" v=\"2\" -->\n\
+**Plan:** Alpha\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"alpha\" -->\n\
+<!-- fleet:prd:begin id=\"beta\" v=\"2\" -->\n\
+**Plan:** Beta\n- [ ] **P1** — b\n<!-- fleet:prd:end id=\"beta\" -->\n",
+        )
+        .unwrap();
+        // Default (no session): first active plan (alpha) is focused.
+        let def = summarize_workspace_tasks(main, None).unwrap();
+        assert_eq!(def.current_plan.as_deref(), Some("Alpha"));
+
+        // Per-session record pointing at beta overrides the default focus.
+        let sid = format!("test-summarize-override-{}", std::process::id());
+        crate::task_progress::set_current(
+            &sid,
+            &main.to_string_lossy(),
+            "beta",
+            Some("**P1** — b".to_string()),
+        )
+        .unwrap();
+        let s = summarize_workspace_tasks(main, Some(&sid)).unwrap();
+        crate::task_progress::clear(&sid);
+        assert_eq!(s.current_plan.as_deref(), Some("Beta"));
+        assert_eq!(s.current_task.as_deref(), Some("**P1** — b"));
+        // Aggregate progress unaffected by which plan is focused.
+        assert_eq!(s.plan_count, 2);
     }
 
     #[test]
@@ -1414,7 +1464,7 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let s = summarize_workspace_tasks(main).expect("summary");
+        let s = summarize_workspace_tasks(main, None).expect("summary");
         assert_eq!(s.current_plan.as_deref(), Some("重构会话中间件"));
         assert_eq!(s.current_task.as_deref(), Some("**P2** — 当前任务"));
     }
@@ -1449,7 +1499,7 @@ trailing notes outside\n";
             .unwrap()
             .set_modified(later)
             .unwrap();
-        let s = summarize_workspace_tasks(main).expect("summary");
+        let s = summarize_workspace_tasks(main, None).expect("summary");
         assert_eq!(s.plan_count, 2);
         assert_eq!(s.current_plan.as_deref(), Some("新计划"));
         assert_eq!(s.current_task.as_deref(), Some("**P1** — 新任务"));
