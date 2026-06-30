@@ -146,7 +146,7 @@ export default function DecisionFloatApp() {
       }}
     >
       <div ref={innerRef}>
-        <DecisionPanel onInlineDetailChange={setInlineDetailOpen} />
+        <DecisionPanel float onInlineDetailChange={setInlineDetailOpen} />
       </div>
     </div>
   );
