@@ -2321,10 +2321,10 @@ fn cmd_plan_approval() {
 /// is still available for the Tauri GUI and remote backends that already
 /// have a probe client.
 fn cmd_session_status(state: &str, note: Option<&str>) {
-    let session_id = match std::env::var("FLEET_SESSION_ID") {
-        Ok(s) if !s.is_empty() => s,
-        _ => {
-            eprintln!("Error: FLEET_SESSION_ID env var not set. Are you running inside a fleet-managed session?");
+    let session_id = match read_fleet_session_id() {
+        Some(s) => s,
+        None => {
+            eprintln!("Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set).");
             std::process::exit(2);
         }
     };
@@ -2361,8 +2361,52 @@ fn cmd_session_resume() {
     claw_fleet_core::idle::clear_idle(&sid);
 }
 
+/// The current session's id, for attributing `fleet plan` / `fleet session`
+/// actions. Prefers `FLEET_SESSION_ID` (set by the Fleet supervisor) and falls
+/// back to `CLAUDE_CODE_SESSION_ID` (set by Claude Code for *every* session,
+/// Fleet-managed or not). Both carry the same value under Fleet — the supervisor
+/// launches claude with `--session-id <id>` and exports `FLEET_SESSION_ID=<id>`,
+/// and that id equals the session's jsonl stem (i.e. `SessionInfo.id`), so the
+/// side-channel key always matches what the card looks up.
 fn read_fleet_session_id() -> Option<String> {
-    std::env::var("FLEET_SESSION_ID").ok().filter(|s| !s.is_empty())
+    resolve_session_id(
+        std::env::var("FLEET_SESSION_ID").ok(),
+        std::env::var("CLAUDE_CODE_SESSION_ID").ok(),
+    )
+}
+
+/// Pure resolution: first non-empty of (`FLEET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`).
+fn resolve_session_id(fleet: Option<String>, claude: Option<String>) -> Option<String> {
+    fleet
+        .filter(|s| !s.is_empty())
+        .or_else(|| claude.filter(|s| !s.is_empty()))
+}
+
+#[cfg(test)]
+mod session_id_tests {
+    use super::resolve_session_id;
+
+    #[test]
+    fn falls_back_to_claude_code_session_id() {
+        // Non-Fleet-managed session: FLEET_SESSION_ID absent, but Claude Code
+        // always sets CLAUDE_CODE_SESSION_ID — attribution must still resolve.
+        assert_eq!(
+            resolve_session_id(None, Some("claude-sid".into())),
+            Some("claude-sid".into())
+        );
+        // Empty FLEET_SESSION_ID also falls back.
+        assert_eq!(
+            resolve_session_id(Some("".into()), Some("claude-sid".into())),
+            Some("claude-sid".into())
+        );
+        // FLEET_SESSION_ID wins when present.
+        assert_eq!(
+            resolve_session_id(Some("fleet-sid".into()), Some("claude-sid".into())),
+            Some("fleet-sid".into())
+        );
+        // Neither → None.
+        assert_eq!(resolve_session_id(None, None), None);
+    }
 }
 
 // ── `fleet plan` — TASKS.md PRD-plan management (captures session focus) ──────
@@ -2439,7 +2483,7 @@ fn plan_start(cwd: &std::path::Path, plan_id: &str, task: Option<&str>) -> Resul
     let body = pt::plan_body(&content, plan_id)
         .ok_or_else(|| format!("plan '{plan_id}' not found"))?;
     let sid = read_fleet_session_id()
-        .ok_or("FLEET_SESSION_ID not set — are you in a fleet-managed session?")?;
+        .ok_or("no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)")?;
     let current = match task {
         Some(t) => pt::parse_task_items(&body)
             .into_iter()
