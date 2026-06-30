@@ -306,6 +306,12 @@ enum Commands {
         #[command(subcommand)]
         action: PlanCommands,
     },
+    /// Manage PRD Discipline mode guidance (the generated
+    /// ~/.claude/fleet-prd-discipline.md + its @import in ~/.claude/CLAUDE.md).
+    PrdDiscipline {
+        #[command(subcommand)]
+        action: PrdDisciplineCommands,
+    },
     /// [internal] Own one task's lifecycle in this process (master + workers +
     /// plan). The desktop spawns `fleet task-runtime resume <id>`; bare
     /// invocation opens the launchpad. Was the standalone `fleet-task` binary.
@@ -488,6 +494,22 @@ enum PlanCommands {
     Get { plan_id: String },
 }
 
+#[derive(Subcommand)]
+enum PrdDisciplineCommands {
+    /// Regenerate the guidance file with the current schema (e.g. after a Fleet
+    /// upgrade) and ensure the @import in CLAUDE.md + the prd-context hook.
+    /// Idempotent. The desktop app does this automatically; this is the CLI
+    /// equivalent for headless / scripted refreshes.
+    Apply {
+        /// How the assistant addresses the user (interpolated into the guidance).
+        #[arg(long, default_value = "Boss")]
+        title: String,
+        /// Guidance locale: `en` or `zh`.
+        #[arg(long, default_value = "en")]
+        locale: String,
+    },
+}
+
 fn main() {
     claw_fleet_core::console::init_utf8();
     let cli = Cli::parse();
@@ -554,6 +576,11 @@ fn main() {
         Commands::Task { action } => cmd_task(action),
         Commands::TaskRuntime { cmd } => cmd_task_runtime(cmd),
         Commands::Plan { action } => cmd_plan(action),
+        Commands::PrdDiscipline { action } => match action {
+            PrdDisciplineCommands::Apply { title, locale } => {
+                cmd_prd_discipline_apply(&title, &locale)
+            }
+        },
     }
 }
 
@@ -2406,6 +2433,20 @@ mod session_id_tests {
         );
         // Neither → None.
         assert_eq!(resolve_session_id(None, None), None);
+    }
+}
+
+// ── `fleet prd-discipline apply` — regenerate guidance (CLI parity w/ GUI) ────
+
+fn cmd_prd_discipline_apply(title: &str, locale: &str) {
+    let result = claw_fleet_core::prd_discipline::apply_prd_discipline(title, locale)
+        .and_then(|()| claw_fleet_core::hooks::apply_prd_context_hook());
+    match result {
+        Ok(()) => println!("ok: regenerated PRD guidance (title={title:?}, locale={locale:?})"),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
     }
 }
 
