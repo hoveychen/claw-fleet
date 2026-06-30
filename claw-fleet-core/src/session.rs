@@ -1611,7 +1611,8 @@ pub fn parse_session_info(
     let model = meta_model.or_else(|| extract_model(&last_n));
     let last_skill = extract_last_skill(&last_n);
     let todos = crate::session_todos::latest_todo_summary_from_lines(&all_lines);
-    let task_plan = crate::prd_tasks::summarize_workspace_tasks(Path::new(&workspace_path));
+    let task_plan =
+        crate::prd_tasks::summarize_workspace_tasks(Path::new(&workspace_path), Some(session_id.as_str()));
 
     // Prefer explicit thinking level from meta; fall back to detecting thinking blocks
     let thinking_level = meta_thinking_level.or_else(|| {
