@@ -20,6 +20,16 @@ use serde::{Deserialize, Serialize};
 pub struct PrdBlock {
     pub id: Option<String>,
     pub body: String,
+    /// Schema version from the begin sentinel's `v="..."` attribute: `2` for
+    /// v2, `1` for legacy blocks with no `v` attribute.
+    pub version: u8,
+}
+
+/// Attributes parsed off a sentinel comment (`<!-- fleet:prd:begin id="x" v="2" -->`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentinelAttrs {
+    pub id: Option<String>,
+    pub version: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,24 +219,26 @@ pub fn extract_prd_blocks(content: &str) -> Vec<PrdBlock> {
 pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<SentinelProblem>) {
     let mut out = Vec::new();
     let mut problems = Vec::new();
-    let mut current: Option<(Option<String>, String)> = None;
+    // (id, version, body)
+    let mut current: Option<(Option<String>, u8, String)> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
-        if let Some(id) = parse_sentinel_line(trimmed, "begin") {
+        if let Some(attrs) = parse_sentinel(trimmed, "begin") {
             // A second `begin` while one is already open means the previous
             // block was never closed — drop it and start fresh.
-            if let Some((open_id, _)) = current.take() {
+            if let Some((open_id, _, _)) = current.take() {
                 problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
             }
-            current = Some((id, String::new()));
+            current = Some((attrs.id, attrs.version, String::new()));
             continue;
         }
-        if let Some(id) = parse_sentinel_line(trimmed, "end") {
+        if let Some(attrs) = parse_sentinel(trimmed, "end") {
+            let id = attrs.id;
             match current.take() {
-                Some((open_id, body)) => {
+                Some((open_id, version, body)) => {
                     if open_id == id {
-                        out.push(PrdBlock { id: open_id, body });
+                        out.push(PrdBlock { id: open_id, body, version });
                     } else {
                         // id mismatch → discard the dangling block; do not start
                         // a new one from the `end` line.
@@ -249,12 +261,12 @@ pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<Se
                 line: trimmed.to_string(),
             });
         }
-        if let Some((_, body)) = current.as_mut() {
+        if let Some((_, _, body)) = current.as_mut() {
             body.push_str(line);
             body.push('\n');
         }
     }
-    if let Some((open_id, _)) = current.take() {
+    if let Some((open_id, _, _)) = current.take() {
         problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
     }
     (out, problems)
@@ -267,29 +279,225 @@ fn looks_like_sentinel(trimmed: &str) -> bool {
     trimmed.starts_with("<!-- fleet:prd:begin") || trimmed.starts_with("<!-- fleet:prd:end")
 }
 
-/// Parse a sentinel comment line. `kind` is either "begin" or "end". Returns
-/// `Some(None)` for the legacy unmarked form, `Some(Some(id))` when an
-/// `id="..."` attribute is present, or `None` if the line isn't a sentinel
-/// of the requested kind.
+/// Back-compat wrapper: parse a sentinel and return just its `id` slot.
+/// `Some(None)` = legacy anonymous, `Some(Some(id))` = id present, `None` =
+/// not a sentinel of this kind / malformed / empty id.
 pub fn parse_sentinel_line(line: &str, kind: &str) -> Option<Option<String>> {
+    parse_sentinel(line, kind).map(|a| a.id)
+}
+
+/// Parse a sentinel comment line into its attributes. `kind` is "begin" or
+/// "end". Handles both v1 (`id="x"` only, or bare anonymous) and v2
+/// (`id="x" v="2"`, attributes in any order). Unknown attributes are tolerated
+/// (ignored) so future versions stay forward-compatible. Returns `None` when
+/// the line isn't a sentinel of this kind, is malformed (bad quotes, no
+/// `-->`), or carries an empty `id`.
+pub fn parse_sentinel(line: &str, kind: &str) -> Option<SentinelAttrs> {
     let prefix = format!("<!-- fleet:prd:{kind}");
-    let suffix = "-->";
     let rest = line.strip_prefix(&prefix)?;
-    let inner = rest.strip_suffix(suffix)?.trim();
-    if inner.is_empty() {
-        return Some(None);
+    let inner = rest.strip_suffix("-->")?.trim();
+    let attrs = parse_attr_map(inner)?;
+    let id = attrs.iter().find(|(k, _)| k == "id").map(|(_, v)| v.clone());
+    if let Some(idv) = &id {
+        if idv.is_empty() {
+            return None;
+        }
     }
-    // Expect `id="..."` (double-quoted). Be lenient about whitespace but
-    // strict about the attribute name so typos don't accidentally match.
-    let after_id = inner.strip_prefix("id")?.trim_start();
-    let after_eq = after_id.strip_prefix('=')?.trim_start();
-    let quoted = after_eq.strip_prefix('"')?;
-    let close = quoted.find('"')?;
-    let id = &quoted[..close];
-    if id.is_empty() {
-        return None;
+    let version = match attrs.iter().find(|(k, _)| k == "v").map(|(_, v)| v.as_str()) {
+        Some("2") => 2,
+        _ => 1,
+    };
+    Some(SentinelAttrs { id, version })
+}
+
+/// Parse the inner text of a sentinel into ordered `key="value"` pairs.
+/// Empty inner → `Some(vec![])` (anonymous sentinel). Returns `None` if the
+/// text isn't cleanly a sequence of `key="value"` attributes (e.g. an
+/// unterminated quote or a bare token), which the caller treats as malformed.
+fn parse_attr_map(inner: &str) -> Option<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    let mut s = inner.trim_start();
+    while !s.is_empty() {
+        let eq = s.find('=')?;
+        let key = s[..eq].trim();
+        if key.is_empty()
+            || !key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return None;
+        }
+        let after = s[eq + 1..].trim_start();
+        let after = after.strip_prefix('"')?;
+        let close = after.find('"')?;
+        out.push((key.to_string(), after[..close].to_string()));
+        s = after[close + 1..].trim_start();
     }
-    Some(Some(id.to_string()))
+    Some(out)
+}
+
+/// Migrate a TASKS.md body from v1 to v2: add `v="2"` to every `begin`
+/// sentinel that has an `id` but no version yet. Pure and idempotent — running
+/// it twice is a no-op. Anonymous (id-less) legacy blocks are left untouched
+/// (v2 requires a stable id; the parser still reads them as v1). All other
+/// content is preserved byte-for-byte.
+pub fn migrate_v1_to_v2(content: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        match parse_sentinel(trimmed, "begin") {
+            Some(attrs) if attrs.version == 1 && attrs.id.is_some() => {
+                if let Some(idx) = line.rfind("-->") {
+                    let before = line[..idx].trim_end();
+                    lines.push(format!("{before} v=\"2\" -->"));
+                    continue;
+                }
+                lines.push(line.to_string());
+            }
+            _ => lines.push(line.to_string()),
+        }
+    }
+    let mut out = lines.join("\n");
+    // Preserve a trailing newline if the original had one.
+    if content.ends_with('\n') {
+        out.push('\n');
+    }
+    out
+}
+
+// ── Mutation helpers (used by the `fleet plan` subcommands) ───────────────────
+
+/// Re-attach a trailing newline iff the source had one — keeps mutations from
+/// silently adding/stripping the final newline.
+fn join_preserving_eol(lines: Vec<String>, original: &str) -> String {
+    let mut s = lines.join("\n");
+    if original.ends_with('\n') {
+        s.push('\n');
+    }
+    s
+}
+
+/// Flip a top-level checkbox in-place: line `"- [ ]…"`/`"- [x]…"` → the
+/// requested state, preserving everything after the 5-char marker.
+fn set_line_checkbox(line: &str, done: bool) -> String {
+    let marker = if done { "- [x]" } else { "- [ ]" };
+    format!("{marker}{}", &line[5..])
+}
+
+/// Return the body of the plan block with `plan_id`, if present.
+pub fn plan_body(content: &str, plan_id: &str) -> Option<String> {
+    extract_prd_blocks(content)
+        .into_iter()
+        .find(|b| b.id.as_deref() == Some(plan_id))
+        .map(|b| b.body)
+}
+
+/// Set the `[ ]`/`[x]` state of the top-level task matching `p_label` (matched
+/// as the bold token `**<label>**`) inside plan `plan_id`. Errors when the plan
+/// or the task isn't found.
+pub fn set_checkbox(
+    content: &str,
+    plan_id: &str,
+    p_label: &str,
+    done: bool,
+) -> Result<String, String> {
+    let needle = format!("**{p_label}**");
+    let mut in_target = false;
+    let mut seen_plan = false;
+    let mut found = false;
+    let mut out: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(attrs) = parse_sentinel(trimmed, "begin") {
+            in_target = attrs.id.as_deref() == Some(plan_id);
+            if in_target {
+                seen_plan = true;
+            }
+            out.push(line.to_string());
+            continue;
+        }
+        if parse_sentinel(trimmed, "end").is_some() {
+            in_target = false;
+            out.push(line.to_string());
+            continue;
+        }
+        if in_target && !found && top_level_checkbox(line).is_some() && line.contains(&needle) {
+            out.push(set_line_checkbox(line, done));
+            found = true;
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if !seen_plan {
+        return Err(format!("plan '{plan_id}' not found"));
+    }
+    if !found {
+        return Err(format!("task '{p_label}' not found in plan '{plan_id}'"));
+    }
+    Ok(join_preserving_eol(out, content))
+}
+
+/// Append a new pending task `- [ ] **<p_label>** — <text>` just before the
+/// end sentinel of `plan_id`. Errors when the plan isn't found.
+pub fn add_task(
+    content: &str,
+    plan_id: &str,
+    p_label: &str,
+    text: &str,
+) -> Result<String, String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_target = false;
+    let mut seen_plan = false;
+    let mut inserted = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(attrs) = parse_sentinel(trimmed, "begin") {
+            in_target = attrs.id.as_deref() == Some(plan_id);
+            if in_target {
+                seen_plan = true;
+            }
+            out.push(line.to_string());
+            continue;
+        }
+        if parse_sentinel(trimmed, "end").is_some() {
+            if in_target && !inserted {
+                out.push(format!("- [ ] **{p_label}** — {text}"));
+                inserted = true;
+            }
+            in_target = false;
+            out.push(line.to_string());
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if !seen_plan {
+        return Err(format!("plan '{plan_id}' not found"));
+    }
+    Ok(join_preserving_eol(out, content))
+}
+
+/// Append a fresh empty v2 plan block. Errors when `plan_id` already exists.
+pub fn create_plan(content: &str, plan_id: &str, title: &str) -> Result<String, String> {
+    if extract_prd_blocks(content)
+        .iter()
+        .any(|b| b.id.as_deref() == Some(plan_id))
+    {
+        return Err(format!("plan '{plan_id}' already exists"));
+    }
+    let block = format!(
+        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\" -->\n\n**Plan:** {title}\n\n<!-- fleet:prd:end id=\"{plan_id}\" -->\n"
+    );
+    let mut out = content.to_string();
+    if out.is_empty() {
+        out.push_str("# TASKS\n\n");
+    } else {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out.push_str(&block);
+    Ok(out)
 }
 
 // ── Active-plan filtering ──────────────────────────────────────────────────────
@@ -553,7 +761,16 @@ pub fn render_problem_warning(problems: &[(PathBuf, SentinelProblem)]) -> Option
 /// Aggregate active-plan progress for the workspace containing `cwd`. Scans
 /// the same source set the hook injects (main checkout + sibling worktrees).
 /// `None` when no TASKS.md exists or no plan is active.
-pub fn summarize_workspace_tasks(cwd: &Path) -> Option<TaskPlanSummary> {
+///
+/// `session_id`, when given, selects the focused plan from the per-session
+/// side-channel (`task_progress`) — the precise, attribution-correct signal
+/// recorded by `fleet plan` subcommands. Without a side-channel record (legacy
+/// hand-edited files, non-Fleet sessions) it falls back to the most-recently-
+/// modified active block.
+pub fn summarize_workspace_tasks(
+    cwd: &Path,
+    session_id: Option<&str>,
+) -> Option<TaskPlanSummary> {
     let main_root = discover_main_checkout_root(cwd);
     let sources = collect_task_sources(cwd, main_root.as_deref());
     if sources.is_empty() {
@@ -571,21 +788,28 @@ pub fn summarize_workspace_tasks(cwd: &Path) -> Option<TaskPlanSummary> {
         done += d;
         total += t;
     }
-    // "Currently focused" plan = the most recently modified active block. When
-    // a session works one of several plans across worktrees, the file it just
-    // ticked a checkbox in has the newest mtime. NB: plans sharing one TASKS.md
-    // have identical mtime, so within a file this falls back to the first active
-    // plan in scan order (reduce keeps the earlier block on an mtime tie).
+    // Fallback focus = most recently modified active block. Within one TASKS.md
+    // (equal mtime) `reduce` keeps the first in scan order.
     let focused = deduped
         .iter()
         .reduce(|a, b| if b.mtime > a.mtime { b } else { a });
-    let (current_plan, current_task) = match focused {
+    let (mut current_plan, mut current_task) = match focused {
         Some(b) => (
             extract_plan_name(&b.body).or_else(|| b.id.clone()),
             first_pending_task(&b.body),
         ),
         None => (None, None),
     };
+    // Precise per-session focus: if this session recorded a focus via a
+    // `fleet plan` subcommand and that plan is still active, use it.
+    if let Some(sid) = session_id {
+        if let Some(rec) = crate::task_progress::read(sid) {
+            if let Some(block) = deduped.iter().find(|b| b.id.as_deref() == Some(rec.plan_id.as_str())) {
+                current_plan = extract_plan_name(&block.body).or_else(|| block.id.clone());
+                current_task = rec.current_task.clone().or_else(|| first_pending_task(&block.body));
+            }
+        }
+    }
     Some(TaskPlanSummary {
         plan_count: deduped.len() as u32,
         done,
@@ -614,6 +838,30 @@ pub fn list_workspace_task_plans(cwd: &Path) -> Vec<TaskPlanDetail> {
             items: parse_task_items(&b.body),
         })
         .collect()
+}
+
+/// Among the workspace's TASKS.md sources (main + worktrees), the file that
+/// contains plan `plan_id`. When several do, the most recently modified wins —
+/// the same dedup rule the hook uses. `None` if no source has the plan.
+pub fn find_plan_source(cwd: &Path, plan_id: &str) -> Option<PathBuf> {
+    let main_root = discover_main_checkout_root(cwd);
+    let sources = collect_task_sources(cwd, main_root.as_deref());
+    let mut hits: Vec<(PathBuf, SystemTime)> = Vec::new();
+    for p in sources {
+        let Ok(body) = fs::read_to_string(&p) else {
+            continue;
+        };
+        if extract_prd_blocks(&body)
+            .iter()
+            .any(|b| b.id.as_deref() == Some(plan_id))
+        {
+            let m = fs::metadata(&p)
+                .and_then(|m| m.modified())
+                .unwrap_or(UNIX_EPOCH);
+            hits.push((p, m));
+        }
+    }
+    hits.into_iter().max_by_key(|(_, m)| *m).map(|(p, _)| p)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -993,6 +1241,133 @@ trailing notes outside\n";
     }
 
     #[test]
+    fn parse_sentinel_reads_version_attr() {
+        // v1: no `v` attr → version 1.
+        let v1 = parse_sentinel("<!-- fleet:prd:begin id=\"x\" -->", "begin").unwrap();
+        assert_eq!(v1.id.as_deref(), Some("x"));
+        assert_eq!(v1.version, 1);
+        // v2: `v="2"` in either order.
+        let v2 = parse_sentinel("<!-- fleet:prd:begin id=\"x\" v=\"2\" -->", "begin").unwrap();
+        assert_eq!(v2.id.as_deref(), Some("x"));
+        assert_eq!(v2.version, 2);
+        let v2b = parse_sentinel("<!-- fleet:prd:begin v=\"2\" id=\"x\" -->", "begin").unwrap();
+        assert_eq!(v2b.id.as_deref(), Some("x"));
+        assert_eq!(v2b.version, 2);
+        // anonymous legacy
+        let anon = parse_sentinel("<!-- fleet:prd:begin -->", "begin").unwrap();
+        assert_eq!(anon.id, None);
+        assert_eq!(anon.version, 1);
+        // unknown attrs tolerated (forward-compat)
+        let fut = parse_sentinel("<!-- fleet:prd:begin id=\"x\" v=\"2\" foo=\"bar\" -->", "begin").unwrap();
+        assert_eq!(fut.version, 2);
+        // malformed → None
+        assert!(parse_sentinel("<!-- fleet:prd:begin id=\"x -->", "begin").is_none());
+        assert!(parse_sentinel("<!-- fleet:prd:begin garbage -->", "begin").is_none());
+    }
+
+    #[test]
+    fn extract_records_block_version() {
+        let body = "<!-- fleet:prd:begin id=\"a\" -->\n- [ ] P1\n<!-- fleet:prd:end id=\"a\" -->\n\
+<!-- fleet:prd:begin id=\"b\" v=\"2\" -->\n- [ ] P1\n<!-- fleet:prd:end id=\"b\" -->\n";
+        let blocks = extract_prd_blocks(body);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].version, 1);
+        assert_eq!(blocks[1].version, 2);
+    }
+
+    #[test]
+    fn migrate_adds_version_to_v1_id_blocks() {
+        let v1 = "# TASKS\n\n<!-- fleet:prd:begin id=\"auth\" -->\n\
+**Plan:** x\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"auth\" -->\n";
+        let migrated = migrate_v1_to_v2(v1);
+        assert!(migrated.contains("<!-- fleet:prd:begin id=\"auth\" v=\"2\" -->"));
+        // end sentinel untouched, body untouched
+        assert!(migrated.contains("<!-- fleet:prd:end id=\"auth\" -->"));
+        assert!(migrated.contains("- [ ] **P1** — a"));
+        // idempotent
+        assert_eq!(migrate_v1_to_v2(&migrated), migrated);
+    }
+
+    #[test]
+    fn migrate_leaves_anonymous_and_v2_untouched() {
+        let anon = "<!-- fleet:prd:begin -->\n- [ ] P1\n<!-- fleet:prd:end -->\n";
+        assert_eq!(migrate_v1_to_v2(anon), anon, "anonymous legacy block left as-is");
+        let v2 = "<!-- fleet:prd:begin id=\"x\" v=\"2\" -->\n- [ ] P1\n<!-- fleet:prd:end id=\"x\" -->\n";
+        assert_eq!(migrate_v1_to_v2(v2), v2, "already-v2 block unchanged");
+    }
+
+    #[test]
+    fn migrate_preserves_indentation_and_no_trailing_newline() {
+        let v1 = "  <!-- fleet:prd:begin id=\"x\" -->\n- [ ] P1\n  <!-- fleet:prd:end id=\"x\" -->";
+        let migrated = migrate_v1_to_v2(v1);
+        assert!(migrated.contains("  <!-- fleet:prd:begin id=\"x\" v=\"2\" -->"));
+        assert!(!migrated.ends_with('\n'), "no trailing newline added when source had none");
+    }
+
+    // ── Mutation helpers ────────────────────────────────────────────────────
+
+    const TWO_PLAN: &str = "<!-- fleet:prd:begin id=\"a\" v=\"2\" -->\n\
+**Plan:** Alpha\n\
+- [ ] **P1** — first\n\
+- [ ] **P2** — second\n\
+<!-- fleet:prd:end id=\"a\" -->\n\
+<!-- fleet:prd:begin id=\"b\" v=\"2\" -->\n\
+**Plan:** Beta\n\
+- [ ] **P1** — beta first\n\
+<!-- fleet:prd:end id=\"b\" -->\n";
+
+    #[test]
+    fn set_checkbox_ticks_only_matching_plan_and_task() {
+        let out = set_checkbox(TWO_PLAN, "a", "P1", true).unwrap();
+        assert!(out.contains("- [x] **P1** — first"));
+        // P2 in same plan untouched; plan b's P1 untouched.
+        assert!(out.contains("- [ ] **P2** — second"));
+        assert!(out.contains("- [ ] **P1** — beta first"));
+    }
+
+    #[test]
+    fn set_checkbox_unchecks() {
+        let checked = set_checkbox(TWO_PLAN, "a", "P1", true).unwrap();
+        let back = set_checkbox(&checked, "a", "P1", false).unwrap();
+        assert_eq!(back, TWO_PLAN);
+    }
+
+    #[test]
+    fn set_checkbox_errors_on_missing_plan_or_task() {
+        assert!(set_checkbox(TWO_PLAN, "nope", "P1", true).is_err());
+        assert!(set_checkbox(TWO_PLAN, "a", "P9", true).is_err());
+    }
+
+    #[test]
+    fn add_task_appends_before_end() {
+        let out = add_task(TWO_PLAN, "b", "P2", "beta second").unwrap();
+        assert!(out.contains("- [ ] **P2** — beta second"));
+        // inserted inside plan b, before its end sentinel
+        let beta_idx = out.find("beta second").unwrap();
+        let end_idx = out.find("<!-- fleet:prd:end id=\"b\" -->").unwrap();
+        assert!(beta_idx < end_idx);
+        assert!(add_task(TWO_PLAN, "missing", "P1", "x").is_err());
+    }
+
+    #[test]
+    fn create_plan_appends_v2_block_and_rejects_dupes() {
+        let out = create_plan(TWO_PLAN, "c", "Gamma").unwrap();
+        assert!(out.contains("<!-- fleet:prd:begin id=\"c\" v=\"2\" -->"));
+        assert!(out.contains("**Plan:** Gamma"));
+        assert!(create_plan(&out, "c", "again").is_err());
+        // create into empty content seeds a header
+        let fresh = create_plan("", "x", "X").unwrap();
+        assert!(fresh.starts_with("# TASKS"));
+        assert!(fresh.contains("id=\"x\" v=\"2\""));
+    }
+
+    #[test]
+    fn plan_body_returns_named_block() {
+        assert!(plan_body(TWO_PLAN, "a").unwrap().contains("Alpha"));
+        assert_eq!(plan_body(TWO_PLAN, "zzz"), None);
+    }
+
+    #[test]
     fn distill_excludes_fully_completed_plan() {
         let body = "**Plan:** all done\n\n- [x] **P1** — first\n  - detail a\n- [x] **P2** — second\n";
         assert_eq!(distill_active_block(body), None);
@@ -1020,12 +1395,46 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let s = summarize_workspace_tasks(main).expect("summary");
+        let s = summarize_workspace_tasks(main, None).expect("summary");
         assert_eq!(s.plan_count, 1);
         assert_eq!(s.done, 1);
         assert_eq!(s.total, 3);
         // Single plan → it is the focused one; current task is the first pending.
         assert_eq!(s.current_task.as_deref(), Some("**P2** — todo"));
+    }
+
+    #[test]
+    fn summarize_session_focus_overrides_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"alpha\" v=\"2\" -->\n\
+**Plan:** Alpha\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"alpha\" -->\n\
+<!-- fleet:prd:begin id=\"beta\" v=\"2\" -->\n\
+**Plan:** Beta\n- [ ] **P1** — b\n<!-- fleet:prd:end id=\"beta\" -->\n",
+        )
+        .unwrap();
+        // Default (no session): first active plan (alpha) is focused.
+        let def = summarize_workspace_tasks(main, None).unwrap();
+        assert_eq!(def.current_plan.as_deref(), Some("Alpha"));
+
+        // Per-session record pointing at beta overrides the default focus.
+        let sid = format!("test-summarize-override-{}", std::process::id());
+        crate::task_progress::set_current(
+            &sid,
+            &main.to_string_lossy(),
+            "beta",
+            Some("**P1** — b".to_string()),
+        )
+        .unwrap();
+        let s = summarize_workspace_tasks(main, Some(&sid)).unwrap();
+        crate::task_progress::clear(&sid);
+        assert_eq!(s.current_plan.as_deref(), Some("Beta"));
+        assert_eq!(s.current_task.as_deref(), Some("**P1** — b"));
+        // Aggregate progress unaffected by which plan is focused.
+        assert_eq!(s.plan_count, 2);
     }
 
     #[test]
@@ -1055,7 +1464,7 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let s = summarize_workspace_tasks(main).expect("summary");
+        let s = summarize_workspace_tasks(main, None).expect("summary");
         assert_eq!(s.current_plan.as_deref(), Some("重构会话中间件"));
         assert_eq!(s.current_task.as_deref(), Some("**P2** — 当前任务"));
     }
@@ -1090,7 +1499,7 @@ trailing notes outside\n";
             .unwrap()
             .set_modified(later)
             .unwrap();
-        let s = summarize_workspace_tasks(main).expect("summary");
+        let s = summarize_workspace_tasks(main, None).expect("summary");
         assert_eq!(s.plan_count, 2);
         assert_eq!(s.current_plan.as_deref(), Some("新计划"));
         assert_eq!(s.current_task.as_deref(), Some("**P1** — 新任务"));
