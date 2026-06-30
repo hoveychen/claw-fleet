@@ -546,22 +546,29 @@ pub fn apply_prd_discipline(user_title: &str, locale: &str) -> Result<(), String
 
     let claude_md = claude_md_path().ok_or("cannot determine home dir")?;
     let existing = fs::read_to_string(&claude_md).unwrap_or_default();
-    let stripped = strip_sentinel_block(&existing);
     let block = format!(
         "{begin}\n@{path}\n{end}\n",
         begin = BEGIN_MARKER,
         end = END_MARKER,
         path = guidance_path.display(),
     );
-    let new_content = if stripped.is_empty() {
-        block
-    } else if stripped.ends_with('\n') {
-        format!("{stripped}\n{block}")
-    } else {
-        format!("{stripped}\n\n{block}")
-    };
+    let new_content = compose_claude_md(&existing, &block);
     fs::write(&claude_md, new_content).map_err(|e| format!("write CLAUDE.md: {e}"))?;
     Ok(())
+}
+
+/// Re-attach the `@import` sentinel block to CLAUDE.md content: strip any prior
+/// block, then append `block` separated by one blank line.
+fn compose_claude_md(existing: &str, block: &str) -> String {
+    let stripped = strip_sentinel_block(existing);
+    if stripped.trim().is_empty() {
+        block.to_string()
+    } else {
+        // Trim trailing newlines the strip left behind, then re-add exactly one
+        // blank-line separator. Without the trim, re-applying accumulates a
+        // blank line each time (strip leaves the prior separator in place).
+        format!("{base}\n\n{block}", base = stripped.trim_end_matches('\n'))
+    }
 }
 
 /// Remove PRD-discipline mode: strip the sentinel block and delete the
@@ -620,6 +627,20 @@ fn strip_sentinel_block(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compose_claude_md_is_idempotent() {
+        let block = format!("{BEGIN_MARKER}\n@~/.claude/fleet-prd-discipline.md\n{END_MARKER}\n");
+        // Existing doc that already carries the block after a blank line — the
+        // real-world shape (another managed block above it).
+        let existing = format!("user stuff\n\nother block end\n\n{block}");
+        let once = compose_claude_md(&existing, &block);
+        let twice = compose_claude_md(&once, &block);
+        assert_eq!(once, twice, "composing twice must not accumulate blank lines");
+        // Exactly one blank line between prior content and the block.
+        assert!(once.contains("other block end\n\n<!--"), "one blank-line separator: {once:?}");
+        assert!(!once.contains("\n\n\n"), "no triple newline: {once:?}");
+    }
 
     #[test]
     fn strip_removes_block_preserves_rest() {
