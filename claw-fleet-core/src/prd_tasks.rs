@@ -365,6 +365,141 @@ pub fn migrate_v1_to_v2(content: &str) -> String {
     out
 }
 
+// ── Mutation helpers (used by the `fleet plan` subcommands) ───────────────────
+
+/// Re-attach a trailing newline iff the source had one — keeps mutations from
+/// silently adding/stripping the final newline.
+fn join_preserving_eol(lines: Vec<String>, original: &str) -> String {
+    let mut s = lines.join("\n");
+    if original.ends_with('\n') {
+        s.push('\n');
+    }
+    s
+}
+
+/// Flip a top-level checkbox in-place: line `"- [ ]…"`/`"- [x]…"` → the
+/// requested state, preserving everything after the 5-char marker.
+fn set_line_checkbox(line: &str, done: bool) -> String {
+    let marker = if done { "- [x]" } else { "- [ ]" };
+    format!("{marker}{}", &line[5..])
+}
+
+/// Return the body of the plan block with `plan_id`, if present.
+pub fn plan_body(content: &str, plan_id: &str) -> Option<String> {
+    extract_prd_blocks(content)
+        .into_iter()
+        .find(|b| b.id.as_deref() == Some(plan_id))
+        .map(|b| b.body)
+}
+
+/// Set the `[ ]`/`[x]` state of the top-level task matching `p_label` (matched
+/// as the bold token `**<label>**`) inside plan `plan_id`. Errors when the plan
+/// or the task isn't found.
+pub fn set_checkbox(
+    content: &str,
+    plan_id: &str,
+    p_label: &str,
+    done: bool,
+) -> Result<String, String> {
+    let needle = format!("**{p_label}**");
+    let mut in_target = false;
+    let mut seen_plan = false;
+    let mut found = false;
+    let mut out: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(attrs) = parse_sentinel(trimmed, "begin") {
+            in_target = attrs.id.as_deref() == Some(plan_id);
+            if in_target {
+                seen_plan = true;
+            }
+            out.push(line.to_string());
+            continue;
+        }
+        if parse_sentinel(trimmed, "end").is_some() {
+            in_target = false;
+            out.push(line.to_string());
+            continue;
+        }
+        if in_target && !found && top_level_checkbox(line).is_some() && line.contains(&needle) {
+            out.push(set_line_checkbox(line, done));
+            found = true;
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if !seen_plan {
+        return Err(format!("plan '{plan_id}' not found"));
+    }
+    if !found {
+        return Err(format!("task '{p_label}' not found in plan '{plan_id}'"));
+    }
+    Ok(join_preserving_eol(out, content))
+}
+
+/// Append a new pending task `- [ ] **<p_label>** — <text>` just before the
+/// end sentinel of `plan_id`. Errors when the plan isn't found.
+pub fn add_task(
+    content: &str,
+    plan_id: &str,
+    p_label: &str,
+    text: &str,
+) -> Result<String, String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut in_target = false;
+    let mut seen_plan = false;
+    let mut inserted = false;
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(attrs) = parse_sentinel(trimmed, "begin") {
+            in_target = attrs.id.as_deref() == Some(plan_id);
+            if in_target {
+                seen_plan = true;
+            }
+            out.push(line.to_string());
+            continue;
+        }
+        if parse_sentinel(trimmed, "end").is_some() {
+            if in_target && !inserted {
+                out.push(format!("- [ ] **{p_label}** — {text}"));
+                inserted = true;
+            }
+            in_target = false;
+            out.push(line.to_string());
+            continue;
+        }
+        out.push(line.to_string());
+    }
+    if !seen_plan {
+        return Err(format!("plan '{plan_id}' not found"));
+    }
+    Ok(join_preserving_eol(out, content))
+}
+
+/// Append a fresh empty v2 plan block. Errors when `plan_id` already exists.
+pub fn create_plan(content: &str, plan_id: &str, title: &str) -> Result<String, String> {
+    if extract_prd_blocks(content)
+        .iter()
+        .any(|b| b.id.as_deref() == Some(plan_id))
+    {
+        return Err(format!("plan '{plan_id}' already exists"));
+    }
+    let block = format!(
+        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\" -->\n\n**Plan:** {title}\n\n<!-- fleet:prd:end id=\"{plan_id}\" -->\n"
+    );
+    let mut out = content.to_string();
+    if out.is_empty() {
+        out.push_str("# TASKS\n\n");
+    } else {
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        out.push('\n');
+    }
+    out.push_str(&block);
+    Ok(out)
+}
+
 // ── Active-plan filtering ──────────────────────────────────────────────────────
 
 /// Drop completed plans, keep active ones whole. A plan is "complete" when
@@ -687,6 +822,30 @@ pub fn list_workspace_task_plans(cwd: &Path) -> Vec<TaskPlanDetail> {
             items: parse_task_items(&b.body),
         })
         .collect()
+}
+
+/// Among the workspace's TASKS.md sources (main + worktrees), the file that
+/// contains plan `plan_id`. When several do, the most recently modified wins —
+/// the same dedup rule the hook uses. `None` if no source has the plan.
+pub fn find_plan_source(cwd: &Path, plan_id: &str) -> Option<PathBuf> {
+    let main_root = discover_main_checkout_root(cwd);
+    let sources = collect_task_sources(cwd, main_root.as_deref());
+    let mut hits: Vec<(PathBuf, SystemTime)> = Vec::new();
+    for p in sources {
+        let Ok(body) = fs::read_to_string(&p) else {
+            continue;
+        };
+        if extract_prd_blocks(&body)
+            .iter()
+            .any(|b| b.id.as_deref() == Some(plan_id))
+        {
+            let m = fs::metadata(&p)
+                .and_then(|m| m.modified())
+                .unwrap_or(UNIX_EPOCH);
+            hits.push((p, m));
+        }
+    }
+    hits.into_iter().max_by_key(|(_, m)| *m).map(|(p, _)| p)
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1127,6 +1286,69 @@ trailing notes outside\n";
         let migrated = migrate_v1_to_v2(v1);
         assert!(migrated.contains("  <!-- fleet:prd:begin id=\"x\" v=\"2\" -->"));
         assert!(!migrated.ends_with('\n'), "no trailing newline added when source had none");
+    }
+
+    // ── Mutation helpers ────────────────────────────────────────────────────
+
+    const TWO_PLAN: &str = "<!-- fleet:prd:begin id=\"a\" v=\"2\" -->\n\
+**Plan:** Alpha\n\
+- [ ] **P1** — first\n\
+- [ ] **P2** — second\n\
+<!-- fleet:prd:end id=\"a\" -->\n\
+<!-- fleet:prd:begin id=\"b\" v=\"2\" -->\n\
+**Plan:** Beta\n\
+- [ ] **P1** — beta first\n\
+<!-- fleet:prd:end id=\"b\" -->\n";
+
+    #[test]
+    fn set_checkbox_ticks_only_matching_plan_and_task() {
+        let out = set_checkbox(TWO_PLAN, "a", "P1", true).unwrap();
+        assert!(out.contains("- [x] **P1** — first"));
+        // P2 in same plan untouched; plan b's P1 untouched.
+        assert!(out.contains("- [ ] **P2** — second"));
+        assert!(out.contains("- [ ] **P1** — beta first"));
+    }
+
+    #[test]
+    fn set_checkbox_unchecks() {
+        let checked = set_checkbox(TWO_PLAN, "a", "P1", true).unwrap();
+        let back = set_checkbox(&checked, "a", "P1", false).unwrap();
+        assert_eq!(back, TWO_PLAN);
+    }
+
+    #[test]
+    fn set_checkbox_errors_on_missing_plan_or_task() {
+        assert!(set_checkbox(TWO_PLAN, "nope", "P1", true).is_err());
+        assert!(set_checkbox(TWO_PLAN, "a", "P9", true).is_err());
+    }
+
+    #[test]
+    fn add_task_appends_before_end() {
+        let out = add_task(TWO_PLAN, "b", "P2", "beta second").unwrap();
+        assert!(out.contains("- [ ] **P2** — beta second"));
+        // inserted inside plan b, before its end sentinel
+        let beta_idx = out.find("beta second").unwrap();
+        let end_idx = out.find("<!-- fleet:prd:end id=\"b\" -->").unwrap();
+        assert!(beta_idx < end_idx);
+        assert!(add_task(TWO_PLAN, "missing", "P1", "x").is_err());
+    }
+
+    #[test]
+    fn create_plan_appends_v2_block_and_rejects_dupes() {
+        let out = create_plan(TWO_PLAN, "c", "Gamma").unwrap();
+        assert!(out.contains("<!-- fleet:prd:begin id=\"c\" v=\"2\" -->"));
+        assert!(out.contains("**Plan:** Gamma"));
+        assert!(create_plan(&out, "c", "again").is_err());
+        // create into empty content seeds a header
+        let fresh = create_plan("", "x", "X").unwrap();
+        assert!(fresh.starts_with("# TASKS"));
+        assert!(fresh.contains("id=\"x\" v=\"2\""));
+    }
+
+    #[test]
+    fn plan_body_returns_named_block() {
+        assert!(plan_body(TWO_PLAN, "a").unwrap().contains("Alpha"));
+        assert_eq!(plan_body(TWO_PLAN, "zzz"), None);
     }
 
     #[test]
