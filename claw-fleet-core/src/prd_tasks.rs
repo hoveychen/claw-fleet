@@ -20,6 +20,16 @@ use serde::{Deserialize, Serialize};
 pub struct PrdBlock {
     pub id: Option<String>,
     pub body: String,
+    /// Schema version from the begin sentinel's `v="..."` attribute: `2` for
+    /// v2, `1` for legacy blocks with no `v` attribute.
+    pub version: u8,
+}
+
+/// Attributes parsed off a sentinel comment (`<!-- fleet:prd:begin id="x" v="2" -->`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SentinelAttrs {
+    pub id: Option<String>,
+    pub version: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -209,24 +219,26 @@ pub fn extract_prd_blocks(content: &str) -> Vec<PrdBlock> {
 pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<SentinelProblem>) {
     let mut out = Vec::new();
     let mut problems = Vec::new();
-    let mut current: Option<(Option<String>, String)> = None;
+    // (id, version, body)
+    let mut current: Option<(Option<String>, u8, String)> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
-        if let Some(id) = parse_sentinel_line(trimmed, "begin") {
+        if let Some(attrs) = parse_sentinel(trimmed, "begin") {
             // A second `begin` while one is already open means the previous
             // block was never closed — drop it and start fresh.
-            if let Some((open_id, _)) = current.take() {
+            if let Some((open_id, _, _)) = current.take() {
                 problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
             }
-            current = Some((id, String::new()));
+            current = Some((attrs.id, attrs.version, String::new()));
             continue;
         }
-        if let Some(id) = parse_sentinel_line(trimmed, "end") {
+        if let Some(attrs) = parse_sentinel(trimmed, "end") {
+            let id = attrs.id;
             match current.take() {
-                Some((open_id, body)) => {
+                Some((open_id, version, body)) => {
                     if open_id == id {
-                        out.push(PrdBlock { id: open_id, body });
+                        out.push(PrdBlock { id: open_id, body, version });
                     } else {
                         // id mismatch → discard the dangling block; do not start
                         // a new one from the `end` line.
@@ -249,12 +261,12 @@ pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<Se
                 line: trimmed.to_string(),
             });
         }
-        if let Some((_, body)) = current.as_mut() {
+        if let Some((_, _, body)) = current.as_mut() {
             body.push_str(line);
             body.push('\n');
         }
     }
-    if let Some((open_id, _)) = current.take() {
+    if let Some((open_id, _, _)) = current.take() {
         problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
     }
     (out, problems)
@@ -267,29 +279,90 @@ fn looks_like_sentinel(trimmed: &str) -> bool {
     trimmed.starts_with("<!-- fleet:prd:begin") || trimmed.starts_with("<!-- fleet:prd:end")
 }
 
-/// Parse a sentinel comment line. `kind` is either "begin" or "end". Returns
-/// `Some(None)` for the legacy unmarked form, `Some(Some(id))` when an
-/// `id="..."` attribute is present, or `None` if the line isn't a sentinel
-/// of the requested kind.
+/// Back-compat wrapper: parse a sentinel and return just its `id` slot.
+/// `Some(None)` = legacy anonymous, `Some(Some(id))` = id present, `None` =
+/// not a sentinel of this kind / malformed / empty id.
 pub fn parse_sentinel_line(line: &str, kind: &str) -> Option<Option<String>> {
+    parse_sentinel(line, kind).map(|a| a.id)
+}
+
+/// Parse a sentinel comment line into its attributes. `kind` is "begin" or
+/// "end". Handles both v1 (`id="x"` only, or bare anonymous) and v2
+/// (`id="x" v="2"`, attributes in any order). Unknown attributes are tolerated
+/// (ignored) so future versions stay forward-compatible. Returns `None` when
+/// the line isn't a sentinel of this kind, is malformed (bad quotes, no
+/// `-->`), or carries an empty `id`.
+pub fn parse_sentinel(line: &str, kind: &str) -> Option<SentinelAttrs> {
     let prefix = format!("<!-- fleet:prd:{kind}");
-    let suffix = "-->";
     let rest = line.strip_prefix(&prefix)?;
-    let inner = rest.strip_suffix(suffix)?.trim();
-    if inner.is_empty() {
-        return Some(None);
+    let inner = rest.strip_suffix("-->")?.trim();
+    let attrs = parse_attr_map(inner)?;
+    let id = attrs.iter().find(|(k, _)| k == "id").map(|(_, v)| v.clone());
+    if let Some(idv) = &id {
+        if idv.is_empty() {
+            return None;
+        }
     }
-    // Expect `id="..."` (double-quoted). Be lenient about whitespace but
-    // strict about the attribute name so typos don't accidentally match.
-    let after_id = inner.strip_prefix("id")?.trim_start();
-    let after_eq = after_id.strip_prefix('=')?.trim_start();
-    let quoted = after_eq.strip_prefix('"')?;
-    let close = quoted.find('"')?;
-    let id = &quoted[..close];
-    if id.is_empty() {
-        return None;
+    let version = match attrs.iter().find(|(k, _)| k == "v").map(|(_, v)| v.as_str()) {
+        Some("2") => 2,
+        _ => 1,
+    };
+    Some(SentinelAttrs { id, version })
+}
+
+/// Parse the inner text of a sentinel into ordered `key="value"` pairs.
+/// Empty inner → `Some(vec![])` (anonymous sentinel). Returns `None` if the
+/// text isn't cleanly a sequence of `key="value"` attributes (e.g. an
+/// unterminated quote or a bare token), which the caller treats as malformed.
+fn parse_attr_map(inner: &str) -> Option<Vec<(String, String)>> {
+    let mut out = Vec::new();
+    let mut s = inner.trim_start();
+    while !s.is_empty() {
+        let eq = s.find('=')?;
+        let key = s[..eq].trim();
+        if key.is_empty()
+            || !key
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return None;
+        }
+        let after = s[eq + 1..].trim_start();
+        let after = after.strip_prefix('"')?;
+        let close = after.find('"')?;
+        out.push((key.to_string(), after[..close].to_string()));
+        s = after[close + 1..].trim_start();
     }
-    Some(Some(id.to_string()))
+    Some(out)
+}
+
+/// Migrate a TASKS.md body from v1 to v2: add `v="2"` to every `begin`
+/// sentinel that has an `id` but no version yet. Pure and idempotent — running
+/// it twice is a no-op. Anonymous (id-less) legacy blocks are left untouched
+/// (v2 requires a stable id; the parser still reads them as v1). All other
+/// content is preserved byte-for-byte.
+pub fn migrate_v1_to_v2(content: &str) -> String {
+    let mut lines: Vec<String> = Vec::new();
+    for line in content.lines() {
+        let trimmed = line.trim();
+        match parse_sentinel(trimmed, "begin") {
+            Some(attrs) if attrs.version == 1 && attrs.id.is_some() => {
+                if let Some(idx) = line.rfind("-->") {
+                    let before = line[..idx].trim_end();
+                    lines.push(format!("{before} v=\"2\" -->"));
+                    continue;
+                }
+                lines.push(line.to_string());
+            }
+            _ => lines.push(line.to_string()),
+        }
+    }
+    let mut out = lines.join("\n");
+    // Preserve a trailing newline if the original had one.
+    if content.ends_with('\n') {
+        out.push('\n');
+    }
+    out
 }
 
 // ── Active-plan filtering ──────────────────────────────────────────────────────
@@ -990,6 +1063,70 @@ trailing notes outside\n";
         assert_eq!(parse_sentinel_line("<!-- fleet:prd:end -->", "begin"), None);
         assert_eq!(parse_sentinel_line("<!-- fleet:prd:begin id=\"\" -->", "begin"), None);
         assert_eq!(parse_sentinel_line("# TASKS", "begin"), None);
+    }
+
+    #[test]
+    fn parse_sentinel_reads_version_attr() {
+        // v1: no `v` attr → version 1.
+        let v1 = parse_sentinel("<!-- fleet:prd:begin id=\"x\" -->", "begin").unwrap();
+        assert_eq!(v1.id.as_deref(), Some("x"));
+        assert_eq!(v1.version, 1);
+        // v2: `v="2"` in either order.
+        let v2 = parse_sentinel("<!-- fleet:prd:begin id=\"x\" v=\"2\" -->", "begin").unwrap();
+        assert_eq!(v2.id.as_deref(), Some("x"));
+        assert_eq!(v2.version, 2);
+        let v2b = parse_sentinel("<!-- fleet:prd:begin v=\"2\" id=\"x\" -->", "begin").unwrap();
+        assert_eq!(v2b.id.as_deref(), Some("x"));
+        assert_eq!(v2b.version, 2);
+        // anonymous legacy
+        let anon = parse_sentinel("<!-- fleet:prd:begin -->", "begin").unwrap();
+        assert_eq!(anon.id, None);
+        assert_eq!(anon.version, 1);
+        // unknown attrs tolerated (forward-compat)
+        let fut = parse_sentinel("<!-- fleet:prd:begin id=\"x\" v=\"2\" foo=\"bar\" -->", "begin").unwrap();
+        assert_eq!(fut.version, 2);
+        // malformed → None
+        assert!(parse_sentinel("<!-- fleet:prd:begin id=\"x -->", "begin").is_none());
+        assert!(parse_sentinel("<!-- fleet:prd:begin garbage -->", "begin").is_none());
+    }
+
+    #[test]
+    fn extract_records_block_version() {
+        let body = "<!-- fleet:prd:begin id=\"a\" -->\n- [ ] P1\n<!-- fleet:prd:end id=\"a\" -->\n\
+<!-- fleet:prd:begin id=\"b\" v=\"2\" -->\n- [ ] P1\n<!-- fleet:prd:end id=\"b\" -->\n";
+        let blocks = extract_prd_blocks(body);
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].version, 1);
+        assert_eq!(blocks[1].version, 2);
+    }
+
+    #[test]
+    fn migrate_adds_version_to_v1_id_blocks() {
+        let v1 = "# TASKS\n\n<!-- fleet:prd:begin id=\"auth\" -->\n\
+**Plan:** x\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"auth\" -->\n";
+        let migrated = migrate_v1_to_v2(v1);
+        assert!(migrated.contains("<!-- fleet:prd:begin id=\"auth\" v=\"2\" -->"));
+        // end sentinel untouched, body untouched
+        assert!(migrated.contains("<!-- fleet:prd:end id=\"auth\" -->"));
+        assert!(migrated.contains("- [ ] **P1** — a"));
+        // idempotent
+        assert_eq!(migrate_v1_to_v2(&migrated), migrated);
+    }
+
+    #[test]
+    fn migrate_leaves_anonymous_and_v2_untouched() {
+        let anon = "<!-- fleet:prd:begin -->\n- [ ] P1\n<!-- fleet:prd:end -->\n";
+        assert_eq!(migrate_v1_to_v2(anon), anon, "anonymous legacy block left as-is");
+        let v2 = "<!-- fleet:prd:begin id=\"x\" v=\"2\" -->\n- [ ] P1\n<!-- fleet:prd:end id=\"x\" -->\n";
+        assert_eq!(migrate_v1_to_v2(v2), v2, "already-v2 block unchanged");
+    }
+
+    #[test]
+    fn migrate_preserves_indentation_and_no_trailing_newline() {
+        let v1 = "  <!-- fleet:prd:begin id=\"x\" -->\n- [ ] P1\n  <!-- fleet:prd:end id=\"x\" -->";
+        let migrated = migrate_v1_to_v2(v1);
+        assert!(migrated.contains("  <!-- fleet:prd:begin id=\"x\" v=\"2\" -->"));
+        assert!(!migrated.ends_with('\n'), "no trailing newline added when source had none");
     }
 
     #[test]
