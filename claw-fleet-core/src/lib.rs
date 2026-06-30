@@ -60,6 +60,7 @@ pub mod plugins;
 pub mod prd_discipline;
 pub mod prd_tasks;
 pub mod project;
+pub mod task_progress;
 pub mod supervisor;
 pub mod rate_limit_parser;
 pub mod scan_cache_disk;
