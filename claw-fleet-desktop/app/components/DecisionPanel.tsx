@@ -1736,9 +1736,19 @@ function tabLabel(d: PendingDecision): string {
 
 export function DecisionPanel({
   compact = false,
+  float = false,
   onInlineDetailChange,
 }: {
   compact?: boolean;
+  /** Standalone decision-float window mode. Unlike the main-window overlay
+   *  (which floats `position: fixed` over the app) or lite/`compact` (which
+   *  fills a fixed-size window), the float window *is* the panel and sizes
+   *  itself to the card's natural height. So the panel must flow in normal
+   *  document layout — not `position: fixed`, no `max-height` cap — otherwise
+   *  it contributes zero height to the wrapper the float window measures
+   *  (a fixed-position element is out of flow), the window never grows, and
+   *  only a sliver of the card shows. */
+  float?: boolean;
   /** Fired when the inline SessionDetail column toggles. The standalone
    *  decision-float window uses this to widen itself when detail expands. */
   onInlineDetailChange?: (open: boolean) => void;
@@ -1945,8 +1955,8 @@ export function DecisionPanel({
 
   return (
     <div
-      className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${peeking ? styles.panel_peeking : ""} ${inlineDetailActive ? styles.panel_with_detail : ""}`}
-      style={compact ? undefined : { width: `${panelWidth}px` }}
+      className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${inlineDetailActive ? styles.panel_with_detail : ""}`}
+      style={compact || float ? undefined : { width: `${panelWidth}px` }}
     >
       {inlineDetailActive && (
         <div className={styles.detail_column}>
