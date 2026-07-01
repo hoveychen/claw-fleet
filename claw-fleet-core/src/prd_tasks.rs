@@ -42,9 +42,10 @@ pub struct SourcedBlock {
 
 // ── Display / Backend types ───────────────────────────────────────────────────
 
-/// Compact per-session task progress shown on the session card. Aggregates
-/// every *active* plan the agent currently sees (main checkout + sibling
-/// worktrees), mirroring the hook injection so the card matches reality.
+/// Compact per-session task progress shown on the session card. `done`/`total`
+/// count only the plan this session is focused on, so the X/Y matches the
+/// P-label; `plan_count` counts every *active* plan the agent currently sees
+/// (main checkout + sibling worktrees) and drives the "+N" chip.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskPlanSummary {
@@ -781,35 +782,37 @@ pub fn summarize_workspace_tasks(
     if deduped.is_empty() {
         return None;
     }
-    let mut done = 0u32;
-    let mut total = 0u32;
-    for b in &deduped {
-        let (d, t) = count_tasks(&b.body);
-        done += d;
-        total += t;
-    }
-    // Fallback focus = most recently modified active block. Within one TASKS.md
-    // (equal mtime) `reduce` keeps the first in scan order.
-    let focused = deduped
+    // Resolve the single plan this session is focused on. Fallback focus = the
+    // most recently modified active block; within one TASKS.md (equal mtime)
+    // `reduce` keeps the first in scan order. A precise per-session record from
+    // a `fleet plan` subcommand overrides that when the plan is still active.
+    let mut focused = deduped
         .iter()
         .reduce(|a, b| if b.mtime > a.mtime { b } else { a });
-    let (mut current_plan, mut current_task) = match focused {
-        Some(b) => (
-            extract_plan_name(&b.body).or_else(|| b.id.clone()),
-            first_pending_task(&b.body),
-        ),
-        None => (None, None),
-    };
-    // Precise per-session focus: if this session recorded a focus via a
-    // `fleet plan` subcommand and that plan is still active, use it.
+    let mut current_task_override: Option<String> = None;
     if let Some(sid) = session_id {
         if let Some(rec) = crate::task_progress::read(sid) {
             if let Some(block) = deduped.iter().find(|b| b.id.as_deref() == Some(rec.plan_id.as_str())) {
-                current_plan = extract_plan_name(&block.body).or_else(|| block.id.clone());
-                current_task = rec.current_task.clone().or_else(|| first_pending_task(&block.body));
+                focused = Some(block);
+                current_task_override = rec.current_task.clone();
             }
         }
     }
+    // Progress counts reflect ONLY the focused plan, so the X/Y matches the
+    // P-label on the card. `plan_count` still counts every active plan (it
+    // drives the "+N" chip). Summing across all plans was the old bug: the
+    // count showed the workspace total while the label named one plan.
+    let (done, total) = match focused {
+        Some(b) => count_tasks(&b.body),
+        None => (0, 0),
+    };
+    let (current_plan, current_task) = match focused {
+        Some(b) => (
+            extract_plan_name(&b.body).or_else(|| b.id.clone()),
+            current_task_override.or_else(|| first_pending_task(&b.body)),
+        ),
+        None => (None, None),
+    };
     Some(TaskPlanSummary {
         plan_count: deduped.len() as u32,
         done,
@@ -1433,7 +1436,34 @@ trailing notes outside\n";
         crate::task_progress::clear(&sid);
         assert_eq!(s.current_plan.as_deref(), Some("Beta"));
         assert_eq!(s.current_task.as_deref(), Some("**P1** — b"));
-        // Aggregate progress unaffected by which plan is focused.
+        // plan_count still reflects every active plan (drives the "+N" chip).
+        assert_eq!(s.plan_count, 2);
+    }
+
+    #[test]
+    fn summarize_counts_only_the_focused_plan() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        // alpha: 1 done / 2 total, beta: 0 done / 3 total. Aggregate = 1/5.
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"alpha\" v=\"2\" -->\n\
+**Plan:** Alpha\n- [x] **P1** — a1\n- [ ] **P2** — a2\n<!-- fleet:prd:end id=\"alpha\" -->\n\
+<!-- fleet:prd:begin id=\"beta\" v=\"2\" -->\n\
+**Plan:** Beta\n- [ ] **P1** — b1\n- [ ] **P2** — b2\n- [ ] **P3** — b3\n<!-- fleet:prd:end id=\"beta\" -->\n",
+        )
+        .unwrap();
+        // Focus this session on beta.
+        let sid = format!("test-summarize-focused-count-{}", std::process::id());
+        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "beta", None).unwrap();
+        let s = summarize_workspace_tasks(main, Some(&sid)).unwrap();
+        crate::task_progress::clear(&sid);
+        // Counts must reflect ONLY beta (0/3), not the 1/5 workspace aggregate.
+        assert_eq!(s.current_plan.as_deref(), Some("Beta"));
+        assert_eq!(s.done, 0, "done should count only the focused plan");
+        assert_eq!(s.total, 3, "total should count only the focused plan");
+        // plan_count still sees both plans.
         assert_eq!(s.plan_count, 2);
     }
 
