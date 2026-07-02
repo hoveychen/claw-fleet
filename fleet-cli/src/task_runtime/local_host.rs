@@ -436,7 +436,7 @@ fn run_mediation_claude(cwd: &Path, prompt: &str) -> Result<String, String> {
         .arg("bypassPermissions")
         .arg("--no-session-persistence")
         .arg("--model")
-        .arg("claude-sonnet-4-6")
+        .arg(claw_fleet_core::merge_mediator::MEDIATOR_MODEL)
         .arg(prompt)
         .env("FLEET_SESSION_KIND", "merge-mediator");
     let out = cmd.output().map_err(|e| format!("spawn mediation claude: {e}"))?;

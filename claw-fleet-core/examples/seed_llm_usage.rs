@@ -58,8 +58,8 @@ fn append_backdated(
     let usage = TurnUsage { input_tokens, output_tokens, ..Default::default() };
     let canonical = match model {
         "haiku" => "claude-haiku-4-5",
-        "sonnet" => "claude-sonnet-4-6",
-        "opus" => "claude-opus-4-7",
+        "sonnet" => "claude-sonnet-5",
+        "opus" => "claude-opus-4-8",
         other => other,
     };
     let cost_usd = turn_cost_usd(canonical, &usage);

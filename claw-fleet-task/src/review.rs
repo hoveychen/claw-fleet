@@ -20,7 +20,7 @@ use std::path::PathBuf;
 
 /// Review judgment runs on a capable model — false "achieved" verdicts are the
 /// expensive mistake.
-pub const REVIEW_MODEL: &str = "claude-sonnet-4-6";
+pub const REVIEW_MODEL: &str = "claude-sonnet-5";
 
 /// JSON Schema passed via `--json-schema` to constrain the session's output to
 /// exactly `{ achieved: bool, gaps: string[] }`.
