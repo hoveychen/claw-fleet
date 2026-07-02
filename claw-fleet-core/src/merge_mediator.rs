@@ -67,7 +67,7 @@ impl std::fmt::Display for MediationError {
 /// Default model for the mediator. Sonnet — same tier as workers; conflict
 /// resolution is a focused task where Sonnet's quality is sufficient and
 /// the per-call cost stays low.
-pub const MEDIATOR_MODEL: &str = "claude-sonnet-4-6";
+pub const MEDIATOR_MODEL: &str = "claude-sonnet-5";
 
 /// Wall-clock budget per file. Conflict resolution should be quick; if a
 /// single file blows past this, escalate.

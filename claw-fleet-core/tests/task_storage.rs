@@ -334,7 +334,7 @@ fn dispatch_pitem_enqueues_worker_session_and_records_agent_session_id() {
     assert_eq!(s.task_id.as_deref(), Some(t.id.as_str()));
     assert_eq!(s.p_item_id.as_deref(), Some("p1"));
     assert!(s.system_prompt.is_some());
-    assert_eq!(s.model.as_deref(), Some("claude-sonnet-4-6"));
+    assert_eq!(s.model.as_deref(), Some(claw_fleet_task::worker::WORKER_MODEL));
 }
 
 #[test]

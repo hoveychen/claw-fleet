@@ -47,8 +47,8 @@ pub struct WorkerSpawnSpec {
     pub model: String,
 }
 
-/// Default worker model. Sonnet 4.6 — fast turn-around for coding work.
-pub const WORKER_MODEL: &str = "claude-sonnet-4-6";
+/// Default worker model. Sonnet 5 — fast turn-around for coding work.
+pub const WORKER_MODEL: &str = "claude-sonnet-5";
 
 /// Build a `WorkerSpawnSpec` for `p_item_id` in `task`. Errors when the
 /// P-item isn't in the plan.
