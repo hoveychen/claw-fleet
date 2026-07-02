@@ -3,6 +3,7 @@ import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notif
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnectionStore, useDetailStore } from "../store";
+import { useKeepAwake } from "../hooks/useKeepAwake";
 import { getItem, setItem } from "../storage";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
 import { QRCodeCanvas } from "qrcode.react";
@@ -957,6 +958,9 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
     [],
   );
 
+  // ── Keep-awake (caffeinate -i equivalent) ───────────────────────────────
+  const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
+
   // ── Mobile access state ──────────────────────────────────────────────
   const [mobileAccess, setMobileAccess] = useState<MobileAccessInfo | null>(null);
   const [mobileLoading, setMobileLoading] = useState(false);
@@ -1119,6 +1123,25 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       }}
                       style={{ width: 72 }}
                     />
+                  </div>
+                )}
+
+                {keepAwakeSupported && (
+                  <div className={styles.row}>
+                    <div>
+                      <span className={styles.row_label}>{t("settings.keep_awake")}</span>
+                      <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)", display: "block", marginTop: 2 }}>
+                        {t("settings.keep_awake_desc")}
+                      </span>
+                    </div>
+                    <label className={styles.toggle}>
+                      <input
+                        type="checkbox"
+                        checked={keepAwake}
+                        onChange={(e) => setKeepAwake(e.target.checked)}
+                      />
+                      <span className={styles.toggle_slider} />
+                    </label>
                   </div>
                 )}
 

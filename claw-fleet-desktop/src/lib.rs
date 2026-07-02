@@ -9,6 +9,7 @@ pub mod app_nap;
 pub mod daemon_autostart;
 pub mod embedded_server;
 mod gui;
+pub mod keep_awake;
 pub mod local_backend;
 pub mod region;
 pub mod remote;
