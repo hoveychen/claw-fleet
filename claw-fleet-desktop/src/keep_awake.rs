@@ -195,3 +195,35 @@ mod platform {
         Err("keep-awake is not supported on this platform".to_string())
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    // End-to-end check against the real power-management daemon: acquire the
+    // assertion, confirm `pmset -g assertions` lists it under our name, then
+    // release and confirm it's gone. Calls platform::apply directly so the
+    // test never touches the user's ~/.fleet/keep-awake.json.
+    #[test]
+    fn assertion_visible_in_pmset() {
+        fn pmset_assertions() -> String {
+            let out = std::process::Command::new("pmset")
+                .args(["-g", "assertions"])
+                .output()
+                .expect("run pmset");
+            String::from_utf8_lossy(&out.stdout).into_owned()
+        }
+
+        super::platform::apply(true).expect("acquire assertion");
+        let held = pmset_assertions();
+        assert!(
+            held.contains("Claw Fleet keep-awake toggle"),
+            "assertion not visible in pmset output:\n{held}"
+        );
+
+        super::platform::apply(false).expect("release assertion");
+        let released = pmset_assertions();
+        assert!(
+            !released.contains("Claw Fleet keep-awake toggle"),
+            "assertion still present after release:\n{released}"
+        );
+    }
+}
