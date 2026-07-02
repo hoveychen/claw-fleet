@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
-import { Menu, LayoutGrid } from "lucide-react";
+import { Menu, LayoutGrid, Coffee } from "lucide-react";
+import { useKeepAwake } from "../hooks/useKeepAwake";
 import { useUIStore } from "../store";
 import styles from "./SessionToolbar.module.css";
 
@@ -29,6 +30,7 @@ export function SessionToolbar({
   const { t } = useTranslation();
   const viewMode = useUIStore((s) => s.viewMode);
   const setViewMode = useUIStore((s) => s.setViewMode);
+  const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
 
   return (
     <div className={styles.toolbar} data-tauri-drag-region>
@@ -60,6 +62,18 @@ export function SessionToolbar({
       >
         {showAll ? t("gallery_show_active") : t("gallery_show_all")}
       </button>
+      {keepAwakeSupported && (
+        <button
+          type="button"
+          className={`${styles.icon_btn} ${keepAwake ? styles.icon_btn_active : ""}`}
+          onClick={() => setKeepAwake(!keepAwake)}
+          title={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+          aria-label={keepAwake ? t("keep_awake_on_tooltip") : t("keep_awake_off_tooltip")}
+          aria-pressed={keepAwake}
+        >
+          <Coffee size={14} strokeWidth={1.5} />
+        </button>
+      )}
       <div className={styles.view_toggle} role="group" aria-label={t("view_sessions")}>
         <button
           type="button"
