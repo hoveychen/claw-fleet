@@ -697,6 +697,30 @@ fn set_auto_resume_config(
     state.backend.read().unwrap().set_auto_resume_config(config)
 }
 
+// ── Keep-awake (caffeinate -i equivalent) ────────────────────────────────────
+// Desktop-local power state, deliberately NOT routed through the Backend
+// trait: the assertion controls the machine the desktop app runs on (like
+// app_nap / tray), not the session host. See keep_awake.rs.
+
+#[tauri::command]
+fn keep_awake_supported() -> bool {
+    crate::keep_awake::is_supported()
+}
+
+#[tauri::command]
+fn get_keep_awake() -> bool {
+    crate::keep_awake::is_enabled()
+}
+
+#[tauri::command]
+fn set_keep_awake(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
+    let state = crate::keep_awake::set_enabled(enabled)?;
+    // Keep the main-window toolbar button and the standalone settings window
+    // in sync — both listen for this event.
+    let _ = app.emit("keep-awake-changed", state);
+    Ok(state)
+}
+
 // ── App state ────────────────────────────────────────────────────────────────
 
 pub struct AppState {
@@ -3348,6 +3372,10 @@ pub fn run() {
     // on macOS (no-op on other platforms). See app_nap.rs for rationale.
     crate::app_nap::disable_app_nap();
 
+    // Re-acquire the keep-awake assertion when the user left the toggle on
+    // last run (no-op when disabled or unsupported). See keep_awake.rs.
+    crate::keep_awake::restore_at_startup();
+
     // Workaround for WebKit2GTK DMA-BUF renderer hanging the GPU/compositor
     // under rapid input on Linux. Falls back to shared-memory rendering.
     // Must run before any WebView is initialized.
@@ -3721,6 +3749,9 @@ pub fn run() {
             resume_rate_limited_session,
             get_auto_resume_config,
             set_auto_resume_config,
+            keep_awake_supported,
+            get_keep_awake,
+            set_keep_awake,
             check_setup_status,
             install_fleet_cli,
             detect_ai_tools,
