@@ -1610,8 +1610,19 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn spawn_new_session(&self, workspace_path: String, prompt: String) -> Result<u32, String> {
-        let pid = claw_fleet_core::session_launch::spawn_new_session(&workspace_path, &prompt)?;
+    fn spawn_new_session(
+        &self,
+        workspace_path: String,
+        prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<u32, String> {
+        let pid = claw_fleet_core::session_launch::spawn_new_session(
+            &workspace_path,
+            &prompt,
+            model.as_deref(),
+            effort.as_deref(),
+        )?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up
         // in the session list without waiting for the next scheduled scan.
         let app = self.app.clone();

@@ -19,6 +19,13 @@ use serde::{Deserialize, Serialize};
 pub struct SpawnSessionRequest {
     pub workspace_path: String,
     pub prompt: String,
+    /// Optional `--model` override; `None`/empty = the CLI's configured default.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Optional `--effort` level (low / medium / high / xhigh / max);
+    /// `None`/empty = the CLI's configured default.
+    #[serde(default)]
+    pub effort: Option<String>,
 }
 
 /// Response body for the remote `/spawn_session` endpoint.
@@ -128,10 +135,16 @@ pub fn spawn_claude_detached(
 }
 
 /// Start a brand-new headless Claude Code session: spawns
-/// `claude -p "<prompt>"` detached in `workspace_path`. Returns as soon as
-/// the child is spawned; the session's JSONL will be created by the claude
-/// process itself and discovered by the scanner.
-pub fn spawn_new_session(workspace_path: &str, prompt: &str) -> Result<u32, String> {
+/// `claude -p "<prompt>" [--model <m>] [--effort <e>]` detached in
+/// `workspace_path`. Returns as soon as the child is spawned; the session's
+/// JSONL will be created by the claude process itself and discovered by the
+/// scanner.
+pub fn spawn_new_session(
+    workspace_path: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<u32, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
@@ -144,15 +157,25 @@ pub fn spawn_new_session(workspace_path: &str, prompt: &str) -> Result<u32, Stri
     let stderr_log = crate::session::get_fleet_dir()
         .map(|d| d.join("new_session_stderr.log"))
         .ok_or_else(|| "no fleet dir".to_string())?;
+    let mut args = vec!["-p".to_string(), prompt.to_string()];
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    if let Some(e) = effort.map(str::trim).filter(|e| !e.is_empty()) {
+        args.push("--effort".to_string());
+        args.push(e.to_string());
+    }
     crate::log_debug(&format!(
-        "new_session: claude -p <prompt {} chars> (cwd={}, stderr_log={})",
+        "new_session: claude {} <prompt {} chars> (cwd={}, stderr_log={})",
+        args[2..].join(" "),
         prompt.len(),
         workspace_path,
         stderr_log.display()
     ));
     let pid = spawn_claude_detached(
         &claude,
-        &["-p".to_string(), prompt.to_string()],
+        &args,
         workspace_path,
         &stderr_log,
         "new_session",
@@ -172,7 +195,7 @@ mod tests {
     fn spawn_new_session_rejects_empty_prompt() {
         // Prompt validation must fire before any CLI/filesystem checks so the
         // frontend gets a stable error regardless of the host environment.
-        let err = super::spawn_new_session("/", "   ").unwrap_err();
+        let err = super::spawn_new_session("/", "   ", None, None).unwrap_err();
         assert_eq!(err, "prompt is required");
     }
 

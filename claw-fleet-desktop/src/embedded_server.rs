@@ -405,7 +405,12 @@ fn handle_api_request(
             match serde_json::from_slice::<claw_fleet_core::session_launch::SpawnSessionRequest>(
                 &body_bytes,
             ) {
-                Ok(req) => match backend.spawn_new_session(req.workspace_path, req.prompt) {
+                Ok(req) => match backend.spawn_new_session(
+                    req.workspace_path,
+                    req.prompt,
+                    req.model,
+                    req.effort,
+                ) {
                     Ok(pid) => {
                         json_ok(&claw_fleet_core::session_launch::SpawnSessionResponse { pid })
                     }

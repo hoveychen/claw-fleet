@@ -136,3 +136,28 @@
   border: 1px solid rgba(220, 38, 38, 0.3);
   border-radius: 6px;
 }
+
+.options_row {
+  display: flex;
+  gap: 10px;
+}
+
+.options_row .field {
+  flex: 1;
+}
+
+.option_select {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+  width: 100%;
+}
+
+.option_select:focus {
+  border-color: var(--color-accent);
+}

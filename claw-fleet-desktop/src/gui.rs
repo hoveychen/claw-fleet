@@ -686,13 +686,15 @@ fn resume_rate_limited_session(
 fn spawn_new_claude_session(
     workspace_path: String,
     prompt: String,
+    model: Option<String>,
+    effort: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<u32, String> {
     state
         .backend
         .read()
         .unwrap()
-        .spawn_new_session(workspace_path, prompt)
+        .spawn_new_session(workspace_path, prompt, model, effort)
 }
 
 #[tauri::command]
