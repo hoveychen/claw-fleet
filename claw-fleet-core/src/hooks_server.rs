@@ -1600,6 +1600,51 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            // Spawn a brand-new headless Claude Code session (sessions page's
+            // "new session" button, remote backend). Detached `claude -p`;
+            // the session appears via the scanner once its JSONL exists.
+            "/spawn_session" if request.method() == &tiny_http::Method::Post => {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<crate::session_launch::SpawnSessionRequest>(&buf) {
+                    Ok(req) => {
+                        match crate::session_launch::spawn_new_session(
+                            &req.workspace_path,
+                            &req.prompt,
+                            req.model.as_deref(),
+                            req.effort.as_deref(),
+                        ) {
+                            Ok(pid) => {
+                                let body = serde_json::to_string(
+                                    &crate::session_launch::SpawnSessionResponse { pid },
+                                )
+                                .unwrap_or_default();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/fleet_sessions" if request.method() == &tiny_http::Method::Get => {
                 let items = crate::project::list_fleet_sessions();
                 let body = serde_json::to_string(&items).unwrap_or_default();

@@ -20,6 +20,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Paperclip, FolderOpen, ArrowUp, ChevronDown, Check } from "lucide-react";
 import styles from "./TaskComposer.module.css";
 import { useProjectsStore, useTasksStore, type Project } from "../store";
+import { CLAUDE_MODEL_CHOICES } from "../modelChoices";
 import type { MediaKind, Task, TaskInput } from "../types";
 
 interface Props {
@@ -67,11 +68,7 @@ function nextPmId(): string {
 // workers/review keep their own defaults (no per-task plumbing for those).
 const MODEL_OPTIONS: { value: string; label: string }[] = [
   { value: "", label: "Default (Opus 4.8)" },
-  { value: "claude-fable-5", label: "Fable 5" },
-  { value: "claude-opus-4-8", label: "Opus 4.8" },
-  { value: "claude-sonnet-5", label: "Sonnet 5" },
-  { value: "claude-sonnet-4-6", label: "Sonnet 4.6" },
-  { value: "claude-haiku-4-5-20251001", label: "Haiku 4.5" },
+  ...CLAUDE_MODEL_CHOICES,
 ];
 
 export function TaskComposer({ defaultProjectId, onCreated }: Props) {

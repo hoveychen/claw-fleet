@@ -399,6 +399,27 @@ fn handle_api_request(
             }
         }
 
+        "/spawn_session" => {
+            let mut body_bytes = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+            match serde_json::from_slice::<claw_fleet_core::session_launch::SpawnSessionRequest>(
+                &body_bytes,
+            ) {
+                Ok(req) => match backend.spawn_new_session(
+                    req.workspace_path,
+                    req.prompt,
+                    req.model,
+                    req.effort,
+                ) {
+                    Ok(pid) => {
+                        json_ok(&claw_fleet_core::session_launch::SpawnSessionResponse { pid })
+                    }
+                    Err(e) => json_error(500, &e),
+                },
+                Err(e) => json_error(400, &e.to_string()),
+            }
+        }
+
         "/setup-status" => json_ok(&backend.check_setup()),
 
         "/usage_summaries" => json_ok(&backend.usage_summaries()),
