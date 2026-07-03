@@ -1622,7 +1622,11 @@
   "decision": {
     "pending": "Pending decisions",
     "preceding_label": "Agent said while working",
-    "preceding_hint": "Agent said {{n}} more while working"
+    "preceding_hint": "Agent said {{n}} more while working",
+    "options_expand": "Show options ({{n}})",
+    "options_expand_plain": "Show answer box",
+    "options_collapse": "Hide options",
+    "options_selected": "Selected: {{s}}"
   },
   "guard": {
     "title": "Critical Command Detected",

@@ -382,6 +382,71 @@ function PrecedingAgentMessagesRegion({
   );
 }
 
+/**
+ * Question bodies longer than this are treated as "document" cards — the agent
+ * used the question field to deliver a report — so the footer's option list
+ * starts collapsed and the body gets the vertical space. One click re-expands.
+ */
+const OPTIONS_AUTO_COLLAPSE_LEN = 600;
+
+/**
+ * Slim toggle bar sitting at the top of the card footer. Collapsing hides the
+ * option list / form fields / "Other" composer beneath it; the action buttons
+ * (Decline / Back / Next / Submit) stay visible. When collapsed with answers
+ * already picked, echoes a one-line summary so the current choice stays legible.
+ */
+function OptionsCollapseBar({
+  collapsed,
+  onToggle,
+  count,
+  summary,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+  count: number;
+  summary: string | null;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      className={styles.options_collapse_bar}
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+    >
+      <svg
+        className={`${styles.preceding_chevron} ${!collapsed ? styles.preceding_chevron_open : ""}`}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <polyline points="6 9 12 15 18 9" />
+      </svg>
+      <span className={styles.options_collapse_label}>
+        {collapsed
+          ? count > 0
+            ? t("decision.options_expand", {
+                n: count,
+                defaultValue: "Show options ({{n}})",
+              })
+            : t("decision.options_expand_plain", "Show answer box")
+          : t("decision.options_collapse", "Hide options")}
+      </span>
+      {collapsed && summary && (
+        <span className={styles.options_collapse_summary} title={summary}>
+          {t("decision.options_selected", {
+            s: summary,
+            defaultValue: "Selected: {{s}}",
+          })}
+        </span>
+      )}
+    </button>
+  );
+}
+
 function ElicitationCard({ decision, compact = false }: { decision: ElicitationDecision; compact?: boolean }) {
   const { t } = useTranslation();
   const {
@@ -429,6 +494,19 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   const questionAttachments = attachments[q.question] || [];
   const hasAnswer =
     selected.length > 0 || customText.trim().length > 0 || questionAttachments.length > 0;
+
+  // Document-style cards (long question body) start with the options collapsed;
+  // re-evaluated whenever the wizard moves to a different question.
+  const [optionsCollapsed, setOptionsCollapsed] = useState(
+    q.question.length > OPTIONS_AUTO_COLLAPSE_LEN,
+  );
+  useEffect(() => {
+    setOptionsCollapsed(q.question.length > OPTIONS_AUTO_COLLAPSE_LEN);
+  }, [q.question]);
+  const collapsedSummary = useMemo(() => {
+    const parts = [...selected, customText.trim()].filter((s) => s.length > 0);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }, [selected, customText]);
 
   const allAnswered = request.questions.every((qq) => {
     const sel = selections[qq.question] || [];
@@ -539,6 +617,13 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
       {/* Always-visible footer — options / "Other" / actions stay reachable
           without scrolling (flex-none tail; the body scrolls in .card_scroll). */}
       <div className={styles.card_footer}>
+        <OptionsCollapseBar
+          collapsed={optionsCollapsed}
+          onToggle={() => setOptionsCollapsed((v) => !v)}
+          count={q.options.length}
+          summary={collapsedSummary}
+        />
+        {!optionsCollapsed && (
         <SharedOptionsBlock
           decisionId={decision.id}
           question={q}
@@ -564,6 +649,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           }
           onAttachmentError={showAttachError}
         />
+        )}
         {attachError && (
           <div className={styles.elicitation_attach_error} role="alert">
             <span className={styles.elicitation_attach_error_text}>{attachError}</span>
@@ -1359,6 +1445,19 @@ function FleetAskCard({
   const effectiveMulti = q.multiSelect || multiSelectOverrides[q.question] === true;
   const canToggleMode = !q.multiSelect && opts.length > 0;
 
+  // Document-style cards (long question body) start with the options collapsed;
+  // re-evaluated whenever the wizard moves to a different question.
+  const [optionsCollapsed, setOptionsCollapsed] = useState(
+    q.question.length > OPTIONS_AUTO_COLLAPSE_LEN,
+  );
+  useEffect(() => {
+    setOptionsCollapsed(q.question.length > OPTIONS_AUTO_COLLAPSE_LEN);
+  }, [q.question]);
+  const collapsedSummary = useMemo(() => {
+    const parts = [...selected, customText.trim()].filter((s) => s.length > 0);
+    return parts.length > 0 ? parts.join(" · ") : null;
+  }, [selected, customText]);
+
   // Whether a question is "complete enough" to advance. Required form fields
   // plus at least one of (option picked / custom typed / attachment / form-only).
   const requiredFormFieldsFilled = formFields.every((f) => {
@@ -1506,7 +1605,13 @@ function FleetAskCard({
       {/* Always-visible footer — form fields / options / "Other" / actions stay
           reachable without scrolling (flex-none tail; body scrolls in .card_scroll). */}
       <div className={styles.card_footer}>
-        {formFields.length > 0 && (
+        <OptionsCollapseBar
+          collapsed={optionsCollapsed}
+          onToggle={() => setOptionsCollapsed((v) => !v)}
+          count={opts.length + formFields.length}
+          summary={collapsedSummary}
+        />
+        {!optionsCollapsed && formFields.length > 0 && (
           <div className={styles.elicitation_options}>
             {formFields.map((f) => (
               <FleetAskFormFieldRow
@@ -1520,13 +1625,12 @@ function FleetAskCard({
           </div>
         )}
 
-        {/* Render unconditionally so the free-text "Other" composer (which lives
-            inside SharedOptionsBlock, outside its options .map) persists even when
-            the agent supplied no options. A zero-option fleet__ask card would
-            otherwise leave the user no way to type a free answer — v1's
-            ElicitationCard renders this block unconditionally, so match it. With
-            an empty options array SharedOptionsBlock renders just the Other input. */}
-        {
+        {/* Render whenever expanded — even with zero options — so the free-text
+            "Other" composer (which lives inside SharedOptionsBlock, outside its
+            options .map) is available on option-less fleet__ask cards. With an
+            empty options array SharedOptionsBlock renders just the Other input.
+            Only the user's collapse toggle hides it. */}
+        {!optionsCollapsed && (
           <SharedOptionsBlock
             decisionId={decision.id}
             question={{
@@ -1565,7 +1669,7 @@ function FleetAskCard({
             }
             onAttachmentError={showAttachError}
           />
-        }
+        )}
         {attachError && (
           <div className={styles.elicitation_attach_error} role="alert">
             <span className={styles.elicitation_attach_error_text}>{attachError}</span>

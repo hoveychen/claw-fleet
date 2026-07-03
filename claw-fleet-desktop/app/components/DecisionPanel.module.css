@@ -522,6 +522,36 @@
   border-bottom-right-radius: 8px;
 }
 
+/* Collapse toggle for the footer's option/form region. Document-style cards
+ * (long question body) start collapsed so the body gets the vertical space;
+ * the bar re-expands the option list with one click. */
+.options_collapse_bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 2px 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: left;
+}
+.options_collapse_bar:hover {
+  color: var(--color-text);
+}
+.options_collapse_label {
+  flex-shrink: 0;
+}
+.options_collapse_summary {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-accent, #60a5fa);
+}
+
 .card_header {
   display: flex;
   align-items: center;
