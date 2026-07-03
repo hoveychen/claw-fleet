@@ -1619,7 +1619,11 @@
   "decision": {
     "pending": "待处理决策",
     "preceding_label": "Agent 过程中的说明",
-    "preceding_hint": "Agent 过程中还说了 {{n}} 段"
+    "preceding_hint": "Agent 过程中还说了 {{n}} 段",
+    "options_expand": "展开选项（{{n}}）",
+    "options_expand_plain": "展开回答区",
+    "options_collapse": "收起选项",
+    "options_selected": "已选：{{s}}"
   },
   "guard": {
     "title": "检测到高危命令",
