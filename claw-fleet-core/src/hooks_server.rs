@@ -1608,7 +1608,12 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
                 match serde_json::from_str::<crate::session_launch::SpawnSessionRequest>(&buf) {
                     Ok(req) => {
-                        match crate::session_launch::spawn_new_session(&req.workspace_path, &req.prompt) {
+                        match crate::session_launch::spawn_new_session(
+                            &req.workspace_path,
+                            &req.prompt,
+                            req.model.as_deref(),
+                            req.effort.as_deref(),
+                        ) {
                             Ok(pid) => {
                                 let body = serde_json::to_string(
                                     &crate::session_launch::SpawnSessionResponse { pid },

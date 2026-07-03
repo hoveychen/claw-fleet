@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Folder } from "lucide-react";
 import { useConnectionStore, useSessionsStore } from "../store";
+import { CLAUDE_EFFORT_CHOICES, CLAUDE_MODEL_CHOICES } from "../modelChoices";
 import {
   ChatComposer,
   type ChatComposerAttachment,
@@ -33,6 +34,8 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   const isRemote = connection?.type === "remote";
   const [workspace, setWorkspace] = useState("");
   const [prompt, setPrompt] = useState("");
+  const [model, setModel] = useState("");
+  const [effort, setEffort] = useState("");
   const [attachments, setAttachments] = useState<ChatComposerAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -60,6 +63,8 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
     if (!open) return;
     setWorkspace((prev) => prev || recentWorkspaces[0]?.path || "");
     setPrompt("");
+    setModel("");
+    setEffort("");
     setAttachments([]);
     setError(null);
     setTimeout(() => composerRef.current?.focus(), 50);
@@ -136,6 +141,8 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
       await invoke<number>("spawn_new_claude_session", {
         workspacePath: ws,
         prompt: finalPrompt,
+        model: model || null,
+        effort: effort || null,
       });
       onClose();
     } catch (e) {
@@ -196,6 +203,41 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
             </select>
           )}
         </label>
+
+        <div className={styles.options_row}>
+          <label className={styles.field}>
+            <span>{t("new_session.model")}</span>
+            <select
+              className={styles.option_select}
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              disabled={submitting}
+            >
+              <option value="">{t("new_session.model_default")}</option>
+              {CLAUDE_MODEL_CHOICES.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            <span>{t("new_session.effort")}</span>
+            <select
+              className={styles.option_select}
+              value={effort}
+              onChange={(e) => setEffort(e.target.value)}
+              disabled={submitting}
+            >
+              <option value="">{t("new_session.effort_default")}</option>
+              {CLAUDE_EFFORT_CHOICES.map((e2) => (
+                <option key={e2} value={e2}>
+                  {e2}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
 
         <ChatComposer
           ref={composerRef}

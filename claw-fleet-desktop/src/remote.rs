@@ -273,10 +273,18 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
-    fn spawn_new_session(&self, workspace_path: String, prompt: String) -> Result<u32, String> {
+    fn spawn_new_session(
+        &self,
+        workspace_path: String,
+        prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<u32, String> {
         let req = claw_fleet_core::session_launch::SpawnSessionRequest {
             workspace_path,
             prompt,
+            model,
+            effort,
         };
         let resp: claw_fleet_core::session_launch::SpawnSessionResponse =
             self.probe.post_json("/spawn_session", &req)?;

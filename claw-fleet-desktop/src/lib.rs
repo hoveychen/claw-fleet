@@ -94,7 +94,13 @@ impl Backend for NullBackend {
     fn resume_session(&self, _: String, _: String) -> Result<(), String> {
         Err("backend not ready".into())
     }
-    fn spawn_new_session(&self, _: String, _: String) -> Result<u32, String> {
+    fn spawn_new_session(
+        &self,
+        _: String,
+        _: String,
+        _: Option<String>,
+        _: Option<String>,
+    ) -> Result<u32, String> {
         Err("backend not ready".into())
     }
     fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {

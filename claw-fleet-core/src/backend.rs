@@ -293,9 +293,16 @@ pub trait Backend: Send + Sync {
     /// directory so the previous task can run to completion. Detached.
     fn resume_session(&self, session_id: String, workspace_path: String) -> Result<(), String>;
     /// Start a brand-new headless Claude Code session: spawns
-    /// `claude -p "<prompt>"` detached in `workspace_path`. The session is
-    /// discovered by the scanner via its own JSONL. Returns the spawned pid.
-    fn spawn_new_session(&self, workspace_path: String, prompt: String) -> Result<u32, String>;
+    /// `claude -p "<prompt>" [--model <m>] [--effort <e>]` detached in
+    /// `workspace_path`. The session is discovered by the scanner via its own
+    /// JSONL. Returns the spawned pid.
+    fn spawn_new_session(
+        &self,
+        workspace_path: String,
+        prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<u32, String>;
     /// Read the auto-resume scheduler config.
     fn get_auto_resume_config(&self) -> crate::auto_resume::AutoResumeConfig;
     /// Persist the auto-resume scheduler config.
