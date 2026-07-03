@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, LayoutGrid, Coffee } from "lucide-react";
+import { Menu, LayoutGrid, Coffee, Plus } from "lucide-react";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { useUIStore } from "../store";
+import { NewSessionModal } from "./NewSessionModal";
 import styles from "./SessionToolbar.module.css";
 
 interface SessionToolbarProps {
@@ -31,9 +33,19 @@ export function SessionToolbar({
   const viewMode = useUIStore((s) => s.viewMode);
   const setViewMode = useUIStore((s) => s.setViewMode);
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
+  const [showNewSession, setShowNewSession] = useState(false);
 
   return (
     <div className={styles.toolbar} data-tauri-drag-region>
+      <button
+        type="button"
+        className={styles.new_session_btn}
+        onClick={() => setShowNewSession(true)}
+        title={t("new_session.title")}
+      >
+        <Plus size={13} strokeWidth={2} />
+        <span>{t("new_session.button")}</span>
+      </button>
       <div className={styles.search_wrap}>
         <input
           className={styles.search}
@@ -96,6 +108,8 @@ export function SessionToolbar({
           <LayoutGrid size={14} strokeWidth={1.5} />
         </button>
       </div>
+
+      <NewSessionModal open={showNewSession} onClose={() => setShowNewSession(false)} />
     </div>
   );
 }

@@ -1610,6 +1610,32 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
+    fn spawn_new_session(
+        &self,
+        workspace_path: String,
+        prompt: String,
+        model: Option<String>,
+        effort: Option<String>,
+    ) -> Result<u32, String> {
+        let pid = claw_fleet_core::session_launch::spawn_new_session(
+            &workspace_path,
+            &prompt,
+            model.as_deref(),
+            effort.as_deref(),
+        )?;
+        // Trigger a rescan after a delay so the freshly created JSONL shows up
+        // in the session list without waiting for the next scheduled scan.
+        let app = self.app.clone();
+        let sessions = self.sessions.clone();
+        let sources = self.sources.clone();
+        let outcomes = self.session_outcomes.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            rescan_and_emit(&sources, &app, &sessions, &outcomes);
+        });
+        Ok(pid)
+    }
+
     fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
         claw_fleet_core::auto_resume::AutoResumeConfig::load()
     }
