@@ -58,6 +58,10 @@ pub const RESET_GRACE: chrono::Duration = chrono::Duration::seconds(60);
 /// Returns `true` only when ALL of:
 /// - `config.enabled`
 /// - the session is NOT a subagent (`agent-*` transcripts can't be resumed)
+/// - the session is NOT attached to an interactive IDE (`ide_name == None`);
+///   IDE (VS Code / Claude app / Cursor) sessions must not be resumed headlessly
+/// - the session's `agent_source == "claude-code"` (only claude-code transcripts
+///   are loadable by `claude --resume`)
 /// - the session is in `RateLimited` state with a `rate_limit` payload
 /// - `now >= resets_at + RESET_GRACE` (the wait has elapsed plus a grace
 ///   window so we don't race the reset boundary)
@@ -75,6 +79,20 @@ pub fn should_auto_resume(
     // `claude --resume agent-X` always fails, leaving the session RateLimited
     // so it re-fires forever. Never treat a subagent as a resume candidate.
     if session.is_subagent {
+        return false;
+    }
+    // Only Fleet-spawned headless sessions are auto-resumable. A session running
+    // inside an interactive IDE (VS Code / Claude app / Cursor) writes an ide
+    // lock file, so `ide_name` is Some — firing `claude --resume <id> -p continue`
+    // as a detached headless process behind the user's open editor is not what
+    // they want. Headless Fleet-spawned `claude --print` sessions have no lock
+    // (`ide_name == None`) and are the only ones we resume.
+    if session.ide_name.is_some() {
+        return false;
+    }
+    // `claude --resume` can only reload a claude-code transcript. Cursor / Codex
+    // sessions carry a different `agent_source` and would just fail the resume.
+    if session.agent_source != "claude-code" {
         return false;
     }
     if session.status != crate::session::SessionStatus::RateLimited {
@@ -361,6 +379,29 @@ mod tests {
     fn blocked_when_disabled() {
         let cfg = AutoResumeConfig { enabled: false, max_wait_hours: 12 };
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-1, 5)));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+    }
+
+    #[test]
+    fn blocked_when_ide_attached() {
+        // A session running inside an interactive IDE (VS Code / Claude app /
+        // Cursor) writes an ide lock, so `ide_name` is Some. Headlessly firing
+        // `claude --resume <id> -p continue` behind the user's editor is exactly
+        // what we must not do — auto-resume is only for Fleet-spawned headless
+        // sessions (`ide_name == None`).
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
+        s.ide_name = Some("Visual Studio Code".into());
+        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+    }
+
+    #[test]
+    fn blocked_when_not_claude_code_source() {
+        // `claude --resume` can only reload a claude-code transcript. A Cursor
+        // (or Codex) session must never be a candidate.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
+        s.agent_source = "cursor".into();
         assert!(!should_auto_resume(&s, &cfg, Utc::now()));
     }
 
