@@ -100,7 +100,6 @@
     "workspace": "Workspace",
     "workspace_placeholder": "Absolute path of the workspace directory",
     "browse": "Browse…",
-    "recent_placeholder": "— Recent workspaces —",
     "model": "Model",
     "model_default": "Default (CLI setting)",
     "effort": "Effort",

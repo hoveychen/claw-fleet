@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Folder } from "lucide-react";
+import { Check, ChevronDown, FileText, Folder, FolderOpen } from "lucide-react";
 import { useConnectionStore, useSessionsStore } from "../store";
 import { CLAUDE_EFFORT_CHOICES, CLAUDE_MODEL_CHOICES } from "../modelChoices";
 import {
@@ -39,7 +39,9 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   const [attachments, setAttachments] = useState<ChatComposerAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
   const composerRef = useRef<ChatComposerHandle | null>(null);
+  const workspaceWrapRef = useRef<HTMLDivElement | null>(null);
 
   // Distinct workspaces from known sessions, most recently active first.
   const recentWorkspaces = useMemo(() => {
@@ -72,6 +74,18 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
     // 5s session poll would clobber the user's in-progress selection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  // Close the workspace popover on outside click.
+  useEffect(() => {
+    if (!workspaceMenuOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      if (!workspaceWrapRef.current?.contains(e.target as Node)) {
+        setWorkspaceMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [workspaceMenuOpen]);
 
   if (!open) return null;
 
@@ -117,6 +131,7 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   };
 
   const browseWorkspace = async () => {
+    setWorkspaceMenuOpen(false);
     const picked = await openDialog({ multiple: false, directory: true });
     if (typeof picked === "string") setWorkspace(picked);
   };
@@ -162,47 +177,79 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
           </button>
         </div>
 
-        <label className={styles.field}>
+        <div className={styles.field}>
           <span>{t("new_session.workspace")}</span>
-          <div className={styles.workspace_row}>
+          <div className={styles.combo_wrap} ref={workspaceWrapRef}>
             <input
               type="text"
               className={styles.workspace_input}
               value={workspace}
               onChange={(e) => setWorkspace(e.target.value)}
+              onFocus={() => setWorkspaceMenuOpen(true)}
+              onClick={() => setWorkspaceMenuOpen(true)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") setWorkspaceMenuOpen(false);
+              }}
               placeholder={t("new_session.workspace_placeholder")}
               disabled={submitting}
               spellCheck={false}
             />
-            {!isRemote && (
-              <button
-                type="button"
-                className={styles.browse_btn}
-                onClick={browseWorkspace}
-                disabled={submitting}
-              >
-                {t("new_session.browse")}
-              </button>
+            <button
+              type="button"
+              className={styles.combo_chevron}
+              onClick={() => setWorkspaceMenuOpen((v) => !v)}
+              disabled={submitting}
+              tabIndex={-1}
+              aria-label={t("new_session.workspace")}
+              aria-haspopup="menu"
+              aria-expanded={workspaceMenuOpen}
+            >
+              <ChevronDown size={14} strokeWidth={1.8} />
+            </button>
+            {workspaceMenuOpen && (recentWorkspaces.length > 0 || !isRemote) && (
+              <div className={styles.menu} role="menu">
+                {recentWorkspaces.map((w) => (
+                  <button
+                    key={w.path}
+                    type="button"
+                    role="menuitem"
+                    className={styles.menu_item}
+                    onClick={() => {
+                      setWorkspace(w.path);
+                      setWorkspaceMenuOpen(false);
+                    }}
+                  >
+                    <Check
+                      size={13}
+                      strokeWidth={2.2}
+                      className={w.path === workspace ? styles.check_on : styles.check_off}
+                    />
+                    <span className={styles.menu_item_text}>
+                      <span className={styles.menu_item_label}>{w.name}</span>
+                      <span className={styles.menu_item_sub} title={w.path}>
+                        {w.path}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+                {!isRemote && (
+                  <>
+                    {recentWorkspaces.length > 0 && <div className={styles.menu_sep} />}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className={styles.menu_item}
+                      onClick={browseWorkspace}
+                    >
+                      <FolderOpen size={13} strokeWidth={1.7} className={styles.menu_icon} />
+                      <span className={styles.menu_item_label}>{t("new_session.browse")}</span>
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </div>
-          {recentWorkspaces.length > 0 && (
-            <select
-              className={styles.recent_select}
-              value=""
-              onChange={(e) => {
-                if (e.target.value) setWorkspace(e.target.value);
-              }}
-              disabled={submitting}
-            >
-              <option value="">{t("new_session.recent_placeholder")}</option>
-              {recentWorkspaces.map((w) => (
-                <option key={w.path} value={w.path}>
-                  {w.name} — {w.path}
-                </option>
-              ))}
-            </select>
-          )}
-        </label>
+        </div>
 
         <div className={styles.options_row}>
           <label className={styles.field}>
