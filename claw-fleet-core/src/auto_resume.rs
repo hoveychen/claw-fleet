@@ -6,7 +6,6 @@
 //! longer than this, the session is left alone so the user is not surprised
 //! by a job that resumes 24h later.
 
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -203,6 +202,7 @@ pub fn spawn_resume_tracked(
 /// Spawn `claude --resume <id> -p continue` with stderr redirected to
 /// `stderr_log` and a background thread that reaps the child and records its
 /// exit status — so failures stop being silent and we don't accumulate zombies.
+/// Thin wrapper over the generic [`crate::session_launch::spawn_claude_detached`].
 fn spawn_resume_with_path(
     claude_path: &str,
     session_id: &str,
@@ -210,84 +210,20 @@ fn spawn_resume_with_path(
     stderr_log: &Path,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<u32, String> {
-    if !std::path::Path::new(workspace_path).is_dir() {
-        return Err(format!("Workspace directory not found: {}", workspace_path));
-    }
-    if let Some(parent) = stderr_log.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("create stderr log dir {}: {}", parent.display(), e))?;
-    }
-
-    {
-        let mut header = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(stderr_log)
-            .map_err(|e| format!("open stderr log {}: {}", stderr_log.display(), e))?;
-        let _ = writeln!(
-            header,
-            "[{}] auto_resume spawn session={} cwd={}",
-            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-            session_id,
-            workspace_path
-        );
-    }
-
-    let stderr_file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(stderr_log)
-        .map_err(|e| format!("reopen stderr log {}: {}", stderr_log.display(), e))?;
-
-    let mut child = crate::process_util::command(claude_path)
-        .arg("--resume")
-        .arg(session_id)
-        .arg("-p")
-        .arg("continue")
-        .current_dir(workspace_path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::from(stderr_file))
-        .spawn()
-        .map_err(|e| format!("spawn claude --resume failed: {e}"))?;
-    let pid = child.id();
-
-    let session_id_owned = session_id.to_string();
-    let log_path_owned = stderr_log.to_path_buf();
-    std::thread::spawn(move || {
-        let result = child.wait();
-        let success = matches!(&result, Ok(status) if status.success());
-        if let Ok(mut f) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path_owned)
-        {
-            match result {
-                Ok(status) => {
-                    let _ = writeln!(
-                        f,
-                        "[{}] auto_resume exit session={} code={:?} success={}",
-                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                        session_id_owned,
-                        status.code(),
-                        status.success(),
-                    );
-                }
-                Err(e) => {
-                    let _ = writeln!(
-                        f,
-                        "[{}] auto_resume wait_err session={} err={}",
-                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
-                        session_id_owned,
-                        e
-                    );
-                }
-            }
-        }
-        // Notify the scheduler the slot is free (and whether it succeeded).
-        on_exit(success);
-    });
-
-    Ok(pid)
+    crate::session_launch::spawn_claude_detached(
+        claude_path,
+        &[
+            "--resume".to_string(),
+            session_id.to_string(),
+            "-p".to_string(),
+            "continue".to_string(),
+        ],
+        workspace_path,
+        stderr_log,
+        "auto_resume",
+        &format!("session={}", session_id),
+        on_exit,
+    )
 }
 
 #[cfg(test)]
