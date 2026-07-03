@@ -522,9 +522,9 @@
   border-bottom-right-radius: 8px;
 }
 
-/* Collapse toggle for the footer's option/form region. Document-style cards
- * (long question body) start collapsed so the body gets the vertical space;
- * the bar re-expands the option list with one click. */
+/* Collapse toggle for the footer's option/form region. Options start expanded;
+ * the bar lets the user manually collapse them on document-style cards so the
+ * body gets the vertical space, and re-expand with one click. */
 .options_collapse_bar {
   display: flex;
   align-items: center;
