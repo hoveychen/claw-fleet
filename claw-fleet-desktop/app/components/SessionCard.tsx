@@ -62,10 +62,19 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
       setResuming(false);
     }
   };
+  // Only show the resume button for sessions that can actually be resumed —
+  // mirrors the auto-resume gate in `auto_resume.rs::should_auto_resume`:
+  //  - not a subagent (`agent-*` transcripts can't be resumed)
+  //  - not attached to an interactive IDE (ideName == null); an IDE session
+  //    (VS Code / Claude app / Cursor) should be resumed from the editor, not
+  //    by firing a detached headless `claude --resume` behind it
+  //  - a claude-code transcript (`claude --resume` can't load cursor/codex/…)
+  const canResume =
+    !session.isSubagent && !session.ideName && session.agentSource === "claude-code";
   return (
     <>
       <RateLimitCountdown state={session.rateLimit} />
-      {!session.isSubagent && (
+      {canResume && (
         <button
           className={styles.resume_btn}
           onClick={handleResume}
