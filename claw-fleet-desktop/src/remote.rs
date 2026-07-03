@@ -273,6 +273,16 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn spawn_new_session(&self, workspace_path: String, prompt: String) -> Result<u32, String> {
+        let req = claw_fleet_core::session_launch::SpawnSessionRequest {
+            workspace_path,
+            prompt,
+        };
+        let resp: claw_fleet_core::session_launch::SpawnSessionResponse =
+            self.probe.post_json("/spawn_session", &req)?;
+        Ok(resp.pid)
+    }
+
     fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
         self.probe
             .get::<claw_fleet_core::auto_resume::AutoResumeConfig>("/auto_resume_config")

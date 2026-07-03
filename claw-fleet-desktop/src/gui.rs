@@ -683,6 +683,19 @@ fn resume_rate_limited_session(
 }
 
 #[tauri::command]
+fn spawn_new_claude_session(
+    workspace_path: String,
+    prompt: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<u32, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .spawn_new_session(workspace_path, prompt)
+}
+
+#[tauri::command]
 fn get_auto_resume_config(
     state: tauri::State<'_, AppState>,
 ) -> claw_fleet_core::auto_resume::AutoResumeConfig {
@@ -3747,6 +3760,7 @@ pub fn run() {
             kill_session,
             kill_workspace_sessions,
             resume_rate_limited_session,
+            spawn_new_claude_session,
             get_auto_resume_config,
             set_auto_resume_config,
             keep_awake_supported,
