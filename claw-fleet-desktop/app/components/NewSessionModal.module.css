@@ -1,0 +1,138 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 18px 22px 20px;
+  width: 540px;
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.close_btn {
+  background: transparent;
+  border: none;
+  color: var(--color-text-dim);
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.close_btn:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.field > span {
+  font-weight: 600;
+}
+
+.workspace_row {
+  display: flex;
+  gap: 6px;
+}
+
+.workspace_input {
+  flex: 1;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+  color: var(--color-text);
+  outline: none;
+  font-family: inherit;
+}
+
+.workspace_input:focus {
+  border-color: var(--color-accent);
+}
+
+.browse_btn {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 0 12px;
+  font-size: 12px;
+  color: var(--color-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.browse_btn:hover:not(:disabled) {
+  background: var(--color-bg);
+  border-color: var(--color-accent);
+}
+
+.browse_btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.recent_select {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  outline: none;
+  font-family: inherit;
+  max-width: 100%;
+}
+
+.recent_select:focus {
+  border-color: var(--color-accent);
+}
+
+.hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  line-height: 1.5;
+}
+
+.error {
+  color: #dc2626;
+  font-size: 12px;
+  padding: 6px 10px;
+  background: rgba(220, 38, 38, 0.1);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  border-radius: 6px;
+}
