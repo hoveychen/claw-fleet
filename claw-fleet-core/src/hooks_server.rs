@@ -1613,6 +1613,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             &req.prompt,
                             req.model.as_deref(),
                             req.effort.as_deref(),
+                            req.permission_mode.as_deref(),
                         ) {
                             Ok(pid) => {
                                 let body = serde_json::to_string(
