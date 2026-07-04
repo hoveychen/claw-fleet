@@ -26,7 +26,24 @@ pub struct SpawnSessionRequest {
     /// `None`/empty = the CLI's configured default.
     #[serde(default)]
     pub effort: Option<String>,
+    /// Optional `--permission-mode` (see [`PERMISSION_MODES`]);
+    /// `None`/empty = the CLI's own default mode. Headless `-p` sessions in
+    /// default mode can't approve file edits, so the launcher usually passes
+    /// `acceptEdits`.
+    #[serde(default)]
+    pub permission_mode: Option<String>,
 }
+
+/// `claude --permission-mode` values accepted by the CLI (verified against
+/// `claude --help`, CLI 2.1.181).
+pub const PERMISSION_MODES: &[&str] = &[
+    "acceptEdits",
+    "auto",
+    "bypassPermissions",
+    "default",
+    "dontAsk",
+    "plan",
+];
 
 /// Response body for the remote `/spawn_session` endpoint.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -153,10 +170,21 @@ pub fn spawn_new_session(
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    permission_mode: Option<&str>,
 ) -> Result<u32, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
+    }
+    let permission_mode = permission_mode.map(str::trim).filter(|m| !m.is_empty());
+    if let Some(m) = permission_mode {
+        if !PERMISSION_MODES.contains(&m) {
+            return Err(format!(
+                "invalid permission mode '{}' (expected one of: {})",
+                m,
+                PERMISSION_MODES.join(", ")
+            ));
+        }
     }
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
@@ -174,6 +202,10 @@ pub fn spawn_new_session(
     if let Some(e) = effort.map(str::trim).filter(|e| !e.is_empty()) {
         args.push("--effort".to_string());
         args.push(e.to_string());
+    }
+    if let Some(m) = permission_mode {
+        args.push("--permission-mode".to_string());
+        args.push(m.to_string());
     }
     crate::log_debug(&format!(
         "new_session: claude {} <prompt {} chars> (cwd={}, stderr_log={})",
@@ -204,8 +236,19 @@ mod tests {
     fn spawn_new_session_rejects_empty_prompt() {
         // Prompt validation must fire before any CLI/filesystem checks so the
         // frontend gets a stable error regardless of the host environment.
-        let err = super::spawn_new_session("/", "   ", None, None).unwrap_err();
+        let err = super::spawn_new_session("/", "   ", None, None, None).unwrap_err();
         assert_eq!(err, "prompt is required");
+    }
+
+    #[test]
+    fn spawn_new_session_rejects_unknown_permission_mode() {
+        // Same host-independence contract as the prompt check: validate the
+        // mode against PERMISSION_MODES before touching the CLI/filesystem.
+        let err = super::spawn_new_session("/", "hi", None, None, Some("yolo")).unwrap_err();
+        assert!(
+            err.contains("invalid permission mode 'yolo'"),
+            "unexpected error: {err}"
+        );
     }
 
     #[cfg(unix)]
