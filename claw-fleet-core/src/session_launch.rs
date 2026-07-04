@@ -26,7 +26,24 @@ pub struct SpawnSessionRequest {
     /// `None`/empty = the CLI's configured default.
     #[serde(default)]
     pub effort: Option<String>,
+    /// Optional `--permission-mode` (see [`PERMISSION_MODES`]);
+    /// `None`/empty = the CLI's own default mode. Headless `-p` sessions in
+    /// default mode can't approve file edits, so the launcher usually passes
+    /// `acceptEdits`.
+    #[serde(default)]
+    pub permission_mode: Option<String>,
 }
+
+/// `claude --permission-mode` values accepted by the CLI (verified against
+/// `claude --help`, CLI 2.1.181).
+pub const PERMISSION_MODES: &[&str] = &[
+    "acceptEdits",
+    "auto",
+    "bypassPermissions",
+    "default",
+    "dontAsk",
+    "plan",
+];
 
 /// Response body for the remote `/spawn_session` endpoint.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -82,12 +99,21 @@ pub fn spawn_claude_detached(
         .open(stderr_log)
         .map_err(|e| format!("reopen stderr log {}: {}", stderr_log.display(), e))?;
 
-    let mut child = crate::process_util::command(claude_path)
-        .args(args)
+    let mut cmd = crate::process_util::command(claude_path);
+    cmd.args(args)
         .current_dir(workspace_path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::from(stderr_file))
+        .stderr(std::process::Stdio::from(stderr_file));
+    // Under the macOS App Sandbox the desktop app's own $HOME points at the
+    // container (~/Library/Containers/.../Data). A claude child inheriting
+    // that would read config from and write its session JSONL into the
+    // container — invisible to the scanner, which reads the real
+    // ~/.claude/projects. Pin the child's HOME to the real home dir.
+    if let Some(home) = crate::session::real_home_dir() {
+        cmd.env("HOME", home);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("spawn claude failed: {e}"))?;
     let pid = child.id();
@@ -144,10 +170,21 @@ pub fn spawn_new_session(
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
+    permission_mode: Option<&str>,
 ) -> Result<u32, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
+    }
+    let permission_mode = permission_mode.map(str::trim).filter(|m| !m.is_empty());
+    if let Some(m) = permission_mode {
+        if !PERMISSION_MODES.contains(&m) {
+            return Err(format!(
+                "invalid permission mode '{}' (expected one of: {})",
+                m,
+                PERMISSION_MODES.join(", ")
+            ));
+        }
     }
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
@@ -165,6 +202,10 @@ pub fn spawn_new_session(
     if let Some(e) = effort.map(str::trim).filter(|e| !e.is_empty()) {
         args.push("--effort".to_string());
         args.push(e.to_string());
+    }
+    if let Some(m) = permission_mode {
+        args.push("--permission-mode".to_string());
+        args.push(m.to_string());
     }
     crate::log_debug(&format!(
         "new_session: claude {} <prompt {} chars> (cwd={}, stderr_log={})",
@@ -195,8 +236,74 @@ mod tests {
     fn spawn_new_session_rejects_empty_prompt() {
         // Prompt validation must fire before any CLI/filesystem checks so the
         // frontend gets a stable error regardless of the host environment.
-        let err = super::spawn_new_session("/", "   ", None, None).unwrap_err();
+        let err = super::spawn_new_session("/", "   ", None, None, None).unwrap_err();
         assert_eq!(err, "prompt is required");
+    }
+
+    #[test]
+    fn spawn_new_session_rejects_unknown_permission_mode() {
+        // Same host-independence contract as the prompt check: validate the
+        // mode against PERMISSION_MODES before touching the CLI/filesystem.
+        let err = super::spawn_new_session("/", "hi", None, None, Some("yolo")).unwrap_err();
+        assert!(
+            err.contains("invalid permission mode 'yolo'"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_claude_detached_overrides_polluted_home() {
+        // When the desktop app runs under the macOS App Sandbox, its own
+        // $HOME points at the container (~/Library/Containers/.../Data). A
+        // spawned claude must NOT inherit that — it would read config and
+        // write session JSONLs inside the container, invisible to the
+        // scanner. The child has to see real_home_dir() instead.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet_test_spawn_home_{}",
+            std::process::id()
+        ));
+        let fake_home = tmp.join("container-home");
+        std::fs::create_dir_all(&fake_home).unwrap();
+        let out = tmp.join("observed-home.txt");
+        let _ = std::fs::remove_file(&out);
+        let log = tmp.join("stderr.log");
+
+        let prev_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &fake_home);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawn_result = super::spawn_claude_detached(
+            "/bin/sh",
+            &[
+                "-c".to_string(),
+                format!("printf %s \"$HOME\" > '{}'", out.display()),
+            ],
+            tmp.to_str().unwrap(),
+            &log,
+            "test",
+            "",
+            move |ok| {
+                let _ = tx.send(ok);
+            },
+        );
+        match prev_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        spawn_result.unwrap();
+        let exited_ok = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("child did not exit in time");
+        assert!(exited_ok, "child exited nonzero");
+
+        let observed = std::fs::read_to_string(&out).unwrap();
+        let expected = crate::session::real_home_dir().unwrap();
+        assert_eq!(
+            observed,
+            expected.display().to_string(),
+            "spawned child must see the real home, not the parent's polluted $HOME"
+        );
     }
 
     #[cfg(unix)]

@@ -688,13 +688,14 @@ fn spawn_new_claude_session(
     prompt: String,
     model: Option<String>,
     effort: Option<String>,
+    permission_mode: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<u32, String> {
     state
         .backend
         .read()
         .unwrap()
-        .spawn_new_session(workspace_path, prompt, model, effort)
+        .spawn_new_session(workspace_path, prompt, model, effort, permission_mode)
 }
 
 #[tauri::command]
