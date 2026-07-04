@@ -383,14 +383,9 @@ function PrecedingAgentMessagesRegion({
 }
 
 /**
- * Question bodies longer than this are treated as "document" cards — the agent
- * used the question field to deliver a report — so the footer's option list
- * starts collapsed and the body gets the vertical space. One click re-expands.
- */
-const OPTIONS_AUTO_COLLAPSE_LEN = 600;
-
-/**
- * Slim toggle bar sitting at the top of the card footer. Collapsing hides the
+ * Slim toggle bar sitting at the top of the card footer. Options always start
+ * expanded; collapsing is a manual, per-question act for document-style cards
+ * where the reader wants the body to take the full height. Collapsing hides the
  * option list / form fields / "Other" composer beneath it; the action buttons
  * (Decline / Back / Next / Submit) stay visible. When collapsed with answers
  * already picked, echoes a one-line summary so the current choice stays legible.
@@ -495,13 +490,11 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
   const hasAnswer =
     selected.length > 0 || customText.trim().length > 0 || questionAttachments.length > 0;
 
-  // Document-style cards (long question body) start with the options collapsed;
-  // re-evaluated whenever the wizard moves to a different question.
-  const [optionsCollapsed, setOptionsCollapsed] = useState(
-    q.question.length > OPTIONS_AUTO_COLLAPSE_LEN,
-  );
+  // Options always start expanded; collapsing is a manual act for the rare
+  // document-style card. Reset when the wizard moves to a different question.
+  const [optionsCollapsed, setOptionsCollapsed] = useState(false);
   useEffect(() => {
-    setOptionsCollapsed(q.question.length > OPTIONS_AUTO_COLLAPSE_LEN);
+    setOptionsCollapsed(false);
   }, [q.question]);
   const collapsedSummary = useMemo(() => {
     const parts = [...selected, customText.trim()].filter((s) => s.length > 0);
@@ -1445,13 +1438,11 @@ function FleetAskCard({
   const effectiveMulti = q.multiSelect || multiSelectOverrides[q.question] === true;
   const canToggleMode = !q.multiSelect && opts.length > 0;
 
-  // Document-style cards (long question body) start with the options collapsed;
-  // re-evaluated whenever the wizard moves to a different question.
-  const [optionsCollapsed, setOptionsCollapsed] = useState(
-    q.question.length > OPTIONS_AUTO_COLLAPSE_LEN,
-  );
+  // Options always start expanded; collapsing is a manual act for the rare
+  // document-style card. Reset when the wizard moves to a different question.
+  const [optionsCollapsed, setOptionsCollapsed] = useState(false);
   useEffect(() => {
-    setOptionsCollapsed(q.question.length > OPTIONS_AUTO_COLLAPSE_LEN);
+    setOptionsCollapsed(false);
   }, [q.question]);
   const collapsedSummary = useMemo(() => {
     const parts = [...selected, customText.trim()].filter((s) => s.length > 0);
