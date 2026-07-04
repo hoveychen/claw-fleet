@@ -410,6 +410,7 @@ fn handle_api_request(
                     req.prompt,
                     req.model,
                     req.effort,
+                    req.permission_mode,
                 ) {
                     Ok(pid) => {
                         json_ok(&claw_fleet_core::session_launch::SpawnSessionResponse { pid })

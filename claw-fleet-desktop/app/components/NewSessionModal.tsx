@@ -4,7 +4,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, ChevronDown, FileText, Folder, FolderOpen } from "lucide-react";
 import { useConnectionStore, useSessionsStore } from "../store";
-import { CLAUDE_EFFORT_CHOICES, CLAUDE_MODEL_CHOICES } from "../modelChoices";
+import {
+  CLAUDE_EFFORT_CHOICES,
+  CLAUDE_MODEL_CHOICES,
+  CLAUDE_PERMISSION_MODE_CHOICES,
+} from "../modelChoices";
 import {
   ChatComposer,
   type ChatComposerAttachment,
@@ -36,6 +40,9 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
+  // Headless `-p` sessions in the CLI's default mode can't approve file
+  // edits, so the launcher defaults to acceptEdits.
+  const [permissionMode, setPermissionMode] = useState("acceptEdits");
   const [attachments, setAttachments] = useState<ChatComposerAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +74,7 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
     setPrompt("");
     setModel("");
     setEffort("");
+    setPermissionMode("acceptEdits");
     setAttachments([]);
     setError(null);
     setTimeout(() => composerRef.current?.focus(), 50);
@@ -158,6 +166,7 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
         prompt: finalPrompt,
         model: model || null,
         effort: effort || null,
+        permissionMode: permissionMode || null,
       });
       onClose();
     } catch (e) {
@@ -280,6 +289,22 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
               {CLAUDE_EFFORT_CHOICES.map((e2) => (
                 <option key={e2} value={e2}>
                   {e2}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className={styles.field}>
+            <span>{t("new_session.permission")}</span>
+            <select
+              className={styles.option_select}
+              value={permissionMode}
+              onChange={(e) => setPermissionMode(e.target.value)}
+              disabled={submitting}
+            >
+              <option value="">{t("new_session.permission_default")}</option>
+              {CLAUDE_PERMISSION_MODE_CHOICES.map((m) => (
+                <option key={m} value={m}>
+                  {t(`new_session.permission_${m}`)}
                 </option>
               ))}
             </select>
