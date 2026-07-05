@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useSessionsStore } from "../store";
+import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useFleetManagedStore, useSessionsStore } from "../store";
 import type { DecisionHistoryRecord, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
@@ -167,6 +167,46 @@ export function SessionDetail({
     setDecisionsLoaded(false);
     setDecisionRecords([]);
   }, [liveSession?.id]);
+
+  // Resume entry: only for Fleet-spawned main sessions that are not currently
+  // running — resume_fleet_session re-queues `claude --resume <sid> -p <追问>`.
+  const fleetManagedIds = useFleetManagedStore((s) => s.managedIds);
+  const [showResume, setShowResume] = useState(false);
+  const [resumeText, setResumeText] = useState("");
+  const [resuming, setResuming] = useState(false);
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  useEffect(() => {
+    useFleetManagedStore.getState().refresh();
+  }, []);
+  useEffect(() => {
+    setShowResume(false);
+    setResumeText("");
+    setResumeError(null);
+  }, [liveSession?.id]);
+  const canResume =
+    !!liveSession &&
+    !liveSession.isSubagent &&
+    !ACTIVE_STATUSES.has(liveSession.status) &&
+    fleetManagedIds.has(liveSession.id);
+  const submitResume = useCallback(async () => {
+    if (!liveSession) return;
+    const prompt = resumeText.trim();
+    if (!prompt || resuming) return;
+    setResuming(true);
+    setResumeError(null);
+    try {
+      await invoke("resume_fleet_session", {
+        sessionId: liveSession.id,
+        followUpPrompt: prompt,
+      });
+      setShowResume(false);
+      setResumeText("");
+    } catch (e) {
+      setResumeError(String((e as { message?: string })?.message ?? e));
+    } finally {
+      setResuming(false);
+    }
+  }, [liveSession?.id, resumeText, resuming]);
 
   useEffect(() => {
     const sid = liveSession?.id;
@@ -364,12 +404,41 @@ export function SessionDetail({
                   <span className={styles.tag_main}>◈ {t("main")}</span>
                 )}
               </div>
+              {canResume && (
+                <button
+                  className={`${styles.resume_btn} ${showResume ? styles.resume_btn_active : ""}`}
+                  onClick={() => setShowResume((v) => !v)}
+                  title={t("history.resume", "恢复会话")}
+                >
+                  ↻ {t("history.resume", "恢复会话")}
+                </button>
+              )}
               {!inline && (
                 <button className={styles.close_btn} onClick={close} title={t("common.close") || "Close"}>
                   ✕
                 </button>
               )}
             </div>
+            {canResume && showResume && (
+              <div className={styles.resume_form}>
+                <textarea
+                  className={styles.resume_input}
+                  value={resumeText}
+                  onChange={(e) => setResumeText(e.target.value)}
+                  placeholder={t("history.resume_placeholder", "输入追问提示词后恢复会话…")}
+                  rows={2}
+                  autoFocus
+                />
+                <button
+                  className={styles.resume_send}
+                  disabled={!resumeText.trim() || resuming}
+                  onClick={submitResume}
+                >
+                  {resuming ? t("history.resuming", "恢复中…") : t("history.resume", "恢复会话")}
+                </button>
+                {resumeError && <div className={styles.resume_error}>{resumeError}</div>}
+              </div>
+            )}
             {liveSession.aiTitle && (
               <div className={styles.ai_title}>{liveSession.aiTitle}</div>
             )}
