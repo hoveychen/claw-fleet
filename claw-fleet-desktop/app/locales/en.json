@@ -1636,6 +1636,12 @@
     "options_collapse": "Hide options",
     "options_selected": "Selected: {{s}}"
   },
+  "permission_prompt": {
+    "title": "Permission Request",
+    "allow": "Allow",
+    "deny": "Deny",
+    "deny_reason_placeholder": "Reason for AI (optional)"
+  },
   "guard": {
     "title": "Critical Command Detected",
     "command": "Command",
