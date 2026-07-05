@@ -88,6 +88,12 @@ pub struct PendingDecisions {
     pub fleet_ask: Vec<crate::mcp_ipc::FleetAskRequest>,
     pub a2ui_render: Vec<crate::mcp_a2ui_ipc::A2uiRenderRequest>,
     pub plan_approval: Vec<crate::plan_approval::PlanApprovalRequest>,
+    /// Native permission prompts from headless sessions, routed through the
+    /// `fleet__permission_prompt` MCP tool (`--permission-prompt-tool`).
+    /// `#[serde(default)]` keeps older `fleet serve` probes (whose
+    /// `/pending_decisions` payload predates this field) deserializable.
+    #[serde(default)]
+    pub permission_prompt: Vec<crate::permission_prompt_ipc::PermissionPromptRequest>,
 }
 
 /// Fill in each pending request's `workspace_name` / `ai_title` from the
@@ -121,6 +127,7 @@ pub fn resolve_pending_display(pending: &mut PendingDecisions, sessions: &[Sessi
     resolve_vec!(pending.fleet_ask);
     resolve_vec!(pending.a2ui_render);
     resolve_vec!(pending.plan_approval);
+    resolve_vec!(pending.permission_prompt);
 }
 
 // ── Unified usage summary for tray / overview ───────────────────────────────
@@ -605,6 +612,18 @@ pub trait Backend: Send + Sync {
         id: &str,
         cancelled: bool,
         answers: std::collections::BTreeMap<String, String>,
+    ) -> Result<(), String>;
+
+    // ── fleet__permission_prompt MCP tool (headless native-permission bridge) ──
+    /// Write a permission-prompt response so the polling MCP server
+    /// (`fleet mcp`) can convert it into Claude Code's
+    /// `--permission-prompt-tool` contract payload. `allow = false` denies;
+    /// `reason` (deny path) is forwarded to the agent as the deny message.
+    fn respond_to_permission_prompt(
+        &self,
+        id: &str,
+        allow: bool,
+        reason: Option<String>,
     ) -> Result<(), String>;
 
     // ── fleet__render_a2ui MCP tool (parallel channel to fleet__ask) ──
