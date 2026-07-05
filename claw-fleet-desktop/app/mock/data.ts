@@ -5,6 +5,7 @@
  */
 
 import type { AuditEvent, AuditSummary, DailyReport, DailyReportStats, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
+import type { FleetSession, Project } from "../store";
 
 const NOW = Date.now();
 const MIN = 60_000;
@@ -689,6 +690,99 @@ export function getMessagesForSession(sessionId: string): RawMessage[] {
     },
   ];
 }
+
+// ── Fleet projects + spawned-session registry (history panel) ───────────────
+
+export const MOCK_PROJECTS: Project[] = [
+  {
+    id: "proj-fleet",
+    name: "claw-fleet",
+    workspace: "/Users/demo/workspace/claw-fleet",
+    concurrency: 2,
+    kanbanColumns: [],
+    createdAt: NOW - 30 * DAY,
+    updatedAt: NOW - HOUR,
+  },
+  {
+    id: "proj-api",
+    name: "api-server",
+    workspace: "/Users/demo/workspace/api-server",
+    concurrency: 1,
+    kanbanColumns: [],
+    createdAt: NOW - 20 * DAY,
+    updatedAt: NOW - 2 * HOUR,
+  },
+];
+
+export const MOCK_FLEET_SESSIONS: FleetSession[] = [
+  // Alive — joins to MOCK_SESSIONS by id, so the panel borrows the aiTitle.
+  {
+    id: "sess-fleet-main",
+    projectId: "proj-fleet",
+    workspace: "/Users/demo/workspace/claw-fleet",
+    fleetsessionPath: null,
+    prompt: "给 demo 截图实现 mock 模式，覆盖所有核心视图",
+    contextFiles: [],
+    status: "doing",
+    note: null,
+    createdAt: NOW - 25 * MIN,
+    startedAt: NOW - 25 * MIN,
+    completedAt: null,
+    pid: 4242,
+    expedited: false,
+    sessionKind: "regular",
+  },
+  {
+    id: "sess-api-main",
+    projectId: "proj-api",
+    workspace: "/Users/demo/workspace/api-server",
+    fleetsessionPath: null,
+    prompt: "修复 auth middleware 里 JWT token 校验绕过的问题",
+    contextFiles: [],
+    status: "doing",
+    note: null,
+    createdAt: NOW - 3 * HOUR,
+    startedAt: NOW - 3 * HOUR,
+    completedAt: null,
+    pid: 4243,
+    expedited: false,
+    sessionKind: "master",
+  },
+  {
+    id: "sess-docs-idle",
+    projectId: "proj-fleet",
+    workspace: "/Users/demo/workspace/docs-site",
+    fleetsessionPath: null,
+    prompt: "把 v2 endpoints 的 API 文档补齐",
+    contextFiles: [],
+    status: "done",
+    note: null,
+    createdAt: NOW - 2 * DAY,
+    startedAt: NOW - 2 * DAY,
+    completedAt: NOW - 2 * DAY + 50 * MIN,
+    pid: null,
+    expedited: false,
+    sessionKind: "regular",
+  },
+  // Transcript gone — id matches no MOCK_SESSIONS entry, so the panel
+  // exercises the metadata fallback + resume box.
+  {
+    id: "sess-gone-refactor",
+    projectId: "proj-fleet",
+    workspace: "/Users/demo/workspace/claw-fleet",
+    fleetsessionPath: null,
+    prompt: "重构 SessionList 侧边栏，把 nav 拆成可复用组件，并保持折叠态行为不变",
+    contextFiles: [],
+    status: "done",
+    note: "已合并回 main",
+    createdAt: NOW - 6 * DAY,
+    startedAt: NOW - 6 * DAY,
+    completedAt: NOW - 6 * DAY + 40 * MIN,
+    pid: null,
+    expedited: false,
+    sessionKind: "worker",
+  },
+];
 
 // ── Waiting alerts ──────────────────────────────────────────────────────────
 

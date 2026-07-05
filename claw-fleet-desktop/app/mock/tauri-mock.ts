@@ -23,6 +23,8 @@ import {
   MOCK_HOOKS_PLAN,
   MOCK_DETECTED_TOOLS,
   MOCK_WAITING_ALERTS,
+  MOCK_PROJECTS,
+  MOCK_FLEET_SESSIONS,
   MOCK_SKILL_HISTORY,
   MOCK_AUDIT_SUMMARY,
   MOCK_DAILY_REPORT,
@@ -89,6 +91,20 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return null;
 
     case "list_skills":
+      return [];
+    case "list_projects":
+      return MOCK_PROJECTS;
+    case "list_fleet_sessions":
+      return MOCK_FLEET_SESSIONS;
+    case "search_sessions":
+      return [];
+    case "resume_fleet_session":
+      return null;
+    case "get_workflow_trees":
+      return [];
+    case "list_session_decisions":
+      return [];
+    case "get_task_plans":
       return [];
     case "get_platform":
       return "macos";
@@ -180,14 +196,22 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "plugin:window|set_title":
       return null;
 
-    // Store plugin — must match expected return types
+    // Store plugin — must match expected return types. Backed by
+    // localStorage so demo-mode preferences survive reloads and test
+    // harnesses can pre-seed keys (e.g. skip onboarding) before boot.
     case "plugin:store|load":
       return 1; // Resource ID (numeric)
-    case "plugin:store|get":
-      return [null, false]; // [value, exists] tuple
+    case "plugin:store|get": {
+      const v = window.localStorage.getItem(`mock-store:${args.key as string}`);
+      return [v, v !== null]; // [value, exists] tuple
+    }
     case "plugin:store|set":
-    case "plugin:store|save":
+      window.localStorage.setItem(`mock-store:${args.key as string}`, String(args.value));
+      return null;
     case "plugin:store|delete":
+      window.localStorage.removeItem(`mock-store:${args.key as string}`);
+      return null;
+    case "plugin:store|save":
     case "plugin:store|clear":
     case "plugin:store|reset":
       return null;
