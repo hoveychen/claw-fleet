@@ -11,12 +11,14 @@
 .modal {
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: 12px;
   padding: 18px 22px 20px;
-  width: 540px;
+  width: 560px;
   max-width: 92vw;
   max-height: 86vh;
-  overflow-y: auto;
+  /* Popover menus (project pill) hang outside the box; overflow must stay
+   * visible or they get clipped. */
+  overflow: visible;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -51,170 +53,6 @@
   color: var(--color-text);
 }
 
-.field {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--color-text-dim);
-}
-
-.field span {
-  font-weight: 600;
-}
-
-.field select,
-.prompt {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 8px 10px;
-  font-size: 13px;
-  color: var(--color-text);
-  outline: none;
-  font-family: inherit;
-}
-
-.prompt {
-  resize: vertical;
-  min-height: 96px;
-  line-height: 1.5;
-}
-
-.field select:focus,
-.prompt:focus {
-  border-color: var(--color-accent);
-}
-
-.field_header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.file_add_menu_wrap {
-  position: relative;
-}
-
-.file_add_btn {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  color: var(--color-text);
-  cursor: pointer;
-}
-
-.file_add_btn:hover:not(:disabled) {
-  background: var(--color-bg);
-  border-color: var(--color-accent);
-}
-
-.file_add_btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.file_add_menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  min-width: 120px;
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  z-index: 10;
-  display: flex;
-  flex-direction: column;
-  padding: 4px;
-}
-
-.file_add_menu button {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: transparent;
-  border: none;
-  text-align: left;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--color-text);
-  cursor: pointer;
-  border-radius: 4px;
-}
-
-.file_add_menu button:hover {
-  background: var(--color-bg-secondary);
-}
-
-.file_add_menu_icon {
-  flex-shrink: 0;
-  color: var(--color-text-dim);
-}
-
-.file_list {
-  list-style: none;
-  margin: 4px 0 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-.file_list li {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
-  background: var(--color-bg-secondary);
-  border-radius: 4px;
-  font-size: 12px;
-  color: var(--color-text);
-}
-
-.file_list li span {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.file_remove {
-  background: transparent;
-  border: none;
-  color: var(--color-text-dim);
-  cursor: pointer;
-  padding: 0 4px;
-}
-
-.file_remove:hover {
-  color: var(--color-text);
-}
-
-.checkbox {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--color-text);
-  cursor: pointer;
-}
-
-.checkbox input {
-  cursor: pointer;
-}
-
-.checkbox_hint {
-  color: var(--color-text-dim);
-  font-size: 11px;
-  margin-left: auto;
-}
-
 .error {
   color: #dc2626;
   font-size: 12px;
@@ -222,43 +60,6 @@
   background: rgba(220, 38, 38, 0.1);
   border: 1px solid rgba(220, 38, 38, 0.3);
   border-radius: 6px;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 4px;
-}
-
-.actions button {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 7px 16px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-text);
-  cursor: pointer;
-}
-
-.actions button:hover:not(:disabled) {
-  background: var(--color-bg);
-}
-
-.actions button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-.primary {
-  background: var(--color-accent) !important;
-  color: var(--color-bg) !important;
-  border-color: var(--color-accent) !important;
-}
-
-.primary:hover:not(:disabled) {
-  filter: brightness(1.1);
 }
 
 .empty_projects {
