@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PlanApprovalRequest, RawMessage, SessionInfo, SessionPendingRequest, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, RawMessage, SessionInfo, SessionPendingRequest, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -844,6 +844,12 @@ interface DecisionState {
   cancelA2uiRender: (id: string) => Promise<void>;
   /** Add a plan-approval request to the queue. */
   addPlanApprovalRequest: (req: PlanApprovalRequest) => void;
+  /** Add a headless native-permission prompt to the queue. */
+  addPermissionPromptRequest: (req: PermissionPromptRequest) => void;
+  /** Update the deny-reason text the user is composing on a permission card. */
+  setPermissionPromptDenyReason: (id: string, text: string) => void;
+  /** Resolve a permission-prompt card (allow / deny with optional reason). */
+  respondToPermissionPrompt: (id: string, allow: boolean) => Promise<void>;
   /** Add a session-pending request (idle-but-not-final) to the queue. */
   addSessionPendingRequest: (req: SessionPendingRequest) => void;
   /** Update the user's free-text follow-up while they're typing. */
@@ -1088,6 +1094,53 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
     }));
     playChime("ding_dong").catch(() => {});
+  },
+
+  addPermissionPromptRequest: (req) => {
+    // Dedup by id: mount catch-up may seed the same request the live watcher
+    // also emits. Skip the duplicate (and its chime) entirely.
+    if (get().decisions.some((d) => d.id === req.id)) return;
+    const decision: PendingDecision = {
+      kind: "permission-prompt",
+      id: req.id,
+      request: req,
+      denyReason: "",
+      arrivedAt: Date.now(),
+    };
+    set((s) => ({
+      decisions: [...s.decisions, decision],
+      activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
+    }));
+    // Same urgency feel as guard — the agent is blocked on this.
+    playChime("triple").catch(() => {});
+  },
+
+  setPermissionPromptDenyReason: (id, text) =>
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && d.kind === "permission-prompt" ? { ...d, denyReason: text } : d,
+      ),
+    })),
+
+  respondToPermissionPrompt: async (id, allow) => {
+    const decision = get().decisions.find(
+      (d) => d.id === id && d.kind === "permission-prompt",
+    );
+    const reason =
+      !allow && decision?.kind === "permission-prompt"
+        ? decision.denyReason.trim()
+        : "";
+    try {
+      await invoke("respond_to_permission_prompt", {
+        id,
+        allow,
+        reason: reason.length > 0 ? reason : null,
+      });
+    } catch (e) {
+      console.error("respond_to_permission_prompt failed:", e);
+    }
+    set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
   },
 
   addSessionPendingRequest: (req) => {
