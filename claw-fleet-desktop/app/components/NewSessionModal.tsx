@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check, ChevronDown, FileText, Folder, FolderOpen } from "lucide-react";
+import { FileText, Folder, FolderOpen } from "lucide-react";
 import { useConnectionStore, useSessionsStore } from "../store";
 import {
   CLAUDE_EFFORT_CHOICES,
@@ -15,6 +15,8 @@ import {
   type ChatComposerHandle,
   type ChatComposerStagedAttachment,
 } from "./ChatComposer";
+import { PillMenu } from "./PillMenu";
+import pillStyles from "./PillMenu.module.css";
 import styles from "./NewSessionModal.module.css";
 
 export interface NewSessionModalProps {
@@ -30,7 +32,9 @@ function basename(p: string): string {
 
 /** Plain "start a new claude session" modal — no project, no task, no queue.
  *  Pick a workspace directory + type the initial prompt; the backend spawns a
- *  detached `claude -p "<prompt>"` and the scanner picks the session up. */
+ *  detached `claude -p "<prompt>"` and the scanner picks the session up.
+ *  Styled in the composer design language (see TaskComposer): ghost pills and
+ *  custom popovers instead of labeled form rows and native <select>s. */
 export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
@@ -46,9 +50,8 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   const [attachments, setAttachments] = useState<ChatComposerAttachment[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false);
+  const [pathDraft, setPathDraft] = useState("");
   const composerRef = useRef<ChatComposerHandle | null>(null);
-  const workspaceWrapRef = useRef<HTMLDivElement | null>(null);
 
   // Distinct workspaces from known sessions, most recently active first.
   const recentWorkspaces = useMemo(() => {
@@ -77,23 +80,12 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
     setPermissionMode("acceptEdits");
     setAttachments([]);
     setError(null);
+    setPathDraft("");
     setTimeout(() => composerRef.current?.focus(), 50);
     // recentWorkspaces intentionally read once per open — re-running on every
     // 5s session poll would clobber the user's in-progress selection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
-
-  // Close the workspace popover on outside click.
-  useEffect(() => {
-    if (!workspaceMenuOpen) return;
-    const onDocMouseDown = (e: MouseEvent) => {
-      if (!workspaceWrapRef.current?.contains(e.target as Node)) {
-        setWorkspaceMenuOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", onDocMouseDown);
-    return () => document.removeEventListener("mousedown", onDocMouseDown);
-  }, [workspaceMenuOpen]);
 
   if (!open) return null;
 
@@ -139,7 +131,6 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   };
 
   const browseWorkspace = async () => {
-    setWorkspaceMenuOpen(false);
     const picked = await openDialog({ multiple: false, directory: true });
     if (typeof picked === "string") setWorkspace(picked);
   };
@@ -176,6 +167,129 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
     }
   };
 
+  const modelLabel =
+    CLAUDE_MODEL_CHOICES.find((m) => m.value === model)?.label ??
+    t("new_session.model_pill_default");
+  const effortLabel = effort || t("new_session.effort_pill_default");
+  const permissionLabel = permissionMode
+    ? t(`new_session.permission_${permissionMode}`)
+    : t("new_session.permission_pill_default");
+
+  const workspacePill = (
+    <PillMenu
+      placement="below"
+      icon={<FolderOpen size={13} strokeWidth={1.7} />}
+      label={workspace ? basename(workspace) : t("new_session.workspace")}
+      title={workspace || t("new_session.workspace_placeholder")}
+      disabled={submitting}
+      menuHeader={(close) => (
+        <div className={pillStyles.menu_header}>
+          <input
+            type="text"
+            className={pillStyles.menu_header_input}
+            value={pathDraft}
+            onChange={(e) => setPathDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && pathDraft.trim()) {
+                setWorkspace(pathDraft.trim());
+                setPathDraft("");
+                close();
+              }
+            }}
+            placeholder={t("new_session.workspace_placeholder")}
+            spellCheck={false}
+          />
+        </div>
+      )}
+      items={recentWorkspaces.map((w) => ({
+        id: w.path,
+        label: w.name,
+        sub: w.path,
+        checked: w.path === workspace,
+        onSelect: () => setWorkspace(w.path),
+      }))}
+      footerItems={
+        isRemote
+          ? []
+          : [
+              {
+                id: "browse",
+                label: t("new_session.browse"),
+                icon: (
+                  <FolderOpen size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />
+                ),
+                onSelect: browseWorkspace,
+              },
+            ]
+      }
+    />
+  );
+
+  const optionPills = (
+    <>
+      <PillMenu
+        placement="above"
+        label={modelLabel}
+        title={t("new_session.model")}
+        disabled={submitting}
+        items={[
+          {
+            id: "",
+            label: t("new_session.model_default"),
+            checked: model === "",
+            onSelect: () => setModel(""),
+          },
+          ...CLAUDE_MODEL_CHOICES.map((m) => ({
+            id: m.value,
+            label: m.label,
+            checked: m.value === model,
+            onSelect: () => setModel(m.value),
+          })),
+        ]}
+      />
+      <PillMenu
+        placement="above"
+        label={effortLabel}
+        title={t("new_session.effort")}
+        disabled={submitting}
+        items={[
+          {
+            id: "",
+            label: t("new_session.effort_default"),
+            checked: effort === "",
+            onSelect: () => setEffort(""),
+          },
+          ...CLAUDE_EFFORT_CHOICES.map((e) => ({
+            id: e,
+            label: e,
+            checked: e === effort,
+            onSelect: () => setEffort(e),
+          })),
+        ]}
+      />
+      <PillMenu
+        placement="above"
+        label={permissionLabel}
+        title={t("new_session.permission")}
+        disabled={submitting}
+        items={[
+          {
+            id: "",
+            label: t("new_session.permission_default"),
+            checked: permissionMode === "",
+            onSelect: () => setPermissionMode(""),
+          },
+          ...CLAUDE_PERMISSION_MODE_CHOICES.map((m) => ({
+            id: m,
+            label: t(`new_session.permission_${m}`),
+            checked: m === permissionMode,
+            onSelect: () => setPermissionMode(m),
+          })),
+        ]}
+      />
+    </>
+  );
+
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -184,131 +298,6 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
           <button type="button" className={styles.close_btn} onClick={onClose} aria-label={t("cancel")}>
             ×
           </button>
-        </div>
-
-        <div className={styles.field}>
-          <span>{t("new_session.workspace")}</span>
-          <div className={styles.combo_wrap} ref={workspaceWrapRef}>
-            <input
-              type="text"
-              className={styles.workspace_input}
-              value={workspace}
-              onChange={(e) => setWorkspace(e.target.value)}
-              onFocus={() => setWorkspaceMenuOpen(true)}
-              onClick={() => setWorkspaceMenuOpen(true)}
-              onKeyDown={(e) => {
-                if (e.key === "Escape") setWorkspaceMenuOpen(false);
-              }}
-              placeholder={t("new_session.workspace_placeholder")}
-              disabled={submitting}
-              spellCheck={false}
-            />
-            <button
-              type="button"
-              className={styles.combo_chevron}
-              onClick={() => setWorkspaceMenuOpen((v) => !v)}
-              disabled={submitting}
-              tabIndex={-1}
-              aria-label={t("new_session.workspace")}
-              aria-haspopup="menu"
-              aria-expanded={workspaceMenuOpen}
-            >
-              <ChevronDown size={14} strokeWidth={1.8} />
-            </button>
-            {workspaceMenuOpen && (recentWorkspaces.length > 0 || !isRemote) && (
-              <div className={styles.menu} role="menu">
-                {recentWorkspaces.map((w) => (
-                  <button
-                    key={w.path}
-                    type="button"
-                    role="menuitem"
-                    className={styles.menu_item}
-                    onClick={() => {
-                      setWorkspace(w.path);
-                      setWorkspaceMenuOpen(false);
-                    }}
-                  >
-                    <Check
-                      size={13}
-                      strokeWidth={2.2}
-                      className={w.path === workspace ? styles.check_on : styles.check_off}
-                    />
-                    <span className={styles.menu_item_text}>
-                      <span className={styles.menu_item_label}>{w.name}</span>
-                      <span className={styles.menu_item_sub} title={w.path}>
-                        {w.path}
-                      </span>
-                    </span>
-                  </button>
-                ))}
-                {!isRemote && (
-                  <>
-                    {recentWorkspaces.length > 0 && <div className={styles.menu_sep} />}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      className={styles.menu_item}
-                      onClick={browseWorkspace}
-                    >
-                      <FolderOpen size={13} strokeWidth={1.7} className={styles.menu_icon} />
-                      <span className={styles.menu_item_label}>{t("new_session.browse")}</span>
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className={styles.options_row}>
-          <label className={styles.field}>
-            <span>{t("new_session.model")}</span>
-            <select
-              className={styles.option_select}
-              value={model}
-              onChange={(e) => setModel(e.target.value)}
-              disabled={submitting}
-            >
-              <option value="">{t("new_session.model_default")}</option>
-              {CLAUDE_MODEL_CHOICES.map((m) => (
-                <option key={m.value} value={m.value}>
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span>{t("new_session.effort")}</span>
-            <select
-              className={styles.option_select}
-              value={effort}
-              onChange={(e) => setEffort(e.target.value)}
-              disabled={submitting}
-            >
-              <option value="">{t("new_session.effort_default")}</option>
-              {CLAUDE_EFFORT_CHOICES.map((e2) => (
-                <option key={e2} value={e2}>
-                  {e2}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className={styles.field}>
-            <span>{t("new_session.permission")}</span>
-            <select
-              className={styles.option_select}
-              value={permissionMode}
-              onChange={(e) => setPermissionMode(e.target.value)}
-              disabled={submitting}
-            >
-              <option value="">{t("new_session.permission_default")}</option>
-              {CLAUDE_PERMISSION_MODE_CHOICES.map((m) => (
-                <option key={m} value={m}>
-                  {t(`new_session.permission_${m}`)}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
 
         <ChatComposer
@@ -324,6 +313,8 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
           submitDisabled={!workspace.trim() || !prompt.trim()}
           placeholder={t("new_session.prompt_placeholder")}
           disabled={submitting}
+          contextSlot={workspacePill}
+          toolbarSlot={optionPills}
           addMenuItems={[
             {
               id: "files",
