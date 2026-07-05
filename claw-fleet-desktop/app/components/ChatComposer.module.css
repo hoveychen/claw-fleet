@@ -290,3 +290,30 @@
   opacity: 0.45;
   cursor: not-allowed;
 }
+
+/* ── Hero layout (contextSlot / toolbarSlot provided — the TaskComposer look) ── */
+
+.context_row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.input_hero {
+  font-size: 14.5px;
+  padding: 6px 4px 2px;
+  min-height: 30px;
+  max-height: 220px;
+}
+
+.action_row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.action_spacer {
+  flex: 1;
+}
