@@ -45,6 +45,7 @@ pub mod merge_mediator;
 pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
+pub mod permission_prompt_ipc;
 pub mod permissions_injector;
 pub mod phase_detector;
 pub use claw_fleet_task::process_util;

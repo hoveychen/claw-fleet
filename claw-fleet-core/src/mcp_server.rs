@@ -98,7 +98,7 @@ fn dispatch(method: &str, params: &Value) -> Result<Value, JsonRpcError> {
             },
         })),
         "tools/list" => Ok(json!({
-            "tools": [fleet_ask_tool_def(), a2ui_render_tool_def()]
+            "tools": [fleet_ask_tool_def(), a2ui_render_tool_def(), permission_prompt_tool_def()]
         })),
         "tools/call" => handle_tool_call(params),
         other => Err(JsonRpcError {
@@ -113,6 +113,14 @@ fn fleet_ask_tool_def() -> Value {
         "name": "fleet__ask",
         "description": "Ask the user one or more questions through Fleet's Decision Panel. Schema mirrors Claude Code's native AskUserQuestion plus two optional fields: `html` (HTML preview, rendered in a sandboxed iframe) and `formFields` (structured input fields).",
         "inputSchema": crate::mcp_ipc::fleet_ask_input_schema(),
+    })
+}
+
+fn permission_prompt_tool_def() -> Value {
+    json!({
+        "name": "fleet__permission_prompt",
+        "description": "INTERNAL — Claude Code's --permission-prompt-tool handler for Fleet-launched headless sessions. Routes native permission prompts to Fleet's Decision Panel and returns the user's allow/deny verdict. Do not call this tool directly from agent code; it is invoked automatically by the Claude Code permission machinery.",
+        "inputSchema": crate::permission_prompt_ipc::permission_prompt_input_schema(),
     })
 }
 
@@ -142,6 +150,7 @@ fn handle_tool_call(params: &Value) -> Result<Value, JsonRpcError> {
     match name {
         "fleet__ask" => handle_fleet_ask_call(params),
         "fleet__render_a2ui" => handle_a2ui_render_call(params),
+        "fleet__permission_prompt" => handle_permission_prompt_call(params),
         other => Err(JsonRpcError {
             code: -32602,
             message: format!("Unknown tool: {}", other),
@@ -419,6 +428,132 @@ fn tool_error(message: String) -> Value {
     })
 }
 
+/// Handle `fleet__permission_prompt` — Claude Code's `--permission-prompt-tool`
+/// bridge for headless sessions.
+///
+/// Unlike the other tools, EVERY exit path must return a *valid contract
+/// payload* (`{"behavior":"allow"|"deny",...}`) as plain text content, never
+/// `tool_error`: the caller is Claude Code's permission machinery, and a
+/// malformed result would surface as an opaque tool failure instead of a
+/// clean denial the agent can read and route around. Verified empirically on
+/// CLI 2.1.181: `{"behavior":"allow","updatedInput":{...}}` executes the
+/// tool, `{"behavior":"deny","message":"..."}` blocks it with the message.
+fn handle_permission_prompt_call(params: &Value) -> Result<Value, JsonRpcError> {
+    let args = params.get("arguments").cloned().unwrap_or(Value::Null);
+    let Some(tool_name) = args.get("tool_name").and_then(|v| v.as_str()) else {
+        return Err(JsonRpcError {
+            code: -32602,
+            message: "Missing `tool_name` argument".into(),
+        });
+    };
+    let tool_input = args.get("input").cloned().unwrap_or(json!({}));
+    let tool_use_id = args
+        .get("tool_use_id")
+        .and_then(|v| v.as_str())
+        .map(str::to_string);
+
+    // No live Fleet consumer → nobody can approve. Deny with a reason the
+    // agent can act on (there is no native UI to fall back to in headless
+    // `-p` mode, so a fast deny beats a doomed 600s wait).
+    let status = crate::consumer_heartbeat::consumer_status(heartbeat_window());
+    if !status.is_alive() {
+        return Ok(permission_deny(format!(
+            "Fleet is not running to approve this action (consumer status: {status}); denied by default."
+        )));
+    }
+
+    let request_id = crate::guard::new_request_id();
+    let req = crate::permission_prompt_ipc::PermissionPromptRequest {
+        id: request_id.clone(),
+        session_id: current_session_id(),
+        workspace_name: std::env::var("CLAUDE_PROJECT_DIR")
+            .ok()
+            .and_then(|p| {
+                std::path::PathBuf::from(p)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+            })
+            .unwrap_or_default(),
+        ai_title: None,
+        timestamp: chrono::Utc::now().to_rfc3339(),
+        tool_name: tool_name.to_string(),
+        tool_input: tool_input.clone(),
+        tool_use_id,
+    };
+
+    if let Err(e) = crate::permission_prompt_ipc::write_request(&req) {
+        return Ok(permission_deny(format!(
+            "Fleet could not queue the permission request ({e}); denied by default."
+        )));
+    }
+
+    let timeout = fleet_ask_timeout();
+    let liveness = heartbeat_window();
+    let poll = std::time::Duration::from_millis(200);
+    let started = Instant::now();
+    let response = loop {
+        if let Some(r) = crate::permission_prompt_ipc::try_read_response(&request_id) {
+            break Some(r);
+        }
+        if started.elapsed() > timeout {
+            break None;
+        }
+        if !crate::consumer_heartbeat::consumer_status(liveness).is_alive() {
+            crate::permission_prompt_ipc::cleanup(&request_id);
+            return Ok(permission_deny(
+                "Fleet went away while waiting for permission approval; denied by default.".into(),
+            ));
+        }
+        std::thread::sleep(poll);
+    };
+
+    crate::permission_prompt_ipc::cleanup(&request_id);
+
+    let Some(resp) = response else {
+        return Ok(permission_deny(format!(
+            "No permission decision from the user after {}s; denied by default.",
+            timeout.as_secs()
+        )));
+    };
+
+    match resp.decision {
+        crate::permission_prompt_ipc::PermissionPromptDecision::Allow => {
+            let payload = json!({ "behavior": "allow", "updatedInput": tool_input });
+            Ok(json!({
+                "content": [{
+                    "type": "text",
+                    "text": serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into()),
+                }],
+                "isError": false,
+            }))
+        }
+        crate::permission_prompt_ipc::PermissionPromptDecision::Deny => {
+            let msg = resp
+                .reason
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|r| format!("Denied by user via Fleet Decision Panel: {r}"))
+                .unwrap_or_else(|| "Denied by user via Fleet Decision Panel.".to_string());
+            Ok(permission_deny(msg))
+        }
+    }
+}
+
+/// Build a `--permission-prompt-tool` deny payload. The `behavior`/`message`
+/// text contract is what Claude Code parses; `isError` stays false because
+/// the tool itself succeeded — the *permission* was denied.
+fn permission_deny(message: String) -> Value {
+    let payload = json!({ "behavior": "deny", "message": message });
+    json!({
+        "content": [{
+            "type": "text",
+            "text": serde_json::to_string(&payload).unwrap_or_else(|_| "{}".into()),
+        }],
+        "isError": false,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -439,17 +574,30 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_both_tools() {
+    fn tools_list_returns_all_tools() {
         let resp = call(r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#)
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 2, "expected fleet__ask + fleet__render_a2ui");
+        assert_eq!(
+            tools.len(),
+            3,
+            "expected fleet__ask + fleet__render_a2ui + fleet__permission_prompt"
+        );
         let names: Vec<&str> = tools
             .iter()
             .map(|t| t["name"].as_str().unwrap())
             .collect();
         assert!(names.contains(&"fleet__ask"));
         assert!(names.contains(&"fleet__render_a2ui"));
+        assert!(names.contains(&"fleet__permission_prompt"));
+        let pp = tools
+            .iter()
+            .find(|t| t["name"] == "fleet__permission_prompt")
+            .unwrap();
+        // Claude Code sends snake_case arguments — the schema must advertise
+        // the exact field names observed on the wire (CLI 2.1.181).
+        assert!(pp["inputSchema"]["properties"].get("tool_name").is_some());
+        assert!(pp["inputSchema"]["properties"].get("input").is_some());
         let ask = tools.iter().find(|t| t["name"] == "fleet__ask").unwrap();
         let schema = &ask["inputSchema"]["properties"]["questions"]["items"]["properties"];
         assert!(schema.get("html").is_some(), "html field present in fleet__ask schema");
@@ -542,6 +690,71 @@ mod tests {
             "params": {
                 "name": "fleet__ask",
                 "arguments": { "questions": [] }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+        assert_eq!(resp["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn permission_prompt_without_consumer_denies_with_contract_json() {
+        // The permission tool must NEVER return isError — every failure path
+        // has to be a parseable {"behavior":"deny"} payload, because the
+        // caller is Claude Code's permission machinery, not the agent.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-pp-no-consumer-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::create_dir_all(&tmp);
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by `fleet_home_lock` (matches fleet__ask sibling test).
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 11,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__permission_prompt",
+                "arguments": {
+                    "tool_name": "Write",
+                    "input": { "file_path": "/tmp/x", "content": "y" },
+                    "tool_use_id": "toolu_test"
+                }
+            }
+        });
+        let resp = call(&req.to_string()).expect("response");
+
+        // SAFETY: restore prior state under the same lock.
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+
+        assert!(resp.get("error").is_none(), "expected ok envelope, got {resp}");
+        assert_eq!(resp["result"]["isError"], false);
+        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let payload: Value = serde_json::from_str(text).expect("contract JSON");
+        assert_eq!(payload["behavior"], "deny");
+        assert!(
+            payload["message"].as_str().unwrap().contains("denied by default"),
+            "unexpected message: {payload}"
+        );
+    }
+
+    #[test]
+    fn permission_prompt_missing_tool_name_errors() {
+        let req = json!({
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "fleet__permission_prompt",
+                "arguments": { "input": {} }
             }
         });
         let resp = call(&req.to_string()).expect("response");

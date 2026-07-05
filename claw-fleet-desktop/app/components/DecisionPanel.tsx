@@ -21,6 +21,7 @@ import type {
   FleetAskFormField,
   GuardDecision,
   PendingDecision,
+  PermissionPromptDecision,
   PlanApprovalDecision,
   SessionPendingDecision,
 } from "../types";
@@ -305,6 +306,109 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         )}
         <button className={`${styles.btn} ${styles.btn_block}`} onClick={handleBlock}>
           {t("guard.block", "Block")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Permission-prompt card (headless native-permission bridge) ────────────
+
+/**
+ * A native Claude Code permission prompt routed from a headless session via
+ * `--permission-prompt-tool` → `fleet__permission_prompt`. Layout mirrors the
+ * guard card (allow / deny + optional deny reason), but the payload is a
+ * tool name + its full input JSON rather than a shell command AST.
+ */
+function PermissionPromptCard({ decision }: { decision: PermissionPromptDecision }) {
+  const { t } = useTranslation();
+  const respondToPermissionPrompt = useDecisionStore((s) => s.respondToPermissionPrompt);
+  const setPermissionPromptDenyReason = useDecisionStore(
+    (s) => s.setPermissionPromptDenyReason,
+  );
+  const req = decision.request;
+
+  const inputPreview = useMemo(() => {
+    try {
+      const text = JSON.stringify(req.toolInput ?? {}, null, 2);
+      return text.length > 6000 ? `${text.slice(0, 6000)}\n…` : text;
+    } catch {
+      return String(req.toolInput);
+    }
+  }, [req.toolInput]);
+
+  const handleAllow = useCallback(
+    () => respondToPermissionPrompt(decision.id, true),
+    [respondToPermissionPrompt, decision.id],
+  );
+  const handleDeny = useCallback(
+    () => respondToPermissionPrompt(decision.id, false),
+    [respondToPermissionPrompt, decision.id],
+  );
+
+  return (
+    <div className={styles.card}>
+      <div className={styles.card_header}>
+        <svg
+          className={styles.card_icon}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+          <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+        <span className={styles.card_title}>
+          {t("permission_prompt.title", "Permission Request")}
+        </span>
+        {req.workspaceName && (
+          <span className={styles.card_workspace}>{req.workspaceName}</span>
+        )}
+        <TaskMasterChip sessionId={req.sessionId ?? null} />
+      </div>
+
+      {req.aiTitle && (
+        <div className={styles.card_subtitle}>{req.aiTitle}</div>
+      )}
+
+      <div className={styles.tags}>
+        <span className={styles.tag}>{req.toolName}</span>
+      </div>
+
+      <div className={styles.command}>{inputPreview}</div>
+
+      <div className={styles.block_reason_row}>
+        <input
+          type="text"
+          className={styles.block_reason_input}
+          placeholder={t(
+            "permission_prompt.deny_reason_placeholder",
+            "Reason for AI (optional)",
+          )}
+          value={decision.denyReason}
+          onChange={(e) => setPermissionPromptDenyReason(decision.id, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              handleDeny();
+            }
+          }}
+          aria-label={t(
+            "permission_prompt.deny_reason_placeholder",
+            "Reason for AI (optional)",
+          )}
+        />
+      </div>
+
+      <div className={styles.actions}>
+        <button className={`${styles.btn} ${styles.btn_allow}`} onClick={handleAllow}>
+          {t("permission_prompt.allow", "Allow")}
+        </button>
+        <button className={`${styles.btn} ${styles.btn_block}`} onClick={handleDeny}>
+          {t("permission_prompt.deny", "Deny")}
         </button>
       </div>
     </div>
@@ -1730,6 +1834,8 @@ function DecisionCard({ decision, compact }: { decision: PendingDecision; compac
       return <PlanApprovalCard decision={decision} />;
     case "session-pending":
       return <SessionPendingCard decision={decision} />;
+    case "permission-prompt":
+      return <PermissionPromptCard decision={decision} />;
     default:
       return null;
   }
@@ -1821,6 +1927,9 @@ function tabLabel(d: PendingDecision): string {
     const text = d.request.aiTitle || d.request.workspaceName || "A2UI";
     return text.length > 24 ? `${text.slice(0, 24)}…` : text;
   }
+  if (d.kind === "permission-prompt") {
+    return d.request.toolName || "Permission";
+  }
   const first = d.request.questions[0];
   if (first?.header) return first.header;
   const text = first?.question ?? "Question";
@@ -1864,19 +1973,22 @@ export function DecisionPanel({
   const sessionsList = useSessionsStore((s) => s.sessions);
   const [historyOpen, setHistoryOpen] = useState(false);
 
-  // Escape key: block the active guard decision.
+  // Escape key: block the active guard / permission-prompt decision.
   const { respond } = useDecisionStore();
+  const respondToPermissionPrompt = useDecisionStore((s) => s.respondToPermissionPrompt);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || !activeDecisionId) return;
       const active = decisions.find((d) => d.id === activeDecisionId);
       if (active?.kind === "guard") {
         respond(active.id, false);
+      } else if (active?.kind === "permission-prompt") {
+        respondToPermissionPrompt(active.id, false);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [activeDecisionId, decisions, respond]);
+  }, [activeDecisionId, decisions, respond, respondToPermissionPrompt]);
 
   // Hold Option/Alt: temporarily fade the panel + disable pointer events so the
   // user can peek at content underneath it. Releasing restores. The blur guard
@@ -1908,10 +2020,14 @@ export function DecisionPanel({
     ? (decisions.find((d) => d.id === activeDecisionId) ?? decisions[0])
     : null;
 
-  // Guard decisions force-expand the panel — too important to let the user
-  // miss because they collapsed it earlier for an elicitation.
+  // Guard / permission-prompt decisions force-expand the panel — too
+  // important to let the user miss because they collapsed it earlier for an
+  // elicitation (the headless agent is blocked until answered).
   useEffect(() => {
-    if (decisionPanelCollapsed && active?.kind === "guard") {
+    if (
+      decisionPanelCollapsed &&
+      (active?.kind === "guard" || active?.kind === "permission-prompt")
+    ) {
       setDecisionPanelCollapsed(false);
     }
   }, [decisionPanelCollapsed, active?.kind, setDecisionPanelCollapsed]);
@@ -2008,7 +2124,7 @@ export function DecisionPanel({
     return (
       <button
         type="button"
-        className={`${styles.panel_collapsed_bar} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${peeking ? styles.panel_peeking : ""}`}
+        className={`${styles.panel_collapsed_bar} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${peeking ? styles.panel_peeking : ""}`}
         onClick={() => setDecisionPanelCollapsed(false)}
         title={t("decision_panel.expand", "Expand panel")}
         aria-label={t("decision_panel.expand", "Expand panel")}
@@ -2050,7 +2166,7 @@ export function DecisionPanel({
 
   return (
     <div
-      className={`${styles.panel} ${active.kind === "guard" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${inlineDetailActive ? styles.panel_with_detail : ""}`}
+      className={`${styles.panel} ${active.kind === "guard" || active.kind === "permission-prompt" ? styles.panel_guard : active.kind === "plan-approval" ? styles.panel_plan : styles.panel_elicitation} ${hasPreview ? styles.panel_wide : ""} ${compact ? styles.panel_compact : ""} ${float ? styles.panel_float : ""} ${peeking ? styles.panel_peeking : ""} ${inlineDetailActive ? styles.panel_with_detail : ""}`}
       style={compact || float ? undefined : { width: `${panelWidth}px` }}
     >
       {inlineDetailActive && (
@@ -2125,7 +2241,7 @@ export function DecisionPanel({
         {decisions.map((d) => (
           <button
             key={d.id}
-            className={`${styles.tab} ${d.id === active.id ? styles.tab_active : ""} ${d.kind === "guard" ? styles.tab_guard : d.kind === "plan-approval" ? styles.tab_plan : styles.tab_elicitation}`}
+            className={`${styles.tab} ${d.id === active.id ? styles.tab_active : ""} ${d.kind === "guard" || d.kind === "permission-prompt" ? styles.tab_guard : d.kind === "plan-approval" ? styles.tab_plan : styles.tab_elicitation}`}
             onClick={() => setActiveDecision(d.id)}
           >
             {d.kind === "guard" ? (
@@ -2133,6 +2249,11 @@ export function DecisionPanel({
                 <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
                 <line x1="12" y1="9" x2="12" y2="13" />
                 <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+            ) : d.kind === "permission-prompt" ? (
+              <svg className={styles.tab_icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                <path d="M7 11V7a5 5 0 0 1 10 0v4" />
               </svg>
             ) : d.kind === "plan-approval" ? (
               <svg className={styles.tab_icon} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

@@ -51,6 +51,30 @@ pub struct SpawnSessionResponse {
     pub pid: u32,
 }
 
+/// Fully-qualified MCP tool name of Fleet's permission-prompt bridge, as the
+/// Claude CLI resolves it: `mcp__<server key>__<tool name>` with server key
+/// `fleet` and tool `fleet__permission_prompt`.
+pub const PERMISSION_PROMPT_TOOL: &str = "mcp__fleet__fleet__permission_prompt";
+
+/// `--permission-prompt-tool` args for headless spawns, or empty when the
+/// fleet MCP server is not registered in `~/.claude.json` (naming an
+/// unresolvable MCP tool makes the CLI abort at startup, so the flag is only
+/// safe while the injection is live).
+///
+/// With the flag, a headless session's native permission prompts (tool calls
+/// that are neither allowed nor denied by permission rules) surface as Fleet
+/// Decision Cards instead of being silently auto-denied.
+pub fn permission_prompt_tool_args() -> Vec<String> {
+    if crate::mcp_injector::fleet_server_registered() {
+        vec![
+            "--permission-prompt-tool".to_string(),
+            PERMISSION_PROMPT_TOOL.to_string(),
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
 /// Spawn `claude <args>` detached in `workspace_path`, with stderr redirected
 /// to `stderr_log` and a background thread that reaps the child and records
 /// its exit status — so failures are not silent and we don't accumulate
@@ -207,6 +231,7 @@ pub fn spawn_new_session(
         args.push("--permission-mode".to_string());
         args.push(m.to_string());
     }
+    args.extend(permission_prompt_tool_args());
     crate::log_debug(&format!(
         "new_session: claude {} <prompt {} chars> (cwd={}, stderr_log={})",
         args[2..].join(" "),

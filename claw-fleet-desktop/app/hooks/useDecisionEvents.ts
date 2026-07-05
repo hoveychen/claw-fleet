@@ -9,6 +9,7 @@ import type {
   FleetAskRequest,
   GuardRequest,
   PendingDecisions,
+  PermissionPromptRequest,
   PlanApprovalRequest,
   SessionPendingRequest,
 } from "../types";
@@ -50,6 +51,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   const addA2uiRenderRequest = useDecisionStore((s) => s.addA2uiRenderRequest);
   const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
   const addSessionPendingRequest = useDecisionStore((s) => s.addSessionPendingRequest);
+  const addPermissionPromptRequest = useDecisionStore((s) => s.addPermissionPromptRequest);
   const dismiss = useDecisionStore((s) => s.dismiss);
 
   // Dedup: re-emitted payloads (e.g. after remount / reconnect) shouldn't
@@ -77,6 +79,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
         p.fleetAsk?.forEach((r) => addFleetAskRequest(r));
         p.a2uiRender?.forEach((r) => addA2uiRenderRequest(r));
         p.planApproval?.forEach((r) => addPlanApprovalRequest(r));
+        p.permissionPrompt?.forEach((r) => addPermissionPromptRequest(r));
       })
       .catch((e) => {
         console.warn("[decision] mount catch-up list_pending_decisions failed:", e);
@@ -91,6 +94,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     addFleetAskRequest,
     addA2uiRenderRequest,
     addPlanApprovalRequest,
+    addPermissionPromptRequest,
   ]);
 
   useEffect(() => {
@@ -203,6 +207,24 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     };
   }, [addSessionPendingRequest, silent]);
 
+  useEffect(() => {
+    const unlisten = listen<PermissionPromptRequest>("permission-prompt-request", (e) => {
+      const r = e.payload;
+      if (!silent && !announcedIds.current.has(r.id)) {
+        announcedIds.current.add(r.id);
+        // Same urgency as guard: the headless agent is blocked until answered.
+        const spoken = [r.workspaceName, r.aiTitle, r.toolName]
+          .filter((s): s is string => !!s && s.length > 0)
+          .join(" ");
+        playDecisionAlert("guard", spoken);
+      }
+      addPermissionPromptRequest(r);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addPermissionPromptRequest, silent]);
+
   // Dismiss events — fire when another client (mobile, other desktop) answers
   // a pending decision, or when `fleet guard`/`fleet elicitation` times out
   // and cleans up the request file. The backend polling loop in
@@ -216,6 +238,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
       "a2ui-render-dismissed",
       "plan-approval-dismissed",
       "session-pending-dismissed",
+      "permission-prompt-dismissed",
     ].map(
       (evt) => listen<string>(evt, (e) => {
         const id = e.payload;

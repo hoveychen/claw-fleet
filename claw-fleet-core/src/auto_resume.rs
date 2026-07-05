@@ -210,14 +210,18 @@ fn spawn_resume_with_path(
     stderr_log: &Path,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<u32, String> {
+    let mut args = vec![
+        "--resume".to_string(),
+        session_id.to_string(),
+        "-p".to_string(),
+        "continue".to_string(),
+    ];
+    // Route native permission prompts to Fleet's Decision Panel instead of
+    // headless auto-deny (no-op when the fleet MCP server isn't injected).
+    args.extend(crate::session_launch::permission_prompt_tool_args());
     crate::session_launch::spawn_claude_detached(
         claude_path,
-        &[
-            "--resume".to_string(),
-            session_id.to_string(),
-            "-p".to_string(),
-            "continue".to_string(),
-        ],
+        &args,
         workspace_path,
         stderr_log,
         "auto_resume",

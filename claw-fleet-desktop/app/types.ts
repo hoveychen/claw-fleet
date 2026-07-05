@@ -823,6 +823,37 @@ export interface A2uiRenderRequest {
   timestamp: string;
 }
 
+// ── fleet__permission_prompt (headless native-permission bridge) ────────
+
+/**
+ * A native Claude Code permission prompt from a headless (`claude -p`)
+ * session, routed through the `fleet__permission_prompt` MCP tool via the
+ * `--permission-prompt-tool` flag. Mirror of Rust's
+ * `claw_fleet_core::permission_prompt_ipc::PermissionPromptRequest`.
+ */
+export interface PermissionPromptRequest {
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  aiTitle?: string | null;
+  timestamp: string;
+  /** Tool Claude Code wants to run (e.g. "Write", "Bash", an MCP tool). */
+  toolName: string;
+  /** Full tool input payload, shown so the user can judge the action. */
+  toolInput: unknown;
+  toolUseId?: string | null;
+}
+
+/** Agent needs a native permission approved (headless session). */
+export interface PermissionPromptDecision {
+  kind: "permission-prompt";
+  id: string;
+  request: PermissionPromptRequest;
+  /** Optional reason the user types before denying (forwarded to the agent). */
+  denyReason: string;
+  arrivedAt: number;
+}
+
 /**
  * Snapshot of every decision-panel request currently awaiting a response,
  * returned by the `list_pending_decisions` Tauri command. The frontend pulls
@@ -836,6 +867,7 @@ export interface PendingDecisions {
   fleetAsk: FleetAskRequest[];
   a2uiRender: A2uiRenderRequest[];
   planApproval: PlanApprovalRequest[];
+  permissionPrompt?: PermissionPromptRequest[];
 }
 
 /** Agent is asking via the `fleet__render_a2ui` MCP tool. */
@@ -861,7 +893,8 @@ export type PendingDecision =
   | FleetAskDecision
   | A2uiRenderDecision
   | PlanApprovalDecision
-  | SessionPendingDecision;
+  | SessionPendingDecision
+  | PermissionPromptDecision;
 
 // ── Daily Report types ────────────────────────────────────────────────────────
 
