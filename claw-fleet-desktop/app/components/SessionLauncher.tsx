@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { FileText, Folder, FolderOpen, Zap } from "lucide-react";
 import { useFleetManagedStore } from "../store";
 import {
   ChatComposer,
@@ -9,6 +10,8 @@ import {
   type ChatComposerHandle,
   type ChatComposerStagedAttachment,
 } from "./ChatComposer";
+import { PillMenu } from "./PillMenu";
+import pillStyles from "./PillMenu.module.css";
 import styles from "./SessionLauncher.module.css";
 
 interface Project {
@@ -45,6 +48,8 @@ function basename(p: string): string {
   return slash >= 0 ? normalized.slice(slash + 1) : normalized;
 }
 
+/** Fleet-managed session launcher (project + prompt + queue), styled in the
+ *  composer pill design language — see TaskComposer / NewSessionModal. */
 export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLauncherProps) {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
@@ -97,6 +102,11 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
       setError(null);
     }
   }, [initial]);
+
+  const selectedProject = useMemo(
+    () => projects.find((p) => p.id === projectId) ?? null,
+    [projects, projectId],
+  );
 
   if (!initial) return null;
 
@@ -176,6 +186,37 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
 
   const projectMissing = projectsLoaded && projects.length === 0;
 
+  const projectPill = (
+    <PillMenu
+      placement="below"
+      icon={<FolderOpen size={13} strokeWidth={1.7} />}
+      label={selectedProject?.name ?? t("launcher.select_project_placeholder")}
+      title={selectedProject?.workspace ?? t("launcher.project")}
+      disabled={!projectsLoaded || submitting}
+      items={projects.map((p) => ({
+        id: p.id,
+        label: p.name,
+        sub: p.workspace,
+        checked: p.id === projectId,
+        onSelect: () => setProjectId(p.id),
+      }))}
+    />
+  );
+
+  const expeditedPill = (
+    <button
+      type="button"
+      className={`${pillStyles.ghost_pill} ${expedited ? pillStyles.ghost_pill_active : ""}`}
+      onClick={() => setExpedited((v) => !v)}
+      disabled={submitting}
+      title={t("launcher.expedited_hint")}
+      aria-pressed={expedited}
+    >
+      <Zap size={13} strokeWidth={1.8} />
+      <span className={pillStyles.pill_label}>{t("launcher.expedited")}</span>
+    </button>
+  );
+
   return (
     <div className={styles.overlay} onClick={onClose}>
       <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
@@ -192,22 +233,6 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
           </div>
         ) : (
           <>
-            <label className={styles.field}>
-              <span>{t("launcher.project")}</span>
-              <select
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                disabled={!projectsLoaded || submitting}
-              >
-                <option value="">{t("launcher.select_project_placeholder")}</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name} — {p.workspace}
-                  </option>
-                ))}
-              </select>
-            </label>
-
             <ChatComposer
               ref={composerRef}
               value={prompt}
@@ -221,61 +246,23 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
               submitDisabled={!projectId || !prompt.trim()}
               placeholder={t("launcher.prompt_placeholder")}
               disabled={submitting}
+              contextSlot={projectPill}
+              toolbarSlot={expeditedPill}
               addMenuItems={[
                 {
                   id: "files",
                   label: t("launcher.add_files"),
                   onSelect: pickFiles,
-                  icon: (
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M9.5 1.5H3.5a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1V5.5z" />
-                      <path d="M9.5 1.5v4h4" />
-                    </svg>
-                  ),
+                  icon: <FileText size={14} strokeWidth={1.5} />,
                 },
                 {
                   id: "folder",
                   label: t("launcher.add_directory"),
                   onSelect: pickDirectory,
-                  icon: (
-                    <svg
-                      width="14"
-                      height="14"
-                      viewBox="0 0 16 16"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.3"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M1.5 4.5a1 1 0 0 1 1-1h3.5l1.5 1.5h6a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" />
-                    </svg>
-                  ),
+                  icon: <Folder size={14} strokeWidth={1.5} />,
                 },
               ]}
             />
-
-            <label className={styles.checkbox}>
-              <input
-                type="checkbox"
-                checked={expedited}
-                onChange={(e) => setExpedited(e.target.checked)}
-                disabled={submitting}
-              />
-              <span>{t("launcher.expedited")}</span>
-              <small className={styles.checkbox_hint}>{t("launcher.expedited_hint")}</small>
-            </label>
 
             {error && <div className={styles.error}>{error}</div>}
           </>
