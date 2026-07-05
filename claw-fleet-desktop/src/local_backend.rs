@@ -852,6 +852,60 @@ impl LocalBackend {
             });
         }
 
+        // fleet__permission_prompt watcher — parallel channel to fleet__ask.
+        // Polls `~/.fleet/permission-prompt/` for native permission prompts
+        // routed from headless sessions via `--permission-prompt-tool` and
+        // emits `permission-prompt-request` / `permission-prompt-dismissed`
+        // Tauri events for the frontend's DecisionPanel.
+        {
+            let app_pp = app.clone();
+            let sess_pp = sessions.clone();
+            let running_pp = running.clone();
+            std::thread::spawn(move || {
+                let mut known: HashSet<String> = HashSet::new();
+                loop {
+                    std::thread::sleep(Duration::from_millis(500));
+                    if !running_pp.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    let pending = match claw_fleet_core::permission_prompt_ipc::list_pending_requests_checked() {
+                        Ok(v) => v,
+                        Err(e) => {
+                            crate::log_debug(&format!(
+                                "[permission-prompt watcher] read_dir failed (skipping dismissal step): {e}"
+                            ));
+                            continue;
+                        }
+                    };
+                    for id in &pending {
+                        if known.insert(id.clone()) {
+                            if let Some(mut req) =
+                                claw_fleet_core::permission_prompt_ipc::read_request(id)
+                            {
+                                let (ws, ai) =
+                                    resolve_session_display(&sess_pp, &req.session_id);
+                                if req.workspace_name.is_empty() {
+                                    req.workspace_name = ws;
+                                }
+                                if req.ai_title.is_none() {
+                                    req.ai_title = ai;
+                                }
+                                crate::log_debug(&format!(
+                                    "[permission-prompt] new request: {} tool={}",
+                                    id, req.tool_name
+                                ));
+                                let _ = app_pp.emit("permission-prompt-request", &req);
+                            }
+                        }
+                    }
+                    for id in known.iter().filter(|id| !pending.contains(*id)) {
+                        let _ = app_pp.emit("permission-prompt-dismissed", id.clone());
+                    }
+                    known.retain(|id| pending.contains(id));
+                }
+            });
+        }
+
         // Plan-approval directory watcher — polls for new ExitPlanMode requests from `fleet plan-approval`.
         {
             let app_plan = app.clone();
@@ -2315,6 +2369,24 @@ impl Backend for LocalBackend {
         claw_fleet_core::mcp_ipc::write_response(&resp)
     }
 
+    fn respond_to_permission_prompt(
+        &self,
+        id: &str,
+        allow: bool,
+        reason: Option<String>,
+    ) -> Result<(), String> {
+        let resp = claw_fleet_core::permission_prompt_ipc::PermissionPromptResponse {
+            id: id.to_string(),
+            decision: if allow {
+                claw_fleet_core::permission_prompt_ipc::PermissionPromptDecision::Allow
+            } else {
+                claw_fleet_core::permission_prompt_ipc::PermissionPromptDecision::Deny
+            },
+            reason,
+        };
+        claw_fleet_core::permission_prompt_ipc::write_response(&resp)
+    }
+
     fn respond_to_a2ui_render(
         &self,
         id: &str,
@@ -2384,6 +2456,10 @@ impl Backend for LocalBackend {
             plan_approval: crate::plan_approval::list_pending_requests()
                 .iter()
                 .filter_map(|id| crate::plan_approval::read_request(id))
+                .collect(),
+            permission_prompt: claw_fleet_core::permission_prompt_ipc::list_pending_requests()
+                .iter()
+                .filter_map(|id| claw_fleet_core::permission_prompt_ipc::read_request(id))
                 .collect(),
         };
         let sessions = self.sessions.lock().unwrap().clone();

@@ -521,6 +521,16 @@ fn spawn_claude(
     if let Some(m) = model {
         cmd.arg("--model").arg(m);
     }
+    // Regular sessions: route native permission prompts to Fleet's Decision
+    // Panel via --permission-prompt-tool (no-op when the fleet MCP server
+    // isn't injected). Master/Worker sessions stay on headless auto-deny —
+    // the task pipeline is meant to run unattended, and a blocking card
+    // would stall the whole cluster instead of failing the one P-item.
+    if matches!(kind, project::SessionKind::Regular) {
+        for a in crate::session_launch::permission_prompt_tool_args() {
+            cmd.arg(a);
+        }
+    }
     cmd.arg(&full_prompt)
         .env("FLEET_SESSION_ID", session_id);
 

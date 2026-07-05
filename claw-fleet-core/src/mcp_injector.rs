@@ -178,6 +178,25 @@ pub fn build_fleet_entry(fleet_path: &str) -> serde_json::Value {
     })
 }
 
+/// True when `mcpServers.fleet` is currently registered in `~/.claude.json`
+/// — i.e. a spawned `claude` child will see the `fleet` MCP server and its
+/// tools. Spawn sites use this to decide whether they can safely pass
+/// `--permission-prompt-tool mcp__fleet__fleet__permission_prompt`: naming a
+/// tool that doesn't resolve makes the CLI abort at startup, so the flag must
+/// only be added when the server is actually injected.
+pub fn fleet_server_registered() -> bool {
+    let Some(path) = claude_json_path() else {
+        return false;
+    };
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return false;
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return false;
+    };
+    extract_fleet_entry(&v).0.is_some()
+}
+
 fn extract_fleet_entry(v: &serde_json::Value) -> (Option<serde_json::Value>, bool, bool) {
     // Returns (fleet_entry, had_mcp_servers_object, json_existed_dummy).
     // Last bool is unused here — kept symmetric with the read_settings path

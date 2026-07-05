@@ -1191,6 +1191,20 @@ fn respond_to_fleet_ask(
 }
 
 #[tauri::command]
+fn respond_to_permission_prompt(
+    state: tauri::State<AppState>,
+    id: String,
+    allow: bool,
+    reason: Option<String>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .respond_to_permission_prompt(&id, allow, reason)
+}
+
+#[tauri::command]
 fn respond_to_a2ui_render(
     state: tauri::State<AppState>,
     id: String,
@@ -3854,6 +3868,7 @@ pub fn run() {
             respond_to_elicitation,
             respond_to_fleet_ask,
             respond_to_a2ui_render,
+            respond_to_permission_prompt,
             apply_mcp_injector,
             upload_elicitation_attachment,
             stage_pasted_attachment,

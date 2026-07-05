@@ -1633,6 +1633,12 @@
     "options_collapse": "收起选项",
     "options_selected": "已选：{{s}}"
   },
+  "permission_prompt": {
+    "title": "权限请求",
+    "allow": "允许",
+    "deny": "拒绝",
+    "deny_reason_placeholder": "原因（可选，告诉 AI）"
+  },
   "guard": {
     "title": "检测到高危命令",
     "command": "命令",
