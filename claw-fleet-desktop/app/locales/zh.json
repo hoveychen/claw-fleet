@@ -81,6 +81,7 @@
   "view_skills": "技能",
   "view_plugins": "插件",
   "view_projects": "项目",
+  "view_history": "历史会话",
   "session_badge": {
     "fleet_managed": "Fleet",
     "fleet_managed_tip": "由 Fleet 启动的 session（支持 queue / resume / kanban）"
@@ -1811,5 +1812,18 @@
       "node": "嵌入 node -e",
       "eval": "嵌入 eval"
     }
+  },
+  "history": {
+    "title": "历史会话",
+    "search_placeholder": "搜索标题、提示词、全文…",
+    "filter_project": "按项目筛选",
+    "all_projects": "全部项目",
+    "empty": "还没有通过 Fleet 创建的会话",
+    "no_match": "没有匹配的会话",
+    "untitled": "（无标题）",
+    "missing_transcript": "转录文件已不在磁盘上，仅剩登记信息",
+    "resume_placeholder": "输入追问提示词后恢复会话…",
+    "resume": "恢复会话",
+    "resuming": "恢复中…"
   }
 }
