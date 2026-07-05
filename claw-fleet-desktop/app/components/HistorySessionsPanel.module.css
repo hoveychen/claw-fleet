@@ -240,6 +240,23 @@
   white-space: nowrap;
 }
 
+.row_snippet {
+  font-size: 10px;
+  color: var(--color-text-dim);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+
+.row_snippet mark {
+  background: none;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
 /* ── Missing-transcript fallback + resume box ────────────────────────────── */
 
 .detail_fallback {

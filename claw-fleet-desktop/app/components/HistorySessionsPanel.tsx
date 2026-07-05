@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderGit2, RotateCcw, Search, X } from "lucide-react";
 import {
@@ -35,6 +35,21 @@ function rowDotColor(live: SessionInfo | undefined): string {
   if (!live || !LIVE_STATUSES.has(live.status)) return "#6b6b72";
   if (live.status === "waitingInput") return "#d0a85a";
   return "#5ac88c";
+}
+
+/** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see
+ *  search_index.rs). Split them into React nodes instead of trusting the
+ *  transcript text as HTML. */
+function renderSnippet(snippet: string): ReactNode[] {
+  return snippet.split("<mark>").flatMap((chunk, i) => {
+    if (i === 0) return [chunk];
+    const end = chunk.indexOf("</mark>");
+    if (end === -1) return [chunk];
+    return [
+      <mark key={i}>{chunk.slice(0, end)}</mark>,
+      chunk.slice(end + "</mark>".length),
+    ];
+  });
 }
 
 interface HistoryRow {
@@ -81,7 +96,7 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
     return () => clearInterval(interval);
   }, []);
 
-  const { searching, ftsMatchPaths } = useSessionSearch(query);
+  const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
 
   const liveById = useMemo(
     () => new Map(sessions.map((s) => [s.id, s])),
@@ -202,6 +217,10 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
         ) : (
           rows.map((row) => {
             const expanded = expandedId === row.fs.id && !row.live;
+            const snippet =
+              query.trim().length >= 2 && row.live
+                ? snippetByPath.get(row.live.jsonlPath)
+                : undefined;
             return (
               <div key={row.fs.id} className={styles.row_wrap}>
                 <button
@@ -230,6 +249,9 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
                       )}
                       <span className={styles.row_time}>{timeAgo(row.fs.createdAt, t)}</span>
                     </span>
+                    {snippet && (
+                      <span className={styles.row_snippet}>{renderSnippet(snippet)}</span>
+                    )}
                   </span>
                 </button>
                 {expanded && (
