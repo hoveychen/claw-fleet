@@ -17,8 +17,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { Paperclip, FolderOpen, ArrowUp, ChevronDown, Check } from "lucide-react";
+import { Paperclip, FolderOpen, ArrowUp } from "lucide-react";
 import styles from "./TaskComposer.module.css";
+import { PillMenu } from "./PillMenu";
+import pillStyles from "./PillMenu.module.css";
 import { useProjectsStore, useTasksStore, type Project } from "../store";
 import { CLAUDE_MODEL_CHOICES } from "../modelChoices";
 import type { MediaKind, Task, TaskInput } from "../types";
@@ -91,11 +93,7 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
   const [dragOver, setDragOver] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [workdirMenuOpen, setWorkdirMenuOpen] = useState(false);
-  const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const workdirWrapRef = useRef<HTMLDivElement>(null);
-  const modelWrapRef = useRef<HTMLDivElement>(null);
 
   // Keep a valid project selected as the project list loads / changes.
   useEffect(() => {
@@ -121,18 +119,6 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Close popovers on outside click.
-  useEffect(() => {
-    if (!workdirMenuOpen && !modelMenuOpen) return;
-    const onDown = (e: MouseEvent) => {
-      const tgt = e.target as Node;
-      if (workdirMenuOpen && !workdirWrapRef.current?.contains(tgt)) setWorkdirMenuOpen(false);
-      if (modelMenuOpen && !modelWrapRef.current?.contains(tgt)) setModelMenuOpen(false);
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [workdirMenuOpen, modelMenuOpen]);
 
   const selectedProject = useMemo(
     () => projects.find((p) => p.id === projectId) ?? null,
@@ -188,7 +174,6 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
   // points at it, or create a new one named after the folder.
   const browseForWorkdir = async () => {
     if (submitting) return;
-    setWorkdirMenuOpen(false);
     try {
       const picked = await openDialog({ directory: true, multiple: false });
       if (typeof picked !== "string") return;
@@ -310,61 +295,30 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
         >
           {/* Working-directory ghost pill (top context) */}
           <div className={styles.context_row}>
-            <div className={styles.menu_wrap} ref={workdirWrapRef}>
-              <button
-                type="button"
-                className={styles.ghost_pill}
-                onClick={() => !submitting && setWorkdirMenuOpen((v) => !v)}
-                disabled={submitting}
-                title={selectedProject?.workspace ?? t("composer.browse", "Browse folder…")}
-                aria-haspopup="menu"
-                aria-expanded={workdirMenuOpen}
-              >
-                <FolderOpen size={13} strokeWidth={1.7} />
-                <span className={styles.pill_label}>{workdirLabel}</span>
-                <ChevronDown size={13} strokeWidth={1.8} className={styles.pill_chevron} />
-              </button>
-              {workdirMenuOpen && (
-                <div className={`${styles.menu} ${styles.menu_below}`} role="menu">
-                  {projects.map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      role="menuitem"
-                      className={styles.menu_item}
-                      onClick={() => {
-                        setProjectId(p.id);
-                        setWorkdirMenuOpen(false);
-                      }}
-                    >
-                      <Check
-                        size={13}
-                        strokeWidth={2.2}
-                        className={p.id === projectId ? styles.check_on : styles.check_off}
-                      />
-                      <span className={styles.menu_item_text}>
-                        <span className={styles.menu_item_label}>{p.name}</span>
-                        {p.workspace && (
-                          <span className={styles.menu_item_sub} title={p.workspace}>
-                            {p.workspace}
-                          </span>
-                        )}
-                      </span>
-                    </button>
-                  ))}
-                  {projects.length > 0 && <div className={styles.menu_sep} />}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={styles.menu_item}
-                    onClick={browseForWorkdir}
-                  >
-                    <FolderOpen size={13} strokeWidth={1.7} className={styles.menu_icon} />
-                    <span className={styles.menu_item_label}>{t("composer.browse", "Browse folder…")}</span>
-                  </button>
-                </div>
-              )}
-            </div>
+            <PillMenu
+              placement="below"
+              icon={<FolderOpen size={13} strokeWidth={1.7} />}
+              label={workdirLabel}
+              title={selectedProject?.workspace ?? t("composer.browse", "Browse folder…")}
+              disabled={submitting}
+              items={projects.map((p) => ({
+                id: p.id,
+                label: p.name,
+                sub: p.workspace || undefined,
+                checked: p.id === projectId,
+                onSelect: () => setProjectId(p.id),
+              }))}
+              footerItems={[
+                {
+                  id: "browse",
+                  label: t("composer.browse", "Browse folder…"),
+                  icon: (
+                    <FolderOpen size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />
+                  ),
+                  onSelect: browseForWorkdir,
+                },
+              ]}
+            />
           </div>
 
           {/* Hero textarea */}
@@ -417,43 +371,18 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
               <Paperclip size={15} strokeWidth={1.8} />
             </button>
 
-            <div className={styles.menu_wrap} ref={modelWrapRef}>
-              <button
-                type="button"
-                className={styles.ghost_btn}
-                onClick={() => !submitting && setModelMenuOpen((v) => !v)}
-                disabled={submitting}
-                title={t("composer.model_hint", "Model for the planning session")}
-                aria-haspopup="menu"
-                aria-expanded={modelMenuOpen}
-              >
-                <span className={styles.pill_label}>{modelLabel}</span>
-                <ChevronDown size={13} strokeWidth={1.8} className={styles.pill_chevron} />
-              </button>
-              {modelMenuOpen && (
-                <div className={`${styles.menu} ${styles.menu_above}`} role="menu">
-                  {MODEL_OPTIONS.map((m) => (
-                    <button
-                      key={m.value}
-                      type="button"
-                      role="menuitem"
-                      className={styles.menu_item}
-                      onClick={() => {
-                        setModel(m.value);
-                        setModelMenuOpen(false);
-                      }}
-                    >
-                      <Check
-                        size={13}
-                        strokeWidth={2.2}
-                        className={m.value === model ? styles.check_on : styles.check_off}
-                      />
-                      <span className={styles.menu_item_label}>{m.label}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <PillMenu
+              placement="above"
+              label={modelLabel}
+              title={t("composer.model_hint", "Model for the planning session")}
+              disabled={submitting}
+              items={MODEL_OPTIONS.map((m) => ({
+                id: m.value,
+                label: m.label,
+                checked: m.value === model,
+                onSelect: () => setModel(m.value),
+              }))}
+            />
 
             <span className={styles.action_spacer} />
 
