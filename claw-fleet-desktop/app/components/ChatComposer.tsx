@@ -102,6 +102,14 @@ export interface ChatComposerProps {
   submitLabel?: ReactNode;
   /** Drop the outer rounded box so a host wrapper can supply its own framing. */
   bare?: boolean;
+  /**
+   * Hero layout slots (the TaskComposer look). Providing either switches the
+   * composer from the inline single row ("+ | textarea | send") to the hero
+   * arrangement: contextSlot row on top, full-width textarea, then a bottom
+   * ghost toolbar of "+ | toolbarSlot | spacer | send".
+   */
+  contextSlot?: ReactNode;
+  toolbarSlot?: ReactNode;
 }
 
 export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(function ChatComposer(
@@ -121,6 +129,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     className,
     submitLabel,
     bare,
+    contextSlot,
+    toolbarSlot,
   },
   ref,
 ) {
@@ -268,8 +278,105 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     }
   }, [addMenuItems, handlePickFiles]);
 
+  const hero = Boolean(contextSlot || toolbarSlot);
+
+  const attachControl = (
+    <div className={styles.attach_wrap} ref={menuWrapRef}>
+      <button
+        type="button"
+        className={styles.attach_btn}
+        onClick={triggerAttach}
+        disabled={disabled}
+        title={t("composer.attach_tooltip", "Attach file or image")}
+        aria-label={t("composer.attach_tooltip", "Attach file or image")}
+        aria-haspopup={addMenuItems && addMenuItems.length > 0 ? "menu" : undefined}
+        aria-expanded={
+          addMenuItems && addMenuItems.length > 0 ? menuOpen : undefined
+        }
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <line x1="12" y1="5" x2="12" y2="19" />
+          <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+      </button>
+      {addMenuItems && addMenuItems.length > 0 && menuOpen && (
+        <div className={styles.menu} role="menu">
+          {addMenuItems.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              role="menuitem"
+              className={styles.menu_item}
+              onClick={async () => {
+                setMenuOpen(false);
+                await item.onSelect();
+              }}
+              disabled={disabled}
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  const textareaEl = (
+    <textarea
+      ref={textareaRef}
+      className={`${styles.input} ${hero ? styles.input_hero : ""}`}
+      rows={1}
+      value={value}
+      placeholder={placeholder ?? t("composer.placeholder", "Type a message…")}
+      onChange={(e) => onChange(e.target.value)}
+      onPaste={handlePaste}
+      onInput={(e) => {
+        const el = e.currentTarget;
+        el.style.height = "auto";
+        el.style.height = `${el.scrollHeight}px`;
+      }}
+      onKeyDown={handleKeyDown}
+      disabled={disabled}
+    />
+  );
+
+  const sendControl = onSubmit ? (
+    <button
+      type="button"
+      className={styles.send_btn}
+      onClick={onSubmit}
+      disabled={submitting || submitDisabled || disabled}
+      title={t("composer.send", "Send (Enter)")}
+      aria-label={t("composer.send", "Send (Enter)")}
+    >
+      {submitLabel ?? (
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <line x1="12" y1="19" x2="12" y2="5" />
+          <polyline points="5 12 12 5 19 12" />
+        </svg>
+      )}
+    </button>
+  ) : null;
+
   return (
     <div className={`${styles.composer} ${bare ? styles.bare : ""} ${className ?? ""}`}>
+      {contextSlot && <div className={styles.context_row}>{contextSlot}</div>}
       {attachments.length > 0 && (
         <div className={styles.chips}>
           {attachments.map((a) => {
@@ -323,95 +430,23 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
           })}
         </div>
       )}
-      <div className={styles.row}>
-        <div className={styles.attach_wrap} ref={menuWrapRef}>
-          <button
-            type="button"
-            className={styles.attach_btn}
-            onClick={triggerAttach}
-            disabled={disabled}
-            title={t("composer.attach_tooltip", "Attach file or image")}
-            aria-label={t("composer.attach_tooltip", "Attach file or image")}
-            aria-haspopup={addMenuItems && addMenuItems.length > 0 ? "menu" : undefined}
-            aria-expanded={
-              addMenuItems && addMenuItems.length > 0 ? menuOpen : undefined
-            }
-          >
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-          </button>
-          {addMenuItems && addMenuItems.length > 0 && menuOpen && (
-            <div className={styles.menu} role="menu">
-              {addMenuItems.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  role="menuitem"
-                  className={styles.menu_item}
-                  onClick={async () => {
-                    setMenuOpen(false);
-                    await item.onSelect();
-                  }}
-                  disabled={disabled}
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                </button>
-              ))}
-            </div>
-          )}
+      {hero ? (
+        <>
+          {textareaEl}
+          <div className={styles.action_row}>
+            {attachControl}
+            {toolbarSlot}
+            <span className={styles.action_spacer} />
+            {sendControl}
+          </div>
+        </>
+      ) : (
+        <div className={styles.row}>
+          {attachControl}
+          {textareaEl}
+          {sendControl}
         </div>
-        <textarea
-          ref={textareaRef}
-          className={styles.input}
-          rows={1}
-          value={value}
-          placeholder={placeholder ?? t("composer.placeholder", "Type a message…")}
-          onChange={(e) => onChange(e.target.value)}
-          onPaste={handlePaste}
-          onInput={(e) => {
-            const el = e.currentTarget;
-            el.style.height = "auto";
-            el.style.height = `${el.scrollHeight}px`;
-          }}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-        />
-        {onSubmit && (
-          <button
-            type="button"
-            className={styles.send_btn}
-            onClick={onSubmit}
-            disabled={submitting || submitDisabled || disabled}
-            title={t("composer.send", "Send (Enter)")}
-            aria-label={t("composer.send", "Send (Enter)")}
-          >
-            {submitLabel ?? (
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <line x1="12" y1="19" x2="12" y2="5" />
-                <polyline points="5 12 12 5 19 12" />
-              </svg>
-            )}
-          </button>
-        )}
-      </div>
+      )}
       {previewing && (
         <ImageLightbox
           src={previewing.src}
