@@ -253,6 +253,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             let mut prev_plan_approval_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_fleet_ask_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_a2ui_render_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let mut prev_permission_prompt_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
 
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
@@ -439,6 +440,34 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     }
                 }
                 prev_a2ui_render_ids.retain(|id| a2ui_render_ids.contains(id));
+
+                // Broadcast new fleet__permission_prompt requests (headless
+                // native-permission bridge via --permission-prompt-tool)
+                let permission_prompt_ids: std::collections::HashSet<String> =
+                    crate::permission_prompt_ipc::list_pending_requests().into_iter().collect();
+                for id in &permission_prompt_ids {
+                    if prev_permission_prompt_ids.insert(id.clone()) {
+                        if let Some(mut req) = crate::permission_prompt_ipc::read_request(id) {
+                            if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
+                                if req.workspace_name.is_empty() {
+                                    req.workspace_name = s.workspace_name.clone();
+                                }
+                                if req.ai_title.is_none() {
+                                    req.ai_title = s.ai_title.clone();
+                                }
+                            }
+                            if let Ok(json) = serde_json::to_string(&req) {
+                                sse_bg.broadcast("permission-prompt-request", &json);
+                            }
+                        }
+                    }
+                }
+                for id in prev_permission_prompt_ids.difference(&permission_prompt_ids) {
+                    if let Ok(json) = serde_json::to_string(id) {
+                        sse_bg.broadcast("permission-prompt-dismissed", &json);
+                    }
+                }
+                prev_permission_prompt_ids.retain(|id| permission_prompt_ids.contains(id));
             }
         });
     }
@@ -2664,6 +2693,64 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 match serde_json::from_slice::<crate::mcp_ipc::FleetAskResponse>(&body_bytes) {
                     Ok(resp) => {
                         match crate::mcp_ipc::write_response(&resp) {
+                            Ok(()) => {
+                                // Don't cleanup here — the `fleet mcp` server
+                                // polls for the response and does cleanup itself.
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/permission-prompt/pending" => {
+                let ids = crate::permission_prompt_ipc::list_pending_requests();
+                let sessions = scan_all_sources(&sources);
+                let mut requests = Vec::new();
+                for id in &ids {
+                    if let Some(mut req) = crate::permission_prompt_ipc::read_request(id) {
+                        if let Some(s) = sessions.iter().find(|s| s.id == req.session_id) {
+                            if req.workspace_name.is_empty() {
+                                req.workspace_name = s.workspace_name.clone();
+                            }
+                            if req.ai_title.is_none() {
+                                req.ai_title = s.ai_title.clone();
+                            }
+                        }
+                        requests.push(req);
+                    }
+                }
+                let body = serde_json::to_string(&requests).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/permission-prompt/respond" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<crate::permission_prompt_ipc::PermissionPromptResponse>(&body_bytes) {
+                    Ok(resp) => {
+                        match crate::permission_prompt_ipc::write_response(&resp) {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet mcp` server
                                 // polls for the response and does cleanup itself.

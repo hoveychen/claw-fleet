@@ -865,6 +865,24 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/a2ui-render/respond", &resp)
     }
 
+    fn respond_to_permission_prompt(
+        &self,
+        id: &str,
+        allow: bool,
+        reason: Option<String>,
+    ) -> Result<(), String> {
+        let resp = claw_fleet_core::permission_prompt_ipc::PermissionPromptResponse {
+            id: id.to_string(),
+            decision: if allow {
+                claw_fleet_core::permission_prompt_ipc::PermissionPromptDecision::Allow
+            } else {
+                claw_fleet_core::permission_prompt_ipc::PermissionPromptDecision::Deny
+            },
+            reason,
+        };
+        self.probe.post_json_ok("/permission-prompt/respond", &resp)
+    }
+
     fn apply_plan_approval_hook(&self) -> Result<(), String> {
         self.probe.post_ok("/apply_plan_approval_hook")
     }
@@ -878,7 +896,7 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn list_pending_decisions(&self) -> claw_fleet_core::backend::PendingDecisions {
-        // Same five `/…/pending` endpoints the live poller threads consume,
+        // Same six `/…/pending` endpoints the live poller threads consume,
         // aggregated into one snapshot for the frontend's mount catch-up.
         let mut pending = claw_fleet_core::backend::PendingDecisions {
             guard: self.probe.get("/guard/pending").unwrap_or_default(),
@@ -886,6 +904,10 @@ impl crate::backend::Backend for RemoteBackend {
             fleet_ask: self.probe.get("/fleet-ask/pending").unwrap_or_default(),
             a2ui_render: self.probe.get("/a2ui-render/pending").unwrap_or_default(),
             plan_approval: self.probe.get("/plan-approval/pending").unwrap_or_default(),
+            permission_prompt: self
+                .probe
+                .get("/permission-prompt/pending")
+                .unwrap_or_default(),
         };
         let sessions = self.list_sessions();
         claw_fleet_core::backend::resolve_pending_display(&mut pending, &sessions);
@@ -2101,6 +2123,43 @@ fn connect_remote_start_probe(
                 }
                 for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
                     let _ = app_ask.emit("fleet-ask-dismissed", id.clone());
+                }
+                known.retain(|id| pending_ids.contains(id));
+            }
+        });
+    }
+
+    // fleet__permission_prompt polling thread — mirror of the fleet-ask
+    // poller for the headless native-permission bridge. Polls
+    // `GET /permission-prompt/pending` and emits the
+    // `permission-prompt-request` / `-dismissed` Tauri events.
+    {
+        let app_pp = app.clone();
+        let pr_pp = poller_running.clone();
+        let probe_pp = probe.clone();
+        std::thread::spawn(move || {
+            let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            loop {
+                std::thread::sleep(Duration::from_millis(500));
+                if !*pr_pp.lock().unwrap() {
+                    break;
+                }
+                let Ok(pending) = probe_pp.get::<Vec<claw_fleet_core::permission_prompt_ipc::PermissionPromptRequest>>("/permission-prompt/pending") else {
+                    continue;
+                };
+                let pending_ids: std::collections::HashSet<String> =
+                    pending.iter().map(|r| r.id.clone()).collect();
+                for req in &pending {
+                    if known.insert(req.id.clone()) {
+                        claw_fleet_core::log_debug(&format!(
+                            "[remote-permission-prompt] new request: {} tool={}",
+                            req.id, req.tool_name,
+                        ));
+                        let _ = app_pp.emit("permission-prompt-request", req);
+                    }
+                }
+                for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
+                    let _ = app_pp.emit("permission-prompt-dismissed", id.clone());
                 }
                 known.retain(|id| pending_ids.contains(id));
             }
