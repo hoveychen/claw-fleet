@@ -81,6 +81,7 @@
   "view_skills": "Skills",
   "view_plugins": "Plugins",
   "view_projects": "Projects",
+  "view_history": "History",
   "session_badge": {
     "fleet_managed": "Fleet",
     "fleet_managed_tip": "This session was launched by Fleet (queue / resume / kanban supported)."
@@ -1814,5 +1815,18 @@
       "node": "embedded node -e",
       "eval": "embedded eval"
     }
+  },
+  "history": {
+    "title": "History",
+    "search_placeholder": "Search title, prompt, full text…",
+    "filter_project": "Filter by project",
+    "all_projects": "All projects",
+    "empty": "No Fleet-spawned sessions yet",
+    "no_match": "No matching sessions",
+    "untitled": "(untitled)",
+    "missing_transcript": "Transcript no longer on disk; registry record only",
+    "resume_placeholder": "Type a follow-up prompt to resume…",
+    "resume": "Resume session",
+    "resuming": "Resuming…"
   }
 }
