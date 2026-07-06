@@ -295,10 +295,16 @@ pub trait Backend: Send + Sync {
     }
     fn kill_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String>;
-    /// Headlessly resume a rate-limited session: spawns
-    /// `claude --resume <session_id> -p "continue"` in the given workspace
-    /// directory so the previous task can run to completion. Detached.
-    fn resume_session(&self, session_id: String, workspace_path: String) -> Result<(), String>;
+    /// Headlessly resume a session: spawns `claude --resume <session_id>
+    /// -p <prompt>` detached in the given workspace directory. `prompt` of
+    /// `None`/empty means "continue" (the rate-limit auto-resume shape); the
+    /// history panel passes the user's follow-up text.
+    fn resume_session(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        prompt: Option<String>,
+    ) -> Result<(), String>;
     /// Start a brand-new headless Claude Code session: spawns
     /// `claude -p "<prompt>" [--model <m>] [--effort <e>]
     /// [--permission-mode <pm>]` detached in `workspace_path`. The session is
@@ -835,6 +841,7 @@ mod tests {
             workspace_path: "/tmp/test".into(),
             workspace_name: workspace_name.into(),
             ide_name: None,
+            entrypoint: None,
             is_subagent: false,
             parent_session_id: None,
             agent_type: None,

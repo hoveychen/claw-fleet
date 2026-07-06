@@ -673,13 +673,14 @@ fn kill_workspace_sessions(workspace_path: String, state: tauri::State<'_, AppSt
 fn resume_rate_limited_session(
     session_id: String,
     workspace_path: String,
+    prompt: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     state
         .backend
         .read()
         .unwrap()
-        .resume_session(session_id, workspace_path)
+        .resume_session(session_id, workspace_path, prompt)
 }
 
 #[tauri::command]

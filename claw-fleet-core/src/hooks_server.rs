@@ -593,11 +593,12 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            // Phase 4 P3: `/stop_workspace`, `/resume_session`, `/auto_resume_config`
-            // removed. Task lifecycle is owned by fleet-task; auto-resume of
-            // individual Claude Code sessions is a per-task concern now.
-            // Remote callers hitting these paths receive the catch-all 404
-            // below.
+            // Phase 4 P3: `/stop_workspace` and `/auto_resume_config` removed.
+            // Task lifecycle is owned by fleet-task; auto-resume of individual
+            // Claude Code sessions is a per-task concern now. Remote callers
+            // hitting those paths receive the catch-all 404 below.
+            // `/resume_session` was re-added later (POST, with follow-up
+            // prompt) for the history panel — see the handler further down.
 
             // ── Unified /sources/{name}/account and /sources/{name}/usage ──
             _ if path.starts_with("/sources/") => {
@@ -1623,6 +1624,47 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         let _ = request.respond(
                             tiny_http::Response::from_string(body)
                                 .with_status_code(404)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            // Resume a scanned session with an optional follow-up prompt
+            // (history panel's "恢复会话", remote backend). Detached
+            // `claude --resume <sid> -p <prompt>`; the resumed turn appears
+            // via the scanner as the JSONL grows.
+            "/resume_session" if request.method() == &tiny_http::Method::Post => {
+                let mut buf = String::new();
+                let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
+                match serde_json::from_str::<crate::auto_resume::ResumeSessionRequest>(&buf) {
+                    Ok(req) => {
+                        match crate::auto_resume::spawn_resume_prompt(
+                            &req.session_id,
+                            &req.workspace_path,
+                            req.prompt.as_deref().unwrap_or("continue"),
+                        ) {
+                            Ok(()) => {
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
                                 .with_header(json_header),
                         );
                     }
