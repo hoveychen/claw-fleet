@@ -321,19 +321,30 @@ mod tests {
         // spawned claude must NOT inherit that — it would read config and
         // write session JSONLs inside the container, invisible to the
         // scanner. The child has to see real_home_dir() instead.
+        //
+        // FLEET_HOME stands in for the real home here: it is
+        // real_home_dir()'s first-priority source on every platform. Without
+        // it the assertion would depend on how real_home_dir() resolves the
+        // fallback — getpwuid on macOS (immune to a polluted $HOME) vs
+        // dirs::home_dir() on Linux (which reads the polluted $HOME and made
+        // this test fail on CI).
         let _guard = crate::session::fleet_home_lock();
         let tmp = std::env::temp_dir().join(format!(
             "fleet_test_spawn_home_{}",
             std::process::id()
         ));
         let fake_home = tmp.join("container-home");
+        let real_home = tmp.join("real-home");
         std::fs::create_dir_all(&fake_home).unwrap();
+        std::fs::create_dir_all(&real_home).unwrap();
         let out = tmp.join("observed-home.txt");
         let _ = std::fs::remove_file(&out);
         let log = tmp.join("stderr.log");
 
         let prev_home = std::env::var_os("HOME");
+        let prev_fleet_home = std::env::var_os("FLEET_HOME");
         std::env::set_var("HOME", &fake_home);
+        std::env::set_var("FLEET_HOME", &real_home);
         let (tx, rx) = std::sync::mpsc::channel();
         let spawn_result = super::spawn_claude_detached(
             "/bin/sh",
@@ -353,6 +364,10 @@ mod tests {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
         }
+        match prev_fleet_home {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
         spawn_result.unwrap();
         let exited_ok = rx
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -360,10 +375,9 @@ mod tests {
         assert!(exited_ok, "child exited nonzero");
 
         let observed = std::fs::read_to_string(&out).unwrap();
-        let expected = crate::session::real_home_dir().unwrap();
         assert_eq!(
             observed,
-            expected.display().to_string(),
+            real_home.display().to_string(),
             "spawned child must see the real home, not the parent's polluted $HOME"
         );
     }
