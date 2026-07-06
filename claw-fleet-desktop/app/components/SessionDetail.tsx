@@ -138,10 +138,9 @@ export function SessionDetail({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowing, setIsFollowing] = useState(true);
   type ViewTab = "decisions" | "skills" | "messages" | "tokens" | "workflow" | "tasks";
-  const [viewTab, setViewTab] = useState<ViewTab>("decisions");
+  const [viewTab, setViewTab] = useState<ViewTab>("messages");
   const [userPickedTab, setUserPickedTab] = useState(false);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
-  const [decisionsLoaded, setDecisionsLoaded] = useState(false);
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
 
   // Claude Code Workflow runs for this session → reconstructed DAG, surfaced as
@@ -170,7 +169,6 @@ export function SessionDetail({
 
   useEffect(() => {
     setUserPickedTab(false);
-    setDecisionsLoaded(false);
     setDecisionRecords([]);
   }, [liveSession?.id]);
 
@@ -223,26 +221,19 @@ export function SessionDetail({
       .then((r) => {
         if (cancelled) return;
         setDecisionRecords(r ?? []);
-        setDecisionsLoaded(true);
       })
       .catch(() => {
         if (cancelled) return;
         setDecisionRecords([]);
-        setDecisionsLoaded(true);
       });
     return () => {
       cancelled = true;
     };
   }, [liveSession?.id, liveSession?.jsonlPath]);
 
-  useEffect(() => {
-    if (!decisionsLoaded || userPickedTab) return;
-    setViewTab(decisionRecords.length > 0 ? "decisions" : "messages");
-  }, [decisionsLoaded, decisionRecords.length, userPickedTab]);
-
   // Honor an explicit initial tab (e.g. the user clicked the card's plan row →
-  // open straight to "tasks"). Declared after the default-tab effect so it wins;
-  // marking userPickedTab stops the default from overriding once decisions load.
+  // open straight to "tasks"). marking userPickedTab records the explicit choice
+  // so later tab logic doesn't override it. Default tab is "messages" (对话).
   useEffect(() => {
     if (isStandalone) return;
     const tab = global.initialTab;
@@ -508,10 +499,10 @@ export function SessionDetail({
               </div>
             )}
             <button
-              className={`${styles.view_tab} ${viewTab === "decisions" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("decisions")}
+              className={`${styles.view_tab} ${viewTab === "messages" ? styles.view_tab_active : ""}`}
+              onClick={() => pickTab("messages")}
             >
-              {t("detail.tab_decisions")}
+              {t("detail.tab_messages")}
             </button>
             <button
               className={`${styles.view_tab} ${viewTab === "skills" ? styles.view_tab_active : ""}`}
@@ -520,10 +511,10 @@ export function SessionDetail({
               {t("detail.tab_skills")}
             </button>
             <button
-              className={`${styles.view_tab} ${viewTab === "messages" ? styles.view_tab_active : ""}`}
-              onClick={() => pickTab("messages")}
+              className={`${styles.view_tab} ${viewTab === "decisions" ? styles.view_tab_active : ""}`}
+              onClick={() => pickTab("decisions")}
             >
-              {t("detail.tab_messages")}
+              {t("detail.tab_decisions")}
             </button>
             <button
               className={`${styles.view_tab} ${viewTab === "tokens" ? styles.view_tab_active : ""}`}
