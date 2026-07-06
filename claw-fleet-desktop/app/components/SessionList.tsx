@@ -21,7 +21,7 @@ import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import { MobileAccessPanel } from "./MobileAccessPanel";
-import { HistorySessionsPanel } from "./HistorySessionsPanel";
+import { HistoryView } from "./HistoryView";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
 import { UsagePanel } from "./UsagePanel";
@@ -76,8 +76,6 @@ export function SessionList() {
     mascotVisible,
     showMobileAccess,
     setShowMobileAccess,
-    historyPanelOpen,
-    setHistoryPanelOpen,
     setShowNewProjectRequested,
   } = useUIStore();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
@@ -424,8 +422,8 @@ export function SessionList() {
                 <span className={styles.nav_label}>{t("view_sessions")}</span>
               </button>
               <button
-                className={`${styles.nav_item} ${historyPanelOpen ? styles.nav_active : ""}`}
-                onClick={() => setHistoryPanelOpen(!historyPanelOpen)}
+                className={`${styles.nav_item} ${viewMode === "history" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("history")}
               >
                 <span className={styles.nav_icon}><History size={14} strokeWidth={1.5} /></span>
                 <span className={styles.nav_label}>{t("view_history", "历史会话")}</span>
@@ -655,11 +653,6 @@ export function SessionList() {
         )}
       </aside>
 
-      {/* Secondary sidebar: Fleet-spawned session history */}
-      {historyPanelOpen && (
-        <HistorySessionsPanel onClose={() => setHistoryPanelOpen(false)} />
-      )}
-
       {/* Mobile access panel */}
       {showMobileAccess && <MobileAccessPanel onClose={() => setShowMobileAccess(false)} />}
 
@@ -708,6 +701,8 @@ export function SessionList() {
         </div>
       ) : viewMode === "gallery" ? (
         <GalleryView />
+      ) : viewMode === "history" ? (
+        <HistoryView />
       ) : viewMode === "audit" ? (
         <AuditView />
       ) : viewMode === "memory" ? (

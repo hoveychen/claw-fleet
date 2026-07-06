@@ -1,11 +1,20 @@
-/* ── History sessions secondary sidebar ──────────────────────────────────── */
+/* ── History page: session rail + inline detail column ──────────────────── */
 
-.panel {
+.page {
+  flex: 1;
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+.rail {
   flex-shrink: 0;
   width: 300px;
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   overflow: hidden;
   background: var(--color-bg-sidebar);
   border-right: 1px solid var(--color-border);
@@ -13,7 +22,7 @@
 
 /* Floating-slab platforms: match the sidebar's card-style background so the
    two columns read as one glass panel group. */
-:global([data-platform]) .panel {
+:global([data-platform]) .rail {
   background: var(--color-bg-card);
 }
 
@@ -23,11 +32,6 @@
   gap: 8px;
   padding: 14px 12px 10px;
   flex-shrink: 0;
-}
-
-/* Leave room for the traffic lights / drag strip on decorated platforms. */
-:global([data-platform]) .header {
-  padding-top: 40px;
 }
 
 .header_title {
@@ -42,26 +46,6 @@
   background: var(--color-bg-card-hover);
   border-radius: 8px;
   padding: 1px 7px;
-}
-
-.close_btn {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border: none;
-  background: none;
-  color: var(--color-text-dim);
-  cursor: pointer;
-  border-radius: 6px;
-  transition: background 0.14s, color 0.14s;
-}
-
-.close_btn:hover {
-  background: var(--color-bg-card-hover);
-  color: var(--color-text);
 }
 
 /* ── Search + project filter ─────────────────────────────────────────────── */
@@ -247,4 +231,25 @@
   background: none;
   color: var(--color-accent);
   font-weight: 600;
+}
+
+/* ── Inline detail column ────────────────────────────────────────────────── */
+
+.detail {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+}
+
+.detail_empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--color-text-dim);
+  font-size: 12px;
 }
