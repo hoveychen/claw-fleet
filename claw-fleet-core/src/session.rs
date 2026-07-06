@@ -62,6 +62,14 @@ pub struct SessionInfo {
     pub workspace_path: String,
     pub workspace_name: String,
     pub ide_name: Option<String>,
+    /// Launch identity persisted by the Claude CLI into every `user` record
+    /// (from the `CLAUDE_CODE_ENTRYPOINT` env var at spawn time): "cli",
+    /// "claude-vscode", `session_launch::NEW_SESSION_ENTRYPOINT`, … Taken
+    /// from the FIRST user record so later `--resume` runs (which stamp their
+    /// own entrypoint) don't reclassify the session. `None` for transcripts
+    /// predating the field.
+    #[serde(default)]
+    pub entrypoint: Option<String>,
     pub is_subagent: bool,
     pub parent_session_id: Option<String>,
     pub agent_type: Option<String>,
@@ -1527,6 +1535,18 @@ fn extract_last_skill(last_lines: &[Value]) -> Option<String> {
     None
 }
 
+/// Launch identity: the FIRST user record's `entrypoint` field (persisted by
+/// the Claude CLI from `CLAUDE_CODE_ENTRYPOINT` at spawn time). First record
+/// only, so later `--resume` runs — which stamp their own entrypoint on the
+/// records they append — don't reclassify the session.
+fn extract_entrypoint(all_lines: &[&str]) -> Option<String> {
+    all_lines
+        .iter()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("user"))
+        .and_then(|v| v.get("entrypoint").and_then(|s| s.as_str()).map(|s| s.to_string()))
+}
+
 pub fn parse_session_info(
     jsonl_path: &Path,
     session_id: String,
@@ -1608,6 +1628,8 @@ pub fn parse_session_info(
         .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("ai-title"))
         .and_then(|v| v.get("aiTitle").and_then(|t| t.as_str()).map(|s| s.to_string()));
 
+    let entrypoint = extract_entrypoint(&all_lines);
+
     let model = meta_model.or_else(|| extract_model(&last_n));
     let last_skill = extract_last_skill(&last_n);
     let todos = crate::session_todos::latest_todo_summary_from_lines(&all_lines);
@@ -1628,6 +1650,7 @@ pub fn parse_session_info(
         workspace_path,
         workspace_name,
         ide_name,
+        entrypoint,
         is_subagent,
         parent_session_id,
         agent_type,
@@ -2282,6 +2305,33 @@ mod tests {
         })
     }
 
+    // ── extract_entrypoint tests ───────────────────────────────────────────
+
+    #[test]
+    fn entrypoint_taken_from_first_user_record_only() {
+        // A resumed session appends user records with the RESUMING process's
+        // entrypoint ("cli" here) — classification must stick to the launch
+        // identity from the first record.
+        let l1 = json!({"type": "ai-title", "aiTitle": "t"}).to_string();
+        let l2 = json!({"type": "user", "entrypoint": "claw-fleet-newsession",
+                        "message": {"role": "user", "content": "hi"}}).to_string();
+        let l3 = json!({"type": "user", "entrypoint": "cli",
+                        "message": {"role": "user", "content": "continue"}}).to_string();
+        let lines: Vec<&str> = vec![&l1, &l2, &l3];
+        assert_eq!(
+            extract_entrypoint(&lines).as_deref(),
+            Some("claw-fleet-newsession")
+        );
+    }
+
+    #[test]
+    fn entrypoint_none_for_legacy_transcripts() {
+        // Transcripts written by CLIs predating the field must classify as None.
+        let l1 = json!({"type": "user", "message": {"role": "user", "content": "hi"}}).to_string();
+        let lines: Vec<&str> = vec![&l1];
+        assert_eq!(extract_entrypoint(&lines), None);
+    }
+
     // ── detect_rate_limit tests ────────────────────────────────────────────
 
     #[test]
@@ -2372,6 +2422,7 @@ mod tests {
             workspace_path: "/tmp/test".into(),
             workspace_name: "test".into(),
             ide_name: None,
+            entrypoint: None,
             is_subagent: false,
             parent_session_id: None,
             agent_type: None,
