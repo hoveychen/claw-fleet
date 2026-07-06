@@ -1819,7 +1819,6 @@
     "empty": "还没有通过“新会话”创建的会话",
     "no_match": "没有匹配的会话",
     "untitled": "（无标题）",
-    "missing_transcript": "转录文件已不在磁盘上，仅剩登记信息",
     "resume_placeholder": "输入追问提示词后恢复会话…",
     "resume": "恢复会话",
     "resuming": "恢复中…",

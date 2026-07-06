@@ -1,14 +1,9 @@
-import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderGit2, RotateCcw, Search, X } from "lucide-react";
-import {
-  useDetailStore,
-  useProjectsStore,
-  useSessionsStore,
-  type FleetSession,
-} from "../store";
+import { FolderGit2, Search, X } from "lucide-react";
+import { useDetailStore, useSessionsStore } from "../store";
 import type { SessionInfo } from "../types";
+import { NEW_SESSION_ENTRYPOINT } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import styles from "./HistorySessionsPanel.module.css";
 
@@ -25,15 +20,10 @@ function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => s
   return t("d_ago", { n: Math.floor(diff / 86_400_000) });
 }
 
-function firstLine(text: string, max = 90): string {
-  const line = text.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "";
-  return line.length > max ? `${line.slice(0, max)}…` : line;
-}
-
 /** Green = agent still live, amber = waiting for input, gray = ended. */
-function rowDotColor(live: SessionInfo | undefined): string {
-  if (!live || !LIVE_STATUSES.has(live.status)) return "#6b6b72";
-  if (live.status === "waitingInput") return "#d0a85a";
+function rowDotColor(s: SessionInfo): string {
+  if (!LIVE_STATUSES.has(s.status)) return "#6b6b72";
+  if (s.status === "waitingInput") return "#d0a85a";
   return "#5ac88c";
 }
 
@@ -52,127 +42,60 @@ function renderSnippet(snippet: string): ReactNode[] {
   });
 }
 
-function workspaceName(path: string): string {
-  return path.replace(/\/+$/, "").split("/").pop() || path;
-}
-
-interface HistoryRow {
-  fs: FleetSession;
-  live: SessionInfo | undefined;
-  title: string;
-}
-
 /**
- * Secondary sidebar: the durable log of sessions launched via the "新会话"
- * button. Those spawns are registered in fleet-sessions.json with an empty
- * `projectId` (ad-hoc, no kanban project — see
- * supervisor::register_adhoc_session), which is exactly the filter here.
- * Newest first, with a text search (client substring + transcript FTS) and a
- * per-workspace filter.
+ * Secondary sidebar: history of sessions launched via the "新会话" button.
  *
- * Rows whose transcript is still on disk join to the live SessionInfo scan
- * and open in SessionDetail on click; rows whose jsonl is gone expand
- * inline to show the recorded metadata plus a resume box.
+ * Zero bookkeeping: those spawns carry `CLAUDE_CODE_ENTRYPOINT` (see
+ * session_launch::NEW_SESSION_ENTRYPOINT), which the Claude CLI persists into
+ * the transcript itself, so the regular scan (`SessionInfo.entrypoint`) is the
+ * data source — same mechanism the VS Code extension uses. History therefore
+ * lives exactly as long as the transcript on disk, within the scanner's
+ * 7-day window. Text search (client substring + transcript FTS) plus a
+ * per-workspace filter; clicking a row opens SessionDetail.
  */
 export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const fleetSessions = useProjectsStore((s) => s.fleetSessions);
-  const loaded = useProjectsStore((s) => s.loaded);
-  const sessions = useSessionsStore((s) => s.sessions);
+  const { sessions, scanReady } = useSessionsStore();
   const { session: viewedSession, open } = useDetailStore();
 
   const [query, setQuery] = useState("");
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [resumeText, setResumeText] = useState("");
-  const [resumingId, setResumingId] = useState<string | null>(null);
-  const [resumeError, setResumeError] = useState<string | null>(null);
-
-  // The sidebar's 5s poller only feeds the projects store while the
-  // projects feature flag is on — poll independently so this panel stays
-  // fresh either way.
-  useEffect(() => {
-    useProjectsStore.getState().refresh();
-    const interval = setInterval(() => {
-      if (document.visibilityState !== "hidden") {
-        useProjectsStore.getState().refresh();
-      }
-    }, 5000);
-    return () => clearInterval(interval);
-  }, []);
 
   const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
 
-  const liveById = useMemo(
-    () => new Map(sessions.map((s) => [s.id, s])),
+  const adhocSessions = useMemo(
+    () =>
+      sessions.filter(
+        (s) => !s.isSubagent && s.entrypoint === NEW_SESSION_ENTRYPOINT,
+      ),
     [sessions],
   );
 
-  // Ad-hoc "新会话" launches only — kanban/task sessions carry a projectId
-  // and stay in the Tasks views.
-  const adhocSessions = useMemo(
-    () => fleetSessions.filter((fs) => fs.projectId === ""),
-    [fleetSessions],
-  );
+  const workspaces = useMemo(() => {
+    const byPath = new Map<string, string>();
+    for (const s of adhocSessions) byPath.set(s.workspacePath, s.workspaceName);
+    return [...byPath.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+  }, [adhocSessions]);
 
-  const workspaces = useMemo(
-    () => [...new Set(adhocSessions.map((fs) => fs.workspace))].sort(),
-    [adhocSessions],
-  );
-
-  const rows = useMemo<HistoryRow[]>(() => {
+  const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return adhocSessions
-      .filter((fs) => workspaceFilter === "all" || fs.workspace === workspaceFilter)
-      .map((fs) => {
-        const live = liveById.get(fs.id);
-        return {
-          fs,
-          live,
-          title: live?.aiTitle ?? live?.slug ?? firstLine(fs.prompt),
-        };
-      })
-      .filter((r) => {
+      .filter((s) => workspaceFilter === "all" || s.workspacePath === workspaceFilter)
+      .filter((s) => {
         if (!q) return true;
         const clientMatch =
-          r.title.toLowerCase().includes(q) ||
-          r.fs.prompt.toLowerCase().includes(q) ||
-          r.fs.workspace.toLowerCase().includes(q);
-        return clientMatch || (r.live ? ftsMatchPaths.has(r.live.jsonlPath) : false);
+          (s.aiTitle?.toLowerCase().includes(q) ?? false) ||
+          (s.slug?.toLowerCase().includes(q) ?? false) ||
+          (s.lastMessagePreview?.toLowerCase().includes(q) ?? false) ||
+          s.workspaceName.toLowerCase().includes(q);
+        return clientMatch || ftsMatchPaths.has(s.jsonlPath);
       })
-      .sort((a, b) => b.fs.createdAt - a.fs.createdAt);
-  }, [adhocSessions, workspaceFilter, query, liveById, ftsMatchPaths]);
+      .sort((a, b) => b.createdAtMs - a.createdAtMs);
+  }, [adhocSessions, workspaceFilter, query, ftsMatchPaths]);
 
-  const handleRowClick = (row: HistoryRow) => {
-    if (row.live) {
-      const isFtsHit = query.trim().length >= 2 && ftsMatchPaths.has(row.live.jsonlPath);
-      open(row.live, isFtsHit ? query.trim() : undefined);
-      return;
-    }
-    // Transcript gone — no SessionDetail to open; expand the recorded
-    // metadata inline instead.
-    setExpandedId((prev) => (prev === row.fs.id ? null : row.fs.id));
-    setResumeText("");
-    setResumeError(null);
-  };
-
-  const handleResume = async (fs: FleetSession) => {
-    const prompt = resumeText.trim();
-    if (!prompt || resumingId) return;
-    setResumingId(fs.id);
-    setResumeError(null);
-    try {
-      await invoke("resume_fleet_session", {
-        sessionId: fs.id,
-        followUpPrompt: prompt,
-      });
-      setExpandedId(null);
-      setResumeText("");
-    } catch (e) {
-      setResumeError(String((e as { message?: string })?.message ?? e));
-    } finally {
-      setResumingId(null);
-    }
+  const handleRowClick = (s: SessionInfo) => {
+    const isFtsHit = query.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
+    open(s, isFtsHit ? query.trim() : undefined);
   };
 
   return (
@@ -210,14 +133,14 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
           title={t("history.filter_workspace", "按工作目录筛选")}
         >
           <option value="all">{t("history.all_workspaces", "全部目录")}</option>
-          {workspaces.map((w) => (
-            <option key={w} value={w} title={w}>{workspaceName(w)}</option>
+          {workspaces.map(([path, name]) => (
+            <option key={path} value={path} title={path}>{name}</option>
           ))}
         </select>
       </div>
 
       <div className={styles.list}>
-        {!loaded ? (
+        {!scanReady ? (
           <div className={styles.empty}>{t("scanning")}</div>
         ) : rows.length === 0 ? (
           <div className={styles.empty}>
@@ -226,74 +149,37 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
               : t("history.no_match", "没有匹配的会话")}
           </div>
         ) : (
-          rows.map((row) => {
-            const expanded = expandedId === row.fs.id && !row.live;
+          rows.map((s) => {
             const snippet =
-              query.trim().length >= 2 && row.live
-                ? snippetByPath.get(row.live.jsonlPath)
-                : undefined;
+              query.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
             return (
-              <div key={row.fs.id} className={styles.row_wrap}>
+              <div key={s.jsonlPath} className={styles.row_wrap}>
                 <button
                   type="button"
-                  className={`${styles.row} ${viewedSession?.id === row.fs.id ? styles.row_active : ""}`}
-                  onClick={() => handleRowClick(row)}
-                  title={row.fs.prompt}
+                  className={`${styles.row} ${viewedSession?.id === s.id ? styles.row_active : ""}`}
+                  onClick={() => handleRowClick(s)}
+                  title={s.lastMessagePreview ?? undefined}
                 >
                   <span
                     className={styles.row_dot}
-                    style={{ background: rowDotColor(row.live) }}
+                    style={{ background: rowDotColor(s) }}
                   />
                   <span className={styles.row_body}>
                     <span className={styles.row_title}>
-                      {row.title || t("history.untitled", "（无标题）")}
+                      {s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
                     </span>
                     <span className={styles.row_meta}>
-                      <span className={styles.row_project} title={row.fs.workspace}>
+                      <span className={styles.row_project} title={s.workspacePath}>
                         <FolderGit2 size={10} strokeWidth={1.6} />
-                        {workspaceName(row.fs.workspace)}
+                        {s.workspaceName}
                       </span>
-                      <span className={styles.row_time}>{timeAgo(row.fs.createdAt, t)}</span>
+                      <span className={styles.row_time}>{timeAgo(s.createdAtMs, t)}</span>
                     </span>
                     {snippet && (
                       <span className={styles.row_snippet}>{renderSnippet(snippet)}</span>
                     )}
                   </span>
                 </button>
-                {expanded && (
-                  <div className={styles.detail_fallback}>
-                    <div className={styles.fallback_note}>
-                      {t("history.missing_transcript", "转录文件已不在磁盘上，仅剩登记信息")}
-                    </div>
-                    <div className={styles.fallback_prompt}>{row.fs.prompt}</div>
-                    {row.fs.note && (
-                      <div className={styles.fallback_prompt}>{row.fs.note}</div>
-                    )}
-                    <div className={styles.resume_box}>
-                      <textarea
-                        className={styles.resume_input}
-                        value={resumeText}
-                        onChange={(e) => setResumeText(e.target.value)}
-                        placeholder={t("history.resume_placeholder", "输入追问提示词后恢复会话…")}
-                        rows={2}
-                      />
-                      <button
-                        type="button"
-                        className={styles.resume_btn}
-                        disabled={!resumeText.trim() || resumingId === row.fs.id}
-                        onClick={() => handleResume(row.fs)}
-                      >
-                        <RotateCcw size={12} strokeWidth={1.6} />
-                        {resumingId === row.fs.id
-                          ? t("history.resuming", "恢复中…")
-                          : t("history.resume", "恢复会话")}
-                      </button>
-                      {resumeError && (
-                        <div className={styles.resume_error}>{resumeError}</div>
-                      )}
-                    </div>
-                  </div>
-                )}
               </div>
             );
           })

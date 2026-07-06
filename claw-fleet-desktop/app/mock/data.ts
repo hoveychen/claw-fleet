@@ -21,6 +21,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/claw-fleet",
     workspaceName: "claw-fleet",
     ideName: "VS Code",
+    entrypoint: null,
     isSubagent: false,
     parentSessionId: null,
     agentType: null,
@@ -53,6 +54,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/claw-fleet",
     workspaceName: "claw-fleet",
     ideName: "VS Code",
+    entrypoint: null,
     isSubagent: true,
     parentSessionId: "sess-fleet-main",
     agentType: "explore",
@@ -85,6 +87,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/claw-fleet",
     workspaceName: "claw-fleet",
     ideName: "VS Code",
+    entrypoint: null,
     isSubagent: true,
     parentSessionId: "sess-fleet-main",
     agentType: "general-purpose",
@@ -118,6 +121,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/claw-fleet",
     workspaceName: "claw-fleet",
     ideName: "VS Code",
+    entrypoint: null,
     isSubagent: true,
     parentSessionId: "sess-fleet-main",
     agentType: "general-purpose",
@@ -150,6 +154,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/claw-fleet",
     workspaceName: "claw-fleet",
     ideName: "VS Code",
+    entrypoint: null,
     isSubagent: true,
     parentSessionId: "sess-fleet-main",
     agentType: "plan",
@@ -183,6 +188,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/api-server",
     workspaceName: "api-server",
     ideName: "JetBrains",
+    entrypoint: null,
     isSubagent: false,
     parentSessionId: null,
     agentType: null,
@@ -215,6 +221,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/api-server",
     workspaceName: "api-server",
     ideName: "JetBrains",
+    entrypoint: null,
     isSubagent: true,
     parentSessionId: "sess-api-main",
     agentType: "plan",
@@ -248,6 +255,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/mobile-app",
     workspaceName: "mobile-app",
     ideName: "Cursor",
+    entrypoint: null,
     isSubagent: false,
     parentSessionId: null,
     agentType: null,
@@ -281,6 +289,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/data-pipeline",
     workspaceName: "data-pipeline",
     ideName: "Terminal",
+    entrypoint: null,
     isSubagent: false,
     parentSessionId: null,
     agentType: null,
@@ -314,6 +323,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/web-frontend",
     workspaceName: "web-frontend",
     ideName: "VS Code",
+    entrypoint: "claw-fleet-newsession",
     isSubagent: false,
     parentSessionId: null,
     agentType: null,
@@ -347,6 +357,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/ml-training",
     workspaceName: "ml-training",
     ideName: "Terminal",
+    entrypoint: null,
     isSubagent: false,
     parentSessionId: null,
     agentType: null,
@@ -380,6 +391,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/docs-site",
     workspaceName: "docs-site",
     ideName: "VS Code",
+    entrypoint: "claw-fleet-newsession",
     isSubagent: false,
     parentSessionId: null,
     agentType: null,
@@ -413,6 +425,7 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     workspacePath: "/Users/demo/workspace/infra-terraform",
     workspaceName: "infra-terraform",
     ideName: "JetBrains",
+    entrypoint: "claw-fleet-newsession",
     isSubagent: false,
     parentSessionId: null,
     agentType: null,
@@ -714,14 +727,11 @@ export const MOCK_PROJECTS: Project[] = [
   },
 ];
 
-// Ad-hoc "新会话" launches carry projectId "" (see
-// supervisor::register_adhoc_session) — the history panel shows exactly
-// those. The kanban-owned record (with a projectId) must stay OUT of it.
 export const MOCK_FLEET_SESSIONS: FleetSession[] = [
   // Alive — joins to MOCK_SESSIONS by id, so the panel borrows the aiTitle.
   {
     id: "sess-fleet-main",
-    projectId: "",
+    projectId: "proj-fleet",
     workspace: "/Users/demo/workspace/claw-fleet",
     fleetsessionPath: null,
     prompt: "给 demo 截图实现 mock 模式，覆盖所有核心视图",
@@ -735,7 +745,6 @@ export const MOCK_FLEET_SESSIONS: FleetSession[] = [
     expedited: false,
     sessionKind: "regular",
   },
-  // Kanban/task session (owned by a project) — must NOT appear in the panel.
   {
     id: "sess-api-main",
     projectId: "proj-api",
@@ -754,7 +763,7 @@ export const MOCK_FLEET_SESSIONS: FleetSession[] = [
   },
   {
     id: "sess-docs-idle",
-    projectId: "",
+    projectId: "proj-fleet",
     workspace: "/Users/demo/workspace/docs-site",
     fleetsessionPath: null,
     prompt: "把 v2 endpoints 的 API 文档补齐",
@@ -772,7 +781,7 @@ export const MOCK_FLEET_SESSIONS: FleetSession[] = [
   // exercises the metadata fallback + resume box.
   {
     id: "sess-gone-refactor",
-    projectId: "",
+    projectId: "proj-fleet",
     workspace: "/Users/demo/workspace/claw-fleet",
     fleetsessionPath: null,
     prompt: "重构 SessionList 侧边栏，把 nav 拆成可复用组件，并保持折叠态行为不变",
