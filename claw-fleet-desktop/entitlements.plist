@@ -30,6 +30,12 @@
     <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
     <array>
         <string>/Users/</string>
+        <!-- Spawned claude children inherit this sandbox; Claude Code creates
+             its per-project scratch/sandbox dirs under /tmp/claude-<uid>/,
+             which EPERMs without this. /tmp is a symlink to /private/tmp —
+             the kernel matches on the resolved path, so list both. -->
+        <string>/tmp/</string>
+        <string>/private/tmp/</string>
     </array>
 </dict>
 </plist>
