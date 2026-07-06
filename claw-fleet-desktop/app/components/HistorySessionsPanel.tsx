@@ -52,17 +52,23 @@ function renderSnippet(snippet: string): ReactNode[] {
   });
 }
 
+function workspaceName(path: string): string {
+  return path.replace(/\/+$/, "").split("/").pop() || path;
+}
+
 interface HistoryRow {
   fs: FleetSession;
   live: SessionInfo | undefined;
-  projectName: string | null;
   title: string;
 }
 
 /**
- * Secondary sidebar: the durable log of Fleet-spawned sessions
- * (fleet-sessions.json via list_fleet_sessions), newest first, with a text
- * search (client substring + transcript FTS) and a per-project filter.
+ * Secondary sidebar: the durable log of sessions launched via the "新会话"
+ * button. Those spawns are registered in fleet-sessions.json with an empty
+ * `projectId` (ad-hoc, no kanban project — see
+ * supervisor::register_adhoc_session), which is exactly the filter here.
+ * Newest first, with a text search (client substring + transcript FTS) and a
+ * per-workspace filter.
  *
  * Rows whose transcript is still on disk join to the live SessionInfo scan
  * and open in SessionDetail on click; rows whose jsonl is gone expand
@@ -70,14 +76,13 @@ interface HistoryRow {
  */
 export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
-  const projects = useProjectsStore((s) => s.projects);
   const fleetSessions = useProjectsStore((s) => s.fleetSessions);
   const loaded = useProjectsStore((s) => s.loaded);
   const sessions = useSessionsStore((s) => s.sessions);
   const { session: viewedSession, open } = useDetailStore();
 
   const [query, setQuery] = useState("");
-  const [projectFilter, setProjectFilter] = useState("all");
+  const [workspaceFilter, setWorkspaceFilter] = useState("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [resumeText, setResumeText] = useState("");
   const [resumingId, setResumingId] = useState<string | null>(null);
@@ -102,21 +107,28 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
     () => new Map(sessions.map((s) => [s.id, s])),
     [sessions],
   );
-  const projectNameById = useMemo(
-    () => new Map(projects.map((p) => [p.id, p.name])),
-    [projects],
+
+  // Ad-hoc "新会话" launches only — kanban/task sessions carry a projectId
+  // and stay in the Tasks views.
+  const adhocSessions = useMemo(
+    () => fleetSessions.filter((fs) => fs.projectId === ""),
+    [fleetSessions],
+  );
+
+  const workspaces = useMemo(
+    () => [...new Set(adhocSessions.map((fs) => fs.workspace))].sort(),
+    [adhocSessions],
   );
 
   const rows = useMemo<HistoryRow[]>(() => {
     const q = query.trim().toLowerCase();
-    return fleetSessions
-      .filter((fs) => projectFilter === "all" || fs.projectId === projectFilter)
+    return adhocSessions
+      .filter((fs) => workspaceFilter === "all" || fs.workspace === workspaceFilter)
       .map((fs) => {
         const live = liveById.get(fs.id);
         return {
           fs,
           live,
-          projectName: projectNameById.get(fs.projectId) ?? null,
           title: live?.aiTitle ?? live?.slug ?? firstLine(fs.prompt),
         };
       })
@@ -125,12 +137,11 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
         const clientMatch =
           r.title.toLowerCase().includes(q) ||
           r.fs.prompt.toLowerCase().includes(q) ||
-          (r.projectName?.toLowerCase().includes(q) ?? false) ||
           r.fs.workspace.toLowerCase().includes(q);
         return clientMatch || (r.live ? ftsMatchPaths.has(r.live.jsonlPath) : false);
       })
       .sort((a, b) => b.fs.createdAt - a.fs.createdAt);
-  }, [fleetSessions, projectFilter, query, liveById, projectNameById, ftsMatchPaths]);
+  }, [adhocSessions, workspaceFilter, query, liveById, ftsMatchPaths]);
 
   const handleRowClick = (row: HistoryRow) => {
     if (row.live) {
@@ -194,13 +205,13 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
         </div>
         <select
           className={styles.project_select}
-          value={projectFilter}
-          onChange={(e) => setProjectFilter(e.target.value)}
-          title={t("history.filter_project", "按项目筛选")}
+          value={workspaceFilter}
+          onChange={(e) => setWorkspaceFilter(e.target.value)}
+          title={t("history.filter_workspace", "按工作目录筛选")}
         >
-          <option value="all">{t("history.all_projects", "全部项目")}</option>
-          {projects.map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
+          <option value="all">{t("history.all_workspaces", "全部目录")}</option>
+          {workspaces.map((w) => (
+            <option key={w} value={w} title={w}>{workspaceName(w)}</option>
           ))}
         </select>
       </div>
@@ -210,8 +221,8 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
           <div className={styles.empty}>{t("scanning")}</div>
         ) : rows.length === 0 ? (
           <div className={styles.empty}>
-            {fleetSessions.length === 0
-              ? t("history.empty", "还没有通过 Fleet 创建的会话")
+            {adhocSessions.length === 0
+              ? t("history.empty", "还没有通过“新会话”创建的会话")
               : t("history.no_match", "没有匹配的会话")}
           </div>
         ) : (
@@ -238,15 +249,10 @@ export function HistorySessionsPanel({ onClose }: { onClose: () => void }) {
                       {row.title || t("history.untitled", "（无标题）")}
                     </span>
                     <span className={styles.row_meta}>
-                      {row.projectName && (
-                        <span className={styles.row_project}>
-                          <FolderGit2 size={10} strokeWidth={1.6} />
-                          {row.projectName}
-                        </span>
-                      )}
-                      {(row.fs.sessionKind === "master" || row.fs.sessionKind === "worker") && (
-                        <span className={styles.row_kind}>{row.fs.sessionKind}</span>
-                      )}
+                      <span className={styles.row_project} title={row.fs.workspace}>
+                        <FolderGit2 size={10} strokeWidth={1.6} />
+                        {workspaceName(row.fs.workspace)}
+                      </span>
                       <span className={styles.row_time}>{timeAgo(row.fs.createdAt, t)}</span>
                     </span>
                     {snippet && (

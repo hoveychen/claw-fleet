@@ -225,14 +225,6 @@
   white-space: nowrap;
 }
 
-.row_kind {
-  font-size: 10px;
-  color: var(--color-text-dim);
-  border: 1px solid var(--color-border);
-  border-radius: 5px;
-  padding: 0 4px;
-}
-
 .row_time {
   margin-left: auto;
   font-size: 10px;

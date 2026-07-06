@@ -1816,14 +1816,14 @@
   "history": {
     "title": "历史会话",
     "search_placeholder": "搜索标题、提示词、全文…",
-    "filter_project": "按项目筛选",
-    "all_projects": "全部项目",
-    "empty": "还没有通过 Fleet 创建的会话",
+    "empty": "还没有通过“新会话”创建的会话",
     "no_match": "没有匹配的会话",
     "untitled": "（无标题）",
     "missing_transcript": "转录文件已不在磁盘上，仅剩登记信息",
     "resume_placeholder": "输入追问提示词后恢复会话…",
     "resume": "恢复会话",
-    "resuming": "恢复中…"
+    "resuming": "恢复中…",
+    "filter_workspace": "按工作目录筛选",
+    "all_workspaces": "全部目录"
   }
 }

@@ -714,11 +714,14 @@ export const MOCK_PROJECTS: Project[] = [
   },
 ];
 
+// Ad-hoc "新会话" launches carry projectId "" (see
+// supervisor::register_adhoc_session) — the history panel shows exactly
+// those. The kanban-owned record (with a projectId) must stay OUT of it.
 export const MOCK_FLEET_SESSIONS: FleetSession[] = [
   // Alive — joins to MOCK_SESSIONS by id, so the panel borrows the aiTitle.
   {
     id: "sess-fleet-main",
-    projectId: "proj-fleet",
+    projectId: "",
     workspace: "/Users/demo/workspace/claw-fleet",
     fleetsessionPath: null,
     prompt: "给 demo 截图实现 mock 模式，覆盖所有核心视图",
@@ -732,6 +735,7 @@ export const MOCK_FLEET_SESSIONS: FleetSession[] = [
     expedited: false,
     sessionKind: "regular",
   },
+  // Kanban/task session (owned by a project) — must NOT appear in the panel.
   {
     id: "sess-api-main",
     projectId: "proj-api",
@@ -750,7 +754,7 @@ export const MOCK_FLEET_SESSIONS: FleetSession[] = [
   },
   {
     id: "sess-docs-idle",
-    projectId: "proj-fleet",
+    projectId: "",
     workspace: "/Users/demo/workspace/docs-site",
     fleetsessionPath: null,
     prompt: "把 v2 endpoints 的 API 文档补齐",
@@ -768,7 +772,7 @@ export const MOCK_FLEET_SESSIONS: FleetSession[] = [
   // exercises the metadata fallback + resume box.
   {
     id: "sess-gone-refactor",
-    projectId: "proj-fleet",
+    projectId: "",
     workspace: "/Users/demo/workspace/claw-fleet",
     fleetsessionPath: null,
     prompt: "重构 SessionList 侧边栏，把 nav 拆成可复用组件，并保持折叠态行为不变",
@@ -780,7 +784,7 @@ export const MOCK_FLEET_SESSIONS: FleetSession[] = [
     completedAt: NOW - 6 * DAY + 40 * MIN,
     pid: null,
     expedited: false,
-    sessionKind: "worker",
+    sessionKind: "regular",
   },
 ];
 
