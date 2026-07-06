@@ -380,6 +380,7 @@ fn parse_openclaw_session(
         workspace_path,
         workspace_name,
         ide_name: None,
+        entrypoint: None,
         is_subagent: false,
         parent_session_id: None,
         agent_type: None,

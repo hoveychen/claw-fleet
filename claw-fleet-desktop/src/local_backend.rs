@@ -1377,8 +1377,16 @@ pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
 /// Returns as soon as the child is spawned; the process's stdout/stderr are
 /// discarded (the session's own JSONL will capture the new turn for the
 /// scanner to pick up).
-pub fn resume_session_impl(session_id: &str, workspace_path: &str) -> Result<(), String> {
-    claw_fleet_core::auto_resume::spawn_resume(session_id, workspace_path)
+pub fn resume_session_impl(
+    session_id: &str,
+    workspace_path: &str,
+    prompt: Option<&str>,
+) -> Result<(), String> {
+    claw_fleet_core::auto_resume::spawn_resume_prompt(
+        session_id,
+        workspace_path,
+        prompt.unwrap_or("continue"),
+    )
 }
 
 /// Max number of `claude --resume` auto-resume processes alive at once. Each
@@ -1649,8 +1657,13 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
-    fn resume_session(&self, session_id: String, workspace_path: String) -> Result<(), String> {
-        resume_session_impl(&session_id, &workspace_path)?;
+    fn resume_session(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        prompt: Option<String>,
+    ) -> Result<(), String> {
+        resume_session_impl(&session_id, &workspace_path, prompt.as_deref())?;
         // Trigger a rescan after a delay so the UI picks up the new turn
         // (which will also clear the RateLimited badge via detect_rate_limit).
         let app = self.app.clone();

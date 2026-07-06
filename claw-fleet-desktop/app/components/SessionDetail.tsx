@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useFleetManagedStore, useSessionsStore } from "../store";
+import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useSessionsStore } from "../store";
+import { NEW_SESSION_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
@@ -168,16 +169,13 @@ export function SessionDetail({
     setDecisionRecords([]);
   }, [liveSession?.id]);
 
-  // Resume entry: only for Fleet-spawned main sessions that are not currently
-  // running — resume_fleet_session re-queues `claude --resume <sid> -p <追问>`.
-  const fleetManagedIds = useFleetManagedStore((s) => s.managedIds);
+  // Resume entry: only for "新会话"-launched main sessions (transcript
+  // entrypoint tag) that are not currently running — spawns
+  // `claude --resume <sid> -p <追问>` detached via the generic resume chain.
   const [showResume, setShowResume] = useState(false);
   const [resumeText, setResumeText] = useState("");
   const [resuming, setResuming] = useState(false);
   const [resumeError, setResumeError] = useState<string | null>(null);
-  useEffect(() => {
-    useFleetManagedStore.getState().refresh();
-  }, []);
   useEffect(() => {
     setShowResume(false);
     setResumeText("");
@@ -187,7 +185,7 @@ export function SessionDetail({
     !!liveSession &&
     !liveSession.isSubagent &&
     !ACTIVE_STATUSES.has(liveSession.status) &&
-    fleetManagedIds.has(liveSession.id);
+    liveSession.entrypoint === NEW_SESSION_ENTRYPOINT;
   const submitResume = useCallback(async () => {
     if (!liveSession) return;
     const prompt = resumeText.trim();
@@ -195,9 +193,10 @@ export function SessionDetail({
     setResuming(true);
     setResumeError(null);
     try {
-      await invoke("resume_fleet_session", {
+      await invoke("resume_rate_limited_session", {
         sessionId: liveSession.id,
-        followUpPrompt: prompt,
+        workspacePath: liveSession.workspacePath,
+        prompt,
       });
       setShowResume(false);
       setResumeText("");
@@ -206,7 +205,7 @@ export function SessionDetail({
     } finally {
       setResuming(false);
     }
-  }, [liveSession?.id, resumeText, resuming]);
+  }, [liveSession?.id, liveSession?.workspacePath, resumeText, resuming]);
 
   useEffect(() => {
     const sid = liveSession?.id;

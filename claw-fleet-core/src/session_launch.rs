@@ -4,9 +4,12 @@
 //! logging + a reaper thread" machinery. `auto_resume::spawn_resume` delegates
 //! here for its `claude --resume <id> -p continue` shape; the sessions page's
 //! "new session" button uses [`spawn_new_session`] for the
-//! `claude -p "<initial prompt>"` shape. The spawned session's own JSONL is
-//! picked up by the scanner, so the new session appears in the session list
-//! without any explicit registration.
+//! `claude -p "<initial prompt>"` shape. Launch identity is carried by the
+//! `CLAUDE_CODE_ENTRYPOINT` env var ([`NEW_SESSION_ENTRYPOINT`]): the CLI
+//! persists it into every `user` record of the session's JSONL, so the
+//! scanner can classify Fleet-launched sessions from the transcript alone —
+//! no registry bookkeeping (same mechanism the VS Code extension uses with
+//! `claude-vscode`; verified against CLI 2.1.201).
 
 use std::io::Write;
 use std::path::Path;
@@ -33,6 +36,11 @@ pub struct SpawnSessionRequest {
     #[serde(default)]
     pub permission_mode: Option<String>,
 }
+
+/// `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions launched by the "新会话"
+/// button. The CLI writes it verbatim into each `user` record's `entrypoint`
+/// field, which is what the history panel filters on.
+pub const NEW_SESSION_ENTRYPOINT: &str = "claw-fleet-newsession";
 
 /// `claude --permission-mode` values accepted by the CLI (verified against
 /// `claude --help`, CLI 2.1.181).
@@ -94,6 +102,31 @@ pub fn spawn_claude_detached(
     detail: &str,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<u32, String> {
+    spawn_claude_detached_with_envs(
+        claude_path,
+        args,
+        workspace_path,
+        stderr_log,
+        label,
+        detail,
+        &[],
+        on_exit,
+    )
+}
+
+/// [`spawn_claude_detached`] plus extra environment variables for the child —
+/// e.g. `CLAUDE_CODE_ENTRYPOINT` so the CLI stamps the launch identity into
+/// the session's JSONL.
+pub fn spawn_claude_detached_with_envs(
+    claude_path: &str,
+    args: &[String],
+    workspace_path: &str,
+    stderr_log: &Path,
+    label: &str,
+    detail: &str,
+    extra_envs: &[(&str, &str)],
+    on_exit: impl FnOnce(bool) + Send + 'static,
+) -> Result<u32, String> {
     if !Path::new(workspace_path).is_dir() {
         return Err(format!("Workspace directory not found: {}", workspace_path));
     }
@@ -136,6 +169,9 @@ pub fn spawn_claude_detached(
     // ~/.claude/projects. Pin the child's HOME to the real home dir.
     if let Some(home) = crate::session::real_home_dir() {
         cmd.env("HOME", home);
+    }
+    for (k, v) in extra_envs {
+        cmd.env(k, v);
     }
     let mut child = cmd
         .spawn()
@@ -239,13 +275,14 @@ pub fn spawn_new_session(
         workspace_path,
         stderr_log.display()
     ));
-    let pid = spawn_claude_detached(
+    let pid = spawn_claude_detached_with_envs(
         &claude,
         &args,
         workspace_path,
         &stderr_log,
         "new_session",
         "",
+        &[("CLAUDE_CODE_ENTRYPOINT", NEW_SESSION_ENTRYPOINT)],
         |_success| {},
     )?;
     crate::log_debug(&format!(
