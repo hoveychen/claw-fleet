@@ -99,6 +99,7 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "search_sessions":
       return [];
     case "resume_fleet_session":
+    case "resume_rate_limited_session":
       return null;
     case "get_workflow_trees":
       return [];

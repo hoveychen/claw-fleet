@@ -532,6 +532,7 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
             workspace_path: workspace_path.clone(),
             workspace_name: ws_name,
             ide_name: Some("Cursor".to_string()),
+            entrypoint: None,
             is_subagent,
             parent_session_id: parent_id,
             agent_type,

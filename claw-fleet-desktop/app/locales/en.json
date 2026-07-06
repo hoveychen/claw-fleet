@@ -1819,14 +1819,13 @@
   "history": {
     "title": "History",
     "search_placeholder": "Search title, prompt, full text…",
-    "filter_project": "Filter by project",
-    "all_projects": "All projects",
-    "empty": "No Fleet-spawned sessions yet",
+    "empty": "No sessions launched via New Session yet",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
-    "missing_transcript": "Transcript no longer on disk; registry record only",
     "resume_placeholder": "Type a follow-up prompt to resume…",
     "resume": "Resume session",
-    "resuming": "Resuming…"
+    "resuming": "Resuming…",
+    "filter_workspace": "Filter by workspace",
+    "all_workspaces": "All workspaces"
   }
 }

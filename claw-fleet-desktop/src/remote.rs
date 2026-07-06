@@ -264,13 +264,18 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get_ok(&format!("/stop_workspace?path={}", encoded))
     }
 
-    fn resume_session(&self, session_id: String, workspace_path: String) -> Result<(), String> {
-        let sid = session_id.replace('/', "%2F");
-        let wp = workspace_path.replace('/', "%2F");
-        self.probe.get_ok(&format!(
-            "/resume_session?session_id={}&workspace_path={}",
-            sid, wp
-        ))
+    fn resume_session(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        prompt: Option<String>,
+    ) -> Result<(), String> {
+        let req = claw_fleet_core::auto_resume::ResumeSessionRequest {
+            session_id,
+            workspace_path,
+            prompt,
+        };
+        self.probe.post_json_ok("/resume_session", &req)
     }
 
     fn spawn_new_session(

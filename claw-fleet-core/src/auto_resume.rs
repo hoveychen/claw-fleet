@@ -162,10 +162,31 @@ pub fn record_resume_outcome(
     }
 }
 
+/// Request body for the remote `POST /resume_session` endpoint.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeSessionRequest {
+    pub session_id: String,
+    pub workspace_path: String,
+    /// Follow-up prompt for the resumed turn; `None`/empty = "continue".
+    #[serde(default)]
+    pub prompt: Option<String>,
+}
+
 /// Headlessly resume a rate-limited session by spawning
 /// `claude --resume <session_id> -p "continue"` detached in the given workspace.
 pub fn spawn_resume(session_id: &str, workspace_path: &str) -> Result<(), String> {
-    spawn_resume_tracked(session_id, workspace_path, |_success| {})
+    spawn_resume_prompt(session_id, workspace_path, "continue")
+}
+
+/// [`spawn_resume`] with a caller-supplied follow-up prompt (the history
+/// panel's "恢复会话" box). Empty/whitespace prompts fall back to "continue".
+pub fn spawn_resume_prompt(
+    session_id: &str,
+    workspace_path: &str,
+    prompt: &str,
+) -> Result<(), String> {
+    spawn_resume_tracked_prompt(session_id, workspace_path, prompt, |_success| {})
 }
 
 /// Like [`spawn_resume`] but invokes `on_exit(success)` from the reaper thread
@@ -177,6 +198,17 @@ pub fn spawn_resume_tracked(
     workspace_path: &str,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<(), String> {
+    spawn_resume_tracked_prompt(session_id, workspace_path, "continue", on_exit)
+}
+
+fn spawn_resume_tracked_prompt(
+    session_id: &str,
+    workspace_path: &str,
+    prompt: &str,
+    on_exit: impl FnOnce(bool) + Send + 'static,
+) -> Result<(), String> {
+    let prompt = prompt.trim();
+    let prompt = if prompt.is_empty() { "continue" } else { prompt };
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
         return Err("Claude CLI not found on PATH".to_string());
@@ -186,12 +218,14 @@ pub fn spawn_resume_tracked(
         .map(|d| d.join("auto_resume_stderr.log"))
         .ok_or_else(|| "no fleet dir".to_string())?;
     crate::log_debug(&format!(
-        "resume_session: claude --resume {} -p 'continue' (cwd={}, stderr_log={})",
+        "resume_session: claude --resume {} -p <{} chars> (cwd={}, stderr_log={})",
         session_id,
+        prompt.len(),
         workspace_path,
         stderr_log.display()
     ));
-    let pid = spawn_resume_with_path(&claude, session_id, workspace_path, &stderr_log, on_exit)?;
+    let pid =
+        spawn_resume_with_path(&claude, session_id, workspace_path, prompt, &stderr_log, on_exit)?;
     crate::log_debug(&format!(
         "resume_session: spawned pid {} for session {}",
         pid, session_id
@@ -199,7 +233,7 @@ pub fn spawn_resume_tracked(
     Ok(())
 }
 
-/// Spawn `claude --resume <id> -p continue` with stderr redirected to
+/// Spawn `claude --resume <id> -p <prompt>` with stderr redirected to
 /// `stderr_log` and a background thread that reaps the child and records its
 /// exit status — so failures stop being silent and we don't accumulate zombies.
 /// Thin wrapper over the generic [`crate::session_launch::spawn_claude_detached`].
@@ -207,6 +241,7 @@ fn spawn_resume_with_path(
     claude_path: &str,
     session_id: &str,
     workspace_path: &str,
+    prompt: &str,
     stderr_log: &Path,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<u32, String> {
@@ -214,7 +249,7 @@ fn spawn_resume_with_path(
         "--resume".to_string(),
         session_id.to_string(),
         "-p".to_string(),
-        "continue".to_string(),
+        prompt.to_string(),
     ];
     // Route native permission prompts to Fleet's Decision Panel instead of
     // headless auto-deny (no-op when the fleet MCP server isn't injected).
@@ -243,6 +278,7 @@ mod tests {
             workspace_path: "/w".into(),
             workspace_name: "w".into(),
             ide_name: None,
+            entrypoint: None,
             is_subagent: false,
             parent_session_id: None,
             agent_type: None,
@@ -489,6 +525,7 @@ mod tests {
             "/bin/sh",
             "test-session-id",
             &tmp.to_string_lossy(),
+            "continue",
             &log,
             move |_success| {
                 exit_flag_cb.store(true, std::sync::atomic::Ordering::SeqCst);

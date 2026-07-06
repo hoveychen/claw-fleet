@@ -27,11 +27,18 @@ export interface RateLimitState {
   errorTimestamp: string; // ISO-8601 UTC
 }
 
+/** `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions launched via the
+ *  "新会话" button — mirrors session_launch::NEW_SESSION_ENTRYPOINT. */
+export const NEW_SESSION_ENTRYPOINT = "claw-fleet-newsession";
+
 export interface SessionInfo {
   id: string;
   workspacePath: string;
   workspaceName: string;
   ideName: string | null;
+  /** Launch identity from the transcript's first user record ("cli",
+   *  "claude-vscode", NEW_SESSION_ENTRYPOINT, …); null for legacy transcripts. */
+  entrypoint: string | null;
   isSubagent: boolean;
   parentSessionId: string | null;
   agentType: string | null;
