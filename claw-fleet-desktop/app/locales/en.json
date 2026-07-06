@@ -1826,6 +1826,7 @@
     "resume": "Resume session",
     "resuming": "Resuming…",
     "filter_workspace": "Filter by workspace",
-    "all_workspaces": "All workspaces"
+    "all_workspaces": "All workspaces",
+    "select_hint": "Select a session on the left to view its detail"
   }
 }
