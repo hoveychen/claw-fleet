@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, Plus, ListTodo, FolderGit2 } from "lucide-react";
+import { Menu, Shield, Plus, ListTodo, FolderGit2, History } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useTasksStore, useUIStore } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo, TaskStatus } from "../types";
@@ -21,6 +21,7 @@ import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import { MobileAccessPanel } from "./MobileAccessPanel";
+import { HistorySessionsPanel } from "./HistorySessionsPanel";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
 import { UsagePanel } from "./UsagePanel";
@@ -75,6 +76,8 @@ export function SessionList() {
     mascotVisible,
     showMobileAccess,
     setShowMobileAccess,
+    historyPanelOpen,
+    setHistoryPanelOpen,
     setShowNewProjectRequested,
   } = useUIStore();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
@@ -421,6 +424,13 @@ export function SessionList() {
                 <span className={styles.nav_label}>{t("view_sessions")}</span>
               </button>
               <button
+                className={`${styles.nav_item} ${historyPanelOpen ? styles.nav_active : ""}`}
+                onClick={() => setHistoryPanelOpen(!historyPanelOpen)}
+              >
+                <span className={styles.nav_icon}><History size={14} strokeWidth={1.5} /></span>
+                <span className={styles.nav_label}>{t("view_history", "历史会话")}</span>
+              </button>
+              <button
                 className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
                 onClick={() => setViewMode("audit")}
               >
@@ -644,6 +654,11 @@ export function SessionList() {
           />
         )}
       </aside>
+
+      {/* Secondary sidebar: Fleet-spawned session history */}
+      {historyPanelOpen && (
+        <HistorySessionsPanel onClose={() => setHistoryPanelOpen(false)} />
+      )}
 
       {/* Mobile access panel */}
       {showMobileAccess && <MobileAccessPanel onClose={() => setShowMobileAccess(false)} />}

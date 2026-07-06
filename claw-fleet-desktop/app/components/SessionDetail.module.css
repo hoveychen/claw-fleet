@@ -156,6 +156,73 @@
 }
 .close_btn:hover { background: var(--color-bg-secondary); color: var(--color-text); }
 
+/* Resume entry (Fleet-managed idle sessions only) */
+.resume_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  color: var(--color-text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: nowrap;
+  transition: background 0.12s, color 0.12s;
+}
+.resume_btn:hover,
+.resume_btn_active {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.resume_form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--color-bg-sidebar);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+}
+
+.resume_input {
+  width: 100%;
+  padding: 5px 7px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  outline: none;
+  resize: vertical;
+}
+.resume_input:focus { border-color: var(--color-accent); }
+
+.resume_send {
+  align-self: flex-end;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.resume_send:hover:not(:disabled) { background: var(--color-border); }
+.resume_send:disabled { opacity: 0.5; cursor: default; }
+
+.resume_error {
+  font-size: 10px;
+  color: #e06a6a;
+  word-break: break-word;
+}
+
 /* Tab bar (agent segmented control + view tabs combined) */
 .tab_bar {
   display: flex;
