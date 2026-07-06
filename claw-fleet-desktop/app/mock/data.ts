@@ -873,9 +873,20 @@ export const MOCK_CODEX_USAGE = {
   credits: { hasCredits: true, unlimited: false, balance: "$42.50" },
 };
 
+// Shape must match OpenClawUsageInfo / OpenClawSessionUsage in usageStore.ts —
+// the previous {contextPercent, maxContext, usedContext} shape left
+// ageSecs/model undefined and the usage card rendered " (NaNd ago)".
 export const MOCK_OPENCLAW_USAGE = {
   sessions: [
-    { sessionId: "sess-openclaw-ml", contextPercent: 62, maxContext: 200000, usedContext: 124000 },
+    {
+      sessionId: "sess-openclaw-ml",
+      agentId: "main",
+      model: "claude-opus-4-20250805",
+      contextTokens: 200000,
+      totalTokens: 124000,
+      percentUsed: 62,
+      ageSecs: 15 * 60,
+    },
   ],
 };
 
