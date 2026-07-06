@@ -102,6 +102,53 @@ pub fn enqueue(form: LauncherForm) -> Result<FleetSession, String> {
     Ok(new)
 }
 
+/// Record an ad-hoc launch (the sessions page's "新会话" button, which spawns
+/// `claude --session-id <id> -p <prompt>` directly instead of going through
+/// the queue) into fleet-sessions.json so it shows up in the history panel
+/// and can be resumed like any fleet-managed session.
+///
+/// Ad-hoc records carry an **empty `project_id`** — they belong to no kanban
+/// project, which keeps them out of the board UI, out of
+/// [`fleet_sessions_needing_input`] (its project lookup skips them, so no
+/// wait-for-input decision cards), and out of any real project's concurrency
+/// accounting. The supervisor's lifecycle passes still apply: a dead pid
+/// flips the record to complete with `completed_at` stamped.
+pub fn register_adhoc_session(
+    id: &str,
+    workspace: &str,
+    prompt: &str,
+    model: Option<&str>,
+    pid: u32,
+) -> Result<(), String> {
+    let mut sessions = project::list_fleet_sessions();
+    if sessions.iter().any(|s| s.id == id) {
+        return Ok(());
+    }
+    let now = now_ms();
+    sessions.push(FleetSession {
+        id: id.to_string(),
+        project_id: String::new(),
+        workspace: workspace.to_string(),
+        fleetsession_path: None,
+        prompt: prompt.to_string(),
+        context_files: Vec::new(),
+        status: DEFAULT_COLUMN_RUNNING.into(),
+        note: None,
+        created_at: now,
+        started_at: Some(now),
+        completed_at: None,
+        pid: Some(pid),
+        expedited: false,
+        final_by_agent: false,
+        session_kind: project::SessionKind::Regular,
+        task_id: None,
+        p_item_id: None,
+        system_prompt: None,
+        model: model.map(str::to_string),
+    });
+    project::save_fleet_sessions(&sessions)
+}
+
 /// Enqueue a **Worker** session for `(task_id, p_item_id)` using the prebuilt
 /// `WorkerSpawnSpec`. Same pattern as `enqueue_master`: pre-allocate the
 /// session id, persist queued, supervisor tick spawns the subprocess.
@@ -1308,6 +1355,53 @@ mod tests {
         let s = sessions.iter().find(|s| s.id == "sess-1").unwrap();
         assert_eq!(s.status, project::DEFAULT_COLUMN_QUEUED);
         assert!(!s.final_by_agent, "resume must reset final_by_agent");
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn register_adhoc_session_writes_history_record_once() {
+        let _g = crate::session::fleet_home_lock();
+        let home = fresh_tmp_home("register-adhoc");
+        let _override = FleetHomeOverride::new(&home);
+
+        register_adhoc_session("sess-adhoc-1", "/tmp/ws", "帮我修个 bug", Some("claude-opus-4"), 4242)
+            .unwrap();
+        // Second call with the same id must be a no-op, not a duplicate row.
+        register_adhoc_session("sess-adhoc-1", "/tmp/ws", "帮我修个 bug", None, 4242).unwrap();
+
+        let sessions = project::list_fleet_sessions();
+        let matches: Vec<_> = sessions.iter().filter(|s| s.id == "sess-adhoc-1").collect();
+        assert_eq!(matches.len(), 1, "re-registration must not duplicate");
+        let s = matches[0];
+        assert_eq!(s.project_id, "", "ad-hoc records carry no project");
+        assert_eq!(s.status, project::DEFAULT_COLUMN_RUNNING);
+        assert_eq!(s.pid, Some(4242));
+        assert_eq!(s.prompt, "帮我修个 bug");
+        assert_eq!(s.model.as_deref(), Some("claude-opus-4"));
+        assert!(s.started_at.is_some());
+        assert!(s.completed_at.is_none());
+
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[test]
+    fn adhoc_sessions_are_excluded_from_needing_input() {
+        // Empty project_id must keep ad-hoc records out of the wait-for-input
+        // decision-card pipeline even when their idle sentinel is set — the
+        // project lookup in fleet_sessions_needing_input skips them.
+        let _g = crate::session::fleet_home_lock();
+        let home = fresh_tmp_home("adhoc-no-pending");
+        let _override = FleetHomeOverride::new(&home);
+
+        register_adhoc_session("sess-adhoc-idle", "/tmp/ws", "prompt", None, 1).unwrap();
+        crate::idle::mark_idle("sess-adhoc-idle").unwrap();
+
+        let pending = fleet_sessions_needing_input();
+        assert!(
+            pending.iter().all(|p| p.session.id != "sess-adhoc-idle"),
+            "ad-hoc session must not surface a wait-for-input card"
+        );
 
         let _ = std::fs::remove_dir_all(&home);
     }

@@ -4,9 +4,10 @@
 //! logging + a reaper thread" machinery. `auto_resume::spawn_resume` delegates
 //! here for its `claude --resume <id> -p continue` shape; the sessions page's
 //! "new session" button uses [`spawn_new_session`] for the
-//! `claude -p "<initial prompt>"` shape. The spawned session's own JSONL is
-//! picked up by the scanner, so the new session appears in the session list
-//! without any explicit registration.
+//! `claude --session-id <id> -p "<initial prompt>"` shape. The session id is
+//! pre-generated so the launch can be registered in fleet-sessions.json
+//! (empty `project_id` = ad-hoc, see `supervisor::register_adhoc_session`);
+//! the spawned session's own JSONL is picked up by the scanner as usual.
 
 use std::io::Write;
 use std::path::Path;
@@ -218,7 +219,15 @@ pub fn spawn_new_session(
     let stderr_log = crate::session::get_fleet_dir()
         .map(|d| d.join("new_session_stderr.log"))
         .ok_or_else(|| "no fleet dir".to_string())?;
-    let mut args = vec!["-p".to_string(), prompt.to_string()];
+    // Pre-generate the session id so the launch can be registered in
+    // fleet-sessions.json (history panel + resume) before claude even starts.
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let mut args = vec![
+        "--session-id".to_string(),
+        session_id.clone(),
+        "-p".to_string(),
+        prompt.to_string(),
+    ];
     if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
         args.push("--model".to_string());
         args.push(m.to_string());
@@ -233,8 +242,9 @@ pub fn spawn_new_session(
     }
     args.extend(permission_prompt_tool_args());
     crate::log_debug(&format!(
-        "new_session: claude {} <prompt {} chars> (cwd={}, stderr_log={})",
-        args[2..].join(" "),
+        "new_session: claude --session-id {} {} <prompt {} chars> (cwd={}, stderr_log={})",
+        session_id,
+        args[4..].join(" "),
         prompt.len(),
         workspace_path,
         stderr_log.display()
@@ -245,13 +255,22 @@ pub fn spawn_new_session(
         workspace_path,
         &stderr_log,
         "new_session",
-        "",
+        &format!("session={session_id}"),
         |_success| {},
     )?;
     crate::log_debug(&format!(
         "new_session: spawned pid {} in {}",
         pid, workspace_path
     ));
+    // Registration failure must not fail the launch — claude is already
+    // running; the record is only the history/resume bookkeeping.
+    if let Err(e) =
+        crate::supervisor::register_adhoc_session(&session_id, workspace_path, prompt, model, pid)
+    {
+        crate::log_debug(&format!(
+            "new_session: register_adhoc_session failed for {session_id}: {e}"
+        ));
+    }
     Ok(pid)
 }
 
