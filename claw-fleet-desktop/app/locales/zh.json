@@ -1823,6 +1823,7 @@
     "resume": "恢复会话",
     "resuming": "恢复中…",
     "filter_workspace": "按工作目录筛选",
-    "all_workspaces": "全部目录"
+    "all_workspaces": "全部目录",
+    "select_hint": "从左侧选择一个会话查看详情"
   }
 }

@@ -26,6 +26,7 @@ export function SessionDetail({
   lite = false,
   inline = false,
   sessionInfo = null,
+  searchQuery: standaloneSearchQuery = null,
 }: {
   lite?: boolean;
   inline?: boolean;
@@ -35,6 +36,10 @@ export function SessionDetail({
    *  global detail store. No live tail in this mode —
    *  messages are a snapshot (pending decisions block the agent anyway). */
   sessionInfo?: SessionInfo | null;
+  /** Standalone mode only: highlight term forwarded to MessageList (e.g.
+   *  the FTS query that matched this session in HistoryView). Ignored in
+   *  global-store mode, which reads the query from useDetailStore. */
+  searchQuery?: string | null;
 } = {}) {
   const { t } = useTranslation();
   const isStandalone = sessionInfo != null;
@@ -104,7 +109,7 @@ export function SessionDetail({
   const messages = isStandalone ? localMessages : global.messages;
   const isLoading = isStandalone ? localLoading : global.isLoading;
   const fullyLoaded = isStandalone ? localFullyLoaded : global.fullyLoaded;
-  const searchQuery = isStandalone ? null : global.searchQuery;
+  const searchQuery = isStandalone ? standaloneSearchQuery : global.searchQuery;
   const close = global.close;
   const open = useCallback(
     (s: SessionInfo) => {
