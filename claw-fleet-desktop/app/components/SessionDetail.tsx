@@ -139,7 +139,6 @@ export function SessionDetail({
   const [isFollowing, setIsFollowing] = useState(true);
   type ViewTab = "decisions" | "skills" | "messages" | "tokens" | "workflow" | "tasks";
   const [viewTab, setViewTab] = useState<ViewTab>("messages");
-  const [userPickedTab, setUserPickedTab] = useState(false);
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
 
@@ -168,7 +167,6 @@ export function SessionDetail({
   );
 
   useEffect(() => {
-    setUserPickedTab(false);
     setDecisionRecords([]);
   }, [liveSession?.id]);
 
@@ -232,13 +230,11 @@ export function SessionDetail({
   }, [liveSession?.id, liveSession?.jsonlPath]);
 
   // Honor an explicit initial tab (e.g. the user clicked the card's plan row →
-  // open straight to "tasks"). marking userPickedTab records the explicit choice
-  // so later tab logic doesn't override it. Default tab is "messages" (对话).
+  // open straight to "tasks"). Default tab is "messages" (对话).
   useEffect(() => {
     if (isStandalone) return;
     const tab = global.initialTab;
     if (!tab) return;
-    setUserPickedTab(true);
     setViewTab(tab as ViewTab);
   }, [isStandalone, global.session?.id, global.initialTab]);
 
@@ -265,7 +261,6 @@ export function SessionDetail({
   const hasTaskPlans = taskPlans.length > 0;
 
   const pickTab = useCallback((tab: ViewTab) => {
-    setUserPickedTab(true);
     setViewTab(tab);
   }, []);
 
