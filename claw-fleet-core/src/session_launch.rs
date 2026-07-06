@@ -170,6 +170,20 @@ pub fn spawn_claude_detached_with_envs(
     if let Some(home) = crate::session::real_home_dir() {
         cmd.env("HOME", home);
     }
+    // A GUI app launched by launchd carries a minimal PATH
+    // (/usr/bin:/bin:/usr/sbin:/sbin); a child inheriting it can't find
+    // user-installed binaries (fleet, cws, node) from its Bash tool.
+    // Prepend ~/.claude/fleet/bin (see supervisor::ensure_fleet_cli_link)
+    // and the common install dirs; the parent's PATH stays at the tail.
+    let mut path = crate::openclaw_source::augmented_path();
+    if let Some(home) = crate::session::real_home_dir() {
+        path = format!(
+            "{}:{}",
+            home.join(".claude").join("fleet").join("bin").display(),
+            path
+        );
+    }
+    cmd.env("PATH", path);
     for (k, v) in extra_envs {
         cmd.env(k, v);
     }
@@ -379,6 +393,77 @@ mod tests {
             observed,
             real_home.display().to_string(),
             "spawned child must see the real home, not the parent's polluted $HOME"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn spawn_claude_detached_augments_minimal_gui_path() {
+        // A GUI app launched by launchd carries a minimal PATH
+        // (/usr/bin:/bin:/usr/sbin:/sbin). A spawned claude inherits it, so
+        // the agent's Bash can't find user-installed binaries (fleet, cws,
+        // claude itself in ~/.local/bin). The child must instead see a PATH
+        // covering the common install dirs plus ~/.claude/fleet/bin, with
+        // the parent's PATH preserved at the tail.
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet_test_spawn_path_{}",
+            std::process::id()
+        ));
+        let real_home = tmp.join("real-home");
+        std::fs::create_dir_all(&real_home).unwrap();
+        let out = tmp.join("observed-path.txt");
+        let _ = std::fs::remove_file(&out);
+        let log = tmp.join("stderr.log");
+
+        const MINIMAL_PATH: &str = "/usr/bin:/bin:/usr/sbin:/sbin";
+        let prev_path = std::env::var_os("PATH");
+        let prev_fleet_home = std::env::var_os("FLEET_HOME");
+        std::env::set_var("PATH", MINIMAL_PATH);
+        std::env::set_var("FLEET_HOME", &real_home);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let spawn_result = super::spawn_claude_detached(
+            "/bin/sh",
+            &[
+                "-c".to_string(),
+                format!("printf %s \"$PATH\" > '{}'", out.display()),
+            ],
+            tmp.to_str().unwrap(),
+            &log,
+            "test",
+            "",
+            move |ok| {
+                let _ = tx.send(ok);
+            },
+        );
+        match prev_path {
+            Some(v) => std::env::set_var("PATH", v),
+            None => std::env::remove_var("PATH"),
+        }
+        match prev_fleet_home {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        spawn_result.unwrap();
+        let exited_ok = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("child did not exit in time");
+        assert!(exited_ok, "child exited nonzero");
+
+        let observed = std::fs::read_to_string(&out).unwrap();
+        let fleet_bin = real_home.join(".claude").join("fleet").join("bin");
+        let local_bin = real_home.join(".local").join("bin");
+        assert!(
+            observed.contains(&fleet_bin.display().to_string()),
+            "child PATH must include ~/.claude/fleet/bin, got: {observed}"
+        );
+        assert!(
+            observed.contains(&local_bin.display().to_string()),
+            "child PATH must include ~/.local/bin, got: {observed}"
+        );
+        assert!(
+            observed.ends_with(MINIMAL_PATH),
+            "parent PATH must be preserved at the tail, got: {observed}"
         );
     }
 

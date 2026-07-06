@@ -739,7 +739,9 @@ fn find_openclaw_binary() -> Option<PathBuf> {
 /// Build an augmented PATH that includes common Node.js installation directories.
 /// GUI apps (like Tauri) often lack the full shell PATH, which causes `#!/usr/bin/env node`
 /// scripts (like openclaw) to fail with exit code 127.
-fn augmented_path() -> String {
+/// Also used by `session_launch` so spawned claude children can find
+/// user-installed binaries (fleet, cws) from their Bash tool.
+pub(crate) fn augmented_path() -> String {
     let mut dirs: Vec<String> = vec![
         "/opt/homebrew/bin".to_string(),
         "/usr/local/bin".to_string(),
