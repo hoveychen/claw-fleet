@@ -349,6 +349,20 @@ fn session_handoff_index_in(
     map
 }
 
+/// Stamp relay positions onto scanned sessions. Called at scan-aggregation
+/// time (not inside the mtime-cached per-session parse) because a
+/// predecessor's chain membership changes when its successor spawns, without
+/// its own jsonl ever being touched.
+pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
+    let idx = session_handoff_index();
+    if idx.is_empty() {
+        return;
+    }
+    for s in sessions.iter_mut() {
+        s.handoff = idx.get(&s.id).cloned();
+    }
+}
+
 // ── successor prompt + consumption ────────────────────────────────────────────
 
 /// Opening prompt for the successor session. The prd-context hook re-injects
