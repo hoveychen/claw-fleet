@@ -227,6 +227,37 @@ fn dfs_decode(rest: &str, acc: String) -> Option<PathBuf> {
     }
 }
 
+/// Retag already-published docs whose workspace was recorded as a session
+/// scratchpad (published before decoding existed). Returns one
+/// `(slug, old_workspace, new_workspace)` per fixed doc.
+pub fn fix_scratchpad_workspaces() -> Result<Vec<(String, String, String)>, String> {
+    Ok(fix_scratchpad_workspaces_in(&wiki_dir_or_err()?))
+}
+
+/// [`fix_scratchpad_workspaces`] against an explicit wiki root (unit-testable).
+pub fn fix_scratchpad_workspaces_in(root: &Path) -> Vec<(String, String, String)> {
+    let mut fixed = Vec::new();
+    for mut doc in list_docs_in(root) {
+        let Some(decoded) = decode_scratchpad_workspace(Path::new(&doc.workspace_path)) else {
+            continue;
+        };
+        let new_path = decoded.display().to_string();
+        if new_path == doc.workspace_path {
+            continue;
+        }
+        let old = std::mem::replace(&mut doc.workspace_path, new_path.clone());
+        doc.workspace_name = Path::new(&new_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&new_path)
+            .to_string();
+        if write_doc_json(&root.join(&doc.slug), &doc).is_ok() {
+            fixed.push((doc.slug.clone(), old, new_path));
+        }
+    }
+    fixed
+}
+
 // ── Publish ──────────────────────────────────────────────────────────────────
 
 /// Publish `source` (a `.md` file, an `.html`/`.htm` file, or a directory
@@ -1258,6 +1289,37 @@ mod tests {
             doc.workspace_path,
             ws.path().canonicalize().unwrap().display().to_string()
         );
+    }
+
+    #[test]
+    fn fix_scratchpad_workspaces_retags_existing_docs() {
+        let root = tmp();
+        let base = tmp();
+        let project = base.path().join("real-proj");
+        fs::create_dir_all(&project).unwrap();
+        let canon = project.canonicalize().unwrap();
+        let scratch = fake_scratchpad(base.path(), &project, "");
+
+        // Publish a doc, then rewrite its workspace tag to the scratchpad
+        // path — simulating a doc published before decoding existed.
+        let md = scratch.join("old.md");
+        fs::write(&md, "# Old\n").unwrap();
+        let ws = tmp();
+        let mut doc = publish_in(root.path(), &md, None, None, ws.path()).unwrap();
+        doc.workspace_path = scratch.display().to_string();
+        doc.workspace_name = "scratchpad".into();
+        write_doc_json(&root.path().join("old"), &doc).unwrap();
+
+        let fixed = fix_scratchpad_workspaces_in(root.path());
+        assert_eq!(fixed.len(), 1);
+        assert_eq!(fixed[0].0, "old");
+        assert_eq!(fixed[0].2, canon.display().to_string());
+        let doc = get_doc_in(root.path(), "old").unwrap();
+        assert_eq!(doc.workspace_path, canon.display().to_string());
+        assert_eq!(doc.workspace_name, "real-proj");
+
+        // Second run is a no-op.
+        assert!(fix_scratchpad_workspaces_in(root.path()).is_empty());
     }
 
     #[test]
