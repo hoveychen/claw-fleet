@@ -248,6 +248,26 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
   return <>{elements}</>;
 });
 
+// ── Message timestamp ─────────────────────────────────────────────────────────
+
+/** Short clock time for a transcript record: `HH:MM` for today, `MM-DD HH:MM`
+ *  otherwise. Absolute (not relative) so rendered rows never go stale. */
+function formatMsgTime(ts: string): { short: string; full: string } | null {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return {
+    short: sameDay ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`,
+    full: d.toLocaleString(),
+  };
+}
+
 // ── Single message row ────────────────────────────────────────────────────────
 
 interface MsgProps {
@@ -294,6 +314,8 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
 
   const isPartial =
     isAssistant && msg.message.stop_reason === null;
+
+  const time = msg.timestamp ? formatMsgTime(msg.timestamp) : null;
 
   // Status dot
   const stopReason = msg.message.stop_reason;
@@ -343,12 +365,29 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
                 : null}
           </div>
         )}
-        {isAssistant && msg.message.usage && (
+        {isAssistant && (msg.message.usage || time) && (
           <div className={styles.usage}>
-            ↑{msg.message.usage.input_tokens} ↓{msg.message.usage.output_tokens}
-            {msg.message.model && (
-              <span className={styles.model}> · {msg.message.model}</span>
+            {msg.message.usage && (
+              <>
+                ↑{msg.message.usage.input_tokens} ↓{msg.message.usage.output_tokens}
+                {msg.message.model && (
+                  <span className={styles.model}> · {msg.message.model}</span>
+                )}
+              </>
             )}
+            {time && (
+              <span className={styles.msg_time} title={time.full}>
+                {msg.message.usage ? " · " : ""}
+                {time.short}
+              </span>
+            )}
+          </div>
+        )}
+        {isUser && time && (
+          <div className={styles.usage}>
+            <span className={styles.msg_time} title={time.full}>
+              {time.short}
+            </span>
           </div>
         )}
       </div>

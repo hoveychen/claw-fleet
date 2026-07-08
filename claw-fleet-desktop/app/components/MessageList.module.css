@@ -115,6 +115,8 @@
 
 .model { opacity: 0.7; }
 
+.msg_time { opacity: 0.7; }
+
 /* Redacted thinking */
 .redacted {
   font-size: 11px;
