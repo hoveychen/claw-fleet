@@ -507,6 +507,31 @@ fn handle_api_request(
             }
         }
 
+        "/wiki_search" => {
+            let q = query
+                .get("q")
+                .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                .unwrap_or_default();
+            json_ok(&backend.search_wiki_docs(&q))
+        }
+
+        "/wiki_export" => {
+            let dec = |key: &str| {
+                query
+                    .get(key)
+                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                    .unwrap_or_default()
+            };
+            match backend.export_wiki_doc(&dec("slug"), &dec("version")) {
+                Ok(e) => {
+                    let mime_header: tiny_http::Header =
+                        format!("Content-Type: {}", e.mime).parse().unwrap();
+                    tiny_http::Response::from_data(e.bytes).with_header(mime_header)
+                }
+                Err(_) => json_error(404, "not found"),
+            }
+        }
+
         "/wiki_delete" if request.method() == &tiny_http::Method::Post => {
             let dec = |key: &str| {
                 query

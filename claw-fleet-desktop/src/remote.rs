@@ -472,6 +472,27 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
+        self.probe
+            .get(&format!("/wiki_search?q={}", encode_path(query)))
+            .unwrap_or_default()
+    }
+
+    fn export_wiki_doc(&self, slug: &str, version: &str) -> Result<crate::wiki::WikiExport, String> {
+        // Filename derivation needs the doc's kind; bytes stream separately.
+        let doc = self.get_wiki_doc(slug)?;
+        let (bytes, mime) = self.probe.get_bytes(&format!(
+            "/wiki_export?slug={}&version={}",
+            encode_path(slug),
+            encode_path(version),
+        ))?;
+        Ok(crate::wiki::WikiExport {
+            filename: crate::wiki::export_filename(&doc),
+            mime,
+            bytes,
+        })
+    }
+
     fn get_task_plans(
         &self,
         workspace_path: &str,
