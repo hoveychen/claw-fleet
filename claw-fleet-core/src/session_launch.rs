@@ -12,7 +12,7 @@
 //! `claude-vscode`; verified against CLI 2.1.201).
 
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -110,6 +110,7 @@ pub fn spawn_claude_detached(
         label,
         detail,
         &[],
+        false,
         on_exit,
     )
 }
@@ -125,6 +126,11 @@ pub fn spawn_claude_detached_with_envs(
     label: &str,
     detail: &str,
     extra_envs: &[(&str, &str)],
+    // When true, the child's stdout (the `--output-format stream-json` payload
+    // the caller must request via `args`) is teed to a live-thinking sidecar
+    // under `~/.fleet/live-thinking/` instead of being discarded. See
+    // [`crate::live_thinking`].
+    live_thinking: bool,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<u32, String> {
     if !Path::new(workspace_path).is_dir() {
@@ -156,11 +162,38 @@ pub fn spawn_claude_detached_with_envs(
         .open(stderr_log)
         .map_err(|e| format!("reopen stderr log {}: {}", stderr_log.display(), e))?;
 
+    // Live-thinking sidecar: open a uniquely-named temp file now (PID isn't
+    // known until after spawn), point the child's stdout at it, then rename to
+    // the pid-keyed name once we have the pid. Renaming an open file is safe on
+    // Unix — the child keeps writing to the same inode via its held fd. Best
+    // effort: if the sidecar can't be created we fall back to discarding stdout
+    // so a filesystem hiccup never blocks session launch.
+    let mut sidecar_tmp: Option<PathBuf> = None;
+    let stdout_stdio = if live_thinking {
+        let opened = crate::live_thinking::ensure_sidecar_dir().ok().and_then(|dir| {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let tmp = dir.join(format!("spawn-{}-{}.jsonl", std::process::id(), nanos));
+            std::fs::File::create(&tmp).ok().map(|f| (tmp, f))
+        });
+        match opened {
+            Some((tmp, file)) => {
+                sidecar_tmp = Some(tmp);
+                std::process::Stdio::from(file)
+            }
+            None => std::process::Stdio::null(),
+        }
+    } else {
+        std::process::Stdio::null()
+    };
+
     let mut cmd = crate::process_util::command(claude_path);
     cmd.args(args)
         .current_dir(workspace_path)
         .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
+        .stdout(stdout_stdio)
         .stderr(std::process::Stdio::from(stderr_file));
     // Under the macOS App Sandbox the desktop app's own $HOME points at the
     // container (~/Library/Containers/.../Data). A claude child inheriting
@@ -191,6 +224,14 @@ pub fn spawn_claude_detached_with_envs(
         .spawn()
         .map_err(|e| format!("spawn claude failed: {e}"))?;
     let pid = child.id();
+
+    // Now that we have the pid, give the sidecar its stable pid-keyed name.
+    // The child's held fd is unaffected by the rename.
+    if let Some(tmp) = sidecar_tmp {
+        if let Some(final_path) = crate::live_thinking::sidecar_path_for_pid(pid) {
+            let _ = std::fs::rename(&tmp, &final_path);
+        }
+    }
 
     let label_owned = label.to_string();
     let detail_owned = detail.to_string();
@@ -269,6 +310,15 @@ pub fn spawn_new_session(
         .map(|d| d.join("new_session_stderr.log"))
         .ok_or_else(|| "no fleet dir".to_string())?;
     let mut args = vec!["-p".to_string(), prompt.to_string()];
+    // Emit the streaming JSON payload (incremental thinking_delta events) to
+    // stdout so it can be teed to a live-thinking sidecar. This only changes
+    // stdout, which Fleet otherwise discards; the JSONL transcript the scanner
+    // reads is unaffected. `--verbose` is required for stream-json in
+    // `--print` mode; `--include-partial-messages` adds the token-level deltas.
+    args.push("--output-format".to_string());
+    args.push("stream-json".to_string());
+    args.push("--verbose".to_string());
+    args.push("--include-partial-messages".to_string());
     if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
         args.push("--model".to_string());
         args.push(m.to_string());
@@ -297,6 +347,7 @@ pub fn spawn_new_session(
         "new_session",
         "",
         &[("CLAUDE_CODE_ENTRYPOINT", NEW_SESSION_ENTRYPOINT)],
+        true, // tee stdout to a live-thinking sidecar
         |_success| {},
     )?;
     crate::log_debug(&format!(
