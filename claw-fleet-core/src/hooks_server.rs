@@ -925,6 +925,27 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/wiki_export" => {
+                let dec = |key: &str| {
+                    query
+                        .get(key)
+                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                        .unwrap_or_default()
+                };
+                match crate::wiki::export_doc(&dec("slug"), &dec("version")) {
+                    Ok(e) => {
+                        let mime_header: tiny_http::Header =
+                            format!("Content-Type: {}", e.mime).parse().unwrap();
+                        let _ = request.respond(
+                            tiny_http::Response::from_data(e.bytes).with_header(mime_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
+            }
+
             "/wiki_delete" if request.method() == &tiny_http::Method::Post => {
                 let dec = |key: &str| {
                     query

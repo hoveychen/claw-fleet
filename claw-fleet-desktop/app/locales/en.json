@@ -475,7 +475,9 @@
     "delete_version": "Delete this version",
     "delete_version_short": "Version",
     "delete_doc_confirm": "Delete “{{slug}}” and all its versions?",
-    "delete_version_confirm": "Delete version {{version}} of “{{slug}}”?"
+    "delete_version_confirm": "Delete version {{version}} of “{{slug}}”?",
+    "export": "Export this version to a file",
+    "export_short": "Export"
   },
   "live": {
     "section_title": "Live"

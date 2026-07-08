@@ -1888,6 +1888,10 @@ impl Backend for LocalBackend {
         crate::wiki::search_docs(query)
     }
 
+    fn export_wiki_doc(&self, slug: &str, version: &str) -> Result<crate::wiki::WikiExport, String> {
+        crate::wiki::export_doc(slug, version)
+    }
+
     fn get_task_plans(
         &self,
         workspace_path: &str,

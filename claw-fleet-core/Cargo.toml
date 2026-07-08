@@ -20,6 +20,10 @@ futures = "0.3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "net", "io-util", "macros"] }
 uuid = { version = "1", features = ["v4"] }
 zstd = "0.13"
+# Already in the dependency tree transitively; powers wiki export's
+# store-only zip writer (stdlib has no zip; the full `zip` crate would be a
+# genuinely new dependency for a 100MB-capped, no-compression use case).
+crc32fast = "1"
 sha2 = "0.10"
 base64 = "0.22"
 conch-parser = "0.1.1"
