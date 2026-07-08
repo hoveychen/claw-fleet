@@ -1,13 +1,24 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderGit2, History, Plus, Search } from "lucide-react";
 import { useSessionsStore } from "../store";
 import type { SessionInfo } from "../types";
 import { NEW_SESSION_ENTRYPOINT } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
-import { NewSessionModal } from "./NewSessionModal";
+import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import styles from "./HistoryView.module.css";
+
+/** A session spawned but not yet discovered by the scanner. We poll the session
+ *  list for the matching `SessionInfo` and swap the detail column over to it. */
+interface PendingSpawn extends NewSessionCreated {
+  /** Wall-clock ms when the spawn returned — fallback correlation window. */
+  startedMs: number;
+}
+
+/** Give up on the in-place spinner after this long and offer an escape hatch;
+ *  the scanner polls every ~5s so a healthy spawn resolves well within this. */
+const START_TIMEOUT_MS = 30_000;
 
 const LIVE_STATUSES = new Set([
   "thinking", "executing", "streaming", "processing",
@@ -66,7 +77,14 @@ export function HistoryView() {
   // global useDetailStore (that one drives the drawer overlaying every view).
   const [selected, setSelected] = useState<SessionInfo | null>(null);
   const [detailQuery, setDetailQuery] = useState<string | null>(null);
-  const [showNewSession, setShowNewSession] = useState(false);
+  // Detail-column modes are mutually exclusive, in precedence order:
+  //   pending  → "starting…" spinner while we wait for the scanner
+  //   composing→ the inline new-session form
+  //   selected → an existing session's SessionDetail
+  //   (none)   → the empty-state hint
+  const [composing, setComposing] = useState(false);
+  const [pending, setPending] = useState<PendingSpawn | null>(null);
+  const [startTimedOut, setStartTimedOut] = useState(false);
 
   const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
 
@@ -102,9 +120,61 @@ export function HistoryView() {
 
   const handleRowClick = (s: SessionInfo) => {
     const isFtsHit = query.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
+    setComposing(false);
+    setPending(null);
+    setStartTimedOut(false);
     setSelected(s);
     setDetailQuery(isFtsHit ? query.trim() : null);
   };
+
+  // "+新会话" → swap the detail column to the inline compose form.
+  const handleNewSession = () => {
+    setSelected(null);
+    setPending(null);
+    setStartTimedOut(false);
+    setComposing(true);
+  };
+
+  // Form spawned the process: leave compose mode and start polling for the
+  // session so we can swap the column over to its live SessionDetail in place.
+  const handleCreated = (info: NewSessionCreated) => {
+    setComposing(false);
+    setStartTimedOut(false);
+    setPending({ ...info, startedMs: Date.now() });
+  };
+
+  // Match the pending spawn to a scanned session: exact pid first, then the
+  // newest ad-hoc session in the same workspace created after the spawn (the
+  // pid may not be attached yet on the first poll). `adhocSessions` is already
+  // filtered to NEW_SESSION_ENTRYPOINT, so both paths stay scoped to launches.
+  useEffect(() => {
+    if (!pending) return;
+    const match =
+      adhocSessions.find((s) => s.pid === pending.pid) ??
+      adhocSessions
+        .filter(
+          (s) =>
+            s.workspacePath === pending.workspacePath &&
+            s.createdAtMs >= pending.startedMs - 3000,
+        )
+        .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
+    if (match) {
+      setSelected(match);
+      setDetailQuery(null);
+      setPending(null);
+      setStartTimedOut(false);
+    }
+  }, [adhocSessions, pending]);
+
+  // Surface an escape hatch if the spawn takes unusually long to show up.
+  useEffect(() => {
+    if (!pending) {
+      setStartTimedOut(false);
+      return;
+    }
+    const id = setTimeout(() => setStartTimedOut(true), START_TIMEOUT_MS);
+    return () => clearTimeout(id);
+  }, [pending]);
 
   return (
     <div className={styles.page}>
@@ -114,8 +184,8 @@ export function HistoryView() {
           <span className={styles.header_count}>{rows.length}</span>
           <button
             type="button"
-            className={styles.header_new_btn}
-            onClick={() => setShowNewSession(true)}
+            className={`${styles.header_new_btn} ${composing ? styles.header_new_btn_active : ""}`}
+            onClick={handleNewSession}
             title={t("new_session.title")}
           >
             <Plus size={12} strokeWidth={2} />
@@ -197,7 +267,33 @@ export function HistoryView() {
       </div>
 
       <div className={styles.detail}>
-        {selected ? (
+        {pending ? (
+          <div className={styles.detail_starting}>
+            {startTimedOut ? (
+              <>
+                <span className={styles.starting_text}>
+                  {t("new_session.start_timeout", "启动较慢，可再等等，或从左侧列表里查看")}
+                </span>
+                <button
+                  type="button"
+                  className={styles.starting_dismiss}
+                  onClick={() => setPending(null)}
+                >
+                  {t("cancel")}
+                </button>
+              </>
+            ) : (
+              <>
+                <span className={styles.starting_spinner} />
+                <span className={styles.starting_text}>
+                  {t("new_session.starting", "正在启动会话…")}
+                </span>
+              </>
+            )}
+          </div>
+        ) : composing ? (
+          <NewSessionForm onCreated={handleCreated} onCancel={() => setComposing(false)} />
+        ) : selected ? (
           <SessionDetail inline sessionInfo={selected} searchQuery={detailQuery} />
         ) : (
           <div className={styles.detail_empty}>
@@ -206,8 +302,6 @@ export function HistoryView() {
           </div>
         )}
       </div>
-
-      <NewSessionModal open={showNewSession} onClose={() => setShowNewSession(false)} />
     </div>
   );
 }

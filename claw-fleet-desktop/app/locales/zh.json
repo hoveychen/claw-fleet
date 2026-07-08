@@ -117,7 +117,9 @@
     "prompt_placeholder": "想让 Claude 做什么？（Enter 提交，Shift+Enter 换行）",
     "hint": "会在所选目录后台启动一个新的 claude 会话，几秒后出现在会话列表中。",
     "error_workspace_required": "请先选择工作目录。",
-    "error_prompt_required": "初始提示词不能为空。"
+    "error_prompt_required": "初始提示词不能为空。",
+    "starting": "正在启动会话…",
+    "start_timeout": "启动较慢，可再等等，或从左侧列表里查看"
   },
   "launcher": {
     "title": "新建 Fleet 会话",
