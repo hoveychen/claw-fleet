@@ -355,6 +355,16 @@ pub trait Backend: Send + Sync {
     /// [`crate::live_thinking`].
     fn read_live_thinking(&self, session_id: &str) -> Option<crate::live_thinking::LiveThinking>;
 
+    // ── Handoff relay chains ─────────────────────────────────────────────────
+    /// The relay chain a session sits on, if any (`fleet handoff`). Default
+    /// errs so placeholder backends need no override; real backends implement.
+    fn get_handoff_chain(
+        &self,
+        _session_id: &str,
+    ) -> Result<Option<crate::handoff::HandoffChain>, String> {
+        Err("backend not ready".into())
+    }
+
     // ── Wiki knowledge base ──────────────────────────────────────────────────
     /// All docs under `~/.fleet/wiki`, newest first.
     fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc>;
@@ -916,7 +926,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
-            task_plan: None,            compact_count: 0,
+            task_plan: None, handoff: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
