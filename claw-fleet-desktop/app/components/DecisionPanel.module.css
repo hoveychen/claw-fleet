@@ -1399,6 +1399,20 @@
   display: none;
 }
 
+/* WKWebView suspends the CSS animation clock while the float window is hidden
+ * and does not resume it when the window is re-shown (`hide()`/`show()` reuse).
+ * Any descendant entry animation that starts from `opacity: 0` (cardFadeIn,
+ * panelSlideIn) then freezes at 0% and the element renders invisible — the
+ * card body paints zero pixels while non-animated siblings paint fine. The
+ * panel itself already opts out (`animation: none` above); extend that to
+ * every descendant so a frozen clock can never hide content in this window. */
+.panel_float *,
+.panel_float::after,
+.panel_float *::before,
+.panel_float *::after {
+  animation: none !important;
+}
+
 /* In float mode the window sizes to the card's natural height, so the card's
  * internal scroll caps (the flex-none footer's `max-height: 55vh`, the body's
  * `overflow-y:auto`) are counter-productive: they'd clamp the footer and force
