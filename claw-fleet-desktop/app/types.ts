@@ -294,6 +294,18 @@ export interface TaskPlanDetail {
   items: TaskItem[];
 }
 
+// ── Live thinking ─────────────────────────────────────────────────────────
+/** Token-level reasoning for a Fleet-spawned session that is streaming now,
+ *  reconstructed from its `~/.fleet/live-thinking` sidecar. */
+export interface LiveThinking {
+  sessionId: string;
+  /** Accumulated text of the most recent thinking block in the current turn. */
+  thinking: string;
+  /** True while the turn is in progress (no terminal result yet + fresh file). */
+  streaming: boolean;
+  updatedSecsAgo: number;
+}
+
 // ── Message / content block types ───────────────────────────────────────────
 
 export type ContentBlockType =

@@ -447,6 +447,12 @@ fn handle_api_request(
         // ── Memory & Skills ─────────────────────────────────────────────
         "/memories" => json_ok(&backend.list_memories()),
 
+        "/live_thinking" => {
+            let raw = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
+            let session_id = percent_decode_str(raw).decode_utf8_lossy().to_string();
+            json_ok(&backend.read_live_thinking(&session_id))
+        }
+
         "/memory_content" => {
             let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
             let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
