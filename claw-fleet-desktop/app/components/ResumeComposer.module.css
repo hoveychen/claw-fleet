@@ -1,0 +1,12 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.error {
+  font-size: 10px;
+  color: #e06a6a;
+  word-break: break-word;
+}

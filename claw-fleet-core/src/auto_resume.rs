@@ -171,22 +171,45 @@ pub struct ResumeSessionRequest {
     /// Follow-up prompt for the resumed turn; `None`/empty = "continue".
     #[serde(default)]
     pub prompt: Option<String>,
+    /// Optional `--model` override for the resumed session.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Optional `--effort` override for the resumed session.
+    #[serde(default)]
+    pub effort: Option<String>,
+    /// Optional `--permission-mode` override (validated against
+    /// [`crate::session_launch::PERMISSION_MODES`]).
+    #[serde(default)]
+    pub permission_mode: Option<String>,
 }
 
 /// Headlessly resume a rate-limited session by spawning
 /// `claude --resume <session_id> -p "continue"` detached in the given workspace.
 pub fn spawn_resume(session_id: &str, workspace_path: &str) -> Result<(), String> {
-    spawn_resume_prompt(session_id, workspace_path, "continue")
+    spawn_resume_prompt(session_id, workspace_path, "continue", None, None, None)
 }
 
 /// [`spawn_resume`] with a caller-supplied follow-up prompt (the history
 /// panel's "恢复会话" box). Empty/whitespace prompts fall back to "continue".
+/// `model` / `effort` / `permission_mode` mirror the new-session overrides and
+/// are passed through to the resumed `claude` invocation when non-blank.
 pub fn spawn_resume_prompt(
     session_id: &str,
     workspace_path: &str,
     prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
 ) -> Result<(), String> {
-    spawn_resume_tracked_prompt(session_id, workspace_path, prompt, |_success| {})
+    spawn_resume_tracked_prompt(
+        session_id,
+        workspace_path,
+        prompt,
+        model,
+        effort,
+        permission_mode,
+        |_success| {},
+    )
 }
 
 /// Like [`spawn_resume`] but invokes `on_exit(success)` from the reaper thread
@@ -198,17 +221,30 @@ pub fn spawn_resume_tracked(
     workspace_path: &str,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<(), String> {
-    spawn_resume_tracked_prompt(session_id, workspace_path, "continue", on_exit)
+    spawn_resume_tracked_prompt(session_id, workspace_path, "continue", None, None, None, on_exit)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_resume_tracked_prompt(
     session_id: &str,
     workspace_path: &str,
     prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<(), String> {
     let prompt = prompt.trim();
     let prompt = if prompt.is_empty() { "continue" } else { prompt };
+    // Validate overrides (permission mode) before any CLI/filesystem checks so
+    // the frontend gets a stable error regardless of the host environment.
+    let mut override_args = Vec::new();
+    crate::session_launch::push_session_override_args(
+        &mut override_args,
+        model,
+        effort,
+        permission_mode,
+    )?;
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
         return Err("Claude CLI not found on PATH".to_string());
@@ -224,8 +260,15 @@ fn spawn_resume_tracked_prompt(
         workspace_path,
         stderr_log.display()
     ));
-    let pid =
-        spawn_resume_with_path(&claude, session_id, workspace_path, prompt, &stderr_log, on_exit)?;
+    let pid = spawn_resume_with_path(
+        &claude,
+        session_id,
+        workspace_path,
+        prompt,
+        &override_args,
+        &stderr_log,
+        on_exit,
+    )?;
     crate::log_debug(&format!(
         "resume_session: spawned pid {} for session {}",
         pid, session_id
@@ -237,11 +280,15 @@ fn spawn_resume_tracked_prompt(
 /// `stderr_log` and a background thread that reaps the child and records its
 /// exit status — so failures stop being silent and we don't accumulate zombies.
 /// Thin wrapper over the generic [`crate::session_launch::spawn_claude_detached`].
+/// `override_args` carries the pre-validated `--model` / `--effort` /
+/// `--permission-mode` flags (empty for the auto-resume scheduler).
+#[allow(clippy::too_many_arguments)]
 fn spawn_resume_with_path(
     claude_path: &str,
     session_id: &str,
     workspace_path: &str,
     prompt: &str,
+    override_args: &[String],
     stderr_log: &Path,
     on_exit: impl FnOnce(bool) + Send + 'static,
 ) -> Result<u32, String> {
@@ -251,6 +298,7 @@ fn spawn_resume_with_path(
         "-p".to_string(),
         prompt.to_string(),
     ];
+    args.extend(override_args.iter().cloned());
     // Route native permission prompts to Fleet's Decision Panel instead of
     // headless auto-deny (no-op when the fleet MCP server isn't injected).
     args.extend(crate::session_launch::permission_prompt_tool_args());
@@ -526,6 +574,7 @@ mod tests {
             "test-session-id",
             &tmp.to_string_lossy(),
             "continue",
+            &[],
             &log,
             move |_success| {
                 exit_flag_cb.store(true, std::sync::atomic::Ordering::SeqCst);

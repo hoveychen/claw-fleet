@@ -1647,6 +1647,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             &req.session_id,
                             &req.workspace_path,
                             req.prompt.as_deref().unwrap_or("continue"),
+                            req.model.as_deref(),
+                            req.effort.as_deref(),
+                            req.permission_mode.as_deref(),
                         ) {
                             Ok(()) => {
                                 let _ = request.respond(

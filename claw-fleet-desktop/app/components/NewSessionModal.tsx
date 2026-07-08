@@ -5,11 +5,6 @@ import { useTranslation } from "react-i18next";
 import { FileText, Folder, FolderOpen } from "lucide-react";
 import { useConnectionStore, useSessionsStore } from "../store";
 import {
-  CLAUDE_EFFORT_CHOICES,
-  CLAUDE_MODEL_CHOICES,
-  CLAUDE_PERMISSION_MODE_CHOICES,
-} from "../modelChoices";
-import {
   ChatComposer,
   type ChatComposerAttachment,
   type ChatComposerHandle,
@@ -17,6 +12,7 @@ import {
 } from "./ChatComposer";
 import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
+import { SessionOptionPills } from "./SessionOptionPills";
 import styles from "./NewSessionModal.module.css";
 
 export interface NewSessionModalProps {
@@ -167,14 +163,6 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
     }
   };
 
-  const modelLabel =
-    CLAUDE_MODEL_CHOICES.find((m) => m.value === model)?.label ??
-    t("new_session.model_pill_default");
-  const effortLabel = effort || t("new_session.effort_pill_default");
-  const permissionLabel = permissionMode
-    ? t(`new_session.permission_${permissionMode}`)
-    : t("new_session.permission_pill_default");
-
   const workspacePill = (
     <PillMenu
       placement="below"
@@ -226,68 +214,15 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   );
 
   const optionPills = (
-    <>
-      <PillMenu
-        placement="above"
-        label={modelLabel}
-        title={t("new_session.model")}
-        disabled={submitting}
-        items={[
-          {
-            id: "",
-            label: t("new_session.model_default"),
-            checked: model === "",
-            onSelect: () => setModel(""),
-          },
-          ...CLAUDE_MODEL_CHOICES.map((m) => ({
-            id: m.value,
-            label: m.label,
-            checked: m.value === model,
-            onSelect: () => setModel(m.value),
-          })),
-        ]}
-      />
-      <PillMenu
-        placement="above"
-        label={effortLabel}
-        title={t("new_session.effort")}
-        disabled={submitting}
-        items={[
-          {
-            id: "",
-            label: t("new_session.effort_default"),
-            checked: effort === "",
-            onSelect: () => setEffort(""),
-          },
-          ...CLAUDE_EFFORT_CHOICES.map((e) => ({
-            id: e,
-            label: e,
-            checked: e === effort,
-            onSelect: () => setEffort(e),
-          })),
-        ]}
-      />
-      <PillMenu
-        placement="above"
-        label={permissionLabel}
-        title={t("new_session.permission")}
-        disabled={submitting}
-        items={[
-          {
-            id: "",
-            label: t("new_session.permission_default"),
-            checked: permissionMode === "",
-            onSelect: () => setPermissionMode(""),
-          },
-          ...CLAUDE_PERMISSION_MODE_CHOICES.map((m) => ({
-            id: m,
-            label: t(`new_session.permission_${m}`),
-            checked: m === permissionMode,
-            onSelect: () => setPermissionMode(m),
-          })),
-        ]}
-      />
-    </>
+    <SessionOptionPills
+      model={model}
+      effort={effort}
+      permissionMode={permissionMode}
+      onModelChange={setModel}
+      onEffortChange={setEffort}
+      onPermissionModeChange={setPermissionMode}
+      disabled={submitting}
+    />
   );
 
   return (
