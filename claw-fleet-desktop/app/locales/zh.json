@@ -1295,6 +1295,8 @@
     "tab_workflow": "Workflow",
     "tab_tasks": "任务",
     "tasks_anonymous": "(匿名计划)",
+    "tasks_status_active": "进行中",
+    "tasks_status_done": "已完成",
     "section_timeline": "来龙去脉",
     "section_plan": "计划",
     "plan_kanban": "看板",
