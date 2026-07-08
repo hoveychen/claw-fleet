@@ -77,6 +77,9 @@ pub struct TaskItem {
 #[serde(rename_all = "camelCase")]
 pub struct TaskPlanDetail {
     pub id: Option<String>,
+    /// Human-readable plan title from the `**Plan:** …` line, when present.
+    /// `None` for a plan block with no title line (e.g. a bare anonymous block).
+    pub title: Option<String>,
     /// `None` when the plan lives in the main checkout's TASKS.md; otherwise a
     /// relative (or absolute fallback) path to the worktree source file.
     pub source: Option<String>,
@@ -822,21 +825,66 @@ pub fn summarize_workspace_tasks(
     })
 }
 
-/// List every plan (active *and* completed) with all of its task items, for the
+/// List plans (active *and* completed) with all of their task items, for the
 /// detail view. Scans the same source set as the hook.
-pub fn list_workspace_task_plans(cwd: &Path) -> Vec<TaskPlanDetail> {
+///
+/// `session_id` scopes the result to *one session's* focused plan:
+/// - `None` → every plan in the workspace (the `fleet plan list`/`get` view).
+/// - `Some(sid)` → only the plan this session is focused on, resolved from the
+///   per-session `task_progress` side-channel (the same signal the session card
+///   uses). When the session has **no** record — a legacy hand-edited file or a
+///   non-Fleet session — the result is empty, so the detail Tasks tab hides
+///   instead of dumping every plan the workspace ever had.
+pub fn list_workspace_task_plans(cwd: &Path, session_id: Option<&str>) -> Vec<TaskPlanDetail> {
+    // Resolve the session's focus from the side-channel here (the only impure
+    // step); the actual scanning + filtering lives in the pure inner function
+    // so it stays unit-testable without touching `~/.fleet`.
+    let scope = match session_id {
+        None => PlanScope::All,
+        Some(sid) => match crate::task_progress::read(sid) {
+            Some(rec) => PlanScope::Only(rec.plan_id),
+            None => PlanScope::None,
+        },
+    };
+    list_workspace_task_plans_scoped(cwd, scope)
+}
+
+/// How much of the workspace's plan set a query wants to see.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlanScope {
+    /// Every plan in the workspace (the `fleet plan list`/`get` view).
+    All,
+    /// Only the plan with this sentinel id (the session-focused detail view).
+    Only(String),
+    /// The session has no focus record → show nothing (hide the detail tab).
+    None,
+}
+
+/// Scan + dedup the workspace's plans, then narrow to `scope`. Pure w.r.t. the
+/// per-session side-channel — `scope` already encodes the resolved focus — so
+/// the three-way filtering can be tested against a tempdir alone.
+fn list_workspace_task_plans_scoped(cwd: &Path, scope: PlanScope) -> Vec<TaskPlanDetail> {
+    if matches!(scope, PlanScope::None) {
+        return Vec::new();
+    }
     let main_root = discover_main_checkout_root(cwd);
     let sources = collect_task_sources(cwd, main_root.as_deref());
     if sources.is_empty() {
         return Vec::new();
     }
     let (raw, _) = collect_from_sources(&sources, false);
-    let deduped = dedup_blocks_keep_latest_mtime(raw);
+    let mut deduped = dedup_blocks_keep_latest_mtime(raw);
+    // A stale focus record pointing at another workspace's plan matches nothing
+    // here, so `retain` naturally yields an empty (hidden) tab.
+    if let PlanScope::Only(plan_id) = &scope {
+        deduped.retain(|b| b.id.as_deref() == Some(plan_id.as_str()));
+    }
     let primary: Option<PathBuf> = main_root.as_ref().map(|r| r.join("TASKS.md"));
     deduped
         .into_iter()
         .map(|b| TaskPlanDetail {
             source: display_source(&b.source, main_root.as_deref(), primary.as_deref()),
+            title: extract_plan_name(&b.body),
             id: b.id,
             items: parse_task_items(&b.body),
         })
@@ -1572,16 +1620,52 @@ trailing notes outside\n";
         std::fs::write(
             main.join("TASKS.md"),
             "<!-- fleet:prd:begin id=\"x\" -->\n\
+**Plan:** Ship the thing\n\
 - [x] **P1** — done\n\
 - [ ] **P2** — todo\n\
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let plans = list_workspace_task_plans(main);
+        // `None` session → every plan (the CLI `plan list`/`get` view).
+        let plans = list_workspace_task_plans(main, None);
         assert_eq!(plans.len(), 1);
         assert_eq!(plans[0].id.as_deref(), Some("x"));
+        // Human-readable title lifted from the `**Plan:**` line.
+        assert_eq!(plans[0].title.as_deref(), Some("Ship the thing"));
         assert_eq!(plans[0].items.len(), 2);
         assert!(plans[0].items[0].done);
         assert!(!plans[0].items[1].done);
+    }
+
+    #[test]
+    fn scoped_view_filters_to_one_plan_and_hides_when_no_focus() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"alpha\" v=\"2\" -->\n\
+**Plan:** Alpha work\n\
+- [ ] **P1** — a\n\
+<!-- fleet:prd:end id=\"alpha\" -->\n\
+<!-- fleet:prd:begin id=\"beta\" v=\"2\" -->\n\
+**Plan:** Beta work\n\
+- [x] **P1** — b done\n\
+<!-- fleet:prd:end id=\"beta\" -->\n",
+        )
+        .unwrap();
+        // All → both plans, each carrying its title.
+        let all = list_workspace_task_plans_scoped(main, PlanScope::All);
+        assert_eq!(all.len(), 2);
+        assert!(all.iter().any(|p| p.title.as_deref() == Some("Alpha work")));
+        assert!(all.iter().any(|p| p.title.as_deref() == Some("Beta work")));
+        // Only(id) → just the focused plan, even though it's already complete.
+        let only_beta = list_workspace_task_plans_scoped(main, PlanScope::Only("beta".into()));
+        assert_eq!(only_beta.len(), 1);
+        assert_eq!(only_beta[0].id.as_deref(), Some("beta"));
+        assert_eq!(only_beta[0].title.as_deref(), Some("Beta work"));
+        // Only(unknown) → nothing (stale record pointing elsewhere).
+        assert!(list_workspace_task_plans_scoped(main, PlanScope::Only("ghost".into())).is_empty());
+        // None → session has no focus record → hide the tab entirely.
+        assert!(list_workspace_task_plans_scoped(main, PlanScope::None).is_empty());
     }
 }

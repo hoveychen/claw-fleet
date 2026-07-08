@@ -287,6 +287,8 @@ export interface TaskItem {
 /** A TASKS.md plan with all of its task items (detail view). */
 export interface TaskPlanDetail {
   id?: string | null;
+  /** Human-readable plan title from the `**Plan:**` line; absent when the block has none. */
+  title?: string | null;
   /** Relative source path when the plan lives in a worktree; absent for the main checkout. */
   source?: string | null;
   items: TaskItem[];
