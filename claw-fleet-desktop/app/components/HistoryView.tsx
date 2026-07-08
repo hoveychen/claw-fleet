@@ -12,13 +12,40 @@ import styles from "./HistoryView.module.css";
 /** A session spawned but not yet discovered by the scanner. We poll the session
  *  list for the matching `SessionInfo` and swap the detail column over to it. */
 interface PendingSpawn extends NewSessionCreated {
-  /** Wall-clock ms when the spawn returned — fallback correlation window. */
-  startedMs: number;
+  /** Ad-hoc session ids that already existed when the spawn returned. The new
+   *  session is the one whose id is NOT in this set — pid can't identify it
+   *  (see `matchSpawnedSession`). */
+  knownIds: Set<string>;
 }
 
 /** Give up on the in-place spinner after this long and offer an escape hatch;
  *  the scanner polls every ~5s so a healthy spawn resolves well within this. */
 const START_TIMEOUT_MS = 30_000;
+
+/**
+ * Pick the freshly-spawned session out of the scanned list.
+ *
+ * We deliberately do NOT match on pid. The scanner assigns a running claude
+ * process's pid to *every* session on disk in that process's cwd (see
+ * `resolve_pid` in session.rs): a headless `claude -p` launch carries no
+ * `--resume` flag, so with one live process in the workspace every ad-hoc
+ * session there gets tagged with the same pid — matching pid would surface an
+ * arbitrary historical session instead of the new one.
+ *
+ * Instead we correlate by novelty: the new session is the ad-hoc session in the
+ * target workspace whose id was absent when the spawn returned. If more than one
+ * is new (unlikely inside the poll window), the most-recently-created wins.
+ */
+function matchSpawnedSession(
+  adhocSessions: SessionInfo[],
+  pending: PendingSpawn,
+): SessionInfo | undefined {
+  return adhocSessions
+    .filter(
+      (s) => s.workspacePath === pending.workspacePath && !pending.knownIds.has(s.id),
+    )
+    .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
+}
 
 const LIVE_STATUSES = new Set([
   "thinking", "executing", "streaming", "processing",
@@ -137,27 +164,21 @@ export function HistoryView() {
 
   // Form spawned the process: leave compose mode and start polling for the
   // session so we can swap the column over to its live SessionDetail in place.
+  // Snapshot the ad-hoc session ids that exist *now* so the poller can tell the
+  // new session apart from the workspace's existing ones (pid can't — see
+  // matchSpawnedSession).
   const handleCreated = (info: NewSessionCreated) => {
     setComposing(false);
     setStartTimedOut(false);
-    setPending({ ...info, startedMs: Date.now() });
+    setPending({ ...info, knownIds: new Set(adhocSessions.map((s) => s.id)) });
   };
 
-  // Match the pending spawn to a scanned session: exact pid first, then the
-  // newest ad-hoc session in the same workspace created after the spawn (the
-  // pid may not be attached yet on the first poll). `adhocSessions` is already
-  // filtered to NEW_SESSION_ENTRYPOINT, so both paths stay scoped to launches.
+  // Poll the scanned list for the freshly-spawned session (by id novelty, not
+  // pid) and swap the detail column over to it once it appears. `adhocSessions`
+  // is filtered to NEW_SESSION_ENTRYPOINT, so this stays scoped to launches.
   useEffect(() => {
     if (!pending) return;
-    const match =
-      adhocSessions.find((s) => s.pid === pending.pid) ??
-      adhocSessions
-        .filter(
-          (s) =>
-            s.workspacePath === pending.workspacePath &&
-            s.createdAtMs >= pending.startedMs - 3000,
-        )
-        .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
+    const match = matchSpawnedSession(adhocSessions, pending);
     if (match) {
       setSelected(match);
       setDetailQuery(null);
