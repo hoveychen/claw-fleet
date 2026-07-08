@@ -1256,8 +1256,9 @@ pub fn delete_connection(id: String) -> Result<(), String> {
 // ── SSH helpers ───────────────────────────────────────────────────────────────
 
 /// Apply the real HOME environment to an SSH/SCP `Command` so that the child
-/// process finds `~/.ssh/config` at the true user home, not inside the macOS
-/// sandbox container (`~/Library/Containers/<id>/Data/`).
+/// process finds `~/.ssh/config` at the true user home even under a polluted
+/// `$HOME` (historically: the macOS App-Sandbox container path
+/// `~/Library/Containers/<id>/Data/`, before the sandbox was dropped 2026-07).
 fn apply_real_home(cmd: &mut std::process::Command) {
     if let Some(home) = crate::session::real_home_dir() {
         cmd.env("HOME", home);

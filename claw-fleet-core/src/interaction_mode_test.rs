@@ -400,8 +400,9 @@ fn build_cli_message(
 /// Build the `claude --allowed-tools <tool> -p <prompt>` command Fleet
 /// spawns from the QA diagnostic. Extracted so it can be unit-tested
 /// without actually running claude — the failure mode this helper exists
-/// to defend against (sandbox-redirected `$HOME` on Tauri release builds)
-/// is invisible to a behavioural test that just spawns the child.
+/// to defend against (a redirected `$HOME`; historically the App-Sandbox
+/// container on Tauri release builds, before the sandbox was dropped
+/// 2026-07) is invisible to a behavioural test that just spawns the child.
 ///
 /// `--allowed-tools <name>` is load-bearing: without it the tool isn't
 /// in `claude -p`'s default tool list, so the CLAUDE.md interaction-mode
@@ -409,13 +410,14 @@ fn build_cli_message(
 /// plain text. `--output-format stream-json --verbose` makes the
 /// captured output self-explanatory.
 ///
-/// `HOME` is explicitly overridden to `real_home_dir()`. Without it, a
-/// child spawned from a sandboxed Fleet desktop (macOS App Sandbox)
-/// inherits `$HOME=~/Library/Containers/com.hoveychen.claw-fleet/Data/`,
-/// where Claude Code reads an empty container settings.json with no
+/// `HOME` is explicitly overridden to `real_home_dir()`. Origin: a child
+/// spawned from the (then-sandboxed) Fleet desktop inherited
+/// `$HOME=~/Library/Containers/com.hoveychen.claw-fleet/Data/`,
+/// where Claude Code read an empty container settings.json with no
 /// PreToolUse hook for AskUserQuestion → CC's default permission gate
-/// denies the call in `-p` (non-interactive) mode → permission_denials
-/// fires and the diagnostic reports a false negative.
+/// denied the call in `-p` (non-interactive) mode → permission_denials
+/// fired and the diagnostic reported a false negative. The sandbox is gone
+/// (2026-07); the override stays as a defence against a polluted `$HOME`.
 pub(crate) fn build_claude_command(
     claude_bin: &std::path::Path,
     allowed_tool: &str,
@@ -460,12 +462,13 @@ mod tests {
 
     #[test]
     fn claude_command_overrides_home_to_escape_macos_sandbox() {
-        // When Fleet desktop (macOS App Sandbox enabled) spawns
-        // `claude -p`, the child inherits `$HOME=~/Library/Containers/
-        // com.hoveychen.claw-fleet/Data/`. Claude Code then reads an
-        // empty container settings.json with no PreToolUse hook for
-        // AskUserQuestion → CC's default permission gate denies the
-        // tool in `-p` mode and the diagnostic reports a false negative.
+        // Historically (App Sandbox enabled, dropped 2026-07): when Fleet
+        // desktop spawned `claude -p`, the child inherited
+        // `$HOME=~/Library/Containers/com.hoveychen.claw-fleet/Data/`.
+        // Claude Code then read an empty container settings.json with no
+        // PreToolUse hook for AskUserQuestion → CC's default permission
+        // gate denied the tool in `-p` mode and the diagnostic reported a
+        // false negative. The HOME pin stays as a polluted-$HOME defence.
         //
         // The fix is to explicitly set HOME to `real_home_dir()` on the
         // Command builder. Pin that with this regression test: the

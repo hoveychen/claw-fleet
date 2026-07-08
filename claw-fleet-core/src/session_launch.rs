@@ -162,11 +162,13 @@ pub fn spawn_claude_detached_with_envs(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::from(stderr_file));
-    // Under the macOS App Sandbox the desktop app's own $HOME points at the
-    // container (~/Library/Containers/.../Data). A claude child inheriting
-    // that would read config from and write its session JSONL into the
-    // container — invisible to the scanner, which reads the real
-    // ~/.claude/projects. Pin the child's HOME to the real home dir.
+    // Pin the child's HOME to the real home dir. Origin: the desktop app
+    // used to ship sandboxed (macOS App Sandbox), where its own $HOME
+    // pointed at the container (~/Library/Containers/.../Data) and an
+    // inheriting claude child would write its session JSONL there —
+    // invisible to the scanner, which reads the real ~/.claude/projects.
+    // The sandbox is gone (entitlements.plist, 2026-07); the pin stays as
+    // a cheap defence against any polluted/overridden $HOME.
     if let Some(home) = crate::session::real_home_dir() {
         cmd.env("HOME", home);
     }
@@ -330,11 +332,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_claude_detached_overrides_polluted_home() {
-        // When the desktop app runs under the macOS App Sandbox, its own
-        // $HOME points at the container (~/Library/Containers/.../Data). A
-        // spawned claude must NOT inherit that — it would read config and
-        // write session JSONLs inside the container, invisible to the
-        // scanner. The child has to see real_home_dir() instead.
+        // A spawned claude must NOT inherit a polluted $HOME (historically:
+        // the App-Sandbox container path ~/Library/Containers/.../Data,
+        // before the sandbox was dropped in 2026-07) — it would read config
+        // and write session JSONLs there, invisible to the scanner. The
+        // child has to see real_home_dir() instead.
         //
         // FLEET_HOME stands in for the real home here: it is
         // real_home_dir()'s first-priority source on every platform. Without
