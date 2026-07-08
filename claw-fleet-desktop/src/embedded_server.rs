@@ -509,6 +509,14 @@ fn handle_api_request(
             }
         }
 
+        "/wiki_search" => {
+            let q = query
+                .get("q")
+                .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                .unwrap_or_default();
+            json_ok(&backend.search_wiki_docs(&q))
+        }
+
         "/wiki_delete" if request.method() == &tiny_http::Method::Post => {
             let dec = |key: &str| {
                 query

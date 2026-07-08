@@ -1744,6 +1744,14 @@ fn get_wiki_file_text(
 }
 
 #[tauri::command]
+fn search_wiki_docs(
+    query: String,
+    state: tauri::State<AppState>,
+) -> Vec<claw_fleet_core::wiki::WikiSearchHit> {
+    state.backend.read().unwrap().search_wiki_docs(&query)
+}
+
+#[tauri::command]
 fn delete_wiki_doc(slug: String, state: tauri::State<AppState>) -> Result<(), String> {
     state.backend.read().unwrap().delete_wiki_doc(&slug)
 }
@@ -3924,6 +3932,7 @@ pub fn run() {
             get_wiki_file_text,
             delete_wiki_doc,
             delete_wiki_version,
+            search_wiki_docs,
             list_skills,
             get_skill_content,
             list_skill_files,

@@ -472,6 +472,141 @@ pub fn get_doc(slug: &str) -> Result<WikiDoc, String> {
     get_doc_in(&wiki_dir_or_err()?, slug)
 }
 
+// ── Search ───────────────────────────────────────────────────────────────────
+
+/// One full-text search hit. `slug` keys back into the doc list; `snippet` is
+/// a plain-text excerpt around the first content match (empty for hits that
+/// only matched title/slug/workspace metadata).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiSearchHit {
+    pub slug: String,
+    /// "meta" (title/slug/workspace name) or "content" (entry-file text).
+    pub field: String,
+    pub snippet: String,
+}
+
+/// Case-insensitive (ASCII) substring search over every doc's metadata and the
+/// plain text of its current version's entry file. Scans on demand — the doc
+/// set is small and this keeps the no-global-index concurrency design intact.
+pub fn search_docs(query: &str) -> Vec<WikiSearchHit> {
+    wiki_dir().map(|root| search_docs_in(&root, query)).unwrap_or_default()
+}
+
+/// [`search_docs`] against an explicit wiki root.
+pub fn search_docs_in(root: &Path, query: &str) -> Vec<WikiSearchHit> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut hits = Vec::new();
+    for doc in list_docs_in(root) {
+        let meta = format!("{} {} {}", doc.title, doc.slug, doc.workspace_name);
+        if find_ci(&meta, query).is_some() {
+            hits.push(WikiSearchHit {
+                slug: doc.slug,
+                field: "meta".to_string(),
+                snippet: String::new(),
+            });
+            continue;
+        }
+        let Ok(file) = get_file_in(root, &doc.slug, "current", &doc.entry) else {
+            continue;
+        };
+        let Ok(raw) = String::from_utf8(file.bytes) else {
+            continue;
+        };
+        let text = if doc.kind == "markdown" { raw } else { strip_html(&raw) };
+        if let Some(pos) = find_ci(&text, query) {
+            hits.push(WikiSearchHit {
+                slug: doc.slug,
+                field: "content".to_string(),
+                snippet: snippet_around(&text, pos, query.len()),
+            });
+        }
+    }
+    hits
+}
+
+/// Byte offset of the first ASCII-case-insensitive occurrence of `needle` in
+/// `haystack`. Byte-exact (no Unicode case folding), so offsets are valid for
+/// snippet extraction; CJK text has no case and matches verbatim.
+fn find_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let (h, n) = (haystack.as_bytes(), needle.as_bytes());
+    if n.is_empty() || h.len() < n.len() {
+        return None;
+    }
+    (0..=h.len() - n.len()).find(|&i| h[i..i + n.len()].eq_ignore_ascii_case(n))
+}
+
+/// Plain-text excerpt (~200 bytes) around a match, snapped to char boundaries,
+/// whitespace collapsed.
+fn snippet_around(text: &str, pos: usize, match_len: usize) -> String {
+    let mut start = pos.saturating_sub(80);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (pos + match_len + 120).min(text.len());
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.extend(text[start..end].split_whitespace().collect::<Vec<_>>().join(" ").chars());
+    if end < text.len() {
+        out.push('…');
+    }
+    out
+}
+
+/// Crude tag stripper for search: drops <script>/<style> blocks, comments, and
+/// all tags; entities are left as-is (good enough for substring matching).
+fn strip_html(html: &str) -> String {
+    let mut out = String::with_capacity(html.len() / 2);
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    while i < html.len() {
+        if bytes[i] == b'<' {
+            let rest = &html[i..];
+            // Skip container blocks whose text content is not prose.
+            let block = ["<script", "<style"].iter().find_map(|open| {
+                if rest.len() >= open.len() && rest[..open.len()].eq_ignore_ascii_case(open) {
+                    let close = format!("</{}", &open[1..]);
+                    Some(find_ci(rest, &close).map_or(html.len() - i, |p| p + close.len()))
+                } else {
+                    None
+                }
+            });
+            if let Some(skip) = block {
+                // Fall through to tag skipping for the closing tag remainder.
+                i += skip;
+                if let Some(gt) = html[i..].find('>') {
+                    i += gt + 1;
+                }
+                continue;
+            }
+            if rest.starts_with("<!--") {
+                i += rest.find("-->").map_or(rest.len(), |p| p + 3);
+                continue;
+            }
+            match rest.find('>') {
+                Some(gt) => {
+                    i += gt + 1;
+                    out.push(' ');
+                }
+                None => break,
+            }
+        } else {
+            let ch = html[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
 pub fn get_doc_in(root: &Path, slug: &str) -> Result<WikiDoc, String> {
     read_doc_json(&root.join(slug))
 }
@@ -697,6 +832,46 @@ mod tests {
         fs::write(none.join("data.json"), "{}").unwrap();
         let err = publish_in(tmp().path(), &none, None, None, ws.path()).unwrap_err();
         assert!(err.contains("no HTML entry"), "{err}");
+    }
+
+    #[test]
+    fn search_meta_content_and_miss() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("perf-report.md");
+        fs::write(&md, "# Perf Report\n\n压测显示 tokenizer 吞吐率下降 40%。\n").unwrap();
+        publish_in(root.path(), &md, None, None, ws.path()).unwrap();
+        let html = ws.path().join("demo.html");
+        fs::write(
+            &html,
+            "<html><head><title>Demo</title><script>var secret=1;</script></head>\
+             <body><p>latency budget exceeded</p></body></html>",
+        )
+        .unwrap();
+        publish_in(root.path(), &html, None, None, ws.path()).unwrap();
+
+        // Title match → meta hit, no snippet.
+        let hits = search_docs_in(root.path(), "perf");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].slug, "perf-report");
+        assert_eq!(hits[0].field, "meta");
+        assert!(hits[0].snippet.is_empty());
+
+        // CJK content match → content hit with surrounding snippet.
+        let hits = search_docs_in(root.path(), "吞吐率");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].field, "content");
+        assert!(hits[0].snippet.contains("吞吐率下降"));
+
+        // HTML body text matches case-insensitively; script bodies do not.
+        let hits = search_docs_in(root.path(), "LATENCY");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].slug, "demo");
+        assert!(hits[0].snippet.contains("latency budget"));
+        assert!(search_docs_in(root.path(), "secret").is_empty());
+
+        assert!(search_docs_in(root.path(), "nonexistent-term").is_empty());
+        assert!(search_docs_in(root.path(), "   ").is_empty());
     }
 
     #[test]

@@ -370,6 +370,8 @@ pub trait Backend: Send + Sync {
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String>;
     /// Delete a single non-current version.
     fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String>;
+    /// Full-text search over doc metadata and current-version entry files.
+    fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit>;
 
     // ── TASKS.md plans ─────────────────────────────────────────────────────────
     /// PRD plans (with full task items) visible to a session whose workspace

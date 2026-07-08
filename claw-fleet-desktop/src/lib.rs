@@ -183,6 +183,9 @@ impl Backend for NullBackend {
     fn delete_wiki_version(&self, _: &str, _: &str) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn search_wiki_docs(&self, _: &str) -> Vec<claw_fleet_core::wiki::WikiSearchHit> {
+        vec![]
+    }
     fn get_task_plans(
         &self,
         _: &str,
