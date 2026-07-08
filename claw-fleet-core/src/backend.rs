@@ -717,6 +717,10 @@ pub trait Backend: Send + Sync {
     // ── Interaction mode (global CLAUDE.md guidance) ────────────────────────
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_interaction_mode(&self) -> Result<(), String>;
+
+    // ── Wiki guidance (global CLAUDE.md block) ──────────────────────────────
+    fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String>;
+    fn remove_wiki_guidance(&self) -> Result<(), String>;
     /// QA diagnostics: report on the four backend-observable checkpoints in
     /// the AskUserQuestion → Decision Card pipeline. The frontend appends a
     /// fifth row (Tauri listener self-test) it owns.

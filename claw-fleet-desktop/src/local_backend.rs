@@ -2345,6 +2345,14 @@ impl Backend for LocalBackend {
         crate::interaction_mode::remove_interaction_mode()
     }
 
+    fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String> {
+        crate::wiki_guidance::apply_wiki_guidance(locale)
+    }
+
+    fn remove_wiki_guidance(&self) -> Result<(), String> {
+        crate::wiki_guidance::remove_wiki_guidance()
+    }
+
     fn interaction_diagnostics(
         &self,
     ) -> Vec<crate::interaction_mode_diagnostics::DiagnosticCheck> {

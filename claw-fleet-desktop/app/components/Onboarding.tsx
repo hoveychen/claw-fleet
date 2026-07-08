@@ -49,6 +49,7 @@ interface HookSetupPlan {
   planApprovalInstalled: boolean;
   prdContextInstalled: boolean;
   prdDisciplineInstalled: boolean;
+  wikiGuidanceInstalled: boolean;
 }
 
 type NotificationMode = "all" | "user_action" | "none";
@@ -731,6 +732,42 @@ function PrdModeCard({
   );
 }
 
+function WikiGuidanceCard({
+  enabled,
+  onToggle,
+}: {
+  enabled: boolean;
+  onToggle: (enabled: boolean) => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className={`${styles.card} ${styles.card_info}`}>
+      <div className={styles.card_header}>
+        <span className={styles.card_icon}>&#x1F4DA;</span>
+        <span className={styles.card_title}>{t("onboarding.wiki_guidance.title")}</span>
+      </div>
+      <p className={styles.card_description}>{t("onboarding.wiki_guidance.description")}</p>
+
+      <div className={styles.hook_feature_section}>
+        <div className={styles.hook_feature_header}>
+          <div className={styles.hook_feature_text}>
+            <span className={styles.settings_label}>{t("settings.wiki_guidance_enabled")}</span>
+          </div>
+          <label className={styles.hook_feature_toggle}>
+            <input
+              type="checkbox"
+              checked={enabled}
+              onChange={(e) => onToggle(e.target.checked)}
+              className={styles.source_checkbox}
+            />
+          </label>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InteractionModeCard({
   enabled,
   onToggle,
@@ -1068,6 +1105,26 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, []);
 
+  // ── Wiki guidance state — default off ──────────────────────────────────
+  const [wikiGuidanceEnabled, setWikiGuidanceEnabled] = useState(
+    () => getItem("wiki-guidance-enabled") === "true",
+  );
+
+  const handleToggleWikiGuidance = useCallback(async (enabled: boolean) => {
+    setWikiGuidanceEnabled(enabled);
+    setItem("wiki-guidance-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_wiki_guidance");
+      } else {
+        await invoke("remove_wiki_guidance");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("wiki guidance toggle failed:", e);
+    }
+  }, []);
+
   // ── Notification state ──────────────────────────────────────────────────
   const [notifMode, setNotifMode] = useState<NotificationMode>(
     () => (getItem("notification-mode") as NotificationMode) || "user_action",
@@ -1301,6 +1358,15 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             </div>
           )}
 
+          {unseenFeatures.has("wiki_guidance") && (
+            <div className={styles.cards}>
+              <WikiGuidanceCard
+                enabled={wikiGuidanceEnabled}
+                onToggle={handleToggleWikiGuidance}
+              />
+            </div>
+          )}
+
           <div className={styles.footer}>
             <button className={styles.btn_primary} onClick={handleDismiss}>
               {t("onboarding.dismiss")}
@@ -1395,6 +1461,12 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                       <PrdModeCard
                         enabled={prdModeEnabled}
                         onToggle={handleTogglePrdMode}
+                      />
+                    )}
+                    {hasClaudeCode && (
+                      <WikiGuidanceCard
+                        enabled={wikiGuidanceEnabled}
+                        onToggle={handleToggleWikiGuidance}
                       />
                     )}
                   </div>

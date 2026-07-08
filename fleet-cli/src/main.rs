@@ -546,6 +546,27 @@ enum WikiCommands {
         #[arg(long)]
         version: Option<String>,
     },
+    /// Manage the agent-guidance block in ~/.claude/CLAUDE.md that tells
+    /// agents to publish durable reports/demos via `fleet wiki publish`
+    Guidance {
+        #[command(subcommand)]
+        action: WikiGuidanceCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum WikiGuidanceCommands {
+    /// Write ~/.claude/fleet-wiki-guidance.md and inject its @import into
+    /// ~/.claude/CLAUDE.md (idempotent)
+    Apply {
+        /// Guidance locale: `en` or `zh`
+        #[arg(long, default_value = "en")]
+        locale: String,
+    },
+    /// Strip the sentinel block and delete the guidance file (idempotent)
+    Remove,
+    /// Print whether the guidance block is currently installed
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -1811,6 +1832,37 @@ fn cmd_wiki(action: WikiCommands) {
                 }
             }
         }
+
+        WikiCommands::Guidance { action } => match action {
+            WikiGuidanceCommands::Apply { locale } => {
+                match claw_fleet_core::wiki_guidance::apply_wiki_guidance(&locale) {
+                    Ok(()) => println!(
+                        "Wiki guidance installed (~/.claude/fleet-wiki-guidance.md + CLAUDE.md import)."
+                    ),
+                    Err(e) => {
+                        eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            WikiGuidanceCommands::Remove => {
+                match claw_fleet_core::wiki_guidance::remove_wiki_guidance() {
+                    Ok(()) => println!("Wiki guidance removed."),
+                    Err(e) => {
+                        eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            WikiGuidanceCommands::Status => {
+                if claw_fleet_core::wiki_guidance::is_wiki_guidance_installed() {
+                    println!("installed");
+                } else {
+                    println!("not installed");
+                    std::process::exit(1);
+                }
+            }
+        },
     }
 }
 
