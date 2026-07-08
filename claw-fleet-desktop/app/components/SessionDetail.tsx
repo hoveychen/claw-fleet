@@ -3,9 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useSessionsStore } from "../store";
 import { NEW_SESSION_ENTRYPOINT } from "../types";
-import type { DecisionHistoryRecord, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
+import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
+import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { WorkflowDag } from "./blocks/WorkflowDag";
@@ -141,6 +142,7 @@ export function SessionDetail({
   const [viewTab, setViewTab] = useState<ViewTab>("messages");
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
+  const [liveThinking, setLiveThinking] = useState<LiveThinking | null>(null);
 
   // Claude Code Workflow runs for this session → reconstructed DAG, surfaced as
   // a session-level "Workflow" tab (not inline in the conversation). Publishing
@@ -156,6 +158,37 @@ export function SessionDetail({
     ).length;
     setWorkflowRunCount(sid, { total: workflowTrees.length, running });
   }, [liveSession?.id, workflowTrees, setWorkflowRunCount]);
+  // Live thinking: while the session is actively streaming, poll its
+  // stream-json sidecar for the token-level reasoning the CLI is emitting right
+  // now (the JSONL transcript only lands a *completed* thinking block, so this
+  // is the only way to show reasoning as it streams — same payload the VS Code
+  // extension renders, just teed to a file). Stops polling once the session
+  // leaves an active status; clears when the stream is no longer streaming.
+  const liveSessionId = liveSession?.id;
+  const liveActive = !!liveSession && ACTIVE_STATUSES.has(liveSession.status);
+  useEffect(() => {
+    if (!liveSessionId || !liveActive) {
+      setLiveThinking(null);
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      invoke<LiveThinking | null>("read_live_thinking", { sessionId: liveSessionId })
+        .then((lt) => {
+          if (!cancelled) setLiveThinking(lt);
+        })
+        .catch(() => {
+          if (!cancelled) setLiveThinking(null);
+        });
+    };
+    poll();
+    const timer = window.setInterval(poll, 700);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [liveSessionId, liveActive]);
+
   // Open a workflow fan-out agent's session (the scan registers it as
   // `agent-<agentId>`, see session.rs). No-op if a scan hasn't surfaced it yet.
   const openAgentSession = useCallback(
@@ -632,6 +665,9 @@ export function SessionDetail({
                   </button>
                 )}
                 <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} />
+                {liveThinking?.streaming && liveThinking.thinking && (
+                  <ThinkingBlock thinking={liveThinking.thinking} live />
+                )}
               </div>
 
               {/* Auto-follow indicator */}

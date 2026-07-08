@@ -343,6 +343,13 @@ pub trait Backend: Send + Sync {
     fn get_memory_content(&self, path: &str) -> Result<String, String>;
     fn get_memory_history(&self, path: &str) -> Vec<MemoryHistoryEntry>;
 
+    // ── Live thinking ────────────────────────────────────────────────────────
+    /// Token-level reasoning for a Fleet-spawned session that is streaming
+    /// right now, reconstructed from its live-thinking sidecar. `None` when the
+    /// session isn't Fleet-spawned or has no live sidecar. See
+    /// [`crate::live_thinking`].
+    fn read_live_thinking(&self, session_id: &str) -> Option<crate::live_thinking::LiveThinking>;
+
     // ── TASKS.md plans ─────────────────────────────────────────────────────────
     /// All PRD plans (with full task items) visible to a session whose
     /// workspace root is `workspace_path` — scans the same source set the
