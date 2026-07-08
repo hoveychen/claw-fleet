@@ -4,7 +4,7 @@
 // three hand-rolled copies: a quiet transparent pill that opens a custom
 // check-list popover, no native <select> chrome, no form labels.
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronDown } from "lucide-react";
 import styles from "./PillMenu.module.css";
 
@@ -26,7 +26,12 @@ export interface PillMenuProps {
   icon?: ReactNode;
   title?: string;
   disabled?: boolean;
-  /** Which side of the pill the popover opens on. */
+  /**
+   * Preferred side of the pill the popover opens on. If the nearest clipping
+   * ancestor (first `overflow != visible`, e.g. SessionDetail's
+   * overflow:hidden root) leaves too little room on that side and the other
+   * side has more, the menu flips automatically.
+   */
   placement: "above" | "below";
   items: PillMenuItem[];
   /** Items rendered after a separator (e.g. "Browse folder…"). */
@@ -51,7 +56,9 @@ export function PillMenu({
   className,
 }: PillMenuProps) {
   const [open, setOpen] = useState(false);
+  const [flipped, setFlipped] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Close on outside click.
   useEffect(() => {
@@ -62,6 +69,39 @@ export function PillMenu({
     window.addEventListener("mousedown", onDown);
     return () => window.removeEventListener("mousedown", onDown);
   }, [open]);
+
+  // Auto-flip: the menu is position:absolute, so it's clipped by the nearest
+  // ancestor with overflow != visible. After the menu renders (pre-paint),
+  // measure the room on the preferred side within that ancestor and flip when
+  // the menu doesn't fit but the opposite side is roomier.
+  useLayoutEffect(() => {
+    if (!open) {
+      setFlipped(false);
+      return;
+    }
+    const wrap = wrapRef.current;
+    const menu = menuRef.current;
+    if (!wrap || !menu) return;
+    let boundsTop = 0;
+    let boundsBottom = window.innerHeight;
+    for (let el = wrap.parentElement; el; el = el.parentElement) {
+      if (getComputedStyle(el).overflowY !== "visible") {
+        const r = el.getBoundingClientRect();
+        boundsTop = r.top;
+        boundsBottom = r.bottom;
+        break;
+      }
+    }
+    const pill = wrap.getBoundingClientRect();
+    const needed = menu.offsetHeight + 6;
+    const roomAbove = pill.top - boundsTop;
+    const roomBelow = boundsBottom - pill.bottom;
+    const preferred = placement === "above" ? roomAbove : roomBelow;
+    const opposite = placement === "above" ? roomBelow : roomAbove;
+    setFlipped(preferred < needed && opposite > preferred);
+  }, [open, placement]);
+
+  const side = flipped ? (placement === "above" ? "below" : "above") : placement;
 
   const renderItem = (item: PillMenuItem) => (
     <button
@@ -111,7 +151,8 @@ export function PillMenu({
       </button>
       {open && (
         <div
-          className={`${styles.menu} ${placement === "above" ? styles.menu_above : styles.menu_below}`}
+          ref={menuRef}
+          className={`${styles.menu} ${side === "above" ? styles.menu_above : styles.menu_below}`}
           role="menu"
         >
           {menuHeader?.(() => setOpen(false))}
