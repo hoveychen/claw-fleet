@@ -870,6 +870,15 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/handoff_chain" => {
+                let raw = query.get("session").map(|s| s.as_str()).unwrap_or("");
+                let sid = percent_decode_str(raw).decode_utf8_lossy().to_string();
+                let chain = crate::handoff::chain_containing(&sid);
+                let body = serde_json::to_string(&chain).unwrap_or_default();
+                let _ = request
+                    .respond(tiny_http::Response::from_string(body).with_header(json_header));
+            }
+
             "/wiki_docs" => {
                 let body = serde_json::to_string(&crate::wiki::list_docs()).unwrap_or_default();
                 let _ = request.respond(

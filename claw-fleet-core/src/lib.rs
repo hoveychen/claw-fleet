@@ -25,6 +25,7 @@ pub mod elicitation;
 pub mod feishu;
 pub mod foxy;
 pub mod guard;
+pub mod handoff;
 pub mod hooks;
 pub mod hooks_server;
 pub mod idle;
