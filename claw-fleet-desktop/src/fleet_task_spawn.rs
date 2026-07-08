@@ -144,11 +144,13 @@ fn serve_base_url_and_token() -> Option<(String, String)> {
     Some((format!("http://127.0.0.1:{port}"), token))
 }
 
-/// Ask the (unsandboxed) `fleet serve` daemon to spawn the task-runtime so the
-/// planner/worker `claude` can read the login keychain. Returns `Ok(())` once
-/// serve reports the process spawned; the runtime registry watcher then lights
-/// up the live badge exactly as with a local spawn. `Err` means serve is
-/// unreachable or refused — the caller falls back to a local spawn.
+/// Ask the `fleet serve` daemon to spawn the task-runtime so it is parented
+/// by the launchd daemon rather than the desktop process (originally this also
+/// escaped the desktop's App Sandbox, which was dropped 2026-07). Returns
+/// `Ok(())` once serve reports the process spawned; the runtime registry
+/// watcher then lights up the live badge exactly as with a local spawn. `Err`
+/// means serve is unreachable or refused — the caller falls back to a local
+/// spawn.
 pub fn spawn_via_serve(task_id: &str, workspace: &std::path::Path) -> Result<(), SpawnError> {
     let (base, token) =
         serve_base_url_and_token().ok_or_else(|| SpawnError::Spawn("serve daemon not running".into()))?;
@@ -173,7 +175,7 @@ pub fn spawn_via_serve(task_id: &str, workspace: &std::path::Path) -> Result<(),
 }
 
 /// Poll the runtime registry until the task's entry publishes (proves the
-/// out-of-sandbox runtime bound its HTTP server) or `appear_timeout` elapses.
+/// daemon-spawned runtime bound its HTTP server) or `appear_timeout` elapses.
 /// Used after [`spawn_via_serve`], where no local child handle exists to reap;
 /// on timeout the task-runtime log tail is folded into the error so a
 /// crash-before-register stays diagnosable.

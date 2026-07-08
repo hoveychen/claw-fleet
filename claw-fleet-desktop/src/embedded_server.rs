@@ -393,11 +393,24 @@ fn handle_api_request(
             if session_id.is_empty() || workspace.is_empty() {
                 return json_error(400, "missing session_id or workspace_path");
             }
-            let prompt = query
-                .get("prompt")
-                .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
-                .filter(|s| !s.trim().is_empty());
-            match backend.resume_session(session_id, workspace, prompt) {
+            let opt_param = |key: &str| {
+                query
+                    .get(key)
+                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                    .filter(|s| !s.trim().is_empty())
+            };
+            let prompt = opt_param("prompt");
+            let model = opt_param("model");
+            let effort = opt_param("effort");
+            let permission_mode = opt_param("permission_mode");
+            match backend.resume_session(
+                session_id,
+                workspace,
+                prompt,
+                model,
+                effort,
+                permission_mode,
+            ) {
                 Ok(()) => json_ok(&serde_json::json!({"ok": true})),
                 Err(e) => json_error(500, &e),
             }

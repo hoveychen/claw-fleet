@@ -195,11 +195,13 @@ pub fn spawn_claude_detached_with_envs(
         .stdin(std::process::Stdio::null())
         .stdout(stdout_stdio)
         .stderr(std::process::Stdio::from(stderr_file));
-    // Under the macOS App Sandbox the desktop app's own $HOME points at the
-    // container (~/Library/Containers/.../Data). A claude child inheriting
-    // that would read config from and write its session JSONL into the
-    // container — invisible to the scanner, which reads the real
-    // ~/.claude/projects. Pin the child's HOME to the real home dir.
+    // Pin the child's HOME to the real home dir. Origin: the desktop app
+    // used to ship sandboxed (macOS App Sandbox), where its own $HOME
+    // pointed at the container (~/Library/Containers/.../Data) and an
+    // inheriting claude child would write its session JSONL there —
+    // invisible to the scanner, which reads the real ~/.claude/projects.
+    // The sandbox is gone (entitlements.plist, 2026-07); the pin stays as
+    // a cheap defence against any polluted/overridden $HOME.
     if let Some(home) = crate::session::real_home_dir() {
         cmd.env("HOME", home);
     }
@@ -275,6 +277,41 @@ pub fn spawn_claude_detached_with_envs(
     Ok(pid)
 }
 
+/// Validate and append the per-session override flags (`--model`, `--effort`,
+/// `--permission-mode`) to `args`; blank/whitespace values are dropped. Shared
+/// by the new-session spawn and the history panel's resume so both accept the
+/// same overrides.
+pub fn push_session_override_args(
+    args: &mut Vec<String>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
+) -> Result<(), String> {
+    let permission_mode = permission_mode.map(str::trim).filter(|m| !m.is_empty());
+    if let Some(m) = permission_mode {
+        if !PERMISSION_MODES.contains(&m) {
+            return Err(format!(
+                "invalid permission mode '{}' (expected one of: {})",
+                m,
+                PERMISSION_MODES.join(", ")
+            ));
+        }
+    }
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        args.push("--model".to_string());
+        args.push(m.to_string());
+    }
+    if let Some(e) = effort.map(str::trim).filter(|e| !e.is_empty()) {
+        args.push("--effort".to_string());
+        args.push(e.to_string());
+    }
+    if let Some(m) = permission_mode {
+        args.push("--permission-mode".to_string());
+        args.push(m.to_string());
+    }
+    Ok(())
+}
+
 /// Start a brand-new headless Claude Code session: spawns
 /// `claude -p "<prompt>" [--model <m>] [--effort <e>]` detached in
 /// `workspace_path`. Returns as soon as the child is spawned; the session's
@@ -291,16 +328,10 @@ pub fn spawn_new_session(
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
     }
-    let permission_mode = permission_mode.map(str::trim).filter(|m| !m.is_empty());
-    if let Some(m) = permission_mode {
-        if !PERMISSION_MODES.contains(&m) {
-            return Err(format!(
-                "invalid permission mode '{}' (expected one of: {})",
-                m,
-                PERMISSION_MODES.join(", ")
-            ));
-        }
-    }
+    // Validate overrides (permission mode) before any CLI/filesystem checks so
+    // the frontend gets a stable error regardless of the host environment.
+    let mut override_args = Vec::new();
+    push_session_override_args(&mut override_args, model, effort, permission_mode)?;
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
         return Err("Claude CLI not found on PATH".to_string());
@@ -319,18 +350,7 @@ pub fn spawn_new_session(
     args.push("stream-json".to_string());
     args.push("--verbose".to_string());
     args.push("--include-partial-messages".to_string());
-    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
-        args.push("--model".to_string());
-        args.push(m.to_string());
-    }
-    if let Some(e) = effort.map(str::trim).filter(|e| !e.is_empty()) {
-        args.push("--effort".to_string());
-        args.push(e.to_string());
-    }
-    if let Some(m) = permission_mode {
-        args.push("--permission-mode".to_string());
-        args.push(m.to_string());
-    }
+    args.extend(override_args);
     args.extend(permission_prompt_tool_args());
     crate::log_debug(&format!(
         "new_session: claude {} <prompt {} chars> (cwd={}, stderr_log={})",
@@ -381,11 +401,11 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn spawn_claude_detached_overrides_polluted_home() {
-        // When the desktop app runs under the macOS App Sandbox, its own
-        // $HOME points at the container (~/Library/Containers/.../Data). A
-        // spawned claude must NOT inherit that — it would read config and
-        // write session JSONLs inside the container, invisible to the
-        // scanner. The child has to see real_home_dir() instead.
+        // A spawned claude must NOT inherit a polluted $HOME (historically:
+        // the App-Sandbox container path ~/Library/Containers/.../Data,
+        // before the sandbox was dropped in 2026-07) — it would read config
+        // and write session JSONLs there, invisible to the scanner. The
+        // child has to see real_home_dir() instead.
         //
         // FLEET_HOME stands in for the real home here: it is
         // real_home_dir()'s first-priority source on every platform. Without
