@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, Plus, ListTodo, FolderGit2, History } from "lucide-react";
+import { Menu, Shield, Plus, ListTodo, FolderGit2, Rocket } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useFleetManagedStore, useProjectsStore, useSessionsStore, useTasksStore, useUIStore } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo, TaskStatus } from "../types";
@@ -425,8 +425,8 @@ export function SessionList() {
                 className={`${styles.nav_item} ${viewMode === "history" ? styles.nav_active : ""}`}
                 onClick={() => setViewMode("history")}
               >
-                <span className={styles.nav_icon}><History size={14} strokeWidth={1.5} /></span>
-                <span className={styles.nav_label}>{t("view_history", "历史会话")}</span>
+                <span className={styles.nav_icon}><Rocket size={14} strokeWidth={1.5} /></span>
+                <span className={styles.nav_label}>{t("view_history", "启动台")}</span>
               </button>
               <button
                 className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
