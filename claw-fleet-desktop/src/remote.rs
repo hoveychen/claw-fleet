@@ -313,7 +313,7 @@ impl crate::backend::Backend for RemoteBackend {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
-    ) -> Result<u32, String> {
+    ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
         let req = claw_fleet_core::session_launch::SpawnSessionRequest {
             workspace_path,
             prompt,
@@ -321,9 +321,10 @@ impl crate::backend::Backend for RemoteBackend {
             effort,
             permission_mode,
         };
-        let resp: claw_fleet_core::session_launch::SpawnSessionResponse =
-            self.probe.post_json("/spawn_session", &req)?;
-        Ok(resp.pid)
+        // `session_id` deserializes to None when the probe is an older build
+        // that only returns `pid`; the frontend then falls back to novelty
+        // matching.
+        self.probe.post_json("/spawn_session", &req)
     }
 
     fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {

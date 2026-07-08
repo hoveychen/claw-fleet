@@ -19,6 +19,10 @@ export interface NewSessionCreated {
   /** PID of the spawned `claude` process — the caller matches it against
    *  `SessionInfo.pid` to locate the freshly-created session. */
   pid: number;
+  /** Session id pre-assigned via `--session-id`; lets the caller correlate
+   *  the scanned session directly by id. Absent when the backend is an older
+   *  remote probe that only returns the pid. */
+  sessionId?: string | null;
   /** Workspace the session was spawned in — fallback correlation key when the
    *  pid hasn't been attached to a `SessionInfo` yet. */
   workspacePath: string;
@@ -155,14 +159,17 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
     setSubmitting(true);
     setError(null);
     try {
-      const pid = await invoke<number>("spawn_new_claude_session", {
-        workspacePath: ws,
-        prompt: finalPrompt,
-        model: model || null,
-        effort: effort || null,
-        permissionMode: permissionMode || null,
-      });
-      onCreated({ pid, workspacePath: ws });
+      const resp = await invoke<{ pid: number; sessionId?: string | null }>(
+        "spawn_new_claude_session",
+        {
+          workspacePath: ws,
+          prompt: finalPrompt,
+          model: model || null,
+          effort: effort || null,
+          permissionMode: permissionMode || null,
+        },
+      );
+      onCreated({ pid: resp.pid, sessionId: resp.sessionId, workspacePath: ws });
     } catch (e) {
       setError(String(e));
       setSubmitting(false);

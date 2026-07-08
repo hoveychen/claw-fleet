@@ -248,6 +248,26 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
   return <>{elements}</>;
 });
 
+// ── Message timestamp ─────────────────────────────────────────────────────────
+
+/** Short clock time for a transcript record: `HH:MM` for today, `MM-DD HH:MM`
+ *  otherwise. Absolute (not relative) so rendered rows never go stale. */
+function formatMsgTime(ts: string): { short: string; full: string } | null {
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return null;
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const now = new Date();
+  const sameDay =
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate();
+  return {
+    short: sameDay ? hm : `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${hm}`,
+    full: d.toLocaleString(),
+  };
+}
+
 // ── Single message row ────────────────────────────────────────────────────────
 
 interface MsgProps {
@@ -294,6 +314,8 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
 
   const isPartial =
     isAssistant && msg.message.stop_reason === null;
+
+  const time = msg.timestamp ? formatMsgTime(msg.timestamp) : null;
 
   // Status dot
   const stopReason = msg.message.stop_reason;
@@ -343,12 +365,29 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
                 : null}
           </div>
         )}
-        {isAssistant && msg.message.usage && (
+        {isAssistant && (msg.message.usage || time) && (
           <div className={styles.usage}>
-            ↑{msg.message.usage.input_tokens} ↓{msg.message.usage.output_tokens}
-            {msg.message.model && (
-              <span className={styles.model}> · {msg.message.model}</span>
+            {msg.message.usage && (
+              <>
+                ↑{msg.message.usage.input_tokens} ↓{msg.message.usage.output_tokens}
+                {msg.message.model && (
+                  <span className={styles.model}> · {msg.message.model}</span>
+                )}
+              </>
             )}
+            {time && (
+              <span className={styles.msg_time} title={time.full}>
+                {msg.message.usage ? " · " : ""}
+                {time.short}
+              </span>
+            )}
+          </div>
+        )}
+        {isUser && time && (
+          <div className={styles.usage}>
+            <span className={styles.msg_time} title={time.full}>
+              {time.short}
+            </span>
           </div>
         )}
       </div>
@@ -359,10 +398,45 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
 // ── Waiting for input indicator ───────────────────────────────────────────────
 
 function WaitingIndicator() {
+  const { t } = useTranslation();
   return (
     <div className={styles.waiting}>
       <span className={styles.waiting_dot} />
-      Waiting for input
+      {t("detail.waiting_input", "Waiting for input")}
+    </div>
+  );
+}
+
+// ── Live activity indicator ───────────────────────────────────────────────────
+
+/** Session statuses that mean the agent is actively doing something right now
+ *  (as opposed to waiting for the user). Mirrors the scanner's working set. */
+const WORKING_STATUSES = new Set([
+  "thinking", "executing", "streaming", "processing", "active", "delegating",
+]);
+
+/** Animated "still working" indicator pinned under the newest message while
+ *  the session is in a working status. */
+function WorkingIndicator({ status }: { status: string }) {
+  const { t } = useTranslation();
+  const label =
+    status === "thinking"
+      ? t("detail.working_thinking", "Thinking…")
+      : status === "executing"
+        ? t("detail.working_executing", "Running tools…")
+        : status === "streaming"
+          ? t("detail.working_streaming", "Responding…")
+          : status === "delegating"
+            ? t("detail.working_delegating", "Delegating to subagents…")
+            : t("detail.working_processing", "Processing…");
+  return (
+    <div className={styles.working}>
+      <span className={styles.working_dots}>
+        <span />
+        <span />
+        <span />
+      </span>
+      {label}
     </div>
   );
 }
@@ -373,6 +447,9 @@ interface Props {
   messages: RawMessage[];
   isLoading: boolean;
   searchQuery?: string | null;
+  /** Live scanner status of the session (e.g. "thinking", "executing");
+   *  drives the animated activity indicator under the newest message. */
+  status?: string | null;
 }
 
 const PAGE_SIZE = 100;
@@ -392,7 +469,7 @@ function messageText(msg: RawMessage): string {
     .join(" ");
 }
 
-export function MessageList({ messages, isLoading, searchQuery }: Props) {
+export function MessageList({ messages, isLoading, searchQuery, status }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -551,7 +628,11 @@ export function MessageList({ messages, isLoading, searchQuery }: Props) {
           msgIdx={effectiveStart + i}
         />
       ))}
-      {isWaiting && <WaitingIndicator />}
+      {status && WORKING_STATUSES.has(status) ? (
+        <WorkingIndicator status={status} />
+      ) : (
+        isWaiting && <WaitingIndicator />
+      )}
       <div ref={bottomRef} />
     </div>
   );

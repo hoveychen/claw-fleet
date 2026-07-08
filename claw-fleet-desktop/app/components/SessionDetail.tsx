@@ -705,7 +705,12 @@ export function SessionDetail({
                       : t("detail.load_earlier") || "Load earlier messages"}
                   </button>
                 )}
-                <MessageList messages={messages} isLoading={isLoading} searchQuery={searchQuery} />
+                <MessageList
+                  messages={messages}
+                  isLoading={isLoading}
+                  searchQuery={searchQuery}
+                  status={liveSession?.status ?? null}
+                />
                 {liveThinking?.streaming && liveThinking.thinking && (
                   <ThinkingBlock thinking={liveThinking.thinking} live />
                 )}
