@@ -20,6 +20,10 @@ const ACTIVE_STATUSES = new Set([
   "waitingInput", "active", "delegating",
 ]);
 
+/** Standalone-mode live tail: re-pull the transcript tail at this cadence
+ *  while the session is in an active status. */
+const LIVE_TAIL_POLL_MS = 1500;
+
 function shortId(id: string) {
   return id.slice(0, 8);
 }
@@ -34,9 +38,10 @@ export function SessionDetail({
   inline?: boolean;
   /** When set, the component runs in standalone mode: its own local
    *  session/messages state, independent from the global useDetailStore.
-   *  Used by DecisionPanel's inline detail column so it doesn't fight the
-   *  global detail store. No live tail in this mode —
-   *  messages are a snapshot (pending decisions block the agent anyway). */
+   *  Used by DecisionPanel's inline detail column and HistoryView so they
+   *  don't fight the global detail store. Unlike global mode (backend watcher
+   *  + `session-tail` push, single-slot), standalone mode live-tails by
+   *  re-polling `get_messages_tail` while the session is active. */
   sessionInfo?: SessionInfo | null;
   /** Standalone mode only: highlight term forwarded to MessageList (e.g.
    *  the FTS query that matched this session in HistoryView). Ignored in
@@ -53,6 +58,12 @@ export function SessionDetail({
   const [localLoading, setLocalLoading] = useState(false);
   const [localFullyLoaded, setLocalFullyLoaded] = useState(false);
   const [localTail, setLocalTail] = useState<number>(INITIAL_TAIL);
+  // Render-synced mirrors for the live-tail interval callback, which must read
+  // the latest values without re-arming the interval on every change.
+  const localTailRef = useRef(localTail);
+  localTailRef.current = localTail;
+  const localLoadingRef = useRef(localLoading);
+  localLoadingRef.current = localLoading;
 
   // External sessionInfo prop changed → reset local state and refetch.
   useEffect(() => {
@@ -189,6 +200,50 @@ export function SessionDetail({
       window.clearInterval(timer);
     };
   }, [liveSessionId, liveActive]);
+
+  // Standalone-mode live tail: the initial fetch above is a one-shot, which
+  // was fine when the only standalone consumer was DecisionPanel (a pending
+  // decision blocks the agent, so the transcript is static) — but HistoryView
+  // renders *running* sessions this way. While the session is active, re-pull
+  // the tail on an interval. `get_messages_tail` goes through the Backend
+  // trait, so local and remote sessions both work. The status flip to
+  // non-active lags the final transcript writes by a scan cycle, so the last
+  // polls before the interval stops still catch the closing messages.
+  const standaloneJsonlPath = isStandalone ? localSession?.jsonlPath : undefined;
+  useEffect(() => {
+    if (!standaloneJsonlPath || !liveActive) return;
+    let cancelled = false;
+    let inFlight = false;
+    const poll = () => {
+      // Skip while a load-earlier refetch is in flight — it fetches a wider
+      // window and would race a stale-tail overwrite from us.
+      if (inFlight || localLoadingRef.current) return;
+      inFlight = true;
+      const tail = localTailRef.current;
+      invoke<RawMessage[]>("get_messages_tail", {
+        jsonlPath: standaloneJsonlPath,
+        tail,
+      })
+        .then((msgs) => {
+          if (cancelled) return;
+          setLocalMessages(msgs);
+          setLocalFullyLoaded(msgs.length < tail);
+          // Window saturated: the next transcript write would slide already-
+          // rendered messages out of the top. Grow the window so the visible
+          // history stays anchored while the tail keeps extending.
+          if (msgs.length >= tail) setLocalTail(tail + LOAD_EARLIER_STEP);
+        })
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    const timer = window.setInterval(poll, LIVE_TAIL_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [standaloneJsonlPath, liveActive]);
 
   // Open a workflow fan-out agent's session (the scan registers it as
   // `agent-<agentId>`, see session.rs). No-op if a scan hasn't surfaced it yet.
