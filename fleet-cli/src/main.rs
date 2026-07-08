@@ -9,6 +9,7 @@ use claw_fleet_core::account::{fetch_account_info_blocking as fetch_account_info
 use claw_fleet_core::agent_source::{build_sources, find_source_for_path};
 use claw_fleet_core::memory;
 use claw_fleet_core::session::{scan_all_sources, SessionInfo, SessionStatus};
+use claw_fleet_core::wiki;
 use claw_fleet_core::{FLEET_SKILL_MD, SKILL_TARGETS};
 
 // ── Color helpers ─────────────────────────────────────────────────────────────
@@ -200,6 +201,11 @@ enum Commands {
         /// Output raw JSON
         #[arg(long)]
         json: bool,
+    },
+    /// Publish and browse docs in the Fleet wiki knowledge base (~/.fleet/wiki)
+    Wiki {
+        #[command(subcommand)]
+        action: WikiCommands,
     },
     /// Start the HTTP probe server (used by Fleet app for remote monitoring)
     Serve {
@@ -495,6 +501,54 @@ enum PlanCommands {
 }
 
 #[derive(Subcommand)]
+enum WikiCommands {
+    /// Publish a .html file, a .md file, or a directory containing an HTML
+    /// entry. Re-publishing an existing slug creates a new version (old
+    /// versions are kept and stay browsable in the Fleet app).
+    Publish {
+        /// Path to the .html file, .md file, or directory
+        path: std::path::PathBuf,
+        /// Stable doc id (lowercase letters/digits/hyphens). Default:
+        /// normalized file/dir name.
+        #[arg(long)]
+        slug: Option<String>,
+        /// Display title. Default: <title> tag / first `# ` heading / slug.
+        #[arg(long)]
+        title: Option<String>,
+        /// Workspace to tag the doc with. Default: current directory.
+        #[arg(long)]
+        workspace: Option<std::path::PathBuf>,
+        /// Output the published doc metadata as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// List all wiki docs
+    #[command(alias = "ls")]
+    List {
+        /// Filter by workspace path substring
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show one doc's metadata and version history
+    Show {
+        slug: String,
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Remove a doc (all versions), or a single old version with --version
+    Rm {
+        slug: String,
+        /// Remove only this version (refused for the current version)
+        #[arg(long)]
+        version: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
 enum PrdDisciplineCommands {
     /// Regenerate the guidance file with the current schema (e.g. after a Fleet
     /// upgrade) and ensure the @import in CLAUDE.md + the prd-context hook.
@@ -552,6 +606,7 @@ fn main() {
         Commands::Account { json } => cmd_account(json),
         Commands::Speed { json } => cmd_speed(json),
         Commands::Memory { file, json } => cmd_memory(file, json),
+        Commands::Wiki { action } => cmd_wiki(action),
         Commands::Search { query, limit, json } => cmd_search(&query.join(" "), limit, json),
         Commands::Audit { level, filter, json } => cmd_audit(&level, filter.as_deref(), json),
         Commands::Report { date, backfill, regenerate, lessons, summary, json, lang } => cmd_report(date, backfill, regenerate, lessons, summary, json, &lang),
@@ -1626,6 +1681,146 @@ fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
         );
         println!("           {}", truncate(&event.command_summary, 90));
         println!();
+    }
+}
+
+// ── fleet wiki ────────────────────────────────────────────────────────────────
+
+fn cmd_wiki(action: WikiCommands) {
+    match action {
+        WikiCommands::Publish { path, slug, title, workspace, json } => {
+            let workspace = workspace.unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+            match wiki::publish(&path, slug.as_deref(), title.as_deref(), &workspace) {
+                Ok(doc) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&doc).unwrap());
+                        return;
+                    }
+                    let nth = doc.versions.len();
+                    println!(
+                        "{}Published {}{} (version {}, {} total)",
+                        c_bold(),
+                        doc.slug,
+                        c_reset(),
+                        doc.current_version,
+                        nth,
+                    );
+                    println!("  title:     {}", doc.title);
+                    println!("  kind:      {:<9} entry: {}", doc.kind, doc.entry);
+                    println!("  workspace: {}", doc.workspace_path);
+                    if let Some(v) = doc.versions.first() {
+                        println!(
+                            "  files:     {} ({})",
+                            v.file_count,
+                            format_wiki_size(v.size_bytes)
+                        );
+                    }
+                    println!("{}View it in the Fleet app → 知识库 board.{}", c_dim(), c_reset());
+                }
+                Err(e) => {
+                    eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        WikiCommands::List { workspace, json } => {
+            let mut docs = wiki::list_docs();
+            if let Some(ref ws) = workspace {
+                docs.retain(|d| d.workspace_path.contains(ws.as_str()) || d.workspace_name.contains(ws.as_str()));
+            }
+            if json {
+                println!("{}", serde_json::to_string_pretty(&docs).unwrap());
+                return;
+            }
+            if docs.is_empty() {
+                println!(
+                    "{}No wiki docs yet. Publish one with `fleet wiki publish <path>`.{}",
+                    c_dim(),
+                    c_reset()
+                );
+                return;
+            }
+            println!(
+                "{}{:<26} {:<8} {:<18} {:>4}  {:<9} TITLE{}",
+                c_bold(),
+                "SLUG",
+                "KIND",
+                "WORKSPACE",
+                "VERS",
+                "UPDATED",
+                c_reset()
+            );
+            for d in &docs {
+                println!(
+                    "{:<26} {:<8} {:<18} {:>4}  {:<9} {}",
+                    truncate(&d.slug, 25),
+                    d.kind,
+                    truncate(&d.workspace_name, 17),
+                    d.versions.len(),
+                    format_age_ms(d.updated_ms),
+                    truncate(&d.title, 40),
+                );
+            }
+        }
+
+        WikiCommands::Show { slug, json } => match wiki::get_doc(&slug) {
+            Ok(doc) => {
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&doc).unwrap());
+                    return;
+                }
+                println!("{}{}{} — {}", c_bold(), doc.slug, c_reset(), doc.title);
+                println!("  kind:      {:<9} entry: {}", doc.kind, doc.entry);
+                println!("  workspace: {}", doc.workspace_path);
+                println!("  created:   {}", format_age_ms(doc.created_ms));
+                println!("  updated:   {}", format_age_ms(doc.updated_ms));
+                println!("  versions:");
+                for v in &doc.versions {
+                    let marker = if v.id == doc.current_version { "*" } else { " " };
+                    println!(
+                        "   {marker} {}  {} file(s), {}  {}",
+                        v.id,
+                        v.file_count,
+                        format_wiki_size(v.size_bytes),
+                        format_age_ms(v.published_ms),
+                    );
+                }
+            }
+            Err(e) => {
+                eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                std::process::exit(1);
+            }
+        },
+
+        WikiCommands::Rm { slug, version } => {
+            let result = match version {
+                Some(ref v) => wiki::delete_version(&slug, v),
+                None => wiki::delete_doc(&slug),
+            };
+            match result {
+                Ok(()) => match version {
+                    Some(v) => println!("Removed version {v} of {slug}"),
+                    None => println!("Removed {slug} (all versions)"),
+                },
+                Err(e) => {
+                    eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
+
+fn format_wiki_size(bytes: u64) -> String {
+    if bytes >= 1024 * 1024 {
+        format!("{:.1} MB", bytes as f64 / (1024.0 * 1024.0))
+    } else if bytes >= 1024 {
+        format!("{:.1} KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{bytes} B")
     }
 }
 
