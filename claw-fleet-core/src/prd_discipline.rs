@@ -462,6 +462,37 @@ P1–P3, want me to review before P4?\", \"P4 is done, shall I continue?\", \
 checkboxes and (under Rule 3) the worktree commits already show progress. \
 The agent's job is to execute the plan, not narrate it.\n\
 \n\
+## Rule 5 — Long-context handoff (`fleet handoff`)\n\
+\n\
+When your context window is running long mid-plan (context usage high, or \
+compaction has already fired), do NOT grind on until the window dies, do NOT \
+silently wrap up early, and do NOT leave \"hand off to the next session\" \
+notes that nothing acts on. Fleet has a first-class relay:\n\
+\n\
+```\n\
+fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>]\n\
+```\n\
+\n\
+- **--note is mandatory** and is everything the successor knows beyond \
+TASKS.md: what's done, what's in flight, key files, gotchas, the next \
+concrete step. Write it like a shift-change briefing.\n\
+- **Pass --plan/--next when the work is a TASKS.md plan** so the successor \
+starts with `fleet plan start <plan-id> <P>` and continues the rhythm.\n\
+- **Then finish the turn cleanly**: commit worktree progress per Rule 3 \
+first, then stop. The moment you yield, Fleet's Stop hook consumes the \
+registration and spawns a fresh session in the same workspace whose opening \
+prompt is your note; the prd-context hook re-injects the TASKS.md macro \
+plan automatically.\n\
+- **The relay is recorded** as a handoff chain and shown on session cards \
+(接力 n/N), so {title} can trace the whole sequence afterwards.\n\
+- A new user prompt to your session cancels your pending handoff — {title} \
+taking over always wins. Chains are capped at 10 hops; re-registering \
+overwrites your previous note.\n\
+\n\
+The moment you catch yourself thinking \"I should wrap up because context \
+is getting long\" — that impulse IS the signal. Register the handoff and \
+relay instead of wrapping up.\n\
+\n\
 ## Recommended tooling for the worktree workflow\n\
 \n\
 Because Rule 3 develops every plan inside a fresh worktree, each new plan \
