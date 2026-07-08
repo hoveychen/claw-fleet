@@ -1,10 +1,11 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderGit2, History, Search } from "lucide-react";
+import { FolderGit2, History, Plus, Search } from "lucide-react";
 import { useSessionsStore } from "../store";
 import type { SessionInfo } from "../types";
 import { NEW_SESSION_ENTRYPOINT } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
+import { NewSessionModal } from "./NewSessionModal";
 import { SessionDetail } from "./SessionDetail";
 import styles from "./HistoryView.module.css";
 
@@ -65,6 +66,7 @@ export function HistoryView() {
   // global useDetailStore (that one drives the drawer overlaying every view).
   const [selected, setSelected] = useState<SessionInfo | null>(null);
   const [detailQuery, setDetailQuery] = useState<string | null>(null);
+  const [showNewSession, setShowNewSession] = useState(false);
 
   const { searching, ftsMatchPaths, snippetByPath } = useSessionSearch(query);
 
@@ -108,8 +110,17 @@ export function HistoryView() {
     <div className={styles.page}>
       <div className={styles.rail}>
         <div className={styles.header}>
-          <span className={styles.header_title}>{t("history.title", "历史会话")}</span>
+          <span className={styles.header_title}>{t("history.title", "启动台")}</span>
           <span className={styles.header_count}>{rows.length}</span>
+          <button
+            type="button"
+            className={styles.header_new_btn}
+            onClick={() => setShowNewSession(true)}
+            title={t("new_session.title")}
+          >
+            <Plus size={12} strokeWidth={2} />
+            <span>{t("new_session.button")}</span>
+          </button>
         </div>
 
         <div className={styles.controls}>
@@ -143,7 +154,7 @@ export function HistoryView() {
           ) : rows.length === 0 ? (
             <div className={styles.empty}>
               {adhocSessions.length === 0
-                ? t("history.empty", "还没有通过“新会话”创建的会话")
+                ? t("history.empty", "还没有会话，点右上角“新会话”发起一个")
                 : t("history.no_match", "没有匹配的会话")}
             </div>
           ) : (
@@ -195,6 +206,8 @@ export function HistoryView() {
           </div>
         )}
       </div>
+
+      <NewSessionModal open={showNewSession} onClose={() => setShowNewSession(false)} />
     </div>
   );
 }
