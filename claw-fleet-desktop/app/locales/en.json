@@ -117,7 +117,9 @@
     "prompt_placeholder": "What should Claude work on? (Enter to submit, Shift+Enter for newline)",
     "hint": "Starts a new claude session in the background in the chosen directory; it appears in the session list within a few seconds.",
     "error_workspace_required": "Please choose a workspace directory.",
-    "error_prompt_required": "The initial prompt is required."
+    "error_prompt_required": "The initial prompt is required.",
+    "starting": "Starting session…",
+    "start_timeout": "Taking longer than usual — wait a moment or open it from the list on the left."
   },
   "launcher": {
     "title": "New Fleet Session",

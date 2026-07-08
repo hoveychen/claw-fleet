@@ -13,11 +13,22 @@ import {
 import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
 import { SessionOptionPills } from "./SessionOptionPills";
-import styles from "./NewSessionModal.module.css";
+import styles from "./NewSessionForm.module.css";
 
-export interface NewSessionModalProps {
-  open: boolean;
-  onClose: () => void;
+export interface NewSessionCreated {
+  /** PID of the spawned `claude` process — the caller matches it against
+   *  `SessionInfo.pid` to locate the freshly-created session. */
+  pid: number;
+  /** Workspace the session was spawned in — fallback correlation key when the
+   *  pid hasn't been attached to a `SessionInfo` yet. */
+  workspacePath: string;
+}
+
+export interface NewSessionFormProps {
+  /** Fired once the backend has spawned the detached `claude -p` process. */
+  onCreated: (info: NewSessionCreated) => void;
+  /** Fired when the user backs out of the form without creating a session. */
+  onCancel: () => void;
 }
 
 function basename(p: string): string {
@@ -26,17 +37,19 @@ function basename(p: string): string {
   return slash >= 0 ? normalized.slice(slash + 1) : normalized;
 }
 
-/** Plain "start a new claude session" modal — no project, no task, no queue.
+/** Plain "start a new claude session" form — no project, no task, no queue.
  *  Pick a workspace directory + type the initial prompt; the backend spawns a
- *  detached `claude -p "<prompt>"` and the scanner picks the session up.
- *  Styled in the composer design language (see TaskComposer): ghost pills and
- *  custom popovers instead of labeled form rows and native <select>s. */
-export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
+ *  detached `claude -p "<prompt>"` and the scanner picks the session up. Rendered
+ *  inline inside the History page's detail column (no modal chrome); on success
+ *  it hands the spawned pid back so the host can switch that column to the new
+ *  session's live SessionDetail. Styled in the composer design language (see
+ *  TaskComposer): ghost pills and custom popovers instead of labeled form rows
+ *  and native <select>s. */
+export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const { connection } = useConnectionStore();
   const isRemote = connection?.type === "remote";
-  const [workspace, setWorkspace] = useState("");
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
@@ -47,6 +60,7 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState("");
+  const [workspace, setWorkspace] = useState("");
   const composerRef = useRef<ChatComposerHandle | null>(null);
 
   // Distinct workspaces from known sessions, most recently active first.
@@ -66,24 +80,17 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
     return [...byPath.values()].sort((a, b) => b.lastMs - a.lastMs).slice(0, 30);
   }, [sessions]);
 
-  // Reset the form each time the modal opens.
+  // Seed the workspace to the most-recent one once, on mount. The form is
+  // remounted each time the user re-enters "new session" mode, so a plain
+  // mount effect stands in for the old modal's open-reset. recentWorkspaces is
+  // read once here on purpose — re-running on every 5s session poll would
+  // clobber the user's in-progress selection.
   useEffect(() => {
-    if (!open) return;
     setWorkspace((prev) => prev || recentWorkspaces[0]?.path || "");
-    setPrompt("");
-    setModel("");
-    setEffort("");
-    setPermissionMode("acceptEdits");
-    setAttachments([]);
-    setError(null);
-    setPathDraft("");
-    setTimeout(() => composerRef.current?.focus(), 50);
-    // recentWorkspaces intentionally read once per open — re-running on every
-    // 5s session poll would clobber the user's in-progress selection.
+    const id = setTimeout(() => composerRef.current?.focus(), 50);
+    return () => clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  if (!open) return null;
+  }, []);
 
   const addAttachmentEntry = (entry: ChatComposerAttachment) => {
     setAttachments((prev) =>
@@ -148,17 +155,16 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
     setSubmitting(true);
     setError(null);
     try {
-      await invoke<number>("spawn_new_claude_session", {
+      const pid = await invoke<number>("spawn_new_claude_session", {
         workspacePath: ws,
         prompt: finalPrompt,
         model: model || null,
         effort: effort || null,
         permissionMode: permissionMode || null,
       });
-      onClose();
+      onCreated({ pid, workspacePath: ws });
     } catch (e) {
       setError(String(e));
-    } finally {
       setSubmitting(false);
     }
   };
@@ -226,50 +232,54 @@ export function NewSessionModal({ open, onClose }: NewSessionModalProps) {
   );
 
   return (
-    <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.header}>
-          <h3>{t("new_session.title")}</h3>
-          <button type="button" className={styles.close_btn} onClick={onClose} aria-label={t("cancel")}>
-            ×
-          </button>
-        </div>
-
-        <ChatComposer
-          ref={composerRef}
-          value={prompt}
-          onChange={setPrompt}
-          attachments={attachments}
-          onAddAttachment={handleAddAttachment}
-          onRemoveAttachment={handleRemoveAttachment}
-          onAttachmentError={setError}
-          onSubmit={handleSubmit}
-          submitting={submitting}
-          submitDisabled={!workspace.trim() || !prompt.trim()}
-          placeholder={t("new_session.prompt_placeholder")}
+    <div className={styles.form}>
+      <div className={styles.header}>
+        <h3>{t("new_session.title")}</h3>
+        <button
+          type="button"
+          className={styles.close_btn}
+          onClick={onCancel}
           disabled={submitting}
-          contextSlot={workspacePill}
-          toolbarSlot={optionPills}
-          addMenuItems={[
-            {
-              id: "files",
-              label: t("launcher.add_files"),
-              onSelect: pickFiles,
-              icon: <FileText size={14} strokeWidth={1.5} />,
-            },
-            {
-              id: "folder",
-              label: t("launcher.add_directory"),
-              onSelect: pickDirectory,
-              icon: <Folder size={14} strokeWidth={1.5} />,
-            },
-          ]}
-        />
-
-        <p className={styles.hint}>{t("new_session.hint")}</p>
-
-        {error && <div className={styles.error}>{error}</div>}
+          aria-label={t("cancel")}
+        >
+          ×
+        </button>
       </div>
+
+      <ChatComposer
+        ref={composerRef}
+        value={prompt}
+        onChange={setPrompt}
+        attachments={attachments}
+        onAddAttachment={handleAddAttachment}
+        onRemoveAttachment={handleRemoveAttachment}
+        onAttachmentError={setError}
+        onSubmit={handleSubmit}
+        submitting={submitting}
+        submitDisabled={!workspace.trim() || !prompt.trim()}
+        placeholder={t("new_session.prompt_placeholder")}
+        disabled={submitting}
+        contextSlot={workspacePill}
+        toolbarSlot={optionPills}
+        addMenuItems={[
+          {
+            id: "files",
+            label: t("launcher.add_files"),
+            onSelect: pickFiles,
+            icon: <FileText size={14} strokeWidth={1.5} />,
+          },
+          {
+            id: "folder",
+            label: t("launcher.add_directory"),
+            onSelect: pickDirectory,
+            icon: <Folder size={14} strokeWidth={1.5} />,
+          },
+        ]}
+      />
+
+      <p className={styles.hint}>{t("new_session.hint")}</p>
+
+      {error && <div className={styles.error}>{error}</div>}
     </div>
   );
 }

@@ -19,7 +19,7 @@ function basename(p: string): string {
 }
 
 /** Full-featured resume form for the history panel — the same ChatComposer +
- *  option-pill surface as NewSessionModal (paste screenshots, attach files or
+ *  option-pill surface as NewSessionForm (paste screenshots, attach files or
  *  a folder, override model / effort / permission mode), targeting
  *  `claude --resume <sid>` instead of a fresh session. `""` overrides mean
  *  "don't pass the flag": the resumed session keeps its own settings. */
