@@ -47,8 +47,11 @@ pub fn render_guidance(locale: &str) -> String {
 - slug 用小写字母/数字/连字符;`--title` 缺省时取 `<title>` 标签或首个 \
 `# ` 标题。\n\
 - 只归档最终成品,草稿、中间产物、一次性调试页不要 publish。\n\
+- markdown 文档里可以用 `[[slug]]` 或 `[[slug|显示文字]]` 引用知识库里\
+其他文档,渲染后可点击跳转;引用前先用 `fleet wiki list` 确认目标 slug \
+已发布(未发布的引用会显示为灰色死链)。\n\
 - 发布后文档出现在 Fleet 桌面端的「知识库」板块,用户可按 workspace \
-筛选、切换版本、直接渲染(HTML 里的 JS 可运行)。\n"
+筛选、全文搜索、切换版本、导出、直接渲染(HTML 里的 JS 可运行)。\n"
             .to_string();
     }
     "# Fleet Wiki knowledge base (managed by Claude Fleet — do not edit)\n\
@@ -70,8 +73,13 @@ slug for the same content.\n\
 `<title>` tag or first `# ` heading.\n\
 - Publish finished artifacts only — no drafts, intermediates, or one-off \
 debug pages.\n\
+- Markdown docs can reference other wiki docs with `[[slug]]` or \
+`[[slug|display text]]` — rendered as clickable cross-links. Check the \
+target slug exists first with `fleet wiki list` (unpublished refs render \
+as grayed dead links).\n\
 - Published docs appear in the Fleet desktop app's Wiki board, filterable by \
-workspace, with version switching and live HTML rendering (scripts run).\n"
+workspace, full-text searchable, with version switching, export, and live \
+HTML rendering (scripts run).\n"
         .to_string()
 }
 
@@ -194,6 +202,7 @@ mod tests {
             let g = render_guidance(locale);
             assert!(g.contains("fleet wiki publish"), "{locale} guidance must mention the command");
             assert!(g.contains("slug"), "{locale} guidance must explain slug reuse");
+            assert!(g.contains("[[slug]]"), "{locale} guidance must document cross-links");
         }
     }
 }
