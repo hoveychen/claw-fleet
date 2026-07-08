@@ -1664,6 +1664,14 @@ fn list_memories(state: tauri::State<AppState>) -> Vec<memory::WorkspaceMemory> 
 }
 
 #[tauri::command]
+fn read_live_thinking(
+    session_id: String,
+    state: tauri::State<AppState>,
+) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
+    state.backend.read().unwrap().read_live_thinking(&session_id)
+}
+
+#[tauri::command]
 fn get_memory_content(path: String, state: tauri::State<AppState>) -> Result<String, String> {
     state.backend.read().unwrap().get_memory_content(&path)
 }
@@ -3466,6 +3474,12 @@ pub fn run() {
                 let _ = w.set_decorations(false);
             }
 
+            // Drop live-thinking sidecars left behind by finished turns. A
+            // `claude --print` turn's sidecar goes stale as soon as it exits;
+            // 6h is a generous ceiling that keeps ~/.fleet/live-thinking small
+            // without racing any still-streaming session.
+            claw_fleet_core::live_thinking::prune_old(6 * 60 * 60);
+
             // Replace NullBackend with the real LocalBackend now that AppHandle
             // is available.
             {
@@ -3807,6 +3821,7 @@ pub fn run() {
             get_source_usage,
             list_memories,
             get_memory_content,
+            read_live_thinking,
             get_task_plans,
             get_memory_history,
             get_claude_md_content,
