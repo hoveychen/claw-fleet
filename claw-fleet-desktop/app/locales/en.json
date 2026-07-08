@@ -1298,6 +1298,8 @@
     "tab_workflow": "Workflow",
     "tab_tasks": "Tasks",
     "tasks_anonymous": "(anonymous plan)",
+    "tasks_status_active": "In progress",
+    "tasks_status_done": "Done",
     "section_timeline": "Story",
     "section_plan": "Plan",
     "plan_kanban": "Board",
