@@ -82,7 +82,7 @@
   "view_skills": "技能",
   "view_plugins": "插件",
   "view_projects": "项目",
-  "view_history": "历史会话",
+  "view_history": "启动台",
   "session_badge": {
     "fleet_managed": "Fleet",
     "fleet_managed_tip": "由 Fleet 启动的 session（支持 queue / resume / kanban）"
@@ -1314,6 +1314,8 @@
     "tab_workflow": "Workflow",
     "tab_tasks": "任务",
     "tasks_anonymous": "(匿名计划)",
+    "tasks_status_active": "进行中",
+    "tasks_status_done": "已完成",
     "section_timeline": "来龙去脉",
     "section_plan": "计划",
     "plan_kanban": "看板",
@@ -1833,9 +1835,9 @@
     }
   },
   "history": {
-    "title": "历史会话",
+    "title": "启动台",
     "search_placeholder": "搜索标题、提示词、全文…",
-    "empty": "还没有通过“新会话”创建的会话",
+    "empty": "还没有会话，点右上角“新会话”发起一个",
     "no_match": "没有匹配的会话",
     "untitled": "（无标题）",
     "resume_placeholder": "输入追问提示词后恢复会话…",
