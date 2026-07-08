@@ -141,7 +141,9 @@ export function HistoryView() {
           s.workspaceName.toLowerCase().includes(q);
         return clientMatch || ftsMatchPaths.has(s.jsonlPath);
       })
-      .sort((a, b) => b.createdAtMs - a.createdAtMs);
+      // Most recently *active* first, matching the row's displayed time — a
+      // created-at order would interleave stale rows between fresh ones.
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
   }, [adhocSessions, workspaceFilter, query, ftsMatchPaths]);
 
   const handleRowClick = (s: SessionInfo) => {
@@ -272,7 +274,7 @@ export function HistoryView() {
                           <FolderGit2 size={10} strokeWidth={1.6} />
                           {s.workspaceName}
                         </span>
-                        <span className={styles.row_time}>{timeAgo(s.createdAtMs, t)}</span>
+                        <span className={styles.row_time}>{timeAgo(s.lastActivityMs, t)}</span>
                       </span>
                       {snippet && (
                         <span className={styles.row_snippet}>{renderSnippet(snippet)}</span>
