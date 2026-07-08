@@ -1381,11 +1381,17 @@ pub fn resume_session_impl(
     session_id: &str,
     workspace_path: &str,
     prompt: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
 ) -> Result<(), String> {
     claw_fleet_core::auto_resume::spawn_resume_prompt(
         session_id,
         workspace_path,
         prompt.unwrap_or("continue"),
+        model,
+        effort,
+        permission_mode,
     )
 }
 
@@ -1662,8 +1668,18 @@ impl Backend for LocalBackend {
         session_id: String,
         workspace_path: String,
         prompt: Option<String>,
+        model: Option<String>,
+        effort: Option<String>,
+        permission_mode: Option<String>,
     ) -> Result<(), String> {
-        resume_session_impl(&session_id, &workspace_path, prompt.as_deref())?;
+        resume_session_impl(
+            &session_id,
+            &workspace_path,
+            prompt.as_deref(),
+            model.as_deref(),
+            effort.as_deref(),
+            permission_mode.as_deref(),
+        )?;
         // Trigger a rescan after a delay so the UI picks up the new turn
         // (which will also clear the RateLimited badge via detect_rate_limit).
         let app = self.app.clone();
