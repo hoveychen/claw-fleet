@@ -130,6 +130,12 @@ pub struct SessionInfo {
     /// compact task-progress row on the session card.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub task_plan: Option<crate::prd_tasks::TaskPlanSummary>,
+    /// Relay-chain position when this session is part of a handoff chain
+    /// (`fleet handoff`). `None` = never relayed. Stamped by
+    /// `handoff::enrich_sessions` at scan time, not during the cached deep
+    /// parse — chain membership changes while the predecessor's jsonl doesn't.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub handoff: Option<crate::handoff::SessionHandoffInfo>,
     /// Number of times this session was context-compacted (auto or manual /compact).
     #[serde(default)]
     pub compact_count: u32,
@@ -1690,6 +1696,7 @@ pub fn parse_session_info(
         rate_limit,
         todos,
         task_plan,
+        handoff: None,
         compact_count: stats.compact_count,
         compact_pre_tokens: stats.compact_pre_tokens,
         compact_post_tokens: stats.compact_post_tokens,
@@ -2280,6 +2287,7 @@ pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -
             sessions.extend(source.scan_sessions());
         }
     }
+    crate::handoff::enrich_sessions(&mut sessions);
     sort_sessions(&mut sessions);
     sessions
 }
@@ -2520,7 +2528,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
-            task_plan: None,
+            task_plan: None, handoff: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,

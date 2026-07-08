@@ -1722,6 +1722,15 @@ fn list_wiki_docs(state: tauri::State<AppState>) -> Vec<claw_fleet_core::wiki::W
     state.backend.read().unwrap().list_wiki_docs()
 }
 
+/// Relay chain containing `session_id`, for the SessionCard handoff popover.
+#[tauri::command]
+fn get_handoff_chain(
+    session_id: String,
+    state: tauri::State<AppState>,
+) -> Result<Option<claw_fleet_core::handoff::HandoffChain>, String> {
+    state.backend.read().unwrap().get_handoff_chain(&session_id)
+}
+
 #[tauri::command]
 fn get_wiki_doc(
     slug: String,
@@ -3943,6 +3952,7 @@ pub fn run() {
             promote_memory,
             list_wiki_docs,
             get_wiki_doc,
+            get_handoff_chain,
             get_wiki_file_text,
             delete_wiki_doc,
             delete_wiki_version,

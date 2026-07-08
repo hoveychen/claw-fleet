@@ -1277,6 +1277,9 @@ fn incremental_rescan_and_emit(
         }
     }
 
+    // Refresh relay positions for retained AND freshly-scanned sessions — a
+    // handoff link can appear while a predecessor's source stays clean.
+    crate::handoff::enrich_sessions(&mut s);
     crate::session::sort_sessions(&mut s);
 
     // Inject cached outcome tags into each session.
@@ -1861,6 +1864,13 @@ impl Backend for LocalBackend {
 
     fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc> {
         crate::wiki::list_docs()
+    }
+
+    fn get_handoff_chain(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::handoff::HandoffChain>, String> {
+        Ok(crate::handoff::chain_containing(session_id))
     }
 
     fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {

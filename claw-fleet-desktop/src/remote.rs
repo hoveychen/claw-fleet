@@ -441,6 +441,16 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get("/wiki_docs").unwrap_or_default()
     }
 
+    fn get_handoff_chain(
+        &self,
+        session_id: &str,
+    ) -> Result<Option<crate::handoff::HandoffChain>, String> {
+        self.probe.get(&format!(
+            "/handoff_chain?session={}",
+            encode_path(session_id)
+        ))
+    }
+
     fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {
         self.probe.get(&format!("/wiki_doc?slug={}", encode_path(slug)))
     }
