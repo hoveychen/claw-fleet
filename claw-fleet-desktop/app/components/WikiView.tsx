@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import { useTranslation } from "react-i18next";
 import { BookOpen, ChevronDown, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
+import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import styles from "./WikiView.module.css";
@@ -165,10 +166,20 @@ export function WikiView() {
     });
   }, [docs, query, workspaceFilter, hits]);
 
+  // Look up in the full doc set (not `filtered`) so cross-doc link jumps land
+  // even when the target is hidden by the current search/workspace filter.
   const selected = useMemo(
-    () => filtered.find((d) => d.slug === selectedSlug) ?? null,
-    [filtered, selectedSlug],
+    () => docs.find((d) => d.slug === selectedSlug) ?? null,
+    [docs, selectedSlug],
   );
+
+  const wikiLinks = useMemo(() => {
+    const slugs = new Set(docs.map((d) => d.slug));
+    return {
+      hasSlug: (slug: string) => slugs.has(slug),
+      openSlug: setSelectedSlug,
+    };
+  }, [docs]);
 
   // Group the filtered docs by workspace; group order follows the docs'
   // updated_ms-desc order, so the most recently active workspace floats up.
@@ -314,6 +325,7 @@ export function WikiView() {
           {selected ? (
             <WikiDetail
               doc={selected}
+              wikiLinks={wikiLinks}
               onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
               onDeleteVersion={(version) =>
                 setConfirmDelete({ kind: "version", slug: selected.slug, version })
@@ -349,10 +361,12 @@ export function WikiView() {
 
 function WikiDetail({
   doc,
+  wikiLinks,
   onDeleteDoc,
   onDeleteVersion,
 }: {
   doc: WikiDoc;
+  wikiLinks: WikiLinkContext;
   onDeleteDoc: () => void;
   onDeleteVersion: (version: string) => void;
 }) {
@@ -438,7 +452,7 @@ function WikiDetail({
             {error && <p className={styles.error}>{error}</p>}
             {markdown !== null && (
               <div className={styles.content_markdown}>
-                <TextBlock text={markdown} />
+                <TextBlock text={markdown} wiki={wikiLinks} />
               </div>
             )}
           </div>

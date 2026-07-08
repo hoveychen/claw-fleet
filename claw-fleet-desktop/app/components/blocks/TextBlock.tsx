@@ -4,6 +4,11 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { safeLinkComponent, safeRemarkPlugins } from "../../markdown/safeLinks";
+import {
+  remarkWikiLinks,
+  wikiLinkComponent,
+  type WikiLinkContext,
+} from "../../markdown/wikiLinks";
 import styles from "./TextBlock.module.css";
 
 /** Recursively walk React children and highlight matching terms in string nodes. */
@@ -33,9 +38,12 @@ interface Props {
   text: string;
   isPartial?: boolean;
   searchTerms?: string[] | null;
+  /** When set, [[slug]] refs and bare slug hrefs resolve to other wiki docs
+   *  (in-app navigation, dead links grayed). Chat rendering leaves this unset. */
+  wiki?: WikiLinkContext;
 }
 
-export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms }: Props) {
+export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms, wiki }: Props) {
   // When streaming, strip the last incomplete paragraph to avoid visual flicker
   const content = isPartial ? stripLastParagraph(text) : text;
 
@@ -54,7 +62,7 @@ export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms 
   return (
     <div className={styles.root}>
       <ReactMarkdown
-        remarkPlugins={safeRemarkPlugins}
+        remarkPlugins={wiki ? [...safeRemarkPlugins, remarkWikiLinks] : safeRemarkPlugins}
         components={{
           // Search term highlighting in text-bearing elements
           ...(highlight ? {
@@ -106,7 +114,8 @@ export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms 
           },
           // External URLs open in the system browser; relative paths are inert
           // so the Tauri webview never navigates (see markdown/safeLinks.ts).
-          a: safeLinkComponent(),
+          // Wiki docs upgrade slug refs to in-app navigation instead.
+          a: wiki ? wikiLinkComponent(wiki) : safeLinkComponent(),
         }}
       >
         {content}
