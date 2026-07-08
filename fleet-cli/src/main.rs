@@ -546,6 +546,13 @@ enum WikiCommands {
         #[arg(long)]
         version: Option<String>,
     },
+    /// Retag docs whose workspace was recorded as a session scratchpad
+    /// directory (published before scratchpad decoding existed)
+    FixWorkspaces {
+        /// Output the fixed docs as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Manage the agent-guidance block in ~/.claude/CLAUDE.md that tells
     /// agents to publish durable reports/demos via `fleet wiki publish`
     Guidance {
@@ -1832,6 +1839,35 @@ fn cmd_wiki(action: WikiCommands) {
                 }
             }
         }
+
+        WikiCommands::FixWorkspaces { json } => match wiki::fix_scratchpad_workspaces() {
+            Ok(fixed) => {
+                if json {
+                    let rows: Vec<serde_json::Value> = fixed
+                        .iter()
+                        .map(|(slug, old, new)| {
+                            serde_json::json!({ "slug": slug, "old": old, "new": new })
+                        })
+                        .collect();
+                    println!("{}", serde_json::to_string_pretty(&rows).unwrap());
+                    return;
+                }
+                if fixed.is_empty() {
+                    println!("No docs needed retagging.");
+                    return;
+                }
+                for (slug, old, new) in &fixed {
+                    println!("{}{slug}{}", c_bold(), c_reset());
+                    println!("  {old}");
+                    println!("  → {new}");
+                }
+                println!("Retagged {} doc(s).", fixed.len());
+            }
+            Err(e) => {
+                eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                std::process::exit(1);
+            }
+        },
 
         WikiCommands::Guidance { action } => match action {
             WikiGuidanceCommands::Apply { locale } => {
