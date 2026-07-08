@@ -53,10 +53,18 @@ pub const PERMISSION_MODES: &[&str] = &[
     "plan",
 ];
 
-/// Response body for the remote `/spawn_session` endpoint.
+/// Response body for the remote `/spawn_session` endpoint (also the return
+/// shape of [`spawn_new_session`] and the Tauri command wrapping it).
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
 pub struct SpawnSessionResponse {
     pub pid: u32,
+    /// Session id pre-assigned via `--session-id`, so the caller can correlate
+    /// the spawned process with its transcript without novelty guessing, and
+    /// the scanner can pin the pid to exactly this session. `None` only when
+    /// the response came from an older `fleet serve` probe.
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// Fully-qualified MCP tool name of Fleet's permission-prompt bridge, as the
@@ -313,17 +321,19 @@ pub fn push_session_override_args(
 }
 
 /// Start a brand-new headless Claude Code session: spawns
-/// `claude -p "<prompt>" [--model <m>] [--effort <e>]` detached in
-/// `workspace_path`. Returns as soon as the child is spawned; the session's
-/// JSONL will be created by the claude process itself and discovered by the
-/// scanner.
+/// `claude -p "<prompt>" --session-id <uuid> [--model <m>] [--effort <e>]`
+/// detached in `workspace_path`. Returns as soon as the child is spawned; the
+/// session's JSONL will be created by the claude process itself and discovered
+/// by the scanner. The pre-assigned `--session-id` keeps the session id in the
+/// process argv, which is what lets the scanner attribute the pid to exactly
+/// this session (and detect its death) — see `resolve_pid` in session.rs.
 pub fn spawn_new_session(
     workspace_path: &str,
     prompt: &str,
     model: Option<&str>,
     effort: Option<&str>,
     permission_mode: Option<&str>,
-) -> Result<u32, String> {
+) -> Result<SpawnSessionResponse, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
@@ -340,7 +350,13 @@ pub fn spawn_new_session(
     let stderr_log = crate::session::get_fleet_dir()
         .map(|d| d.join("new_session_stderr.log"))
         .ok_or_else(|| "no fleet dir".to_string())?;
-    let mut args = vec!["-p".to_string(), prompt.to_string()];
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let mut args = vec![
+        "-p".to_string(),
+        prompt.to_string(),
+        "--session-id".to_string(),
+        session_id.clone(),
+    ];
     // Emit the streaming JSON payload (incremental thinking_delta events) to
     // stdout so it can be teed to a live-thinking sidecar. This only changes
     // stdout, which Fleet otherwise discards; the JSONL transcript the scanner
@@ -371,10 +387,13 @@ pub fn spawn_new_session(
         |_success| {},
     )?;
     crate::log_debug(&format!(
-        "new_session: spawned pid {} in {}",
-        pid, workspace_path
+        "new_session: spawned pid {} session {} in {}",
+        pid, session_id, workspace_path
     ));
-    Ok(pid)
+    Ok(SpawnSessionResponse {
+        pid,
+        session_id: Some(session_id),
+    })
 }
 
 #[cfg(test)]

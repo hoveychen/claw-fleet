@@ -694,7 +694,7 @@ fn spawn_new_claude_session(
     effort: Option<String>,
     permission_mode: Option<String>,
     state: tauri::State<'_, AppState>,
-) -> Result<u32, String> {
+) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
     state
         .backend
         .read()

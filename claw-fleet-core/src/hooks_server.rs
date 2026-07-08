@@ -1782,11 +1782,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             req.effort.as_deref(),
                             req.permission_mode.as_deref(),
                         ) {
-                            Ok(pid) => {
-                                let body = serde_json::to_string(
-                                    &crate::session_launch::SpawnSessionResponse { pid },
-                                )
-                                .unwrap_or_default();
+                            Ok(resp) => {
+                                let body =
+                                    serde_json::to_string(&resp).unwrap_or_default();
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(body)
                                         .with_header(json_header),
