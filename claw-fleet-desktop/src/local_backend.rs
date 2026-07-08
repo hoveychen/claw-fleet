@@ -1836,6 +1836,31 @@ impl Backend for LocalBackend {
         vec![]
     }
 
+    fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc> {
+        crate::wiki::list_docs()
+    }
+
+    fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {
+        crate::wiki::get_doc(slug)
+    }
+
+    fn get_wiki_file(
+        &self,
+        slug: &str,
+        version: &str,
+        relpath: &str,
+    ) -> Result<crate::wiki::WikiFileBytes, String> {
+        crate::wiki::get_file(slug, version, relpath)
+    }
+
+    fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
+        crate::wiki::delete_doc(slug)
+    }
+
+    fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String> {
+        crate::wiki::delete_version(slug, version)
+    }
+
     fn get_task_plans(&self, workspace_path: &str) -> Vec<crate::prd_tasks::TaskPlanDetail> {
         crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace_path))
     }

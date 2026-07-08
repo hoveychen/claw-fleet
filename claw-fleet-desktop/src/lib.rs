@@ -149,6 +149,26 @@ impl Backend for NullBackend {
     fn get_memory_history(&self, _: &str) -> Vec<MemoryHistoryEntry> {
         vec![]
     }
+    fn list_wiki_docs(&self) -> Vec<claw_fleet_core::wiki::WikiDoc> {
+        vec![]
+    }
+    fn get_wiki_doc(&self, _: &str) -> Result<claw_fleet_core::wiki::WikiDoc, String> {
+        Err("backend not ready".into())
+    }
+    fn get_wiki_file(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<claw_fleet_core::wiki::WikiFileBytes, String> {
+        Err("backend not ready".into())
+    }
+    fn delete_wiki_doc(&self, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    fn delete_wiki_version(&self, _: &str, _: &str) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn get_task_plans(&self, _: &str) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
         vec![]
     }

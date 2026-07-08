@@ -343,6 +343,23 @@ pub trait Backend: Send + Sync {
     fn get_memory_content(&self, path: &str) -> Result<String, String>;
     fn get_memory_history(&self, path: &str) -> Vec<MemoryHistoryEntry>;
 
+    // ── Wiki knowledge base ──────────────────────────────────────────────────
+    /// All docs under `~/.fleet/wiki`, newest first.
+    fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc>;
+    fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String>;
+    /// Raw bytes + mime of one file of one version. `version` `""`/`"current"`
+    /// resolves to the doc's `current_version`. Serves the `fleet-wiki://`
+    /// protocol, so it must work for both local and remote backends.
+    fn get_wiki_file(
+        &self,
+        slug: &str,
+        version: &str,
+        relpath: &str,
+    ) -> Result<crate::wiki::WikiFileBytes, String>;
+    fn delete_wiki_doc(&self, slug: &str) -> Result<(), String>;
+    /// Delete a single non-current version.
+    fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String>;
+
     // ── TASKS.md plans ─────────────────────────────────────────────────────────
     /// All PRD plans (with full task items) visible to a session whose
     /// workspace root is `workspace_path` — scans the same source set the
