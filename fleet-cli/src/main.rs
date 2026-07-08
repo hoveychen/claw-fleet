@@ -2658,6 +2658,14 @@ fn cmd_session_idle() {
     if let Err(e) = claw_fleet_core::idle::mark_idle(&sid) {
         eprintln!("fleet session idle: {e}");
     }
+    // Handoff relay: the session just yielded its turn — exactly the moment a
+    // registered handoff should fire. Errors are logged, never propagated:
+    // the Stop hook must not block or fail the session over a relay problem.
+    match claw_fleet_core::handoff::consume_and_spawn(&sid) {
+        Ok(Some(to_sid)) => println!("handoff: successor session {to_sid} spawned"),
+        Ok(None) => {}
+        Err(e) => eprintln!("fleet session idle: handoff relay failed: {e}"),
+    }
 }
 
 /// `fleet session resume` — UserPromptSubmit-hook entrypoint. Clears the idle
@@ -2667,6 +2675,10 @@ fn cmd_session_resume() {
         return;
     };
     claw_fleet_core::idle::clear_idle(&sid);
+    // A fresh user prompt means the user took the session back over — a still
+    // pending (i.e. never-consumed) handoff is stale intent; drop it so it
+    // can't fire surprisingly on a later Stop.
+    claw_fleet_core::handoff::cancel_pending(&sid);
 }
 
 /// The current session's id, for attributing `fleet plan` / `fleet session`
