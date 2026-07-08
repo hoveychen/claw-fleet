@@ -312,6 +312,24 @@ enum Commands {
         #[command(subcommand)]
         action: PlanCommands,
     },
+    /// Register a session handoff (接力): when this session next ends its
+    /// turn, Fleet spawns a fresh successor session in the same workspace to
+    /// continue the work, opening with your --note. Use when your context is
+    /// running long mid-plan. Reads FLEET_SESSION_ID / CLAUDE_CODE_SESSION_ID.
+    Handoff {
+        /// Relay note for the successor (required): what's done, what's next,
+        /// key files, gotchas.
+        #[arg(long)]
+        note: Option<String>,
+        /// TASKS.md plan id the successor should continue (optional).
+        #[arg(long)]
+        plan: Option<String>,
+        /// Next P label for --plan, e.g. `P4` (optional).
+        #[arg(long)]
+        next: Option<String>,
+        #[command(subcommand)]
+        action: Option<HandoffCommands>,
+    },
     /// Manage PRD Discipline mode guidance (the generated
     /// ~/.claude/fleet-prd-discipline.md + its @import in ~/.claude/CLAUDE.md).
     PrdDiscipline {
@@ -455,6 +473,16 @@ enum SessionCommands {
     /// Wired to Claude Code's `UserPromptSubmit` hook.
     #[command(hide = true)]
     Resume,
+}
+
+#[derive(Subcommand)]
+enum HandoffCommands {
+    /// Cancel this session's pending handoff.
+    Cancel,
+    /// List recorded handoff chains.
+    List,
+    /// Show the relay chain containing a session id.
+    Show { session_id: String },
 }
 
 #[derive(Subcommand)]
@@ -652,6 +680,12 @@ fn main() {
         Commands::Task { action } => cmd_task(action),
         Commands::TaskRuntime { cmd } => cmd_task_runtime(cmd),
         Commands::Plan { action } => cmd_plan(action),
+        Commands::Handoff {
+            note,
+            plan,
+            next,
+            action,
+        } => cmd_handoff(note.as_deref(), plan.as_deref(), next.as_deref(), action),
         Commands::PrdDiscipline { action } => match action {
             PrdDisciplineCommands::Apply { title, locale } => {
                 cmd_prd_discipline_apply(&title, &locale)
@@ -2690,6 +2724,100 @@ fn cmd_prd_discipline_apply(title: &str, locale: &str) {
         .and_then(|()| claw_fleet_core::hooks::apply_prd_context_hook());
     match result {
         Ok(()) => println!("ok: regenerated PRD guidance (title={title:?}, locale={locale:?})"),
+        Err(e) => {
+            eprintln!("Error: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+// ── `fleet handoff` — session relay registration ──────────────────────────────
+
+/// Bare `fleet handoff --note ...` registers; subcommands manage/inspect.
+/// Registration is a promise, not an action: the successor session is spawned
+/// by the Stop hook (`fleet session idle`) the moment this session yields.
+fn cmd_handoff(
+    note: Option<&str>,
+    plan: Option<&str>,
+    next: Option<&str>,
+    action: Option<HandoffCommands>,
+) {
+    match action {
+        Some(HandoffCommands::Cancel) => {
+            let Some(sid) = read_fleet_session_id() else {
+                eprintln!("Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set).");
+                std::process::exit(2);
+            };
+            claw_fleet_core::handoff::cancel_pending(&sid);
+            println!("ok: pending handoff cancelled (if any)");
+            return;
+        }
+        Some(HandoffCommands::List) => {
+            let chains = claw_fleet_core::handoff::list_chains();
+            if chains.is_empty() {
+                println!("no handoff chains recorded");
+                return;
+            }
+            for c in chains {
+                println!(
+                    "{}  [{} hops]  plan={}  ws={}",
+                    c.chain_id,
+                    c.links.len(),
+                    c.plan_id.as_deref().unwrap_or("-"),
+                    c.workspace_path
+                );
+                for id in c.session_ids() {
+                    println!("  -> {id}");
+                }
+            }
+            return;
+        }
+        Some(HandoffCommands::Show { session_id }) => {
+            match claw_fleet_core::handoff::chain_containing(&session_id) {
+                Some(c) => println!("{}", serde_json::to_string_pretty(&c).unwrap_or_default()),
+                None => {
+                    eprintln!("no chain contains session {session_id}");
+                    std::process::exit(1);
+                }
+            }
+            return;
+        }
+        None => {}
+    }
+
+    // registration path
+    let Some(note) = note.map(str::trim).filter(|n| !n.is_empty()) else {
+        eprintln!(
+            "Error: --note is required — the successor session only knows what you write here.\n\
+             Include: what's done, what's next, key files, gotchas."
+        );
+        std::process::exit(2);
+    };
+    let Some(sid) = read_fleet_session_id() else {
+        eprintln!("Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set).");
+        std::process::exit(2);
+    };
+    if next.is_some() && plan.is_none() {
+        eprintln!("Error: --next requires --plan.");
+        std::process::exit(2);
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+    if let Some(plan_id) = plan {
+        if claw_fleet_core::prd_tasks::find_plan_source(&cwd, plan_id).is_none() {
+            eprintln!(
+                "Error: plan '{plan_id}' not found in any TASKS.md reachable from {}.",
+                cwd.display()
+            );
+            std::process::exit(1);
+        }
+    }
+    let ws = cwd.to_string_lossy().to_string();
+    match claw_fleet_core::handoff::register(&sid, &ws, note, plan, next) {
+        Ok(rec) => println!(
+            "ok: handoff registered (chain {}, 第 {} 棒). \
+             接力 session 将在本 session 结束 turn 后由 Stop hook 自动启动；请尽快结束当前 turn。",
+            rec.chain_id, rec.hop
+        ),
         Err(e) => {
             eprintln!("Error: {e}");
             std::process::exit(1);
