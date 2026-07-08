@@ -857,6 +857,82 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/wiki_docs" => {
+                let body = serde_json::to_string(&crate::wiki::list_docs()).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/wiki_doc" => {
+                let raw = query.get("slug").map(|s| s.as_str()).unwrap_or("");
+                let slug = percent_decode_str(raw).decode_utf8_lossy().to_string();
+                match crate::wiki::get_doc(&slug) {
+                    Ok(doc) => {
+                        let body = serde_json::to_string(&doc).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
+            }
+
+            "/wiki_file" => {
+                let dec = |key: &str| {
+                    query
+                        .get(key)
+                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                        .unwrap_or_default()
+                };
+                let (slug, version, rel) = (dec("slug"), dec("version"), dec("path"));
+                match crate::wiki::get_file(&slug, &version, &rel) {
+                    Ok(f) => {
+                        let mime_header: tiny_http::Header =
+                            format!("Content-Type: {}", f.mime).parse().unwrap();
+                        let _ = request.respond(
+                            tiny_http::Response::from_data(f.bytes).with_header(mime_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
+            }
+
+            "/wiki_delete" if request.method() == &tiny_http::Method::Post => {
+                let dec = |key: &str| {
+                    query
+                        .get(key)
+                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                        .unwrap_or_default()
+                };
+                let (slug, version) = (dec("slug"), dec("version"));
+                let result = if version.is_empty() {
+                    crate::wiki::delete_doc(&slug)
+                } else {
+                    crate::wiki::delete_version(&slug, &version)
+                };
+                match result {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/task_plans" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let workspace_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
