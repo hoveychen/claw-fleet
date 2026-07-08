@@ -334,6 +334,27 @@ pub fn spawn_new_session(
     effort: Option<&str>,
     permission_mode: Option<&str>,
 ) -> Result<SpawnSessionResponse, String> {
+    spawn_new_session_with_entrypoint(
+        workspace_path,
+        prompt,
+        model,
+        effort,
+        permission_mode,
+        NEW_SESSION_ENTRYPOINT,
+    )
+}
+
+/// [`spawn_new_session`] with an explicit `CLAUDE_CODE_ENTRYPOINT` stamp, so
+/// programmatic launchers (e.g. the handoff relay) stay distinguishable from
+/// the "新会话" button in transcripts and the history panel.
+pub fn spawn_new_session_with_entrypoint(
+    workspace_path: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
+    entrypoint: &str,
+) -> Result<SpawnSessionResponse, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
@@ -382,7 +403,7 @@ pub fn spawn_new_session(
         &stderr_log,
         "new_session",
         "",
-        &[("CLAUDE_CODE_ENTRYPOINT", NEW_SESSION_ENTRYPOINT)],
+        &[("CLAUDE_CODE_ENTRYPOINT", entrypoint)],
         true, // tee stdout to a live-thinking sidecar
         |_success| {},
     )?;
