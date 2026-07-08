@@ -11,6 +11,7 @@ import { SessionEmptyState } from "./EmptyState";
 import { MascotEyes } from "./MascotEyes";
 import { useUsageRing } from "../hooks/useUsageRing";
 import { MemoryView } from "./MemoryView";
+import { WikiView } from "./WikiView";
 import { AuditView } from "./AuditView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
@@ -456,6 +457,13 @@ export function SessionList() {
                 <span className={styles.nav_label}>{t("view_memory")}</span>
               </button>
               <button
+                className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
+                onClick={() => setViewMode("wiki")}
+              >
+                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3.5C6.8 2.4 5.2 2 3.5 2c-.6 0-1 .4-1 1v8.5c0 .6.4 1 1 1 1.7 0 3.3.4 4.5 1.5 1.2-1.1 2.8-1.5 4.5-1.5.6 0 1-.4 1-1V3c0-.6-.4-1-1-1-1.7 0-3.3.4-4.5 1.5Z"/><path d="M8 3.5V14"/></svg></span>
+                <span className={styles.nav_label}>{t("view_wiki", "知识库")}</span>
+              </button>
+              <button
                 className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
                 onClick={() => setViewMode("skills")}
               >
@@ -707,6 +715,8 @@ export function SessionList() {
         <AuditView />
       ) : viewMode === "memory" ? (
         <MemoryView />
+      ) : viewMode === "wiki" ? (
+        <WikiView />
       ) : viewMode === "skills" ? (
         <SkillsView />
       ) : viewMode === "plugins" ? (

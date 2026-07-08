@@ -354,6 +354,23 @@ pub trait Backend: Send + Sync {
     /// [`crate::live_thinking`].
     fn read_live_thinking(&self, session_id: &str) -> Option<crate::live_thinking::LiveThinking>;
 
+    // ── Wiki knowledge base ──────────────────────────────────────────────────
+    /// All docs under `~/.fleet/wiki`, newest first.
+    fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc>;
+    fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String>;
+    /// Raw bytes + mime of one file of one version. `version` `""`/`"current"`
+    /// resolves to the doc's `current_version`. Serves the `fleet-wiki://`
+    /// protocol, so it must work for both local and remote backends.
+    fn get_wiki_file(
+        &self,
+        slug: &str,
+        version: &str,
+        relpath: &str,
+    ) -> Result<crate::wiki::WikiFileBytes, String>;
+    fn delete_wiki_doc(&self, slug: &str) -> Result<(), String>;
+    /// Delete a single non-current version.
+    fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String>;
+
     // ── TASKS.md plans ─────────────────────────────────────────────────────────
     /// PRD plans (with full task items) visible to a session whose workspace
     /// root is `workspace_path` — scans the same source set the `fleet
@@ -711,6 +728,10 @@ pub trait Backend: Send + Sync {
     // ── Interaction mode (global CLAUDE.md guidance) ────────────────────────
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String>;
     fn remove_interaction_mode(&self) -> Result<(), String>;
+
+    // ── Wiki guidance (global CLAUDE.md block) ──────────────────────────────
+    fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String>;
+    fn remove_wiki_guidance(&self) -> Result<(), String>;
     /// QA diagnostics: report on the four backend-observable checkpoints in
     /// the AskUserQuestion → Decision Card pipeline. The frontend appends a
     /// fifth row (Tauri listener self-test) it owns.

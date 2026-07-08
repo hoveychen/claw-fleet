@@ -1092,6 +1092,17 @@ fn remove_interaction_mode(state: tauri::State<AppState>) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn apply_wiki_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    let locale = state.locale.lock().unwrap().clone();
+    state.backend.read().unwrap().apply_wiki_guidance(&locale)
+}
+
+#[tauri::command]
+fn remove_wiki_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().remove_wiki_guidance()
+}
+
+#[tauri::command]
 fn get_interaction_diagnostics(
     state: tauri::State<AppState>,
 ) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {
@@ -1702,6 +1713,48 @@ fn get_claude_md_content(workspace_path: String) -> Result<String, String> {
 #[tauri::command]
 fn promote_memory(memory_path: String, target: String, workspace_path: String) -> Result<(), String> {
     memory::promote_memory(&memory_path, &target, &workspace_path)
+}
+
+// ── Wiki knowledge base ───────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_wiki_docs(state: tauri::State<AppState>) -> Vec<claw_fleet_core::wiki::WikiDoc> {
+    state.backend.read().unwrap().list_wiki_docs()
+}
+
+#[tauri::command]
+fn get_wiki_doc(
+    slug: String,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::wiki::WikiDoc, String> {
+    state.backend.read().unwrap().get_wiki_doc(&slug)
+}
+
+/// UTF-8 text of one wiki file (markdown preview path — HTML goes through the
+/// `fleet-wiki://` protocol instead so relative assets resolve).
+#[tauri::command]
+fn get_wiki_file_text(
+    slug: String,
+    version: String,
+    relpath: String,
+    state: tauri::State<AppState>,
+) -> Result<String, String> {
+    let f = state.backend.read().unwrap().get_wiki_file(&slug, &version, &relpath)?;
+    String::from_utf8(f.bytes).map_err(|_| "file is not valid UTF-8".to_string())
+}
+
+#[tauri::command]
+fn delete_wiki_doc(slug: String, state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().delete_wiki_doc(&slug)
+}
+
+#[tauri::command]
+fn delete_wiki_version(
+    slug: String,
+    version: String,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    state.backend.read().unwrap().delete_wiki_version(&slug, &version)
 }
 
 // ── Skills ────────────────────────────────────────────────────────────────────
@@ -3442,7 +3495,47 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        // Serves wiki content into the webview: fleet-wiki://localhost/
+        // <slug>/<version>/<relpath…> (http://fleet-wiki.localhost/… on
+        // Windows). Routed through the Backend trait so a remote connection
+        // transparently proxies bytes over the probe API. Asynchronous +
+        // worker thread because RemoteBackend does blocking HTTP.
+        .register_asynchronous_uri_scheme_protocol("fleet-wiki", move |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || {
+                let dec = |s: &str| {
+                    percent_encoding::percent_decode_str(s)
+                        .decode_utf8_lossy()
+                        .to_string()
+                };
+                let path = request.uri().path().trim_start_matches('/').to_string();
+                let mut segs = path.splitn(3, '/');
+                let slug = dec(segs.next().unwrap_or(""));
+                let version = dec(segs.next().unwrap_or(""));
+                let rel = dec(segs.next().unwrap_or(""));
+                // Scope the backend read lock so it's released before respond.
+                let result = {
+                    let state = app.state::<AppState>();
+                    let backend = state.backend.read().unwrap();
+                    backend.get_wiki_file(&slug, &version, &rel)
+                };
+                let response = match result {
+                    Ok(f) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", f.mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(f.bytes)
+                        .unwrap(),
+                    Err(e) => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Content-Type", "text/plain")
+                        .body(e.into_bytes())
+                        .unwrap(),
+                };
+                responder.respond(response);
+            });
+        });
 
     builder.manage(AppState {
             // NullBackend is a placeholder; replaced with LocalBackend in setup().
@@ -3826,6 +3919,11 @@ pub fn run() {
             get_memory_history,
             get_claude_md_content,
             promote_memory,
+            list_wiki_docs,
+            get_wiki_doc,
+            get_wiki_file_text,
+            delete_wiki_doc,
+            delete_wiki_version,
             list_skills,
             get_skill_content,
             list_skill_files,
@@ -3881,6 +3979,8 @@ pub fn run() {
             remove_elicitation_hook,
             apply_interaction_mode,
             remove_interaction_mode,
+            apply_wiki_guidance,
+            remove_wiki_guidance,
             get_interaction_diagnostics,
             test_decision_frontend_only,
             test_decision_end_to_end,

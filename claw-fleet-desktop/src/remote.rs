@@ -79,6 +79,28 @@ impl ProbeClient {
         resp.json::<T>().map_err(|e| e.to_string())
     }
 
+    /// GET endpoint, return the raw body bytes plus the `Content-Type` header
+    /// value (used for wiki file proxying where the body is not JSON).
+    fn get_bytes(&self, endpoint: &str) -> Result<(Vec<u8>, String), String> {
+        let url = format!("{}{}", self.base_url, endpoint);
+        let resp = self.client
+            .get(&url)
+            .header("Authorization", &self.auth_header)
+            .send()
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("HTTP {}", resp.status()));
+        }
+        let mime = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
+        let bytes = resp.bytes().map_err(|e| e.to_string())?.to_vec();
+        Ok((bytes, mime))
+    }
+
     /// GET endpoint, only check that the status is 2xx.
     fn get_ok(&self, endpoint: &str) -> Result<(), String> {
         let url = format!("{}{}", self.base_url, endpoint);
@@ -412,6 +434,41 @@ impl crate::backend::Backend for RemoteBackend {
 
     fn get_memory_history(&self, path: &str) -> Vec<crate::memory::MemoryHistoryEntry> {
         self.probe.get(&format!("/memory_history?path={}", encode_path(path))).unwrap_or_default()
+    }
+
+    fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc> {
+        self.probe.get("/wiki_docs").unwrap_or_default()
+    }
+
+    fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {
+        self.probe.get(&format!("/wiki_doc?slug={}", encode_path(slug)))
+    }
+
+    fn get_wiki_file(
+        &self,
+        slug: &str,
+        version: &str,
+        relpath: &str,
+    ) -> Result<crate::wiki::WikiFileBytes, String> {
+        let (bytes, mime) = self.probe.get_bytes(&format!(
+            "/wiki_file?slug={}&version={}&path={}",
+            encode_path(slug),
+            encode_path(version),
+            encode_path(relpath),
+        ))?;
+        Ok(crate::wiki::WikiFileBytes { bytes, mime })
+    }
+
+    fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
+        self.probe.post_ok(&format!("/wiki_delete?slug={}", encode_path(slug)))
+    }
+
+    fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String> {
+        self.probe.post_ok(&format!(
+            "/wiki_delete?slug={}&version={}",
+            encode_path(slug),
+            encode_path(version),
+        ))
     }
 
     fn get_task_plans(
@@ -784,6 +841,7 @@ impl crate::backend::Backend for RemoteBackend {
             plan_approval_installed: false,
             prd_context_installed: false,
             prd_discipline_installed: false,
+            wiki_guidance_installed: false,
             idle_hooks_installed: false,
         })
     }
@@ -991,6 +1049,16 @@ impl crate::backend::Backend for RemoteBackend {
 
     fn remove_interaction_mode(&self) -> Result<(), String> {
         self.probe.post_ok("/remove_interaction_mode")
+    }
+
+    fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { locale: &'a str }
+        self.probe.post_json_ok("/apply_wiki_guidance", &Req { locale })
+    }
+
+    fn remove_wiki_guidance(&self) -> Result<(), String> {
+        self.probe.post_ok("/remove_wiki_guidance")
     }
 
     fn interaction_diagnostics(
