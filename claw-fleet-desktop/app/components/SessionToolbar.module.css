@@ -158,24 +158,3 @@
   background: var(--color-accent);
   color: #fff;
 }
-
-.new_session_btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--color-accent);
-  background: var(--color-accent);
-  color: #fff;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  flex-shrink: 0;
-  transition: filter 0.1s;
-}
-
-.new_session_btn:hover {
-  filter: brightness(1.1);
-}

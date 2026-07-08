@@ -49,7 +49,7 @@ function basename(p: string): string {
 }
 
 /** Fleet-managed session launcher (project + prompt + queue), styled in the
- *  composer pill design language — see TaskComposer / NewSessionModal. */
+ *  composer pill design language — see TaskComposer / NewSessionForm. */
 export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLauncherProps) {
   const { t } = useTranslation();
   const [projects, setProjects] = useState<Project[]>([]);
