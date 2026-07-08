@@ -19,6 +19,7 @@ export function SessionOptionPills({
   onPermissionModeChange,
   disabled,
   permissionDefaultLabel,
+  placement = "above",
 }: {
   model: string;
   effort: string;
@@ -29,6 +30,10 @@ export function SessionOptionPills({
   disabled?: boolean;
   /** Label for the "" permission item; defaults to new_session.permission_default. */
   permissionDefaultLabel?: string;
+  /** Popover side. Hosts near the top of a clipping panel (e.g. the resume
+   *  composer in SessionDetail's header) must open below or the menu is cut
+   *  off by the panel's overflow:hidden. */
+  placement?: "above" | "below";
 }) {
   const { t } = useTranslation();
   const modelLabel =
@@ -41,7 +46,7 @@ export function SessionOptionPills({
   return (
     <>
       <PillMenu
-        placement="above"
+        placement={placement}
         label={modelLabel}
         title={t("new_session.model")}
         disabled={disabled}
@@ -61,7 +66,7 @@ export function SessionOptionPills({
         ]}
       />
       <PillMenu
-        placement="above"
+        placement={placement}
         label={effortLabel}
         title={t("new_session.effort")}
         disabled={disabled}
@@ -81,7 +86,7 @@ export function SessionOptionPills({
         ]}
       />
       <PillMenu
-        placement="above"
+        placement={placement}
         label={permissionLabel}
         title={t("new_session.permission")}
         disabled={disabled}

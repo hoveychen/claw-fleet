@@ -129,6 +129,7 @@ export function ResumeComposer({
         disabled={submitting}
         toolbarSlot={
           <SessionOptionPills
+            placement="below"
             model={model}
             effort={effort}
             permissionMode={permissionMode}
