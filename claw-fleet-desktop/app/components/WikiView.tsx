@@ -1,8 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpen, RefreshCw, Trash2 } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { BookOpen, ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
+import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import styles from "./WikiView.module.css";
@@ -28,6 +30,12 @@ interface WikiDoc {
   updatedMs: number;
   currentVersion: string;
   versions: WikiVersion[];
+}
+
+interface WikiSearchHit {
+  slug: string;
+  field: "meta" | "content";
+  snippet: string;
 }
 
 const KIND_CONFIG: Record<WikiDoc["kind"], { short: string; cssClass: string }> = {
@@ -66,6 +74,25 @@ function relativeTime(ms: number): string {
   const mo = Math.floor(day / 30);
   if (mo < 12) return `${mo}mo ago`;
   return `${Math.floor(mo / 12)}y ago`;
+}
+
+/** Render `text` with case-insensitive occurrences of `term` wrapped in <mark>. */
+function highlightTerm(text: string, term: string): ReactNode {
+  const t = term.trim();
+  if (!t) return text;
+  const lower = text.toLowerCase();
+  const needle = t.toLowerCase();
+  const parts: ReactNode[] = [];
+  let i = 0;
+  for (;;) {
+    const at = lower.indexOf(needle, i);
+    if (at < 0) break;
+    if (at > i) parts.push(text.slice(i, at));
+    parts.push(<mark key={at}>{text.slice(at, at + t.length)}</mark>);
+    i = at + t.length;
+  }
+  if (i < text.length) parts.push(text.slice(i));
+  return parts.length > 0 ? parts : text;
 }
 
 function formatBytes(bytes: number): string {
@@ -111,19 +138,76 @@ export function WikiView() {
     return [...seen.entries()].map(([path, name]) => ({ path, name }));
   }, [docs]);
 
+  // Full-text hits from the backend, keyed by slug. `null` while idle or
+  // before the debounced search for the current query lands.
+  const [hits, setHits] = useState<Map<string, WikiSearchHit> | null>(null);
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setHits(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      invoke<WikiSearchHit[]>("search_wiki_docs", { query: q })
+        .then((res) => setHits(new Map(res.map((h) => [h.slug, h]))))
+        .catch(() => setHits(null));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return docs.filter((d) => {
       if (workspaceFilter !== "all" && d.workspacePath !== workspaceFilter) return false;
       if (!q) return true;
+      // Backend full-text hits (metadata + content); metadata fallback while
+      // the debounced search is still in flight.
+      if (hits) return hits.has(d.slug);
       return [d.title, d.slug, d.workspaceName].join(" ").toLowerCase().includes(q);
     });
-  }, [docs, query, workspaceFilter]);
+  }, [docs, query, workspaceFilter, hits]);
 
+  // Look up in the full doc set (not `filtered`) so cross-doc link jumps land
+  // even when the target is hidden by the current search/workspace filter.
   const selected = useMemo(
-    () => filtered.find((d) => d.slug === selectedSlug) ?? null,
-    [filtered, selectedSlug],
+    () => docs.find((d) => d.slug === selectedSlug) ?? null,
+    [docs, selectedSlug],
   );
+
+  const wikiLinks = useMemo(() => {
+    const slugs = new Set(docs.map((d) => d.slug));
+    return {
+      hasSlug: (slug: string) => slugs.has(slug),
+      openSlug: setSelectedSlug,
+    };
+  }, [docs]);
+
+  // Group the filtered docs by workspace; group order follows the docs'
+  // updated_ms-desc order, so the most recently active workspace floats up.
+  const groups = useMemo(() => {
+    const byPath = new Map<string, { path: string; name: string; docs: WikiDoc[] }>();
+    for (const d of filtered) {
+      let g = byPath.get(d.workspacePath);
+      if (!g) {
+        g = { path: d.workspacePath, name: d.workspaceName, docs: [] };
+        byPath.set(d.workspacePath, g);
+      }
+      g.docs.push(d);
+    }
+    return [...byPath.values()];
+  }, [filtered]);
+
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = (path: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+  // While searching, collapse state is ignored so matches stay visible.
+  const searching = query.trim().length > 0;
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
@@ -188,38 +272,61 @@ export function WikiView() {
               )}
             />
           )}
-          {filtered.map((d) => (
-            <button
-              key={d.slug}
-              className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""}`}
-              onClick={() => setSelectedSlug(d.slug)}
-            >
-              <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
-                {KIND_CONFIG[d.kind]?.short ?? d.kind}
-              </span>
-              <span className={styles.card_body}>
-                <span className={styles.card_title}>{d.title}</span>
-                <span className={styles.card_slug}>{d.slug}</span>
-                <span className={styles.card_meta}>
-                  <span>{d.workspaceName}</span>
-                  <span className={styles.card_meta_dot}>·</span>
-                  <span>{relativeTime(d.updatedMs)}</span>
-                  {d.versions.length > 1 && (
-                    <>
-                      <span className={styles.card_meta_dot}>·</span>
-                      <span>{t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}</span>
-                    </>
+          {groups.map((g) => {
+            const isCollapsed = !searching && collapsed.has(g.path);
+            return (
+              <div key={g.path} className={styles.group}>
+                <button className={styles.group_header} onClick={() => toggleGroup(g.path)}>
+                  {isCollapsed ? (
+                    <ChevronRight size={12} strokeWidth={2} className={styles.group_chevron} />
+                  ) : (
+                    <ChevronDown size={12} strokeWidth={2} className={styles.group_chevron} />
                   )}
-                </span>
-              </span>
-            </button>
-          ))}
+                  <span className={styles.group_name}>{g.name}</span>
+                  <span className={styles.group_count}>{g.docs.length}</span>
+                </button>
+                {!isCollapsed &&
+                  g.docs.map((d) => (
+                    <button
+                      key={d.slug}
+                      className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""}`}
+                      onClick={() => setSelectedSlug(d.slug)}
+                    >
+                      <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
+                        {KIND_CONFIG[d.kind]?.short ?? d.kind}
+                      </span>
+                      <span className={styles.card_body}>
+                        <span className={styles.card_title}>
+                          {searching ? highlightTerm(d.title, query) : d.title}
+                        </span>
+                        <span className={styles.card_slug}>{d.slug}</span>
+                        {searching && hits?.get(d.slug)?.snippet ? (
+                          <span className={styles.card_snippet}>
+                            {highlightTerm(hits.get(d.slug)!.snippet, query)}
+                          </span>
+                        ) : null}
+                        <span className={styles.card_meta}>
+                          <span>{relativeTime(d.updatedMs)}</span>
+                          {d.versions.length > 1 && (
+                            <>
+                              <span className={styles.card_meta_dot}>·</span>
+                              <span>{t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}</span>
+                            </>
+                          )}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            );
+          })}
         </aside>
 
         <main className={styles.detail_pane}>
           {selected ? (
             <WikiDetail
               doc={selected}
+              wikiLinks={wikiLinks}
               onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
               onDeleteVersion={(version) =>
                 setConfirmDelete({ kind: "version", slug: selected.slug, version })
@@ -255,10 +362,12 @@ export function WikiView() {
 
 function WikiDetail({
   doc,
+  wikiLinks,
   onDeleteDoc,
   onDeleteVersion,
 }: {
   doc: WikiDoc;
+  wikiLinks: WikiLinkContext;
   onDeleteDoc: () => void;
   onDeleteVersion: (version: string) => void;
 }) {
@@ -276,6 +385,25 @@ function WikiDetail({
   const effectiveVersion = doc.versions.some((v) => v.id === version)
     ? version
     : doc.currentVersion;
+
+  const [exporting, setExporting] = useState(false);
+  const handleExport = async () => {
+    // Mirrors core's wiki::export_filename — kind decides the artifact shape.
+    const ext = doc.kind === "markdown" ? "md" : doc.kind === "html" ? "html" : "zip";
+    const dest = await save({
+      defaultPath: `${doc.slug}.${ext}`,
+      filters: [{ name: doc.title, extensions: [ext] }],
+    });
+    if (!dest) return;
+    setExporting(true);
+    try {
+      await invoke("export_wiki_doc", { slug: doc.slug, version: effectiveVersion, dest });
+    } catch (e) {
+      console.error("wiki export failed:", e);
+    } finally {
+      setExporting(false);
+    }
+  };
 
   useEffect(() => {
     if (doc.kind !== "markdown") {
@@ -316,6 +444,15 @@ function WikiDetail({
               </option>
             ))}
           </select>
+          <button
+            className={styles.action_btn}
+            onClick={handleExport}
+            disabled={exporting}
+            title={t("wiki.export", "Export this version to a file")}
+          >
+            <Download size={12} strokeWidth={1.7} />
+            {t("wiki.export_short", "Export")}
+          </button>
           {effectiveVersion !== doc.currentVersion && (
             <button
               className={styles.action_btn}
@@ -344,7 +481,7 @@ function WikiDetail({
             {error && <p className={styles.error}>{error}</p>}
             {markdown !== null && (
               <div className={styles.content_markdown}>
-                <TextBlock text={markdown} />
+                <TextBlock text={markdown} wiki={wikiLinks} />
               </div>
             )}
           </div>

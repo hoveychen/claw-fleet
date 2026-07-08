@@ -472,7 +472,9 @@
     "delete_version": "\u5220\u9664\u8be5\u7248\u672c",
     "delete_version_short": "\u5220\u7248\u672c",
     "delete_doc_confirm": "\u5220\u9664\u300c{{slug}}\u300d\u53ca\u5176\u6240\u6709\u7248\u672c\uff1f",
-    "delete_version_confirm": "\u5220\u9664\u300c{{slug}}\u300d\u7684\u7248\u672c {{version}}\uff1f"
+    "delete_version_confirm": "\u5220\u9664\u300c{{slug}}\u300d\u7684\u7248\u672c {{version}}\uff1f",
+    "export": "\u5bfc\u51fa\u5f53\u524d\u7248\u672c\u5230\u6587\u4ef6",
+    "export_short": "\u5bfc\u51fa"
   },
   "live": {
     "section_title": "实时"

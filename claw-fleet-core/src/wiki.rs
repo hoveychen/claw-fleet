@@ -472,6 +472,274 @@ pub fn get_doc(slug: &str) -> Result<WikiDoc, String> {
     get_doc_in(&wiki_dir_or_err()?, slug)
 }
 
+// ── Search ───────────────────────────────────────────────────────────────────
+
+/// One full-text search hit. `slug` keys back into the doc list; `snippet` is
+/// a plain-text excerpt around the first content match (empty for hits that
+/// only matched title/slug/workspace metadata).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct WikiSearchHit {
+    pub slug: String,
+    /// "meta" (title/slug/workspace name) or "content" (entry-file text).
+    pub field: String,
+    pub snippet: String,
+}
+
+/// Case-insensitive (ASCII) substring search over every doc's metadata and the
+/// plain text of its current version's entry file. Scans on demand — the doc
+/// set is small and this keeps the no-global-index concurrency design intact.
+pub fn search_docs(query: &str) -> Vec<WikiSearchHit> {
+    wiki_dir().map(|root| search_docs_in(&root, query)).unwrap_or_default()
+}
+
+/// [`search_docs`] against an explicit wiki root.
+pub fn search_docs_in(root: &Path, query: &str) -> Vec<WikiSearchHit> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Vec::new();
+    }
+    let mut hits = Vec::new();
+    for doc in list_docs_in(root) {
+        let meta = format!("{} {} {}", doc.title, doc.slug, doc.workspace_name);
+        if find_ci(&meta, query).is_some() {
+            hits.push(WikiSearchHit {
+                slug: doc.slug,
+                field: "meta".to_string(),
+                snippet: String::new(),
+            });
+            continue;
+        }
+        let Ok(file) = get_file_in(root, &doc.slug, "current", &doc.entry) else {
+            continue;
+        };
+        let Ok(raw) = String::from_utf8(file.bytes) else {
+            continue;
+        };
+        let text = if doc.kind == "markdown" { raw } else { strip_html(&raw) };
+        if let Some(pos) = find_ci(&text, query) {
+            hits.push(WikiSearchHit {
+                slug: doc.slug,
+                field: "content".to_string(),
+                snippet: snippet_around(&text, pos, query.len()),
+            });
+        }
+    }
+    hits
+}
+
+/// Byte offset of the first ASCII-case-insensitive occurrence of `needle` in
+/// `haystack`. Byte-exact (no Unicode case folding), so offsets are valid for
+/// snippet extraction; CJK text has no case and matches verbatim.
+fn find_ci(haystack: &str, needle: &str) -> Option<usize> {
+    let (h, n) = (haystack.as_bytes(), needle.as_bytes());
+    if n.is_empty() || h.len() < n.len() {
+        return None;
+    }
+    (0..=h.len() - n.len()).find(|&i| h[i..i + n.len()].eq_ignore_ascii_case(n))
+}
+
+/// Plain-text excerpt (~200 bytes) around a match, snapped to char boundaries,
+/// whitespace collapsed.
+fn snippet_around(text: &str, pos: usize, match_len: usize) -> String {
+    let mut start = pos.saturating_sub(80);
+    while start > 0 && !text.is_char_boundary(start) {
+        start -= 1;
+    }
+    let mut end = (pos + match_len + 120).min(text.len());
+    while end < text.len() && !text.is_char_boundary(end) {
+        end += 1;
+    }
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.extend(text[start..end].split_whitespace().collect::<Vec<_>>().join(" ").chars());
+    if end < text.len() {
+        out.push('…');
+    }
+    out
+}
+
+// ── Export ───────────────────────────────────────────────────────────────────
+
+/// One exportable artifact: a single file for "markdown"/"html" docs, a
+/// store-only zip of the whole version dir for "htmlDir".
+#[derive(Clone, Debug)]
+pub struct WikiExport {
+    pub filename: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Suggested download filename for a doc, by kind.
+pub fn export_filename(doc: &WikiDoc) -> String {
+    match doc.kind.as_str() {
+        "markdown" => format!("{}.md", doc.slug),
+        "html" => format!("{}.html", doc.slug),
+        _ => format!("{}.zip", doc.slug),
+    }
+}
+
+pub fn export_doc(slug: &str, version: &str) -> Result<WikiExport, String> {
+    export_doc_in(&wiki_dir_or_err()?, slug, version)
+}
+
+/// [`export_doc`] against an explicit wiki root. `version` `""`/`"current"`
+/// resolves to the doc's `current_version`.
+pub fn export_doc_in(root: &Path, slug: &str, version: &str) -> Result<WikiExport, String> {
+    let doc = get_doc_in(root, slug)?;
+    let filename = export_filename(&doc);
+    if doc.kind != "htmlDir" {
+        let f = get_file_in(root, slug, version, &doc.entry)?;
+        return Ok(WikiExport { filename, mime: f.mime, bytes: f.bytes });
+    }
+    let version = if version.is_empty() || version == "current" {
+        doc.current_version.as_str()
+    } else {
+        version
+    };
+    if version.contains('/') || version.contains('\\') || version.contains("..") {
+        return Err("invalid version id".to_string());
+    }
+    let dir = root.join(slug).join("versions").join(version);
+    if !dir.is_dir() {
+        return Err(format!("version '{version}' not found for '{slug}'"));
+    }
+    Ok(WikiExport {
+        filename,
+        mime: "application/zip".to_string(),
+        bytes: zip_dir(&dir)?,
+    })
+}
+
+/// Store-only (method 0) zip of every regular file under `dir`, paths
+/// relative with forward slashes. u32 sizes/offsets suffice: published
+/// versions are capped at [`MAX_TOTAL_BYTES`] (100MB).
+fn zip_dir(dir: &Path) -> Result<Vec<u8>, String> {
+    let mut files = Vec::new();
+    collect_files(dir, "", &mut files)?;
+    files.sort();
+
+    let mut out: Vec<u8> = Vec::new();
+    let mut central: Vec<u8> = Vec::new();
+    for rel in &files {
+        let data = fs::read(dir.join(rel)).map_err(|e| format!("read '{rel}': {e}"))?;
+        let crc = crc32fast::hash(&data);
+        let name = rel.as_bytes();
+        let offset = out.len() as u32;
+
+        // Local file header.
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        out.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        out.extend_from_slice(&[0; 2]); // flags
+        out.extend_from_slice(&[0; 2]); // method: stored
+        out.extend_from_slice(&[0; 4]); // dos time+date
+        out.extend_from_slice(&crc.to_le_bytes());
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes()); // compressed
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes()); // uncompressed
+        out.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        out.extend_from_slice(&[0; 2]); // extra len
+        out.extend_from_slice(name);
+        out.extend_from_slice(&data);
+
+        // Central directory entry.
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes()); // version made by
+        central.extend_from_slice(&20u16.to_le_bytes()); // version needed
+        central.extend_from_slice(&[0; 2]); // flags
+        central.extend_from_slice(&[0; 2]); // method
+        central.extend_from_slice(&[0; 4]); // dos time+date
+        central.extend_from_slice(&crc.to_le_bytes());
+        central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        central.extend_from_slice(&(name.len() as u16).to_le_bytes());
+        central.extend_from_slice(&[0; 2]); // extra len
+        central.extend_from_slice(&[0; 2]); // comment len
+        central.extend_from_slice(&[0; 2]); // disk number
+        central.extend_from_slice(&[0; 2]); // internal attrs
+        central.extend_from_slice(&[0; 4]); // external attrs
+        central.extend_from_slice(&offset.to_le_bytes());
+        central.extend_from_slice(name);
+    }
+
+    let cd_offset = out.len() as u32;
+    out.extend_from_slice(&central);
+    // End of central directory.
+    out.extend_from_slice(&0x0605_4b50u32.to_le_bytes());
+    out.extend_from_slice(&[0; 2]); // disk
+    out.extend_from_slice(&[0; 2]); // cd start disk
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+    out.extend_from_slice(&cd_offset.to_le_bytes());
+    out.extend_from_slice(&[0; 2]); // comment len
+    Ok(out)
+}
+
+/// Regular files under `dir`, as `/`-joined paths relative to it. Symlinks are
+/// skipped (published version dirs never contain them, but stay defensive).
+fn collect_files(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<(), String> {
+    let entries = fs::read_dir(dir).map_err(|e| format!("read dir: {e}"))?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        let rel = if prefix.is_empty() { name } else { format!("{prefix}/{name}") };
+        let ft = entry.file_type().map_err(|e| e.to_string())?;
+        if ft.is_dir() {
+            collect_files(&entry.path(), &rel, out)?;
+        } else if ft.is_file() {
+            out.push(rel);
+        }
+    }
+    Ok(())
+}
+
+/// Crude tag stripper for search: drops <script>/<style> blocks, comments, and
+/// all tags; entities are left as-is (good enough for substring matching).
+fn strip_html(html: &str) -> String {
+    let mut out = String::with_capacity(html.len() / 2);
+    let bytes = html.as_bytes();
+    let mut i = 0;
+    while i < html.len() {
+        if bytes[i] == b'<' {
+            let rest = &html[i..];
+            // Skip container blocks whose text content is not prose.
+            let block = ["<script", "<style"].iter().find_map(|open| {
+                if rest.len() >= open.len() && rest[..open.len()].eq_ignore_ascii_case(open) {
+                    let close = format!("</{}", &open[1..]);
+                    Some(find_ci(rest, &close).map_or(html.len() - i, |p| p + close.len()))
+                } else {
+                    None
+                }
+            });
+            if let Some(skip) = block {
+                // Fall through to tag skipping for the closing tag remainder.
+                i += skip;
+                if let Some(gt) = html[i..].find('>') {
+                    i += gt + 1;
+                }
+                continue;
+            }
+            if rest.starts_with("<!--") {
+                i += rest.find("-->").map_or(rest.len(), |p| p + 3);
+                continue;
+            }
+            match rest.find('>') {
+                Some(gt) => {
+                    i += gt + 1;
+                    out.push(' ');
+                }
+                None => break,
+            }
+        } else {
+            let ch = html[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+    }
+    out
+}
+
 pub fn get_doc_in(root: &Path, slug: &str) -> Result<WikiDoc, String> {
     read_doc_json(&root.join(slug))
 }
@@ -697,6 +965,90 @@ mod tests {
         fs::write(none.join("data.json"), "{}").unwrap();
         let err = publish_in(tmp().path(), &none, None, None, ws.path()).unwrap_err();
         assert!(err.contains("no HTML entry"), "{err}");
+    }
+
+    #[test]
+    fn search_meta_content_and_miss() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("perf-report.md");
+        fs::write(&md, "# Perf Report\n\n压测显示 tokenizer 吞吐率下降 40%。\n").unwrap();
+        publish_in(root.path(), &md, None, None, ws.path()).unwrap();
+        let html = ws.path().join("demo.html");
+        fs::write(
+            &html,
+            "<html><head><title>Demo</title><script>var secret=1;</script></head>\
+             <body><p>latency budget exceeded</p></body></html>",
+        )
+        .unwrap();
+        publish_in(root.path(), &html, None, None, ws.path()).unwrap();
+
+        // Title match → meta hit, no snippet.
+        let hits = search_docs_in(root.path(), "perf");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].slug, "perf-report");
+        assert_eq!(hits[0].field, "meta");
+        assert!(hits[0].snippet.is_empty());
+
+        // CJK content match → content hit with surrounding snippet.
+        let hits = search_docs_in(root.path(), "吞吐率");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].field, "content");
+        assert!(hits[0].snippet.contains("吞吐率下降"));
+
+        // HTML body text matches case-insensitively; script bodies do not.
+        let hits = search_docs_in(root.path(), "LATENCY");
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].slug, "demo");
+        assert!(hits[0].snippet.contains("latency budget"));
+        assert!(search_docs_in(root.path(), "secret").is_empty());
+
+        assert!(search_docs_in(root.path(), "nonexistent-term").is_empty());
+        assert!(search_docs_in(root.path(), "   ").is_empty());
+    }
+
+    #[test]
+    fn export_single_file_and_zip() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("notes.md");
+        fs::write(&md, "# Notes\n正文\n").unwrap();
+        publish_in(root.path(), &md, None, None, ws.path()).unwrap();
+
+        let e = export_doc_in(root.path(), "notes", "current").unwrap();
+        assert_eq!(e.filename, "notes.md");
+        assert_eq!(e.mime, "text/markdown; charset=utf-8");
+        assert_eq!(e.bytes, fs::read(&md).unwrap());
+
+        let demo = ws.path().join("demo");
+        fs::create_dir_all(demo.join("assets")).unwrap();
+        fs::write(demo.join("index.html"), "<title>Demo</title>").unwrap();
+        fs::write(demo.join("assets/app.js"), "console.log(1)").unwrap();
+        publish_in(root.path(), &demo, None, None, ws.path()).unwrap();
+
+        let e = export_doc_in(root.path(), "demo", "").unwrap();
+        assert_eq!(e.filename, "demo.zip");
+        assert_eq!(e.mime, "application/zip");
+        // Structure: local-header magic up front, EOCD magic with entry count 2.
+        assert_eq!(&e.bytes[0..4], &0x0403_4b50u32.to_le_bytes());
+        let eocd = e.bytes.len() - 22;
+        assert_eq!(&e.bytes[eocd..eocd + 4], &0x0605_4b50u32.to_le_bytes());
+        assert_eq!(&e.bytes[eocd + 10..eocd + 12], &2u16.to_le_bytes());
+
+        // Real-world validation when the host has `unzip` (macOS/linux do);
+        // silently skipped elsewhere to stay hermetic.
+        let zip_path = root.path().join("demo.zip");
+        fs::write(&zip_path, &e.bytes).unwrap();
+        if let Ok(out) = std::process::Command::new("unzip").arg("-t").arg(&zip_path).output() {
+            assert!(
+                out.status.success(),
+                "unzip -t rejected our archive:\n{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
+        }
+
+        assert!(export_doc_in(root.path(), "demo", "no-such-version").is_err());
+        assert!(export_doc_in(root.path(), "missing-doc", "").is_err());
     }
 
     #[test]

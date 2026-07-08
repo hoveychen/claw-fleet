@@ -34,3 +34,21 @@
   word-break: break-word;
   overflow-wrap: anywhere;
 }
+
+/* ── Wiki cross-doc links (markdown/wikiLinks.tsx) ────────────────────────── */
+
+.wiki_link {
+  color: var(--color-accent);
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+}
+
+/* Target slug isn't published: keep it visibly a ref, but clearly dead. */
+.wiki_link_dead {
+  color: var(--color-text-dim);
+  cursor: default;
+  text-decoration: line-through;
+  text-decoration-style: dotted;
+}

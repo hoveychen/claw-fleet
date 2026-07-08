@@ -183,6 +183,12 @@ impl Backend for NullBackend {
     fn delete_wiki_version(&self, _: &str, _: &str) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn search_wiki_docs(&self, _: &str) -> Vec<claw_fleet_core::wiki::WikiSearchHit> {
+        vec![]
+    }
+    fn export_wiki_doc(&self, _: &str, _: &str) -> Result<claw_fleet_core::wiki::WikiExport, String> {
+        Err("backend not ready".into())
+    }
     fn get_task_plans(
         &self,
         _: &str,
