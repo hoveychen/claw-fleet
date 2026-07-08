@@ -271,16 +271,19 @@ export function SessionDetail({
     setViewTab(tab as ViewTab);
   }, [isStandalone, global.session?.id, global.initialTab]);
 
-  // TASKS.md plans for this session's workspace (full task-item list). Fetched
-  // through the Backend trait so it works for both local and remote sessions.
+  // TASKS.md plan for THIS session — scoped to the plan the session is focused
+  // on (via its task-progress record), not every plan the workspace ever had.
+  // Fetched through the Backend trait so it works for both local and remote
+  // sessions. No session id → nothing to scope to → show nothing.
   const workspacePath = liveSession?.workspacePath;
+  const sessionId = liveSession?.id;
   useEffect(() => {
-    if (!workspacePath) {
+    if (!workspacePath || !sessionId) {
       setTaskPlans([]);
       return;
     }
     let cancelled = false;
-    invoke<TaskPlanDetail[]>("get_task_plans", { workspacePath })
+    invoke<TaskPlanDetail[]>("get_task_plans", { workspacePath, sessionId })
       .then((r) => {
         if (!cancelled) setTaskPlans(r ?? []);
       })
@@ -290,7 +293,7 @@ export function SessionDetail({
     return () => {
       cancelled = true;
     };
-  }, [workspacePath]);
+  }, [workspacePath, sessionId]);
   const hasTaskPlans = taskPlans.length > 0;
 
   const pickTab = useCallback((tab: ViewTab) => {
@@ -589,24 +592,42 @@ export function SessionDetail({
             <div className={styles.tasks_panel}>
               {taskPlans.map((plan, pi) => {
                 const done = plan.items.filter((it) => it.done).length;
+                const total = plan.items.length;
+                const allDone = total > 0 && done === total;
+                // Prefer the human-readable `**Plan:**` title; fall back to the
+                // sentinel id, then to the anonymous label.
+                const title = plan.title ?? plan.id ?? t("detail.tasks_anonymous");
+                // Keep the id as a secondary tag only when a title is present —
+                // otherwise the title already *is* the id, no need to repeat it.
+                const showId = Boolean(plan.title && plan.id);
                 // The first still-pending item is "current" for this plan —
                 // the visible answer to "做到第几个 P 了".
                 const currentIdx = plan.items.findIndex((it) => !it.done);
                 return (
                   <div key={plan.id ?? `plan-${pi}`} className={styles.tasks_plan}>
                     <div className={styles.tasks_plan_head}>
-                      <span className={styles.tasks_plan_id}>
-                        {plan.id ?? t("detail.tasks_anonymous")}
+                      <span className={styles.tasks_plan_title}>{title}</span>
+                      <span
+                        className={`${styles.tasks_plan_status} ${allDone ? styles.tasks_plan_status_done : styles.tasks_plan_status_active}`}
+                      >
+                        {allDone
+                          ? t("detail.tasks_status_done")
+                          : t("detail.tasks_status_active")}
                       </span>
                       <span className={styles.tasks_plan_count}>
-                        {done}/{plan.items.length}
+                        {done}/{total}
                       </span>
-                      {plan.source && (
-                        <span className={styles.tasks_plan_source} title={plan.source}>
-                          {plan.source}
-                        </span>
-                      )}
                     </div>
+                    {(showId || plan.source) && (
+                      <div className={styles.tasks_plan_sub}>
+                        {showId && <span className={styles.tasks_plan_id}>{plan.id}</span>}
+                        {plan.source && (
+                          <span className={styles.tasks_plan_source} title={plan.source}>
+                            {plan.source}
+                          </span>
+                        )}
+                      </div>
+                    )}
                     <ul className={styles.tasks_items}>
                       {plan.items.map((it, ii) => {
                         const isCurrent = ii === currentIdx;

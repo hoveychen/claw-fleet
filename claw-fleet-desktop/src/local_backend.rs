@@ -1843,8 +1843,12 @@ impl Backend for LocalBackend {
         vec![]
     }
 
-    fn get_task_plans(&self, workspace_path: &str) -> Vec<crate::prd_tasks::TaskPlanDetail> {
-        crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace_path))
+    fn get_task_plans(
+        &self,
+        workspace_path: &str,
+        session_id: Option<&str>,
+    ) -> Vec<crate::prd_tasks::TaskPlanDetail> {
+        crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace_path), session_id)
     }
 
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {

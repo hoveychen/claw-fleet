@@ -408,8 +408,16 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&format!("/memory_history?path={}", encode_path(path))).unwrap_or_default()
     }
 
-    fn get_task_plans(&self, workspace_path: &str) -> Vec<crate::prd_tasks::TaskPlanDetail> {
-        self.probe.get(&format!("/task_plans?path={}", encode_path(workspace_path))).unwrap_or_default()
+    fn get_task_plans(
+        &self,
+        workspace_path: &str,
+        session_id: Option<&str>,
+    ) -> Vec<crate::prd_tasks::TaskPlanDetail> {
+        let mut url = format!("/task_plans?path={}", encode_path(workspace_path));
+        if let Some(sid) = session_id {
+            url.push_str(&format!("&session={}", encode_path(sid)));
+        }
+        self.probe.get(&url).unwrap_or_default()
     }
 
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {

@@ -1681,9 +1681,14 @@ fn get_memory_history(path: String, state: tauri::State<AppState>) -> Vec<memory
 #[tauri::command]
 fn get_task_plans(
     workspace_path: String,
+    session_id: Option<String>,
     state: tauri::State<AppState>,
 ) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
-    state.backend.read().unwrap().get_task_plans(&workspace_path)
+    state
+        .backend
+        .read()
+        .unwrap()
+        .get_task_plans(&workspace_path, session_id.as_deref())
 }
 
 #[tauri::command]

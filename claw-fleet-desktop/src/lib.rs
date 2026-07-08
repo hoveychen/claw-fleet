@@ -155,7 +155,11 @@ impl Backend for NullBackend {
     fn get_memory_history(&self, _: &str) -> Vec<MemoryHistoryEntry> {
         vec![]
     }
-    fn get_task_plans(&self, _: &str) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
+    fn get_task_plans(
+        &self,
+        _: &str,
+        _: Option<&str>,
+    ) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
         vec![]
     }
     fn list_skills(&self) -> Vec<SkillItem> {
