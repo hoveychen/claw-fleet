@@ -106,13 +106,15 @@ Claw Fleet can monitor sessions from multiple AI coding agents:
 
 **Your agents' memory, finally visible.** `CLAUDE.md` files and memory entries scattered across dozens of projects, indexed in one place. Browse, diff, promote to global scope.
 
+**A wiki for everything your agents produce.** HTML reports, interactive demos, and markdown docs no longer die in scratch workdirs — agents archive them with `fleet wiki publish <path>` and they show up in the Wiki board: filterable by workspace, versioned on every re-publish, rendered live (scripts and all) for local and remote backends alike. An optional guidance toggle teaches agents to publish finished artifacts automatically.
+
 **Monitor from your phone.** The companion Android app connects to your desktop via a secure tunnel — scan a QR code and you're in. See live agent statuses, token speeds, and conversation history from anywhere. Stop a runaway agent from the couch.
 
 **Remote agents, local dashboard.** SSH into your cloud box and monitor remote agents alongside local ones. Auto-bootstraps itself on the remote side. No port forwarding, no VPN.
 
 **Agents that manage agents.** Install the Fleet Skill and your AI coding agent can check on — and stop — other running agents on its own.
 
-**A CLI for everything.** `fleet agents`, `fleet stop`, `fleet audit`, `fleet search` — all with `--json`. Stay in the terminal if that's your thing.
+**A CLI for everything.** `fleet agents`, `fleet stop`, `fleet audit`, `fleet search`, `fleet wiki` — all with `--json`. Stay in the terminal if that's your thing.
 
 **Zero config.** Download. Open. It reads local session files directly — no server, no API key. macOS, Windows, Linux.
 
