@@ -169,7 +169,11 @@ impl Backend for NullBackend {
     fn delete_wiki_version(&self, _: &str, _: &str) -> Result<(), String> {
         Err("backend not ready".into())
     }
-    fn get_task_plans(&self, _: &str) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
+    fn get_task_plans(
+        &self,
+        _: &str,
+        _: Option<&str>,
+    ) -> Vec<claw_fleet_core::prd_tasks::TaskPlanDetail> {
         vec![]
     }
     fn list_skills(&self) -> Vec<SkillItem> {

@@ -2772,7 +2772,7 @@ fn plan_migrate(cwd: &std::path::Path, path: Option<std::path::PathBuf>) -> Resu
 }
 
 fn plan_list(cwd: &std::path::Path) -> Result<(), String> {
-    let plans = claw_fleet_core::prd_tasks::list_workspace_task_plans(cwd);
+    let plans = claw_fleet_core::prd_tasks::list_workspace_task_plans(cwd, None);
     if plans.is_empty() {
         println!("(no plans)");
         return Ok(());
@@ -2792,7 +2792,7 @@ fn plan_list(cwd: &std::path::Path) -> Result<(), String> {
 }
 
 fn plan_get(cwd: &std::path::Path, plan_id: &str) -> Result<(), String> {
-    let plans = claw_fleet_core::prd_tasks::list_workspace_task_plans(cwd);
+    let plans = claw_fleet_core::prd_tasks::list_workspace_task_plans(cwd, None);
     let p = plans
         .iter()
         .find(|p| p.id.as_deref() == Some(plan_id))
