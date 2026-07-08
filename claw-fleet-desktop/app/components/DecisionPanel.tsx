@@ -2032,8 +2032,11 @@ export function DecisionPanel({
     }
   }, [decisionPanelCollapsed, active?.kind, setDecisionPanelCollapsed]);
 
-  // Lite/compact never collapses — the lite window is already small.
-  const effectiveCollapsed = decisionPanelCollapsed && !compact;
+  // Lite/compact never collapses — the lite window is already small. The
+  // standalone float window never collapses either: it exists solely to show
+  // the card, and the collapsed state is shared via localStorage with the
+  // main window, so honoring it here would leave the float a bare pill.
+  const effectiveCollapsed = decisionPanelCollapsed && !compact && !float;
 
   const hasPreview =
     (active?.kind === "elicitation" || active?.kind === "fleet-ask") &&
