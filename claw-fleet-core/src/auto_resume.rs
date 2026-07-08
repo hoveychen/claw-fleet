@@ -298,17 +298,26 @@ fn spawn_resume_with_path(
         "-p".to_string(),
         prompt.to_string(),
     ];
+    // Stream the token-level thinking to stdout so it can be teed to a
+    // live-thinking sidecar (same rationale as `session_launch::spawn_new_session`;
+    // stdout was otherwise discarded, the JSONL transcript is unaffected).
+    args.push("--output-format".to_string());
+    args.push("stream-json".to_string());
+    args.push("--verbose".to_string());
+    args.push("--include-partial-messages".to_string());
     args.extend(override_args.iter().cloned());
     // Route native permission prompts to Fleet's Decision Panel instead of
     // headless auto-deny (no-op when the fleet MCP server isn't injected).
     args.extend(crate::session_launch::permission_prompt_tool_args());
-    crate::session_launch::spawn_claude_detached(
+    crate::session_launch::spawn_claude_detached_with_envs(
         claude_path,
         &args,
         workspace_path,
         stderr_log,
         "auto_resume",
         &format!("session={}", session_id),
+        &[],
+        true, // tee stdout to a live-thinking sidecar
         on_exit,
     )
 }

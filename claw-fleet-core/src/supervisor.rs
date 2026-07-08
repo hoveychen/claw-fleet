@@ -510,6 +510,13 @@ fn spawn_claude(
 
     let mut cmd = crate::process_util::command(&claude.path);
     cmd.current_dir(workspace).arg("--print");
+    // Stream token-level thinking to stdout so it can be teed to a live-thinking
+    // sidecar below (stdout was otherwise discarded; the JSONL transcript is
+    // unaffected). `--verbose` is required for stream-json under `--print`.
+    cmd.arg("--output-format")
+        .arg("stream-json")
+        .arg("--verbose")
+        .arg("--include-partial-messages");
     if is_resume {
         cmd.arg("--resume").arg(session_id);
     } else {
@@ -565,12 +572,42 @@ fn spawn_claude(
         cmd.env("PATH", new_path);
     }
 
+    // Live-thinking sidecar: open a uniquely-named temp file (PID isn't known
+    // until after spawn), point stdout at it, then rename to the pid-keyed name
+    // once we have the pid. Renaming an open file is safe on Unix — the child
+    // keeps writing to the same inode. Best-effort: on any error we fall back to
+    // discarding stdout so a filesystem hiccup never blocks a spawn.
+    let mut sidecar_tmp: Option<std::path::PathBuf> = None;
+    let stdout_stdio = match crate::live_thinking::ensure_sidecar_dir().ok().and_then(|dir| {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let tmp = dir.join(format!("spawn-{}-{}.jsonl", std::process::id(), nanos));
+        std::fs::File::create(&tmp).ok().map(|f| (tmp, f))
+    }) {
+        Some((tmp, file)) => {
+            sidecar_tmp = Some(tmp);
+            Stdio::from(file)
+        }
+        None => Stdio::null(),
+    };
+
     cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(stdout_stdio)
         .stderr(Stdio::null());
 
     let child = cmd.spawn().map_err(|e| format!("spawn: {e}"))?;
-    Ok(child.id())
+    let pid = child.id();
+
+    // Give the sidecar its stable pid-keyed name now that we have the pid.
+    if let Some(tmp) = sidecar_tmp {
+        if let Some(final_path) = crate::live_thinking::sidecar_path_for_pid(pid) {
+            let _ = std::fs::rename(&tmp, &final_path);
+        }
+    }
+
+    Ok(pid)
 }
 
 /// Create / refresh `~/.claude/fleet/bin/fleet → <fleet binary path>` so that
