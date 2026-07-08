@@ -1743,6 +1743,20 @@ fn get_wiki_file_text(
     String::from_utf8(f.bytes).map_err(|_| "file is not valid UTF-8".to_string())
 }
 
+/// Export one version of a wiki doc to `dest` on the local filesystem. Bytes
+/// come through the backend, so remote docs download transparently; the save
+/// dialog runs on the frontend (plugin-dialog), which hands us the path.
+#[tauri::command]
+fn export_wiki_doc(
+    slug: String,
+    version: String,
+    dest: String,
+    state: tauri::State<AppState>,
+) -> Result<(), String> {
+    let export = state.backend.read().unwrap().export_wiki_doc(&slug, &version)?;
+    std::fs::write(&dest, export.bytes).map_err(|e| format!("write '{dest}': {e}"))
+}
+
 #[tauri::command]
 fn search_wiki_docs(
     query: String,
@@ -3933,6 +3947,7 @@ pub fn run() {
             delete_wiki_doc,
             delete_wiki_version,
             search_wiki_docs,
+            export_wiki_doc,
             list_skills,
             get_skill_content,
             list_skill_files,

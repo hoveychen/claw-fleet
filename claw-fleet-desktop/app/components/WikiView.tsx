@@ -1,7 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpen, ChevronDown, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
+import { save } from "@tauri-apps/plugin-dialog";
+import { BookOpen, ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { EmptyState } from "./EmptyState";
@@ -385,6 +386,25 @@ function WikiDetail({
     ? version
     : doc.currentVersion;
 
+  const [exporting, setExporting] = useState(false);
+  const handleExport = async () => {
+    // Mirrors core's wiki::export_filename — kind decides the artifact shape.
+    const ext = doc.kind === "markdown" ? "md" : doc.kind === "html" ? "html" : "zip";
+    const dest = await save({
+      defaultPath: `${doc.slug}.${ext}`,
+      filters: [{ name: doc.title, extensions: [ext] }],
+    });
+    if (!dest) return;
+    setExporting(true);
+    try {
+      await invoke("export_wiki_doc", { slug: doc.slug, version: effectiveVersion, dest });
+    } catch (e) {
+      console.error("wiki export failed:", e);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   useEffect(() => {
     if (doc.kind !== "markdown") {
       setMarkdown(null);
@@ -424,6 +444,15 @@ function WikiDetail({
               </option>
             ))}
           </select>
+          <button
+            className={styles.action_btn}
+            onClick={handleExport}
+            disabled={exporting}
+            title={t("wiki.export", "Export this version to a file")}
+          >
+            <Download size={12} strokeWidth={1.7} />
+            {t("wiki.export_short", "Export")}
+          </button>
           {effectiveVersion !== doc.currentVersion && (
             <button
               className={styles.action_btn}
