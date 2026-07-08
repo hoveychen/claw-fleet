@@ -81,6 +81,7 @@ pub mod task {
 pub mod tcc;
 pub mod token_analysis;
 pub mod touches_hook;
+pub mod wiki;
 pub mod workflow;
 pub mod workflow_sidecar;
 pub mod worker_executor {
