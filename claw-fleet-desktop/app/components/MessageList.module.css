@@ -142,3 +142,34 @@
   background: var(--color-warning);
   animation: pulse 1s ease-in-out infinite;
 }
+
+/* Live activity ("still working") indicator */
+.working {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  color: var(--color-text-dim);
+  font-size: 12px;
+}
+
+.working_dots {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.working_dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-success, #5ac88c);
+  animation: working_bounce 1.2s ease-in-out infinite;
+}
+
+.working_dots span:nth-child(2) { animation-delay: 0.15s; }
+.working_dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes working_bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
