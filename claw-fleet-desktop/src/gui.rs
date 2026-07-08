@@ -674,13 +674,16 @@ fn resume_rate_limited_session(
     session_id: String,
     workspace_path: String,
     prompt: Option<String>,
+    model: Option<String>,
+    effort: Option<String>,
+    permission_mode: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     state
         .backend
         .read()
         .unwrap()
-        .resume_session(session_id, workspace_path, prompt)
+        .resume_session(session_id, workspace_path, prompt, model, effort, permission_mode)
 }
 
 #[tauri::command]
