@@ -72,6 +72,8 @@ export interface SessionInfo {
   todos?: TodoSummary | null;
   /** Aggregate TASKS.md plan progress for this session's workspace; absent when PRD Discipline isn't in use. */
   taskPlan?: TaskPlanSummary | null;
+  /** Relay-chain position when this session took part in a handoff (`fleet handoff`); absent otherwise. */
+  handoff?: SessionHandoffInfo | null;
   /** Number of times this session was context-compacted (auto or manual /compact). */
   compactCount?: number;
   /** Sum of context sizes (in tokens) right before each compaction. */
@@ -276,6 +278,34 @@ export interface TaskPlanSummary {
   currentPlan?: string;
   /** First still-pending top-level task in the focused plan (e.g. `**P3** — …`). */
   currentTask?: string;
+}
+
+/** Relay-chain position embedded on SessionInfo (drives the 接力 chip). */
+export interface SessionHandoffInfo {
+  chainId: string;
+  /** This session's 1-based position on the chain. */
+  hop: number;
+  /** Total sessions currently on the chain. */
+  chainLen: number;
+}
+
+/** One consumed relay step of a handoff chain. */
+export interface HandoffLink {
+  fromSessionId: string;
+  toSessionId: string;
+  note: string;
+  planId?: string | null;
+  nextTask?: string | null;
+  /** Epoch ms the successor session was spawned. */
+  handedAt: number;
+}
+
+/** A full session relay chain (`fleet handoff` history). */
+export interface HandoffChain {
+  chainId: string;
+  workspacePath: string;
+  planId?: string | null;
+  links: HandoffLink[];
 }
 
 /** One checkbox line in a TASKS.md plan (detail view). */

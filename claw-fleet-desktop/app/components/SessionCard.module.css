@@ -481,3 +481,98 @@
 :global([data-platform="macos"][data-theme="light"]) .badge_idle {
   background: rgba(0, 0, 0, 0.06);
 }
+
+/* ── Handoff relay chain ─────────────────────────────────────────────────── */
+
+.handoff_row {
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.handoff_chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  border-radius: 9px;
+  background: var(--color-hover, rgba(127, 127, 127, 0.12));
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+  transition: background 0.15s;
+}
+
+.handoff_chip:hover {
+  background: rgba(127, 127, 127, 0.22);
+}
+
+.handoff_panel {
+  margin-top: 4px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--color-hover, rgba(127, 127, 127, 0.08));
+  cursor: default;
+}
+
+.handoff_leg {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-text-secondary);
+}
+
+.handoff_current .handoff_leg_title,
+.handoff_current {
+  color: var(--color-text-primary, inherit);
+  font-weight: 600;
+}
+
+.handoff_leg_no {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.75;
+}
+
+.handoff_leg_title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.handoff_link {
+  display: flex;
+  gap: 6px;
+  margin: 2px 0 2px 6px;
+}
+
+.handoff_arrow {
+  flex: 0 0 auto;
+  opacity: 0.5;
+}
+
+.handoff_link_body {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.handoff_next {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  opacity: 0.9;
+}
+
+.handoff_note {
+  color: var(--color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: pre-wrap;
+}
+
+.handoff_time {
+  font-size: 10px;
+  opacity: 0.6;
+}
