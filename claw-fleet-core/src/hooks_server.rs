@@ -19,12 +19,12 @@ fn task_runtime_log_path(task_id: &str) -> Option<std::path::PathBuf> {
 
 /// Spawn `fleet task-runtime resume <task_id> --workspace <ws> --no-tui` as a
 /// child of THIS process and return its pid. Called from the `/spawn_task_runtime`
-/// endpoint so that `fleet serve` — which runs outside the desktop app's macOS
-/// sandbox (launchd `com.claudefleet.serve`, ppid launchd) — is the parent.
-/// A task-runtime spawned here is therefore unsandboxed too, so the planner /
-/// worker `claude` it launches can read the user's login-keychain credentials.
-/// Spawning from the sandboxed desktop app instead leaves the child confined and
-/// `claude` exits with "Not logged in".
+/// endpoint so that `fleet serve` (launchd `com.claudefleet.serve`, ppid
+/// launchd) — not the desktop process — is the parent. Origin: the desktop app
+/// used to be macOS-sandboxed, and a task-runtime it spawned directly inherited
+/// that sandbox, so the planner/worker `claude` couldn't read the user's
+/// login-keychain credentials and exited "Not logged in". The sandbox is gone
+/// (2026-07); the daemon route stays for the launchd parenting.
 ///
 /// The child's stderr is captured to `task_runtime_log_path` (truncated per
 /// start), not `/dev/null`, so a crash-before-register is recoverable. A reaper
@@ -563,10 +563,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            // Spawn a task-runtime as a child of this (unsandboxed) serve
-            // process so the planner/worker `claude` can reach the login
-            // keychain. The desktop POSTs here instead of spawning directly,
-            // which would inherit its macOS sandbox and break `claude` auth.
+            // Spawn a task-runtime as a child of this serve process so it is
+            // parented by the launchd daemon rather than the desktop process
+            // (historically this also escaped the desktop's App Sandbox —
+            // dropped 2026-07).
             "/spawn_task_runtime" => {
                 let task_id = query.get("task_id").cloned().unwrap_or_default();
                 let workspace = query.get("workspace").cloned().unwrap_or_default();

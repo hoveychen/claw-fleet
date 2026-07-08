@@ -148,12 +148,14 @@ pub struct SessionInfo {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-/// Returns the real user home directory, bypassing sandbox container redirection.
+/// Returns the real user home directory, robust to a redirected `$HOME`.
 ///
-/// In a sandboxed macOS app, `dirs::home_dir()` returns the container path
-/// (`~/Library/Containers/<id>/Data/`).  This function uses `getpwuid` to
-/// obtain the real home from the passwd database so that `~/.claude/`,
-/// `~/.fleet/`, `~/.ssh/` etc. resolve to the actual user directories.
+/// Origin: the desktop app used to ship with the macOS App Sandbox enabled,
+/// where `dirs::home_dir()` returns the container path
+/// (`~/Library/Containers/<id>/Data/`). The sandbox was dropped from
+/// entitlements.plist in 2026-07, but this stays the canonical home lookup:
+/// `getpwuid` reads the passwd database, so `~/.claude/`, `~/.fleet/`,
+/// `~/.ssh/` etc. resolve correctly even under a polluted/overridden `$HOME`.
 ///
 /// For integration tests, setting `FLEET_HOME` overrides the detected home
 /// so the test can operate on a temp dir without touching the real user's
@@ -238,7 +240,9 @@ pub fn is_process_alive(pid: u32) -> bool {
 /// with `unwrap_or(0)` upstream, every holder in a sandboxed Fleet build
 /// silently captured `start_time_secs = 0`, neutralising the PID-reuse
 /// defence. The macOS branch below therefore calls `libc::proc_pidinfo`
-/// directly for the target pid, which is permitted inside the sandbox.
+/// directly for the target pid, which was permitted even inside the sandbox.
+/// The desktop app has since dropped the App Sandbox (2026-07), but the
+/// direct call stays — it skips the full-host pid enumeration sysinfo does.
 #[cfg(target_os = "macos")]
 pub fn process_start_time(pid: u32) -> Option<u64> {
     use std::mem;

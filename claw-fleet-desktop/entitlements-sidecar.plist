@@ -2,10 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- Sidecar (fleet CLI) runs outside the app sandbox because it is
-         invoked by external processes (e.g. Claude Code hooks) that are
-         not themselves sandboxed.  Sandbox entitlements on a binary
-         launched outside the app-bundle context cause SIGTRAP. -->
+    <!-- Sidecar (fleet CLI) entitlements, kept separate from the app's
+         entitlements.plist: the sidecar is invoked by external processes
+         (e.g. Claude Code hooks) outside the app-bundle context and needs
+         none of the app's WebView JIT keys. Historically this separation
+         also kept the (since-removed, 2026-07) app-sandbox entitlement off
+         the sidecar — a sandboxed binary launched outside the app bundle
+         SIGTRAPs. -->
 
     <!-- ── Runtime: allow dyld env vars for compatibility ── -->
     <key>com.apple.security.cs.allow-dyld-environment-variables</key>

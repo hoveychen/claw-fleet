@@ -2014,13 +2014,14 @@ impl Backend for LocalBackend {
             })?;
         // Fresh attempt — clear any stale failure reason from a prior start.
         let _ = crate::task::clear_task_start_error(task_id);
-        // Prefer the out-of-sandbox `fleet serve` daemon to spawn the runtime:
-        // the desktop app is macOS-sandboxed, and a runtime it spawns directly
-        // inherits that sandbox, so the planner/worker `claude` can't read the
-        // login keychain and exits "Not logged in". serve runs under launchd
-        // outside the sandbox, so a runtime it parents is unsandboxed too.
-        // Fall back to a local spawn when serve isn't running (e.g. dev runs of
-        // the desktop, which aren't sandboxed anyway).
+        // Prefer the `fleet serve` daemon to spawn the runtime. Origin: the
+        // desktop app used to be macOS-sandboxed, and a runtime it spawned
+        // directly inherited that sandbox, so the planner/worker `claude`
+        // couldn't read the login keychain and exited "Not logged in". The
+        // sandbox is gone (entitlements.plist, 2026-07), but the daemon route
+        // stays preferred: it parents the runtime under launchd instead of
+        // the desktop process. Fall back to a local spawn when serve isn't
+        // running (e.g. dev runs of the desktop).
         let tid = task_id.to_string();
         match crate::fleet_task_spawn::spawn_via_serve(task_id, &workspace) {
             Ok(()) => {
@@ -2039,8 +2040,8 @@ impl Backend for LocalBackend {
             Err(serve_err) => {
                 eprintln!(
                     "[start_task] serve daemon unavailable ({serve_err}); \
-                     falling back to local spawn (sandboxed desktop builds will \
-                     hit the keychain auth issue)"
+                     falling back to local spawn (runtime will be parented \
+                     by the desktop process)"
                 );
                 let mut child =
                     crate::fleet_task_spawn::spawn_fleet_task_detached(task_id, &workspace)
