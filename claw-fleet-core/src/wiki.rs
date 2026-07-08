@@ -153,6 +153,80 @@ pub fn mime_for_path(path: &Path) -> &'static str {
     }
 }
 
+// ── Scratchpad workspace decoding ────────────────────────────────────────────
+
+/// Claude Code gives each session a scratchpad directory at
+/// `<tmp>/claude-<uid>/<encoded-project-path>/<session-uuid>/scratchpad`,
+/// where the project path is encoded by replacing every non-alphanumeric
+/// character with `-`. Agents often run `fleet wiki publish` from inside that
+/// scratchpad, which would tag the doc's workspace as ".../scratchpad" instead
+/// of the session's real project. Detect the pattern anywhere in `path` and
+/// decode the real project directory; ambiguity in the encoding (a `-` can be
+/// `/`, `-`, `.` or `_`) is resolved by what actually exists on disk.
+pub fn decode_scratchpad_workspace(path: &Path) -> Option<PathBuf> {
+    let comps: Vec<String> = path
+        .iter()
+        .map(|c| c.to_string_lossy().into_owned())
+        .collect();
+    for i in 0..comps.len().saturating_sub(3) {
+        if is_claude_uid_dir(&comps[i])
+            && comps[i + 1].starts_with('-')
+            && is_session_uuid(&comps[i + 2])
+            && comps[i + 3] == "scratchpad"
+        {
+            if let Some(decoded) = decode_encoded_path(&comps[i + 1]) {
+                return Some(decoded);
+            }
+        }
+    }
+    None
+}
+
+/// `claude-<uid>` with a purely numeric uid, e.g. `claude-501`.
+fn is_claude_uid_dir(s: &str) -> bool {
+    s.strip_prefix("claude-")
+        .is_some_and(|rest| !rest.is_empty() && rest.bytes().all(|b| b.is_ascii_digit()))
+}
+
+/// Lowercase hex UUID with dashes at positions 8/13/18/23.
+fn is_session_uuid(s: &str) -> bool {
+    s.len() == 36
+        && s.bytes().enumerate().all(|(i, b)| match i {
+            8 | 13 | 18 | 23 => b == b'-',
+            _ => b.is_ascii_hexdigit(),
+        })
+}
+
+/// `-Users-me-workspace-my-app` → `/Users/me/workspace/my-app`. The encoding
+/// is lossy, so try each `-` as `/`, `-`, `.` or `_` (in that order) and prune
+/// branches whose directory prefix doesn't exist.
+fn decode_encoded_path(encoded: &str) -> Option<PathBuf> {
+    let rest = encoded.strip_prefix('-')?;
+    dfs_decode(rest, "/".to_string())
+}
+
+fn dfs_decode(rest: &str, acc: String) -> Option<PathBuf> {
+    match rest.find('-') {
+        None => {
+            let p = PathBuf::from(format!("{acc}{rest}"));
+            p.is_dir().then_some(p)
+        }
+        Some(idx) => {
+            let base = format!("{acc}{}", &rest[..idx]);
+            let tail = &rest[idx + 1..];
+            for alt in ['/', '-', '.', '_'] {
+                if alt == '/' && !Path::new(&base).is_dir() {
+                    continue;
+                }
+                if let Some(hit) = dfs_decode(tail, format!("{base}{alt}")) {
+                    return Some(hit);
+                }
+            }
+            None
+        }
+    }
+}
+
 // ── Publish ──────────────────────────────────────────────────────────────────
 
 /// Publish `source` (a `.md` file, an `.html`/`.htm` file, or a directory
@@ -257,9 +331,11 @@ pub fn publish_in(
         source_path: source.display().to_string(),
     };
 
-    let workspace_path = workspace
+    let workspace = workspace
         .canonicalize()
-        .unwrap_or_else(|_| workspace.to_path_buf())
+        .unwrap_or_else(|_| workspace.to_path_buf());
+    let workspace_path = decode_scratchpad_workspace(&workspace)
+        .unwrap_or(workspace)
         .display()
         .to_string();
     let workspace_name = Path::new(&workspace_path)
@@ -1125,6 +1201,63 @@ mod tests {
         assert!(get_doc_in(root.path(), "doomed").is_err());
         assert!(delete_doc_in(root.path(), "doomed").is_err());
         assert!(list_docs_in(root.path()).is_empty());
+    }
+
+    /// Encode a path the way Claude Code names session scratchpad parents:
+    /// every non-alphanumeric character becomes `-`.
+    fn encode_project_path(p: &Path) -> String {
+        p.to_str()
+            .unwrap()
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect()
+    }
+
+    /// Build `<base>/claude-501/<encoded-project>/<uuid>/scratchpad/<sub…>`
+    /// mirroring a real Claude Code session scratchpad, and return that dir.
+    fn fake_scratchpad(base: &Path, project: &Path, sub: &str) -> PathBuf {
+        let canon = project.canonicalize().unwrap();
+        let dir = base
+            .join("claude-501")
+            .join(encode_project_path(&canon))
+            .join("9afa58d4-0cd7-4d97-ad30-bcac934f724d")
+            .join("scratchpad")
+            .join(sub);
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn publish_decodes_scratchpad_workspace() {
+        let root = tmp();
+        let base = tmp();
+        let project = base.path().join("ws").join("my-app");
+        fs::create_dir_all(&project).unwrap();
+        let canon = project.canonicalize().unwrap();
+
+        // Publish from inside a subdir of the session scratchpad, like an
+        // agent that wrote its report to scratchpad/orvid/ and published there.
+        let scratch_sub = fake_scratchpad(base.path(), &project, "orvid");
+        let md = scratch_sub.join("report.md");
+        fs::write(&md, "# Report\n").unwrap();
+
+        let doc = publish_in(root.path(), &md, None, None, &scratch_sub).unwrap();
+        assert_eq!(doc.workspace_path, canon.display().to_string());
+        assert_eq!(doc.workspace_name, "my-app");
+    }
+
+    #[test]
+    fn publish_keeps_non_scratchpad_workspace() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("plain.md");
+        fs::write(&md, "# Plain\n").unwrap();
+
+        let doc = publish_in(root.path(), &md, None, None, ws.path()).unwrap();
+        assert_eq!(
+            doc.workspace_path,
+            ws.path().canonicalize().unwrap().display().to_string()
+        );
     }
 
     #[test]
