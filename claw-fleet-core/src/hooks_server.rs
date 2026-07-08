@@ -2544,6 +2544,52 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            // ── Wiki guidance endpoints ──────────────────────────────────────
+            "/apply_wiki_guidance" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct Req { locale: String }
+                let locale = serde_json::from_slice::<Req>(&body_bytes)
+                    .map(|r| r.locale)
+                    .unwrap_or_else(|_| "en".to_string());
+                match crate::wiki_guidance::apply_wiki_guidance(&locale) {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/remove_wiki_guidance" => {
+                match crate::wiki_guidance::remove_wiki_guidance() {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/interaction_diagnostics" => {
                 let checks = crate::interaction_mode_diagnostics::run_checks();
                 let body = serde_json::to_string(&checks).unwrap_or_else(|_| "[]".into());

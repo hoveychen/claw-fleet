@@ -24,6 +24,7 @@ interface HookSetupPlan {
   planApprovalInstalled: boolean;
   prdContextInstalled: boolean;
   prdDisciplineInstalled: boolean;
+  wikiGuidanceInstalled: boolean;
 }
 
 interface SourceInfo {
@@ -254,6 +255,14 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
           console.error("auto-apply prd mode:", e),
         );
       }
+      // Wiki guidance: opt-in, disk is the source of truth.
+      setWikiGuidanceEnabled(plan.wikiGuidanceInstalled);
+      setItem("wiki-guidance-enabled", plan.wikiGuidanceInstalled ? "true" : "false");
+      if (plan.wikiGuidanceInstalled) {
+        invoke("apply_wiki_guidance").catch((e: unknown) =>
+          console.error("auto-apply wiki guidance:", e),
+        );
+      }
     }).catch(() => {});
   }, []);
 
@@ -366,6 +375,26 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
       invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
     } catch (e) {
       console.error("prd mode toggle failed:", e);
+    }
+  }, []);
+
+  // ── Wiki guidance state (default off) ──────────────────────────────────
+  const [wikiGuidanceEnabled, setWikiGuidanceEnabled] = useState(
+    () => getItem("wiki-guidance-enabled") === "true",
+  );
+
+  const handleToggleWikiGuidance = useCallback(async (enabled: boolean) => {
+    setWikiGuidanceEnabled(enabled);
+    setItem("wiki-guidance-enabled", enabled ? "true" : "false");
+    try {
+      if (enabled) {
+        await invoke("apply_wiki_guidance");
+      } else {
+        await invoke("remove_wiki_guidance");
+      }
+      invoke<HookSetupPlan>("get_hooks_setup_plan").then(setHooksPlan).catch(() => {});
+    } catch (e) {
+      console.error("wiki guidance toggle failed:", e);
     }
   }, []);
 
@@ -1825,6 +1854,22 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       type="checkbox"
                       checked={prdModeEnabled}
                       onChange={(e) => handleTogglePrdMode(e.target.checked)}
+                    />
+                    <span className={styles.toggle_slider} />
+                  </label>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
+                    {t("settings.wiki_guidance_desc")}
+                  </span>
+                </div>
+                <div className={styles.row}>
+                  <span className={styles.row_label}>{t("settings.wiki_guidance_enabled")}</span>
+                  <label className={styles.toggle}>
+                    <input
+                      type="checkbox"
+                      checked={wikiGuidanceEnabled}
+                      onChange={(e) => handleToggleWikiGuidance(e.target.checked)}
                     />
                     <span className={styles.toggle_slider} />
                   </label>

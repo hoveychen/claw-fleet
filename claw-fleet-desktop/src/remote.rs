@@ -825,6 +825,7 @@ impl crate::backend::Backend for RemoteBackend {
             plan_approval_installed: false,
             prd_context_installed: false,
             prd_discipline_installed: false,
+            wiki_guidance_installed: false,
             idle_hooks_installed: false,
         })
     }
@@ -1032,6 +1033,16 @@ impl crate::backend::Backend for RemoteBackend {
 
     fn remove_interaction_mode(&self) -> Result<(), String> {
         self.probe.post_ok("/remove_interaction_mode")
+    }
+
+    fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> { locale: &'a str }
+        self.probe.post_json_ok("/apply_wiki_guidance", &Req { locale })
+    }
+
+    fn remove_wiki_guidance(&self) -> Result<(), String> {
+        self.probe.post_ok("/remove_wiki_guidance")
     }
 
     fn interaction_diagnostics(

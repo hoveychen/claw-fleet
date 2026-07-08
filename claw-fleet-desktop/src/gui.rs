@@ -1089,6 +1089,17 @@ fn remove_interaction_mode(state: tauri::State<AppState>) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn apply_wiki_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    let locale = state.locale.lock().unwrap().clone();
+    state.backend.read().unwrap().apply_wiki_guidance(&locale)
+}
+
+#[tauri::command]
+fn remove_wiki_guidance(state: tauri::State<AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().remove_wiki_guidance()
+}
+
+#[tauri::command]
 fn get_interaction_diagnostics(
     state: tauri::State<AppState>,
 ) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {
@@ -3950,6 +3961,8 @@ pub fn run() {
             remove_elicitation_hook,
             apply_interaction_mode,
             remove_interaction_mode,
+            apply_wiki_guidance,
+            remove_wiki_guidance,
             get_interaction_diagnostics,
             test_decision_frontend_only,
             test_decision_end_to_end,

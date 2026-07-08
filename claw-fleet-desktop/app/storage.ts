@@ -48,6 +48,7 @@ export const ONBOARDING_FEATURES = [
   "hooks_guard_elicitation",
   "global_ask",
   "prd_discipline",
+  "wiki_guidance",
 ] as const;
 
 export type OnboardingFeatureId = (typeof ONBOARDING_FEATURES)[number];
