@@ -310,9 +310,10 @@ pub trait Backend: Send + Sync {
         permission_mode: Option<String>,
     ) -> Result<(), String>;
     /// Start a brand-new headless Claude Code session: spawns
-    /// `claude -p "<prompt>" [--model <m>] [--effort <e>]
+    /// `claude -p "<prompt>" --session-id <uuid> [--model <m>] [--effort <e>]
     /// [--permission-mode <pm>]` detached in `workspace_path`. The session is
-    /// discovered by the scanner via its own JSONL. Returns the spawned pid.
+    /// discovered by the scanner via its own JSONL. Returns the spawned pid
+    /// plus the pre-assigned session id (None only from an older remote probe).
     fn spawn_new_session(
         &self,
         workspace_path: String,
@@ -320,7 +321,7 @@ pub trait Backend: Send + Sync {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
-    ) -> Result<u32, String>;
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String>;
     /// Read the auto-resume scheduler config.
     fn get_auto_resume_config(&self) -> crate::auto_resume::AutoResumeConfig;
     /// Persist the auto-resume scheduler config.
