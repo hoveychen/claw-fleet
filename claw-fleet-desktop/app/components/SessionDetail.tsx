@@ -6,6 +6,7 @@ import { NEW_SESSION_ENTRYPOINT } from "../types";
 import type { DecisionHistoryRecord, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
+import { ResumeComposer } from "./ResumeComposer";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { WorkflowDag } from "./blocks/WorkflowDag";
@@ -177,40 +178,17 @@ export function SessionDetail({
   // Resume entry: only for "新会话"-launched main sessions (transcript
   // entrypoint tag) that are not currently running — spawns
   // `claude --resume <sid> -p <追问>` detached via the generic resume chain.
+  // The form itself (prompt + attachments + model/effort/permission overrides)
+  // lives in ResumeComposer, sharing the new-session composer surface.
   const [showResume, setShowResume] = useState(false);
-  const [resumeText, setResumeText] = useState("");
-  const [resuming, setResuming] = useState(false);
-  const [resumeError, setResumeError] = useState<string | null>(null);
   useEffect(() => {
     setShowResume(false);
-    setResumeText("");
-    setResumeError(null);
   }, [liveSession?.id]);
   const canResume =
     !!liveSession &&
     !liveSession.isSubagent &&
     !ACTIVE_STATUSES.has(liveSession.status) &&
     liveSession.entrypoint === NEW_SESSION_ENTRYPOINT;
-  const submitResume = useCallback(async () => {
-    if (!liveSession) return;
-    const prompt = resumeText.trim();
-    if (!prompt || resuming) return;
-    setResuming(true);
-    setResumeError(null);
-    try {
-      await invoke("resume_rate_limited_session", {
-        sessionId: liveSession.id,
-        workspacePath: liveSession.workspacePath,
-        prompt,
-      });
-      setShowResume(false);
-      setResumeText("");
-    } catch (e) {
-      setResumeError(String((e as { message?: string })?.message ?? e));
-    } finally {
-      setResuming(false);
-    }
-  }, [liveSession?.id, liveSession?.workspacePath, resumeText, resuming]);
 
   useEffect(() => {
     const sid = liveSession?.id;
@@ -423,25 +401,12 @@ export function SessionDetail({
                 </button>
               )}
             </div>
-            {canResume && showResume && (
-              <div className={styles.resume_form}>
-                <textarea
-                  className={styles.resume_input}
-                  value={resumeText}
-                  onChange={(e) => setResumeText(e.target.value)}
-                  placeholder={t("history.resume_placeholder", "输入追问提示词后恢复会话…")}
-                  rows={2}
-                  autoFocus
-                />
-                <button
-                  className={styles.resume_send}
-                  disabled={!resumeText.trim() || resuming}
-                  onClick={submitResume}
-                >
-                  {resuming ? t("history.resuming", "恢复中…") : t("history.resume", "恢复会话")}
-                </button>
-                {resumeError && <div className={styles.resume_error}>{resumeError}</div>}
-              </div>
+            {canResume && showResume && liveSession && (
+              <ResumeComposer
+                sessionId={liveSession.id}
+                workspacePath={liveSession.workspacePath}
+                onResumed={() => setShowResume(false)}
+              />
             )}
             {liveSession.aiTitle && (
               <div className={styles.ai_title}>{liveSession.aiTitle}</div>

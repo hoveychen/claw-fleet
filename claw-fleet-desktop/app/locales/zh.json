@@ -1821,7 +1821,7 @@
     "untitled": "（无标题）",
     "resume_placeholder": "输入追问提示词后恢复会话…",
     "resume": "恢复会话",
-    "resuming": "恢复中…",
+    "resume_permission_default": "沿用会话设置",
     "filter_workspace": "按工作目录筛选",
     "all_workspaces": "全部目录",
     "select_hint": "从左侧选择一个会话查看详情"
