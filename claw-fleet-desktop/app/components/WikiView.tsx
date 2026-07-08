@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BookOpen, RefreshCw, Trash2 } from "lucide-react";
+import { BookOpen, ChevronDown, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -125,6 +125,33 @@ export function WikiView() {
     [filtered, selectedSlug],
   );
 
+  // Group the filtered docs by workspace; group order follows the docs'
+  // updated_ms-desc order, so the most recently active workspace floats up.
+  const groups = useMemo(() => {
+    const byPath = new Map<string, { path: string; name: string; docs: WikiDoc[] }>();
+    for (const d of filtered) {
+      let g = byPath.get(d.workspacePath);
+      if (!g) {
+        g = { path: d.workspacePath, name: d.workspaceName, docs: [] };
+        byPath.set(d.workspacePath, g);
+      }
+      g.docs.push(d);
+    }
+    return [...byPath.values()];
+  }, [filtered]);
+
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const toggleGroup = (path: string) => {
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  };
+  // While searching, collapse state is ignored so matches stay visible.
+  const searching = query.trim().length > 0;
+
   const handleDelete = async () => {
     if (!confirmDelete) return;
     try {
@@ -188,32 +215,47 @@ export function WikiView() {
               )}
             />
           )}
-          {filtered.map((d) => (
-            <button
-              key={d.slug}
-              className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""}`}
-              onClick={() => setSelectedSlug(d.slug)}
-            >
-              <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
-                {KIND_CONFIG[d.kind]?.short ?? d.kind}
-              </span>
-              <span className={styles.card_body}>
-                <span className={styles.card_title}>{d.title}</span>
-                <span className={styles.card_slug}>{d.slug}</span>
-                <span className={styles.card_meta}>
-                  <span>{d.workspaceName}</span>
-                  <span className={styles.card_meta_dot}>·</span>
-                  <span>{relativeTime(d.updatedMs)}</span>
-                  {d.versions.length > 1 && (
-                    <>
-                      <span className={styles.card_meta_dot}>·</span>
-                      <span>{t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}</span>
-                    </>
+          {groups.map((g) => {
+            const isCollapsed = !searching && collapsed.has(g.path);
+            return (
+              <div key={g.path} className={styles.group}>
+                <button className={styles.group_header} onClick={() => toggleGroup(g.path)}>
+                  {isCollapsed ? (
+                    <ChevronRight size={12} strokeWidth={2} className={styles.group_chevron} />
+                  ) : (
+                    <ChevronDown size={12} strokeWidth={2} className={styles.group_chevron} />
                   )}
-                </span>
-              </span>
-            </button>
-          ))}
+                  <span className={styles.group_name}>{g.name}</span>
+                  <span className={styles.group_count}>{g.docs.length}</span>
+                </button>
+                {!isCollapsed &&
+                  g.docs.map((d) => (
+                    <button
+                      key={d.slug}
+                      className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""}`}
+                      onClick={() => setSelectedSlug(d.slug)}
+                    >
+                      <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
+                        {KIND_CONFIG[d.kind]?.short ?? d.kind}
+                      </span>
+                      <span className={styles.card_body}>
+                        <span className={styles.card_title}>{d.title}</span>
+                        <span className={styles.card_slug}>{d.slug}</span>
+                        <span className={styles.card_meta}>
+                          <span>{relativeTime(d.updatedMs)}</span>
+                          {d.versions.length > 1 && (
+                            <>
+                              <span className={styles.card_meta_dot}>·</span>
+                              <span>{t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}</span>
+                            </>
+                          )}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            );
+          })}
         </aside>
 
         <main className={styles.detail_pane}>
