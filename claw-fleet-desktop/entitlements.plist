@@ -2,40 +2,25 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-    <!-- ── App Sandbox (required for Mac App Store, testing now) ── -->
-    <key>com.apple.security.app-sandbox</key>
-    <true/>
+    <!-- ── App Sandbox intentionally OFF ──
+         Fleet spawns `claude` children whose Bash tool must freely EXEC the
+         user's dev toolchains (node/pnpm/cargo/go/python in /opt, /usr/local,
+         ~/.cargo, nvm/fnm/volta, …) and read+write anywhere in the user's file
+         system. Under the sandbox this required an ever-growing
+         temporary-exception path whitelist that still EPERM'd every new
+         toolchain location. Disabling the sandbox removes that whole class of
+         failures. Trade-off: the app can no longer ship on the Mac App Store
+         (sandbox is mandatory there) — Fleet is distributed as a signed
+         Developer-ID app instead. -->
 
-    <!-- ── Runtime: JIT / unsigned memory (Tauri WebView needs these) ── -->
+    <!-- ── Hardened Runtime: JIT / unsigned memory ──
+         The Tauri WKWebView needs these; they are Hardened-Runtime entitlements,
+         NOT sandbox ones, so they stay regardless of sandbox state. -->
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
     <key>com.apple.security.cs.allow-jit</key>
     <true/>
     <key>com.apple.security.cs.allow-dyld-environment-variables</key>
     <true/>
-
-    <!-- ── Network ── -->
-    <key>com.apple.security.network.client</key>
-    <true/>
-    <key>com.apple.security.network.server</key>
-    <true/>
-
-    <!-- ── User-selected files (open/save dialogs) ── -->
-    <key>com.apple.security.files.user-selected.read-write</key>
-    <true/>
-
-    <!-- ── Temporary exceptions: absolute paths ── -->
-    <!-- home-relative-path resolves to the sandbox container, not the real home. -->
-    <!-- absolute-path with /Users/ allows access to the real user directories. -->
-    <key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
-    <array>
-        <string>/Users/</string>
-        <!-- Spawned claude children inherit this sandbox; Claude Code creates
-             its per-project scratch/sandbox dirs under /tmp/claude-<uid>/,
-             which EPERMs without this. /tmp is a symlink to /private/tmp —
-             the kernel matches on the resolved path, so list both. -->
-        <string>/tmp/</string>
-        <string>/private/tmp/</string>
-    </array>
 </dict>
 </plist>

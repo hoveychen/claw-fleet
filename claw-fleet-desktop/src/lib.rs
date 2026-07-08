@@ -97,7 +97,15 @@ impl Backend for NullBackend {
     fn kill_workspace(&self, _: String) -> Result<(), String> {
         Err("backend not ready".into())
     }
-    fn resume_session(&self, _: String, _: String, _: Option<String>) -> Result<(), String> {
+    fn resume_session(
+        &self,
+        _: String,
+        _: String,
+        _: Option<String>,
+        _: Option<String>,
+        _: Option<String>,
+        _: Option<String>,
+    ) -> Result<(), String> {
         Err("backend not ready".into())
     }
     fn spawn_new_session(
