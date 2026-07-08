@@ -81,7 +81,7 @@
   "view_skills": "Skills",
   "view_plugins": "Plugins",
   "view_projects": "Projects",
-  "view_history": "History",
+  "view_history": "Launchpad",
   "session_badge": {
     "fleet_managed": "Fleet",
     "fleet_managed_tip": "This session was launched by Fleet (queue / resume / kanban supported)."
@@ -1817,9 +1817,9 @@
     }
   },
   "history": {
-    "title": "History",
+    "title": "Launchpad",
     "search_placeholder": "Search title, prompt, full text…",
-    "empty": "No sessions launched via New Session yet",
+    "empty": "No sessions yet — hit New Session in the top-right to launch one",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
     "resume_placeholder": "Type a follow-up prompt to resume…",
