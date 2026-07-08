@@ -555,7 +555,10 @@ pub struct CliProcess {
     pub pid: u32,
     pub ppid: Option<u32>,
     pub cwd: String,
-    /// Session ID parsed from `--resume <id>` in the process argv, if present.
+    /// Session ID parsed from `--resume <id>` or `--session-id <id>` in the
+    /// process argv, if present. Fleet's own headless spawns always carry one
+    /// of the two (launchpad spawns pass `--session-id`, follow-up turns pass
+    /// `--resume`), so their pids resolve to exactly one session.
     pub resume_session_id: Option<String>,
 }
 
@@ -563,10 +566,13 @@ fn extract_resume_id(cmd: &[std::ffi::OsString]) -> Option<String> {
     let mut iter = cmd.iter();
     while let Some(arg) = iter.next() {
         let s = arg.to_string_lossy();
-        if s == "--resume" || s == "-r" {
+        if s == "--resume" || s == "-r" || s == "--session-id" {
             return iter.next().map(|v| v.to_string_lossy().into_owned());
         }
         if let Some(val) = s.strip_prefix("--resume=") {
+            return Some(val.to_owned());
+        }
+        if let Some(val) = s.strip_prefix("--session-id=") {
             return Some(val.to_owned());
         }
     }
@@ -576,7 +582,8 @@ fn extract_resume_id(cmd: &[std::ffi::OsString]) -> Option<String> {
 /// Resolve a PID for a specific session given all processes sharing the same cwd.
 ///
 /// Matching priority (highest → lowest):
-/// 1. Exact `--resume <session_id>` match → always precise.
+/// 1. Exact `--resume <session_id>` / `--session-id <session_id>` match →
+///    always precise.
 /// 2. Parent-child filtering: drop any claude process whose parent is also a
 ///    claude process in this workspace (those are subagent child processes).
 ///    If exactly one "root" process remains → precise.
@@ -1789,6 +1796,58 @@ pub fn age_out_status(info: &mut SessionInfo, age_secs: f64) {
     }
 }
 
+/// Hard pid-based liveness override for Fleet-spawned headless sessions.
+///
+/// Launchpad spawns always carry the session id in argv (`--session-id` on the
+/// first turn, `--resume` on follow-ups), so for sessions whose entrypoint is
+/// [`crate::session_launch::NEW_SESSION_ENTRYPOINT`] the presence/absence of an
+/// exact argv match is definitive — unlike the mtime-age heuristics that govern
+/// every other session:
+///
+/// - **Process alive but transcript quiet** (blocked on an AskUserQuestion /
+///   permission decision card, or a long-running tool): the age heuristics
+///   decay the status to Idle even though the agent is mid-turn. Re-promote —
+///   the live process pinned to exactly this session id is stronger evidence
+///   than file age. (The general "never promote on age alone" invariant is
+///   about mtime guessing; this branch has a live pid as proof.)
+/// - **Process dead**: any lingering in-flight status (e.g. a stale
+///   ToolExecuting hook pinning Executing after a `kill -9`) is a ghost.
+///   Downgrade to Idle immediately instead of waiting out the age windows.
+///
+/// Subagents never have their own argv-matched process; skip them.
+pub fn apply_pid_liveness(
+    info: &mut SessionInfo,
+    exact_proc_alive: bool,
+    hook_state: Option<&HookState>,
+) {
+    if info.is_subagent
+        || info.entrypoint.as_deref() != Some(crate::session_launch::NEW_SESSION_ENTRYPOINT)
+    {
+        return;
+    }
+    if exact_proc_alive {
+        if info.status == SessionStatus::Idle {
+            info.status = match hook_state {
+                Some(HookState::ToolExecuting) => SessionStatus::Executing,
+                Some(HookState::ModelProcessing) => SessionStatus::Thinking,
+                _ => SessionStatus::WaitingInput,
+            };
+        }
+    } else if matches!(
+        info.status,
+        SessionStatus::Thinking
+            | SessionStatus::Executing
+            | SessionStatus::Streaming
+            | SessionStatus::Processing
+            | SessionStatus::Active
+    ) {
+        info.status = SessionStatus::Idle;
+        info.token_speed = 0.0;
+        info.agent_token_speed = 0.0;
+        info.cost_speed_usd_per_min = 0.0;
+    }
+}
+
 /// Check if a cached session entry is still valid (mtime matches).
 /// Returns `(cached_info, age_secs)` on hit.
 fn check_session_cache(
@@ -1925,15 +1984,21 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     .to_string();
 
                 let (session_pid, pid_precise) = resolve_pid(&procs_in_cwd, &session_id);
+                // Definitive liveness signal for Fleet-spawned sessions: a
+                // live process whose argv names exactly this session id.
+                let exact_proc_alive = procs_in_cwd
+                    .iter()
+                    .any(|p| p.resume_session_id.as_deref() == Some(session_id.as_str()));
 
                 // Try session cache first (skip re-reading unchanged files).
                 if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
                     age_out_status(&mut info, age);
+                    apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
                     info.pid = session_pid;
                     info.pid_precise = pid_precise;
                     info.ide_name = ide_name.clone();
                     sessions.push(info);
-                } else if let Some(info) = parse_session_info(
+                } else if let Some(mut info) = parse_session_info(
                     &path,
                     session_id.clone(),
                     workspace_path.clone(),
@@ -1949,6 +2014,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     pid_precise,
                     hook_states.get(&session_id),
                 ) {
+                    apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
                     scan_cache.session_cache.lock().unwrap()
                         .insert(path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
                     sessions.push(info);
@@ -3079,6 +3145,99 @@ mod tests {
     fn resume_id_absent() {
         let cmd: Vec<std::ffi::OsString> = vec!["claude".into(), "--verbose".into()];
         assert_eq!(extract_resume_id(&cmd), None);
+    }
+
+    #[test]
+    fn resume_id_session_id_flag() {
+        // Launchpad spawns pass `--session-id <uuid>` on the first turn.
+        let cmd: Vec<std::ffi::OsString> = vec![
+            "claude".into(),
+            "-p".into(),
+            "hi".into(),
+            "--session-id".into(),
+            "sess-new".into(),
+        ];
+        assert_eq!(extract_resume_id(&cmd), Some("sess-new".into()));
+    }
+
+    #[test]
+    fn resume_id_session_id_equals_syntax() {
+        let cmd: Vec<std::ffi::OsString> =
+            vec!["claude".into(), "--session-id=sess-new".into()];
+        assert_eq!(extract_resume_id(&cmd), Some("sess-new".into()));
+    }
+
+    // ── apply_pid_liveness tests ────────────────────────────────────────────
+
+    fn make_launchpad_session(status: SessionStatus) -> SessionInfo {
+        let mut s = make_session(status);
+        s.entrypoint = Some(crate::session_launch::NEW_SESSION_ENTRYPOINT.into());
+        s
+    }
+
+    #[test]
+    fn pid_liveness_dead_process_downgrades_working_status() {
+        for status in [
+            SessionStatus::Thinking,
+            SessionStatus::Executing,
+            SessionStatus::Streaming,
+            SessionStatus::Processing,
+            SessionStatus::Active,
+        ] {
+            let mut s = make_launchpad_session(status.clone());
+            apply_pid_liveness(&mut s, false, None);
+            assert_eq!(s.status, SessionStatus::Idle, "from {status:?}");
+            assert_eq!(s.token_speed, 0.0);
+        }
+    }
+
+    #[test]
+    fn pid_liveness_dead_process_keeps_waiting_input() {
+        // Normal end-of-turn: the -p process exits, the session waits for a
+        // follow-up. That's WaitingInput, not a ghost — leave it alone.
+        let mut s = make_launchpad_session(SessionStatus::WaitingInput);
+        apply_pid_liveness(&mut s, false, None);
+        assert_eq!(s.status, SessionStatus::WaitingInput);
+    }
+
+    #[test]
+    fn pid_liveness_alive_process_promotes_idle() {
+        // Blocked on a decision card for 20 minutes: age heuristics decayed
+        // the status to Idle, but the process is provably alive and mid-turn.
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        apply_pid_liveness(&mut s, true, None);
+        assert_eq!(s.status, SessionStatus::WaitingInput);
+
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        apply_pid_liveness(&mut s, true, Some(&HookState::ToolExecuting));
+        assert_eq!(s.status, SessionStatus::Executing);
+
+        let mut s = make_launchpad_session(SessionStatus::Idle);
+        apply_pid_liveness(&mut s, true, Some(&HookState::ModelProcessing));
+        assert_eq!(s.status, SessionStatus::Thinking);
+    }
+
+    #[test]
+    fn pid_liveness_alive_process_keeps_fresh_status() {
+        // A fine-grained status derived from a fresh transcript wins over the
+        // coarse pid signal — only decayed-to-Idle gets re-promoted.
+        let mut s = make_launchpad_session(SessionStatus::Streaming);
+        apply_pid_liveness(&mut s, true, None);
+        assert_eq!(s.status, SessionStatus::Streaming);
+    }
+
+    #[test]
+    fn pid_liveness_ignores_non_launchpad_sessions() {
+        // IDE / terminal sessions never carry their id in argv, so process
+        // absence proves nothing — the age heuristics stay authoritative.
+        let mut s = make_session(SessionStatus::Thinking);
+        apply_pid_liveness(&mut s, false, None);
+        assert_eq!(s.status, SessionStatus::Thinking);
+
+        let mut s = make_launchpad_session(SessionStatus::Thinking);
+        s.is_subagent = true;
+        apply_pid_liveness(&mut s, false, None);
+        assert_eq!(s.status, SessionStatus::Thinking);
     }
 
     // ── resolve_pid tests ───────────────────────────────────────────────────

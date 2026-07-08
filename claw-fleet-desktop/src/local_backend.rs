@@ -1700,8 +1700,8 @@ impl Backend for LocalBackend {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
-    ) -> Result<u32, String> {
-        let pid = claw_fleet_core::session_launch::spawn_new_session(
+    ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
+        let resp = claw_fleet_core::session_launch::spawn_new_session(
             &workspace_path,
             &prompt,
             model.as_deref(),
@@ -1718,7 +1718,7 @@ impl Backend for LocalBackend {
             std::thread::sleep(Duration::from_millis(1500));
             rescan_and_emit(&sources, &app, &sessions, &outcomes);
         });
-        Ok(pid)
+        Ok(resp)
     }
 
     fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {

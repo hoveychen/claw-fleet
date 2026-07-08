@@ -25,21 +25,20 @@ const START_TIMEOUT_MS = 30_000;
 /**
  * Pick the freshly-spawned session out of the scanned list.
  *
- * We deliberately do NOT match on pid. The scanner assigns a running claude
- * process's pid to *every* session on disk in that process's cwd (see
- * `resolve_pid` in session.rs): a headless `claude -p` launch carries no
- * `--resume` flag, so with one live process in the workspace every ad-hoc
- * session there gets tagged with the same pid — matching pid would surface an
- * arbitrary historical session instead of the new one.
- *
- * Instead we correlate by novelty: the new session is the ad-hoc session in the
- * target workspace whose id was absent when the spawn returned. If more than one
- * is new (unlikely inside the poll window), the most-recently-created wins.
+ * The spawn pre-assigns the session id via `--session-id` and returns it, so
+ * the primary match is a direct id lookup. The novelty fallback (the ad-hoc
+ * session in the target workspace whose id was absent when the spawn returned;
+ * most-recently-created wins) covers older remote probes that only return the
+ * pid. We still deliberately do NOT match on pid — see `resolve_pid` in
+ * session.rs: a cwd-shared pid can tag several sessions at once.
  */
 function matchSpawnedSession(
   adhocSessions: SessionInfo[],
   pending: PendingSpawn,
 ): SessionInfo | undefined {
+  if (pending.sessionId) {
+    return adhocSessions.find((s) => s.id === pending.sessionId);
+  }
   return adhocSessions
     .filter(
       (s) => s.workspacePath === pending.workspacePath && !pending.knownIds.has(s.id),
