@@ -1,0 +1,365 @@
+import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { BookOpen, RefreshCw, Trash2 } from "lucide-react";
+import { TextBlock } from "./blocks/TextBlock";
+import { EmptyState } from "./EmptyState";
+import { ConfirmDialog } from "./ConfirmDialog";
+import styles from "./WikiView.module.css";
+
+// ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
+
+interface WikiVersion {
+  id: string;
+  publishedMs: number;
+  sizeBytes: number;
+  fileCount: number;
+  sourcePath: string;
+}
+
+interface WikiDoc {
+  slug: string;
+  title: string;
+  kind: "html" | "htmlDir" | "markdown";
+  entry: string;
+  workspacePath: string;
+  workspaceName: string;
+  createdMs: number;
+  updatedMs: number;
+  currentVersion: string;
+  versions: WikiVersion[];
+}
+
+const KIND_CONFIG: Record<WikiDoc["kind"], { short: string; cssClass: string }> = {
+  html: { short: "HTML", cssClass: "kind_html" },
+  htmlDir: { short: "DIR", cssClass: "kind_dir" },
+  markdown: { short: "MD", cssClass: "kind_md" },
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * URL of one wiki file through the fleet-wiki custom protocol. Built by hand:
+ * convertFileSrc() percent-encodes the whole path (`/` → `%2F`), which
+ * collapses the URL to a single segment and breaks relative-asset resolution
+ * inside HTML docs.
+ */
+function wikiFileUrl(slug: string, version: string, relpath: string): string {
+  const path = [slug, version, ...relpath.split("/")]
+    .map(encodeURIComponent)
+    .join("/");
+  return navigator.userAgent.includes("Windows")
+    ? `http://fleet-wiki.localhost/${path}`
+    : `fleet-wiki://localhost/${path}`;
+}
+
+function relativeTime(ms: number): string {
+  if (!ms) return "";
+  const sec = Math.floor((Date.now() - ms) / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 30) return `${day}d ago`;
+  const mo = Math.floor(day / 30);
+  if (mo < 12) return `${mo}mo ago`;
+  return `${Math.floor(mo / 12)}y ago`;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)}K`;
+  return `${bytes}B`;
+}
+
+// ── Component ────────────────────────────────────────────────────────────────
+
+export function WikiView() {
+  const { t } = useTranslation();
+  const [docs, setDocs] = useState<WikiDoc[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [query, setQuery] = useState("");
+  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
+  const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<
+    { kind: "doc"; slug: string } | { kind: "version"; slug: string; version: string } | null
+  >(null);
+
+  const load = useCallback(async () => {
+    try {
+      const data = await invoke<WikiDoc[]>("list_wiki_docs");
+      setDocs(data);
+    } catch {
+      // keep whatever we had
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Distinct workspaces for the filter dropdown, stable order.
+  const workspaces = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const d of docs) {
+      if (!seen.has(d.workspacePath)) seen.set(d.workspacePath, d.workspaceName);
+    }
+    return [...seen.entries()].map(([path, name]) => ({ path, name }));
+  }, [docs]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return docs.filter((d) => {
+      if (workspaceFilter !== "all" && d.workspacePath !== workspaceFilter) return false;
+      if (!q) return true;
+      return [d.title, d.slug, d.workspaceName].join(" ").toLowerCase().includes(q);
+    });
+  }, [docs, query, workspaceFilter]);
+
+  const selected = useMemo(
+    () => filtered.find((d) => d.slug === selectedSlug) ?? null,
+    [filtered, selectedSlug],
+  );
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    try {
+      if (confirmDelete.kind === "doc") {
+        await invoke("delete_wiki_doc", { slug: confirmDelete.slug });
+        if (selectedSlug === confirmDelete.slug) setSelectedSlug(null);
+      } else {
+        await invoke("delete_wiki_version", {
+          slug: confirmDelete.slug,
+          version: confirmDelete.version,
+        });
+      }
+    } catch (e) {
+      console.error("wiki delete failed:", e);
+    }
+    setConfirmDelete(null);
+    load();
+  };
+
+  return (
+    <div className={styles.page}>
+      <header className={styles.header}>
+        <div className={styles.title_row}>
+          <h1 className={styles.title}>{t("wiki.panel_title", "知识库")}</h1>
+          {loaded && docs.length > 0 && <span className={styles.count}>{docs.length}</span>}
+        </div>
+        <input
+          className={styles.search}
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={t("wiki.search_placeholder", "Search docs…")}
+        />
+        <select
+          className={styles.ws_select}
+          value={workspaceFilter}
+          onChange={(e) => setWorkspaceFilter(e.target.value)}
+        >
+          <option value="all">{t("wiki.all_workspaces", "All workspaces")}</option>
+          {workspaces.map((ws) => (
+            <option key={ws.path} value={ws.path}>
+              {ws.name}
+            </option>
+          ))}
+        </select>
+        <button className={styles.icon_btn} onClick={load} title={t("wiki.refresh", "Refresh")}>
+          <RefreshCw size={13} strokeWidth={1.7} />
+        </button>
+      </header>
+
+      <div className={styles.body}>
+        <aside className={styles.list_pane}>
+          {!loaded && <p className={styles.empty}>{t("wiki.loading", "Loading…")}</p>}
+          {loaded && filtered.length === 0 && (
+            <EmptyState
+              icon={<BookOpen size={28} strokeWidth={1.5} />}
+              title={t("wiki.empty_title", "No wiki docs yet")}
+              subtitle={t(
+                "wiki.empty_subtitle",
+                "Agents publish reports and demos here with `fleet wiki publish <path>`.",
+              )}
+            />
+          )}
+          {filtered.map((d) => (
+            <button
+              key={d.slug}
+              className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""}`}
+              onClick={() => setSelectedSlug(d.slug)}
+            >
+              <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
+                {KIND_CONFIG[d.kind]?.short ?? d.kind}
+              </span>
+              <span className={styles.card_body}>
+                <span className={styles.card_title}>{d.title}</span>
+                <span className={styles.card_slug}>{d.slug}</span>
+                <span className={styles.card_meta}>
+                  <span>{d.workspaceName}</span>
+                  <span className={styles.card_meta_dot}>·</span>
+                  <span>{relativeTime(d.updatedMs)}</span>
+                  {d.versions.length > 1 && (
+                    <>
+                      <span className={styles.card_meta_dot}>·</span>
+                      <span>{t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}</span>
+                    </>
+                  )}
+                </span>
+              </span>
+            </button>
+          ))}
+        </aside>
+
+        <main className={styles.detail_pane}>
+          {selected ? (
+            <WikiDetail
+              doc={selected}
+              onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
+              onDeleteVersion={(version) =>
+                setConfirmDelete({ kind: "version", slug: selected.slug, version })
+              }
+            />
+          ) : (
+            <div className={styles.placeholder}>{t("wiki.select_hint", "Select a doc to preview")}</div>
+          )}
+        </main>
+      </div>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={
+            confirmDelete.kind === "doc"
+              ? t("wiki.delete_doc_confirm", "Delete “{{slug}}” and all its versions?", {
+                  slug: confirmDelete.slug,
+                })
+              : t("wiki.delete_version_confirm", "Delete version {{version}} of “{{slug}}”?", {
+                  slug: confirmDelete.slug,
+                  version: confirmDelete.version,
+                })
+          }
+          onConfirm={handleDelete}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Detail pane ──────────────────────────────────────────────────────────────
+
+function WikiDetail({
+  doc,
+  onDeleteDoc,
+  onDeleteVersion,
+}: {
+  doc: WikiDoc;
+  onDeleteDoc: () => void;
+  onDeleteVersion: (version: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [version, setVersion] = useState(doc.currentVersion);
+  const [markdown, setMarkdown] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Reset to the current version whenever the selected doc changes.
+  useEffect(() => {
+    setVersion(doc.currentVersion);
+  }, [doc.slug, doc.currentVersion]);
+
+  const effectiveVersion = doc.versions.some((v) => v.id === version)
+    ? version
+    : doc.currentVersion;
+
+  useEffect(() => {
+    if (doc.kind !== "markdown") {
+      setMarkdown(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    invoke<string>("get_wiki_file_text", {
+      slug: doc.slug,
+      version: effectiveVersion,
+      relpath: doc.entry,
+    })
+      .then(setMarkdown)
+      .catch((e) => setError(String(e)))
+      .finally(() => setLoading(false));
+  }, [doc.slug, doc.kind, doc.entry, effectiveVersion]);
+
+  return (
+    <>
+      <div className={styles.detail_header}>
+        <div className={styles.detail_title}>
+          {doc.workspaceName}
+          <span className={styles.detail_sep}>/</span>
+          <span className={styles.detail_name}>{doc.title}</span>
+        </div>
+        <div className={styles.detail_actions}>
+          <select
+            className={styles.version_select}
+            value={effectiveVersion}
+            onChange={(e) => setVersion(e.target.value)}
+          >
+            {doc.versions.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.id}
+                {v.id === doc.currentVersion ? ` (${t("wiki.current", "current")})` : ""}
+                {` · ${formatBytes(v.sizeBytes)}`}
+              </option>
+            ))}
+          </select>
+          {effectiveVersion !== doc.currentVersion && (
+            <button
+              className={styles.action_btn}
+              onClick={() => onDeleteVersion(effectiveVersion)}
+              title={t("wiki.delete_version", "Delete this version")}
+            >
+              <Trash2 size={12} strokeWidth={1.7} />
+              {t("wiki.delete_version_short", "Version")}
+            </button>
+          )}
+          <button
+            className={`${styles.action_btn} ${styles.action_danger}`}
+            onClick={onDeleteDoc}
+            title={t("wiki.delete_doc", "Delete doc")}
+          >
+            <Trash2 size={12} strokeWidth={1.7} />
+            {t("wiki.delete_doc_short", "Doc")}
+          </button>
+        </div>
+      </div>
+
+      <div className={styles.detail_body_wrap}>
+        {doc.kind === "markdown" ? (
+          <div className={styles.markdown_body}>
+            {loading && <p className={styles.loading}>{t("wiki.loading", "Loading…")}</p>}
+            {error && <p className={styles.error}>{error}</p>}
+            {markdown !== null && (
+              <div className={styles.content_markdown}>
+                <TextBlock text={markdown} />
+              </div>
+            )}
+          </div>
+        ) : (
+          // allow-scripts but NOT allow-same-origin: demos can run JS while
+          // staying a cross-origin document with no reach into Tauri IPC.
+          <iframe
+            key={`${doc.slug}/${effectiveVersion}`}
+            className={styles.html_frame}
+            sandbox="allow-scripts"
+            src={wikiFileUrl(doc.slug, effectiveVersion, doc.entry)}
+            title={doc.title}
+          />
+        )}
+      </div>
+    </>
+  );
+}

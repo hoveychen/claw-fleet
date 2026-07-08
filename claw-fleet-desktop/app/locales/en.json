@@ -78,6 +78,7 @@
   "keep_awake_off_tooltip": "Keep the system awake (like caffeinate -i)",
   "view_audit": "Audit",
   "view_memory": "Memory",
+  "view_wiki": "Wiki",
   "view_skills": "Skills",
   "view_plugins": "Plugins",
   "view_projects": "Projects",
@@ -455,6 +456,24 @@
     "filter_project": "Project",
     "filter_reference": "Reference",
     "unindexed_section": "Unindexed"
+  },
+  "wiki": {
+    "panel_title": "Wiki",
+    "loading": "Loading…",
+    "search_placeholder": "Search docs…",
+    "all_workspaces": "All workspaces",
+    "refresh": "Refresh",
+    "empty_title": "No wiki docs yet",
+    "empty_subtitle": "Agents publish reports and demos here with `fleet wiki publish <path>`.",
+    "select_hint": "Select a doc to preview",
+    "current": "current",
+    "version_count": "{{count}} versions",
+    "delete_doc": "Delete doc (all versions)",
+    "delete_doc_short": "Doc",
+    "delete_version": "Delete this version",
+    "delete_version_short": "Version",
+    "delete_doc_confirm": "Delete “{{slug}}” and all its versions?",
+    "delete_version_confirm": "Delete version {{version}} of “{{slug}}”?"
   },
   "live": {
     "section_title": "Live"
