@@ -269,11 +269,17 @@ impl crate::backend::Backend for RemoteBackend {
         session_id: String,
         workspace_path: String,
         prompt: Option<String>,
+        model: Option<String>,
+        effort: Option<String>,
+        permission_mode: Option<String>,
     ) -> Result<(), String> {
         let req = claw_fleet_core::auto_resume::ResumeSessionRequest {
             session_id,
             workspace_path,
             prompt,
+            model,
+            effort,
+            permission_mode,
         };
         self.probe.post_json_ok("/resume_session", &req)
     }
