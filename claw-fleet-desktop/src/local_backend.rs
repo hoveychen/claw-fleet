@@ -1884,6 +1884,10 @@ impl Backend for LocalBackend {
         crate::wiki::delete_version(slug, version)
     }
 
+    fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
+        crate::wiki::search_docs(query)
+    }
+
     fn get_task_plans(
         &self,
         workspace_path: &str,

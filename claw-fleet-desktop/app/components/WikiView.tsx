@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { BookOpen, ChevronDown, ChevronRight, RefreshCw, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
@@ -28,6 +28,12 @@ interface WikiDoc {
   updatedMs: number;
   currentVersion: string;
   versions: WikiVersion[];
+}
+
+interface WikiSearchHit {
+  slug: string;
+  field: "meta" | "content";
+  snippet: string;
 }
 
 const KIND_CONFIG: Record<WikiDoc["kind"], { short: string; cssClass: string }> = {
@@ -66,6 +72,25 @@ function relativeTime(ms: number): string {
   const mo = Math.floor(day / 30);
   if (mo < 12) return `${mo}mo ago`;
   return `${Math.floor(mo / 12)}y ago`;
+}
+
+/** Render `text` with case-insensitive occurrences of `term` wrapped in <mark>. */
+function highlightTerm(text: string, term: string): ReactNode {
+  const t = term.trim();
+  if (!t) return text;
+  const lower = text.toLowerCase();
+  const needle = t.toLowerCase();
+  const parts: ReactNode[] = [];
+  let i = 0;
+  for (;;) {
+    const at = lower.indexOf(needle, i);
+    if (at < 0) break;
+    if (at > i) parts.push(text.slice(i, at));
+    parts.push(<mark key={at}>{text.slice(at, at + t.length)}</mark>);
+    i = at + t.length;
+  }
+  if (i < text.length) parts.push(text.slice(i));
+  return parts.length > 0 ? parts : text;
 }
 
 function formatBytes(bytes: number): string {
@@ -111,14 +136,34 @@ export function WikiView() {
     return [...seen.entries()].map(([path, name]) => ({ path, name }));
   }, [docs]);
 
+  // Full-text hits from the backend, keyed by slug. `null` while idle or
+  // before the debounced search for the current query lands.
+  const [hits, setHits] = useState<Map<string, WikiSearchHit> | null>(null);
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setHits(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      invoke<WikiSearchHit[]>("search_wiki_docs", { query: q })
+        .then((res) => setHits(new Map(res.map((h) => [h.slug, h]))))
+        .catch(() => setHits(null));
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return docs.filter((d) => {
       if (workspaceFilter !== "all" && d.workspacePath !== workspaceFilter) return false;
       if (!q) return true;
+      // Backend full-text hits (metadata + content); metadata fallback while
+      // the debounced search is still in flight.
+      if (hits) return hits.has(d.slug);
       return [d.title, d.slug, d.workspaceName].join(" ").toLowerCase().includes(q);
     });
-  }, [docs, query, workspaceFilter]);
+  }, [docs, query, workspaceFilter, hits]);
 
   const selected = useMemo(
     () => filtered.find((d) => d.slug === selectedSlug) ?? null,
@@ -239,8 +284,15 @@ export function WikiView() {
                         {KIND_CONFIG[d.kind]?.short ?? d.kind}
                       </span>
                       <span className={styles.card_body}>
-                        <span className={styles.card_title}>{d.title}</span>
+                        <span className={styles.card_title}>
+                          {searching ? highlightTerm(d.title, query) : d.title}
+                        </span>
                         <span className={styles.card_slug}>{d.slug}</span>
+                        {searching && hits?.get(d.slug)?.snippet ? (
+                          <span className={styles.card_snippet}>
+                            {highlightTerm(hits.get(d.slug)!.snippet, query)}
+                          </span>
+                        ) : null}
                         <span className={styles.card_meta}>
                           <span>{relativeTime(d.updatedMs)}</span>
                           {d.versions.length > 1 && (

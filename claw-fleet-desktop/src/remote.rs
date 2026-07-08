@@ -471,6 +471,12 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
+        self.probe
+            .get(&format!("/wiki_search?q={}", encode_path(query)))
+            .unwrap_or_default()
+    }
+
     fn get_task_plans(
         &self,
         workspace_path: &str,

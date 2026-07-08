@@ -915,6 +915,16 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/wiki_search" => {
+                let raw = query.get("q").map(|s| s.as_str()).unwrap_or("");
+                let q = percent_decode_str(raw).decode_utf8_lossy().to_string();
+                let body =
+                    serde_json::to_string(&crate::wiki::search_docs(&q)).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             "/wiki_delete" if request.method() == &tiny_http::Method::Post => {
                 let dec = |key: &str| {
                     query
