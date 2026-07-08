@@ -1817,6 +1817,13 @@ impl Backend for LocalBackend {
         all
     }
 
+    fn read_live_thinking(
+        &self,
+        session_id: &str,
+    ) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
+        claw_fleet_core::live_thinking::read_live_thinking(session_id)
+    }
+
     fn get_memory_content(&self, path: &str) -> Result<String, String> {
         for source in self.sources.iter() {
             if let Ok(content) = source.get_memory_content(path) {

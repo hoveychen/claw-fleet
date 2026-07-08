@@ -816,6 +816,19 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/live_thinking" => {
+                let raw = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
+                let session_id = percent_decode_str(raw).decode_utf8_lossy().to_string();
+                // Sidecars live on the machine running `fleet serve`, so read
+                // them directly rather than per-source. Serializes to `null`
+                // when there's no live sidecar for this session.
+                let lt = crate::live_thinking::read_live_thinking(&session_id);
+                let body = serde_json::to_string(&lt).unwrap_or_else(|_| "null".into());
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             "/memory_content" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();

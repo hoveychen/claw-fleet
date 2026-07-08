@@ -394,6 +394,16 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&format!("/memory_content?path={}", encode_path(path)))
     }
 
+    fn read_live_thinking(
+        &self,
+        session_id: &str,
+    ) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
+        self.probe
+            .get(&format!("/live_thinking?session_id={}", encode_path(session_id)))
+            .ok()
+            .flatten()
+    }
+
     fn get_memory_history(&self, path: &str) -> Vec<crate::memory::MemoryHistoryEntry> {
         self.probe.get(&format!("/memory_history?path={}", encode_path(path))).unwrap_or_default()
     }

@@ -85,6 +85,12 @@ impl Backend for NullBackend {
     fn get_messages(&self, _: &str) -> Result<Vec<Value>, String> {
         Err("backend not ready".into())
     }
+    fn read_live_thinking(
+        &self,
+        _: &str,
+    ) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
+        None
+    }
     fn kill_pid(&self, _: u32) -> Result<(), String> {
         Err("backend not ready".into())
     }
