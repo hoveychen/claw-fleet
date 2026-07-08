@@ -78,6 +78,7 @@
   "keep_awake_off_tooltip": "Keep the system awake (like caffeinate -i)",
   "view_audit": "Audit",
   "view_memory": "Memory",
+  "view_wiki": "Wiki",
   "view_skills": "Skills",
   "view_plugins": "Plugins",
   "view_projects": "Projects",
@@ -456,6 +457,24 @@
     "filter_reference": "Reference",
     "unindexed_section": "Unindexed"
   },
+  "wiki": {
+    "panel_title": "Wiki",
+    "loading": "Loading…",
+    "search_placeholder": "Search docs…",
+    "all_workspaces": "All workspaces",
+    "refresh": "Refresh",
+    "empty_title": "No wiki docs yet",
+    "empty_subtitle": "Agents publish reports and demos here with `fleet wiki publish <path>`.",
+    "select_hint": "Select a doc to preview",
+    "current": "current",
+    "version_count": "{{count}} versions",
+    "delete_doc": "Delete doc (all versions)",
+    "delete_doc_short": "Doc",
+    "delete_version": "Delete this version",
+    "delete_version_short": "Version",
+    "delete_doc_confirm": "Delete “{{slug}}” and all its versions?",
+    "delete_version_confirm": "Delete version {{version}} of “{{slug}}”?"
+  },
   "live": {
     "section_title": "Live"
   },
@@ -700,6 +719,10 @@
     "prd_mode": {
       "title": "New: PRD Discipline Mode",
       "description": "Keep Claude Code focused across long multi-step plans (P1–P10). Adds a commit-discipline rule (no proactive commits mid-PRD) and persists your macro plan to TASKS.md at the workspace root, with a UserPromptSubmit hook that re-injects the active region every turn — so context compression no longer makes Claude forget remaining tasks."
+    },
+    "wiki_guidance": {
+      "title": "New: Wiki knowledge base",
+      "description": "Agents' HTML reports, demos and markdown docs get archived into a shared wiki (~/.fleet/wiki) via `fleet wiki publish` and browsed in the Wiki board with version history. This toggle injects a short guidance block into ~/.claude/CLAUDE.md so agents publish finished artifacts there automatically."
     },
     "copy_hint": "Click to copy"
   },
@@ -1436,6 +1459,8 @@
     "prd_mode": "PRD Discipline Mode",
     "prd_mode_desc": "Keep the Agent focused on long tasks: it won't keep interrupting you to confirm commits, and it saves the task list so it doesn't forget remaining steps after a long conversation. Claude Code only.",
     "prd_mode_enabled": "Enable PRD discipline mode",
+    "wiki_guidance_desc": "Tell agents to archive finished HTML reports, demos and markdown docs into the Fleet wiki (`fleet wiki publish`) so they show up in the Wiki board instead of getting lost in workdirs. Claude Code only.",
+    "wiki_guidance_enabled": "Enable wiki publish guidance",
     "feishu": "Feishu (Lark) phone sync",
     "feishu_desc": "Once connected, every decision card is mirrored to Feishu so you can handle them from your phone.",
     "feishu_step_creds": "Step 1 · Configure the app & enter credentials",

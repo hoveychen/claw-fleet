@@ -1859,6 +1859,31 @@ impl Backend for LocalBackend {
         vec![]
     }
 
+    fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc> {
+        crate::wiki::list_docs()
+    }
+
+    fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {
+        crate::wiki::get_doc(slug)
+    }
+
+    fn get_wiki_file(
+        &self,
+        slug: &str,
+        version: &str,
+        relpath: &str,
+    ) -> Result<crate::wiki::WikiFileBytes, String> {
+        crate::wiki::get_file(slug, version, relpath)
+    }
+
+    fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
+        crate::wiki::delete_doc(slug)
+    }
+
+    fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String> {
+        crate::wiki::delete_version(slug, version)
+    }
+
     fn get_task_plans(
         &self,
         workspace_path: &str,
@@ -2342,6 +2367,14 @@ impl Backend for LocalBackend {
 
     fn remove_interaction_mode(&self) -> Result<(), String> {
         crate::interaction_mode::remove_interaction_mode()
+    }
+
+    fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String> {
+        crate::wiki_guidance::apply_wiki_guidance(locale)
+    }
+
+    fn remove_wiki_guidance(&self) -> Result<(), String> {
+        crate::wiki_guidance::remove_wiki_guidance()
     }
 
     fn interaction_diagnostics(

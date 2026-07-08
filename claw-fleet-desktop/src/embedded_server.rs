@@ -309,9 +309,19 @@ fn run_server(
             &**backend,
         );
 
+        // Handlers that serve raw files (e.g. /wiki_file) set their own
+        // Content-Type; only default to JSON when none is present.
+        let has_content_type = response
+            .headers()
+            .iter()
+            .any(|h| h.field.equiv("content-type"));
+        let response = if has_content_type {
+            response
+        } else {
+            response.with_header(json_header)
+        };
         let _ = request.respond(
             response
-                .with_header(json_header)
                 .with_header(cors_origin)
                 .with_header(cors_headers),
         );
@@ -466,6 +476,56 @@ fn handle_api_request(
             let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
             let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
             json_ok(&backend.get_memory_history(&file_path))
+        }
+
+        // ── Wiki ────────────────────────────────────────────────────────
+        "/wiki_docs" => json_ok(&backend.list_wiki_docs()),
+
+        "/wiki_doc" => {
+            let slug = query
+                .get("slug")
+                .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                .unwrap_or_default();
+            match backend.get_wiki_doc(&slug) {
+                Ok(doc) => json_ok(&doc),
+                Err(_) => json_error(404, "not found"),
+            }
+        }
+
+        "/wiki_file" => {
+            let dec = |key: &str| {
+                query
+                    .get(key)
+                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                    .unwrap_or_default()
+            };
+            match backend.get_wiki_file(&dec("slug"), &dec("version"), &dec("path")) {
+                Ok(f) => {
+                    let mime_header: tiny_http::Header =
+                        format!("Content-Type: {}", f.mime).parse().unwrap();
+                    tiny_http::Response::from_data(f.bytes).with_header(mime_header)
+                }
+                Err(_) => json_error(404, "not found"),
+            }
+        }
+
+        "/wiki_delete" if request.method() == &tiny_http::Method::Post => {
+            let dec = |key: &str| {
+                query
+                    .get(key)
+                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                    .unwrap_or_default()
+            };
+            let (slug, version) = (dec("slug"), dec("version"));
+            let result = if version.is_empty() {
+                backend.delete_wiki_doc(&slug)
+            } else {
+                backend.delete_wiki_version(&slug, &version)
+            };
+            match result {
+                Ok(()) => json_ok(&serde_json::json!({"ok": true})),
+                Err(e) => json_error(400, &e),
+            }
         }
 
         "/skills" => json_ok(&backend.list_skills()),

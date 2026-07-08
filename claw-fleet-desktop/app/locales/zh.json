@@ -78,6 +78,7 @@
   "keep_awake_off_tooltip": "保持系统唤醒（相当于 caffeinate -i）",
   "view_audit": "审计",
   "view_memory": "记忆",
+  "view_wiki": "知识库",
   "view_skills": "技能",
   "view_plugins": "插件",
   "view_projects": "项目",
@@ -453,6 +454,24 @@
     "filter_reference": "\u5f15\u7528",
     "unindexed_section": "\u672a\u7d22\u5f15"
   },
+  "wiki": {
+    "panel_title": "\u77e5\u8bc6\u5e93",
+    "loading": "\u52a0\u8f7d\u4e2d\u2026",
+    "search_placeholder": "\u641c\u7d22\u6587\u6863\u2026",
+    "all_workspaces": "\u5168\u90e8\u5de5\u4f5c\u533a",
+    "refresh": "\u5237\u65b0",
+    "empty_title": "\u77e5\u8bc6\u5e93\u8fd8\u662f\u7a7a\u7684",
+    "empty_subtitle": "Agent \u7528 `fleet wiki publish <path>` \u628a\u62a5\u544a\u548c demo \u53d1\u5e03\u5230\u8fd9\u91cc\u3002",
+    "select_hint": "\u9009\u62e9\u4e00\u7bc7\u6587\u6863\u9884\u89c8",
+    "current": "\u5f53\u524d",
+    "version_count": "{{count}} \u4e2a\u7248\u672c",
+    "delete_doc": "\u5220\u9664\u6587\u6863\uff08\u6240\u6709\u7248\u672c\uff09",
+    "delete_doc_short": "\u5220\u6587\u6863",
+    "delete_version": "\u5220\u9664\u8be5\u7248\u672c",
+    "delete_version_short": "\u5220\u7248\u672c",
+    "delete_doc_confirm": "\u5220\u9664\u300c{{slug}}\u300d\u53ca\u5176\u6240\u6709\u7248\u672c\uff1f",
+    "delete_version_confirm": "\u5220\u9664\u300c{{slug}}\u300d\u7684\u7248\u672c {{version}}\uff1f"
+  },
   "live": {
     "section_title": "实时"
   },
@@ -697,6 +716,10 @@
     "prd_mode": {
       "title": "新功能：PRD 自律模式",
       "description": "让 Claude 在长 PRD（P1-P10）中保持专注：注入一条 commit 纪律（PRD 进行中不主动发起 commit），并把宏观计划持久化到工作区根目录的 TASKS.md。每次用户发送消息前，UserPromptSubmit 钩子会自动把 TASKS.md 中标记为「活动区」的部分重新注入上下文 —— 即便上下文被压缩，也不会忘记尚未完成的任务。仅对 Claude Code 生效。"
+    },
+    "wiki_guidance": {
+      "title": "新功能：Wiki 知识库",
+      "description": "Agent 产出的 HTML 报告、demo、markdown 文档可以用 `fleet wiki publish` 归档进统一知识库（~/.fleet/wiki），在「知识库」板块浏览并保留版本历史。打开此开关会向 ~/.claude/CLAUDE.md 注入一段指引，让 Agent 完成成品后自动归档。"
     },
     "copy_hint": "点击复制"
   },
@@ -1433,6 +1456,8 @@
     "prd_mode": "PRD 自律模式",
     "prd_mode_desc": "让 Agent 在长任务里保持专注：不中途反复打断你确认提交，并把任务清单持久化保存，避免聊久了忘记剩余步骤。仅对 Claude Code 生效。",
     "prd_mode_enabled": "启用 PRD 自律模式",
+    "wiki_guidance_desc": "让 Agent 把完成的 HTML 报告、demo、markdown 文档用 `fleet wiki publish` 归档进知识库，在「知识库」板块统一浏览，不再散落在工作目录里。仅对 Claude Code 生效。",
+    "wiki_guidance_enabled": "启用知识库归档指引",
     "feishu": "飞书（Lark）手机同步",
     "feishu_desc": "连接飞书后，所有决策卡片会同步推送到飞书，手机上就能随时处理。",
     "feishu_step_creds": "第一步 · 配置应用并填写凭证",
