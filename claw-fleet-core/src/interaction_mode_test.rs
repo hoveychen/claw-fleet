@@ -116,6 +116,7 @@ pub fn build_test_fleet_ask_request() -> crate::mcp_ipc::FleetAskRequest {
                     preview: None,
                 },
             ],
+            images: vec![],
         }],
     }
 }

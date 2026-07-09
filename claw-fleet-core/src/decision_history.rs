@@ -881,6 +881,7 @@ mod tests {
                     max: None,
                     step: None,
                 }],
+                images: vec![],
             }],
         }
     }
