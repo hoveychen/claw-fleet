@@ -470,6 +470,21 @@ impl crate::backend::Backend for RemoteBackend {
         Ok(crate::wiki::WikiFileBytes { bytes, mime })
     }
 
+    fn get_decision_asset(
+        &self,
+        id: &str,
+        qidx: &str,
+        relpath: &str,
+    ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String> {
+        let (bytes, mime) = self.probe.get_bytes(&format!(
+            "/decision_asset?id={}&qidx={}&path={}",
+            encode_path(id),
+            encode_path(qidx),
+            encode_path(relpath),
+        ))?;
+        Ok(crate::mcp_ipc::DecisionAssetBytes { bytes, mime })
+    }
+
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
         self.probe.post_ok(&format!("/wiki_delete?slug={}", encode_path(slug)))
     }

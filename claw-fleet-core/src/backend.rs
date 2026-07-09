@@ -388,6 +388,18 @@ pub trait Backend: Send + Sync {
     fn export_wiki_doc(&self, slug: &str, version: &str)
         -> Result<crate::wiki::WikiExport, String>;
 
+    // ── Decision-card assets (fleet__ask images) ─────────────────────────────
+    /// Raw bytes + mime of one file in a `fleet__ask` question's decision-asset
+    /// dir (`~/.fleet/decision-assets/<id>/q<idx>/<relpath>`). Backs the
+    /// `fleet-decision://` protocol, so it must work for both local and remote
+    /// backends. `relpath` is typically `index.html` or a bare image name.
+    fn get_decision_asset(
+        &self,
+        id: &str,
+        qidx: &str,
+        relpath: &str,
+    ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String>;
+
     // ── TASKS.md plans ─────────────────────────────────────────────────────────
     /// PRD plans (with full task items) visible to a session whose workspace
     /// root is `workspace_path` — scans the same source set the `fleet
