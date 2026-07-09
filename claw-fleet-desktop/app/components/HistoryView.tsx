@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { FolderGit2, History, Plus, Search } from "lucide-react";
 import { useSessionsStore } from "../store";
 import type { SessionInfo } from "../types";
-import { NEW_SESSION_ENTRYPOINT } from "../types";
+import { isFleetOwnedEntrypoint } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
@@ -117,7 +117,7 @@ export function HistoryView() {
   const adhocSessions = useMemo(
     () =>
       sessions.filter(
-        (s) => !s.isSubagent && s.entrypoint === NEW_SESSION_ENTRYPOINT,
+        (s) => !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint),
       ),
     [sessions],
   );
@@ -176,7 +176,7 @@ export function HistoryView() {
 
   // Poll the scanned list for the freshly-spawned session (by id novelty, not
   // pid) and swap the detail column over to it once it appears. `adhocSessions`
-  // is filtered to NEW_SESSION_ENTRYPOINT, so this stays scoped to launches.
+  // is filtered to Fleet-owned entrypoints, so this stays scoped to launches.
   useEffect(() => {
     if (!pending) return;
     const match = matchSpawnedSession(adhocSessions, pending);
