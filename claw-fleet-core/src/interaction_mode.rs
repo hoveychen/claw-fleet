@@ -256,13 +256,26 @@ deferred listing does NOT qualify as absent; see the opening section.\n\
 When Fleet is running, Claude Code also sees a second tool — `fleet__ask` — \
 registered via MCP (mcpServers.fleet in ~/.claude.json). It is a *superset* \
 of `AskUserQuestion`: anything you could put in `AskUserQuestion`, you can \
-put in `fleet__ask`, plus two new optional per-question fields:\n\
+put in `fleet__ask`, plus three new optional per-question fields:\n\
 \n\
 - `html` (string): a static HTML preview. Fleet renders it in a sandboxed \
   `<iframe sandbox=\"\">` between the question body and the answer controls — \
   no scripts, no same-origin, no forms, no top-navigation, no popups. Useful \
   for rich diff previews, screenshot tables, anything HTML can express that \
-  markdown can't.\n\
+  markdown can't. **To show images, do NOT base64-inline them into this \
+  string** — that burns output tokens on every call. Put the files in \
+  `images` (below) and reference them by name with a relative path, e.g. \
+  `<img src=\"chart.png\">`.\n\
+- `images` (Image[]): local image files to display without base64-inlining. \
+  Each entry is `{{ \"name\": \"chart.png\", \"path\": \"/abs/or/cwd-relative/chart.png\", \"caption\": \"optional\" }}`. \
+  Fleet copies each file **once** into its persistent decision-asset store \
+  (`~/.fleet/decision-assets/<id>/`) on the way in and serves it to the card \
+  through the `fleet-decision://` protocol; the tool call itself carries only \
+  the short path, never the bytes. Reference an image from `html` by its \
+  `name` (`<img src=\"chart.png\">`); if you omit `html`, Fleet renders the \
+  images as a simple captioned gallery. Because the copies are durable, the \
+  exact preview re-renders in the Decision History later. Always prefer this \
+  over `data:`/base64 image URLs.\n\
 - `formFields` (FormField[]): dynamic input fields. Each field has `name`, \
   `kind`, `label`, optional `placeholder` / `options` / `required` / \
   `default` / `min` / `max` / `step`. `kind` is one of `text` / `textarea` / \
@@ -279,7 +292,7 @@ put in `fleet__ask`, plus two new optional per-question fields:\n\
   option-label entries and form-field-name → value entries coexist.\n\
 - `fleet__ask` shares the same Decision Card surface as `AskUserQuestion`, \
   the same Speech Summary Divider rule, the same Tone & Language rules. \
-  Treat it as `AskUserQuestion` plus the two extension hooks.\n\
+  Treat it as `AskUserQuestion` plus the extension hooks.\n\
 \n\
 **When to use which.**\n\
 \n\
@@ -288,6 +301,7 @@ put in `fleet__ask`, plus two new optional per-question fields:\n\
 | Pure preference / branch choice with 2–4 textual options | `AskUserQuestion` |\n\
 | Status report + 1–4 follow-up decisions, all option-based | `AskUserQuestion` |\n\
 | Needs a rendered HTML preview (diff table, formatted artefact, screenshot grid) | `fleet__ask` with `html` |\n\
+| Needs to show one or more local images (screenshots, charts, generated art) | `fleet__ask` with `images` (never base64 in `html`) |\n\
 | Needs structured form input (commit message, slider, date/time picker, multiple typed fields) | `fleet__ask` with `formFields` |\n\
 | Mix of all three (preview + form + options) on one card | `fleet__ask` (composite) |\n\
 | The visual rendering itself is the deliverable — a drawing, chart, styled artefact, anything where \"looks good\" is part of the ask — even when plain text could technically convey the same information | `fleet__ask` with `html` (or `render_a2ui`) |\n\
@@ -308,11 +322,16 @@ seam.\n\
 \n\
 Top-level: `{{ \"questions\": Question[] }}` — 1 to 4 questions per call.\n\
 \n\
-`Question` (same fields as `AskUserQuestion`, plus two optional):\n\
+`Question` (same fields as `AskUserQuestion`, plus three optional):\n\
 - `question`, `header`, `multiSelect` — identical to `AskUserQuestion`.\n\
 - `options` (Option[], **optional** here): same Option shape as \
   `AskUserQuestion`; omit entirely when the card is form-only or html-only.\n\
-- `html` (string, optional): HTML body rendered in a sandboxed iframe.\n\
+- `html` (string, optional): HTML body rendered in a sandboxed iframe. \
+  Reference attached images by name (`<img src=\"name\">`); never base64-inline.\n\
+- `images` (Image[], optional): local files shown without inlining. Each is \
+  `{{ \"name\": string, \"path\": string, \"caption\"?: string }}` — `name` is the bare \
+  filename you reference in `html`, `path` is where the file lives on your \
+  host. See the images bullet above for the full contract.\n\
 - `formFields` (FormField[], optional): dynamic input fields. See below.\n\
 \n\
 `FormField`:\n\
