@@ -214,7 +214,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         })
         .unwrap_or_default();
 
-    let req = crate::mcp_ipc::FleetAskRequest {
+    let mut req = crate::mcp_ipc::FleetAskRequest {
         id: request_id.clone(),
         session_id,
         workspace_name,
@@ -222,6 +222,13 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         timestamp: chrono::Utc::now().to_rfc3339(),
         questions,
     };
+
+    // Copy any referenced images into Fleet's persistent decision-asset store
+    // and blank their local paths, so the card can load them through the
+    // `fleet-decision://` protocol instead of base64-inlined `html`.
+    if let Err(e) = crate::mcp_ipc::ingest_images(&mut req) {
+        return Ok(tool_error(format!("Failed to stage fleet__ask images: {e}")));
+    }
 
     if let Err(e) = crate::mcp_ipc::write_request(&req) {
         return Ok(tool_error(format!("Failed to queue fleet__ask request: {e}")));
