@@ -1274,6 +1274,20 @@ function SessionPendingCard({ decision }: { decision: SessionPendingDecision }) 
 // `options` still renders the existing button grid. The three sections compose
 // freely — a single question can carry any subset.
 
+/**
+ * URL of one decision-asset file through the fleet-decision custom protocol.
+ * Built by hand (not convertFileSrc) for the same reason as WikiView's
+ * wikiFileUrl: percent-encoding the whole path collapses it to one segment and
+ * breaks relative-asset resolution inside the served index.html.
+ * `qidx` is the question's `q<step>` dir; `rel` defaults to the served entry.
+ */
+export function decisionAssetUrl(id: string, qidx: string, rel = "index.html"): string {
+  const path = [id, qidx, ...rel.split("/")].map(encodeURIComponent).join("/");
+  return navigator.userAgent.includes("Windows")
+    ? `http://fleet-decision.localhost/${path}`
+    : `fleet-decision://localhost/${path}`;
+}
+
 function FleetAskFormFieldRow({
   decisionId,
   field,
@@ -1680,11 +1694,15 @@ function FleetAskCard({
           <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
         </div>
 
-        {q.html && (
+        {q.images && q.images.length > 0 ? (
+          // Image-bearing card: load the served index.html (agent html or auto
+          // gallery) via the fleet-decision:// protocol so <img src="name">
+          // resolves to the copied files — no base64 in the tool call. Still
+          // sandbox="" (no scripts, opaque origin).
           <iframe
             title={`fleet-ask-html-${decision.id}-${step}`}
             sandbox=""
-            srcDoc={q.html}
+            src={decisionAssetUrl(decision.id, `q${step}`)}
             style={{
               width: "100%",
               minHeight: "200px",
@@ -1693,6 +1711,21 @@ function FleetAskCard({
               background: "#fff",
             }}
           />
+        ) : (
+          q.html && (
+            <iframe
+              title={`fleet-ask-html-${decision.id}-${step}`}
+              sandbox=""
+              srcDoc={q.html}
+              style={{
+                width: "100%",
+                minHeight: "200px",
+                border: "1px solid var(--decision-card-border, #ccc)",
+                borderRadius: "0.4rem",
+                background: "#fff",
+              }}
+            />
+          )
         )}
       </div>
       </div>

@@ -653,6 +653,15 @@ export interface FleetAskFormField {
   step?: number;
 }
 
+export interface FleetAskImage {
+  /** Bare filename the image is served as; referenced from `html` as <img src="name">. */
+  name: string;
+  /** Optional caption (only used by the auto gallery when `html` is absent). */
+  caption?: string;
+  // NB: the agent-side `path` is consumed + blanked during ingest, so it never
+  // reaches the frontend.
+}
+
 export interface FleetAskQuestion {
   question: string;
   header: string;
@@ -660,6 +669,13 @@ export interface FleetAskQuestion {
   options?: FleetAskOption[];
   html?: string;
   formFields?: FleetAskFormField[];
+  /**
+   * Local images the agent attached without base64-inlining. When present, the
+   * card loads a served `index.html` (the `html` field, or an auto gallery)
+   * through the `fleet-decision://` protocol instead of the `srcDoc` iframe, so
+   * `<img src="name">` resolves to the copied files.
+   */
+  images?: FleetAskImage[];
 }
 
 export interface FleetAskRequest {
