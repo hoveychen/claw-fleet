@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useSessionsStore } from "../store";
-import { NEW_SESSION_ENTRYPOINT } from "../types";
+import { isFleetOwnedEntrypoint } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
@@ -272,7 +272,7 @@ export function SessionDetail({
     !!liveSession &&
     !liveSession.isSubagent &&
     !ACTIVE_STATUSES.has(liveSession.status) &&
-    liveSession.entrypoint === NEW_SESSION_ENTRYPOINT;
+    isFleetOwnedEntrypoint(liveSession.entrypoint);
 
   useEffect(() => {
     const sid = liveSession?.id;
