@@ -177,6 +177,14 @@ impl Backend for NullBackend {
     ) -> Result<claw_fleet_core::wiki::WikiFileBytes, String> {
         Err("backend not ready".into())
     }
+    fn get_decision_asset(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<claw_fleet_core::mcp_ipc::DecisionAssetBytes, String> {
+        Err("backend not ready".into())
+    }
     fn delete_wiki_doc(&self, _: &str) -> Result<(), String> {
         Err("backend not ready".into())
     }
