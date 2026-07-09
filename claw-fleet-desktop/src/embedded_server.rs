@@ -507,6 +507,23 @@ fn handle_api_request(
             }
         }
 
+        "/decision_asset" => {
+            let dec = |key: &str| {
+                query
+                    .get(key)
+                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                    .unwrap_or_default()
+            };
+            match backend.get_decision_asset(&dec("id"), &dec("qidx"), &dec("path")) {
+                Ok(f) => {
+                    let mime_header: tiny_http::Header =
+                        format!("Content-Type: {}", f.mime).parse().unwrap();
+                    tiny_http::Response::from_data(f.bytes).with_header(mime_header)
+                }
+                Err(_) => json_error(404, "not found"),
+            }
+        }
+
         "/wiki_search" => {
             let q = query
                 .get("q")

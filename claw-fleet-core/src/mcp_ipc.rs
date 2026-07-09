@@ -14,7 +14,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,6 +49,44 @@ pub struct FleetAskQuestion {
     pub html: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub form_fields: Vec<FleetAskFormField>,
+    /// Local image files the agent wants shown WITHOUT base64-inlining them
+    /// into `html`. Each entry names a file on the agent's host; on the way in
+    /// [`ingest_images`] copies it once into Fleet's persistent decision-asset
+    /// store (`~/.fleet/decision-assets/<id>/q<idx>/<name>`) and blanks the
+    /// `path`. The card then loads a served `index.html` (the `html` field, or
+    /// a synthesized gallery when `html` is absent) through the
+    /// `fleet-decision://` protocol, so `<img src="<name>">` resolves without a
+    /// single base64 byte crossing the tool-call boundary — and the copies
+    /// survive for later decision-history review.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<FleetAskImage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FleetAskImage {
+    /// Filename the image is served as inside the question's asset dir; also
+    /// the string the agent references in `html` (e.g. `<img src="chart.png">`).
+    /// Must be a bare filename — no path separators, no `..`.
+    pub name: String,
+    /// Absolute (or agent-cwd-relative) path to the source file. Consumed by
+    /// [`ingest_images`] and blanked afterwards, so it never lands in the
+    /// persisted request or decision history.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub path: String,
+    /// Optional caption rendered beneath the image in the synthesized gallery
+    /// (ignored when the agent supplies its own `html`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub caption: Option<String>,
+}
+
+/// Raw bytes + mime for a decision-asset file, served into the webview through
+/// the `fleet-decision://` protocol or over the probe HTTP API. Mirrors
+/// [`crate::wiki::WikiFileBytes`].
+#[derive(Clone, Debug)]
+pub struct DecisionAssetBytes {
+    pub bytes: Vec<u8>,
+    pub mime: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,6 +258,159 @@ fn list_pending_in_dir(dir: &std::path::Path) -> std::io::Result<Vec<String>> {
         .collect())
 }
 
+// ── Decision-asset store (fleet-decision:// protocol backing) ────────────────
+//
+// Lives at `~/.fleet/decision-assets/<id>/q<idx>/`. Each question that carries
+// `images` gets its own subdir holding an `index.html` (the question's `html`,
+// or a synthesized gallery) plus one file per image. The desktop loads
+// `fleet-decision://localhost/<id>/q<idx>/index.html` into the card's iframe;
+// relative `<img src="name">` references resolve to sibling files. The dir is
+// deliberately NOT removed by `cleanup` — it persists so DecisionHistory can
+// re-render the exact card the user saw.
+
+/// `~/.fleet/decision-assets` (None when the home dir can't be determined).
+pub fn decision_assets_dir() -> Option<PathBuf> {
+    crate::session::real_home_dir().map(|h| h.join(".fleet").join("decision-assets"))
+}
+
+fn question_asset_dir(id: &str, qidx: usize) -> Option<PathBuf> {
+    decision_assets_dir().map(|d| d.join(id).join(format!("q{qidx}")))
+}
+
+/// Reject anything that isn't a bare filename (path separators, `..`, absolute).
+fn valid_asset_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains('/')
+        && !name.contains('\\')
+        && name != "."
+        && name != ".."
+        && !Path::new(name).is_absolute()
+}
+
+fn html_escape_text(s: &str) -> String {
+    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+}
+
+fn html_escape_attr(s: &str) -> String {
+    html_escape_text(s).replace('"', "&quot;")
+}
+
+/// Build a minimal stacked-image gallery document for questions that ship
+/// `images` but no `html` of their own.
+fn synthesize_gallery(images: &[FleetAskImage]) -> String {
+    let mut body = String::from(
+        "<!doctype html><meta charset=\"utf-8\"><style>\
+         body{margin:0;padding:8px;font:13px/1.5 system-ui,-apple-system,sans-serif;background:#fff;color:#222}\
+         figure{margin:0 0 12px}img{max-width:100%;height:auto;display:block;border-radius:6px}\
+         figcaption{margin-top:4px;color:#666;font-size:12px}</style>",
+    );
+    for img in images {
+        body.push_str("<figure><img src=\"");
+        body.push_str(&html_escape_attr(&img.name));
+        body.push_str("\" alt=\"");
+        body.push_str(&html_escape_attr(img.caption.as_deref().unwrap_or(&img.name)));
+        body.push_str("\">");
+        if let Some(cap) = &img.caption {
+            body.push_str("<figcaption>");
+            body.push_str(&html_escape_text(cap));
+            body.push_str("</figcaption>");
+        }
+        body.push_str("</figure>");
+    }
+    body
+}
+
+/// Copy every referenced image into the persistent decision-asset store and
+/// materialize a served `index.html` per image-bearing question. Mutates `req`
+/// in place: blanks each surviving image `path` (so no absolute local path
+/// leaks into the persisted request / history) and keeps `name` + `caption`.
+///
+/// Runs inside the `fleet mcp` child — the same host as the agent's files — so
+/// the copy is a plain local `fs::copy` regardless of Local vs Remote backend.
+/// Best-effort per image: an unsafe name or missing/unreadable source is
+/// dropped from the question rather than failing the whole ask.
+pub fn ingest_images(req: &mut FleetAskRequest) -> Result<(), String> {
+    let id = req.id.clone();
+    for (qidx, q) in req.questions.iter_mut().enumerate() {
+        if q.images.is_empty() {
+            continue;
+        }
+        let dir = question_asset_dir(&id, qidx).ok_or("cannot determine home dir")?;
+        fs::create_dir_all(&dir).map_err(|e| format!("create decision-asset dir: {e}"))?;
+
+        let mut kept: Vec<FleetAskImage> = Vec::with_capacity(q.images.len());
+        for img in std::mem::take(&mut q.images) {
+            if !valid_asset_name(&img.name) {
+                continue;
+            }
+            let dest = dir.join(&img.name);
+            if fs::copy(PathBuf::from(&img.path), &dest).is_ok() {
+                kept.push(FleetAskImage {
+                    name: img.name,
+                    path: String::new(),
+                    caption: img.caption,
+                });
+            }
+        }
+        q.images = kept;
+
+        // Materialize the served entry document: the agent's own html when it
+        // provided one (referencing images relatively), else a gallery.
+        let index = dir.join("index.html");
+        let html = match &q.html {
+            Some(h) if !h.trim().is_empty() => h.clone(),
+            _ => synthesize_gallery(&q.images),
+        };
+        fs::write(&index, html).map_err(|e| format!("write decision-asset index.html: {e}"))?;
+    }
+    Ok(())
+}
+
+/// Read one file from a question's decision-asset dir, with the same
+/// path-traversal defense as [`crate::wiki::get_file_in`]. `rel` is typically
+/// `index.html` or a bare image name.
+pub fn read_decision_asset(id: &str, qidx: &str, rel: &str) -> Result<DecisionAssetBytes, String> {
+    let base = decision_assets_dir().ok_or("cannot determine home dir")?;
+    for seg in [id, qidx] {
+        if seg.is_empty() || seg.contains('/') || seg.contains('\\') || seg.contains("..") {
+            return Err("invalid decision-asset id/qidx".to_string());
+        }
+    }
+    let dir = base.join(id).join(qidx);
+
+    let relp = Path::new(rel);
+    if relp.is_absolute()
+        || rel.contains('\\')
+        || relp.components().any(|c| {
+            matches!(
+                c,
+                std::path::Component::ParentDir
+                    | std::path::Component::Prefix(_)
+                    | std::path::Component::RootDir
+            )
+        })
+    {
+        return Err(format!("invalid path '{rel}'"));
+    }
+
+    let joined = dir.join(relp);
+    let canon_dir = dir
+        .canonicalize()
+        .map_err(|_| "decision-asset dir not found".to_string())?;
+    let canon_file = joined
+        .canonicalize()
+        .map_err(|_| format!("file '{rel}' not found"))?;
+    if !canon_file.starts_with(&canon_dir) {
+        return Err(format!("invalid path '{rel}'"));
+    }
+
+    let bytes = fs::read(&canon_file).map_err(|e| format!("read '{rel}': {e}"))?;
+    Ok(DecisionAssetBytes {
+        bytes,
+        mime: crate::wiki::mime_for_path(&canon_file).to_string(),
+    })
+}
+
 /// JSONSchema describing `fleet__ask` arguments. The MCP `tools/list` response
 /// embeds this verbatim so the agent sees the same field shape the Rust types
 /// would deserialize.
@@ -253,7 +444,20 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                         },
                         "html": {
                             "type": "string",
-                            "description": "HTML preview body; rendered in an iframe srcdoc with sandbox=\"\" (no scripts, no same-origin)"
+                            "description": "HTML preview body; rendered in a sandboxed iframe (no scripts, no same-origin). To show images, DO NOT base64-inline them here — that burns output tokens. Instead list the files in `images` and reference them by their `name` with a relative path, e.g. <img src=\"chart.png\">."
+                        },
+                        "images": {
+                            "type": "array",
+                            "description": "Local image files to display WITHOUT base64-inlining them into `html`. Fleet copies each file once into its persistent decision-asset store and serves it to the card; reference them from `html` by `name` (e.g. <img src=\"chart.png\">). If you omit `html`, Fleet renders the images as a simple captioned gallery. Prefer this over data:/base64 URLs for every image.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": { "type": "string", "description": "Bare filename the image is served as and referenced by in html (no path separators, no ..)" },
+                                    "path": { "type": "string", "description": "Absolute path (or path relative to the agent's cwd) to the source file on the agent's host" },
+                                    "caption": { "type": "string", "description": "Optional caption shown under the image in the auto gallery (ignored when you supply your own html)" }
+                                },
+                                "required": ["name", "path"]
+                            }
                         },
                         "formFields": {
                             "type": "array",
@@ -308,6 +512,7 @@ mod tests {
                 options: vec![],
                 html: None,
                 form_fields: vec![],
+                images: vec![],
             }],
         }
     }
@@ -327,6 +532,7 @@ mod tests {
                 options: vec![],
                 html: None,
                 form_fields: vec![],
+                images: vec![],
             }],
         };
         let s = serde_json::to_string(&req).unwrap();
@@ -378,6 +584,7 @@ mod tests {
                 max: None,
                 step: None,
             }],
+            images: vec![],
         };
         let v: serde_json::Value = serde_json::to_value(&q).unwrap();
         assert!(v.get("multiSelect").is_some(), "multiSelect (camelCase)");
@@ -613,5 +820,87 @@ mod tests {
             req.questions[0].form_fields[1].options,
             vec!["merge", "rebase", "squash"]
         );
+    }
+
+    #[test]
+    fn ingest_images_copies_serves_and_defends() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = fresh_tmp_dir("assets");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized via fleet_home_lock
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        // A fake source image sitting on the "agent host".
+        let src = tmp.join("orig-chart.png");
+        std::fs::write(&src, b"\x89PNG\r\n\x1a\nFAKE").unwrap();
+
+        // Case 1: agent-supplied html referencing the image relatively.
+        let mut req = empty_request("card-img");
+        req.questions[0].html = Some("<img src=\"chart.png\">".into());
+        req.questions[0].images = vec![FleetAskImage {
+            name: "chart.png".into(),
+            path: src.to_string_lossy().to_string(),
+            caption: Some("cap".into()),
+        }];
+        ingest_images(&mut req).unwrap();
+
+        // Local path is blanked; name/caption survive for rendering.
+        assert_eq!(req.questions[0].images[0].name, "chart.png");
+        assert!(
+            req.questions[0].images[0].path.is_empty(),
+            "absolute local path must not persist into the request/history"
+        );
+
+        // index.html == the agent's html (not the synthesized gallery).
+        let index = read_decision_asset("card-img", "q0", "index.html").unwrap();
+        assert_eq!(index.mime, "text/html; charset=utf-8");
+        assert_eq!(String::from_utf8_lossy(&index.bytes), "<img src=\"chart.png\">");
+
+        // The image serves with correct bytes + mime.
+        let png = read_decision_asset("card-img", "q0", "chart.png").unwrap();
+        assert_eq!(png.mime, "image/png");
+        assert_eq!(png.bytes, b"\x89PNG\r\n\x1a\nFAKE");
+
+        // Path traversal is rejected on both the id and the relpath.
+        assert!(read_decision_asset("card-img", "q0", "../../etc/passwd").is_err());
+        assert!(read_decision_asset("../x", "q0", "index.html").is_err());
+
+        // Case 2: missing source dropped (non-fatal), unsafe name rejected,
+        // and with no html a gallery is synthesized referencing survivors.
+        let mut req2 = empty_request("card-img2");
+        req2.questions[0].html = None;
+        req2.questions[0].images = vec![
+            FleetAskImage {
+                name: "ok.png".into(),
+                path: src.to_string_lossy().to_string(),
+                caption: None,
+            },
+            FleetAskImage {
+                name: "gone.png".into(),
+                path: tmp.join("nope.png").to_string_lossy().to_string(),
+                caption: None,
+            },
+            FleetAskImage {
+                name: "../evil".into(),
+                path: src.to_string_lossy().to_string(),
+                caption: None,
+            },
+        ];
+        ingest_images(&mut req2).unwrap();
+        assert_eq!(req2.questions[0].images.len(), 1);
+        assert_eq!(req2.questions[0].images[0].name, "ok.png");
+        let gallery = read_decision_asset("card-img2", "q0", "index.html").unwrap();
+        let g = String::from_utf8_lossy(&gallery.bytes);
+        assert!(g.contains("src=\"ok.png\""), "gallery must reference survivor: {g}");
+
+        // restore env + clean up
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

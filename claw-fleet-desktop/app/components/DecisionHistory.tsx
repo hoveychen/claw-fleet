@@ -12,6 +12,7 @@ import type {
 } from "../types";
 import { History } from "lucide-react";
 import { EmptyState } from "./EmptyState";
+import { decisionAssetUrl } from "./DecisionPanel";
 import styles from "./DecisionHistory.module.css";
 
 // Inline-only markdown variant: unwraps the surrounding <p> so we can drop the
@@ -230,10 +231,30 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                 {q.question}
               </ReactMarkdown>
             </div>
-            {q.html && (
-              <div className={styles.option_desc}>
-                {t("decision_history.fleet_ask_html_marker", "[HTML preview was shown]")}
-              </div>
+            {q.images && q.images.length > 0 ? (
+              // Image-bearing cards persist their assets under
+              // ~/.fleet/decision-assets/<id>/q<qi>/, so we CAN faithfully
+              // re-render the exact preview through the fleet-decision://
+              // protocol (still sandbox="" — no scripts). This is the whole
+              // point of copying images into a durable store.
+              <iframe
+                title={`fleet-ask-history-${rec.id}-${qi}`}
+                sandbox=""
+                src={decisionAssetUrl(rec.id, `q${qi}`)}
+                style={{
+                  width: "100%",
+                  minHeight: "160px",
+                  border: "1px solid var(--decision-card-border, #ccc)",
+                  borderRadius: "0.4rem",
+                  background: "#fff",
+                }}
+              />
+            ) : (
+              q.html && (
+                <div className={styles.option_desc}>
+                  {t("decision_history.fleet_ask_html_marker", "[HTML preview was shown]")}
+                </div>
+              )
             )}
             {(q.options ?? []).map((opt, oi) => {
               const isSelected = !isOther && selectedLabels.includes(opt.label);

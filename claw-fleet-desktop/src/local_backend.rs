@@ -1886,6 +1886,15 @@ impl Backend for LocalBackend {
         crate::wiki::get_file(slug, version, relpath)
     }
 
+    fn get_decision_asset(
+        &self,
+        id: &str,
+        qidx: &str,
+        relpath: &str,
+    ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String> {
+        crate::mcp_ipc::read_decision_asset(id, qidx, relpath)
+    }
+
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
         crate::wiki::delete_doc(slug)
     }

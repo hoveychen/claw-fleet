@@ -924,6 +924,28 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/decision_asset" => {
+                let dec = |key: &str| {
+                    query
+                        .get(key)
+                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                        .unwrap_or_default()
+                };
+                let (id, qidx, rel) = (dec("id"), dec("qidx"), dec("path"));
+                match crate::mcp_ipc::read_decision_asset(&id, &qidx, &rel) {
+                    Ok(f) => {
+                        let mime_header: tiny_http::Header =
+                            format!("Content-Type: {}", f.mime).parse().unwrap();
+                        let _ = request.respond(
+                            tiny_http::Response::from_data(f.bytes).with_header(mime_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
+            }
+
             "/wiki_search" => {
                 let raw = query.get("q").map(|s| s.as_str()).unwrap_or("");
                 let q = percent_decode_str(raw).decode_utf8_lossy().to_string();
