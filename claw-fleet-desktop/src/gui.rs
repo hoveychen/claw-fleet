@@ -3566,6 +3566,46 @@ pub fn run() {
                 };
                 responder.respond(response);
             });
+        })
+        // Serves fleet__ask decision-card assets into the webview:
+        // fleet-decision://localhost/<id>/q<idx>/<relpath…>
+        // (http://fleet-decision.localhost/… on Windows). Same Backend-routed,
+        // worker-thread shape as fleet-wiki:// so remote sessions proxy the
+        // bytes over the probe API. Lets image-bearing cards load their
+        // index.html + images without base64-inlining into the tool call.
+        .register_asynchronous_uri_scheme_protocol("fleet-decision", move |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || {
+                let dec = |s: &str| {
+                    percent_encoding::percent_decode_str(s)
+                        .decode_utf8_lossy()
+                        .to_string()
+                };
+                let path = request.uri().path().trim_start_matches('/').to_string();
+                let mut segs = path.splitn(3, '/');
+                let id = dec(segs.next().unwrap_or(""));
+                let qidx = dec(segs.next().unwrap_or(""));
+                let rel = dec(segs.next().unwrap_or(""));
+                let result = {
+                    let state = app.state::<AppState>();
+                    let backend = state.backend.read().unwrap();
+                    backend.get_decision_asset(&id, &qidx, &rel)
+                };
+                let response = match result {
+                    Ok(f) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", f.mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(f.bytes)
+                        .unwrap(),
+                    Err(e) => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Content-Type", "text/plain")
+                        .body(e.into_bytes())
+                        .unwrap(),
+                };
+                responder.respond(response);
+            });
         });
 
     builder.manage(AppState {
