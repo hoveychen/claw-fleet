@@ -31,6 +31,21 @@ export interface RateLimitState {
  *  "新会话" button — mirrors session_launch::NEW_SESSION_ENTRYPOINT. */
 export const NEW_SESSION_ENTRYPOINT = "claw-fleet-newsession";
 
+/** `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions spawned by the handoff
+ *  relay — mirrors handoff::HANDOFF_ENTRYPOINT. A handoff successor is just a
+ *  Fleet-launched continuation of an adhoc session, so the launcher lists it
+ *  and it stays resumable, same as a "新会话" spawn. */
+export const HANDOFF_ENTRYPOINT = "claw-fleet-handoff";
+
+/** True for sessions Fleet itself launched (the "新会话" button or the handoff
+ *  relay). These are the sessions the 启动台 lists and that the detail view
+ *  can resume; other entrypoints (cli, claude-vscode, …) are read-only here. */
+export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
+  return (
+    entrypoint === NEW_SESSION_ENTRYPOINT || entrypoint === HANDOFF_ENTRYPOINT
+  );
+}
+
 export interface SessionInfo {
   id: string;
   workspacePath: string;
