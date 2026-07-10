@@ -97,9 +97,9 @@
   text-align: right;
 }
 
+/* Direction is chosen at runtime by useAutoFlip. */
 .popover {
   position: absolute;
-  bottom: calc(100% + 4px);
   left: 6px;
   right: 6px;
   padding: 6px 8px;
@@ -108,6 +108,14 @@
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
   z-index: 10;
+}
+
+.popover_above {
+  bottom: calc(100% + 4px);
+}
+
+.popover_below {
+  top: calc(100% + 4px);
 }
 
 [data-theme="light"] .popover {

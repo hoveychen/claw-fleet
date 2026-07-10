@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import { useAutoFlip } from "./useAutoFlip";
 import styles from "./UsageBar.module.css";
 
 export interface UsageBarSubBar {
@@ -46,6 +47,8 @@ export function UsageBar({ data }: { data: UsageBarData }) {
   const sources = (data.sources ?? []).slice().sort((a, b) => b.percent - a.percent);
   const clickable = typeof data.onClick === "function";
   const showBreakdown = hovered && sources.length > 0;
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const side = useAutoFlip(showBreakdown, "above", popoverRef);
 
   return (
     <div
@@ -68,7 +71,10 @@ export function UsageBar({ data }: { data: UsageBarData }) {
         <span className={styles.pct} style={{ color }}>{Math.round(pct)}%</span>
       </div>
       {showBreakdown && (
-        <div className={styles.popover}>
+        <div
+          className={`${styles.popover} ${side === "above" ? styles.popover_above : styles.popover_below}`}
+          ref={popoverRef}
+        >
           {sources.map((s) => {
             const subs = s.bars ?? [];
             if (subs.length > 0) {
