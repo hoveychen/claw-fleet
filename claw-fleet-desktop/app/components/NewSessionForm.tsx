@@ -46,9 +46,9 @@ function basename(p: string): string {
  *  detached `claude -p "<prompt>"` and the scanner picks the session up. Rendered
  *  inline inside the History page's detail column (no modal chrome); on success
  *  it hands the spawned pid back so the host can switch that column to the new
- *  session's live SessionDetail. Styled in the composer design language (see
- *  TaskComposer): ghost pills and custom popovers instead of labeled form rows
- *  and native <select>s. */
+ *  session's live SessionDetail. Styled in the composer design language: ghost
+ *  pills and custom popovers instead of labeled form rows and native
+ *  <select>s. */
 export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);

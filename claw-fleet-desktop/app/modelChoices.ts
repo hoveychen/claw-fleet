@@ -1,7 +1,6 @@
 // Shared catalog of selectable Claude models. Consumers prepend their own
-// "default" entry (the default differs per surface: TaskComposer's planner
-// defaults to Opus 4.8, the new-session launcher follows the CLI's own
-// configured model).
+// "default" entry, since the default differs per surface (the new-session
+// launcher, for one, follows the CLI's own configured model).
 export const CLAUDE_MODEL_CHOICES: { value: string; label: string }[] = [
   { value: "claude-fable-5", label: "Fable 5" },
   { value: "claude-opus-4-8", label: "Opus 4.8" },
