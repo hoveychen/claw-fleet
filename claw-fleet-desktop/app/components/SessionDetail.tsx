@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useSessionsStore } from "../store";
 import { isFleetOwnedEntrypoint } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
+import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { MessageList } from "./MessageList";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
@@ -245,14 +246,23 @@ export function SessionDetail({
     };
   }, [standaloneJsonlPath, liveActive]);
 
-  // Open a workflow fan-out agent's session (the scan registers it as
-  // `agent-<agentId>`, see session.rs). No-op if a scan hasn't surfaced it yet.
+  // Open a subagent's session — a workflow fan-out agent from the DAG, or a
+  // Task subagent from its tool card. The scan registers both as
+  // `agent-<agentId>` (see session.rs). No-op if a scan hasn't surfaced it yet.
   const openAgentSession = useCallback(
     (agentId: string) => {
       const target = sessions.find((s) => s.id === `agent-${agentId}`);
       if (target) open(target);
     },
     [sessions, open],
+  );
+
+  const agentNav = useMemo(
+    () => ({
+      open: openAgentSession,
+      has: (agentId: string) => sessions.some((s) => s.id === `agent-${agentId}`),
+    }),
+    [openAgentSession, sessions],
   );
 
   useEffect(() => {
@@ -696,16 +706,18 @@ export function SessionDetail({
               <div ref={scrollRef} className={styles.scroll_area}>
                 {/* The "load earlier" control lives inside MessageList, which
                     owns the render window this button used to duplicate. */}
-                <MessageList
-                  messages={messages}
-                  isLoading={isLoading}
-                  searchQuery={searchQuery}
-                  status={liveSession?.status ?? null}
-                  decisionRecords={decisionRecords}
-                  onLoadEarlier={loadEarlier}
-                  fullyLoaded={fullyLoaded}
-                  isLoadingEarlier={isLoading && messages.length > 0}
-                />
+                <AgentNavProvider nav={agentNav}>
+                  <MessageList
+                    messages={messages}
+                    isLoading={isLoading}
+                    searchQuery={searchQuery}
+                    status={liveSession?.status ?? null}
+                    decisionRecords={decisionRecords}
+                    onLoadEarlier={loadEarlier}
+                    fullyLoaded={fullyLoaded}
+                    isLoadingEarlier={isLoading && messages.length > 0}
+                  />
+                </AgentNavProvider>
                 {liveThinking?.streaming && liveThinking.thinking && (
                   <ThinkingBlock thinking={liveThinking.thinking} live />
                 )}
