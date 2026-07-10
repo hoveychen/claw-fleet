@@ -2955,10 +2955,16 @@ fn plan_create(cwd: &std::path::Path, plan_id: &str, title: &str) -> Result<(), 
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     let updated = pt::create_plan(&content, plan_id, title)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
+    // Writing a plan is starting it: the agent authoring the block is the agent
+    // about to execute it. Claiming focus here spares it a separate `resume`.
+    plan_record_focus(cwd, plan_id, &updated);
     println!("created plan '{plan_id}' in {}", path.display());
     Ok(())
 }
 
+/// Appends a pending task. Deliberately does NOT claim focus: `add` edits a
+/// plan's structure and says nothing about who is executing it — a master
+/// appending a P-item to another session's plan must not repoint its own card.
 fn plan_add(cwd: &std::path::Path, plan_id: &str, task: &str, text: &str) -> Result<(), String> {
     use claw_fleet_core::prd_tasks as pt;
     let path = pt::find_plan_source(cwd, plan_id)
