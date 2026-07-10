@@ -62,99 +62,11 @@ function buildResultMap(
   return map;
 }
 
-// ── Write baseline replay ─────────────────────────────────────────────────────
-
-/** Strip Claude Code's `cat -n` line-number prefix from a Read result. */
-function stripCatNFormat(s: string): string {
-  return s.split("\n").map((line) => line.replace(/^\s*\d+\t/, "")).join("\n");
-}
-
-/**
- * Walk session messages forward, tracking each `file_path`'s reconstructed
- * content as Read results land and Write/Edit/MultiEdit ops apply. For each
- * `Write` tool_use we capture the prior content (if known) so the diff view
- * can render an accurate "before vs after". Edit/MultiEdit don't need this —
- * their input already carries old/new strings.
- */
-function buildWriteBaselineMap(messages: RawMessage[]): Map<string, string> {
-  const fileState = new Map<string, string>();
-  const baseline = new Map<string, string>();
-  const pendingReads = new Map<string, { path: string; full: boolean }>();
-
-  for (const msg of messages) {
-    if (!msg.message) continue;
-    const content = msg.message.content;
-    if (!Array.isArray(content)) continue;
-
-    for (const block of content) {
-      if (block.type === "tool_use") {
-        const tu = block as ToolUseBlock;
-        const path = typeof tu.input.file_path === "string" ? tu.input.file_path : undefined;
-        if (!path) continue;
-
-        if (tu.name === "Read") {
-          const full =
-            tu.input.offset === undefined && tu.input.limit === undefined;
-          pendingReads.set(tu.id, { path, full });
-        } else if (tu.name === "Write") {
-          const cur = fileState.get(path);
-          if (cur !== undefined) baseline.set(tu.id, cur);
-          const next = typeof tu.input.content === "string" ? tu.input.content : "";
-          fileState.set(path, next);
-        } else if (tu.name === "Edit") {
-          const cur = fileState.get(path);
-          if (cur !== undefined) {
-            const oldS = String(tu.input.old_string ?? "");
-            const newS = String(tu.input.new_string ?? "");
-            const replaceAll = tu.input.replace_all === true;
-            const next = replaceAll ? cur.split(oldS).join(newS) : cur.replace(oldS, newS);
-            fileState.set(path, next);
-          }
-        } else if (tu.name === "MultiEdit") {
-          let cur = fileState.get(path);
-          if (cur !== undefined) {
-            const edits = Array.isArray(tu.input.edits)
-              ? (tu.input.edits as Array<{
-                  old_string?: string;
-                  new_string?: string;
-                  replace_all?: boolean;
-                }>)
-              : [];
-            for (const e of edits) {
-              const oldS = String(e.old_string ?? "");
-              const newS = String(e.new_string ?? "");
-              cur = e.replace_all
-                ? cur.split(oldS).join(newS)
-                : cur.replace(oldS, newS);
-            }
-            fileState.set(path, cur);
-          }
-        }
-      } else if (block.type === "tool_result") {
-        const tr = block as ToolResultBlock;
-        const pending = pendingReads.get(tr.tool_use_id);
-        if (
-          pending &&
-          pending.full &&
-          !tr.is_error &&
-          typeof tr.content === "string"
-        ) {
-          fileState.set(pending.path, stripCatNFormat(tr.content));
-        }
-        pendingReads.delete(tr.tool_use_id);
-      }
-    }
-  }
-
-  return baseline;
-}
-
 // ── Content blocks renderer ───────────────────────────────────────────────────
 
 interface BlocksProps {
   content: ContentBlock[];
   resultMap: Map<string, ToolResultBlock>;
-  baselineMap: Map<string, string>;
   /** tool_use_id → Claude Code's structured `toolUseResult` for that call. */
   metaMap: Map<string, unknown>;
   /** Session decision records; supply asset ids for image-bearing cards. */
@@ -163,7 +75,7 @@ interface BlocksProps {
   searchTerms?: string[] | null;
 }
 
-const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baselineMap, metaMap, decisionRecords, isPartial, searchTerms }: BlocksProps) {
+const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms }: BlocksProps) {
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -236,14 +148,18 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
       ]);
 
       if (READ_ONLY.has(toolBlock.name)) {
-        const group: Array<{ block: ToolUseBlock; result?: ToolResultBlock }> =
-          [{ block: toolBlock, result }];
+        const group: Array<{ block: ToolUseBlock; result?: ToolResultBlock; meta?: unknown }> =
+          [{ block: toolBlock, result, meta: metaMap.get(toolBlock.id) }];
 
         let j = i + 1;
         while (j < content.length && content[j].type === "tool_use") {
           const next = content[j] as ToolUseBlock;
           if (!READ_ONLY.has(next.name)) break;
-          group.push({ block: next, result: resultMap.get(next.id) });
+          group.push({
+            block: next,
+            result: resultMap.get(next.id),
+            meta: metaMap.get(next.id),
+          });
           j++;
         }
 
@@ -260,7 +176,7 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
           block={toolBlock}
           result={result}
           isPartial={isPartial && !result}
-          baseline={baselineMap.has(toolBlock.id) ? baselineMap.get(toolBlock.id) : null}
+          meta={metaMap.get(toolBlock.id)}
         />
       );
       i++;
@@ -299,14 +215,13 @@ function formatMsgTime(ts: string): { short: string; full: string } | null {
 interface MsgProps {
   msg: RawMessage;
   resultMap: Map<string, ToolResultBlock>;
-  baselineMap: Map<string, string>;
   metaMap: Map<string, unknown>;
   decisionRecords: DecisionHistoryRecord[];
   searchTerms?: string[] | null;
   msgIdx?: number;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, metaMap, decisionRecords, searchTerms, msgIdx }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx }: MsgProps) {
   if (!msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
@@ -370,7 +285,6 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, metaM
           <ContentBlocks
             content={content}
             resultMap={resultMap}
-            baselineMap={baselineMap}
             metaMap={metaMap}
             decisionRecords={decisionRecords}
             isPartial={isPartial}
@@ -516,7 +430,6 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
   const scrollAnchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   const resultMap = useMemo(() => buildResultMap(messages), [messages]);
-  const baselineMap = useMemo(() => buildWriteBaselineMap(messages), [messages]);
   const metaMap = useMemo(() => buildToolResultMetaMap(messages), [messages]);
 
   const displayMsgs = useMemo(
@@ -659,7 +572,6 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
           key={msg.uuid ?? (effectiveStart + i)}
           msg={msg}
           resultMap={resultMap}
-          baselineMap={baselineMap}
           metaMap={metaMap}
           decisionRecords={records}
           searchTerms={searchTerms}
