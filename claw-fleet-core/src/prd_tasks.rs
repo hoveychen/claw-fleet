@@ -892,6 +892,34 @@ pub fn find_plan_source(cwd: &Path, plan_id: &str) -> Option<PathBuf> {
     hits.into_iter().max_by_key(|(_, m)| *m).map(|(p, _)| p)
 }
 
+/// Display text of the task a session focusing on `plan_id` is now on: the item
+/// whose bold token matches `task` (e.g. `P4`) when given, else the plan's first
+/// pending item. `Ok(None)` means the plan exists but has no such task — a
+/// P-token with no matching item falls back to the bare `**P4**` token, and an
+/// all-done plan yields `None`. `Err` when the plan is in no TASKS.md here.
+///
+/// Shared by `fleet plan resume/check` and the handoff relay so both stamp the
+/// side-channel with the same text the card renders.
+pub fn resolve_current_task(
+    cwd: &Path,
+    plan_id: &str,
+    task: Option<&str>,
+) -> Result<Option<String>, String> {
+    let path = find_plan_source(cwd, plan_id)
+        .ok_or_else(|| format!("plan '{plan_id}' not found in any TASKS.md"))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let body = plan_body(&content, plan_id).ok_or_else(|| format!("plan '{plan_id}' not found"))?;
+    Ok(match task {
+        Some(t) => parse_task_items(&body)
+            .into_iter()
+            .find(|it| it.text.contains(&format!("**{t}**")))
+            .map(|it| it.text)
+            .or_else(|| Some(format!("**{t}**"))),
+        None => first_pending_task(&body),
+    })
+}
+
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
