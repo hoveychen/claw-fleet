@@ -814,11 +814,17 @@ fn get_messages(
 
 /// Read at most the last `tail` messages of a session. Used by SessionDetail
 /// to avoid stalling the webview on large transcripts.
-#[tauri::command]
+///
+/// `(async)` runs this on Tauri's threadpool instead of the main thread: it
+/// reads whole transcript files (can be tens of MB) and is polled every ~1.5s
+/// plus fired on every decision-card mount, so keeping it off the main thread
+/// prevents it from stalling paints / other IPC (a source of decision-panel
+/// submit jank). The body stays synchronous.
+#[tauri::command(async)]
 fn get_messages_tail(
     jsonl_path: String,
     tail: usize,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<Vec<Value>, String> {
     state.backend.read().unwrap().get_messages_tail(&jsonl_path, tail)
 }
@@ -1336,9 +1342,13 @@ fn respond_to_plan_approval(
         .respond_to_plan_approval(&id, &decision, edited_plan, feedback)
 }
 
-#[tauri::command]
+/// `(async)` → threadpool: `sync_user_prompts_from_jsonl` reads the entire
+/// transcript with `fs::read_to_string`, and this fires on every decision-card
+/// mount (the history strip). Off the main thread it can't stall the just-
+/// rendered card. The body stays synchronous.
+#[tauri::command(async)]
 fn list_session_decisions(
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
     session_id: String,
     jsonl_path: Option<String>,
 ) -> Vec<claw_fleet_core::decision_history::DecisionHistoryRecord> {
@@ -1670,10 +1680,13 @@ fn list_memories(state: tauri::State<AppState>) -> Vec<memory::WorkspaceMemory> 
     state.backend.read().unwrap().list_memories()
 }
 
-#[tauri::command]
+/// `(async)` → threadpool: polled every 700ms while a session streams. Even
+/// after the stale-skip fix it still does a `readdir` + `stat` per sidecar, so
+/// keep it off the main thread. The body stays synchronous.
+#[tauri::command(async)]
 fn read_live_thinking(
     session_id: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
     state.backend.read().unwrap().read_live_thinking(&session_id)
 }
