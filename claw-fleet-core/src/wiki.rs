@@ -279,6 +279,41 @@ fn dfs_decode(rest: &str, acc: String) -> Option<PathBuf> {
     }
 }
 
+// ── Workspace identity ───────────────────────────────────────────────────────
+
+/// Normalize a directory into the workspace string a doc is tagged with:
+/// canonicalized, with a session scratchpad decoded back to its real project
+/// root. [`publish`] tags docs through this, so a filter the caller builds from
+/// its own cwd compares against like-for-like values.
+pub fn resolve_workspace_path(workspace: &Path) -> String {
+    let ws = workspace
+        .canonicalize()
+        .unwrap_or_else(|_| workspace.to_path_buf());
+    decode_scratchpad_workspace(&ws)
+        .unwrap_or(ws)
+        .display()
+        .to_string()
+}
+
+/// Last path component of a workspace path, falling back to the whole string.
+pub fn workspace_name_of(workspace_path: &str) -> String {
+    Path::new(workspace_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(workspace_path)
+        .to_string()
+}
+
+/// True when a doc tagged with `doc_workspace` belongs to the workspace the
+/// caller stands in. Either may nest under the other: a doc published from
+/// `<repo>/.worktrees/x` still belongs to `<repo>`, and a caller inside that
+/// worktree still sees docs published from the repo root. Comparison is
+/// component-wise, so `/a/foo` never matches `/a/foobar`.
+pub fn workspace_contains(doc_workspace: &str, cwd_workspace: &str) -> bool {
+    let (doc, cwd) = (Path::new(doc_workspace), Path::new(cwd_workspace));
+    doc.starts_with(cwd) || cwd.starts_with(doc)
+}
+
 /// Retag already-published docs whose workspace was recorded as a session
 /// scratchpad (published before decoding existed). Returns one
 /// `(slug, old_workspace, new_workspace)` per fixed doc.
@@ -298,11 +333,7 @@ pub fn fix_scratchpad_workspaces_in(root: &Path) -> Vec<(String, String, String)
             continue;
         }
         let old = std::mem::replace(&mut doc.workspace_path, new_path.clone());
-        doc.workspace_name = Path::new(&new_path)
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or(&new_path)
-            .to_string();
+        doc.workspace_name = workspace_name_of(&new_path);
         if write_doc_json(&root.join(slug_to_dirname(&doc.slug)), &doc).is_ok() {
             fixed.push((doc.slug.clone(), old, new_path));
         }
@@ -414,18 +445,8 @@ pub fn publish_in(
         source_path: source.display().to_string(),
     };
 
-    let workspace = workspace
-        .canonicalize()
-        .unwrap_or_else(|_| workspace.to_path_buf());
-    let workspace_path = decode_scratchpad_workspace(&workspace)
-        .unwrap_or(workspace)
-        .display()
-        .to_string();
-    let workspace_name = Path::new(&workspace_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or(&workspace_path)
-        .to_string();
+    let workspace_path = resolve_workspace_path(workspace);
+    let workspace_name = workspace_name_of(&workspace_path);
 
     let doc = match existing {
         Some(mut old) => {
@@ -1528,5 +1549,41 @@ mod tests {
         let docs = list_docs_in(root.path());
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0].slug, "good");
+    }
+
+    #[test]
+    fn resolve_workspace_path_matches_what_publish_tags() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("doc.md");
+        fs::write(&md, "# hi").unwrap();
+        let doc = publish_in(root.path(), &md, None, None, ws.path()).unwrap();
+
+        assert_eq!(resolve_workspace_path(ws.path()), doc.workspace_path);
+        assert_eq!(workspace_name_of(&doc.workspace_path), doc.workspace_name);
+    }
+
+    #[test]
+    fn resolve_workspace_path_keeps_nonexistent_path_verbatim() {
+        // canonicalize() fails on a path that isn't on disk; we keep the input
+        // rather than dropping the filter entirely.
+        assert_eq!(resolve_workspace_path(Path::new("/no/such/dir")), "/no/such/dir");
+    }
+
+    #[test]
+    fn workspace_contains_self_and_both_nesting_directions() {
+        assert!(workspace_contains("/a/repo", "/a/repo"));
+        // Doc published from a worktree; caller stands at the repo root.
+        assert!(workspace_contains("/a/repo/.worktrees/x", "/a/repo"));
+        // Doc published from the repo root; caller stands inside the worktree.
+        assert!(workspace_contains("/a/repo", "/a/repo/.worktrees/x"));
+    }
+
+    #[test]
+    fn workspace_contains_rejects_siblings_and_name_prefixes() {
+        assert!(!workspace_contains("/a/repo", "/a/other"));
+        // Component-wise, so a shared string prefix is not a match.
+        assert!(!workspace_contains("/a/foo", "/a/foobar"));
+        assert!(!workspace_contains("/a/foobar", "/a/foo"));
     }
 }

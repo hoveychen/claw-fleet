@@ -555,12 +555,32 @@ enum WikiCommands {
         #[arg(long)]
         json: bool,
     },
-    /// List all wiki docs
+    /// List wiki docs published from the current workspace, newest first
+    /// (--all for every workspace)
     #[command(alias = "ls")]
     List {
-        /// Filter by workspace path substring
+        /// Filter by workspace path substring instead of the current workspace
         #[arg(long)]
         workspace: Option<String>,
+        /// List docs from every workspace
+        #[arg(long, conflicts_with = "workspace")]
+        all: bool,
+        /// Output raw JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Full-text search over doc titles, slugs and the text of each doc's
+    /// current version. Scoped to the current workspace unless --all.
+    #[command(alias = "grep")]
+    Search {
+        /// Text to look for (case-insensitive)
+        query: String,
+        /// Filter by workspace path substring instead of the current workspace
+        #[arg(long)]
+        workspace: Option<String>,
+        /// Search docs from every workspace
+        #[arg(long, conflicts_with = "workspace")]
+        all: bool,
         /// Output raw JSON
         #[arg(long)]
         json: bool,
@@ -1775,6 +1795,51 @@ fn cmd_audit(min_level: &str, filter: Option<&str>, as_json: bool) {
 
 // ── fleet wiki ────────────────────────────────────────────────────────────────
 
+/// Which docs a `list` / `search` invocation shows.
+enum WikiScope {
+    /// Default: docs whose workspace nests with the caller's cwd, resolved the
+    /// same way `publish` tags them.
+    CurrentWorkspace(String),
+    /// `--workspace <substr>`: substring match on workspace path or name.
+    Substring(String),
+    /// `--all`: no filter.
+    All,
+}
+
+impl WikiScope {
+    fn new(workspace: Option<String>, all: bool) -> Self {
+        match (workspace, all) {
+            (Some(ws), _) => Self::Substring(ws),
+            (None, true) => Self::All,
+            (None, false) => {
+                let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+                Self::CurrentWorkspace(wiki::resolve_workspace_path(&cwd))
+            }
+        }
+    }
+
+    fn admits(&self, doc: &wiki::WikiDoc) -> bool {
+        match self {
+            Self::All => true,
+            Self::Substring(s) => {
+                doc.workspace_path.contains(s.as_str()) || doc.workspace_name.contains(s.as_str())
+            }
+            Self::CurrentWorkspace(cwd) => wiki::workspace_contains(&doc.workspace_path, cwd),
+        }
+    }
+
+    /// Line printed under an empty result, pointing at the wider scope.
+    fn empty_hint(&self) -> String {
+        match self {
+            Self::All => "No wiki docs yet. Publish one with `fleet wiki publish <path>`.".into(),
+            Self::Substring(s) => format!("No wiki docs matching workspace '{s}'."),
+            Self::CurrentWorkspace(cwd) => {
+                format!("No wiki docs published from {cwd}. Use --all to see every workspace.")
+            }
+        }
+    }
+}
+
 fn cmd_wiki(action: WikiCommands) {
     match action {
         WikiCommands::Publish { path, slug, title, workspace, json } => {
@@ -1815,21 +1880,16 @@ fn cmd_wiki(action: WikiCommands) {
             }
         }
 
-        WikiCommands::List { workspace, json } => {
+        WikiCommands::List { workspace, all, json } => {
+            let scope = WikiScope::new(workspace, all);
             let mut docs = wiki::list_docs();
-            if let Some(ref ws) = workspace {
-                docs.retain(|d| d.workspace_path.contains(ws.as_str()) || d.workspace_name.contains(ws.as_str()));
-            }
+            docs.retain(|d| scope.admits(d));
             if json {
                 println!("{}", serde_json::to_string_pretty(&docs).unwrap());
                 return;
             }
             if docs.is_empty() {
-                println!(
-                    "{}No wiki docs yet. Publish one with `fleet wiki publish <path>`.{}",
-                    c_dim(),
-                    c_reset()
-                );
+                println!("{}{}{}", c_dim(), scope.empty_hint(), c_reset());
                 return;
             }
             println!(
@@ -1853,6 +1913,54 @@ fn cmd_wiki(action: WikiCommands) {
                     truncate(&d.title, 40),
                 );
             }
+        }
+
+        WikiCommands::Search { query, workspace, all, json } => {
+            let scope = WikiScope::new(workspace, all);
+            let by_slug: std::collections::HashMap<String, wiki::WikiDoc> =
+                wiki::list_docs().into_iter().map(|d| (d.slug.clone(), d)).collect();
+            let hits: Vec<_> = wiki::search_docs(&query)
+                .into_iter()
+                .filter(|h| by_slug.get(&h.slug).is_some_and(|d| scope.admits(d)))
+                .collect();
+            if json {
+                println!("{}", serde_json::to_string_pretty(&hits).unwrap());
+                return;
+            }
+            if hits.is_empty() {
+                println!(
+                    "{}No doc matches '{}'. {}{}",
+                    c_dim(),
+                    query,
+                    match scope {
+                        WikiScope::All => "Nothing in the wiki mentions it.".to_string(),
+                        _ => "Widen the scope with --all.".to_string(),
+                    },
+                    c_reset()
+                );
+                return;
+            }
+            println!(
+                "{}{:<36} {:<18} {:<8} MATCH{}",
+                c_bold(),
+                "SLUG",
+                "WORKSPACE",
+                "FIELD",
+                c_reset()
+            );
+            for h in &hits {
+                // Every hit came from `by_slug`, so the lookup cannot miss.
+                let doc = &by_slug[&h.slug];
+                let matched = if h.snippet.is_empty() { &doc.title } else { &h.snippet };
+                println!(
+                    "{:<36} {:<18} {:<8} {}",
+                    truncate(&h.slug, 35),
+                    truncate(&doc.workspace_name, 17),
+                    h.field,
+                    truncate(matched, 60),
+                );
+            }
+            println!("{}Read one with `fleet wiki cat <slug>`.{}", c_dim(), c_reset());
         }
 
         WikiCommands::Show { slug, json } => match wiki::get_doc(&slug) {
