@@ -9,7 +9,7 @@
     "core:window:allow-close",
     "core:event:default",
     "store:default",
-    "clipboard-manager:default",
+    "clipboard-manager:allow-write-text",
     "dialog:default"
   ]
 }

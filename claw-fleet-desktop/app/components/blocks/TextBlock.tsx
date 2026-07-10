@@ -86,7 +86,9 @@ export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms,
                   <button
                     className={styles.copy_btn}
                     onClick={() =>
-                      writeText(String(children))
+                      writeText(String(children)).catch((e) =>
+                        console.error("clipboard write failed:", e),
+                      )
                     }
                   >
                     Copy

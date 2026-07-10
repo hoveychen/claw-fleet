@@ -3,11 +3,23 @@ import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNo
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { BookOpen, Check, ChevronDown, ChevronRight, Copy, Download, RefreshCw, Trash2 } from "lucide-react";
+import {
+  BookOpen,
+  Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  Download,
+  FolderInput,
+  RefreshCw,
+  Trash2,
+} from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { PromptDialog } from "./PromptDialog";
+import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import styles from "./WikiView.module.css";
 
 // ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
@@ -108,6 +120,36 @@ function formatBytes(bytes: number): string {
 function slugBasename(slug: string): string {
   const at = slug.lastIndexOf("/");
   return at < 0 ? slug : slug.slice(at + 1);
+}
+
+// ── Doc actions (shared by the sidebar context menu and the detail header) ────
+
+/**
+ * Copies the `[[slug]]` reference rather than an on-disk path: the slug is the
+ * doc's stable address, and it's what `fleet wiki cat` and the session
+ * composer's @-mention both resolve. Returns false when the write was refused.
+ */
+async function copyDocRef(slug: string): Promise<boolean> {
+  try {
+    await writeText(`[[${slug}]]`);
+    return true;
+  } catch (e) {
+    console.error("clipboard write failed:", e);
+    return false;
+  }
+}
+
+/** Prompts for a destination, then writes `version` of `doc` to it. */
+async function exportDoc(doc: WikiDoc, version: string): Promise<void> {
+  // Mirrors core's wiki::export_filename — kind decides the artifact shape,
+  // and only the slug's last segment is a name (the rest are directories).
+  const ext = doc.kind === "markdown" ? "md" : doc.kind === "html" ? "html" : "zip";
+  const dest = await save({
+    defaultPath: `${slugBasename(doc.slug)}.${ext}`,
+    filters: [{ name: doc.title, extensions: [ext] }],
+  });
+  if (!dest) return;
+  await invoke("export_wiki_doc", { slug: doc.slug, version, dest });
 }
 
 type DocNode = { type: "doc"; doc: WikiDoc };
@@ -276,12 +318,23 @@ export function WikiView() {
     load();
   };
 
-  // ── Drag a doc into another folder ─────────────────────────────────────────
-  // Moving a doc IS re-keying it: the drop target's path becomes the slug's
-  // directory prefix. `null` drop target means the tree root.
+  // ── Moving a doc ───────────────────────────────────────────────────────────
+  // Moving a doc IS re-keying it — the slug's directory prefix is the only
+  // thing a folder ever was. Two entry points share `moveDoc`: dragging onto a
+  // folder (prefix swap) and the context menu's dialog (arbitrary new slug,
+  // which is how a folder gets created in the first place).
   const [dragSlug, setDragSlug] = useState<string | null>(null);
   const [dropPath, setDropPath] = useState<string | null>(null);
   const [moveError, setMoveError] = useState<string | null>(null);
+
+  const moveDoc = useCallback(
+    async (from: string, to: string) => {
+      await invoke<WikiDoc>("move_wiki_doc", { from, to });
+      setSelectedSlug((cur) => (cur === from ? to : cur));
+      await load();
+    },
+    [load],
+  );
 
   const handleDrop = async (folderPath: string) => {
     const from = dragSlug;
@@ -292,13 +345,62 @@ export function WikiView() {
     if (to === from) return;
     setMoveError(null);
     try {
-      await invoke<WikiDoc>("move_wiki_doc", { from, to });
-      if (selectedSlug === from) setSelectedSlug(to);
-      load();
+      await moveDoc(from, to);
     } catch (e) {
       setMoveError(String(e));
     }
   };
+
+  // ── Context menu + move dialog ─────────────────────────────────────────────
+  const [ctxMenu, setCtxMenu] = useState<{ doc: WikiDoc; anchor: ContextMenuAnchor } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<WikiDoc | null>(null);
+  const [moveDialogError, setMoveDialogError] = useState<string | null>(null);
+
+  const openMoveDialog = (doc: WikiDoc) => {
+    setMoveDialogError(null);
+    setMoveTarget(doc);
+  };
+
+  const handleMoveSubmit = async (to: string) => {
+    if (!moveTarget) return;
+    try {
+      await moveDoc(moveTarget.slug, to);
+      setMoveTarget(null);
+    } catch (e) {
+      // Keep the dialog open so the rejected slug stays editable.
+      setMoveDialogError(String(e));
+    }
+  };
+
+  const menuItems = (doc: WikiDoc): ContextMenuItem[] => [
+    {
+      id: "move",
+      label: t("wiki.move", "移动 / 重命名…"),
+      icon: <FolderInput size={13} strokeWidth={1.7} />,
+      onSelect: () => openMoveDialog(doc),
+    },
+    {
+      id: "copy",
+      label: t("wiki.copy_ref_short", "复制引用"),
+      icon: <Copy size={13} strokeWidth={1.7} />,
+      onSelect: () => void copyDocRef(doc.slug),
+    },
+    {
+      id: "export",
+      label: t("wiki.export_short", "导出"),
+      icon: <Download size={13} strokeWidth={1.7} />,
+      onSelect: () => {
+        exportDoc(doc, doc.currentVersion).catch((e) => console.error("wiki export failed:", e));
+      },
+    },
+    {
+      id: "delete",
+      label: t("wiki.delete_doc", "删除文档"),
+      icon: <Trash2 size={13} strokeWidth={1.7} />,
+      danger: true,
+      onSelect: () => setConfirmDelete({ kind: "doc", slug: doc.slug }),
+    },
+  ];
 
   /**
    * Accept a drop into folder `path` ("" is the root). Doc cards carry their
@@ -357,6 +459,12 @@ export function WikiView() {
           }`}
           style={indent(depth)}
           onClick={() => setSelectedSlug(d.slug)}
+          onContextMenu={(e) => {
+            // preventDefault also suppresses the app-wide Settings/About menu.
+            e.preventDefault();
+            e.stopPropagation();
+            setCtxMenu({ doc: d, anchor: { x: e.clientX, y: e.clientY } });
+          }}
           draggable
           onDragStart={(e) => {
             e.dataTransfer.effectAllowed = "move";
@@ -462,6 +570,7 @@ export function WikiView() {
             <WikiDetail
               doc={selected}
               wikiLinks={wikiLinks}
+              onMove={() => openMoveDialog(selected)}
               onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
               onDeleteVersion={(version) =>
                 setConfirmDelete({ kind: "version", slug: selected.slug, version })
@@ -472,6 +581,29 @@ export function WikiView() {
           )}
         </main>
       </div>
+
+      {ctxMenu && (
+        <ContextMenu
+          anchor={ctxMenu.anchor}
+          items={menuItems(ctxMenu.doc)}
+          onClose={() => setCtxMenu(null)}
+        />
+      )}
+
+      {moveTarget && (
+        <PromptDialog
+          title={t("wiki.move_title", "移动 / 重命名 “{{title}}”", { title: moveTarget.title })}
+          hint={t(
+            "wiki.move_hint",
+            "输入新的 slug。用 / 分隔目录 —— 写成 design/foo 就会建出 design 目录。最多 8 层，每段 ≤64 字符。",
+          )}
+          defaultValue={moveTarget.slug}
+          confirmLabel={t("wiki.move_confirm", "移动")}
+          error={moveDialogError}
+          onConfirm={handleMoveSubmit}
+          onCancel={() => setMoveTarget(null)}
+        />
+      )}
 
       {confirmDelete && (
         <ConfirmDialog
@@ -498,11 +630,13 @@ export function WikiView() {
 function WikiDetail({
   doc,
   wikiLinks,
+  onMove,
   onDeleteDoc,
   onDeleteVersion,
 }: {
   doc: WikiDoc;
   wikiLinks: WikiLinkContext;
+  onMove: () => void;
   onDeleteDoc: () => void;
   onDeleteVersion: (version: string) => void;
 }) {
@@ -521,9 +655,6 @@ function WikiDetail({
     ? version
     : doc.currentVersion;
 
-  // Copies the `[[slug]]` reference rather than an on-disk path: the slug is
-  // the doc's stable address, and it's what `fleet wiki cat` and the session
-  // composer's @-mention both resolve.
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -531,23 +662,14 @@ function WikiDetail({
     return () => clearTimeout(id);
   }, [copied]);
   const handleCopyRef = async () => {
-    await writeText(`[[${doc.slug}]]`);
-    setCopied(true);
+    if (await copyDocRef(doc.slug)) setCopied(true);
   };
 
   const [exporting, setExporting] = useState(false);
   const handleExport = async () => {
-    // Mirrors core's wiki::export_filename — kind decides the artifact shape,
-    // and only the slug's last segment is a name (the rest are directories).
-    const ext = doc.kind === "markdown" ? "md" : doc.kind === "html" ? "html" : "zip";
-    const dest = await save({
-      defaultPath: `${slugBasename(doc.slug)}.${ext}`,
-      filters: [{ name: doc.title, extensions: [ext] }],
-    });
-    if (!dest) return;
     setExporting(true);
     try {
-      await invoke("export_wiki_doc", { slug: doc.slug, version: effectiveVersion, dest });
+      await exportDoc(doc, effectiveVersion);
     } catch (e) {
       console.error("wiki export failed:", e);
     } finally {
@@ -594,6 +716,14 @@ function WikiDetail({
               </option>
             ))}
           </select>
+          <button
+            className={styles.action_btn}
+            onClick={onMove}
+            title={t("wiki.move_title_short", "Move or rename — type a slug with / to make a folder")}
+          >
+            <FolderInput size={12} strokeWidth={1.7} />
+            {t("wiki.move_short", "移动")}
+          </button>
           <button
             className={styles.action_btn}
             onClick={handleCopyRef}
