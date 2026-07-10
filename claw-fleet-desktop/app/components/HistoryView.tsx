@@ -53,6 +53,21 @@ const LIVE_STATUSES = new Set([
   "waitingInput", "active", "delegating",
 ]);
 
+/** Segments for the manual-review filter. "all" shows everything; the other
+ *  three map to the three mark buckets (unmarked is "new"). */
+type MarkFilter = "all" | "new" | "pending" | "done";
+const MARK_SEGMENTS: { key: MarkFilter; dot?: string }[] = [
+  { key: "all" },
+  { key: "new", dot: "#e0574a" },
+  { key: "pending", dot: "#4a90e0" },
+  { key: "done" },
+];
+
+/** Which review bucket a session falls in — unmarked collapses to "new". */
+function markBucket(s: SessionInfo): "new" | "pending" | "done" {
+  return s.userMark ?? "new";
+}
+
 function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
   const diff = Date.now() - ms;
   if (diff < 60_000) return t("just_now");
@@ -111,6 +126,8 @@ export function HistoryView() {
   // Narrow the rail to sessions whose agent is still live — same status set that
   // colours the row dot green/amber.
   const [activeOnly, setActiveOnly] = useState(false);
+  // Segmented filter by manual review mark; "all" shows every bucket.
+  const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
   // Inline detail column selection — local to the page, deliberately NOT the
   // global useDetailStore (that one drives the drawer overlaying every view).
   const [selected, setSelected] = useState<SessionInfo | null>(null);
@@ -140,9 +157,12 @@ export function HistoryView() {
     return [...byPath.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [adhocSessions]);
 
-  const rows = useMemo(() => {
+  const { rows, markCounts } = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return adhocSessions
+    // Everything except the mark filter — the segment counts are taken over
+    // this set so each count reflects how many rows its segment would reveal
+    // under the current workspace / query / active filters.
+    const preMark = adhocSessions
       .filter((s) => workspaceFilter === "all" || s.workspacePath === workspaceFilter)
       .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
@@ -153,11 +173,21 @@ export function HistoryView() {
           (s.lastMessagePreview?.toLowerCase().includes(q) ?? false) ||
           s.workspaceName.toLowerCase().includes(q);
         return clientMatch || ftsMatchPaths.has(s.jsonlPath);
-      })
+      });
+    const counts: Record<MarkFilter, number> = {
+      all: preMark.length,
+      new: 0,
+      pending: 0,
+      done: 0,
+    };
+    for (const s of preMark) counts[markBucket(s)] += 1;
+    const rows = preMark
+      .filter((s) => markFilter === "all" || markBucket(s) === markFilter)
       // Most recently *active* first, matching the row's displayed time — a
       // created-at order would interleave stale rows between fresh ones.
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
-  }, [adhocSessions, workspaceFilter, activeOnly, query, ftsMatchPaths]);
+    return { rows, markCounts: counts };
+  }, [adhocSessions, workspaceFilter, activeOnly, query, ftsMatchPaths, markFilter]);
 
   const activeCount = useMemo(
     () => adhocSessions.filter((s) => LIVE_STATUSES.has(s.status)).length,
@@ -268,6 +298,45 @@ export function HistoryView() {
               {t("history.only_active", "仅活跃")}
               <span>{activeCount}</span>
             </button>
+          </div>
+          <div
+            className={styles.mark_filter}
+            role="group"
+            aria-label={t("history.mark_filter_label", "按标记状态筛选")}
+          >
+            {MARK_SEGMENTS.map((seg) => {
+              const label =
+                seg.key === "all"
+                  ? t("history.mark_f_all", "全部")
+                  : seg.key === "new"
+                    ? t("history.mark_f_new", "待 review")
+                    : seg.key === "pending"
+                      ? t("history.mark_f_pending", "进行中")
+                      : t("history.mark_f_done", "已完成");
+              return (
+                <button
+                  key={seg.key}
+                  type="button"
+                  className={`${styles.mark_seg} ${markFilter === seg.key ? styles.mark_seg_on : ""}`}
+                  aria-pressed={markFilter === seg.key}
+                  onClick={() => setMarkFilter(seg.key)}
+                >
+                  {seg.dot && (
+                    <span
+                      className={styles.mark_seg_dot}
+                      style={{ background: seg.dot }}
+                    />
+                  )}
+                  {seg.key === "done" && (
+                    <span
+                      className={`${styles.mark_seg_dot} ${styles.mark_seg_dot_done}`}
+                    />
+                  )}
+                  {label}
+                  <span className={styles.mark_seg_count}>{markCounts[seg.key]}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
 
