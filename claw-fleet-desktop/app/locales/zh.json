@@ -1686,5 +1686,20 @@
     "only_active": "仅活跃",
     "filter_active_tip": "只显示仍在运行或等待输入的会话",
     "select_hint": "从左侧选择一个会话查看详情"
+  },
+  "view_files": "文件",
+  "files": {
+    "panel_title": "文件",
+    "no_workspaces_title": "暂无工作区",
+    "no_workspaces_subtitle": "有会话跑起来之后，这里会列出它们的项目目录。",
+    "select_workspace": "选择左侧工作区浏览文件。",
+    "select_file": "选择左侧文件查看内容。",
+    "tree_label": "文件",
+    "loading": "加载中…",
+    "empty_dir": "目录为空。",
+    "binary_file": "二进制或非文本文件，无法在此预览。",
+    "read_error": "读取文件失败。",
+    "truncated_notice": "文件过大，仅显示前 1MB（共 {{size}}）。",
+    "show_ignored": "显示忽略文件"
   }
 }
