@@ -27,15 +27,24 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-/// A sidecar untouched for longer than this is treated as belonging to a
-/// finished turn and skipped by the hot `read_live_thinking` poll path without
-/// being opened or parsed. Set generously above the 120s streaming window so a
-/// briefly-idle live session is never dropped: a session that resumes streaming
-/// bumps the file's mtime and re-enters the window on the next poll. This is
-/// what keeps the 700ms poll from re-parsing the pile of dead-process sidecars
-/// that accumulate under `~/.fleet/live-thinking/` between app restarts (the
-/// only other cleanup, `prune_old`, runs once at startup).
-const STALE_SKIP_SECS: u64 = 300;
+/// A sidecar untouched for longer than this is skipped by `parse_sidecar`
+/// without even being opened.
+///
+/// The main saving in the 700ms `read_live_thinking` poll comes from bailing as
+/// soon as a file's first `session_id` event proves it isn't the session we
+/// want — that turns a non-matching file from "parse to EOF" into "read one
+/// line". This gate is a cheaper second guard that avoids the `open` entirely
+/// for the pile of dead-process sidecars that accumulate under
+/// `~/.fleet/live-thinking/` (the only other cleanup, `prune_old`, runs once at
+/// startup with a 6h threshold, so hours of them survive).
+///
+/// Because the early-out already makes the per-file cost trivial, this is set
+/// generously — far above the 120s streaming window — so a *live* session that
+/// simply went quiet keeps showing its last thinking. That case is real: an
+/// agent finishes reasoning, raises a decision card, and the user reads the
+/// thinking while deciding. A session that resumes streaming bumps the file's
+/// mtime and re-enters the window on the next poll.
+const STALE_SKIP_SECS: u64 = 1800;
 
 /// Directory holding one sidecar per live Fleet-spawned session.
 /// `None` only when the real home dir can't be resolved.
