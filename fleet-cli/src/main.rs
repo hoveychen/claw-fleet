@@ -351,16 +351,6 @@ enum GuardCommands {
 
 #[derive(Subcommand)]
 enum SessionCommands {
-    /// Report the current session's status (e.g. complete, in-review, custom-column-name).
-    /// Reads FLEET_SESSION_ID from env. If the status matches one of the project's
-    /// kanban_columns, the card moves; otherwise the value is recorded as a free-text note.
-    Status {
-        /// New status value (kanban column id or any free-text label).
-        state: String,
-        /// Optional note to attach (overrides status if status is unknown).
-        #[arg(long)]
-        note: Option<String>,
-    },
     /// [internal] Mark the current fleet session idle (turn ended, awaiting next user prompt).
     /// Wired to Claude Code's `Stop` hook by `apply_idle_hooks`. Silent no-op if
     /// FLEET_SESSION_ID is unset (non-fleet-managed sessions running with global hooks).
@@ -622,7 +612,6 @@ fn main() {
         Commands::PlanApproval => cmd_plan_approval(),
         Commands::PrdContext => cmd_prd_context(),
         Commands::Session { action } => match action {
-            SessionCommands::Status { state, note } => cmd_session_status(&state, note.as_deref()),
             SessionCommands::Idle => cmd_session_idle(),
             SessionCommands::Resume => cmd_session_resume(),
         },
@@ -2528,35 +2517,6 @@ fn cmd_plan_approval() {
 
 // ── Session self-report (called by agents from inside a managed session) ──
 
-/// `fleet session status <state> [--note <msg>]` — agent self-reports its
-/// current status to the supervisor.
-///
-/// Reads `FLEET_SESSION_ID` from env, then writes the status directly to
-/// `~/.claude/fleet/fleet-sessions.json` via `claw_fleet_core::supervisor`.
-/// The running supervisor's tick loop (in fleet serve) picks up the change
-/// on its next pass.
-///
-/// v1 uses direct file write rather than HTTP to keep fleet-cli light (no
-/// extra HTTP client dep). The HTTP endpoint at `/fleet_sessions/status`
-/// is still available for the Tauri GUI and remote backends that already
-/// have a probe client.
-fn cmd_session_status(state: &str, note: Option<&str>) {
-    let session_id = match read_fleet_session_id() {
-        Some(s) => s,
-        None => {
-            eprintln!("Error: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set).");
-            std::process::exit(2);
-        }
-    };
-
-    match claw_fleet_core::supervisor::set_status(&session_id, state, note.map(String::from)) {
-        Ok(()) => println!("ok"),
-        Err(e) => {
-            eprintln!("Error: {e}");
-            std::process::exit(1);
-        }
-    }
-}
 
 /// `fleet session idle` — Stop-hook entrypoint. Marks the current session idle
 /// so the supervisor's tick flips the kanban card from Running → Pending.

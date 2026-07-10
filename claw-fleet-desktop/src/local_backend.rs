@@ -167,21 +167,6 @@ impl LocalBackend {
         step!("DBs opened");
 
         // ── Startup zombie recovery ───────────────────────────────────────
-        // Sweep fleet-sessions.json for sessions stuck in Running/Pending
-        // whose pid is gone (None or dead) so the kanban board doesn't show
-        // ghosts on first paint. Idempotent — `fleet serve` runs the same
-        // sweep when its tick loop boots, so calling here from the desktop
-        // side is a belt-and-suspenders cleanup for the case where the user
-        // opens the app before the LaunchAgent has come up.
-        match crate::supervisor::migrate_zombie_running() {
-            Ok(0) => {}
-            Ok(n) => log_debug(&format!(
-                "[BACKEND-INIT] recovered {n} zombie session(s)"
-            )),
-            Err(e) => log_debug(&format!(
-                "[BACKEND-INIT] zombie recovery failed: {e}"
-            )),
-        }
         // Start the outbound Feishu WS long-connection if credentials already
         // exist (no-op otherwise). Idempotent. card.action.trigger arrives over
         // this outbound socket, so no public webhook/tunnel is needed.
@@ -919,52 +904,6 @@ impl LocalBackend {
                         let _ = app_plan.emit("plan-approval-dismissed", id.clone());
                     }
                     known.retain(|id| pending.contains(id));
-                }
-            });
-        }
-
-        // Session-pending watcher — polls fleet_sessions_needing_input for
-        // idle main-agent sessions whose status hasn't been moved into a
-        // terminal column. New entries surface in the global DecisionPanel as
-        // SessionPendingCard; entries that disappear (user clicked "complete",
-        // agent received next prompt, etc.) emit a dismissal event so the
-        // panel can drop the card.
-        {
-            let app_pending = app.clone();
-            let sess_pending = sessions.clone();
-            let running_pending = running.clone();
-            std::thread::spawn(move || {
-                let mut known: HashSet<String> = HashSet::new();
-                loop {
-                    std::thread::sleep(Duration::from_millis(1000));
-                    if !running_pending.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    let mut pending = crate::supervisor::session_pending_requests();
-                    // Replace the workspace-basename fallback with the live
-                    // SessionInfo workspaceName when available (matches the
-                    // guard / elicitation watchers' display behaviour).
-                    for req in pending.iter_mut() {
-                        let (ws, _) = resolve_session_display(&sess_pending, &req.session_id);
-                        if !ws.is_empty() {
-                            req.workspace_name = ws;
-                        }
-                    }
-                    let pending_ids: HashSet<String> =
-                        pending.iter().map(|r| r.id.clone()).collect();
-                    for req in &pending {
-                        if known.insert(req.id.clone()) {
-                            crate::log_debug(&format!(
-                                "[session-pending] new: id={} project={}",
-                                req.id, req.project_id
-                            ));
-                            let _ = app_pending.emit("session-pending-request", req);
-                        }
-                    }
-                    for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
-                        let _ = app_pending.emit("session-pending-dismissed", id.clone());
-                    }
-                    known.retain(|id| pending_ids.contains(id));
                 }
             });
         }
@@ -1877,82 +1816,6 @@ impl Backend for LocalBackend {
 
     fn remove_marketplace(&self, name: &str) -> Result<(), String> {
         crate::claude_cli::remove_marketplace(name).map_err(|e| e.to_string())
-    }
-
-    // ── Projects ──────────────────────────────────────────────────────────────
-
-    fn list_projects(&self) -> Vec<crate::project::Project> {
-        // Registered projects only. Tasks whose project_id isn't registered
-        // (e.g. started via `fleet-task new` on an unregistered workspace) are
-        // still visible in the rebuilt TasksView's flat task list — we no
-        // longer synthesise phantom "virtual projects" for them (those were a
-        // leftover of the old project-grouped sidebar and couldn't be deleted).
-        crate::project::list_projects()
-    }
-
-    fn create_project(
-        &self,
-        input: crate::project::ProjectInput,
-    ) -> Result<crate::project::Project, String> {
-        crate::project::create_project(input)
-    }
-
-    fn update_project(&self, project: crate::project::Project) -> Result<(), String> {
-        crate::project::update_project(project)
-    }
-
-    fn delete_project(&self, project_id: &str) -> Result<(), String> {
-        crate::project::delete_project(project_id)
-    }
-
-    fn list_fleet_sessions(&self) -> Vec<crate::project::FleetSession> {
-        crate::project::list_fleet_sessions()
-    }
-
-    fn spawn_fleet_session(
-        &self,
-        form: crate::project::LauncherForm,
-    ) -> Result<crate::project::FleetSession, String> {
-        crate::supervisor::enqueue(form)
-    }
-
-    fn cancel_fleet_session(&self, session_id: &str) -> Result<(), String> {
-        crate::supervisor::cancel(session_id)
-    }
-
-    fn resume_fleet_session(&self, session_id: &str, follow_up_prompt: &str) -> Result<(), String> {
-        crate::supervisor::resume(session_id, follow_up_prompt.to_string())
-    }
-
-    fn set_fleet_session_status(
-        &self,
-        session_id: &str,
-        status: &str,
-        note: Option<&str>,
-    ) -> Result<(), String> {
-        crate::supervisor::set_status(session_id, status, note.map(String::from))
-    }
-
-    fn is_fleet_daemon_installed(&self) -> bool {
-        crate::launchd::is_installed()
-    }
-
-    fn install_fleet_daemon(&self, fleet_path: &str, port: u16, token: &str) -> Result<(), String> {
-        crate::launchd::install(fleet_path, port, token)
-    }
-
-    fn uninstall_fleet_daemon(&self) -> Result<(), String> {
-        // Best-effort: pull our Stop / UserPromptSubmit kanban hooks too. They
-        // were auto-installed by daemon_autostart::ensure_supervisor_daemon, so
-        // the symmetric uninstall belongs here.
-        if let Err(e) = crate::hooks::remove_idle_hooks() {
-            eprintln!("[uninstall] remove_idle_hooks: {e}");
-        }
-        crate::launchd::uninstall()
-    }
-
-    fn ensure_fleet_cli_link(&self, fleet_path: &str) -> Result<(), String> {
-        crate::supervisor::ensure_fleet_cli_link(fleet_path)
     }
 
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
