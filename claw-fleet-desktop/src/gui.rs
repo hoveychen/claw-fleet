@@ -1798,6 +1798,22 @@ fn move_wiki_doc(
     state.backend.read().unwrap().move_wiki_doc(&from, &to)
 }
 
+/// Rename a folder, or dissolve it into the tree root when `to` is empty.
+#[tauri::command]
+fn move_wiki_folder(
+    from: String,
+    to: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::wiki::WikiDoc>, String> {
+    state.backend.read().unwrap().move_wiki_folder(&from, &to)
+}
+
+/// Delete every doc under a folder. Returns how many were removed.
+#[tauri::command]
+fn delete_wiki_folder(prefix: String, state: tauri::State<AppState>) -> Result<usize, String> {
+    state.backend.read().unwrap().delete_wiki_folder(&prefix)
+}
+
 // ── Skills ────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -4007,6 +4023,8 @@ pub fn run() {
             delete_wiki_doc,
             delete_wiki_version,
             move_wiki_doc,
+            move_wiki_folder,
+            delete_wiki_folder,
             search_wiki_docs,
             export_wiki_doc,
             list_skills,
