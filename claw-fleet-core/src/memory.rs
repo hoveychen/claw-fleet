@@ -111,14 +111,13 @@ pub fn scan_all_memories() -> Vec<WorkspaceMemory> {
         }
 
         let workspace_path = decode_project_key(&project_key);
-        let workspace_name = match workspace_path
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .last()
-        {
-            Some(name) => name.to_string(),
-            None => continue, // skip degenerate keys that decode to "/"
-        };
+        // Skip degenerate keys that decode to "/" (no meaningful component).
+        if workspace_path.split('/').all(|s| s.is_empty()) {
+            continue;
+        }
+        // Reuse session's derivation so worktree checkouts
+        // (<repo>/.worktrees/<task-id>) group under their repo name here too.
+        let workspace_name = crate::session::workspace_name(&workspace_path);
 
         // Check for CLAUDE.md — skip if workspace resolves into a TCC-protected
         // directory (e.g. ~/Downloads) to avoid triggering macOS permission dialogs.
@@ -1015,15 +1014,20 @@ mod tests {
     }
 
     #[test]
-    fn workspace_name_from_root_path_is_none() {
-        // A workspace_path of "/" has no meaningful last component,
-        // so scan_all_memories should skip it (continue).
-        let workspace_path = "/";
-        let workspace_name = workspace_path
-            .split('/')
-            .filter(|s| !s.is_empty())
-            .last();
-        assert!(workspace_name.is_none());
+    fn root_path_is_skipped_as_degenerate() {
+        // A workspace_path of "/" has no meaningful component, so
+        // scan_all_memories skips it via the same all-empty check.
+        assert!("/".split('/').all(|s| s.is_empty()));
+        assert!(!"/Users/foo/bar".split('/').all(|s| s.is_empty()));
+    }
+
+    #[test]
+    fn memory_reuses_worktree_aware_name() {
+        // A worktree memory dir groups under the repo, not the task-id.
+        assert_eq!(
+            crate::session::workspace_name("/Users/foo/maliang/.worktrees/script-runtime"),
+            "maliang"
+        );
     }
 
     // ── parse_memory_index_str tests ──────────────────────────────────────
