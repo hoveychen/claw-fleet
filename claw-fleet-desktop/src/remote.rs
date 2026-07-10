@@ -260,6 +260,27 @@ fn encode_path(path: &str) -> String {
     utf8_percent_encode(path, NON_ALPHANUMERIC).to_string()
 }
 
+/// Body of `POST /wiki_move` and `POST /wiki_move_folder`. Module-level rather
+/// than declared inside each method so the integration tests exercise the exact
+/// same schema the production client sends.
+#[derive(serde::Serialize)]
+pub(crate) struct WikiMoveReq<'a> {
+    pub from: &'a str,
+    pub to: &'a str,
+}
+
+/// Body of `POST /wiki_delete_folder`.
+#[derive(serde::Serialize)]
+pub(crate) struct WikiDeleteFolderReq<'a> {
+    pub prefix: &'a str,
+}
+
+/// Response of `POST /wiki_delete_folder`.
+#[derive(serde::Deserialize, Debug)]
+pub(crate) struct WikiDeleteFolderResp {
+    pub deleted: usize,
+}
+
 impl crate::backend::Backend for RemoteBackend {
     fn list_sessions(&self) -> Vec<crate::session::SessionInfo> {
         self.sessions.lock().unwrap().clone()
@@ -498,33 +519,16 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn move_wiki_doc(&self, from: &str, to: &str) -> Result<crate::wiki::WikiDoc, String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> {
-            from: &'a str,
-            to: &'a str,
-        }
-        self.probe.post_json("/wiki_move", &Req { from, to })
+        self.probe.post_json("/wiki_move", &WikiMoveReq { from, to })
     }
 
     fn move_wiki_folder(&self, from: &str, to: &str) -> Result<Vec<crate::wiki::WikiDoc>, String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> {
-            from: &'a str,
-            to: &'a str,
-        }
-        self.probe.post_json("/wiki_move_folder", &Req { from, to })
+        self.probe.post_json("/wiki_move_folder", &WikiMoveReq { from, to })
     }
 
     fn delete_wiki_folder(&self, prefix: &str) -> Result<usize, String> {
-        #[derive(serde::Serialize)]
-        struct Req<'a> {
-            prefix: &'a str,
-        }
-        #[derive(serde::Deserialize)]
-        struct Resp {
-            deleted: usize,
-        }
-        let resp: Resp = self.probe.post_json("/wiki_delete_folder", &Req { prefix })?;
+        let resp: WikiDeleteFolderResp =
+            self.probe.post_json("/wiki_delete_folder", &WikiDeleteFolderReq { prefix })?;
         Ok(resp.deleted)
     }
 
@@ -2534,4 +2538,318 @@ fn start_remote_tail(
             }
         }
     });
+}
+
+/// Integration tests for the wiki HTTP surface.
+///
+/// These boot a real `hooks_server` and drive it through `ProbeClient` — the
+/// same client `RemoteBackend`'s wiki methods use, each of which is a one-line
+/// delegation to a `post_json`/`post_ok` call. Booting the real server is what
+/// makes these worth having: they pin the route paths, the request-body schema,
+/// the 400-vs-200 contract, and the response JSON shape all at once. A pure
+/// unit test of `wiki::move_folder` (which core already has) proves none of it.
+///
+/// `FLEET_HOME` is redirected at a `TempDir` so `wiki_dir()` — and the
+/// permission/MCP injectors `serve()` acquires on startup — resolve inside the
+/// sandbox instead of the developer's real `~/.fleet` and `~/.claude`.
+#[cfg(test)]
+mod tests {
+    use super::ProbeClient;
+    use claw_fleet_core::paths::fleet_home_lock;
+    use std::sync::MutexGuard;
+
+    const TOKEN: &str = "integration-test-token";
+
+    /// A booted server plus everything that must outlive it.
+    struct Fixture {
+        probe: ProbeClient,
+        home: tempfile::TempDir,
+        /// Serialises every test that mutates the global `FLEET_HOME`.
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Fixture {
+        /// Absolute path of the sandboxed wiki root.
+        fn wiki_root(&self) -> std::path::PathBuf {
+            self.home.path().join(".fleet").join("wiki")
+        }
+
+        /// Publish a doc straight onto disk, bypassing HTTP.
+        fn seed(&self, slug: &str) {
+            self.seed_with(slug, &format!("# {slug}\n"));
+        }
+
+        /// Publishing the same slug twice with different bodies stacks versions.
+        fn seed_with(&self, slug: &str, body: &str) {
+            let src = self.home.path().join("seed.md");
+            std::fs::write(&src, body).unwrap();
+            claw_fleet_core::wiki::publish_in(
+                &self.wiki_root(),
+                &src,
+                Some(slug),
+                None,
+                self.home.path(),
+            )
+            .unwrap();
+        }
+
+        fn slugs(&self) -> Vec<String> {
+            let mut s: Vec<String> = claw_fleet_core::wiki::list_docs_in(&self.wiki_root())
+                .into_iter()
+                .map(|d| d.slug)
+                .collect();
+            s.sort();
+            s
+        }
+    }
+
+    /// Boots `hooks_server::serve` on an ephemeral port against an isolated
+    /// `FLEET_HOME`, and returns a `ProbeClient` aimed at it.
+    fn boot() -> Fixture {
+        let guard = fleet_home_lock();
+        let home = tempfile::TempDir::new().unwrap();
+        // SAFETY: every test touching FLEET_HOME holds `guard`, so no other
+        // thread reads the env while we swap it.
+        unsafe { std::env::set_var("FLEET_HOME", home.path()) };
+
+        let port_file = home.path().join("port");
+        {
+            let pf = port_file.clone();
+            // `serve` never returns; the thread dies with the test process.
+            std::thread::spawn(move || {
+                claw_fleet_core::hooks_server::serve(0, TOKEN.to_string(), Some(pf))
+            });
+        }
+
+        // `serve` writes the OS-assigned port once it is listening.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let port = loop {
+            assert!(std::time::Instant::now() < deadline, "serve never wrote its port file");
+            if let Ok(text) = std::fs::read_to_string(&port_file) {
+                if let Ok(p) = text.trim().parse::<u16>() {
+                    if p != 0 {
+                        break p;
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+
+        Fixture {
+            probe: ProbeClient::new(format!("http://127.0.0.1:{port}"), TOKEN),
+            home,
+            _guard: guard,
+        }
+    }
+
+    #[test]
+    fn health_answers_and_bad_token_is_rejected() {
+        let fx = boot();
+
+        let health: serde_json::Value = fx.probe.get("/health").unwrap();
+        assert_eq!(health["status"], "ok", "server is up");
+
+        // The auth gate is the reason every other test's requests are trusted.
+        let base = fx.probe.base_url.clone();
+        let wrong = ProbeClient::new(base, "not-the-token");
+        assert!(
+            wrong.get::<serde_json::Value>("/health").is_err(),
+            "a bad bearer token must be rejected"
+        );
+    }
+
+    // ── /wiki_move ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn wiki_move_rekeys_and_normalizes_the_target_slug() {
+        let fx = boot();
+        fx.seed("overview");
+
+        let doc: claw_fleet_core::wiki::WikiDoc = fx
+            .probe
+            .post_json("/wiki_move", &super::WikiMoveReq { from: "overview", to: "Arch/Overview" })
+            .unwrap();
+
+        // The server normalizes; the client gets the canonical slug back.
+        assert_eq!(doc.slug, "arch/overview");
+        assert_eq!(fx.slugs(), vec!["arch/overview"]);
+    }
+
+    #[test]
+    fn wiki_move_onto_an_occupied_slug_is_a_400_with_a_message() {
+        let fx = boot();
+        fx.seed("a");
+        fx.seed("b");
+
+        let err = fx
+            .probe
+            .post_json::<_, claw_fleet_core::wiki::WikiDoc>(
+                "/wiki_move",
+                &super::WikiMoveReq { from: "a", to: "b" },
+            )
+            .unwrap_err();
+
+        // post_json digs the `error` field out of the 400 body.
+        assert!(err.contains("already exists"), "unexpected error: {err}");
+        assert_eq!(fx.slugs(), vec!["a", "b"], "the rejected move changed nothing");
+    }
+
+    // ── /wiki_delete ────────────────────────────────────────────────────────
+
+    /// The slug travels in the query string, so a slug with directories has to
+    /// survive a percent-encode/decode round trip (`a/b` → `a%2Fb` → `a/b`).
+    #[test]
+    fn wiki_delete_removes_a_doc_whose_slug_has_directories() {
+        let fx = boot();
+        fx.seed("arch/deep/overview");
+        fx.seed("keeper");
+
+        fx.probe
+            .post_ok(&format!("/wiki_delete?slug={}", super::encode_path("arch/deep/overview")))
+            .unwrap();
+
+        assert_eq!(fx.slugs(), vec!["keeper"]);
+    }
+
+    #[test]
+    fn wiki_delete_drops_one_version_and_keeps_the_current() {
+        let fx = boot();
+        fx.seed_with("notes", "# v1\n");
+        fx.seed_with("notes", "# v2\n");
+
+        let doc = claw_fleet_core::wiki::get_doc_in(&fx.wiki_root(), "notes").unwrap();
+        assert_eq!(doc.versions.len(), 2);
+        let old = doc.versions.iter().find(|v| v.id != doc.current_version).unwrap().id.clone();
+
+        fx.probe
+            .post_ok(&format!(
+                "/wiki_delete?slug=notes&version={}",
+                super::encode_path(&old)
+            ))
+            .unwrap();
+
+        let after = claw_fleet_core::wiki::get_doc_in(&fx.wiki_root(), "notes").unwrap();
+        assert_eq!(after.versions.len(), 1);
+        assert_eq!(after.current_version, doc.current_version, "current version survives");
+    }
+
+    // ── /wiki_move_folder ───────────────────────────────────────────────────
+
+    #[test]
+    fn wiki_move_folder_rekeys_every_doc_beneath_and_returns_them() {
+        let fx = boot();
+        fx.seed("arch/one");
+        fx.seed("arch/deep/two");
+        fx.seed("arch"); // same name as the folder — renders beside it, must stay
+        fx.seed("unrelated");
+
+        let moved: Vec<claw_fleet_core::wiki::WikiDoc> = fx
+            .probe
+            .post_json("/wiki_move_folder", &super::WikiMoveReq { from: "arch", to: "design" })
+            .unwrap();
+
+        assert_eq!(moved.len(), 2, "server returns exactly the docs it moved");
+        assert_eq!(fx.slugs(), vec!["arch", "design/deep/two", "design/one", "unrelated"]);
+    }
+
+    /// `to: ""` is how the UI dissolves a folder. It has to survive JSON — an
+    /// empty string must not be dropped or coerced on the way in.
+    #[test]
+    fn wiki_move_folder_with_empty_target_dissolves_into_the_root() {
+        let fx = boot();
+        fx.seed("arch/one");
+        fx.seed("arch/two");
+
+        let moved: Vec<claw_fleet_core::wiki::WikiDoc> = fx
+            .probe
+            .post_json("/wiki_move_folder", &super::WikiMoveReq { from: "arch", to: "" })
+            .unwrap();
+
+        assert_eq!(moved.len(), 2);
+        assert_eq!(fx.slugs(), vec!["one", "two"]);
+    }
+
+    /// A collision anywhere under the prefix must abort the whole move, and the
+    /// 400 body must carry the reason.
+    #[test]
+    fn wiki_move_folder_collision_is_a_400_and_moves_nothing() {
+        let fx = boot();
+        fx.seed("a/x");
+        fx.seed("a/y");
+        fx.seed("b/y"); // b/y is taken, so a/y cannot land
+
+        let err = fx
+            .probe
+            .post_json::<_, Vec<claw_fleet_core::wiki::WikiDoc>>(
+                "/wiki_move_folder",
+                &super::WikiMoveReq { from: "a", to: "b" },
+            )
+            .unwrap_err();
+
+        assert!(err.contains("already exists"), "unexpected error: {err}");
+        assert_eq!(fx.slugs(), vec!["a/x", "a/y", "b/y"], "nothing moved");
+    }
+
+    // ── /wiki_delete_folder ─────────────────────────────────────────────────
+
+    /// The `{"deleted": n}` response shape is RemoteBackend's deserialization
+    /// contract — if the server ever renamed that field, only this test catches it.
+    #[test]
+    fn wiki_delete_folder_removes_everything_beneath_and_reports_the_count() {
+        let fx = boot();
+        fx.seed("a/x");
+        fx.seed("a/deep/y");
+        fx.seed("a"); // beside the folder, must survive
+        fx.seed("b/z");
+
+        let resp: super::WikiDeleteFolderResp = fx
+            .probe
+            .post_json("/wiki_delete_folder", &super::WikiDeleteFolderReq { prefix: "a" })
+            .unwrap();
+
+        assert_eq!(resp.deleted, 2);
+        assert_eq!(fx.slugs(), vec!["a", "b/z"]);
+    }
+
+    #[test]
+    fn wiki_delete_folder_on_an_empty_prefix_is_a_400() {
+        let fx = boot();
+        fx.seed("keeper");
+
+        let err = fx
+            .probe
+            .post_json::<_, super::WikiDeleteFolderResp>(
+                "/wiki_delete_folder",
+                &super::WikiDeleteFolderReq { prefix: "nosuch" },
+            )
+            .unwrap_err();
+
+        assert!(err.contains("no wiki docs under"), "unexpected error: {err}");
+        assert_eq!(fx.slugs(), vec!["keeper"]);
+    }
+
+    /// A malformed body must be rejected by the route, not panic the server.
+    #[test]
+    fn wiki_move_folder_rejects_a_malformed_body() {
+        let fx = boot();
+        fx.seed("a/x");
+
+        #[derive(serde::Serialize)]
+        struct Wrong<'a> {
+            nonsense: &'a str,
+        }
+        let err = fx
+            .probe
+            .post_json::<_, Vec<claw_fleet_core::wiki::WikiDoc>>(
+                "/wiki_move_folder",
+                &Wrong { nonsense: "x" },
+            )
+            .unwrap_err();
+        assert!(err.contains("bad /wiki_move_folder body"), "unexpected error: {err}");
+
+        // The server is still alive and the wiki is untouched.
+        let health: serde_json::Value = fx.probe.get("/health").unwrap();
+        assert_eq!(health["status"], "ok");
+        assert_eq!(fx.slugs(), vec!["a/x"]);
+    }
 }
