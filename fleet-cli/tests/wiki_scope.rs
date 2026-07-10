@@ -71,12 +71,29 @@ fn search_slugs(fleet_home: &Path, cwd: &Path, query: &str, extra: &[&str]) -> V
         .collect()
 }
 
-/// Two sibling workspaces, one doc each, both mentioning "caching". `repo` also
-/// carries an empty `.worktrees/feat` checkout-shaped subdirectory.
+/// A `git init`-shaped checkout: a plain `.git` directory.
+fn fake_repo(at: &Path) {
+    std::fs::create_dir_all(at.join(".git")).unwrap();
+}
+
+/// A linked worktree, the shape `git worktree add` leaves behind: `.git` is a
+/// file pointing into the main checkout's `.git/worktrees/<name>`.
+fn fake_linked_worktree(at: &Path, main_repo: &Path, name: &str) {
+    std::fs::create_dir_all(at).unwrap();
+    let gitdir = main_repo.join(".git").join("worktrees").join(name);
+    std::fs::create_dir_all(&gitdir).unwrap();
+    std::fs::write(at.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
+}
+
+/// Two sibling checkouts with one doc each, both mentioning "caching"; `repo`
+/// also carries a linked worktree at `.worktrees/feat`. `ancestor` (the tempdir
+/// root) is deliberately NOT a checkout and holds a doc of its own — it stands
+/// in for `$HOME`, whose docs must not leak into the projects nested below it.
 struct Fixture {
     _home: tempfile::TempDir,
     _root: tempfile::TempDir,
     home: PathBuf,
+    ancestor: PathBuf,
     repo: PathBuf,
     worktree: PathBuf,
     other: PathBuf,
@@ -85,20 +102,26 @@ struct Fixture {
 fn fixture() -> Fixture {
     let home = tempfile::tempdir().unwrap();
     let root = tempfile::tempdir().unwrap();
-    let repo = root.path().join("myrepo");
+    let ancestor = root.path().to_path_buf();
+    let repo = ancestor.join("myrepo");
     let worktree = repo.join(".worktrees").join("feat");
-    let other = root.path().join("other");
-    std::fs::create_dir_all(&worktree).unwrap();
-    std::fs::create_dir_all(&other).unwrap();
+    let other = ancestor.join("other");
+
+    fake_repo(&repo);
+    fake_repo(&other);
+    fake_linked_worktree(&worktree, &repo, "feat");
 
     std::fs::write(repo.join("perf.md"), "# Perf notes\n\n吞吐率 improved by caching.\n").unwrap();
     std::fs::write(other.join("misc.md"), "# Other doc\n\nunrelated caching text\n").unwrap();
+    std::fs::write(ancestor.join("home.md"), "# Home doc\n\nstray caching note\n").unwrap();
 
     wiki(home.path(), &repo, &["publish", "perf.md"]);
     wiki(home.path(), &other, &["publish", "misc.md"]);
+    wiki(home.path(), &ancestor, &["publish", "home.md"]);
 
     Fixture {
         home: home.path().to_path_buf(),
+        ancestor,
         repo,
         worktree,
         other,
@@ -123,11 +146,29 @@ fn list_from_a_worktree_sees_the_repos_docs() {
 }
 
 #[test]
+fn list_ignores_docs_published_from_an_ancestor_directory() {
+    let f = fixture();
+    // `home` was published from the tempdir root, an ancestor of `repo` that is
+    // not a checkout. Path nesting alone must not make it the repo's doc.
+    assert!(!list_slugs(&f.home, &f.repo, &[]).contains(&"home".to_string()));
+    assert!(!list_slugs(&f.home, &f.worktree, &[]).contains(&"home".to_string()));
+    // Standing in that directory, it is of course the doc you published.
+    assert_eq!(list_slugs(&f.home, &f.ancestor, &[]), ["home"]);
+}
+
+#[test]
+fn search_ignores_docs_published_from_an_ancestor_directory() {
+    let f = fixture();
+    // All three docs say "caching"; only the repo's own is in scope.
+    assert_eq!(search_slugs(&f.home, &f.repo, "caching", &[]), ["perf"]);
+}
+
+#[test]
 fn list_all_spans_every_workspace() {
     let f = fixture();
     let mut slugs = list_slugs(&f.home, &f.repo, &["--all"]);
     slugs.sort();
-    assert_eq!(slugs, ["misc", "perf"]);
+    assert_eq!(slugs, ["home", "misc", "perf"]);
 }
 
 #[test]
@@ -149,7 +190,7 @@ fn search_all_spans_every_workspace() {
     let f = fixture();
     let mut slugs = search_slugs(&f.home, &f.repo, "caching", &["--all"]);
     slugs.sort();
-    assert_eq!(slugs, ["misc", "perf"]);
+    assert_eq!(slugs, ["home", "misc", "perf"]);
 }
 
 #[test]
