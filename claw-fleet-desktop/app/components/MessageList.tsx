@@ -9,7 +9,14 @@ import type {
 } from "../types";
 import { buildToolResultMetaMap, isDecisionTool } from "../toolResults";
 import { nextVisibleCount, visibleCountForMatch, windowSlice } from "../messageWindow";
-import { dayKey, daysAgo, isRenderableRow, messageToText } from "../messageRows";
+import {
+  dayKey,
+  daysAgo,
+  findMatches,
+  isRenderableRow,
+  messageSearchText,
+  messageToText,
+} from "../messageRows";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
@@ -222,9 +229,11 @@ interface MsgProps {
   decisionRecords: DecisionHistoryRecord[];
   searchTerms?: string[] | null;
   msgIdx?: number;
+  /** The hit the search navigation is currently parked on. */
+  isActiveMatch?: boolean;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch }: MsgProps) {
   // Same predicate the list uses to build its window and day separators, so the
   // two can never disagree about which records occupy a row.
   if (!isRenderableRow(msg) || !msg.message) return null;
@@ -275,7 +284,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
 
   return (
     <div
-      className={`${styles.message} ${isAssistant ? styles.assistant : styles.user}`}
+      className={`${styles.message} ${isAssistant ? styles.assistant : styles.user} ${isActiveMatch ? styles.active_match : ""}`}
       data-msg-idx={msgIdx}
     >
       {/* Tool-only assistant turns have no prose worth copying. */}
@@ -488,20 +497,6 @@ interface Props {
 /** Messages revealed per click, and the initial size of the render window. */
 const PAGE_SIZE = 100;
 
-/** Extract plain text from a message for search matching. */
-function messageText(msg: RawMessage): string {
-  if (!msg.message) return "";
-  const content = msg.message.content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((b) => {
-      if (b.type === "text") return (b as { type: "text"; text: string }).text;
-      if (b.type === "thinking") return (b as { type: "thinking"; thinking: string }).thinking;
-      return "";
-    })
-    .join(" ");
-}
 
 const NO_DECISIONS: DecisionHistoryRecord[] = [];
 
@@ -546,15 +541,21 @@ export function MessageList({
     return searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
   }, [searchQuery]);
 
-  // Find the index of the first matching message for search navigation
-  const searchMatchIndex = useMemo(() => {
-    if (!searchTerms || displayMsgs.length === 0) return -1;
-    for (let i = 0; i < displayMsgs.length; i++) {
-      const text = messageText(displayMsgs[i]).toLowerCase();
-      if (searchTerms.every((term) => text.includes(term))) return i;
-    }
-    return -1;
-  }, [searchTerms, displayMsgs]);
+  // Search haystacks are built from the messages alone, so typing another term
+  // re-scans strings instead of re-serialising every tool input.
+  const haystacks = useMemo(() => displayMsgs.map(messageSearchText), [displayMsgs]);
+  const matches = useMemo(
+    () => (searchTerms ? findMatches(haystacks, searchTerms) : []),
+    [haystacks, searchTerms],
+  );
+
+  // Which hit the reader is currently parked on.
+  const [activeMatch, setActiveMatch] = useState(0);
+  useEffect(() => {
+    setActiveMatch(0);
+  }, [searchTerms, displayMsgs.length === 0]);
+
+  const searchMatchIndex = matches.length > 0 ? matches[Math.min(activeMatch, matches.length - 1)] : -1;
 
   // Reset window when switching to a new session (total message count drops)
   const prevCountRef = useRef(displayMsgs.length);
@@ -649,6 +650,32 @@ export function MessageList({
     setVisibleCount((v) => v + PAGE_SIZE);
   }, [canReveal, canFetch, onLoadEarlier, isLoadingEarlier, anchorScroll]);
 
+  /** Scroll a rendered row into the middle of the viewport, if it is mounted. */
+  const scrollToRow = useCallback((msgIdx: number) => {
+    const row = listRef.current?.querySelector(`[data-msg-idx="${msgIdx}"]`);
+    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
+  /**
+   * Step to the next or previous hit, wrapping around.
+   *
+   * A hit above the render window is unreachable until the window covers it, so
+   * widen first; the scroll then happens on the next frame, once the row exists.
+   */
+  const stepMatch = useCallback(
+    (delta: number) => {
+      if (matches.length === 0) return;
+      const next = (activeMatch + delta + matches.length) % matches.length;
+      setActiveMatch(next);
+      const target = matches[next];
+      setVisibleCount((v) =>
+        Math.max(v, visibleCountForMatch(displayMsgs.length, target, PAGE_SIZE)),
+      );
+      requestAnimationFrame(() => scrollToRow(target));
+    },
+    [matches, activeMatch, displayMsgs.length, scrollToRow],
+  );
+
   // Auto-scroll to bottom (or to search match) when session switches
   useEffect(() => {
     const scroller = listRef.current?.parentElement;
@@ -691,7 +718,36 @@ export function MessageList({
   }
 
   return (
-    <div ref={listRef} className={styles.list}>
+    <div ref={listRef} className={`${styles.list} ${searchTerms ? styles.list_searching : ""}`}>
+      {searchTerms && (
+        <div className={styles.search_nav}>
+          <span className={styles.search_count}>
+            {matches.length === 0
+              ? t("detail.search_no_match")
+              : `${activeMatch + 1} / ${matches.length}`}
+          </span>
+          <button
+            type="button"
+            className={styles.search_step}
+            onClick={() => stepMatch(-1)}
+            disabled={matches.length === 0}
+            title={t("detail.search_prev")}
+            aria-label={t("detail.search_prev")}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className={styles.search_step}
+            onClick={() => stepMatch(1)}
+            disabled={matches.length === 0}
+            title={t("detail.search_next")}
+            aria-label={t("detail.search_next")}
+          >
+            ↓
+          </button>
+        </div>
+      )}
       {(canReveal || canFetch) && (
         <button
           className={styles.load_earlier}
@@ -719,6 +775,7 @@ export function MessageList({
               decisionRecords={records}
               searchTerms={searchTerms}
               msgIdx={effectiveStart + i}
+              isActiveMatch={effectiveStart + i === searchMatchIndex}
             />
           </Fragment>
         );
