@@ -42,6 +42,16 @@ pub struct PendingHandoff {
     /// Next P-item token (e.g. `P4`), when plan-bound.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub next_task: Option<String>,
+    /// Model spec the source session was running, so the successor continues on
+    /// the same model instead of silently falling back to the CLI default.
+    /// `None` — including on pending files written before this field existed —
+    /// means "let the CLI pick", preserving the old behaviour.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model: Option<String>,
+    /// Reasoning effort the source session was running; same rationale as
+    /// `model`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub effort: Option<String>,
     /// Chain this handoff extends; a fresh uuid when the session starts one.
     pub chain_id: String,
     /// 1-based position of the *source* session in the chain.
@@ -145,16 +155,22 @@ fn now_ms() -> u64 {
 /// Register a handoff for `session_id`. Overwrites any previous un-consumed
 /// registration by the same session. Fails when the chain the session sits on
 /// has already reached `MAX_CHAIN_HOPS`.
+#[allow(clippy::too_many_arguments)]
 pub fn register(
     session_id: &str,
     workspace_path: &str,
     note: &str,
     plan_id: Option<&str>,
     next_task: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
 ) -> Result<PendingHandoff, String> {
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
     let cdir = chain_dir().ok_or("cannot determine home dir")?;
-    register_in(&pdir, &cdir, session_id, workspace_path, note, plan_id, next_task, now_ms())
+    register_in(
+        &pdir, &cdir, session_id, workspace_path, note, plan_id, next_task, model, effort,
+        now_ms(),
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -166,6 +182,8 @@ fn register_in(
     note: &str,
     plan_id: Option<&str>,
     next_task: Option<&str>,
+    model: Option<&str>,
+    effort: Option<&str>,
     now: u64,
 ) -> Result<PendingHandoff, String> {
     let note = note.trim();
@@ -187,12 +205,15 @@ fn register_in(
         }
         None => (uuid::Uuid::new_v4().to_string(), 1),
     };
+    let blank = |s: &str| s.trim().is_empty();
     let rec = PendingHandoff {
         from_session_id: session_id.to_string(),
         workspace_path: workspace_path.to_string(),
         note: note.to_string(),
         plan_id: plan_id.map(str::to_string),
         next_task: next_task.map(str::to_string),
+        model: model.filter(|m| !blank(m)).map(str::to_string),
+        effort: effort.filter(|e| !blank(e)).map(str::to_string),
         chain_id,
         hop,
         created: now,
@@ -404,15 +425,9 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
 /// progress from its first scan, instead of depending on the agent noticing the
 /// `fleet plan resume` instruction in its opening prompt. A free-form relay
 /// (no `plan_id`) attributes nothing — there is no plan to point at.
-fn attribute_successor(pending: &PendingHandoff, to_sid: &str) {
-    let Some(dir) = crate::task_progress::progress_dir() else {
-        return;
-    };
-    attribute_successor_in(&dir, pending, to_sid);
-}
-
-/// `attribute_successor` against an explicit record dir, so tests don't race the
-/// process-global `FLEET_HOME` that other suites mutate.
+///
+/// Takes an explicit record dir so tests don't race the process-global
+/// `FLEET_HOME` that other suites mutate.
 fn attribute_successor_in(dir: &Path, pending: &PendingHandoff, to_sid: &str) {
     let Some(plan_id) = pending.plan_id.as_deref() else {
         return;
@@ -439,23 +454,63 @@ fn attribute_successor_in(dir: &Path, pending: &PendingHandoff, to_sid: &str) {
 /// session id when a relay fired. Errors never propagate to the hook exit
 /// code — callers log and move on.
 pub fn consume_and_spawn(session_id: &str) -> Result<Option<String>, String> {
-    let Some(pending) = take_pending(session_id) else {
+    let pdir = pending_dir().ok_or("cannot determine home dir")?;
+    let cdir = chain_dir().ok_or("cannot determine home dir")?;
+    let progress = crate::task_progress::progress_dir();
+    consume_and_spawn_in(
+        &pdir,
+        &cdir,
+        progress.as_deref(),
+        session_id,
+        now_ms(),
+        crate::session_launch::spawn_new_session_with_entrypoint,
+    )
+}
+
+/// `consume_and_spawn` against explicit record dirs and an injectable spawner,
+/// so tests can observe exactly which launch flags the successor receives
+/// without starting a real `claude` process.
+fn consume_and_spawn_in<S>(
+    pending_dir: &Path,
+    chain_dir: &Path,
+    progress_dir: Option<&Path>,
+    session_id: &str,
+    now: u64,
+    spawn: S,
+) -> Result<Option<String>, String>
+where
+    S: FnOnce(
+        &str,
+        &str,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+        &str,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String>,
+{
+    let Some(pending) = take_pending_in(pending_dir, session_id, now) else {
         return Ok(None);
     };
     let prompt = compose_successor_prompt(&pending);
-    let resp = crate::session_launch::spawn_new_session_with_entrypoint(
+    // The relay continues the predecessor's work, so it continues on the
+    // predecessor's model and effort. Falling through to the CLI default here
+    // would silently switch models mid-plan. `permission_mode` is deliberately
+    // left to the default: a relay should not inherit an elevated mode.
+    let resp = spawn(
         &pending.workspace_path,
         &prompt,
-        None,
-        None,
+        pending.model.as_deref(),
+        pending.effort.as_deref(),
         None,
         HANDOFF_ENTRYPOINT,
     )?;
     let to_sid = resp
         .session_id
         .ok_or_else(|| "spawn returned no session id".to_string())?;
-    attribute_successor(&pending, &to_sid);
-    record_link(&pending, &to_sid)?;
+    if let Some(dir) = progress_dir {
+        attribute_successor_in(dir, &pending, &to_sid);
+    }
+    record_link_in(chain_dir, &pending, &to_sid, now)?;
     crate::log_debug(&format!(
         "handoff: relayed session {} -> {} (chain {}, hop {} -> {})",
         session_id,
@@ -496,7 +551,104 @@ mod tests {
         note: &str,
         now: u64,
     ) -> Result<PendingHandoff, String> {
-        register_in(pdir, cdir, sid, "/ws", note, Some("my-plan"), Some("P4"), now)
+        register_in(
+            pdir,
+            cdir,
+            sid,
+            "/ws",
+            note,
+            Some("my-plan"),
+            Some("P4"),
+            None,
+            None,
+            now,
+        )
+    }
+
+    /// Launch flags the injected spawner observed, so a test can assert on what
+    /// the successor would actually have been started with.
+    #[derive(Default)]
+    struct SpawnSpy {
+        model: Option<String>,
+        effort: Option<String>,
+    }
+
+    /// The relay exists to rescue a session whose context ran out. Dropping the
+    /// predecessor's model on the floor silently demotes (or promotes) the
+    /// successor to whatever `~/.claude/settings.json` happens to default to —
+    /// a fable-5 relay would wake up as opus. The launch flags must follow the
+    /// registration.
+    #[test]
+    fn successor_is_spawned_with_the_predecessors_model_and_effort() {
+        let (root, pdir, cdir) = fresh_dirs("inherit");
+        register_in(
+            &pdir,
+            &cdir,
+            "s1",
+            "/ws",
+            "note",
+            None,
+            None,
+            Some("claude-fable-5"),
+            Some("high"),
+            1000,
+        )
+        .unwrap();
+
+        let spy = std::cell::RefCell::new(SpawnSpy::default());
+        let to = consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            "s1",
+            1001,
+            |_ws, _prompt, model, effort, _perm, entrypoint| {
+                assert_eq!(entrypoint, HANDOFF_ENTRYPOINT);
+                let mut s = spy.borrow_mut();
+                s.model = model.map(str::to_string);
+                s.effort = effort.map(str::to_string);
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 42,
+                    session_id: Some("s2".to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(to.as_deref(), Some("s2"));
+        let spy = spy.into_inner();
+        assert_eq!(
+            spy.model.as_deref(),
+            Some("claude-fable-5"),
+            "successor must inherit the predecessor's model, not the CLI default"
+        );
+        assert_eq!(spy.effort.as_deref(), Some("high"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A relay registered without a model (old pending files, or a session whose
+    /// model couldn't be resolved) must not invent one — the CLI default stands.
+    #[test]
+    fn successor_without_recorded_model_passes_no_override() {
+        let (root, pdir, cdir) = fresh_dirs("inherit-none");
+        register_simple(&pdir, &cdir, "s1", "note", 1000).unwrap();
+
+        let spy = std::cell::RefCell::new(SpawnSpy::default());
+        consume_and_spawn_in(&pdir, &cdir, None, "s1", 1001, |_w, _p, model, effort, _pm, _e| {
+            let mut s = spy.borrow_mut();
+            s.model = model.map(str::to_string);
+            s.effort = effort.map(str::to_string);
+            Ok(crate::session_launch::SpawnSessionResponse {
+                pid: 1,
+                session_id: Some("s2".to_string()),
+            })
+        })
+        .unwrap();
+
+        let spy = spy.into_inner();
+        assert_eq!(spy.model, None);
+        assert_eq!(spy.effort, None);
+        let _ = fs::remove_dir_all(&root);
     }
 
     /// Build a `PendingHandoff` whose workspace holds `tasks_md`.
@@ -507,6 +659,8 @@ mod tests {
             note: "n".into(),
             plan_id: plan_id.map(str::to_string),
             next_task: next.map(str::to_string),
+            model: None,
+            effort: None,
             chain_id: "c1".into(),
             hop: 1,
             created: 1,
@@ -611,6 +765,25 @@ mod tests {
         let rec = crate::task_progress::read_in(recs.path(), "to-sid").expect("attributed");
         assert_eq!(rec.plan_id, "ghost");
         assert_eq!(rec.current_task, None);
+    }
+
+    /// Pending files written before `model`/`effort` existed must still load —
+    /// an in-flight relay registered by the previous build must not be dropped
+    /// on upgrade.
+    #[test]
+    fn legacy_pending_file_without_model_still_deserializes() {
+        let (root, pdir, _cdir) = fresh_dirs("legacy");
+        fs::write(
+            pdir.join("s1.json"),
+            r#"{"fromSessionId":"s1","workspacePath":"/ws","note":"n",
+                "chainId":"c1","hop":1,"created":1000}"#,
+        )
+        .unwrap();
+        let rec = read_pending_in(&pdir, "s1").expect("legacy record must load");
+        assert_eq!(rec.model, None);
+        assert_eq!(rec.effort, None);
+        assert_eq!(rec.note, "n");
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -725,6 +898,8 @@ mod tests {
             note: "P1-P3 已完成；P4 卡在 X".into(),
             plan_id: Some("auth-refactor".into()),
             next_task: Some("P4".into()),
+            model: None,
+            effort: None,
             chain_id: "c1".into(),
             hop: 2,
             created: 1,

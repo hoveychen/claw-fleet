@@ -2696,11 +2696,30 @@ fn cmd_handoff(
         }
     }
     let ws = cwd.to_string_lossy().to_string();
-    match claw_fleet_core::handoff::register(&sid, &ws, note, plan, next) {
+    // The successor continues this session's work, so it must continue on this
+    // session's model and effort rather than the CLI default. The model is only
+    // discoverable from the transcript (Claude Code exports no model env var);
+    // effort is handed to us directly.
+    let model = claw_fleet_core::session::resolve_session_model_spec(&sid);
+    let effort = std::env::var("CLAUDE_EFFORT")
+        .ok()
+        .filter(|e| !e.trim().is_empty());
+    match claw_fleet_core::handoff::register(
+        &sid,
+        &ws,
+        note,
+        plan,
+        next,
+        model.as_deref(),
+        effort.as_deref(),
+    ) {
         Ok(rec) => println!(
-            "ok: handoff registered (chain {}, 第 {} 棒). \
+            "ok: handoff registered (chain {}, 第 {} 棒, model={}, effort={}). \
              接力 session 将在本 session 结束 turn 后由 Stop hook 自动启动；请尽快结束当前 turn。",
-            rec.chain_id, rec.hop
+            rec.chain_id,
+            rec.hop,
+            rec.model.as_deref().unwrap_or("<CLI 默认>"),
+            rec.effort.as_deref().unwrap_or("<CLI 默认>"),
         ),
         Err(e) => {
             eprintln!("Error: {e}");
