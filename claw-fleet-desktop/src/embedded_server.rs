@@ -568,6 +568,23 @@ fn handle_api_request(
             }
         }
 
+        "/wiki_move" if request.method() == &tiny_http::Method::Post => {
+            let mut body_bytes = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+            #[derive(serde::Deserialize)]
+            struct Req {
+                from: String,
+                to: String,
+            }
+            match serde_json::from_slice::<Req>(&body_bytes)
+                .map_err(|e| format!("bad /wiki_move body: {e}"))
+                .and_then(|r| backend.move_wiki_doc(&r.from, &r.to))
+            {
+                Ok(doc) => json_ok(&doc),
+                Err(e) => json_error(400, &e),
+            }
+        }
+
         "/skills" => json_ok(&backend.list_skills()),
 
         "/skill_content" => {

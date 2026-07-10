@@ -1788,6 +1788,16 @@ fn delete_wiki_version(
     state.backend.read().unwrap().delete_wiki_version(&slug, &version)
 }
 
+/// Re-key a doc — how the 知识库 board drags a doc into another folder.
+#[tauri::command]
+fn move_wiki_doc(
+    from: String,
+    to: String,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::wiki::WikiDoc, String> {
+    state.backend.read().unwrap().move_wiki_doc(&from, &to)
+}
+
 // ── Skills ────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -3996,6 +4006,7 @@ pub fn run() {
             get_wiki_file_text,
             delete_wiki_doc,
             delete_wiki_version,
+            move_wiki_doc,
             search_wiki_docs,
             export_wiki_doc,
             list_skills,
