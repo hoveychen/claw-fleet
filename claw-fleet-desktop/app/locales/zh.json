@@ -466,6 +466,7 @@
     "empty_subtitle": "Agent \u7528 `fleet wiki publish <path>` \u628a\u62a5\u544a\u548c demo \u53d1\u5e03\u5230\u8fd9\u91cc\u3002",
     "select_hint": "\u9009\u62e9\u4e00\u7bc7\u6587\u6863\u9884\u89c8",
     "current": "\u5f53\u524d",
+    "move_failed": "\u79fb\u52a8\u5931\u8d25\uff1a{{error}}",
     "version_count": "{{count}} \u4e2a\u7248\u672c",
     "delete_doc": "\u5220\u9664\u6587\u6863\uff08\u6240\u6709\u7248\u672c\uff09",
     "delete_doc_short": "\u5220\u6587\u6863",

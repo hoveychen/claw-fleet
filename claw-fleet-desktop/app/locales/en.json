@@ -469,6 +469,7 @@
     "empty_subtitle": "Agents publish reports and demos here with `fleet wiki publish <path>`.",
     "select_hint": "Select a doc to preview",
     "current": "current",
+    "move_failed": "Move failed: {{error}}",
     "version_count": "{{count}} versions",
     "delete_doc": "Delete doc (all versions)",
     "delete_doc_short": "Doc",

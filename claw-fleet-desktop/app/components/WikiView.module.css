@@ -195,6 +195,31 @@
   border-color: var(--color-border);
 }
 
+/* ── Drag a doc into another folder ──────────────────────────────────────── */
+
+.card_dragging {
+  opacity: 0.4;
+}
+
+.drop_target {
+  background: var(--color-bg-card-hover);
+  border-radius: 6px;
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+  color: var(--color-text);
+}
+
+/* Dropping outside any folder strips the doc's directory prefix. */
+.drop_target_root {
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+}
+
+.move_error {
+  font-size: 11px;
+  color: #f87171;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
 .card_body {
   flex: 1;
   min-width: 0;
