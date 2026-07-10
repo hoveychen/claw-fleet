@@ -2535,3 +2535,117 @@ fn start_remote_tail(
         }
     });
 }
+
+/// Integration tests for the wiki HTTP surface.
+///
+/// These boot a real `hooks_server` and drive it through `ProbeClient` — the
+/// same client `RemoteBackend`'s wiki methods use, each of which is a one-line
+/// delegation to a `post_json`/`post_ok` call. Booting the real server is what
+/// makes these worth having: they pin the route paths, the request-body schema,
+/// the 400-vs-200 contract, and the response JSON shape all at once. A pure
+/// unit test of `wiki::move_folder` (which core already has) proves none of it.
+///
+/// `FLEET_HOME` is redirected at a `TempDir` so `wiki_dir()` — and the
+/// permission/MCP injectors `serve()` acquires on startup — resolve inside the
+/// sandbox instead of the developer's real `~/.fleet` and `~/.claude`.
+#[cfg(test)]
+mod tests {
+    use super::ProbeClient;
+    use claw_fleet_core::paths::fleet_home_lock;
+    use std::sync::MutexGuard;
+
+    const TOKEN: &str = "integration-test-token";
+
+    /// A booted server plus everything that must outlive it.
+    struct Fixture {
+        probe: ProbeClient,
+        home: tempfile::TempDir,
+        /// Serialises every test that mutates the global `FLEET_HOME`.
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    impl Fixture {
+        /// Absolute path of the sandboxed wiki root.
+        fn wiki_root(&self) -> std::path::PathBuf {
+            self.home.path().join(".fleet").join("wiki")
+        }
+
+        /// Publish a doc straight onto disk, bypassing HTTP.
+        fn seed(&self, slug: &str) {
+            let src = self.home.path().join("seed.md");
+            std::fs::write(&src, format!("# {slug}\n")).unwrap();
+            claw_fleet_core::wiki::publish_in(
+                &self.wiki_root(),
+                &src,
+                Some(slug),
+                None,
+                self.home.path(),
+            )
+            .unwrap();
+        }
+
+        fn slugs(&self) -> Vec<String> {
+            let mut s: Vec<String> = claw_fleet_core::wiki::list_docs_in(&self.wiki_root())
+                .into_iter()
+                .map(|d| d.slug)
+                .collect();
+            s.sort();
+            s
+        }
+    }
+
+    /// Boots `hooks_server::serve` on an ephemeral port against an isolated
+    /// `FLEET_HOME`, and returns a `ProbeClient` aimed at it.
+    fn boot() -> Fixture {
+        let guard = fleet_home_lock();
+        let home = tempfile::TempDir::new().unwrap();
+        // SAFETY: every test touching FLEET_HOME holds `guard`, so no other
+        // thread reads the env while we swap it.
+        unsafe { std::env::set_var("FLEET_HOME", home.path()) };
+
+        let port_file = home.path().join("port");
+        {
+            let pf = port_file.clone();
+            // `serve` never returns; the thread dies with the test process.
+            std::thread::spawn(move || {
+                claw_fleet_core::hooks_server::serve(0, TOKEN.to_string(), Some(pf))
+            });
+        }
+
+        // `serve` writes the OS-assigned port once it is listening.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let port = loop {
+            assert!(std::time::Instant::now() < deadline, "serve never wrote its port file");
+            if let Ok(text) = std::fs::read_to_string(&port_file) {
+                if let Ok(p) = text.trim().parse::<u16>() {
+                    if p != 0 {
+                        break p;
+                    }
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+
+        Fixture {
+            probe: ProbeClient::new(format!("http://127.0.0.1:{port}"), TOKEN),
+            home,
+            _guard: guard,
+        }
+    }
+
+    #[test]
+    fn health_answers_and_bad_token_is_rejected() {
+        let fx = boot();
+
+        let health: serde_json::Value = fx.probe.get("/health").unwrap();
+        assert_eq!(health["status"], "ok", "server is up");
+
+        // The auth gate is the reason every other test's requests are trusted.
+        let base = fx.probe.base_url.clone();
+        let wrong = ProbeClient::new(base, "not-the-token");
+        assert!(
+            wrong.get::<serde_json::Value>("/health").is_err(),
+            "a bad bearer token must be rejected"
+        );
+    }
+}
