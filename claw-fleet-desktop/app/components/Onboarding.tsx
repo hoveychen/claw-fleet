@@ -144,8 +144,15 @@ function CopyableCommand({ cmd }: { cmd: string }) {
   const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
-  const copy = () => {
-    writeText(cmd);
+  // Only flag "copied" once the write actually lands — a rejected clipboard
+  // write must not leave the user thinking the command is on their clipboard.
+  const copy = async () => {
+    try {
+      await writeText(cmd);
+    } catch (e) {
+      console.error("clipboard write failed:", e);
+      return;
+    }
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };

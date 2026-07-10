@@ -531,7 +531,12 @@ function WikiDetail({
     return () => clearTimeout(id);
   }, [copied]);
   const handleCopyRef = async () => {
-    await writeText(`[[${doc.slug}]]`);
+    try {
+      await writeText(`[[${doc.slug}]]`);
+    } catch (e) {
+      console.error("clipboard write failed:", e);
+      return;
+    }
     setCopied(true);
   };
 
