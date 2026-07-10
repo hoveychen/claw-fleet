@@ -1336,6 +1336,8 @@
     "decision_unanswered": "Unanswered",
     "user_image": "Attached image",
     "slash_command": "slash command",
+    "today": "Today",
+    "yesterday": "Yesterday",
     "working_thinking": "Thinking…",
     "working_executing": "Running tools…",
     "working_streaming": "Responding…",

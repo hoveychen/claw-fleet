@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
@@ -9,6 +9,7 @@ import type {
 } from "../types";
 import { buildToolResultMetaMap, isDecisionTool } from "../toolResults";
 import { nextVisibleCount, visibleCountForMatch, windowSlice } from "../messageWindow";
+import { dayKey, daysAgo, isRenderableRow } from "../messageRows";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import {
@@ -223,7 +224,9 @@ interface MsgProps {
 }
 
 const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx }: MsgProps) {
-  if (!msg.message) return null;
+  // Same predicate the list uses to build its window and day separators, so the
+  // two can never disagree about which records occupy a row.
+  if (!isRenderableRow(msg) || !msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
   const isUser = msg.type === "user";
@@ -246,14 +249,6 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
         <CompactSummaryBlock summary={summaryText} />
       </div>
     );
-  }
-
-  // User messages: skip pure tool-result messages (rendered inline in tool blocks)
-  if (isUser) {
-    if (Array.isArray(content)) {
-      const hasText = content.some((b) => b.type !== "tool_result");
-      if (!hasText) return null;
-    }
   }
 
   const isPartial =
@@ -336,6 +331,34 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     </div>
   );
 });
+
+// ── Day separator ─────────────────────────────────────────────────────────────
+
+/**
+ * Sticky date header shown above the first row of each day.
+ *
+ * The topmost visible row always gets one, so a reader who scrolled into the
+ * middle of an old session can still see which day they are looking at.
+ */
+function DaySeparator({ isoDay }: { isoDay: string }) {
+  const { t } = useTranslation();
+  const ago = daysAgo(isoDay, new Date());
+  const label =
+    ago === 0
+      ? t("detail.today")
+      : ago === 1
+        ? t("detail.yesterday")
+        : new Date(`${isoDay}T00:00:00`).toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          });
+  return (
+    <div className={styles.day_sep}>
+      <span className={styles.day_sep_label}>{label}</span>
+    </div>
+  );
+}
 
 // ── Waiting for input indicator ───────────────────────────────────────────────
 
@@ -453,10 +476,11 @@ export function MessageList({
   const resultMap = useMemo(() => buildResultMap(messages), [messages]);
   const metaMap = useMemo(() => buildToolResultMetaMap(messages), [messages]);
 
-  const displayMsgs = useMemo(
-    () => messages.filter((m) => m.type === "user" || m.type === "assistant"),
-    [messages]
-  );
+  // Only records that actually occupy a row. Excluding the 32% of user records
+  // that carry nothing but tool results keeps the render window honest (a
+  // "100 message" window used to show ~67 rows) and stops a day separator from
+  // landing above an invisible message.
+  const displayMsgs = useMemo(() => messages.filter(isRenderableRow), [messages]);
 
   // Parse search terms once for matching and highlighting
   const searchTerms = useMemo(() => {
@@ -621,17 +645,26 @@ export function MessageList({
             : `↑ ${t("detail.load_earlier")}`}
         </button>
       )}
-      {visibleMsgs.map((msg, i) => (
-        <MessageRow
-          key={msg.uuid ?? (effectiveStart + i)}
-          msg={msg}
-          resultMap={resultMap}
-          metaMap={metaMap}
-          decisionRecords={records}
-          searchTerms={searchTerms}
-          msgIdx={effectiveStart + i}
-        />
-      ))}
+      {visibleMsgs.map((msg, i) => {
+        // A separator opens each new day, and also the top of the window — a
+        // reader scrolled into the middle of an old session needs the date too.
+        const today = dayKey(msg.timestamp);
+        const prev = i > 0 ? dayKey(visibleMsgs[i - 1].timestamp) : null;
+        const showDay = today !== null && (i === 0 || today !== prev);
+        return (
+          <Fragment key={msg.uuid ?? (effectiveStart + i)}>
+            {showDay && <DaySeparator isoDay={today} />}
+            <MessageRow
+              msg={msg}
+              resultMap={resultMap}
+              metaMap={metaMap}
+              decisionRecords={records}
+              searchTerms={searchTerms}
+              msgIdx={effectiveStart + i}
+            />
+          </Fragment>
+        );
+      })}
       {status && WORKING_STATUSES.has(status) ? (
         <WorkingIndicator status={status} />
       ) : (

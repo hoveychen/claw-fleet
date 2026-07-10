@@ -1339,6 +1339,8 @@
     "decision_unanswered": "未回答",
     "user_image": "附带的图片",
     "slash_command": "斜杠命令",
+    "today": "今天",
+    "yesterday": "昨天",
     "working_thinking": "思考中…",
     "working_executing": "执行工具中…",
     "working_streaming": "回复中…",
