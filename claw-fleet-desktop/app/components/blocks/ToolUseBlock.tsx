@@ -1,9 +1,11 @@
 import { useState } from "react";
 import type { ToolResultBlock, ToolUseBlock as ToolUseBlockType } from "../../types";
+import { asFileEditResult } from "../../toolResults";
 import { DiffView } from "./DiffView";
+import { ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
 import styles from "./ToolUseBlock.module.css";
 
-// Read-only tools that get grouped into "Explored [N]"
+// Read-only tools that get grouped into a single summary row
 const READ_ONLY_TOOLS = new Set([
   "Read",
   "Grep",
@@ -19,12 +21,8 @@ interface Props {
   block: ToolUseBlockType;
   result?: ToolResultBlock;
   isPartial?: boolean; // no result yet
-  /**
-   * For Write: file content immediately before this tool ran (reconstructed
-   * by replaying prior Read/Edit/Write ops in the same session). `null` means
-   * the prior content is unknown — render as a "new file" diff.
-   */
-  baseline?: string | null;
+  /** Claude Code's structured `toolUseResult` for this call, when recorded. */
+  meta?: unknown;
 }
 
 interface MultiEditEdit {
@@ -67,15 +65,32 @@ function ResultContent({ result }: { result: ToolResultBlock }) {
   );
 }
 
-/** Render Edit/MultiEdit/Write input as a diff view; falls back to null. */
-function DiffSection({ block, baseline }: { block: ToolUseBlockType; baseline?: string | null }) {
+/**
+ * Render Edit/MultiEdit/Write input as a diff view; falls back to null.
+ *
+ * When Claude Code recorded a `structuredPatch` for the call, that wins: it is
+ * the diff the tool actually applied, with true file line numbers. The
+ * before/after strings remain the fallback for transcripts with no structured
+ * payload.
+ */
+function DiffSection({ block, meta }: { block: ToolUseBlockType; meta?: unknown }) {
   const input = block.input;
-  const filePath = typeof input.file_path === "string" ? input.file_path : undefined;
+  const edit = asFileEditResult(meta);
+  const filePath =
+    edit?.filePath ?? (typeof input.file_path === "string" ? input.file_path : undefined);
 
   if (block.name === "Edit") {
     const oldS = typeof input.old_string === "string" ? input.old_string : "";
     const newS = typeof input.new_string === "string" ? input.new_string : "";
-    return <DiffView filePath={filePath} before={oldS} after={newS} tag="Edit" />;
+    return (
+      <DiffView
+        filePath={filePath}
+        hunks={edit?.structuredPatch}
+        before={oldS}
+        after={newS}
+        tag="Edit"
+      />
+    );
   }
 
   if (block.name === "MultiEdit") {
@@ -98,10 +113,17 @@ function DiffSection({ block, baseline }: { block: ToolUseBlockType; baseline?: 
 
   if (block.name === "Write") {
     const content = typeof input.content === "string" ? input.content : "";
-    // baseline === undefined or null means no replay info available; the diff
-    // view will render content as all-additions ("new file" style).
-    const before = baseline === undefined ? null : baseline;
-    return <DiffView filePath={filePath} before={before} after={content} tag="Write" />;
+    // With no structuredPatch and no recorded original, the prior content is
+    // genuinely unknown: `before: null` renders content as a new-file diff.
+    return (
+      <DiffView
+        filePath={filePath}
+        hunks={edit?.structuredPatch}
+        before={edit?.originalFile ?? null}
+        after={content}
+        tag="Write"
+      />
+    );
   }
 
   return null;
@@ -109,11 +131,13 @@ function DiffSection({ block, baseline }: { block: ToolUseBlockType; baseline?: 
 
 const DIFF_TOOLS = new Set(["Edit", "MultiEdit", "Write"]);
 
-export function ToolUseBlock({ block, result, isPartial, baseline }: Props) {
+export function ToolUseBlock({ block, result, isPartial, meta }: Props) {
   const [open, setOpen] = useState(false);
   const summary = formatInput(block.input);
   const isReadOnly = READ_ONLY_TOOLS.has(block.name);
   const isDiffTool = DIFF_TOOLS.has(block.name);
+  const custom = hasCustomBody(block.name, meta, result);
+  const stats = headerStats(block, meta, result);
 
   return (
     <div className={`${styles.root} ${isReadOnly ? styles.readonly : ""}`}>
@@ -123,23 +147,28 @@ export function ToolUseBlock({ block, result, isPartial, baseline }: Props) {
         {!open && (
           <span className={styles.summary}>{summary}</span>
         )}
+        {stats}
         {isPartial && !result && (
           <span className={styles.spinner}>⟳</span>
         )}
         {result?.is_error && !open && (
           <span className={styles.error_badge}>error</span>
         )}
-        {result && !result.is_error && !open && (
+        {result && !result.is_error && !open && !stats && (
           <span className={styles.ok_dot} />
         )}
       </button>
 
       {open && (
         <div className={styles.body}>
-          {isDiffTool ? (
+          {/* A failed Edit/Write applied nothing — drawing its intended diff
+              would claim a change that never landed. Show the error instead. */}
+          {isDiffTool && !result?.is_error ? (
             <div className={styles.input_section}>
-              <DiffSection block={block} baseline={baseline} />
+              <DiffSection block={block} meta={meta} />
             </div>
+          ) : custom ? (
+            <ToolBody block={block} meta={meta} result={result} />
           ) : (
             <div className={styles.input_section}>
               <span className={styles.section_label}>Input</span>
@@ -148,7 +177,9 @@ export function ToolUseBlock({ block, result, isPartial, baseline }: Props) {
               </pre>
             </div>
           )}
-          {result && <ResultContent result={result} />}
+          {/* A custom body already presents the result (stdout, todo list,
+              subagent output); repeating the raw blob under it is noise. */}
+          {result && !custom && <ResultContent result={result} />}
           {isPartial && !result && (
             <div className={styles.pending}>Running…</div>
           )}
@@ -161,24 +192,25 @@ export function ToolUseBlock({ block, result, isPartial, baseline }: Props) {
 // ── Grouped read-only tools ───────────────────────────────────────────────────
 
 interface GroupedProps {
-  blocks: Array<{ block: ToolUseBlockType; result?: ToolResultBlock }>;
+  blocks: Array<{ block: ToolUseBlockType; result?: ToolResultBlock; meta?: unknown }>;
 }
 
 export function GroupedToolUseBlocks({ blocks }: GroupedProps) {
   const [open, setOpen] = useState(false);
+  // The label used to read "Explored N files" for every group, including runs
+  // of WebSearch or TodoWrite, which touch no files at all.
+  const label = groupLabel(blocks.map((b) => b.block.name));
 
   return (
     <div className={styles.group}>
       <button className={styles.group_toggle} onClick={() => setOpen((o) => !o)}>
         <span className={styles.arrow}>{open ? "▾" : "▸"}</span>
-        <span className={styles.group_label}>
-          Explored {blocks.length} file{blocks.length !== 1 ? "s" : ""}
-        </span>
+        <span className={styles.group_label}>{label}</span>
       </button>
       {open && (
         <div className={styles.group_body}>
-          {blocks.map(({ block, result }, i) => (
-            <ToolUseBlock key={block.id ?? i} block={block} result={result} />
+          {blocks.map(({ block, result, meta }, i) => (
+            <ToolUseBlock key={block.id ?? i} block={block} result={result} meta={meta} />
           ))}
         </div>
       )}
