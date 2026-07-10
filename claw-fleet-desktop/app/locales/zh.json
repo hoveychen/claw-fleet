@@ -1222,7 +1222,10 @@
     "tasks_anonymous": "(匿名计划)",
     "tasks_status_active": "进行中",
     "tasks_status_done": "已完成",
-    "files": "个文件"
+    "files": "个文件",
+    "session_id": "会话 ID",
+    "copy_session_id": "复制会话 ID",
+    "copy_transcript_path": "复制 transcript 路径"
   },
   "settings": {
     "title": "设置",
