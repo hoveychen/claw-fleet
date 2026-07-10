@@ -1,0 +1,52 @@
+.root {
+  display: flex;
+  flex-direction: column;
+}
+
+.text {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  /* Collapsed: a preview. Expanded: scrolls inside itself rather than pushing
+     the whole conversation down by a thousand lines. */
+  max-height: 240px;
+  overflow: auto;
+}
+
+.text_expanded {
+  max-height: 520px;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.toggle {
+  padding: 0;
+  background: none;
+  border: none;
+  font-size: 10px;
+  color: var(--color-accent, #60a5fa);
+  cursor: pointer;
+}
+
+.toggle:hover { text-decoration: underline; }
+
+.capped {
+  font-size: 10px;
+  color: var(--color-warning, #dcaa3c);
+}
+
+/* Push the copy control to the trailing edge of the footer. */
+.copy {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+}

@@ -116,24 +116,32 @@
 
 .result_error { background: var(--color-error-result-bg); }
 
+/* ExpandableText owns the <pre>: its typography, its height cap, its scrolling.
+   This class is mostly a hook for the error tint below — giving it a competing
+   max-height would leave the winner up to CSS-module ordering. It keeps one
+   declaration so a minifier can't drop the rule and leave `styles.result_text`
+   undefined. */
 .result_text {
-  margin: 0;
-  font-family: var(--font-mono);
-  font-size: 11px;
   color: var(--color-text-secondary);
-  white-space: pre-wrap;
-  word-break: break-word;
-  max-height: 400px;
-  overflow-y: auto;
 }
 
 .result_error .result_text { color: var(--color-error-fg); }
 
-.truncated {
-  display: block;
+/* ToolSearch answers with a list of tool names rather than prose. */
+.tool_refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tool_ref {
+  font-family: var(--font-mono);
   font-size: 10px;
-  color: var(--color-text-dim);
-  margin-top: 4px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
 }
 
 .pending {

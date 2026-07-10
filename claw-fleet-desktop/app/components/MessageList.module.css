@@ -196,31 +196,8 @@
   opacity: 1;
 }
 
-.copy_btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  font-size: 11px;
-  line-height: 1;
-  color: var(--color-text-dim);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.copy_btn:hover {
-  color: var(--color-text);
-  border-color: var(--color-accent, #60a5fa);
-}
-
-.copy_btn_failed {
-  color: var(--color-error-fg);
-  border-color: var(--color-error-fg);
-}
+/* The copy control itself lives in CopyButton.module.css — shared with the
+   expandable tool-output blocks. */
 
 /* Content area */
 .content {

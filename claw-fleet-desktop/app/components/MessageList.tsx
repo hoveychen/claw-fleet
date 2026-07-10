@@ -17,7 +17,6 @@ import {
   messageSearchText,
   messageToText,
 } from "../messageRows";
-import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import {
@@ -26,6 +25,7 @@ import {
 } from "./blocks/ToolUseBlock";
 import { DecisionToolCard, hasDecisionQuestions } from "./blocks/DecisionToolCard";
 import { UserContent } from "./blocks/UserContent";
+import { CopyButton } from "./CopyButton";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import styles from "./MessageList.module.css";
 
@@ -348,56 +348,6 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     </div>
   );
 });
-
-// ── Copy control ──────────────────────────────────────────────────────────────
-
-type CopyState = "idle" | "done" | "failed";
-
-/**
- * Copies a message's prose. Revealed on row hover.
- *
- * The write is awaited and its rejection surfaced: `writeText` goes through
- * Tauri's ACL, so a capability that lacks `clipboard-manager:allow-write-text`
- * rejects it. A fire-and-forget call would flash "copied" while the clipboard
- * stayed empty.
- */
-function CopyButton({ text }: { text: string }) {
-  const { t } = useTranslation();
-  const [state, setState] = useState<CopyState>("idle");
-  const timerRef = useRef<number | undefined>(undefined);
-
-  useEffect(() => () => window.clearTimeout(timerRef.current), []);
-
-  const copy = useCallback(async () => {
-    window.clearTimeout(timerRef.current);
-    try {
-      await writeText(text);
-      setState("done");
-    } catch {
-      setState("failed");
-    }
-    timerRef.current = window.setTimeout(() => setState("idle"), 1400);
-  }, [text]);
-
-  const label =
-    state === "done"
-      ? t("detail.copied")
-      : state === "failed"
-        ? t("detail.copy_failed")
-        : t("detail.copy");
-
-  return (
-    <button
-      type="button"
-      className={`${styles.copy_btn} ${state === "failed" ? styles.copy_btn_failed : ""}`}
-      onClick={copy}
-      title={label}
-      aria-label={label}
-    >
-      {state === "done" ? "✓" : state === "failed" ? "✕" : "⧉"}
-    </button>
-  );
-}
 
 // ── Day separator ─────────────────────────────────────────────────────────────
 

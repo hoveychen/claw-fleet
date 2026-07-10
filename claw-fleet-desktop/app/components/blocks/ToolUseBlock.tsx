@@ -1,7 +1,15 @@
 import { useState } from "react";
-import type { ToolResultBlock, ToolUseBlock as ToolUseBlockType } from "../../types";
+import { useTranslation } from "react-i18next";
+import type {
+  ContentBlock,
+  ImageBlock,
+  ToolResultBlock,
+  ToolUseBlock as ToolUseBlockType,
+} from "../../types";
 import { asFileEditResult } from "../../toolResults";
 import { DiffView } from "./DiffView";
+import { ExpandableText } from "./ExpandableText";
+import { ImageThumb } from "./ImageThumb";
 import { ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
 import styles from "./ToolUseBlock.module.css";
 
@@ -42,24 +50,60 @@ function formatInput(input: Record<string, unknown>): string {
   return JSON.stringify(input, null, 2);
 }
 
-function ResultContent({ result }: { result: ToolResultBlock }) {
-  const content =
-    typeof result.content === "string"
-      ? result.content
-      : JSON.stringify(result.content, null, 2);
+/** Error colouring comes from `.result_error .result_text` on the wrapper. */
+function ResultText({ text }: { text: string }) {
+  return <ExpandableText text={text} className={styles.result_text} />;
+}
 
-  // Truncate very long results
-  const MAX = 2000;
-  const truncated = content.length > MAX;
-  const display = truncated ? content.slice(0, MAX) : content;
+/**
+ * The blocks a `tool_result` can carry, rendered as themselves.
+ *
+ * Previously anything that wasn't a plain string went through
+ * `JSON.stringify`, so a `Read` of an image file — 295 of them across 120 real
+ * transcripts — showed up as two thousand characters of base64.
+ */
+function ResultBlocks({ blocks }: { blocks: ContentBlock[] }) {
+  const { t } = useTranslation();
+  const refs = blocks.filter((b) => b.type === "tool_reference");
+  const rest = blocks.filter((b) => b.type !== "tool_reference");
 
   return (
-    <div className={`${styles.result} ${result.is_error ? styles.result_error : ""}`}>
-      <pre className={styles.result_text}>{display}</pre>
-      {truncated && (
-        <span className={styles.truncated}>
-          … {(content.length - MAX).toLocaleString()} more chars
-        </span>
+    <>
+      {/* ToolSearch answers with a list of tool names; a chip row beats JSON. */}
+      {refs.length > 0 && (
+        <div className={styles.tool_refs}>
+          {refs.map((b, i) => (
+            <span key={i} className={styles.tool_ref}>
+              {String((b as { tool_name?: unknown }).tool_name ?? "?")}
+            </span>
+          ))}
+        </div>
+      )}
+      {rest.map((block, i) => {
+        if (block.type === "image") {
+          return (
+            <ImageThumb key={i} block={block as ImageBlock} alt={t("detail.result_image")} />
+          );
+        }
+        if (block.type === "text") {
+          return <ResultText key={i} text={(block as { text: string }).text} />;
+        }
+        // An unknown block still beats silence: show its shape.
+        return <ResultText key={i} text={JSON.stringify(block, null, 2)} />;
+      })}
+    </>
+  );
+}
+
+function ResultContent({ result }: { result: ToolResultBlock }) {
+  const isError = !!result.is_error;
+
+  return (
+    <div className={`${styles.result} ${isError ? styles.result_error : ""}`}>
+      {Array.isArray(result.content) ? (
+        <ResultBlocks blocks={result.content} />
+      ) : (
+        <ResultText text={typeof result.content === "string" ? result.content : ""} />
       )}
     </div>
   );
