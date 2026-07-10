@@ -567,6 +567,19 @@ enum WikiCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Print a doc's content to stdout — the way to actually read a wiki doc.
+    /// Defaults to the entry file of the current version.
+    #[command(alias = "get")]
+    Cat {
+        slug: String,
+        /// Version id to read (see `fleet wiki show <slug>`). Default: current.
+        #[arg(long)]
+        version: Option<String>,
+        /// File inside the version, relative to its root (e.g. `assets/app.js`).
+        /// Default: the doc's entry file.
+        #[arg(long)]
+        file: Option<String>,
+    },
     /// Remove a doc (all versions), or a single old version with --version
     Rm {
         slug: String,
@@ -1856,6 +1869,38 @@ fn cmd_wiki(action: WikiCommands) {
                 std::process::exit(1);
             }
         },
+
+        WikiCommands::Cat { slug, version, file } => {
+            // `get_file` resolves "current" on its own, but the entry filename
+            // only lives on the doc, so we need the metadata either way.
+            let doc = match wiki::get_doc(&slug) {
+                Ok(d) => d,
+                Err(e) => {
+                    eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                    eprintln!("{}Run `fleet wiki list` to see published slugs.{}", c_dim(), c_reset());
+                    std::process::exit(1);
+                }
+            };
+            let version = version.unwrap_or_else(|| doc.current_version.clone());
+            let relpath = file.unwrap_or_else(|| doc.entry.clone());
+            match wiki::get_file(&slug, &version, &relpath) {
+                Ok(f) => {
+                    use std::io::Write;
+                    let stdout = std::io::stdout();
+                    let mut out = stdout.lock();
+                    // Raw bytes, like `cat` — html/markdown come out verbatim
+                    // and binary assets stay intact when redirected to a file.
+                    if out.write_all(&f.bytes).is_err() {
+                        std::process::exit(1);
+                    }
+                    let _ = out.flush();
+                }
+                Err(e) => {
+                    eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                    std::process::exit(1);
+                }
+            }
+        }
 
         WikiCommands::Rm { slug, version } => {
             let result = match version {
