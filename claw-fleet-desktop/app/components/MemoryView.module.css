@@ -504,11 +504,10 @@
   cursor: not-allowed;
 }
 
+/* Direction is chosen at runtime by useAutoFlip. */
 .promote_menu {
   position: absolute;
-  top: 100%;
   right: 0;
-  margin-top: 4px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -516,6 +515,14 @@
   z-index: 10;
   overflow: hidden;
   min-width: 200px;
+}
+
+.promote_menu_below {
+  top: calc(100% + 4px);
+}
+
+.promote_menu_above {
+  bottom: calc(100% + 4px);
 }
 
 .promote_menu_item {

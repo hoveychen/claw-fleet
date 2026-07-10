@@ -843,9 +843,9 @@
   display: inline-flex;
 }
 
+/* Direction is chosen at runtime by useAutoFlip. */
 .always_allow_menu_panel {
   position: absolute;
-  bottom: calc(100% + 6px);
   right: 0;
   z-index: 20;
   min-width: 220px;
@@ -858,6 +858,14 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.menu_above {
+  bottom: calc(100% + 6px);
+}
+
+.menu_below {
+  top: calc(100% + 6px);
 }
 
 .always_allow_menu_title {
