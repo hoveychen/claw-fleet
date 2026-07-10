@@ -54,7 +54,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Run unit tests
-        run: cargo test --release -p fleet-cli -p claw-fleet-core -p claw-fleet-task
+        run: cargo test --release -p fleet-cli -p claw-fleet-core -p fleet-hooks-server
 
   # ═══════════════════════════════════════════════════════════════════════════
   # Tag push only — Linux CLI binaries.
