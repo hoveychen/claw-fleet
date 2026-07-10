@@ -14,7 +14,9 @@
   font-size: 13px;
 }
 
-.load_more {
+/* The single control for reaching older messages: reveals what is already in
+   memory, then goes to disk once the window catches up with what was fetched. */
+.load_earlier {
   display: block;
   width: 100%;
   padding: 8px 0;
@@ -27,9 +29,13 @@
   text-align: center;
   transition: background 0.15s, border-color 0.15s;
 }
-.load_more:hover {
+.load_earlier:hover:not(:disabled) {
   background: var(--color-bg-secondary);
   border-color: var(--color-accent, #60a5fa);
+}
+.load_earlier:disabled {
+  cursor: wait;
+  color: var(--color-text-dim);
 }
 
 /* Message row.

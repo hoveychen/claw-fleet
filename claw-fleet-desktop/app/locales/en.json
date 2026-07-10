@@ -1322,7 +1322,6 @@
   "detail": {
     "following": "Auto-following",
     "scroll_to_latest": "Scroll to latest",
-    "load_more": "Load {{count}} more messages",
     "load_earlier": "Load earlier messages",
     "loading_earlier": "Loading earlier messages…",
     "tab_decisions": "Decisions",

@@ -8,6 +8,7 @@ import type {
   ToolUseBlock,
 } from "../types";
 import { buildToolResultMetaMap, isDecisionTool } from "../toolResults";
+import { nextVisibleCount, visibleCountForMatch, windowSlice } from "../messageWindow";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import {
@@ -394,8 +395,16 @@ interface Props {
   /** Decision records for this session. Inline decision cards read them for the
    *  asset id an image-bearing `fleet__ask` needs to re-serve its preview. */
   decisionRecords?: DecisionHistoryRecord[];
+  /** Pull older messages from disk. Awaited, so the reveal happens after the
+   *  fetch lands. Omit when the caller has no deeper history to offer. */
+  onLoadEarlier?: () => Promise<void> | void;
+  /** True when `messages` already reaches the start of the transcript. */
+  fullyLoaded?: boolean;
+  /** True while `onLoadEarlier` is in flight. */
+  isLoadingEarlier?: boolean;
 }
 
+/** Messages revealed per click, and the initial size of the render window. */
 const PAGE_SIZE = 100;
 
 /** Extract plain text from a message for search matching. */
@@ -415,7 +424,16 @@ function messageText(msg: RawMessage): string {
 
 const NO_DECISIONS: DecisionHistoryRecord[] = [];
 
-export function MessageList({ messages, isLoading, searchQuery, status, decisionRecords }: Props) {
+export function MessageList({
+  messages,
+  isLoading,
+  searchQuery,
+  status,
+  decisionRecords,
+  onLoadEarlier,
+  fullyLoaded = true,
+  isLoadingEarlier = false,
+}: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -423,10 +441,13 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
   // omits the prop.
   const records = decisionRecords ?? NO_DECISIONS;
 
-  // visibleStart tracks the actual start index into displayMsgs.
-  // -1 is a sentinel meaning "show the tail (last PAGE_SIZE)".
-  const [visibleStart, setVisibleStart] = useState(-1);
-  // Saved before loading more; used by useLayoutEffect to restore scroll position
+  // How many trailing messages to render. Counting from the *end* rather than
+  // holding a start index is what lets this window coexist with the store's
+  // disk pagination: loading earlier history prepends messages, which shifts
+  // every index but leaves a count-from-the-end untouched, so the visible set
+  // does not jump under the reader.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // Saved before revealing more; used by useLayoutEffect to restore scroll position
   const scrollAnchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   const resultMap = useMemo(() => buildResultMap(messages), [messages]);
@@ -465,42 +486,43 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
       sessionSwitchedRef.current = true;
       searchScrolledRef.current = false;
 
-      // If we have a search match, start the view window around that match
-      if (searchMatchIndex >= 0) {
-        const start = Math.max(0, searchMatchIndex - 10); // show some context before match
-        setVisibleStart(start);
-      } else {
-        setVisibleStart(-1);
-      }
+      // Widen the window far enough that the first search hit — plus a little
+      // context above it — is actually inside it.
+      setVisibleCount(
+        searchMatchIndex >= 0
+          ? visibleCountForMatch(displayMsgs.length, searchMatchIndex, PAGE_SIZE)
+          : PAGE_SIZE,
+      );
     }
     prevCountRef.current = displayMsgs.length;
   }, [displayMsgs.length, searchMatchIndex]);
 
-  // Compute effective start: -1 means "tail mode" (follow latest messages)
-  const tailStart = Math.max(0, displayMsgs.length - PAGE_SIZE);
-  const effectiveStart = visibleStart === -1 ? tailStart : Math.min(visibleStart, tailStart);
+  const { start: effectiveStart, hidden: hiddenCount } = windowSlice(
+    displayMsgs.length,
+    visibleCount,
+  );
   const visibleMsgs = displayMsgs.slice(effectiveStart);
-  const hiddenCount = effectiveStart;
 
-  // When in tail mode and new messages arrive, the window auto-advances.
-  // When user has scrolled up (visibleStart >= 0), the window stays put and grows.
-  const prevEffectiveStartRef = useRef(effectiveStart);
-  if (
-    visibleStart === -1 &&
-    effectiveStart > prevEffectiveStartRef.current &&
-    !scrollAnchor.current
-  ) {
-    const scroller = listRef.current?.parentElement;
-    if (scroller && listRef.current) {
-      scrollAnchor.current = {
-        scrollTop: scroller.scrollTop,
-        scrollHeight: listRef.current.scrollHeight,
-      };
-    }
-  }
-  prevEffectiveStartRef.current = effectiveStart;
+  // Keep the reader's place when the transcript grows.
+  //
+  // A *prepend* (older history arriving) needs nothing: the window counts from
+  // the end, so the visible set is already unchanged. An *append* (the agent
+  // writing a new turn) slides the window forward, dropping the oldest visible
+  // message — which is what we want while the reader sits at the bottom, but
+  // yanks content away once they have expanded the window to read back. So grow
+  // the window by the same delta in that case, pinning its start.
+  const prevFirstKeyRef = useRef<string | null>(null);
+  const prevLenRef = useRef(displayMsgs.length);
+  useEffect(() => {
+    const firstKey = displayMsgs[0]?.uuid ?? displayMsgs[0]?.timestamp ?? null;
+    const prepended = prevFirstKeyRef.current !== null && firstKey !== prevFirstKeyRef.current;
+    const delta = displayMsgs.length - prevLenRef.current;
+    prevFirstKeyRef.current = firstKey;
+    prevLenRef.current = displayMsgs.length;
+    setVisibleCount((v) => nextVisibleCount({ prepended, delta, visibleCount: v, pageSize: PAGE_SIZE }));
+  }, [displayMsgs]);
 
-  // After prepending/trimming messages, restore scroll so the viewport doesn't jump
+  // After revealing more rows, restore scroll so the viewport doesn't jump
   useLayoutEffect(() => {
     const anchor = scrollAnchor.current;
     if (!anchor || !listRef.current) return;
@@ -511,8 +533,7 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
     scrollAnchor.current = null;
   });
 
-  const loadMore = useCallback(() => {
-    if (hiddenCount === 0 || scrollAnchor.current) return;
+  const anchorScroll = useCallback(() => {
     const scroller = listRef.current?.parentElement;
     if (scroller && listRef.current) {
       scrollAnchor.current = {
@@ -520,8 +541,31 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
         scrollHeight: listRef.current.scrollHeight,
       };
     }
-    setVisibleStart(Math.max(0, prevEffectiveStartRef.current - PAGE_SIZE));
-  }, [hiddenCount]);
+  }, []);
+
+  /**
+   * The one control for reaching older messages.
+   *
+   * Two mechanisms used to be exposed as two identical-looking buttons: this
+   * component's render window, and the store's disk pagination. They are now
+   * stacked behind a single action — reveal what is already in memory, and only
+   * go to disk once the window has caught up with what was fetched.
+   */
+  const canReveal = hiddenCount > 0;
+  const canFetch = !fullyLoaded && !!onLoadEarlier;
+  const loadEarlier = useCallback(async () => {
+    if (scrollAnchor.current || isLoadingEarlier) return;
+    if (canReveal) {
+      anchorScroll();
+      setVisibleCount((v) => v + PAGE_SIZE);
+      return;
+    }
+    if (!canFetch) return;
+    await onLoadEarlier?.();
+    // The fetch prepends, leaving the visible set unchanged; widen to reveal it.
+    anchorScroll();
+    setVisibleCount((v) => v + PAGE_SIZE);
+  }, [canReveal, canFetch, onLoadEarlier, isLoadingEarlier, anchorScroll]);
 
   // Auto-scroll to bottom (or to search match) when session switches
   useEffect(() => {
@@ -556,15 +600,25 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
   const lastAssistant = [...displayMsgs].reverse().find((m: RawMessage) => m.type === "assistant");
   const isWaiting = lastAssistant?.message?.stop_reason === "end_turn";
 
-  if (isLoading) {
+  // Only take over the panel when there is genuinely nothing to show. The same
+  // `isLoading` flag is raised while fetching *older* history, and blanking the
+  // whole conversation for that is how the previous "load earlier" button made
+  // the transcript flash empty on every click.
+  if (isLoading && displayMsgs.length === 0) {
     return <div className={styles.loading}>{t("loading", "Loading…")}</div>;
   }
 
   return (
     <div ref={listRef} className={styles.list}>
-      {hiddenCount > 0 && (
-        <button className={styles.load_more} onClick={loadMore}>
-          ↑ {t("detail.load_more", { count: Math.min(PAGE_SIZE, hiddenCount) })}
+      {(canReveal || canFetch) && (
+        <button
+          className={styles.load_earlier}
+          onClick={loadEarlier}
+          disabled={isLoadingEarlier}
+        >
+          {isLoadingEarlier
+            ? t("detail.loading_earlier")
+            : `↑ ${t("detail.load_earlier")}`}
         </button>
       )}
       {visibleMsgs.map((msg, i) => (
