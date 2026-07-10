@@ -2908,11 +2908,16 @@ fn workspace_tasks_path(cwd: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// Record this session's focus (plan + current pending P) in the side-channel.
-/// No-op (with a warning) when FLEET_SESSION_ID is unset — file edits still
-/// apply; only the per-session "current" attribution is skipped.
+/// Warns and skips attribution when no session id is set — the file edit still
+/// applies, but the desktop card will show no plan, and a silent skip makes that
+/// impossible to diagnose.
 fn plan_record_focus(cwd: &std::path::Path, plan_id: &str, content: &str) {
     use claw_fleet_core::prd_tasks as pt;
     let Some(sid) = read_fleet_session_id() else {
+        eprintln!(
+            "warning: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set); \
+             plan '{plan_id}' was updated but this session won't be attributed to it."
+        );
         return;
     };
     let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
