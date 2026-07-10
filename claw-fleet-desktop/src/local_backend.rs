@@ -1493,6 +1493,21 @@ impl Backend for LocalBackend {
         }
     }
 
+    fn interrupt_pid(&self, pid: u32) -> Result<(), String> {
+        claw_fleet_core::session::interrupt_pid_impl(pid)?;
+        // The CLI needs a moment to write its interrupt marker and exit, so the
+        // rescan lags further behind than the kill path's.
+        let app = self.app.clone();
+        let sessions = self.sessions.clone();
+        let sources = self.sources.clone();
+        let outcomes = self.session_outcomes.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            rescan_and_emit(&sources, &app, &sessions, &outcomes);
+        });
+        Ok(())
+    }
+
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         kill_pid_impl(pid)?;
         // Trigger a rescan after a delay.

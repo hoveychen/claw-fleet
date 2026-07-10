@@ -662,6 +662,14 @@ async fn get_source_usage(
 
 // ── Process kill ──────────────────────────────────────────────────────────────
 
+/// Graceful stop: abort the in-flight tool call, keep the transcript resumable.
+/// Only ever called with a `pidPrecise` session — SIGINT aimed at the wrong
+/// sibling would abort someone else's turn.
+#[tauri::command]
+fn interrupt_session(pid: u32, state: tauri::State<'_, AppState>) -> Result<(), String> {
+    state.backend.read().unwrap().interrupt_pid(pid)
+}
+
 #[tauri::command]
 fn kill_session(pid: u32, state: tauri::State<'_, AppState>) -> Result<(), String> {
     state.backend.read().unwrap().kill_pid(pid)
@@ -3474,6 +3482,7 @@ pub fn run() {
             get_platform,
             check_app_version,
             get_app_version,
+            interrupt_session,
             kill_session,
             kill_workspace_sessions,
             resume_rate_limited_session,

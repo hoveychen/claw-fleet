@@ -293,6 +293,10 @@ pub trait Backend: Send + Sync {
         let start = all.len().saturating_sub(n);
         Ok(all[start..].to_vec())
     }
+    /// Gracefully interrupt the agent at `pid`: tears down the in-flight tool
+    /// call but leaves the transcript resumable. See
+    /// [`crate::session::interrupt_pid_impl`] for the signal semantics.
+    fn interrupt_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String>;
     /// Headlessly resume a session: spawns `claude --resume <session_id>

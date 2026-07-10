@@ -62,7 +62,7 @@
   margin-bottom: 0;
 }
 
-.header_compact .stop_btn {
+.header_compact .stop_slot {
   position: absolute;
   top: 8px;
   right: 8px;
@@ -411,48 +411,24 @@
 .compact_chip { color: var(--color-text-dim); }
 .time { color: var(--color-text-dim); }
 
-/* Stop button */
-.stop_btn {
+/* Reveal-on-hover wrapper for StopControl. The control owns its own CSS module,
+   so `.card:hover .btn` could never reach it — the class name is hashed per
+   module. The slot is ours, so we style that instead. */
+.stop_slot {
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--color-text-dim);
-  font-size: 9px;
-  cursor: pointer;
   flex-shrink: 0;
   opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  transition: opacity 0.15s;
 }
 
-.card:hover .stop_btn,
-.card.selected .stop_btn {
+.card:hover .stop_slot,
+.card.selected .stop_slot,
+.stop_slot:focus-within {
   opacity: 1;
 }
 
-.stop_btn:hover {
-  background: var(--badge-streaming-bg);
-  color: var(--badge-streaming-fg);
-}
-
-.stop_btn_killing {
-  opacity: 1;
-  animation: pulse 0.8s ease-in-out infinite;
-}
-
-.stop_btn_warn {
-  color: var(--badge-executing-fg);
-}
-
-.stop_btn_warn:hover {
-  background: var(--badge-executing-bg);
-  color: var(--badge-executing-fg);
-}
+/* The stop/interrupt button itself now lives in StopControl.module.css; only
+   its slot (reveal-on-hover, compact placement) is this card's business. */
 
 /* macOS vibrancy: rows stay chrome-less (Linear-style); tags/badges keep
    their subtle bg so they read against the bare row. */
