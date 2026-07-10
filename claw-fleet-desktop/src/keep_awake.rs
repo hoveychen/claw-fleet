@@ -102,6 +102,10 @@ mod platform {
     type IOPMAssertionID = u32;
     const K_IOPM_ASSERTION_LEVEL_ON: u32 = 255;
 
+    /// Name this process registers its assertion under. `pmset -g assertions`
+    /// reports it verbatim, so the test greps for it.
+    pub const ASSERTION_NAME: &str = "Claw Fleet keep-awake toggle";
+
     #[link(name = "IOKit", kind = "framework")]
     unsafe extern "C" {
         // CFStringRef parameters; NSString is toll-free bridged to CFString,
@@ -125,7 +129,7 @@ mod platform {
             }
             // Same assertion type `caffeinate -i` creates.
             let assertion_type = NSString::from_str("PreventUserIdleSystemSleep");
-            let name = NSString::from_str("Claw Fleet keep-awake toggle");
+            let name = NSString::from_str(ASSERTION_NAME);
             let mut id: IOPMAssertionID = 0;
             let ret = unsafe {
                 IOPMAssertionCreateWithName(
@@ -204,6 +208,8 @@ mod tests {
     // test never touches the user's ~/.fleet/keep-awake.json.
     #[test]
     fn assertion_visible_in_pmset() {
+        use super::platform::ASSERTION_NAME;
+
         fn pmset_assertions() -> String {
             let out = std::process::Command::new("pmset")
                 .args(["-g", "assertions"])
@@ -212,18 +218,28 @@ mod tests {
             String::from_utf8_lossy(&out.stdout).into_owned()
         }
 
+        /// Does *this* process hold the assertion?
+        ///
+        /// `pmset` lists every process's assertions, and a Claw Fleet app
+        /// running on the same machine registers one under the very same name.
+        /// Matching on the name alone made the post-release check fail whenever
+        /// the desktop app happened to be running, so scope it to our own pid:
+        /// `pmset` prefixes each line with `pid <n>(<proc>):`.
+        fn ours(text: &str) -> bool {
+            let pid_tag = format!("pid {}(", std::process::id());
+            text.lines()
+                .any(|l| l.contains(&pid_tag) && l.contains(ASSERTION_NAME))
+        }
+
         super::platform::apply(true).expect("acquire assertion");
         let held = pmset_assertions();
-        assert!(
-            held.contains("Claw Fleet keep-awake toggle"),
-            "assertion not visible in pmset output:\n{held}"
-        );
+        assert!(ours(&held), "our assertion not visible in pmset output:\n{held}");
 
         super::platform::apply(false).expect("release assertion");
         let released = pmset_assertions();
         assert!(
-            !released.contains("Claw Fleet keep-awake toggle"),
-            "assertion still present after release:\n{released}"
+            !ours(&released),
+            "our assertion still present after release:\n{released}"
         );
     }
 }
