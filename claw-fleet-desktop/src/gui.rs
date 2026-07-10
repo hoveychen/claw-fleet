@@ -728,6 +728,23 @@ fn set_auto_resume_config(
     state.backend.read().unwrap().set_auto_resume_config(config)
 }
 
+/// Set (or clear, when `mark` is null) the human's manual review mark for a
+/// session. Delegates via the backend so LocalBackend writes the local
+/// side-channel file and RemoteBackend POSTs it to the probe.
+#[tauri::command]
+fn set_session_mark(
+    session_id: String,
+    workspace_path: String,
+    mark: Option<claw_fleet_core::session_mark::SessionMark>,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .set_session_mark(session_id, workspace_path, mark)
+}
+
 // ── Keep-awake (caffeinate -i equivalent) ────────────────────────────────────
 // Desktop-local power state, deliberately NOT routed through the Backend
 // trait: the assertion controls the machine the desktop app runs on (like
@@ -3541,6 +3558,7 @@ pub fn run() {
             spawn_new_claude_session,
             get_auto_resume_config,
             set_auto_resume_config,
+            set_session_mark,
             keep_awake_supported,
             get_keep_awake,
             set_keep_awake,
