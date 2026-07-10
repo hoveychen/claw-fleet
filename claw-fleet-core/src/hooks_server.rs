@@ -1929,6 +1929,46 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            // ── Session mark (manual done/pending review state) ──────────────
+            "/session_mark" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<crate::session_mark::SetSessionMarkRequest>(
+                    &body_bytes,
+                ) {
+                    Ok(req_body) => {
+                        match crate::session_mark::set_mark(
+                            &req_body.session_id,
+                            &req_body.workspace_path,
+                            req_body.mark,
+                        ) {
+                            Ok(()) => {
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                        .with_header(json_header),
+                                );
+                            }
+                            Err(e) => {
+                                let body = serde_json::json!({"error": e}).to_string();
+                                let _ = request.respond(
+                                    tiny_http::Response::from_string(body)
+                                        .with_status_code(500)
+                                        .with_header(json_header),
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             // ── Interaction mode endpoints ───────────────────────────────────
             "/apply_interaction_mode" => {
                 let mut body_bytes = Vec::new();

@@ -50,6 +50,17 @@ pub struct SessionMarkRecord {
     pub updated: u64,
 }
 
+/// HTTP request body for setting a mark over the `fleet serve` boundary
+/// (`RemoteBackend` → `/session_mark`). `mark: None` clears.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct SetSessionMarkRequest {
+    pub session_id: String,
+    pub workspace_path: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub mark: Option<SessionMark>,
+}
+
 pub(crate) fn mark_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("session-mark"))
 }
