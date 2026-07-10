@@ -1308,7 +1308,7 @@
     "guard_enabled": "Enable safety guard",
     "guard_llm_analysis": "AI risk analysis",
     "permissions_bypass": "Let Fleet manage permissions",
-    "permissions_bypass_desc": "Let Fleet handle command approvals so the same command isn't asked twice — once by the terminal and once by Fleet. The original setup is restored automatically when Fleet quits.",
+    "permissions_bypass_desc": "Let Fleet handle command approvals so the same command isn't asked twice — once by the terminal and once by Fleet. The rules persist after Fleet quits, so sessions it started don't stall on permission prompts. Only turning this toggle off restores your original setup.",
     "permissions_bypass_enabled": "Let Fleet manage permissions",
     "elicitation": "Send the Agent's questions to Fleet",
     "elicitation_desc": "When the Agent needs an answer, reply right here in Fleet instead of switching back to the terminal.",
