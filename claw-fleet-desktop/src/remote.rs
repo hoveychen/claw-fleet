@@ -298,6 +298,10 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn interrupt_pid(&self, pid: u32) -> Result<(), String> {
+        self.probe.get_ok(&format!("/interrupt?pid={}", pid))
+    }
+
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
         self.probe.get_ok(&format!("/stop?pid={}&force=false", pid))
     }

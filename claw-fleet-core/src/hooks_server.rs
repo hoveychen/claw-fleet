@@ -454,6 +454,30 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/interrupt" => {
+                let pid: u32 = query.get("pid").and_then(|s| s.parse().ok()).unwrap_or(0);
+                if pid == 0 {
+                    let _ = request.respond(tiny_http::Response::empty(400));
+                    continue;
+                }
+                match crate::session::interrupt_pid_impl(pid) {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e);
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/stop" => {
                 let pid: u32 = query.get("pid").and_then(|s| s.parse().ok()).unwrap_or(0);
                 if pid == 0 {
