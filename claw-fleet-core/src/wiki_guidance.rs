@@ -51,7 +51,23 @@ pub fn render_guidance(locale: &str) -> String {
 其他文档,渲染后可点击跳转;引用前先用 `fleet wiki list` 确认目标 slug \
 已发布(未发布的引用会显示为灰色死链)。\n\
 - 发布后文档出现在 Fleet 桌面端的「知识库」板块,用户可按 workspace \
-筛选、全文搜索、切换版本、导出、直接渲染(HTML 里的 JS 可运行)。\n"
+筛选、全文搜索、切换版本、导出、直接渲染(HTML 里的 JS 可运行)。\n\
+\n\
+## 读取知识库里的文档\n\
+\n\
+当你需要某篇文档的正文时——尤其是用户在 prompt 里用 `[[slug]]` 引用了\
+它——用 `cat` 直接读,**不要**去 `~/.fleet/wiki/` 底下手动拼版本目录:\n\
+\n\
+```\n\
+fleet wiki cat <slug>                       # 当前版本的正文\n\
+fleet wiki cat <slug> --version <version-id>  # 某个历史版本\n\
+fleet wiki cat <slug> --file assets/app.js  # 目录型文档里的其他文件\n\
+```\n\
+\n\
+- 默认输出当前版本的 entry 文件(markdown 文档就是正文,HTML 目录是 \
+`index.html`)。\n\
+- 不知道有哪些文档就 `fleet wiki list`;想看某篇的版本历史和 entry \
+文件名就 `fleet wiki show <slug>`。\n"
             .to_string();
     }
     "# Fleet Wiki knowledge base (managed by Claude Fleet — do not edit)\n\
@@ -79,7 +95,24 @@ target slug exists first with `fleet wiki list` (unpublished refs render \
 as grayed dead links).\n\
 - Published docs appear in the Fleet desktop app's Wiki board, filterable by \
 workspace, full-text searchable, with version switching, export, and live \
-HTML rendering (scripts run).\n"
+HTML rendering (scripts run).\n\
+\n\
+## Reading a wiki doc\n\
+\n\
+When you need a doc's content — especially when the user referenced it as \
+`[[slug]]` in their prompt — read it with `cat`. Do **not** hand-assemble \
+version paths under `~/.fleet/wiki/`:\n\
+\n\
+```\n\
+fleet wiki cat <slug>                         # current version's content\n\
+fleet wiki cat <slug> --version <version-id>  # a historical version\n\
+fleet wiki cat <slug> --file assets/app.js    # another file in a dir doc\n\
+```\n\
+\n\
+- Defaults to the current version's entry file (the body for markdown docs, \
+`index.html` for HTML directories).\n\
+- `fleet wiki list` shows the available slugs; `fleet wiki show <slug>` \
+shows its version history and entry filename.\n"
         .to_string()
 }
 
