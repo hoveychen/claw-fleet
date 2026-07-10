@@ -22,6 +22,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // The release path is unconditional even when the toggle is off — it's a
     // no-op when no lock exists, so it self-heals if the user flipped the
     // toggle off mid-run after we'd already acquired.
+    //
+    // release() only deregisters the pid; the allowlist stays in settings.json
+    // so detached claude sessions survive this process. Un-injecting happens
+    // solely via permissions_injector::deactivate() (the settings-panel toggle).
     let serve_pid = std::process::id();
     if crate::permissions_injector::load_config().enabled {
         if let Err(e) = crate::permissions_injector::acquire(serve_pid) {
