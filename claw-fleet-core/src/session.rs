@@ -199,17 +199,12 @@ mod test_lock {
     use std::sync::MutexGuard;
 
     /// Acquire the cross-module `FLEET_HOME` mutex. Delegates to the single
-    /// process-wide mutex in `claw_fleet_task::paths` so EVERY test that mutates
-    /// the global `FLEET_HOME` env serialises on ONE lock — not just core's own
-    /// tests. Previously this kept its own private static `Mutex`, so a core
-    /// test holding it (e.g. `supervisor::tests`) could run concurrently with a
-    /// task-crate test holding `claw_fleet_task::paths::fleet_home_lock` (e.g.
-    /// `task_actions::accept_merge_tests`); both flip the global `FLEET_HOME`
-    /// and clobbered each other's `fleet-sessions.json`, intermittently failing
-    /// the supervisor `pending_input_*` / `migrate_zombie_*` tests under the
-    /// parallel test runner. Poison tolerance lives in the task-crate impl.
+    /// process-wide mutex in `crate::paths` so EVERY test that mutates the
+    /// global `FLEET_HOME` env serialises on ONE lock — in-crate unit tests
+    /// and separate integration-test binaries alike. Poison tolerance lives
+    /// in the `crate::paths` impl.
     pub fn fleet_home_lock() -> MutexGuard<'static, ()> {
-        claw_fleet_task::paths::fleet_home_lock()
+        crate::paths::fleet_home_lock()
     }
 }
 

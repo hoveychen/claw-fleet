@@ -103,13 +103,6 @@ pub struct LocalBackend {
     /// running, and every one of them emits the same `elicitation-request` /
     /// `guard-request` event, producing duplicate decision tabs.
     running: Arc<AtomicBool>,
-    /// Phase 3: tracks live `fleet-task` subprocesses by polling
-    /// `~/.fleet/runtime/`. Pushes `runtime-task-*` events to the frontend.
-    pub runtime_registry: Arc<crate::runtime_registry::RuntimeRegistryWatcher>,
-    /// Phase 5: filesystem watcher on `~/.fleet/tasks/` that emits
-    /// `tasks-updated` whenever an out-of-process tool (e.g. `fleet-task
-    /// new`) writes / updates / deletes a task json.
-    _tasks_watcher: crate::tasks_watcher::TasksDirWatcher,
 }
 
 impl Drop for LocalBackend {
@@ -174,53 +167,12 @@ impl LocalBackend {
         step!("DBs opened");
 
         // ── Startup zombie recovery ───────────────────────────────────────
-        // Sweep fleet-sessions.json for sessions stuck in Running/Pending
-        // whose pid is gone (None or dead) so the kanban board doesn't show
-        // ghosts on first paint. Idempotent — `fleet serve` runs the same
-        // sweep when its tick loop boots, so calling here from the desktop
-        // side is a belt-and-suspenders cleanup for the case where the user
-        // opens the app before the LaunchAgent has come up.
-        match crate::supervisor::migrate_zombie_running() {
-            Ok(0) => {}
-            Ok(n) => log_debug(&format!(
-                "[BACKEND-INIT] recovered {n} zombie session(s)"
-            )),
-            Err(e) => log_debug(&format!(
-                "[BACKEND-INIT] zombie recovery failed: {e}"
-            )),
-        }
-        // Task-store analogue: revert any task left `Running` whose
-        // task-runtime process is gone (host crash / quit / a start that never
-        // registered) back to Drafting so the Start button re-enables.
-        match crate::task::migrate_zombie_running_tasks() {
-            Ok(0) => {}
-            Ok(n) => log_debug(&format!(
-                "[BACKEND-INIT] recovered {n} zombie running task(s)"
-            )),
-            Err(e) => log_debug(&format!(
-                "[BACKEND-INIT] zombie task recovery failed: {e}"
-            )),
-        }
-
         // Start the outbound Feishu WS long-connection if credentials already
         // exist (no-op otherwise). Idempotent. card.action.trigger arrives over
         // this outbound socket, so no public webhook/tunnel is needed.
         claw_fleet_core::feishu::ensure_ws_client();
         step!("zombie recovery done");
 
-        // Sweep orphan worktrees under ~/.fleet/worktrees/ whose owning
-        // task / P-item is no longer Running. Mirrors the zombie-session
-        // recovery above so a crash-then-restart doesn't leak disk.
-        match crate::supervisor::gc_orphan_worktrees() {
-            Ok(0) => {}
-            Ok(n) => log_debug(&format!(
-                "[BACKEND-INIT] reaped {n} orphan worktree(s)"
-            )),
-            Err(e) => log_debug(&format!(
-                "[BACKEND-INIT] worktree gc failed: {e}"
-            )),
-        }
-        step!("worktree gc done");
 
         // Dedicated indexer thread — receives session lists via channel,
         // coalesces rapid requests, and runs indexing off the scan threads.
@@ -956,52 +908,6 @@ impl LocalBackend {
             });
         }
 
-        // Session-pending watcher — polls fleet_sessions_needing_input for
-        // idle main-agent sessions whose status hasn't been moved into a
-        // terminal column. New entries surface in the global DecisionPanel as
-        // SessionPendingCard; entries that disappear (user clicked "complete",
-        // agent received next prompt, etc.) emit a dismissal event so the
-        // panel can drop the card.
-        {
-            let app_pending = app.clone();
-            let sess_pending = sessions.clone();
-            let running_pending = running.clone();
-            std::thread::spawn(move || {
-                let mut known: HashSet<String> = HashSet::new();
-                loop {
-                    std::thread::sleep(Duration::from_millis(1000));
-                    if !running_pending.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    let mut pending = crate::supervisor::session_pending_requests();
-                    // Replace the workspace-basename fallback with the live
-                    // SessionInfo workspaceName when available (matches the
-                    // guard / elicitation watchers' display behaviour).
-                    for req in pending.iter_mut() {
-                        let (ws, _) = resolve_session_display(&sess_pending, &req.session_id);
-                        if !ws.is_empty() {
-                            req.workspace_name = ws;
-                        }
-                    }
-                    let pending_ids: HashSet<String> =
-                        pending.iter().map(|r| r.id.clone()).collect();
-                    for req in &pending {
-                        if known.insert(req.id.clone()) {
-                            crate::log_debug(&format!(
-                                "[session-pending] new: id={} project={}",
-                                req.id, req.project_id
-                            ));
-                            let _ = app_pending.emit("session-pending-request", req);
-                        }
-                    }
-                    for id in known.iter().filter(|id| !pending_ids.contains(*id)) {
-                        let _ = app_pending.emit("session-pending-dismissed", id.clone());
-                    }
-                    known.retain(|id| pending_ids.contains(id));
-                }
-            });
-        }
-
         // Start the daily report scheduler (backfills missing reports in background).
         crate::daily_report::start_report_scheduler(
             report_store.clone(),
@@ -1011,10 +917,6 @@ impl LocalBackend {
         );
 
         step!("threads spawned, constructing result");
-
-        let runtime_registry =
-            Arc::new(crate::runtime_registry::RuntimeRegistryWatcher::start(app.clone()));
-        let tasks_watcher = crate::tasks_watcher::TasksDirWatcher::start(app.clone());
 
         let result = LocalBackend {
             app,
@@ -1032,8 +934,6 @@ impl LocalBackend {
             llm_config,
             _watcher: watcher,
             running,
-            runtime_registry,
-            _tasks_watcher: tasks_watcher,
         };
         step!("LocalBackend::new() complete");
         result
@@ -1572,51 +1472,6 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
     }
 }
 
-// ── Task-title reconciliation helper ──────────────────────────────────────────
-
-impl LocalBackend {
-    /// For each task with `title_auto = true` and a bound `master_session_id`,
-    /// overwrite the in-memory `title` with the master session's `aiTitle`
-    /// when one is available, and persist the change. Tasks where the user
-    /// edited the title (`title_auto = false`) are left untouched.
-    ///
-    /// Cost is O(tasks + sessions): the LocalBackend already holds a cached
-    /// session list, so this does no disk scan. Skipped early when no task
-    /// is auto-titled.
-    fn reconcile_titles_from_master_sessions(&self, tasks: &mut [crate::task::Task]) {
-        if !tasks
-            .iter()
-            .any(|t| t.title_auto && t.master_session_id.is_some())
-        {
-            return;
-        }
-        let sessions = self.sessions.lock().unwrap();
-        let title_by_sid: std::collections::HashMap<&str, &str> = sessions
-            .iter()
-            .filter_map(|s| s.ai_title.as_deref().map(|t| (s.id.as_str(), t)))
-            .collect();
-        for t in tasks.iter_mut() {
-            if !t.title_auto {
-                continue;
-            }
-            let Some(sid) = t.master_session_id.as_deref() else {
-                continue;
-            };
-            let Some(ai) = title_by_sid.get(sid) else {
-                continue;
-            };
-            if t.title == *ai {
-                continue;
-            }
-            // Best-effort persist; on failure keep the disk copy and leave the
-            // in-memory clone alone so the next reconcile retries.
-            if crate::task::set_task_title(&t.id, ai, true).is_ok() {
-                t.title = (*ai).to_string();
-            }
-        }
-    }
-}
-
 // ── Backend impl ──────────────────────────────────────────────────────────────
 
 impl Backend for LocalBackend {
@@ -1961,269 +1816,6 @@ impl Backend for LocalBackend {
 
     fn remove_marketplace(&self, name: &str) -> Result<(), String> {
         crate::claude_cli::remove_marketplace(name).map_err(|e| e.to_string())
-    }
-
-    // ── Projects ──────────────────────────────────────────────────────────────
-
-    fn list_projects(&self) -> Vec<crate::project::Project> {
-        // Registered projects only. Tasks whose project_id isn't registered
-        // (e.g. started via `fleet-task new` on an unregistered workspace) are
-        // still visible in the rebuilt TasksView's flat task list — we no
-        // longer synthesise phantom "virtual projects" for them (those were a
-        // leftover of the old project-grouped sidebar and couldn't be deleted).
-        crate::project::list_projects()
-    }
-
-    fn create_project(
-        &self,
-        input: crate::project::ProjectInput,
-    ) -> Result<crate::project::Project, String> {
-        crate::project::create_project(input)
-    }
-
-    fn update_project(&self, project: crate::project::Project) -> Result<(), String> {
-        crate::project::update_project(project)
-    }
-
-    fn delete_project(&self, project_id: &str) -> Result<(), String> {
-        crate::project::delete_project(project_id)
-    }
-
-    fn list_fleet_sessions(&self) -> Vec<crate::project::FleetSession> {
-        crate::project::list_fleet_sessions()
-    }
-
-    fn spawn_fleet_session(
-        &self,
-        form: crate::project::LauncherForm,
-    ) -> Result<crate::project::FleetSession, String> {
-        crate::supervisor::enqueue(form)
-    }
-
-    fn cancel_fleet_session(&self, session_id: &str) -> Result<(), String> {
-        crate::supervisor::cancel(session_id)
-    }
-
-    fn resume_fleet_session(&self, session_id: &str, follow_up_prompt: &str) -> Result<(), String> {
-        crate::supervisor::resume(session_id, follow_up_prompt.to_string())
-    }
-
-    fn set_fleet_session_status(
-        &self,
-        session_id: &str,
-        status: &str,
-        note: Option<&str>,
-    ) -> Result<(), String> {
-        crate::supervisor::set_status(session_id, status, note.map(String::from))
-    }
-
-    // ── Tasks (task-as-unit V1) ──────────────────────────────────────────────
-
-    fn create_task(&self, input: crate::task::TaskInput) -> Result<crate::task::Task, String> {
-        crate::task::create_task(input)
-    }
-
-    fn add_task_material(
-        &self,
-        task_id: &str,
-        filename: &str,
-        bytes: Vec<u8>,
-        media: crate::task::MediaKind,
-    ) -> Result<std::path::PathBuf, String> {
-        if bytes.len() as u64 > crate::backend::MAX_ATTACHMENT_BYTES {
-            return Err(format!(
-                "attachment too large: {} bytes (max {})",
-                bytes.len(),
-                crate::backend::MAX_ATTACHMENT_BYTES
-            ));
-        }
-        crate::task::add_task_material(task_id, filename, &bytes, media)
-    }
-
-    fn get_task(&self, task_id: &str) -> Result<crate::task::Task, String> {
-        let mut task = crate::task::get_task(task_id)?;
-        if task.title_auto {
-            let mut one = vec![task];
-            self.reconcile_titles_from_master_sessions(&mut one);
-            task = one.pop().unwrap();
-        }
-        Ok(task)
-    }
-
-    fn list_tasks(&self, project_id: Option<&str>) -> Vec<crate::task::Task> {
-        let mut tasks = crate::task::list_tasks(project_id);
-        self.reconcile_titles_from_master_sessions(&mut tasks);
-        tasks
-    }
-
-    fn get_task_deliverables(
-        &self,
-        task_id: &str,
-    ) -> Result<claw_fleet_core::deliverables::TaskDeliverables, String> {
-        claw_fleet_core::deliverables::compute_task_deliverables(task_id)
-    }
-
-    fn update_plan(&self, task_id: &str, plan: crate::plan::DagPlan) -> Result<(), String> {
-        crate::task::update_plan(task_id, plan)
-    }
-
-    fn start_task(&self, task_id: &str) -> Result<(), String> {
-        // Non-blocking start: spawn the `fleet task-runtime` process and return
-        // immediately. The runtime creates the master session in-process,
-        // flips the task to Running and publishes a registry entry; the runtime
-        // registry watcher (runtime_registry.rs, 1s poll) lights up the live
-        // badge asynchronously. We do NOT block on that handshake — the old 10s
-        // synchronous wait spuriously failed on the first cold launch after an
-        // update (Gatekeeper assessing the freshly-installed sidecar exceeded
-        // 10s) even though the runtime came up fine seconds later.
-        //
-        // A `BinaryMissing` / spawn error still surfaces synchronously so an
-        // impossible start fails fast. A runtime that spawns but never registers
-        // (a real crash) is caught by the background watcher below, which calls
-        // mark_task_start_failed → reverts Running→Drafting + records the reason.
-        let task = crate::task::get_task(task_id)?;
-        // Prefer the registered project's workspace; but a task started via
-        // `fleet task-runtime new` on an unregistered workspace has no registered
-        // project (its project_id is a synthetic `auto-<hash>`). In that case
-        // fall back to the workspace the task itself stamped at start time, so
-        // auto-discovered tasks remain (re)startable from the desktop instead
-        // of erroring out.
-        let workspace = crate::project::list_projects()
-            .into_iter()
-            .find(|p| p.id == task.project_id)
-            .map(|p| std::path::PathBuf::from(&p.workspace))
-            .or_else(|| task.workspace.clone())
-            .ok_or_else(|| {
-                format!(
-                    "no workspace for task {task_id}: project {} not registered and task has no stamped workspace",
-                    task.project_id
-                )
-            })?;
-        // Fresh attempt — clear any stale failure reason from a prior start.
-        let _ = crate::task::clear_task_start_error(task_id);
-        // Prefer the `fleet serve` daemon to spawn the runtime. Origin: the
-        // desktop app used to be macOS-sandboxed, and a runtime it spawned
-        // directly inherited that sandbox, so the planner/worker `claude`
-        // couldn't read the login keychain and exited "Not logged in". The
-        // sandbox is gone (entitlements.plist, 2026-07), but the daemon route
-        // stays preferred: it parents the runtime under launchd instead of
-        // the desktop process. Fall back to a local spawn when serve isn't
-        // running (e.g. dev runs of the desktop).
-        let tid = task_id.to_string();
-        match crate::fleet_task_spawn::spawn_via_serve(task_id, &workspace) {
-            Ok(()) => {
-                std::thread::Builder::new()
-                    .name("fleet-task-start-watch".into())
-                    .spawn(move || {
-                        if let Err(e) = crate::fleet_task_spawn::await_registry_polling(
-                            &tid,
-                            std::time::Duration::from_secs(45),
-                        ) {
-                            let _ = crate::task::mark_task_start_failed(&tid, &e.to_string());
-                        }
-                    })
-                    .map_err(|e| format!("spawn start watcher: {e}"))?;
-            }
-            Err(serve_err) => {
-                eprintln!(
-                    "[start_task] serve daemon unavailable ({serve_err}); \
-                     falling back to local spawn (runtime will be parented \
-                     by the desktop process)"
-                );
-                let mut child =
-                    crate::fleet_task_spawn::spawn_fleet_task_detached(task_id, &workspace)
-                        .map_err(|e| e.to_string())?;
-                std::thread::Builder::new()
-                    .name("fleet-task-start-watch".into())
-                    .spawn(move || {
-                        if let Err(e) = crate::fleet_task_spawn::await_registry(
-                            &tid,
-                            &mut child,
-                            std::time::Duration::from_secs(45),
-                        ) {
-                            let _ = crate::task::mark_task_start_failed(&tid, &e.to_string());
-                        }
-                    })
-                    .map_err(|e| format!("spawn start watcher: {e}"))?;
-            }
-        }
-        Ok(())
-    }
-
-    fn accept_task(
-        &self,
-        task_id: &str,
-        mode: crate::task::AcceptMode,
-    ) -> Result<(), String> {
-        crate::task::accept_task_with_mode(task_id, mode)
-    }
-
-    fn rerun_task_e2e(&self, task_id: &str) -> Result<(), String> {
-        crate::task::rerun_task_e2e(task_id)
-    }
-
-    fn clear_task(&self, task_id: &str) -> Result<(), String> {
-        crate::task::clear_task(task_id)
-    }
-
-    fn set_task_title(&self, task_id: &str, new_title: &str) -> Result<(), String> {
-        crate::task::set_task_title(task_id, new_title, false)
-    }
-
-    fn subscribe_task_events(&self, task_id: &str) -> Result<String, String> {
-        // Verify the task exists; reuse the id as the subscription handle.
-        // Actual TaskEvent push lands with P19 (master runtime) + P21 (event
-        // router). For V1's first slice, the frontend re-fetches via
-        // `get_task` after each user action, which is sufficient because no
-        // background agent is mutating task state yet.
-        let _ = crate::task::get_task(task_id)?;
-        Ok(task_id.to_string())
-    }
-
-    fn runtime_tasks(&self) -> Vec<crate::registry::RegistryEntry> {
-        self.runtime_registry.snapshot()
-    }
-
-    fn fleet_task_state(&self, task_id: &str) -> Result<serde_json::Value, String> {
-        let entry = crate::registry::read(task_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("no fleet-task process for task {task_id}"))?;
-        let client = crate::fleet_task_client::FleetTaskClient::new(entry.port);
-        client.state().map_err(|e| e.to_string())
-    }
-
-    fn fleet_task_dispatch(
-        &self,
-        task_id: &str,
-        p_item_id: &str,
-    ) -> Result<(), String> {
-        let entry = crate::registry::read(task_id)
-            .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("no fleet-task process for task {task_id}"))?;
-        let client = crate::fleet_task_client::FleetTaskClient::new(entry.port);
-        client.dispatch(p_item_id).map_err(|e| e.to_string())
-    }
-
-    fn is_fleet_daemon_installed(&self) -> bool {
-        crate::launchd::is_installed()
-    }
-
-    fn install_fleet_daemon(&self, fleet_path: &str, port: u16, token: &str) -> Result<(), String> {
-        crate::launchd::install(fleet_path, port, token)
-    }
-
-    fn uninstall_fleet_daemon(&self) -> Result<(), String> {
-        // Best-effort: pull our Stop / UserPromptSubmit kanban hooks too. They
-        // were auto-installed by daemon_autostart::ensure_supervisor_daemon, so
-        // the symmetric uninstall belongs here.
-        if let Err(e) = crate::hooks::remove_idle_hooks() {
-            eprintln!("[uninstall] remove_idle_hooks: {e}");
-        }
-        crate::launchd::uninstall()
-    }
-
-    fn ensure_fleet_cli_link(&self, fleet_path: &str) -> Result<(), String> {
-        crate::supervisor::ensure_fleet_cli_link(fleet_path)
     }
 
     fn get_skill_content(&self, path: &str) -> Result<String, String> {

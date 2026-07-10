@@ -1,6 +1,5 @@
 pub mod account;
 pub mod agent_source;
-pub use claw_fleet_task::architecture_overview;
 pub mod audit;
 pub mod auto_resume;
 pub mod backend;
@@ -11,14 +10,12 @@ pub mod claude_cli;
 pub mod claude_source;
 pub mod cmd_ast;
 pub mod codex_source;
-pub use claw_fleet_task::console;
+pub mod console;
 pub mod consumer_heartbeat;
 pub mod cursor;
-pub use claw_fleet_task::dag;
 pub mod daily_report;
 pub mod decision_history;
 pub mod decision_panel_config;
-pub mod deviation_ledger;
 #[cfg(windows)]
 pub mod dpapi;
 pub mod elicitation;
@@ -43,54 +40,52 @@ pub mod mcp_ipc;
 pub mod mcp_a2ui_ipc;
 pub mod mcp_server;
 pub mod memory;
-pub mod merge_mediator;
 pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
 pub mod permission_prompt_ipc;
 pub mod permissions_injector;
-pub mod phase_detector;
-pub use claw_fleet_task::process_util;
-pub use claw_fleet_task::actions;
-pub use claw_fleet_task::deliverables;
-pub use claw_fleet_task::paths;
-pub use claw_fleet_task::pitem;
-pub use claw_fleet_task::plan;
-pub use claw_fleet_task::registry;
-pub use claw_fleet_task::runner;
+pub mod process_util;
+/// Path helpers, formerly re-exported from the (removed) `claw-fleet-task`
+/// crate. `real_home_dir` / `get_fleet_dir` live in [`session`];
+/// `fleet_home_lock` is the process-wide `FLEET_HOME` test mutex whose
+/// canonical implementation now lives here.
+pub mod paths {
+    pub use crate::session::{get_fleet_dir, real_home_dir};
+
+    /// Process-wide mutex used by tests to serialise access to the
+    /// `FLEET_HOME` environment variable. Exposed unconditionally so
+    /// integration tests (separate test binaries) can serialise against the
+    /// same notion of "claim FLEET_HOME" as in-crate unit tests.
+    pub fn fleet_home_lock() -> std::sync::MutexGuard<'static, ()> {
+        use std::sync::{Mutex, OnceLock};
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK.get_or_init(|| Mutex::new(()));
+        match lock.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
 pub mod plan_approval;
 pub mod plugins;
 pub mod prd_discipline;
 pub mod prd_tasks;
-pub mod project;
 pub mod task_progress;
-pub mod supervisor;
 pub mod rate_limit_parser;
 pub mod scan_cache_disk;
-pub mod scheduler;
 pub mod search_index;
 pub mod session;
 pub mod session_launch;
 pub mod session_todos;
 pub mod skill_history;
 pub mod skills;
-mod task_actions;
-pub mod lifecycle_host;
-pub mod task {
-    pub use claw_fleet_task::task::*;
-    pub use super::task_actions::*;
-}
 pub mod tcc;
 pub mod token_analysis;
-pub mod touches_hook;
 pub mod wiki;
 pub mod wiki_guidance;
 pub mod workflow;
 pub mod workflow_sidecar;
-pub mod worker_executor {
-    pub use claw_fleet_task::worker::*;
-}
-pub use claw_fleet_task::worktree;
 
 use std::fs;
 use session::SessionInfo;
