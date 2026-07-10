@@ -4069,23 +4069,25 @@ pub fn collect_process_tree(root_pid: u32) -> Vec<u32> {
 /// Grace period before a SIGINT that nobody handled escalates to a tree kill.
 const INTERRUPT_ESCALATION: Duration = Duration::from_millis(5000);
 
-/// Gracefully interrupt the agent at `pid`, the way pressing Esc does in an
-/// interactive session: the in-flight tool call is torn down but the transcript
-/// stays resumable.
+/// Gracefully interrupt the agent at `pid`: deliver SIGINT to the **root pid
+/// only** and let the CLI decide how to unwind. Signalling the whole tree (as
+/// [`kill_pid_impl`] does) would kill the tool child behind the CLI's back and
+/// lose the transcript marker.
 ///
-/// Delivers SIGINT to the **root pid only**. The CLI handles it, kills its own
-/// tool children, appends `[Request interrupted by user for tool use]` to the
-/// transcript and exits 0 — verified against `claude` 2.1.204 spawned headless
-/// (`-p`, stdin=/dev/null) with a blocking foreground Bash call in flight, after
-/// which `claude --resume <session-id>` picks the conversation back up.
-/// Signalling the whole process tree (as [`kill_pid_impl`] does) would kill the
-/// tool child behind the CLI's back and lose that marker, so this deliberately
-/// does not call [`collect_process_tree`].
+/// What SIGINT actually does depends on how the CLI was started — both verified
+/// against `claude` 2.1.204 with a blocking foreground Bash call in flight:
 ///
-/// SIGINT is a request, not a guarantee: a process that ignores it, or that has
-/// not installed its handler yet (a session still booting is killed outright),
-/// would otherwise hang around. So escalate to [`kill_pid_impl`] once `grace`
-/// has elapsed and the pid is still there.
+/// * **headless `-p`** (what the launchpad spawns): aborts the tool call, kills
+///   its own tool child, appends `[Request interrupted by user for tool use]`
+///   and exits 0. `claude --resume <session-id>` then picks the conversation
+///   back up. This is the case worth calling "interrupt".
+/// * **interactive, attached to a pty** (what the user runs in a terminal): the
+///   TUI reads Ctrl-C as a keystroke in raw mode, so a real SIGINT means "quit".
+///   It exits 0 and **abandons its tool child**, reparented to init.
+/// * **still booting**, before a handler is installed: killed outright.
+///
+/// Hence: sweep whatever the captured tree left behind once the root is gone,
+/// and escalate to [`kill_pid_impl`] if the root ignored the signal entirely.
 pub fn interrupt_pid_impl(pid: u32) -> Result<(), String> {
     interrupt_pid_with_grace(pid, INTERRUPT_ESCALATION)
 }
@@ -4095,18 +4097,52 @@ pub fn interrupt_pid_impl(pid: u32) -> Result<(), String> {
 pub fn interrupt_pid_with_grace(pid: u32, grace: Duration) -> Result<(), String> {
     #[cfg(unix)]
     {
-        crate::log_debug(&format!("interrupt_pid: SIGINT to root {pid}"));
+        // Capture the tree BEFORE signalling: once the root exits, its children
+        // are reparented to init and walking down from `pid` finds nothing.
+        let tree = collect_process_tree(pid);
+        crate::log_debug(&format!(
+            "interrupt_pid: SIGINT to root {pid} (captured tree of {})",
+            tree.len()
+        ));
         if unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) } != 0 {
             return Err(format!("no such process: {pid}"));
         }
 
         std::thread::spawn(move || {
             std::thread::sleep(grace);
+
             if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
                 crate::log_debug(&format!(
                     "interrupt_pid: {pid} still alive {grace:?} after SIGINT; escalating to tree kill"
                 ));
                 let _ = kill_pid_impl(pid);
+                return;
+            }
+
+            // The root is gone. A headless CLI reaped its own children; an
+            // interactive one abandoned them. Sweep the survivors.
+            //
+            // Every pid here was alive moments ago, so reuse inside this window
+            // is unlikely — the same bet kill_pid_tree's delayed SIGKILL makes.
+            let orphans: Vec<u32> = tree
+                .iter()
+                .copied()
+                .filter(|&p| p != pid && unsafe { libc::kill(p as libc::pid_t, 0) } == 0)
+                .collect();
+            if orphans.is_empty() {
+                return;
+            }
+            crate::log_debug(&format!(
+                "interrupt_pid: root {pid} exited but orphaned {orphans:?}; sweeping"
+            ));
+            for &p in orphans.iter().rev() {
+                unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM) };
+            }
+            std::thread::sleep(Duration::from_millis(2000));
+            for &p in orphans.iter().rev() {
+                if unsafe { libc::kill(p as libc::pid_t, 0) } == 0 {
+                    unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
+                }
             }
         });
 
@@ -4307,5 +4343,48 @@ mod interrupt_tests {
         child.wait().expect("wait");
         std::thread::sleep(Duration::from_millis(100));
         assert!(interrupt_pid_with_grace(pid, Duration::from_millis(50)).is_err());
+    }
+}
+
+#[cfg(all(test, unix))]
+mod interrupt_orphan_tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+
+    fn alive(pattern: &str) -> bool {
+        Command::new("pgrep")
+            .args(["-f", pattern])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// An interactive `claude` exits on SIGINT (rc 0) and leaves its tool child
+    /// reparented to init — verified against claude 2.1.204 on a pty. Only the
+    /// headless `-p` sessions reap their own children. So interrupt must sweep
+    /// the tree it captured up front, not just escalate when the root survives.
+    #[test]
+    fn interrupt_reaps_orphans_when_the_root_exits() {
+        let marker = "sleep 5051";
+        // Dies on SIGINT and abandons its background child — the interactive shape.
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 5051 & trap 'exit 0' INT; wait"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(alive(marker), "precondition: the tool child must be running");
+
+        interrupt_pid_with_grace(child.id(), Duration::from_millis(300)).expect("interrupt");
+        let status = child.wait().expect("wait");
+        assert!(status.success(), "root should exit cleanly on SIGINT");
+
+        // Grace window + the sweep's own SIGTERM->SIGKILL delay.
+        std::thread::sleep(Duration::from_millis(1200));
+        let leaked = alive(marker);
+        Command::new("pkill").args(["-9", "-f", marker]).output().ok();
+
+        assert!(!leaked, "interrupt orphaned the tool child after the root exited");
     }
 }
