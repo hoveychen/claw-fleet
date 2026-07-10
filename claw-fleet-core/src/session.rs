@@ -136,6 +136,13 @@ pub struct SessionInfo {
     /// parse — chain membership changes while the predecessor's jsonl doesn't.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub handoff: Option<crate::handoff::SessionHandoffInfo>,
+    /// Manual review mark set by the human ("done" / "pending"). `None` = the
+    /// session is unmarked, i.e. "new / needs review". Orthogonal to `status`
+    /// (which is the auto-computed run state). Stamped by
+    /// `session_mark::enrich_sessions` at scan time, not during the cached deep
+    /// parse — the mark changes while the session's jsonl doesn't.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub user_mark: Option<crate::session_mark::SessionMark>,
     /// Number of times this session was context-compacted (auto or manual /compact).
     #[serde(default)]
     pub compact_count: u32,
@@ -1780,6 +1787,7 @@ pub fn parse_session_info(
         todos,
         task_plan,
         handoff: None,
+        user_mark: None,
         compact_count: stats.compact_count,
         compact_pre_tokens: stats.compact_pre_tokens,
         compact_post_tokens: stats.compact_post_tokens,
@@ -2371,6 +2379,7 @@ pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -
         }
     }
     crate::handoff::enrich_sessions(&mut sessions);
+    crate::session_mark::enrich_sessions(&mut sessions);
     sort_sessions(&mut sessions);
     sessions
 }
@@ -2611,7 +2620,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
-            task_plan: None, handoff: None,
+            task_plan: None, handoff: None, user_mark: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,

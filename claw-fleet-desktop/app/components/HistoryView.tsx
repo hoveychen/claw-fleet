@@ -8,6 +8,7 @@ import { useSessionSearch } from "../hooks/useSessionSearch";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import { StopControl, canControl } from "./StopControl";
+import { MarkControl } from "./MarkControl";
 import styles from "./HistoryView.module.css";
 
 /** A session spawned but not yet discovered by the scanner. We poll the session
@@ -322,11 +323,14 @@ export function HistoryView() {
                       )}
                     </span>
                   </button>
-                  {showsControl(s) && (
-                    <span className={styles.row_actions}>
-                      <StopControl session={s} />
-                    </span>
-                  )}
+                  <span className={styles.row_actions}>
+                    {showsControl(s) && (
+                      <span className={styles.stop_slot}>
+                        <StopControl session={s} />
+                      </span>
+                    )}
+                    <MarkControl session={s} />
+                  </span>
                 </div>
               );
             })

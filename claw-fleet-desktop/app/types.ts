@@ -11,6 +11,10 @@ export type SessionStatus =
   | "idle"
   | "rateLimited";
 
+/** The human's manual review mark. Unmarked (undefined) is the implicit third
+ *  state — "new / needs review". */
+export type SessionMark = "pending" | "done";
+
 export type RateLimitType =
   | "sessionLimit"
   | "weeklyLimit"
@@ -89,6 +93,9 @@ export interface SessionInfo {
   taskPlan?: TaskPlanSummary | null;
   /** Relay-chain position when this session took part in a handoff (`fleet handoff`); absent otherwise. */
   handoff?: SessionHandoffInfo | null;
+  /** Human's manual review mark. Absent/undefined = unmarked ("new / needs review"),
+   *  the third bucket alongside the two persisted values. Orthogonal to `status`. */
+  userMark?: SessionMark | null;
   /** Number of times this session was context-compacted (auto or manual /compact). */
   compactCount?: number;
   /** Sum of context sizes (in tokens) right before each compaction. */

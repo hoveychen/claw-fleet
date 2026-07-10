@@ -1629,6 +1629,15 @@ impl Backend for LocalBackend {
         config.save()
     }
 
+    fn set_session_mark(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        mark: Option<claw_fleet_core::session_mark::SessionMark>,
+    ) -> Result<(), String> {
+        claw_fleet_core::session_mark::set_mark(&session_id, &workspace_path, mark)
+    }
+
     fn account_info(&self) -> crate::backend::AccountInfoFuture {
         Box::pin(crate::account::fetch_account_info())
     }
