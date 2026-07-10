@@ -127,6 +127,7 @@ export function ResumeComposer({
         submitDisabled={!prompt.trim()}
         placeholder={t("history.resume_placeholder", "输入追问提示词后恢复会话…")}
         disabled={submitting}
+        wikiMentions
         toolbarSlot={
           <SessionOptionPills
             placement="below"

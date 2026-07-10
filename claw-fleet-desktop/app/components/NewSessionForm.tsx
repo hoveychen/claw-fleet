@@ -266,6 +266,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
         submitDisabled={!workspace.trim() || !prompt.trim()}
         placeholder={t("new_session.prompt_placeholder")}
         disabled={submitting}
+        wikiMentions
         contextSlot={workspacePill}
         toolbarSlot={optionPills}
         addMenuItems={[
