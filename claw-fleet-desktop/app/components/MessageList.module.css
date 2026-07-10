@@ -54,6 +54,64 @@
   padding: 4px 0;
 }
 
+/* Search navigation. Sticks above the day separators, which step down to make
+   room for it while a search is active. */
+.search_nav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.search_count {
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: center;
+}
+
+.search_step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.search_step:hover:not(:disabled) {
+  border-color: var(--color-accent, #60a5fa);
+  color: var(--color-accent, #60a5fa);
+}
+
+.search_step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The hit the reader jumped to. Without this the scroll lands somewhere and
+   nothing says which row was the match. */
+.active_match {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--color-accent, #60a5fa);
+}
+
 /* Day separator. Sticks to the top of the scroll area so the date of whatever
    is on screen stays visible while reading back through a long session. */
 .day_sep {
@@ -68,6 +126,11 @@
      Solid rather than a gradient/color-mix so it renders identically on the
      older WebView2 builds Fleet still ships to. */
   background: var(--color-bg);
+}
+
+/* Step the day header below the search bar so the two stickies don't collide. */
+.list_searching .day_sep {
+  top: 34px;
 }
 
 .day_sep_label {

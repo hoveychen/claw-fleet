@@ -57,6 +57,65 @@ export function messageToText(msg: RawMessage): string {
   return parts.join("\n\n").trim();
 }
 
+/**
+ * Fields a tool card shows on its collapsed header — the same list
+ * `ToolUseBlock.formatInput` picks from.
+ */
+const TOOL_SUMMARY_FIELDS = ["command", "file_path", "pattern", "path", "query", "url"] as const;
+
+/**
+ * Lowercased haystack for searching one message.
+ *
+ * Covers prose, reasoning, and the one input field each tool card prints on its
+ * collapsed header — a file path, a shell command, a URL. Two deliberate
+ * exclusions:
+ *
+ * - **The rest of the tool input.** A hit buried in a JSON blob would scroll the
+ *   reader to a row showing nothing that matches, which is worse than no hit.
+ *   Everything indexed here is legible without expanding a card.
+ * - **The tool's name.** Tool names are ordinary English words — Read, Write,
+ *   Edit, Task, Bash — so indexing them buries real hits: searching "bash" over
+ *   a sample of 12,806 messages jumped from 58 matches to 3,439, one per shell
+ *   call, and "write the test" would match every file write.
+ *
+ * Built once per message, so a search over a 2000-message session doesn't
+ * re-serialise every tool input on each keystroke.
+ */
+export function messageSearchText(msg: RawMessage): string {
+  const content = msg.message?.content;
+  if (typeof content === "string") return content.toLowerCase();
+  if (!Array.isArray(content)) return "";
+
+  const parts: string[] = [];
+  for (const block of content) {
+    if (block.type === "text") {
+      parts.push((block as { type: "text"; text: string }).text);
+    } else if (block.type === "thinking") {
+      parts.push((block as { type: "thinking"; thinking: string }).thinking);
+    } else if (block.type === "tool_use") {
+      const tu = block as { input?: Record<string, unknown> };
+      for (const field of TOOL_SUMMARY_FIELDS) {
+        const v = tu.input?.[field];
+        if (typeof v === "string") {
+          parts.push(v);
+          break; // formatInput shows the first match only
+        }
+      }
+    }
+  }
+  return parts.join(" ").toLowerCase();
+}
+
+/** Indices of every message matching all search terms. */
+export function findMatches(haystacks: string[], terms: string[]): number[] {
+  if (terms.length === 0) return [];
+  const out: number[] = [];
+  for (let i = 0; i < haystacks.length; i++) {
+    if (terms.every((t) => haystacks[i].includes(t))) out.push(i);
+  }
+  return out;
+}
+
 /** Local-time `YYYY-MM-DD` for a record, or null when it has no usable stamp. */
 export function dayKey(timestamp: string | undefined): string | null {
   if (!timestamp) return null;
