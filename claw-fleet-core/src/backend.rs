@@ -384,6 +384,11 @@ pub trait Backend: Send + Sync {
     /// Re-key a doc, which is how it moves between virtual directories. Version
     /// history rides along; errors when `to` is already taken.
     fn move_wiki_doc(&self, from: &str, to: &str) -> Result<crate::wiki::WikiDoc, String>;
+    /// Re-key every doc under folder `from` to sit under `to`; `to` may be `""`
+    /// (the tree root), which dissolves the folder. All-or-nothing.
+    fn move_wiki_folder(&self, from: &str, to: &str) -> Result<Vec<crate::wiki::WikiDoc>, String>;
+    /// Delete every doc under folder `prefix`. Returns how many were removed.
+    fn delete_wiki_folder(&self, prefix: &str) -> Result<usize, String>;
     /// Full-text search over doc metadata and current-version entry files.
     fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit>;
     /// Exportable artifact of one version: the entry file for single-file

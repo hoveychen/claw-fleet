@@ -1907,6 +1907,14 @@ impl Backend for LocalBackend {
         crate::wiki::move_doc(from, to)
     }
 
+    fn move_wiki_folder(&self, from: &str, to: &str) -> Result<Vec<crate::wiki::WikiDoc>, String> {
+        crate::wiki::move_folder(from, to)
+    }
+
+    fn delete_wiki_folder(&self, prefix: &str) -> Result<usize, String> {
+        crate::wiki::delete_folder(prefix)
+    }
+
     fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
         crate::wiki::search_docs(query)
     }
