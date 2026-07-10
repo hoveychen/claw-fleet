@@ -496,13 +496,17 @@ enum PlanCommands {
     },
     /// Untick a task (`[x]`→`[ ]`).
     Uncheck { plan_id: String, task: String },
-    /// Declare this session is now focused on a plan (records focus only; no
-    /// file change). Optional task label sets the current P explicitly.
-    Start {
+    /// Take over an existing plan: record that this session is now executing it
+    /// (records focus only; no file change). Optional task label sets the
+    /// current P explicitly, else the first pending one. Not needed after
+    /// `create` (which claims focus) nor after a handoff (Fleet attributes the
+    /// successor); use it when picking an existing plan back up.
+    Resume {
         plan_id: String,
         task: Option<String>,
     },
-    /// Create a new empty v2 plan block in the workspace TASKS.md.
+    /// Create a new empty v2 plan block in the workspace TASKS.md, and record
+    /// this session as its executor.
     Create {
         plan_id: String,
         #[arg(long)]
@@ -2882,7 +2886,7 @@ fn cmd_plan(action: PlanCommands) {
         PlanCommands::Uncheck { plan_id, task } => {
             plan_mutate_checkbox(&cwd, &plan_id, &task, false)
         }
-        PlanCommands::Start { plan_id, task } => plan_start(&cwd, &plan_id, task.as_deref()),
+        PlanCommands::Resume { plan_id, task } => plan_resume(&cwd, &plan_id, task.as_deref()),
         PlanCommands::Create { plan_id, title } => plan_create(&cwd, &plan_id, &title),
         PlanCommands::Add { plan_id, task, text } => plan_add(&cwd, &plan_id, &task, &text),
         PlanCommands::Migrate { path } => plan_migrate(&cwd, path),
@@ -2904,11 +2908,16 @@ fn workspace_tasks_path(cwd: &std::path::Path) -> std::path::PathBuf {
 }
 
 /// Record this session's focus (plan + current pending P) in the side-channel.
-/// No-op (with a warning) when FLEET_SESSION_ID is unset — file edits still
-/// apply; only the per-session "current" attribution is skipped.
+/// Warns and skips attribution when no session id is set — the file edit still
+/// applies, but the desktop card will show no plan, and a silent skip makes that
+/// impossible to diagnose.
 fn plan_record_focus(cwd: &std::path::Path, plan_id: &str, content: &str) {
     use claw_fleet_core::prd_tasks as pt;
     let Some(sid) = read_fleet_session_id() else {
+        eprintln!(
+            "warning: no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set); \
+             plan '{plan_id}' was updated but this session won't be attributed to it."
+        );
         return;
     };
     let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
@@ -2938,24 +2947,11 @@ fn plan_mutate_checkbox(
     Ok(())
 }
 
-fn plan_start(cwd: &std::path::Path, plan_id: &str, task: Option<&str>) -> Result<(), String> {
+fn plan_resume(cwd: &std::path::Path, plan_id: &str, task: Option<&str>) -> Result<(), String> {
     use claw_fleet_core::prd_tasks as pt;
-    let path = pt::find_plan_source(cwd, plan_id)
-        .ok_or_else(|| format!("plan '{plan_id}' not found in any TASKS.md"))?;
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let body = pt::plan_body(&content, plan_id)
-        .ok_or_else(|| format!("plan '{plan_id}' not found"))?;
+    let current = pt::resolve_current_task(cwd, plan_id, task)?;
     let sid = read_fleet_session_id()
         .ok_or("no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)")?;
-    let current = match task {
-        Some(t) => pt::parse_task_items(&body)
-            .into_iter()
-            .find(|it| it.text.contains(&format!("**{t}**")))
-            .map(|it| it.text)
-            .or_else(|| Some(format!("**{t}**"))),
-        None => pt::first_pending_task(&body),
-    };
     let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     claw_fleet_core::task_progress::set_current(&sid, &ws.to_string_lossy(), plan_id, current)?;
     println!("ok");
@@ -2968,10 +2964,16 @@ fn plan_create(cwd: &std::path::Path, plan_id: &str, title: &str) -> Result<(), 
     let content = std::fs::read_to_string(&path).unwrap_or_default();
     let updated = pt::create_plan(&content, plan_id, title)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
+    // Writing a plan is starting it: the agent authoring the block is the agent
+    // about to execute it. Claiming focus here spares it a separate `resume`.
+    plan_record_focus(cwd, plan_id, &updated);
     println!("created plan '{plan_id}' in {}", path.display());
     Ok(())
 }
 
+/// Appends a pending task. Deliberately does NOT claim focus: `add` edits a
+/// plan's structure and says nothing about who is executing it — a master
+/// appending a P-item to another session's plan must not repoint its own card.
 fn plan_add(cwd: &std::path::Path, plan_id: &str, task: &str, text: &str) -> Result<(), String> {
     use claw_fleet_core::prd_tasks as pt;
     let path = pt::find_plan_source(cwd, plan_id)
