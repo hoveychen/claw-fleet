@@ -65,31 +65,11 @@
 
 .stream_label_err { color: var(--color-error-fg); }
 
-.stream_text {
-  margin: 0;
-  padding: 6px 8px;
-  border-radius: 4px;
-  background: var(--color-bg-secondary);
-  color: var(--color-text-secondary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  line-height: 1.45;
-  max-height: 320px;
-  overflow: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
+/* Stream bodies render through ExpandableText, which owns the <pre>. Only the
+   error tint is layered on top of it. */
 .stream_text_err {
   background: var(--color-error-bg);
   color: var(--color-error-fg);
-}
-
-.more {
-  display: block;
-  margin-top: 3px;
-  font-size: 10px;
-  color: var(--color-text-dim);
 }
 
 .note {
