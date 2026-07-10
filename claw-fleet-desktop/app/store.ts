@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, RawMessage, SessionInfo, SessionPendingRequest, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -45,7 +45,7 @@ export async function openSettingsWindow(): Promise<void> {
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery" | "history" | "audit" | "report" | "memory" | "wiki" | "skills" | "plugins" | "projects" | "tasks";
+export type ViewMode = "list" | "gallery" | "history" | "audit" | "report" | "memory" | "wiki" | "skills" | "plugins";
 export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
 
 interface UIState {
@@ -61,7 +61,6 @@ interface UIState {
   showMobileAccess: boolean;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
-  showNewProjectRequested: boolean;
   // Lite-mode hop from the active DecisionPanel into a dedicated decision-
   // history view. Holds the session id whose history is being viewed, or null
   // when the view is closed. Takes precedence over DecisionPanel and the
@@ -74,7 +73,6 @@ interface UIState {
   setSidebarCollapsed: (on: boolean) => void;
   setMascotVisible: (on: boolean) => void;
   setShowMobileAccess: (v: boolean) => void;
-  setShowNewProjectRequested: (v: boolean) => void;
   setLiteDecisionHistorySessionId: (id: string | null) => void;
   /** When true, the DecisionPanel renders as a minimized bar at the bottom
    *  of the screen instead of the full card. Guard decisions force-expand. */
@@ -104,7 +102,6 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   mascotVisible: getItem("mascot-visible") === "true",
   showMobileAccess: false,
-  showNewProjectRequested: false,
   liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   floatingDecisionPanel: getItem("floating-decision-panel") === "true",
@@ -141,7 +138,6 @@ export const useUIStore = create<UIState>((set) => ({
     set({ mascotVisible: on });
   },
   setShowMobileAccess: (v) => set({ showMobileAccess: v }),
-  setShowNewProjectRequested: (v) => set({ showNewProjectRequested: v }),
   setLiteDecisionHistorySessionId: (id) =>
     set({ liteDecisionHistorySessionId: id }),
   setDecisionPanelCollapsed: (on) => {
@@ -235,217 +231,6 @@ export const useSessionsStore = create<SessionsState>((set) => ({
   refresh: async () => {
     const sessions = await invoke<SessionInfo[]>("list_sessions");
     useSessionsStore.getState().setSessions(sessions);
-  },
-}));
-
-// ── Projects store ──────────────────────────────────────────────────────────
-// Shared state for the Projects view + the sidebar nav: list of projects,
-// fleet sessions used to derive per-project counts, and the currently-
-// selected project id.
-
-export interface KanbanColumn {
-  id: string;
-  name: string;
-  color: string | null;
-  isDefault: boolean;
-  order: number;
-}
-
-export interface Project {
-  id: string;
-  name: string;
-  workspace: string;
-  concurrency: number;
-  kanbanColumns: KanbanColumn[];
-  createdAt: number;
-  updatedAt: number;
-  /** Project-wide "force human gate on every P-item" toggle (PRD §5.x). */
-  manualReviewAll?: boolean;
-}
-
-export type FleetSessionKind = "regular" | "master" | "worker";
-
-export interface FleetSession {
-  id: string;
-  projectId: string;
-  workspace: string;
-  fleetsessionPath: string | null;
-  prompt: string;
-  contextFiles: string[];
-  status: string;
-  note: string | null;
-  createdAt: number;
-  startedAt: number | null;
-  completedAt: number | null;
-  pid: number | null;
-  expedited: boolean;
-  /** Task-as-unit V1: regular kanban session, master, or worker. Older
-   *  persisted sessions without this field default to "regular". */
-  sessionKind?: FleetSessionKind;
-  /** For master/worker: the owning Task.id. */
-  taskId?: string | null;
-  /** For worker: the PItemId being executed. */
-  pItemId?: string | null;
-  systemPrompt?: string | null;
-  model?: string | null;
-}
-
-interface ProjectsState {
-  projects: Project[];
-  fleetSessions: FleetSession[];
-  selectedProjectId: string | null;
-  loaded: boolean;
-  setSelectedProjectId: (id: string | null) => void;
-  refresh: () => Promise<void>;
-}
-
-// ── Tasks store (task-as-unit V1) ────────────────────────────────────────────
-//
-// Lightweight: load on demand (`refresh`), create through `create_task` Tauri
-// command, transition through `start_task` / `update_task_plan`. The full
-// realtime event stream from `subscribe_task_events` lands once the master
-// runtime starts pushing semantic events (P19/P21 integration); for V1 the
-// frontend re-fetches after every user action.
-
-import type { AcceptMode, Task, TaskInput } from "./types";
-
-interface TasksState {
-  tasks: Task[];
-  selectedTaskId: string | null;
-  loaded: boolean;
-  /// Per-task start failure messages. Auto-start (on task creation) used to
-  /// swallow its error silently, leaving the task stranded in `drafting` with no
-  /// hint why; this records the failure so TaskDetail can surface it without the
-  /// user having to click Start again.
-  startErrors: Record<string, string>;
-  setSelectedTaskId: (id: string | null) => void;
-  /// Always fetches the FULL task list across all projects — the sidebar
-  /// renders this shared array unfiltered, while the project/task views filter
-  /// it client-side (`tasks.filter(projectId)`). A project-scoped fetch here
-  /// would clobber the sidebar's full list, so there is deliberately no
-  /// projectId parameter.
-  refresh: () => Promise<void>;
-  createTask: (input: TaskInput) => Promise<Task>;
-  startTask: (taskId: string) => Promise<void>;
-  acceptTask: (taskId: string, mode?: AcceptMode) => Promise<void>;
-  rerunTaskE2e: (taskId: string) => Promise<void>;
-  updateTaskTitle: (taskId: string, title: string) => Promise<void>;
-  deleteTask: (taskId: string) => Promise<void>;
-}
-
-export const useTasksStore = create<TasksState>((set, get) => ({
-  tasks: [],
-  selectedTaskId: null,
-  loaded: false,
-  startErrors: {},
-  setSelectedTaskId: (id) => set({ selectedTaskId: id }),
-  refresh: async () => {
-    try {
-      const tasks = await invoke<Task[]>("list_tasks", { projectId: null });
-      set({ tasks, loaded: true });
-    } catch {
-      set({ loaded: true });
-    }
-  },
-  createTask: async (input) => {
-    const task = await invoke<Task>("create_task", { input });
-    set({ tasks: [task, ...get().tasks] });
-    return task;
-  },
-  startTask: async (taskId) => {
-    try {
-      await invoke("start_task", { taskId });
-    } catch (e) {
-      // Record so callers that don't surface the throw themselves (the
-      // auto-start on creation) still leave a visible reason on the task.
-      const message = String((e as { message?: string })?.message ?? e);
-      set({ startErrors: { ...get().startErrors, [taskId]: message } });
-      throw e;
-    }
-    // Success — clear any prior start error and refetch (start_task flips
-    // status + sets task_branch).
-    const { [taskId]: _cleared, ...rest } = get().startErrors;
-    const fresh = await invoke<Task>("get_task", { taskId });
-    set({
-      tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
-      startErrors: rest,
-    });
-  },
-  acceptTask: async (taskId, mode = "mergeBack") => {
-    // P7 final acceptance: AwaitingAcceptance → Done. `mode` chooses whether to
-    // merge fleet/<slug> back into its base branch + delete it (mergeBack) or
-    // leave the branch for the user (keepBranch).
-    await invoke("accept_task", { taskId, mode });
-    const fresh = await invoke<Task>("get_task", { taskId });
-    set({
-      tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
-    });
-  },
-  rerunTaskE2e: async (taskId) => {
-    // Clear the failed e2e outcome so the live orchestrator re-runs verify.e2e.
-    await invoke("rerun_task_e2e", { taskId });
-    const fresh = await invoke<Task>("get_task", { taskId });
-    set({
-      tasks: get().tasks.map((t) => (t.id === taskId ? fresh : t)),
-    });
-  },
-  updateTaskTitle: async (taskId, title) => {
-    await invoke("update_task_title", { taskId, title });
-    set({
-      tasks: get().tasks.map((t) =>
-        t.id === taskId ? { ...t, title, titleAuto: false } : t,
-      ),
-    });
-  },
-  deleteTask: async (taskId) => {
-    // Terminates linked sessions + removes the task json/materials on disk.
-    await invoke("clear_task", { taskId });
-    set({
-      tasks: get().tasks.filter((t) => t.id !== taskId),
-      selectedTaskId: get().selectedTaskId === taskId ? null : get().selectedTaskId,
-    });
-  },
-}));
-
-export const useProjectsStore = create<ProjectsState>((set) => ({
-  projects: [],
-  fleetSessions: [],
-  selectedProjectId: null,
-  loaded: false,
-  setSelectedProjectId: (id) => set({ selectedProjectId: id }),
-  refresh: async () => {
-    try {
-      const [projects, fleetSessions] = await Promise.all([
-        invoke<Project[]>("list_projects"),
-        invoke<FleetSession[]>("list_fleet_sessions").catch(() => []),
-      ]);
-      set({ projects, fleetSessions, loaded: true });
-    } catch {
-      set({ loaded: true });
-    }
-  },
-}));
-
-// ── Fleet-managed sessions store ──────────────────────────────────────────────
-// Tracks which session ids were spawned by Fleet itself (vs. observed
-// passively from another tool). Populated by ProjectsView + SessionList on
-// mount; consumed by SessionCard / LiteSessionCard for the
-// "fleet-managed / non-managed" badge.
-
-interface FleetManagedState {
-  managedIds: Set<string>;
-  refresh: () => Promise<void>;
-}
-
-export const useFleetManagedStore = create<FleetManagedState>((set) => ({
-  managedIds: new Set(),
-  refresh: async () => {
-    try {
-      const sessions = await invoke<{ id: string }[]>("list_fleet_sessions");
-      set({ managedIds: new Set(sessions.map((s) => s.id)) });
-    } catch {
-      set({ managedIds: new Set() });
-    }
   },
 }));
 
@@ -850,22 +635,6 @@ interface DecisionState {
   setPermissionPromptDenyReason: (id: string, text: string) => void;
   /** Resolve a permission-prompt card (allow / deny with optional reason). */
   respondToPermissionPrompt: (id: string, allow: boolean) => Promise<void>;
-  /** Add a session-pending request (idle-but-not-final) to the queue. */
-  addSessionPendingRequest: (req: SessionPendingRequest) => void;
-  /** Update the user's free-text follow-up while they're typing. */
-  setSessionPendingFollowUp: (id: string, text: string) => void;
-  /**
-   * Mark the session into a terminal kanban column (the user clicked one of
-   * the action buttons on the SessionPendingCard). Removes the decision
-   * from the queue when the backend write succeeds.
-   */
-  markSessionPendingStatus: (id: string, statusId: string) => Promise<void>;
-  /**
-   * Send the typed follow-up prompt back to the agent. Re-queues the session
-   * via `resume_fleet_session`, which causes the supervisor's next tick to
-   * spawn `claude --resume <sid>`. Removes the decision from the queue.
-   */
-  submitSessionPendingFollowUp: (id: string) => Promise<void>;
   /**
    * Respond to a decision (allow/block for guard). Removes it from the queue.
    * Pass `alwaysAllow` to also persist a guard allow rule (see
@@ -1141,84 +910,6 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
     }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
-  },
-
-  addSessionPendingRequest: (req) => {
-    const decision: PendingDecision = {
-      kind: "session-pending",
-      id: req.id,
-      request: req,
-      followUpText: "",
-      submitting: false,
-      arrivedAt: Date.now(),
-    };
-    set((s) => {
-      // Dedup: the watcher polls every second, so a re-emit shouldn't
-      // duplicate the card. Match by id.
-      if (s.decisions.some((d) => d.id === decision.id)) return s;
-      return {
-        decisions: [...s.decisions, decision],
-        activeDecisionId: s.decisions.length === 0 ? decision.id : s.activeDecisionId,
-      };
-    });
-    playChime("ding_dong").catch(() => {});
-  },
-
-  setSessionPendingFollowUp: (id, text) =>
-    set((s) => ({
-      decisions: s.decisions.map((d) =>
-        d.id === id && d.kind === "session-pending" ? { ...d, followUpText: text } : d,
-      ),
-    })),
-
-  markSessionPendingStatus: async (id, statusId) => {
-    set((s) => ({
-      decisions: s.decisions.map((d) =>
-        d.id === id && d.kind === "session-pending" ? { ...d, submitting: true } : d,
-      ),
-    }));
-    try {
-      await invoke("set_fleet_session_status", {
-        sessionId: id,
-        status: statusId,
-        note: null,
-      });
-      set((s) => removeDecision(s, id));
-    } catch (e) {
-      console.error("set_fleet_session_status failed:", e);
-      set((s) => ({
-        decisions: s.decisions.map((d) =>
-          d.id === id && d.kind === "session-pending" ? { ...d, submitting: false } : d,
-        ),
-      }));
-    }
-  },
-
-  submitSessionPendingFollowUp: async (id) => {
-    const state = get();
-    const decision = state.decisions.find((d) => d.id === id);
-    if (!decision || decision.kind !== "session-pending") return;
-    const prompt = decision.followUpText.trim();
-    if (!prompt) return;
-    set((s) => ({
-      decisions: s.decisions.map((d) =>
-        d.id === id && d.kind === "session-pending" ? { ...d, submitting: true } : d,
-      ),
-    }));
-    try {
-      await invoke("resume_fleet_session", {
-        sessionId: id,
-        followUpPrompt: prompt,
-      });
-      set((s) => removeDecision(s, id));
-    } catch (e) {
-      console.error("resume_fleet_session (session-pending follow-up) failed:", e);
-      set((s) => ({
-        decisions: s.decisions.map((d) =>
-          d.id === id && d.kind === "session-pending" ? { ...d, submitting: false } : d,
-        ),
-      }));
-    }
   },
 
   approvePlan: async (id, editedPlan) => {
