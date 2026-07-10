@@ -492,11 +492,15 @@ where
         return Ok(None);
     };
     let prompt = compose_successor_prompt(&pending);
+    // The relay continues the predecessor's work, so it continues on the
+    // predecessor's model and effort. Falling through to the CLI default here
+    // would silently switch models mid-plan. `permission_mode` is deliberately
+    // left to the default: a relay should not inherit an elevated mode.
     let resp = spawn(
         &pending.workspace_path,
         &prompt,
-        None,
-        None,
+        pending.model.as_deref(),
+        pending.effort.as_deref(),
         None,
         HANDOFF_ENTRYPOINT,
     )?;
