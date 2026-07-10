@@ -1335,6 +1335,7 @@
     "decision_answered_other": "Answered",
     "decision_unanswered": "Unanswered",
     "user_image": "Attached image",
+    "result_image": "Image returned by the tool",
     "slash_command": "slash command",
     "today": "Today",
     "yesterday": "Yesterday",

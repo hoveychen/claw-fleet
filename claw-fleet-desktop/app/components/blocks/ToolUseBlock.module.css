@@ -136,6 +136,23 @@
   margin-top: 4px;
 }
 
+/* ToolSearch answers with a list of tool names rather than prose. */
+.tool_refs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tool_ref {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border);
+}
+
 .pending {
   padding: 6px 10px;
   color: var(--color-text-dim);
