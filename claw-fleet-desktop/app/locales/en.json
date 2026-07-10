@@ -1681,5 +1681,20 @@
     "only_active": "Active only",
     "filter_active_tip": "Show only sessions still running or waiting for input",
     "select_hint": "Select a session on the left to view its detail"
+  },
+  "view_files": "Files",
+  "files": {
+    "panel_title": "Files",
+    "no_workspaces_title": "No workspaces yet",
+    "no_workspaces_subtitle": "Project directories appear here once sessions are running.",
+    "select_workspace": "Select a workspace to browse its files.",
+    "select_file": "Select a file to preview it.",
+    "tree_label": "Files",
+    "loading": "Loading…",
+    "empty_dir": "Empty directory.",
+    "binary_file": "Binary or non-text file; cannot preview here.",
+    "read_error": "Failed to read file.",
+    "truncated_notice": "Large file — showing the first 1MB of {{size}}.",
+    "show_ignored": "Show ignored files"
   }
 }
