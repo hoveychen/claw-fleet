@@ -6,6 +6,7 @@ import { isFleetOwnedEntrypoint } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
+import { HandoffChainRow } from "./HandoffChainRow";
 import { MessageList } from "./MessageList";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { ResumeComposer } from "./ResumeComposer";
@@ -536,6 +537,8 @@ export function SessionDetail({
               )}
             </div>
             <div className={styles.path} title={liveSession.workspacePath}>{liveSession.workspacePath}</div>
+            {/* Handoff relay chain — chip toggles the chain detail panel */}
+            {liveSession.handoff && <HandoffChainRow session={liveSession} />}
           </div>
 
           {/* Combined tab bar: subagent segmented control (if any) + view tabs */}

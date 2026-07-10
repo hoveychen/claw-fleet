@@ -99,6 +99,9 @@ export function HistoryView() {
 
   const [query, setQuery] = useState("");
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
+  // Narrow the rail to sessions whose agent is still live — same status set that
+  // colours the row dot green/amber.
+  const [activeOnly, setActiveOnly] = useState(false);
   // Inline detail column selection — local to the page, deliberately NOT the
   // global useDetailStore (that one drives the drawer overlaying every view).
   const [selected, setSelected] = useState<SessionInfo | null>(null);
@@ -132,6 +135,7 @@ export function HistoryView() {
     const q = query.trim().toLowerCase();
     return adhocSessions
       .filter((s) => workspaceFilter === "all" || s.workspacePath === workspaceFilter)
+      .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
         if (!q) return true;
         const clientMatch =
@@ -144,7 +148,12 @@ export function HistoryView() {
       // Most recently *active* first, matching the row's displayed time — a
       // created-at order would interleave stale rows between fresh ones.
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
-  }, [adhocSessions, workspaceFilter, query, ftsMatchPaths]);
+  }, [adhocSessions, workspaceFilter, activeOnly, query, ftsMatchPaths]);
+
+  const activeCount = useMemo(
+    () => adhocSessions.filter((s) => LIVE_STATUSES.has(s.status)).length,
+    [adhocSessions],
+  );
 
   const handleRowClick = (s: SessionInfo) => {
     const isFtsHit = query.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
@@ -227,17 +236,30 @@ export function HistoryView() {
             />
             {searching && <span className={styles.search_spinner} />}
           </div>
-          <select
-            className={styles.project_select}
-            value={workspaceFilter}
-            onChange={(e) => setWorkspaceFilter(e.target.value)}
-            title={t("history.filter_workspace", "按工作目录筛选")}
-          >
-            <option value="all">{t("history.all_workspaces", "全部目录")}</option>
-            {workspaces.map(([path, name]) => (
-              <option key={path} value={path} title={path}>{name}</option>
-            ))}
-          </select>
+          <div className={styles.filter_row}>
+            <select
+              className={styles.project_select}
+              value={workspaceFilter}
+              onChange={(e) => setWorkspaceFilter(e.target.value)}
+              title={t("history.filter_workspace", "按工作目录筛选")}
+            >
+              <option value="all">{t("history.all_workspaces", "全部目录")}</option>
+              {workspaces.map(([path, name]) => (
+                <option key={path} value={path} title={path}>{name}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={`${styles.active_toggle} ${activeOnly ? styles.active_toggle_on : ""}`}
+              aria-pressed={activeOnly}
+              onClick={() => setActiveOnly((v) => !v)}
+              title={t("history.filter_active_tip", "只显示仍在运行或等待输入的会话")}
+            >
+              <span className={styles.active_toggle_dot} />
+              {t("history.only_active", "仅活跃")}
+              <span>{activeCount}</span>
+            </button>
+          </div>
         </div>
 
         <div className={styles.list}>
@@ -274,6 +296,17 @@ export function HistoryView() {
                           <FolderGit2 size={10} strokeWidth={1.6} />
                           {s.workspaceName}
                         </span>
+                        {s.handoff && (
+                          <span
+                            className={styles.row_handoff}
+                            title={t("card.tip_handoff", {
+                              hop: s.handoff.hop,
+                              len: s.handoff.chainLen,
+                            })}
+                          >
+                            🔗 {s.handoff.hop}/{s.handoff.chainLen}
+                          </span>
+                        )}
                         <span className={styles.row_time}>{timeAgo(s.lastActivityMs, t)}</span>
                       </span>
                       {snippet && (
