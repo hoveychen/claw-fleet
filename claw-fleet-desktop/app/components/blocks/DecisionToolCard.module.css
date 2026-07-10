@@ -1,0 +1,213 @@
+/* Inline decision card. Deliberately more prominent than a plain tool card —
+   a decision is where the conversation turned, not an implementation detail. */
+.root {
+  border-radius: 6px;
+  border: 1px solid var(--color-accent, #60a5fa);
+  border-left-width: 3px;
+  overflow: hidden;
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.root_error { border-color: var(--color-error-fg, #dc5b5b); }
+
+.header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--color-bg-tool);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text);
+  font-size: 12px;
+  min-height: 30px;
+}
+
+.header:hover { background: var(--color-bg-tool-hover); }
+
+.arrow { color: var(--color-text-dim); font-size: 10px; flex-shrink: 0; }
+
+.kind {
+  font-weight: 600;
+  color: var(--color-accent, #60a5fa);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* The gist of the question. Shrinks first — the chosen answer matters more. */
+.summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+/* What the user picked. Capped so a long "Other" answer can't push the row. */
+.answer_chip {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-success-bg, rgba(90, 200, 140, 0.15));
+  color: var(--color-success, #5ac88c);
+}
+
+.pending_chip {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+}
+
+.count {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-dim);
+}
+
+.spinner {
+  color: var(--color-text-dim);
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.error_badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+}
+
+.body {
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg);
+}
+
+.error_text {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.question_block + .question_block {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--color-border);
+}
+
+.question_text {
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text);
+  margin-bottom: 8px;
+}
+
+.question_text :global(p) { margin: 0 0 6px; }
+.question_text :global(p:last-child) { margin-bottom: 0; }
+.question_text :global(table) { font-size: 11px; }
+
+.preview_frame {
+  width: 100%;
+  min-height: 160px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: #fff;
+  margin-bottom: 8px;
+}
+
+.html_marker {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  font-style: italic;
+  margin-bottom: 8px;
+}
+
+.option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 5px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  margin-bottom: 4px;
+}
+
+.option_selected {
+  border-color: var(--color-success, #5ac88c);
+  background: var(--color-success-bg, rgba(90, 200, 140, 0.08));
+}
+
+.option_label {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.marker {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  font-size: 11px;
+}
+
+.option_selected .marker { color: var(--color-success, #5ac88c); }
+
+.option_desc {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  padding-left: 16px;
+  word-break: break-word;
+}
+
+/* Only rendered for the option the user actually chose. */
+.option_preview {
+  margin: 4px 0 0 16px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.45;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.attachments {
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--color-text-dim);
+  word-break: break-all;
+}

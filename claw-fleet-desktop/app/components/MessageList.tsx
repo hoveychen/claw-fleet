@@ -2,16 +2,19 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, mem
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
+  DecisionHistoryRecord,
   RawMessage,
   ToolResultBlock,
   ToolUseBlock,
 } from "../types";
+import { buildToolResultMetaMap, isDecisionTool } from "../toolResults";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import {
   GroupedToolUseBlocks,
   ToolUseBlock as ToolUseBlockComp,
 } from "./blocks/ToolUseBlock";
+import { DecisionToolCard, hasDecisionQuestions } from "./blocks/DecisionToolCard";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import styles from "./MessageList.module.css";
 
@@ -151,11 +154,15 @@ interface BlocksProps {
   content: ContentBlock[];
   resultMap: Map<string, ToolResultBlock>;
   baselineMap: Map<string, string>;
+  /** tool_use_id → Claude Code's structured `toolUseResult` for that call. */
+  metaMap: Map<string, unknown>;
+  /** Session decision records; supply asset ids for image-bearing cards. */
+  decisionRecords: DecisionHistoryRecord[];
   isPartial: boolean;
   searchTerms?: string[] | null;
 }
 
-const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baselineMap, isPartial, searchTerms }: BlocksProps) {
+const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baselineMap, metaMap, decisionRecords, isPartial, searchTerms }: BlocksProps) {
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -199,6 +206,24 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
     if (block.type === "tool_use") {
       const toolBlock = block as ToolUseBlock;
       const result = resultMap.get(toolBlock.id);
+
+      // A decision card is where the conversation turned — never let it degrade
+      // into the generic card's `JSON.stringify(input)` header. An unrenderable
+      // shape (rejected call, future schema) still falls through to that card.
+      if (isDecisionTool(toolBlock.name) && hasDecisionQuestions(toolBlock.input)) {
+        elements.push(
+          <DecisionToolCard
+            key={i}
+            block={toolBlock}
+            result={result}
+            meta={metaMap.get(toolBlock.id)}
+            records={decisionRecords}
+            isPartial={isPartial && !result}
+          />
+        );
+        i++;
+        continue;
+      }
 
       // Note: the Claude Code Workflow tool renders as an ordinary tool card
       // here; its progress DAG is surfaced at the session level (the "Workflow"
@@ -274,11 +299,13 @@ interface MsgProps {
   msg: RawMessage;
   resultMap: Map<string, ToolResultBlock>;
   baselineMap: Map<string, string>;
+  metaMap: Map<string, unknown>;
+  decisionRecords: DecisionHistoryRecord[];
   searchTerms?: string[] | null;
   msgIdx?: number;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searchTerms, msgIdx }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, metaMap, decisionRecords, searchTerms, msgIdx }: MsgProps) {
   if (!msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
@@ -342,6 +369,8 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
             content={content}
             resultMap={resultMap}
             baselineMap={baselineMap}
+            metaMap={metaMap}
+            decisionRecords={decisionRecords}
             isPartial={isPartial}
             searchTerms={searchTerms}
           />
@@ -450,6 +479,9 @@ interface Props {
   /** Live scanner status of the session (e.g. "thinking", "executing");
    *  drives the animated activity indicator under the newest message. */
   status?: string | null;
+  /** Decision records for this session. Inline decision cards read them for the
+   *  asset id an image-bearing `fleet__ask` needs to re-serve its preview. */
+  decisionRecords?: DecisionHistoryRecord[];
 }
 
 const PAGE_SIZE = 100;
@@ -469,10 +501,15 @@ function messageText(msg: RawMessage): string {
     .join(" ");
 }
 
-export function MessageList({ messages, isLoading, searchQuery, status }: Props) {
+const NO_DECISIONS: DecisionHistoryRecord[] = [];
+
+export function MessageList({ messages, isLoading, searchQuery, status, decisionRecords }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Stable identity so memoized MessageRows don't re-render when the caller
+  // omits the prop.
+  const records = decisionRecords ?? NO_DECISIONS;
 
   // visibleStart tracks the actual start index into displayMsgs.
   // -1 is a sentinel meaning "show the tail (last PAGE_SIZE)".
@@ -482,6 +519,7 @@ export function MessageList({ messages, isLoading, searchQuery, status }: Props)
 
   const resultMap = useMemo(() => buildResultMap(messages), [messages]);
   const baselineMap = useMemo(() => buildWriteBaselineMap(messages), [messages]);
+  const metaMap = useMemo(() => buildToolResultMetaMap(messages), [messages]);
 
   const displayMsgs = useMemo(
     () => messages.filter((m) => m.type === "user" || m.type === "assistant"),
@@ -624,6 +662,8 @@ export function MessageList({ messages, isLoading, searchQuery, status }: Props)
           msg={msg}
           resultMap={resultMap}
           baselineMap={baselineMap}
+          metaMap={metaMap}
+          decisionRecords={records}
           searchTerms={searchTerms}
           msgIdx={effectiveStart + i}
         />
