@@ -101,6 +101,64 @@ function formatBytes(bytes: number): string {
   return `${bytes}B`;
 }
 
+// ── Virtual directory tree ───────────────────────────────────────────────────
+
+/** Everything after the last `/` — mirrors core's `wiki::slug_basename`. */
+function slugBasename(slug: string): string {
+  const at = slug.lastIndexOf("/");
+  return at < 0 ? slug : slug.slice(at + 1);
+}
+
+type DocNode = { type: "doc"; doc: WikiDoc };
+type FolderNode = {
+  type: "folder";
+  /** Full prefix, e.g. "arch/deep" — unique, so it keys collapse state. */
+  path: string;
+  /** Last segment only, e.g. "deep". */
+  name: string;
+  children: TreeNode[];
+  /** Docs at or below this folder. */
+  docCount: number;
+};
+type TreeNode = DocNode | FolderNode;
+
+/**
+ * Fold a flat doc list into the virtual directory tree its slugs describe:
+ * `arch/deep/storage` nests under folder `arch` → folder `arch/deep`. Nothing
+ * on disk is nested — the tree exists only here and in the slug string.
+ *
+ * `docs` arrives newest-first, so folders and docs both keep recency order;
+ * folders sort ahead of docs at each level.
+ */
+function buildTree(docs: WikiDoc[]): TreeNode[] {
+  const root: FolderNode = { type: "folder", path: "", name: "", children: [], docCount: 0 };
+  const folders = new Map<string, FolderNode>();
+
+  for (const doc of docs) {
+    const segments = doc.slug.split("/");
+    let parent = root;
+    for (let i = 0; i < segments.length - 1; i++) {
+      const path = segments.slice(0, i + 1).join("/");
+      let folder = folders.get(path);
+      if (!folder) {
+        folder = { type: "folder", path, name: segments[i], children: [], docCount: 0 };
+        folders.set(path, folder);
+        parent.children.push(folder);
+      }
+      folder.docCount++;
+      parent = folder;
+    }
+    parent.children.push({ type: "doc", doc });
+  }
+
+  const sortLevel = (nodes: TreeNode[]): TreeNode[] => {
+    const dirs = nodes.filter((n): n is FolderNode => n.type === "folder");
+    for (const d of dirs) d.children = sortLevel(d.children);
+    return [...dirs, ...nodes.filter((n) => n.type === "doc")];
+  };
+  return sortLevel(root.children);
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 export function WikiView() {
@@ -182,23 +240,12 @@ export function WikiView() {
     };
   }, [docs]);
 
-  // Group the filtered docs by workspace; group order follows the docs'
-  // updated_ms-desc order, so the most recently active workspace floats up.
-  const groups = useMemo(() => {
-    const byPath = new Map<string, { path: string; name: string; docs: WikiDoc[] }>();
-    for (const d of filtered) {
-      let g = byPath.get(d.workspacePath);
-      if (!g) {
-        g = { path: d.workspacePath, name: d.workspaceName, docs: [] };
-        byPath.set(d.workspacePath, g);
-      }
-      g.docs.push(d);
-    }
-    return [...byPath.values()];
-  }, [filtered]);
+  // The doc list is a virtual directory tree keyed off slug prefixes. Workspace
+  // is no longer a grouping dimension — it stays as the header's filter.
+  const tree = useMemo(() => buildTree(filtered), [filtered]);
 
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  const toggleGroup = (path: string) => {
+  const toggleFolder = (path: string) => {
     setCollapsed((prev) => {
       const next = new Set(prev);
       if (next.has(path)) next.delete(path);
@@ -227,6 +274,72 @@ export function WikiView() {
     setConfirmDelete(null);
     load();
   };
+
+  /** Indent one tree level; depth 0 sits flush with the pane. */
+  const indent = (depth: number) => ({ paddingLeft: `${depth * 12}px` });
+
+  const renderNodes = (nodes: TreeNode[], depth: number): ReactNode =>
+    nodes.map((node) => {
+      if (node.type === "folder") {
+        const isCollapsed = !searching && collapsed.has(node.path);
+        return (
+          <div key={`d:${node.path}`} className={styles.group}>
+            <button
+              className={styles.group_header}
+              style={indent(depth)}
+              onClick={() => toggleFolder(node.path)}
+              title={node.path}
+            >
+              {isCollapsed ? (
+                <ChevronRight size={12} strokeWidth={2} className={styles.group_chevron} />
+              ) : (
+                <ChevronDown size={12} strokeWidth={2} className={styles.group_chevron} />
+              )}
+              <span className={styles.group_name}>{node.name}</span>
+              <span className={styles.group_count}>{node.docCount}</span>
+            </button>
+            {!isCollapsed && renderNodes(node.children, depth + 1)}
+          </div>
+        );
+      }
+
+      const d = node.doc;
+      return (
+        <button
+          key={`f:${d.slug}`}
+          className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""}`}
+          style={indent(depth)}
+          onClick={() => setSelectedSlug(d.slug)}
+        >
+          <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
+            {KIND_CONFIG[d.kind]?.short ?? d.kind}
+          </span>
+          <span className={styles.card_body}>
+            <span className={styles.card_title}>
+              {searching ? highlightTerm(d.title, query) : d.title}
+            </span>
+            {/* Under a folder the prefix is already on screen — show the leaf. */}
+            <span className={styles.card_slug} title={d.slug}>
+              {slugBasename(d.slug)}
+            </span>
+            {searching && hits?.get(d.slug)?.snippet ? (
+              <span className={styles.card_snippet}>
+                {highlightTerm(hits.get(d.slug)!.snippet, query)}
+              </span>
+            ) : null}
+            <span className={styles.card_meta}>
+              <span>{relativeTime(d.updatedMs)}</span>
+              {d.versions.length > 1 && (
+                <>
+                  <span className={styles.card_meta_dot}>·</span>
+                  <span>{t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}</span>
+                </>
+              )}
+            </span>
+          </span>
+        </button>
+      );
+    });
 
   return (
     <div className={styles.page}>
@@ -272,54 +385,7 @@ export function WikiView() {
               )}
             />
           )}
-          {groups.map((g) => {
-            const isCollapsed = !searching && collapsed.has(g.path);
-            return (
-              <div key={g.path} className={styles.group}>
-                <button className={styles.group_header} onClick={() => toggleGroup(g.path)}>
-                  {isCollapsed ? (
-                    <ChevronRight size={12} strokeWidth={2} className={styles.group_chevron} />
-                  ) : (
-                    <ChevronDown size={12} strokeWidth={2} className={styles.group_chevron} />
-                  )}
-                  <span className={styles.group_name}>{g.name}</span>
-                  <span className={styles.group_count}>{g.docs.length}</span>
-                </button>
-                {!isCollapsed &&
-                  g.docs.map((d) => (
-                    <button
-                      key={d.slug}
-                      className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""}`}
-                      onClick={() => setSelectedSlug(d.slug)}
-                    >
-                      <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
-                        {KIND_CONFIG[d.kind]?.short ?? d.kind}
-                      </span>
-                      <span className={styles.card_body}>
-                        <span className={styles.card_title}>
-                          {searching ? highlightTerm(d.title, query) : d.title}
-                        </span>
-                        <span className={styles.card_slug}>{d.slug}</span>
-                        {searching && hits?.get(d.slug)?.snippet ? (
-                          <span className={styles.card_snippet}>
-                            {highlightTerm(hits.get(d.slug)!.snippet, query)}
-                          </span>
-                        ) : null}
-                        <span className={styles.card_meta}>
-                          <span>{relativeTime(d.updatedMs)}</span>
-                          {d.versions.length > 1 && (
-                            <>
-                              <span className={styles.card_meta_dot}>·</span>
-                              <span>{t("wiki.version_count", "{{count}} versions", { count: d.versions.length })}</span>
-                            </>
-                          )}
-                        </span>
-                      </span>
-                    </button>
-                  ))}
-              </div>
-            );
-          })}
+          {renderNodes(tree, 0)}
         </aside>
 
         <main className={styles.detail_pane}>
@@ -388,10 +454,11 @@ function WikiDetail({
 
   const [exporting, setExporting] = useState(false);
   const handleExport = async () => {
-    // Mirrors core's wiki::export_filename — kind decides the artifact shape.
+    // Mirrors core's wiki::export_filename — kind decides the artifact shape,
+    // and only the slug's last segment is a name (the rest are directories).
     const ext = doc.kind === "markdown" ? "md" : doc.kind === "html" ? "html" : "zip";
     const dest = await save({
-      defaultPath: `${doc.slug}.${ext}`,
+      defaultPath: `${slugBasename(doc.slug)}.${ext}`,
       filters: [{ name: doc.title, extensions: [ext] }],
     });
     if (!dest) return;
