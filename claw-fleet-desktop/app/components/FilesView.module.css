@@ -1,0 +1,87 @@
+/* FilesView — bits not covered by the shared MemoryView/SkillsView modules. */
+
+.root_pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 16px 0;
+}
+
+.root_pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  background: transparent;
+  color: var(--text-secondary, #999);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.root_pill:hover {
+  color: var(--text-primary, #ddd);
+}
+
+.root_pill_active {
+  border-color: var(--accent, #7aa2f7);
+  color: var(--accent, #7aa2f7);
+}
+
+.root_branch {
+  opacity: 0.65;
+}
+
+.ignored_toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.entry_ignored {
+  opacity: 0.5;
+}
+
+.image_wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+}
+
+.image_preview {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: 6px;
+  /* Checkerboard so transparent images stay legible in both themes. */
+  background:
+    repeating-conic-gradient(rgba(128, 128, 128, 0.15) 0% 25%, transparent 0% 50%)
+    0 0 / 16px 16px;
+}
+
+.image_meta {
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+}
+
+.truncated_notice {
+  margin: 0 0 8px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+  background: rgba(128, 128, 128, 0.12);
+}
+
+.copy_content_row {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
