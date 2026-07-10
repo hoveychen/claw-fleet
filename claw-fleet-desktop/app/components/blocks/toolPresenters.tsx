@@ -24,6 +24,7 @@ import {
   diffStats,
 } from "../../toolResults";
 import type { ToolResultBlock, ToolUseBlock as ToolUseBlockType } from "../../types";
+import { ExpandableText } from "./ExpandableText";
 import styles from "./toolPresenters.module.css";
 
 /**
@@ -139,23 +140,14 @@ export function headerStats(
 
 // ── Bodies ───────────────────────────────────────────────────────────────────
 
-const MAX_STREAM_CHARS = 4000;
-
+/** A named run of tool output — stdout, stderr, a subagent's answer. */
 function Stream({ label, text, error }: { label: string; text: string; error?: boolean }) {
-  const truncated = text.length > MAX_STREAM_CHARS;
   return (
     <div className={styles.stream}>
       <span className={`${styles.stream_label} ${error ? styles.stream_label_err : ""}`}>
         {label}
       </span>
-      <pre className={`${styles.stream_text} ${error ? styles.stream_text_err : ""}`}>
-        {truncated ? text.slice(0, MAX_STREAM_CHARS) : text}
-      </pre>
-      {truncated && (
-        <span className={styles.more}>
-          … {(text.length - MAX_STREAM_CHARS).toLocaleString()} more chars
-        </span>
-      )}
+      <ExpandableText text={text} className={error ? styles.stream_text_err : ""} />
     </div>
   );
 }
@@ -208,7 +200,7 @@ function AgentBody({ meta }: { meta: unknown }) {
           <button className={styles.toggle} onClick={() => setShowPrompt((v) => !v)}>
             {showPrompt ? "▾" : "▸"} prompt
           </button>
-          {showPrompt && <pre className={styles.stream_text}>{agent.prompt}</pre>}
+          {showPrompt && <ExpandableText text={agent.prompt} />}
         </>
       )}
       {agent.content && <Stream label="result" text={agent.content} />}

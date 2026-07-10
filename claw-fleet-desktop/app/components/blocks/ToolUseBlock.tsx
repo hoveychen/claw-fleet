@@ -8,6 +8,7 @@ import type {
 } from "../../types";
 import { asFileEditResult } from "../../toolResults";
 import { DiffView } from "./DiffView";
+import { ExpandableText } from "./ExpandableText";
 import { ImageThumb } from "./ImageThumb";
 import { ToolBody, groupLabel, hasCustomBody, headerStats } from "./toolPresenters";
 import styles from "./ToolUseBlock.module.css";
@@ -49,12 +50,9 @@ function formatInput(input: Record<string, unknown>): string {
   return JSON.stringify(input, null, 2);
 }
 
-/** How many characters of a text result to show before offering "show all". */
-const RESULT_PREVIEW_CHARS = 2000;
-
 /** Error colouring comes from `.result_error .result_text` on the wrapper. */
 function ResultText({ text }: { text: string }) {
-  return <pre className={styles.result_text}>{text}</pre>;
+  return <ExpandableText text={text} className={styles.result_text} />;
 }
 
 /**
@@ -100,24 +98,12 @@ function ResultBlocks({ blocks }: { blocks: ContentBlock[] }) {
 function ResultContent({ result }: { result: ToolResultBlock }) {
   const isError = !!result.is_error;
 
-  if (Array.isArray(result.content)) {
-    return (
-      <div className={`${styles.result} ${isError ? styles.result_error : ""}`}>
-        <ResultBlocks blocks={result.content} />
-      </div>
-    );
-  }
-
-  const content = typeof result.content === "string" ? result.content : "";
-  const truncated = content.length > RESULT_PREVIEW_CHARS;
-
   return (
     <div className={`${styles.result} ${isError ? styles.result_error : ""}`}>
-      <ResultText text={truncated ? content.slice(0, RESULT_PREVIEW_CHARS) : content} />
-      {truncated && (
-        <span className={styles.truncated}>
-          … {(content.length - RESULT_PREVIEW_CHARS).toLocaleString()} more chars
-        </span>
+      {Array.isArray(result.content) ? (
+        <ResultBlocks blocks={result.content} />
+      ) : (
+        <ResultText text={typeof result.content === "string" ? result.content : ""} />
       )}
     </div>
   );
