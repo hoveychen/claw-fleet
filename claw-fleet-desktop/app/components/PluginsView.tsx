@@ -2,8 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Blocks } from "lucide-react";
-import { useConnectionStore } from "../store";
+import { useConnectionStore, useUIStore } from "../store";
 import { EmptyState } from "./EmptyState";
+import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import styles from "./MemoryView.module.css";
 import pluginStyles from "./PluginsView.module.css";
 
@@ -165,6 +166,8 @@ function PluginCard({
 
 export function PluginsView() {
   const { t } = useTranslation();
+  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["plugins"]);
+  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const [plugins, setPlugins] = useState<PluginItem[]>([]);
   const [marketplaces, setMarketplaces] = useState<MarketplaceItem[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -289,6 +292,9 @@ export function PluginsView() {
       </header>
 
       <div className={styles.body}>
+        {collapsed ? (
+          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("plugins", false)} />
+        ) : (
         <aside className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("plugins.loading")}</p>}
           {loaded && plugins.length === 0 && (
@@ -329,6 +335,7 @@ export function PluginsView() {
             </>
           )}
         </aside>
+        )}
 
         <main className={styles.detail_pane}>
           {selected ? (

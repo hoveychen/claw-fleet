@@ -1,0 +1,38 @@
+.rail {
+  width: 30px;
+  flex-shrink: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 14px;
+  background: var(--color-bg-sidebar, transparent);
+  border: none;
+  cursor: pointer;
+  color: var(--color-text-dim);
+  transition: background 0.12s, color 0.12s;
+}
+
+.rail_left {
+  border-right: 1px solid var(--color-border);
+}
+
+.rail_right {
+  border-left: 1px solid var(--color-border);
+}
+
+.rail:hover {
+  background: rgba(128, 128, 128, 0.12);
+  color: var(--color-text);
+}
+
+.rail:hover .icon {
+  transform: scale(1.08);
+}
+
+.icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.12s;
+}
