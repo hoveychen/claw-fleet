@@ -346,19 +346,25 @@ fn history_file(session_id: &str) -> Option<PathBuf> {
 }
 
 /// Append a record to the per-session JSONL file.
+///
+/// The record and its trailing newline go out in a **single** `write_all`. Two
+/// writes (payload, then `\n`) let a concurrent appender — another thread, or
+/// the `fleet` CLI in another process — slip its bytes in between, producing a
+/// line like `{…}{…}\n` that `read_persisted_records` then discards as
+/// malformed. One `O_APPEND` write keeps each record intact.
 pub fn append_record(record: &DecisionHistoryRecord) -> Result<(), String> {
     let dir = history_dir().ok_or("cannot determine home dir")?;
     fs::create_dir_all(&dir).map_err(|e| format!("create decision-history dir: {e}"))?;
     let path = history_file(record.session_id())
         .ok_or_else(|| format!("invalid session_id: {:?}", record.session_id()))?;
-    let line = serde_json::to_string(record).map_err(|e| format!("serialize: {e}"))?;
+    let mut line = serde_json::to_string(record).map_err(|e| format!("serialize: {e}"))?;
+    line.push('\n');
     let mut file = OpenOptions::new()
         .create(true)
         .append(true)
         .open(&path)
         .map_err(|e| format!("open {}: {e}", path.display()))?;
     file.write_all(line.as_bytes())
-        .and_then(|_| file.write_all(b"\n"))
         .map_err(|e| format!("append: {e}"))
 }
 
@@ -426,6 +432,12 @@ fn record_sort_ts(r: &DecisionHistoryRecord) -> &str {
 
 // ── Session JSONL → UserPrompt extraction ───────────────────────────────────
 
+/// Guards the read-then-append inside [`sync_user_prompts_from_jsonl`] so
+/// concurrent callers in this process can't each observe the same prompt as
+/// missing and append it twice. Cross-process appenders are still possible, but
+/// `append_record`'s single-write contract keeps their lines intact.
+static SYNC_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Prefixes that mark a user-role text block as auto-injected (not actually
 /// typed by the user). When a content block's stripped text starts with one
 /// of these, that block is dropped from the prompt.
@@ -438,6 +450,13 @@ pub fn sync_user_prompts_from_jsonl(
     session_id: &str,
     jsonl_path: &Path,
 ) -> Result<(), String> {
+    // Serialise the read-then-append below. `list_session_decisions` used to be
+    // a synchronous Tauri command, so the main thread was the de-facto lock;
+    // now it runs on a threadpool and two cards mounting for the same session
+    // would otherwise both see a prompt as missing and append it twice.
+    // Poison-tolerant: a panicking appender must not wedge the history sync.
+    let _guard = SYNC_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
     let content = match fs::read_to_string(jsonl_path) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -1005,5 +1024,54 @@ mod tests {
         assert_eq!(listed.len(), 2);
         assert_eq!(listed[0].id(), "elic-1");
         assert_eq!(listed[1].id(), "fa-1");
+    }
+
+    /// `list_session_decisions` used to be a synchronous Tauri command, so the
+    /// main thread serialised every call and the read-then-append inside
+    /// `sync_user_prompts_from_jsonl` could never interleave. Now that the
+    /// command runs on a threadpool, two concurrent calls for the same session
+    /// must still not append the same user prompt twice.
+    #[test]
+    fn concurrent_sync_does_not_duplicate_user_prompts() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = temp_dir("concurrent-sync");
+        let _home = FleetHomeOverride::new(&tmp);
+
+        let session = "sess-concurrent";
+        let jsonl = tmp.join("transcript.jsonl");
+        let mut content = String::new();
+        for i in 0..5 {
+            content.push_str(&format!(
+                r#"{{"type":"user","uuid":"u{i}","timestamp":"2026-04-28T00:00:0{i}Z","message":{{"role":"user","content":[{{"type":"text","text":"hello {i}"}}]}}}}"#
+            ));
+            content.push('\n');
+        }
+        fs::write(&jsonl, content).unwrap();
+
+        const THREADS: usize = 8;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(THREADS));
+        let mut handles = Vec::new();
+        for _ in 0..THREADS {
+            let b = barrier.clone();
+            let p = jsonl.clone();
+            handles.push(std::thread::spawn(move || {
+                // All threads enter the read-then-append window together.
+                b.wait();
+                let _ = sync_user_prompts_from_jsonl("sess-concurrent", &p);
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let records = read_persisted_records(session);
+        let ids: Vec<String> = records.iter().map(|r| r.id().to_string()).collect();
+        let unique: std::collections::HashSet<&String> = ids.iter().collect();
+        assert_eq!(
+            ids.len(),
+            unique.len(),
+            "concurrent sync appended duplicate user-prompt records: {ids:?}"
+        );
+        assert_eq!(unique.len(), 5, "each of the 5 prompts recorded exactly once");
     }
 }
