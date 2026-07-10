@@ -1,0 +1,23 @@
+/* Pasted / attached / read image. Capped so a tall screenshot can't own the
+   viewport, and clickable to see it full size. */
+.thumb_btn {
+  display: block;
+  padding: 0;
+  margin: 6px 0 0;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: none;
+  cursor: zoom-in;
+  overflow: hidden;
+  line-height: 0;
+  max-width: 100%;
+}
+
+.thumb_btn:hover { border-color: var(--color-accent, #60a5fa); }
+
+.thumb {
+  display: block;
+  max-width: 100%;
+  max-height: 260px;
+  object-fit: contain;
+}

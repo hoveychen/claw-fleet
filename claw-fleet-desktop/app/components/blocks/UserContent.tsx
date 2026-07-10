@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ContentBlock, ImageBlock } from "../../types";
-import { ImageLightbox } from "../ImageLightbox";
+import { ImageThumb } from "./ImageThumb";
 import styles from "./UserContent.module.css";
 
 /**
@@ -33,27 +33,9 @@ function SlashCommand({ name, args }: { name: string; args: string }) {
   );
 }
 
-/** `data:` URI for an inline base64 image block. */
-function imageDataUrl(block: ImageBlock): string | null {
-  const source = block.source;
-  if (!source || source.type !== "base64" || !source.data) return null;
-  return `data:${source.media_type || "image/png"};base64,${source.data}`;
-}
-
 function UserImage({ block }: { block: ImageBlock }) {
   const { t } = useTranslation();
-  const [zoomed, setZoomed] = useState(false);
-  const src = imageDataUrl(block);
-  if (!src) return null;
-  const alt = t("detail.user_image");
-  return (
-    <>
-      <button type="button" className={styles.thumb_btn} onClick={() => setZoomed(true)} title={alt}>
-        <img src={src} alt={alt} className={styles.thumb} />
-      </button>
-      {zoomed && <ImageLightbox src={src} alt={alt} onClose={() => setZoomed(false)} />}
-    </>
-  );
+  return <ImageThumb block={block} alt={t("detail.user_image")} />;
 }
 
 interface Props {
