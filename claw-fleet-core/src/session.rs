@@ -4125,33 +4125,48 @@ pub fn interrupt_pid_with_grace(pid: u32, grace: Duration) -> Result<(), String>
 
 /// Kill a process by PID (with process tree cleanup).
 pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
+    kill_pid_tree(pid, false)
+}
+
+/// Kill `pid` **and every descendant**. Signalling the root alone leaves the
+/// agent's tool children — a build, a test run, a dev server — reparented to
+/// init and still burning CPU after the agent itself is gone.
+///
+/// `force` sends SIGKILL straight away; otherwise SIGTERM now, and SIGKILL to
+/// whatever is still standing 2s later.
+pub fn kill_pid_tree(pid: u32, force: bool) -> Result<(), String> {
     #[cfg(unix)]
     {
         let pids = collect_process_tree(pid);
+        let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
         crate::log_debug(&format!(
-            "kill_pid: SIGTERM to {} pids (root={}): {:?}",
+            "kill_pid: {} to {} pids (root={}): {:?}",
+            if force { "SIGKILL" } else { "SIGTERM" },
             pids.len(),
             pid,
             pids
         ));
         for &p in pids.iter().rev() {
-            unsafe { libc::kill(p as libc::pid_t, libc::SIGTERM) };
+            unsafe { libc::kill(p as libc::pid_t, signal) };
         }
 
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(2000));
-            for &p in pids.iter().rev() {
-                if unsafe { libc::kill(p as libc::pid_t, 0) } == 0 {
-                    unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
+        if !force {
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_millis(2000));
+                for &p in pids.iter().rev() {
+                    if unsafe { libc::kill(p as libc::pid_t, 0) } == 0 {
+                        unsafe { libc::kill(p as libc::pid_t, libc::SIGKILL) };
+                    }
                 }
-            }
-        });
+            });
+        }
 
         Ok(())
     }
 
     #[cfg(not(unix))]
     {
+        let _ = force;
         crate::process_util::command("taskkill")
             .args(["/F", "/T", "/PID", &pid.to_string()])
             .status()

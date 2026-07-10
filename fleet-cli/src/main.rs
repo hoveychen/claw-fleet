@@ -171,13 +171,18 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Stop an agent by sending SIGTERM (use --force for SIGKILL)
+    /// Stop an agent and its whole process tree (SIGTERM, or SIGKILL with --force)
     Stop {
         /// Session ID prefix or workspace name
         id: String,
         /// Send SIGKILL instead of SIGTERM
         #[arg(short, long)]
         force: bool,
+    },
+    /// Interrupt an agent's in-flight tool call, leaving the session resumable
+    Interrupt {
+        /// Session ID prefix or workspace name
+        id: String,
     },
     /// Show account info and rate-limit usage
     Account {
@@ -591,6 +596,7 @@ fn main() {
         Commands::Agents { all, json } => cmd_agents(all, json),
         Commands::Agent { id, json } => cmd_agent(&id, json),
         Commands::Stop { id, force } => cmd_stop(&id, force),
+        Commands::Interrupt { id } => cmd_interrupt(&id),
         Commands::Account { json } => cmd_account(json),
         Commands::Speed { json } => cmd_speed(json),
         Commands::Memory { file, json } => cmd_memory(file, json),
@@ -971,7 +977,10 @@ fn cmd_agent(id_prefix: &str, as_json: bool) {
     }
 }
 
-fn cmd_stop(id_prefix: &str, force: bool) {
+/// Resolve an id prefix / workspace name to exactly one signalable agent and
+/// its pid. Exits the process with a diagnostic when that can't be done.
+/// `verb` names the action in the error text ("stop", "interrupt").
+fn resolve_agent(id_prefix: &str, verb: &str) -> (SessionInfo, u32) {
     let sessions = load_sessions();
     let needle = id_prefix.to_lowercase();
 
@@ -1001,7 +1010,7 @@ fn cmd_stop(id_prefix: &str, force: bool) {
 
     if s.is_subagent {
         eprintln!(
-            "Error: '{}' is a subagent — stop the parent session instead.",
+            "Error: '{}' is a subagent — {verb} the parent session instead.",
             short_id(&s.id)
         );
         std::process::exit(1);
@@ -1009,12 +1018,57 @@ fn cmd_stop(id_prefix: &str, force: bool) {
 
     let Some(pid) = s.pid else {
         eprintln!(
-            "Agent {} ({}) has no associated PID — cannot stop.",
+            "Agent {} ({}) has no associated PID — cannot {verb}.",
             short_id(&s.id),
             s.workspace_name
         );
         std::process::exit(1);
     };
+
+    (s.clone(), pid)
+}
+
+/// Interrupt the agent's in-flight tool call. The session survives and stays
+/// resumable, so unlike `stop` this refuses to act on an ambiguous pid: it
+/// would abort a sibling session's turn with no confirmation step.
+fn cmd_interrupt(id_prefix: &str) {
+    let (s, pid) = resolve_agent(id_prefix, "interrupt");
+
+    if !s.pid_precise {
+        eprintln!(
+            "Error: multiple claude processes share workspace '{}', so the PID \
+             for {} is ambiguous — interrupting could abort another session's \
+             turn. Use `fleet stop` if you really mean to signal them all.",
+            s.workspace_name,
+            short_id(&s.id)
+        );
+        std::process::exit(1);
+    }
+
+    #[cfg(unix)]
+    match claw_fleet_core::session::interrupt_pid_impl(pid) {
+        Ok(()) => println!(
+            "Interrupted agent {} ({}) [PID {}] — session remains resumable",
+            short_id(&s.id),
+            s.workspace_name,
+            pid
+        ),
+        Err(e) => {
+            eprintln!("Failed to interrupt PID {pid}: {e}");
+            std::process::exit(1);
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = pid;
+        eprintln!("Interrupt is not supported on this platform.");
+        std::process::exit(1);
+    }
+}
+
+fn cmd_stop(id_prefix: &str, force: bool) {
+    let (s, pid) = resolve_agent(id_prefix, "stop");
 
     if !s.pid_precise {
         eprintln!(
@@ -1026,21 +1080,21 @@ fn cmd_stop(id_prefix: &str, force: bool) {
 
     #[cfg(unix)]
     {
-        let signal = if force { libc::SIGKILL } else { libc::SIGTERM };
         let signal_name = if force { "SIGKILL" } else { "SIGTERM" };
-        let ret = unsafe { libc::kill(pid as libc::pid_t, signal) };
-        if ret == 0 {
-            println!(
-                "Sent {} to agent {} ({}) [PID {}]",
-                signal_name,
-                short_id(&s.id),
-                s.workspace_name,
-                pid
-            );
-        } else {
-            let err = std::io::Error::last_os_error();
-            eprintln!("Failed to send {} to PID {}: {}", signal_name, pid, err);
-            std::process::exit(1);
+        match signal_agent(pid, force) {
+            Ok(()) => {
+                println!(
+                    "Sent {} to agent {} ({}) [PID {}]",
+                    signal_name,
+                    short_id(&s.id),
+                    s.workspace_name,
+                    pid
+                );
+            }
+            Err(e) => {
+                eprintln!("Failed to send {} to PID {}: {}", signal_name, pid, e);
+                std::process::exit(1);
+            }
         }
     }
 
@@ -1050,6 +1104,18 @@ fn cmd_stop(id_prefix: &str, force: bool) {
         eprintln!("Stop is not supported on this platform.");
         std::process::exit(1);
     }
+}
+
+/// Signal an agent process **and its whole tree**; `force` picks SIGKILL over
+/// SIGTERM. Signalling only the root orphans the agent's tool children.
+#[cfg(unix)]
+fn signal_agent(pid: u32, force: bool) -> Result<(), String> {
+    // Probe first: a stale pid must still report "No such process" rather than
+    // silently succeeding once the signalling fans out over the tree.
+    if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    claw_fleet_core::session::kill_pid_tree(pid, force)
 }
 
 fn cmd_account(as_json: bool) {
@@ -3184,5 +3250,48 @@ fn print_report(report: &claw_fleet_core::daily_report::DailyReport) {
     if let Some(ref summary) = report.ai_summary {
         println!("{b}AI Summary{r}");
         println!("{}", summary);
+    }
+}
+
+#[cfg(all(test, unix))]
+mod stop_tests {
+    use super::*;
+    use std::process::{Command, Stdio};
+    use std::time::Duration;
+
+    fn pgrep(pattern: &str) -> bool {
+        Command::new("pgrep")
+            .args(["-f", pattern])
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
+    /// `fleet stop` must reap the agent's whole process tree. A bare
+    /// `kill(root)` leaves the tool child (a build, a test run, a server)
+    /// running after the agent is gone.
+    #[test]
+    fn stop_kills_the_whole_process_tree() {
+        // `sh` backgrounds the sleep and waits: signalling only `sh` reparents
+        // the sleep to init, exactly like a claude process holding a Bash tool.
+        let marker = "sleep 4747";
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 4747 & wait"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn");
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(pgrep(marker), "precondition: the tool child must be running");
+
+        signal_agent(child.id(), false).expect("signal");
+        std::thread::sleep(Duration::from_millis(600));
+
+        let leaked = pgrep(marker);
+        let _ = child.kill();
+        let _ = child.wait();
+        Command::new("pkill").args(["-9", "-f", marker]).output().ok();
+
+        assert!(!leaked, "fleet stop orphaned the agent's tool child");
     }
 }
