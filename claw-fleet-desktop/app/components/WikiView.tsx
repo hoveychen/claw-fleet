@@ -11,6 +11,7 @@ import {
   Copy,
   Download,
   FolderInput,
+  FolderOutput,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -122,6 +123,12 @@ function slugBasename(slug: string): string {
   return at < 0 ? slug : slug.slice(at + 1);
 }
 
+/** Everything before the last `/`; "" when the slug sits at the tree root. */
+function slugDirname(slug: string): string {
+  const at = slug.lastIndexOf("/");
+  return at < 0 ? "" : slug.slice(0, at);
+}
+
 // ── Doc actions (shared by the sidebar context menu and the detail header) ────
 
 /**
@@ -212,7 +219,10 @@ export function WikiView() {
   const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
   const [selectedSlug, setSelectedSlug] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<
-    { kind: "doc"; slug: string } | { kind: "version"; slug: string; version: string } | null
+    | { kind: "doc"; slug: string }
+    | { kind: "version"; slug: string; version: string }
+    | { kind: "folder"; path: string; count: number }
+    | null
   >(null);
 
   const load = useCallback(async () => {
@@ -305,6 +315,9 @@ export function WikiView() {
       if (confirmDelete.kind === "doc") {
         await invoke("delete_wiki_doc", { slug: confirmDelete.slug });
         if (selectedSlug === confirmDelete.slug) setSelectedSlug(null);
+      } else if (confirmDelete.kind === "folder") {
+        await invoke("delete_wiki_folder", { prefix: confirmDelete.path });
+        if (selectedSlug?.startsWith(`${confirmDelete.path}/`)) setSelectedSlug(null);
       } else {
         await invoke("delete_wiki_version", {
           slug: confirmDelete.slug,
@@ -372,6 +385,75 @@ export function WikiView() {
     }
   };
 
+  // ── Folder ops ─────────────────────────────────────────────────────────────
+  const [folderCtx, setFolderCtx] = useState<{ path: string; anchor: ContextMenuAnchor } | null>(
+    null,
+  );
+  const [renameFolder, setRenameFolder] = useState<string | null>(null);
+  const [folderError, setFolderError] = useState<string | null>(null);
+
+  /**
+   * Docs a folder op will actually touch. Counted over the full `docs` set, NOT
+   * the search-filtered tree: the backend acts on every doc under the prefix,
+   * so a count taken from `filtered` would under-report what delete destroys.
+   */
+  const docsUnder = useCallback(
+    (path: string) => docs.filter((d) => d.slug.startsWith(`${path}/`)).length,
+    [docs],
+  );
+
+  /** Re-key a whole folder. `to` of "" dissolves it into the tree root. */
+  const moveFolder = useCallback(
+    async (from: string, to: string) => {
+      await invoke<WikiDoc[]>("move_wiki_folder", { from, to });
+      setSelectedSlug((cur) => {
+        if (!cur?.startsWith(`${from}/`)) return cur;
+        const rest = cur.slice(from.length + 1);
+        return to ? `${to}/${rest}` : rest;
+      });
+      await load();
+    },
+    [load],
+  );
+
+  const handleRenameFolderSubmit = async (to: string) => {
+    if (renameFolder === null) return;
+    try {
+      await moveFolder(renameFolder, to);
+      setRenameFolder(null);
+    } catch (e) {
+      setFolderError(String(e));
+    }
+  };
+
+  const folderMenuItems = (path: string): ContextMenuItem[] => [
+    {
+      id: "rename",
+      label: t("wiki.folder_rename", "重命名目录…"),
+      icon: <FolderInput size={13} strokeWidth={1.7} />,
+      onSelect: () => {
+        setFolderError(null);
+        setRenameFolder(path);
+      },
+    },
+    {
+      id: "dissolve",
+      label: t("wiki.folder_dissolve", "解散目录（文档移到上级）"),
+      icon: <FolderOutput size={13} strokeWidth={1.7} />,
+      onSelect: () => {
+        // Dissolving is just a move to the parent prefix — `p/a/x` → `p/x`.
+        moveFolder(path, slugDirname(path)).catch((e) => setMoveError(String(e)));
+      },
+    },
+    {
+      id: "delete",
+      label: t("wiki.folder_delete", "删除目录及其 {{count}} 篇文档", { count: docsUnder(path) }),
+      icon: <Trash2 size={13} strokeWidth={1.7} />,
+      danger: true,
+      onSelect: () => setConfirmDelete({ kind: "folder", path, count: docsUnder(path) }),
+    },
+  ];
+
   const menuItems = (doc: WikiDoc): ContextMenuItem[] => [
     {
       id: "move",
@@ -434,6 +516,11 @@ export function WikiView() {
               className={`${styles.group_header} ${dropPath === node.path ? styles.drop_target : ""}`}
               style={indent(depth)}
               onClick={() => toggleFolder(node.path)}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setFolderCtx({ path: node.path, anchor: { x: e.clientX, y: e.clientY } });
+              }}
               title={node.path}
               {...dropProps(node.path)}
             >
@@ -590,6 +677,30 @@ export function WikiView() {
         />
       )}
 
+      {folderCtx && (
+        <ContextMenu
+          anchor={folderCtx.anchor}
+          items={folderMenuItems(folderCtx.path)}
+          onClose={() => setFolderCtx(null)}
+        />
+      )}
+
+      {renameFolder !== null && (
+        <PromptDialog
+          title={t("wiki.folder_rename_title", "重命名目录 “{{path}}”", { path: renameFolder })}
+          hint={t(
+            "wiki.folder_rename_hint",
+            "目录下的 {{count}} 篇文档会一起改前缀。写成 a/b 可把它移到别的目录下；移入已存在的目录会合并，撞名则整体失败、什么都不改。",
+            { count: docsUnder(renameFolder) },
+          )}
+          defaultValue={renameFolder}
+          confirmLabel={t("wiki.folder_rename_confirm", "重命名")}
+          error={folderError}
+          onConfirm={handleRenameFolderSubmit}
+          onCancel={() => setRenameFolder(null)}
+        />
+      )}
+
       {moveTarget && (
         <PromptDialog
           title={t("wiki.move_title", "移动 / 重命名 “{{title}}”", { title: moveTarget.title })}
@@ -612,10 +723,16 @@ export function WikiView() {
               ? t("wiki.delete_doc_confirm", "Delete “{{slug}}” and all its versions?", {
                   slug: confirmDelete.slug,
                 })
-              : t("wiki.delete_version_confirm", "Delete version {{version}} of “{{slug}}”?", {
-                  slug: confirmDelete.slug,
-                  version: confirmDelete.version,
-                })
+              : confirmDelete.kind === "folder"
+                ? t(
+                    "wiki.delete_folder_confirm",
+                    "删除目录 “{{path}}” 下的全部 {{count}} 篇文档（含所有历史版本）？此操作不可撤销。",
+                    { path: confirmDelete.path, count: confirmDelete.count },
+                  )
+                : t("wiki.delete_version_confirm", "Delete version {{version}} of “{{slug}}”?", {
+                    slug: confirmDelete.slug,
+                    version: confirmDelete.version,
+                  })
           }
           onConfirm={handleDelete}
           onCancel={() => setConfirmDelete(null)}

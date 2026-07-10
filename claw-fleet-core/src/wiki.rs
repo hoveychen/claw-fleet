@@ -1017,6 +1017,124 @@ pub fn move_doc_in(root: &Path, from: &str, to: &str) -> Result<WikiDoc, String>
     Ok(doc)
 }
 
+// ── Folder ops ───────────────────────────────────────────────────────────────
+//
+// Folders do not exist. `slug_to_dirname` flattens `a/b` into `a%2Fb`, so a
+// folder is nothing but the shared prefix of some slugs — there is no directory
+// on disk to rename or remove. Every folder operation is therefore a loop over
+// the docs beneath it.
+
+/// Slugs of every doc strictly beneath `prefix` (that is, `prefix/…`), sorted.
+///
+/// A doc whose slug *equals* `prefix` is excluded on purpose: the sidebar tree
+/// renders it beside the folder, not inside it, so a folder rename must leave
+/// it alone.
+fn slugs_under(root: &Path, prefix: &str) -> Vec<String> {
+    let needle = format!("{prefix}/");
+    let mut slugs: Vec<String> = list_docs_in(root)
+        .into_iter()
+        .map(|d| d.slug)
+        .filter(|s| s.starts_with(&needle))
+        .collect();
+    slugs.sort();
+    slugs
+}
+
+/// Re-key every doc under folder `from` so it sits under `to` instead.
+pub fn move_folder(from: &str, to: &str) -> Result<Vec<WikiDoc>, String> {
+    move_folder_in(&wiki_dir_or_err()?, from, to)
+}
+
+/// [`move_folder`] against an explicit wiki root. `to` may be `""`, meaning the
+/// tree root — that is how a folder gets dissolved.
+///
+/// All-or-nothing: every destination is planned and checked before the first
+/// rename, and a failure part-way through rolls the completed renames back, so
+/// the wiki is never left half-moved. Merging into an existing folder is
+/// allowed; a doc that would collide with one already there aborts the move.
+pub fn move_folder_in(root: &Path, from: &str, to: &str) -> Result<Vec<WikiDoc>, String> {
+    if from.is_empty() {
+        return Err("cannot move the wiki root".to_string());
+    }
+    let to = if to.is_empty() { String::new() } else { normalize_slug(to)? };
+    if to == from {
+        return Ok(Vec::new());
+    }
+    // `a` → `a/b` would re-key each doc into an ever-deeper path.
+    if to.starts_with(&format!("{from}/")) {
+        return Err(format!("cannot move folder '{from}' into itself"));
+    }
+
+    let sources = slugs_under(root, from);
+    if sources.is_empty() {
+        return Err(format!("no wiki docs under '{from}'"));
+    }
+
+    // Plan and validate every destination before touching the disk.
+    let mut plan: Vec<(String, String)> = Vec::new();
+    let mut targets: Vec<String> = Vec::new();
+    for old in &sources {
+        let rest = &old[from.len() + 1..];
+        let joined = if to.is_empty() { rest.to_string() } else { format!("{to}/{rest}") };
+        // Re-normalizing catches the depth ceiling: nesting `a/b` under `c/d/e`
+        // can push a doc past MAX_SLUG_DEPTH.
+        let new = normalize_slug(&joined)?;
+        if targets.contains(&new) {
+            return Err(format!("'{new}' would collide with another doc in this move"));
+        }
+        if root.join(slug_to_dirname(&new)).join("doc.json").exists() {
+            return Err(format!("wiki doc '{new}' already exists"));
+        }
+        targets.push(new.clone());
+        plan.push((old.clone(), new));
+    }
+
+    let mut done: Vec<(String, String)> = Vec::new();
+    let mut moved: Vec<WikiDoc> = Vec::new();
+    for (old, new) in &plan {
+        match move_doc_in(root, old, new) {
+            Ok(doc) => {
+                done.push((old.clone(), new.clone()));
+                moved.push(doc);
+            }
+            Err(e) => {
+                for (old_slug, new_slug) in done.iter().rev() {
+                    let _ = move_doc_in(root, new_slug, old_slug);
+                }
+                return Err(e);
+            }
+        }
+    }
+    Ok(moved)
+}
+
+/// Delete every doc under folder `prefix`, with all their versions.
+pub fn delete_folder(prefix: &str) -> Result<usize, String> {
+    delete_folder_in(&wiki_dir_or_err()?, prefix)
+}
+
+/// [`delete_folder`] against an explicit wiki root. Returns how many docs went.
+///
+/// Unlike [`move_folder_in`] this cannot roll back — a removed directory is
+/// gone — so a mid-way failure reports how many docs were already deleted
+/// rather than pretending nothing happened.
+pub fn delete_folder_in(root: &Path, prefix: &str) -> Result<usize, String> {
+    if prefix.is_empty() {
+        return Err("cannot delete the wiki root".to_string());
+    }
+    let slugs = slugs_under(root, prefix);
+    if slugs.is_empty() {
+        return Err(format!("no wiki docs under '{prefix}'"));
+    }
+    let total = slugs.len();
+    for (deleted, slug) in slugs.iter().enumerate() {
+        delete_doc_in(root, slug).map_err(|e| {
+            format!("deleted {deleted} of {total} docs under '{prefix}', then failed: {e}")
+        })?;
+    }
+    Ok(total)
+}
+
 // ── Delete ───────────────────────────────────────────────────────────────────
 
 /// Remove a doc and all its versions.
@@ -1204,6 +1322,143 @@ mod tests {
         assert!(get_doc_in(root.path(), "b").is_ok());
         // Moving onto itself is a no-op, not an "already exists" error.
         assert_eq!(move_doc_in(root.path(), "a", "a").unwrap().slug, "a");
+    }
+
+    /// Publishes `slug` with throwaway content, for folder-op fixtures.
+    fn seed(root: &TempDir, ws: &TempDir, slug: &str) {
+        let md = ws.path().join("seed.md");
+        fs::write(&md, format!("# {slug}\n")).unwrap();
+        publish_in(root.path(), &md, Some(slug), None, ws.path()).unwrap();
+    }
+
+    #[test]
+    fn move_folder_rekeys_every_doc_beneath() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "arch/one");
+        seed(&root, &ws, "arch/deep/two");
+        seed(&root, &ws, "arch"); // same name as the folder, sits beside it
+        seed(&root, &ws, "unrelated");
+
+        let moved = move_folder_in(root.path(), "arch", "design").unwrap();
+        assert_eq!(moved.len(), 2, "only the two docs *under* arch/ move");
+
+        assert!(get_doc_in(root.path(), "design/one").is_ok());
+        assert!(get_doc_in(root.path(), "design/deep/two").is_ok());
+        // A doc whose slug equals the folder name renders beside it, so it stays.
+        assert!(get_doc_in(root.path(), "arch").is_ok());
+        assert!(get_doc_in(root.path(), "unrelated").is_ok());
+        assert!(get_doc_in(root.path(), "arch/one").is_err());
+    }
+
+    #[test]
+    fn move_folder_to_empty_dissolves_into_root() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "arch/one");
+        seed(&root, &ws, "arch/two");
+
+        assert_eq!(move_folder_in(root.path(), "arch", "").unwrap().len(), 2);
+        assert!(get_doc_in(root.path(), "one").is_ok());
+        assert!(get_doc_in(root.path(), "two").is_ok());
+    }
+
+    #[test]
+    fn move_folder_merges_into_existing_folder() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "a/x");
+        seed(&root, &ws, "b/y");
+
+        assert_eq!(move_folder_in(root.path(), "a", "b").unwrap().len(), 1);
+        assert!(get_doc_in(root.path(), "b/x").is_ok());
+        assert!(get_doc_in(root.path(), "b/y").is_ok());
+    }
+
+    /// The whole point of planning up front: a collision anywhere aborts the
+    /// move and leaves every doc exactly where it started.
+    #[test]
+    fn move_folder_collision_aborts_before_touching_disk() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "a/x");
+        seed(&root, &ws, "a/y");
+        seed(&root, &ws, "b/y"); // b/y already taken — a/y cannot land
+
+        assert!(move_folder_in(root.path(), "a", "b").is_err());
+        assert!(get_doc_in(root.path(), "a/x").is_ok(), "a/x never moved");
+        assert!(get_doc_in(root.path(), "a/y").is_ok());
+        assert!(get_doc_in(root.path(), "b/y").is_ok());
+        assert!(get_doc_in(root.path(), "b/x").is_err());
+    }
+
+    /// Exercises the rollback path itself, which the collision test above never
+    /// reaches (it aborts during planning, before any rename).
+    ///
+    /// `b/y`'s destination is squatted by a non-empty directory that has no
+    /// `doc.json`: planning sees no doc there and lets the move through, then
+    /// `fs::rename` onto a non-empty dir fails. `a/x` has already moved by
+    /// then, so it must be put back.
+    #[test]
+    fn move_folder_rolls_back_a_partially_completed_move() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "a/x");
+        seed(&root, &ws, "a/y");
+        let squat = root.path().join(slug_to_dirname("b/y"));
+        fs::create_dir_all(squat.join("junk")).unwrap();
+
+        assert!(move_folder_in(root.path(), "a", "b").is_err());
+
+        // a/x moved first, then a/y failed — a/x must be back where it started.
+        assert!(get_doc_in(root.path(), "a/x").is_ok(), "rolled back");
+        assert!(get_doc_in(root.path(), "a/y").is_ok());
+        assert!(get_doc_in(root.path(), "b/x").is_err(), "no orphan left behind");
+    }
+
+    #[test]
+    fn move_folder_rejects_root_self_nesting_and_missing() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "a/x");
+
+        assert!(move_folder_in(root.path(), "", "b").is_err(), "no moving the root");
+        assert!(move_folder_in(root.path(), "a", "a/deeper").is_err(), "into itself");
+        assert!(move_folder_in(root.path(), "nosuch", "b").is_err());
+        // A no-op move reports nothing moved rather than erroring.
+        assert!(move_folder_in(root.path(), "a", "a").unwrap().is_empty());
+        assert!(get_doc_in(root.path(), "a/x").is_ok());
+    }
+
+    /// Nesting a deep folder under another can breach MAX_SLUG_DEPTH; the plan
+    /// pass must catch it before any doc moves.
+    #[test]
+    fn move_folder_respects_depth_ceiling() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "a/b/c/d/e/f/g"); // 7 segments, at the ceiling
+
+        assert!(move_folder_in(root.path(), "a", "x/y/z").is_err());
+        assert!(get_doc_in(root.path(), "a/b/c/d/e/f/g").is_ok(), "nothing moved");
+    }
+
+    #[test]
+    fn delete_folder_removes_everything_beneath() {
+        let root = tmp();
+        let ws = tmp();
+        seed(&root, &ws, "a/x");
+        seed(&root, &ws, "a/deep/y");
+        seed(&root, &ws, "a"); // beside the folder, must survive
+        seed(&root, &ws, "b/z");
+
+        assert_eq!(delete_folder_in(root.path(), "a").unwrap(), 2);
+        assert!(get_doc_in(root.path(), "a/x").is_err());
+        assert!(get_doc_in(root.path(), "a/deep/y").is_err());
+        assert!(get_doc_in(root.path(), "a").is_ok());
+        assert!(get_doc_in(root.path(), "b/z").is_ok());
+
+        assert!(delete_folder_in(root.path(), "a").is_err(), "now empty");
+        assert!(delete_folder_in(root.path(), "").is_err(), "no deleting the root");
     }
 
     #[test]

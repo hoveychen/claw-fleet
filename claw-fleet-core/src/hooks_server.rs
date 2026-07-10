@@ -1037,6 +1037,64 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            // Folder ops. `to: ""` dissolves the folder into the tree root.
+            "/wiki_move_folder" if request.method() == &tiny_http::Method::Post => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct Req {
+                    from: String,
+                    to: String,
+                }
+                let moved = serde_json::from_slice::<Req>(&body_bytes)
+                    .map_err(|e| format!("bad /wiki_move_folder body: {e}"))
+                    .and_then(|r| crate::wiki::move_folder(&r.from, &r.to));
+                match moved {
+                    Ok(docs) => {
+                        let body = serde_json::to_string(&docs).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            "/wiki_delete_folder" if request.method() == &tiny_http::Method::Post => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                #[derive(serde::Deserialize)]
+                struct Req {
+                    prefix: String,
+                }
+                let deleted = serde_json::from_slice::<Req>(&body_bytes)
+                    .map_err(|e| format!("bad /wiki_delete_folder body: {e}"))
+                    .and_then(|r| crate::wiki::delete_folder(&r.prefix));
+                match deleted {
+                    Ok(count) => {
+                        let body = serde_json::json!({ "deleted": count }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/task_plans" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let workspace_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
