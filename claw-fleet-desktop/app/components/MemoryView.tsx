@@ -6,6 +6,8 @@ import { Brain } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { useAutoFlip } from "./useAutoFlip";
+import { useUIStore } from "../store";
+import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import styles from "./MemoryView.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -106,6 +108,8 @@ function formatTime(iso: string): string {
 
 export function MemoryView() {
   const { t } = useTranslation();
+  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["memory"]);
+  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const [memories, setMemories] = useState<WorkspaceMemory[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -244,6 +248,9 @@ export function MemoryView() {
       </div>
 
       <div className={styles.body}>
+        {collapsed ? (
+          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("memory", false)} />
+        ) : (
         <aside className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("memory.loading")}</p>}
           {loaded && filtered.length === 0 && (
@@ -336,6 +343,7 @@ export function MemoryView() {
             );
           })}
         </aside>
+        )}
 
         <main className={styles.detail_pane}>
           {selection === null ? (
