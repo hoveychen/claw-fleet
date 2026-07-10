@@ -52,8 +52,9 @@ pub fn render_guidance(locale: &str) -> String {
 `fleet wiki mv <旧 slug> <新 slug>` 改键搬进目录,版本历史会一起带走。\n\
 - 只归档最终成品,草稿、中间产物、一次性调试页不要 publish。\n\
 - markdown 文档里可以用 `[[slug]]` 或 `[[slug|显示文字]]` 引用知识库里\
-其他文档,渲染后可点击跳转;引用前先用 `fleet wiki list` 确认目标 slug \
-已发布(未发布的引用会显示为灰色死链)。\n\
+其他文档,渲染后可点击跳转;slug 是全局的,引用前先用 \
+`fleet wiki list --all` 确认目标 slug 已发布(未发布的引用会显示为灰色\
+死链)。\n\
 - 发布后文档出现在 Fleet 桌面端的「知识库」板块,用户可按 workspace \
 筛选、全文搜索、切换版本、导出、直接渲染(HTML 里的 JS 可运行)。\n\
 \n\
@@ -70,8 +71,12 @@ fleet wiki cat <slug> --file assets/app.js  # 目录型文档里的其他文件\
 \n\
 - 默认输出当前版本的 entry 文件(markdown 文档就是正文,HTML 目录是 \
 `index.html`)。\n\
-- 不知道有哪些文档就 `fleet wiki list`;想看某篇的版本历史和 entry \
-文件名就 `fleet wiki show <slug>`。\n\
+- 不知道有哪些文档就 `fleet wiki list`——默认只列当前 workspace 发布过的\
+文档,正好用来开工前回顾这个项目已有的调研成果;加 `--all` 看所有 \
+workspace。\n\
+- 按内容找就 `fleet wiki search <关键词>`(同样默认限当前 workspace,\
+`--all` 放宽),它会搜标题、slug 和正文并给出片段。\n\
+- 想看某篇的版本历史和 entry 文件名就 `fleet wiki show <slug>`。\n\
 \n\
 ## 什么时候不该用 wiki\n\
 \n\
@@ -115,9 +120,9 @@ everything at the root. Already-published docs move with \
 - Publish finished artifacts only — no drafts, intermediates, or one-off \
 debug pages.\n\
 - Markdown docs can reference other wiki docs with `[[slug]]` or \
-`[[slug|display text]]` — rendered as clickable cross-links. Check the \
-target slug exists first with `fleet wiki list` (unpublished refs render \
-as grayed dead links).\n\
+`[[slug|display text]]` — rendered as clickable cross-links. Slugs are \
+global, so check the target exists first with `fleet wiki list --all` \
+(unpublished refs render as grayed dead links).\n\
 - Published docs appear in the Fleet desktop app's Wiki board, filterable by \
 workspace, full-text searchable, with version switching, export, and live \
 HTML rendering (scripts run).\n\
@@ -136,8 +141,13 @@ fleet wiki cat <slug> --file assets/app.js    # another file in a dir doc\n\
 \n\
 - Defaults to the current version's entry file (the body for markdown docs, \
 `index.html` for HTML directories).\n\
-- `fleet wiki list` shows the available slugs; `fleet wiki show <slug>` \
-shows its version history and entry filename.\n\
+- `fleet wiki list` shows the docs published from the current workspace — \
+the way to review what this project already investigated before starting \
+work; `--all` spans every workspace.\n\
+- `fleet wiki search <term>` finds docs by content (also current-workspace \
+by default, `--all` to widen), matching titles, slugs and body text.\n\
+- `fleet wiki show <slug>` shows a doc's version history and entry \
+filename.\n\
 \n\
 ## When NOT to use the wiki\n\
 \n\
