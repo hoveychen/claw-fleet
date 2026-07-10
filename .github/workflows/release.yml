@@ -277,18 +277,6 @@ jobs:
       - name: List artifacts
         run: ls -lh all-artifacts/
 
-      - name: Find latest mobile release
-        id: mobile
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          MOBILE_TAG=$(gh release list -L 50 --json tagName -q '[.[] | select(.tagName | startswith("mobile-v"))][0].tagName' 2>/dev/null || echo "")
-          if [ -n "$MOBILE_TAG" ]; then
-            ASSET_URL=$(gh release view "$MOBILE_TAG" --json assets -q '.assets[0].url' 2>/dev/null || echo "")
-            echo "tag=$MOBILE_TAG" >> "$GITHUB_OUTPUT"
-            echo "url=$ASSET_URL" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Generate release notes
         env:
           TAG: ${{ needs.resolve.outputs.tag }}
@@ -313,14 +301,6 @@ jobs:
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-windows.svg" width="24"> | Windows x64 | [fleet-windows-x64.exe](${DL}/fleet-windows-x64.exe) |
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux x86_64 | [fleet-linux-x64](${DL}/fleet-linux-x64) |
           | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-linux.svg" width="24"> | Linux ARM64 | [fleet-linux-arm64](${DL}/fleet-linux-arm64) |
-
-          ### Mobile Companion
-
-          | | Platform | Download |
-          |---|---|---|
-          | <img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/docs/icon-android.svg" width="24"> | Android | [Download APK](${{ steps.mobile.outputs.url }}) |
-
-          Scan the QR code in Desktop → Settings → Mobile to connect.
 
           ## What's Changed
 

@@ -3,7 +3,7 @@
 //! client, timed out, or cleaned up by the respective CLI).
 //!
 //! This is the end-to-end regression test for the cross-client decision-panel
-//! sync feature: without the dismiss broadcasts, mobile and desktop can each
+//! sync feature: without the dismiss broadcasts, two desktop clients can each
 //! answer the same decision independently because neither is notified that
 //! the other's answer already landed.
 //!

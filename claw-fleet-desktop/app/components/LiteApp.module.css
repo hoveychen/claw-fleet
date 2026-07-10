@@ -64,21 +64,6 @@
   color: var(--color-text);
 }
 
-.icon_btn_active {
-  color: var(--color-accent, #4ade80);
-}
-
-.icon_btn_dot {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-accent, #4ade80);
-  box-shadow: 0 0 4px var(--color-accent, #4ade80);
-}
-
 .body {
   flex: 1;
   display: flex;
