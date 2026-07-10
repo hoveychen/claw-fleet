@@ -361,6 +361,22 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
   // been opened (absent until then). Drives the "wf" chip.
   const workflowRun = useSessionsStore((s) => s.workflowRunCounts[session.id]);
   const [killing, setKilling] = useState(false);
+  const [interrupting, setInterrupting] = useState(false);
+
+  // Graceful stop. Deliberately gated on pidPrecise: an imprecise pid means
+  // several claude processes share the cwd, and SIGINT would abort whichever
+  // one we guessed at. Killing a whole workspace is a decision the user can
+  // confirm; silently interrupting the wrong session is not.
+  const handleInterrupt = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!session.pid || interrupting || killing || !session.pidPrecise) return;
+    setInterrupting(true);
+    try {
+      await invoke("interrupt_session", { pid: session.pid });
+    } finally {
+      setInterrupting(false);
+    }
+  };
 
   const handleStop = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -439,14 +455,26 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           <span className={styles.gm_spacer} />
           <RateLimitControls session={session} />
           {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
-            <button
-              className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
-              onClick={handleStop}
-              title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
-              disabled={killing}
-            >
-              ■
-            </button>
+            <>
+              {session.pidPrecise && (
+                <button
+                  className={`${styles.interrupt_btn} ${interrupting ? styles.interrupt_btn_busy : ""}`}
+                  onClick={handleInterrupt}
+                  title={t("interrupt_session")}
+                  disabled={interrupting || killing}
+                >
+                  ⎋
+                </button>
+              )}
+              <button
+                className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
+                onClick={handleStop}
+                title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
+                disabled={killing}
+              >
+                ■
+              </button>
+            </>
           )}
         </div>
       ) : (
@@ -456,14 +484,26 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             {!hideHeader && <StatusBadge status={session.status} />}
             {!hideHeader && <RateLimitControls session={session} />}
             {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
-              <button
-                className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
-                onClick={handleStop}
-                title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
-                disabled={killing}
-              >
-                ■
-              </button>
+              <>
+                {session.pidPrecise && (
+                  <button
+                    className={`${styles.interrupt_btn} ${interrupting ? styles.interrupt_btn_busy : ""}`}
+                    onClick={handleInterrupt}
+                    title={t("interrupt_session")}
+                    disabled={interrupting || killing}
+                  >
+                    ⎋
+                  </button>
+                )}
+                <button
+                  className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
+                  onClick={handleStop}
+                  title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
+                  disabled={killing}
+                >
+                  ■
+                </button>
+              </>
             )}
           </div>
 

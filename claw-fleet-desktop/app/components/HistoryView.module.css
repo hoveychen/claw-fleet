@@ -163,6 +163,69 @@
 .row_wrap {
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+/* The row is a full-width <button>; nesting more buttons inside it would be
+   invalid HTML and swallow the clicks. Overlay them on its right edge instead. */
+.row_actions {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.row_wrap:hover .row_actions,
+.row_actions:focus-within {
+  opacity: 1;
+}
+
+.row_action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: var(--color-bg-card);
+  color: var(--color-text-dim);
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.row_action:hover {
+  background: var(--badge-executing-bg);
+  color: var(--badge-executing-fg);
+}
+
+.row_action_stop {
+  font-size: 9px;
+}
+
+.row_action_stop:hover {
+  background: var(--badge-streaming-bg);
+  color: var(--badge-streaming-fg);
+}
+
+.row_action:disabled {
+  cursor: default;
+}
+
+.row_action_busy {
+  animation: row_action_pulse 0.8s ease-in-out infinite;
+}
+
+/* Keyframes are module-scoped, so this must live in this file. */
+@keyframes row_action_pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
 }
 
 .row {

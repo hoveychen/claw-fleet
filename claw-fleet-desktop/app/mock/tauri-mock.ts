@@ -78,6 +78,7 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "disconnect_remote":
     case "set_source_enabled":
     case "apply_hooks_setup":
+    case "interrupt_session":
     case "kill_session":
     case "kill_workspace_sessions":
     case "delete_connection":

@@ -411,6 +411,40 @@
 .compact_chip { color: var(--color-text-dim); }
 .time { color: var(--color-text-dim); }
 
+/* Interrupt button — graceful sibling of .stop_btn, same reveal-on-hover rules */
+.interrupt_btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.card:hover .interrupt_btn,
+.card.selected .interrupt_btn {
+  opacity: 1;
+}
+
+.interrupt_btn:hover {
+  background: var(--badge-executing-bg);
+  color: var(--badge-executing-fg);
+}
+
+.interrupt_btn_busy {
+  opacity: 1;
+  animation: pulse 0.8s ease-in-out infinite;
+}
+
 /* Stop button */
 .stop_btn {
   display: inline-flex;

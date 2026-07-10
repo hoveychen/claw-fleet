@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderGit2, History, Plus, Search } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { useSessionsStore } from "../store";
 import type { SessionInfo } from "../types";
 import { isFleetOwnedEntrypoint } from "../types";
@@ -64,6 +66,75 @@ function rowDotColor(s: SessionInfo): string {
   if (!LIVE_STATUSES.has(s.status)) return "#6b6b72";
   if (s.status === "waitingInput") return "#d0a85a";
   return "#5ac88c";
+}
+
+/** A row only grows stop/interrupt controls while there is a live process to
+ *  aim them at. Subagents are driven by their parent, and cursor sessions are
+ *  not ours to signal. */
+function isStoppable(s: SessionInfo): boolean {
+  return (
+    LIVE_STATUSES.has(s.status) &&
+    s.pid !== null &&
+    !s.isSubagent &&
+    s.agentSource !== "cursor"
+  );
+}
+
+/** Stop (hard kill) and interrupt (graceful) controls for one launchpad row.
+ *  Rendered as a sibling of the row `<button>` — nesting them inside it would
+ *  be invalid HTML and swallow the clicks. */
+function RowActions({ session }: { session: SessionInfo }) {
+  const { t } = useTranslation();
+  const [busy, setBusy] = useState<"interrupt" | "stop" | null>(null);
+
+  const run = async (kind: "interrupt" | "stop", fn: () => Promise<unknown>) => {
+    if (busy) return;
+    setBusy(kind);
+    try {
+      await fn();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <span className={styles.row_actions}>
+      {/* Interrupt needs an unambiguous pid: with several claude processes in
+          one cwd we would be aborting whichever turn we guessed at. */}
+      {session.pidPrecise && (
+        <button
+          type="button"
+          className={`${styles.row_action} ${busy === "interrupt" ? styles.row_action_busy : ""}`}
+          title={t("interrupt_session")}
+          disabled={busy !== null}
+          onClick={() =>
+            run("interrupt", () => invoke("interrupt_session", { pid: session.pid }))
+          }
+        >
+          ⎋
+        </button>
+      )}
+      <button
+        type="button"
+        className={`${styles.row_action} ${styles.row_action_stop} ${busy === "stop" ? styles.row_action_busy : ""}`}
+        title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
+        disabled={busy !== null}
+        onClick={() =>
+          run("stop", async () => {
+            if (session.pidPrecise) {
+              if (!(await ask(t("stop_confirm", { name: session.workspaceName }), { kind: "warning" }))) return;
+              await invoke("kill_session", { pid: session.pid });
+            } else {
+              if (!(await ask(t("stop_imprecise_confirm", { workspace: session.workspaceName }), { kind: "warning" }))) return;
+              await invoke("kill_workspace_sessions", { workspacePath: session.workspacePath });
+            }
+          })
+        }
+      >
+        ■
+      </button>
+    </span>
+  );
 }
 
 /** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see
@@ -281,6 +352,7 @@ export function HistoryView() {
                       )}
                     </span>
                   </button>
+                  {isStoppable(s) && <RowActions session={s} />}
                 </div>
               );
             })
