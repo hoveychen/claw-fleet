@@ -450,23 +450,26 @@ fn get_permissions_config() -> claw_fleet_core::permissions_injector::Permission
     claw_fleet_core::permissions_injector::load_config()
 }
 
-/// Persist the toggle and immediately apply it to this process:
+/// Persist the toggle and immediately apply it:
 ///   - flipping to `true`  → acquire(pid) right now
-///   - flipping to `false` → release(pid) right now
+///   - flipping to `false` → deactivate() right now
 ///
-/// A peer `fleet serve` process keeps its own holder slot until its own exit;
-/// the lock's refcount ensures settings.json stays injected as long as any
-/// Fleet process still wants it.
+/// This toggle is the *only* thing that un-injects settings.json. Quitting Fleet
+/// does not, because the `claude` sessions Fleet spawned outlive the app and
+/// would stall on permission prompts if the allow rules disappeared underneath
+/// them. `deactivate` is unconditional even when a peer `fleet serve` still
+/// holds the lock: the toggle is global, so every Fleet process's watchdog then
+/// reads `enabled == false` and stops re-injecting.
 #[tauri::command]
 fn set_permissions_config(
     cfg: claw_fleet_core::permissions_injector::PermissionsConfig,
 ) -> Result<claw_fleet_core::permissions_injector::PermissionsConfig, String> {
     claw_fleet_core::permissions_injector::save_config(&cfg).map_err(|e| e.to_string())?;
-    let pid = std::process::id();
     if cfg.enabled {
-        claw_fleet_core::permissions_injector::acquire(pid).map_err(|e| e.to_string())?;
+        claw_fleet_core::permissions_injector::acquire(std::process::id())
+            .map_err(|e| e.to_string())?;
     } else {
-        claw_fleet_core::permissions_injector::release(pid).map_err(|e| e.to_string())?;
+        claw_fleet_core::permissions_injector::deactivate().map_err(|e| e.to_string())?;
     }
     Ok(cfg)
 }
@@ -3616,11 +3619,16 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application")
         .run(|_app_handle, event| {
-            // Restore the user's ~/.claude/settings.json and ~/.claude.json
-            // on every exit path so the injections are symmetric with the
-            // acquires in setup(). Both releases are unconditional — they
-            // no-op when no lock exists, so they self-heal if the toggle
-            // was flipped off mid-run.
+            // Deregister this pid from both injector locks on every exit path.
+            // Unconditional — each is a no-op when no lock exists, so they
+            // self-heal if the toggle was flipped off mid-run.
+            //
+            // Note the asymmetry with setup()'s acquires: permissions_injector
+            // deliberately leaves ~/.claude/settings.json injected, because the
+            // claude sessions we spawned are detached and keep running after we
+            // quit — pulling the allow rules would strand them on permission
+            // prompts nothing is left to answer. Only the settings-panel toggle
+            // un-injects, via permissions_injector::deactivate().
             if matches!(event, tauri::RunEvent::Exit) {
                 let _ = claw_fleet_core::permissions_injector::release(
                     std::process::id(),

@@ -1318,7 +1318,7 @@
     "guard_enabled": "启用安全防护",
     "guard_llm_analysis": "AI 风险分析",
     "permissions_bypass": "由 Fleet 统一管权限",
-    "permissions_bypass_desc": "让 Fleet 统一负责命令许可，避免同一条命令被终端和 Fleet 两次询问。关闭 Fleet 后会自动恢复原状。",
+    "permissions_bypass_desc": "让 Fleet 统一负责命令许可，避免同一条命令被终端和 Fleet 两次询问。规则会一直保留：Fleet 退出后依然生效，这样它启动的会话不会卡在授权上。只有关闭此开关才会恢复你原来的设置。",
     "permissions_bypass_enabled": "让 Fleet 统一管理权限",
     "elicitation": "把 Agent 的提问送到 Fleet",
     "elicitation_desc": "Agent 需要你回答问题时，直接在 Fleet 里回复，不用切回终端。",
