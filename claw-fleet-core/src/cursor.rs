@@ -563,7 +563,7 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
             last_outcome: None,
             rate_limit: None,
             todos: None,
-            task_plan: None, handoff: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
