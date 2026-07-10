@@ -93,7 +93,9 @@
   min-width: 0;
 }
 
-/* User text */
+/* User bubble. Whitespace handling belongs to UserContent's own text runs, not
+   here — this container also holds images and command chips, whose surrounding
+   markup whitespace must not be preserved. */
 .user_text {
   background: var(--color-bg-user);
   border-radius: 6px 6px 6px 2px;
@@ -101,7 +103,6 @@
   font-size: 13px;
   line-height: 1.5;
   color: var(--color-text);
-  white-space: pre-wrap;
   word-break: break-word;
 }
 

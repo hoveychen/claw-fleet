@@ -1335,6 +1335,8 @@
     "decision_ask": "Question",
     "decision_answered_other": "Answered",
     "decision_unanswered": "Unanswered",
+    "user_image": "Attached image",
+    "slash_command": "slash command",
     "working_thinking": "Thinking…",
     "working_executing": "Running tools…",
     "working_streaming": "Responding…",

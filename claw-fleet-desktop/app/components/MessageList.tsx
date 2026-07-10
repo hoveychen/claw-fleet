@@ -15,6 +15,7 @@ import {
   ToolUseBlock as ToolUseBlockComp,
 } from "./blocks/ToolUseBlock";
 import { DecisionToolCard, hasDecisionQuestions } from "./blocks/DecisionToolCard";
+import { UserContent } from "./blocks/UserContent";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import styles from "./MessageList.module.css";
 
@@ -377,21 +378,16 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, metaM
         )}
         {isUser && (
           <div className={styles.user_text}>
-            {typeof content === "string"
-              ? (searchTerms ? <HighlightedText text={content} terms={searchTerms} /> : content)
-              : Array.isArray(content)
-                ? content
-                    .filter((b) => b.type !== "tool_result")
-                    .map((b, i) =>
-                      b.type === "text" ? (
-                        <span key={i}>
-                          {searchTerms
-                            ? <HighlightedText text={(b as { type: "text"; text: string }).text} terms={searchTerms} />
-                            : (b as { type: "text"; text: string }).text}
-                        </span>
-                      ) : null
-                    )
-                : null}
+            <UserContent
+              content={content}
+              renderText={(text, key) =>
+                searchTerms ? (
+                  <HighlightedText key={key} text={text} terms={searchTerms} />
+                ) : (
+                  text
+                )
+              }
+            />
           </div>
         )}
         {isAssistant && (msg.message.usage || time) && (
