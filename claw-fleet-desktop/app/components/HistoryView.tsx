@@ -7,6 +7,7 @@ import { isFleetOwnedEntrypoint } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
+import { StopControl, canControl } from "./StopControl";
 import styles from "./HistoryView.module.css";
 
 /** A session spawned but not yet discovered by the scanner. We poll the session
@@ -64,6 +65,13 @@ function rowDotColor(s: SessionInfo): string {
   if (!LIVE_STATUSES.has(s.status)) return "#6b6b72";
   if (s.status === "waitingInput") return "#d0a85a";
   return "#5ac88c";
+}
+
+/** Rows keep their control while there is a live process to aim it at; once the
+ *  session is spent the control renders disabled rather than vanishing, so the
+ *  row doesn't reflow under the cursor mid-click. */
+function showsControl(s: SessionInfo): boolean {
+  return canControl(s) && (s.pid !== null || LIVE_STATUSES.has(s.status));
 }
 
 /** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see
@@ -314,6 +322,11 @@ export function HistoryView() {
                       )}
                     </span>
                   </button>
+                  {showsControl(s) && (
+                    <span className={styles.row_actions}>
+                      <StopControl session={s} />
+                    </span>
+                  )}
                 </div>
               );
             })

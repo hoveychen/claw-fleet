@@ -43,9 +43,9 @@ jobs:
             libayatana-appindicator3-dev
 
       - name: Setup protoc
-        uses: arduino/setup-protoc@v3
+        uses: taiki-e/install-action@v2
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          tool: protoc
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -110,9 +110,9 @@ jobs:
             libayatana-appindicator3-dev
 
       - name: Setup protoc
-        uses: arduino/setup-protoc@v3
+        uses: taiki-e/install-action@v2
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          tool: protoc
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -224,9 +224,9 @@ jobs:
           cache-dependency-path: claw-fleet-desktop/pnpm-lock.yaml
 
       - name: Setup protoc
-        uses: arduino/setup-protoc@v3
+        uses: taiki-e/install-action@v2
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          tool: protoc
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -476,9 +476,9 @@ jobs:
 
       - name: Setup protoc
         if: github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true'
-        uses: arduino/setup-protoc@v3
+        uses: taiki-e/install-action@v2
         with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          tool: protoc
 
       - name: Setup Rust
         if: github.event_name == 'workflow_dispatch' || steps.filter.outputs.deps == 'true'

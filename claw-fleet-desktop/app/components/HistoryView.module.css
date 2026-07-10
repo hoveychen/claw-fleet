@@ -209,6 +209,29 @@
 .row_wrap {
   display: flex;
   flex-direction: column;
+  position: relative;
+}
+
+/* The row is a full-width <button>; nesting more buttons inside it would be
+   invalid HTML and swallow the clicks. Overlay them on its right edge instead. */
+.row_actions {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.row_wrap:hover .row_actions,
+.row_actions:focus-within {
+  opacity: 1;
+}
+
+/* Give the control a backdrop so it stays legible over the row's own text. */
+.row_actions > button {
+  background: var(--color-bg-card);
 }
 
 .row {

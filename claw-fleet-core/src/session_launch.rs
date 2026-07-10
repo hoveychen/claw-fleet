@@ -42,6 +42,21 @@ pub struct SpawnSessionRequest {
 /// field, which is what the history panel filters on.
 pub const NEW_SESSION_ENTRYPOINT: &str = "claw-fleet-newsession";
 
+/// True for the sessions Fleet spawned itself, headless (`-p`): the "新会话"
+/// button and the handoff relay. Mirrors `isFleetOwnedEntrypoint` in the
+/// desktop's `types.ts`.
+///
+/// Load-bearing for interrupts. SIGINT only means "abort the tool call" for a
+/// headless CLI; an interactive one, attached to a pty, reads Ctrl-C as a
+/// keystroke, so a real SIGINT makes it quit and abandon its tool child. Only
+/// these sessions may be offered an interrupt.
+pub fn is_fleet_owned_entrypoint(entrypoint: Option<&str>) -> bool {
+    matches!(
+        entrypoint,
+        Some(e) if e == NEW_SESSION_ENTRYPOINT || e == crate::handoff::HANDOFF_ENTRYPOINT
+    )
+}
+
 /// `claude --permission-mode` values accepted by the CLI (verified against
 /// `claude --help`, CLI 2.1.181).
 pub const PERMISSION_MODES: &[&str] = &[
@@ -599,5 +614,25 @@ mod tests {
             err.contains("Workspace directory not found"),
             "unexpected error: {err}"
         );
+    }
+}
+
+#[cfg(test)]
+mod fleet_owned_tests {
+    use super::*;
+
+    #[test]
+    fn only_fleet_spawned_headless_sessions_are_interruptible() {
+        assert!(is_fleet_owned_entrypoint(Some(NEW_SESSION_ENTRYPOINT)));
+        assert!(is_fleet_owned_entrypoint(Some(
+            crate::handoff::HANDOFF_ENTRYPOINT
+        )));
+
+        // Interactive / foreign launches must never be offered an interrupt:
+        // SIGINT makes those quit and orphan their tool child.
+        assert!(!is_fleet_owned_entrypoint(Some("cli")));
+        assert!(!is_fleet_owned_entrypoint(Some("claude-vscode")));
+        assert!(!is_fleet_owned_entrypoint(Some("sdk-py")));
+        assert!(!is_fleet_owned_entrypoint(None));
     }
 }

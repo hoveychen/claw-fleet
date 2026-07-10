@@ -467,6 +467,8 @@
     "close": "Close",
     "path": "Path"
   },
+  "interrupt_session": "Interrupt the current tool call (session stays resumable)",
+  "stop_spent": "Session has ended — no process left to stop",
   "stop_session": "Stop session (kill process tree)",
   "stop_session_imprecise": "Stop all sessions in this workspace (imprecise PID match — multiple claude processes share this workspace)",
   "cancel": "Cancel",
@@ -1212,7 +1214,10 @@
     "tasks_anonymous": "(anonymous plan)",
     "tasks_status_active": "In progress",
     "tasks_status_done": "Done",
-    "files": "files"
+    "files": "files",
+    "session_id": "Session ID",
+    "copy_session_id": "Copy session ID",
+    "copy_transcript_path": "Copy transcript path"
   },
   "settings": {
     "title": "Settings",

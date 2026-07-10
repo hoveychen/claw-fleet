@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Play } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { useDetailStore, useSessionsStore } from "../store";
 import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import { HandoffChainRow } from "./HandoffChainRow";
+import { StopControl, canControl } from "./StopControl";
 import styles from "./SessionCard.module.css";
 
 // ── Rate-limit countdown ──────────────────────────────────────────────────────
@@ -361,36 +361,6 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
   // Workflow run rollup, lazily published by SessionDetail once the session has
   // been opened (absent until then). Drives the "wf" chip.
   const workflowRun = useSessionsStore((s) => s.workflowRunCounts[session.id]);
-  const [killing, setKilling] = useState(false);
-
-  const handleStop = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!session.pid || killing) return;
-
-    if (session.pidPrecise) {
-      const confirmed = await ask(t("stop_confirm", { name: session.workspaceName }), { kind: "warning" });
-      if (!confirmed) return;
-      setKilling(true);
-      try {
-        await invoke("kill_session", { pid: session.pid });
-      } finally {
-        setKilling(false);
-      }
-    } else {
-      const confirmed = await ask(
-        t("stop_imprecise_confirm", { workspace: session.workspaceName }),
-        { kind: "warning" }
-      );
-      if (!confirmed) return;
-      setKilling(true);
-      try {
-        await invoke("kill_workspace_sessions", { workspacePath: session.workspacePath });
-      } finally {
-        setKilling(false);
-      }
-    }
-  };
-
   return (
     <div
       className={`${styles.card} ${isSelected ? styles.selected : ""} ${isActive ? styles.active : ""} ${variant === "group-main" ? styles.group_main : ""}`}
@@ -439,15 +409,10 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           )}
           <span className={styles.gm_spacer} />
           <RateLimitControls session={session} />
-          {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
-            <button
-              className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
-              onClick={handleStop}
-              title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
-              disabled={killing}
-            >
-              ■
-            </button>
+          {isActive && session.pid !== null && canControl(session) && (
+            <span className={styles.stop_slot}>
+              <StopControl session={session} />
+            </span>
           )}
         </div>
       ) : (
@@ -456,15 +421,10 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             {!hideHeader && <span className={styles.workspace}>{session.workspaceName}</span>}
             {!hideHeader && <StatusBadge status={session.status} />}
             {!hideHeader && <RateLimitControls session={session} />}
-            {isActive && session.pid !== null && !session.isSubagent && session.agentSource !== "cursor" && (
-              <button
-                className={`${styles.stop_btn} ${killing ? styles.stop_btn_killing : ""} ${!session.pidPrecise ? styles.stop_btn_warn : ""}`}
-                onClick={handleStop}
-                title={session.pidPrecise ? t("stop_session") : t("stop_session_imprecise")}
-                disabled={killing}
-              >
-                ■
-              </button>
+            {isActive && session.pid !== null && canControl(session) && (
+              <span className={styles.stop_slot}>
+                <StopControl session={session} />
+              </span>
             )}
           </div>
 
