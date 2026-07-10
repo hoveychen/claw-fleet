@@ -27,6 +27,16 @@ use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
+/// A sidecar untouched for longer than this is treated as belonging to a
+/// finished turn and skipped by the hot `read_live_thinking` poll path without
+/// being opened or parsed. Set generously above the 120s streaming window so a
+/// briefly-idle live session is never dropped: a session that resumes streaming
+/// bumps the file's mtime and re-enters the window on the next poll. This is
+/// what keeps the 700ms poll from re-parsing the pile of dead-process sidecars
+/// that accumulate under `~/.fleet/live-thinking/` between app restarts (the
+/// only other cleanup, `prune_old`, runs once at startup).
+const STALE_SKIP_SECS: u64 = 300;
+
 /// Directory holding one sidecar per live Fleet-spawned session.
 /// `None` only when the real home dir can't be resolved.
 pub fn sidecar_dir() -> Option<PathBuf> {
@@ -86,6 +96,21 @@ pub fn read_live_thinking(session_id: &str) -> Option<LiveThinking> {
 /// Parse one sidecar file. Returns `Some` only when the file's stream belongs
 /// to `want_session`.
 fn parse_sidecar(path: &Path, want_session: &str) -> Option<LiveThinking> {
+    // Cheap `stat` before we open + read the whole file: a sidecar untouched
+    // past the grace window belongs to a finished turn, so skip it without
+    // parsing. This is what keeps the 700ms poll off the pile of dead-process
+    // sidecars that accumulate under `~/.fleet/live-thinking/`. Reused at the
+    // end for `updated_secs_ago` so we only `stat` once.
+    let updated_secs_ago = match std::fs::metadata(path).and_then(|m| m.modified()) {
+        // A future mtime (clock skew) means "just written" → age 0, not stale.
+        Ok(mtime) => mtime.elapsed().map(|d| d.as_secs_f64()).unwrap_or(0.0),
+        // Can't stat (file vanished mid-scan) → treat as stale and skip.
+        Err(_) => f64::INFINITY,
+    };
+    if updated_secs_ago > STALE_SKIP_SECS as f64 {
+        return None;
+    }
+
     let file = std::fs::File::open(path).ok()?;
     let reader = BufReader::new(file);
 
@@ -110,9 +135,14 @@ fn parse_sidecar(path: &Path, want_session: &str) -> Option<LiveThinking> {
             Err(_) => continue,
         };
 
-        // Recover the session id from any event that stamps it.
+        // Recover the session id from the first event that stamps it. The whole
+        // file is a single session's stream, so once we know it isn't the one
+        // we're after we can stop immediately instead of reading to EOF.
         if file_session.is_none() {
             if let Some(sid) = v.get("session_id").and_then(|s| s.as_str()) {
+                if sid != want_session {
+                    return None;
+                }
                 file_session = Some(sid.to_string());
             }
         }
@@ -174,12 +204,8 @@ fn parse_sidecar(path: &Path, want_session: &str) -> Option<LiveThinking> {
         .and_then(|idx| blocks.get(&idx).cloned())
         .unwrap_or_default();
 
-    let updated_secs_ago = std::fs::metadata(path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| t.elapsed().ok())
-        .map(|d| d.as_secs_f64())
-        .unwrap_or(f64::INFINITY);
+    // `updated_secs_ago` was computed up front for the stale-skip gate; reuse it
+    // rather than `stat`-ing a second time.
 
     // Still streaming if we never saw the terminal result and the file was
     // touched within the streaming window.
@@ -267,6 +293,51 @@ mod tests {
             &[r#"{"type":"system","session_id":"other"}"#],
         );
         assert!(parse_sidecar(&path, "abc").is_none());
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// Backdate a file's mtime by `secs_ago` seconds (unix `utimes`), so we can
+    /// exercise the stale-skip path without waiting real time.
+    #[cfg(unix)]
+    fn backdate_mtime(path: &Path, secs_ago: u64) {
+        use std::os::unix::ffi::OsStrExt;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+        let when = now - secs_ago as i64;
+        let tv = libc::timeval {
+            tv_sec: when as libc::time_t,
+            tv_usec: 0,
+        };
+        let times = [tv, tv];
+        let c = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        let rc = unsafe { libc::utimes(c.as_ptr(), times.as_ptr()) };
+        assert_eq!(rc, 0, "utimes failed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn skips_sidecar_stale_beyond_grace_window() {
+        let tmp = std::env::temp_dir().join(format!("lt-test-stale-{}", std::process::id()));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let path = write_sidecar(
+            &tmp,
+            "pid-9.jsonl",
+            &[
+                r#"{"type":"system","session_id":"stale"}"#,
+                r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking"}},"session_id":"stale"}"#,
+                r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"old reasoning"}},"session_id":"stale"}"#,
+            ],
+        );
+        // Backdate well past the streaming grace window. Even though the session
+        // id matches, a long-untouched sidecar must be skipped so the 700ms hot
+        // poll path never parses finished sessions' files.
+        backdate_mtime(&path, STALE_SKIP_SECS + 100);
+        assert!(
+            parse_sidecar(&path, "stale").is_none(),
+            "sidecar older than the grace window must be skipped without parsing"
+        );
         let _ = std::fs::remove_file(&path);
     }
 
