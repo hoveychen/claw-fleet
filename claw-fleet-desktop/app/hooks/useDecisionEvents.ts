@@ -225,7 +225,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     };
   }, [addPermissionPromptRequest, silent]);
 
-  // Dismiss events — fire when another client (mobile, other desktop) answers
+  // Dismiss events — fire when another client (another desktop) answers
   // a pending decision, or when `fleet guard`/`fleet elicitation` times out
   // and cleans up the request file. The backend polling loop in
   // local_backend.rs / remote.rs emits these by diffing the known id set
