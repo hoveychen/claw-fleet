@@ -4066,6 +4066,63 @@ pub fn collect_process_tree(root_pid: u32) -> Vec<u32> {
     result
 }
 
+/// Grace period before a SIGINT that nobody handled escalates to a tree kill.
+const INTERRUPT_ESCALATION: Duration = Duration::from_millis(5000);
+
+/// Gracefully interrupt the agent at `pid`, the way pressing Esc does in an
+/// interactive session: the in-flight tool call is torn down but the transcript
+/// stays resumable.
+///
+/// Delivers SIGINT to the **root pid only**. The CLI handles it, kills its own
+/// tool children, appends `[Request interrupted by user for tool use]` to the
+/// transcript and exits 0 — verified against `claude` 2.1.204 spawned headless
+/// (`-p`, stdin=/dev/null) with a blocking foreground Bash call in flight, after
+/// which `claude --resume <session-id>` picks the conversation back up.
+/// Signalling the whole process tree (as [`kill_pid_impl`] does) would kill the
+/// tool child behind the CLI's back and lose that marker, so this deliberately
+/// does not call [`collect_process_tree`].
+///
+/// SIGINT is a request, not a guarantee: a process that ignores it, or that has
+/// not installed its handler yet (a session still booting is killed outright),
+/// would otherwise hang around. So escalate to [`kill_pid_impl`] once `grace`
+/// has elapsed and the pid is still there.
+pub fn interrupt_pid_impl(pid: u32) -> Result<(), String> {
+    interrupt_pid_with_grace(pid, INTERRUPT_ESCALATION)
+}
+
+/// [`interrupt_pid_impl`] with an explicit escalation delay. Split out so tests
+/// don't have to wait five seconds to observe the fallback.
+pub fn interrupt_pid_with_grace(pid: u32, grace: Duration) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        crate::log_debug(&format!("interrupt_pid: SIGINT to root {pid}"));
+        if unsafe { libc::kill(pid as libc::pid_t, libc::SIGINT) } != 0 {
+            return Err(format!("no such process: {pid}"));
+        }
+
+        std::thread::spawn(move || {
+            std::thread::sleep(grace);
+            if unsafe { libc::kill(pid as libc::pid_t, 0) } == 0 {
+                crate::log_debug(&format!(
+                    "interrupt_pid: {pid} still alive {grace:?} after SIGINT; escalating to tree kill"
+                ));
+                let _ = kill_pid_impl(pid);
+            }
+        });
+
+        Ok(())
+    }
+
+    // Windows has no way to deliver SIGINT to an unrelated process (the console
+    // control events only reach the sender's own console group), so there is no
+    // graceful tier — fall through to the hard kill.
+    #[cfg(not(unix))]
+    {
+        let _ = grace;
+        kill_pid_impl(pid)
+    }
+}
+
 /// Kill a process by PID (with process tree cleanup).
 pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
     #[cfg(unix)]
@@ -4163,5 +4220,77 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
             .status()
             .map_err(|e| format!("taskkill failed: {e}"))?;
         Ok(())
+    }
+}
+
+#[cfg(all(test, unix))]
+mod interrupt_tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+    use std::process::{Command, Stdio};
+
+    /// `sh -c 'sleep 30'` execs sleep, which dies on SIGINT's default
+    /// disposition — the graceful tier, no escalation.
+    #[test]
+    fn interrupt_delivers_sigint_and_does_not_escalate() {
+        let mut child = Command::new("sh")
+            .args(["-c", "sleep 30"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn");
+        std::thread::sleep(Duration::from_millis(200));
+
+        interrupt_pid_with_grace(child.id(), Duration::from_millis(300)).expect("interrupt");
+
+        let status = child.wait().expect("wait");
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGINT),
+            "process must die from SIGINT, not from the escalation path"
+        );
+    }
+
+    /// A process that ignores SIGINT must still go down, via the tree kill.
+    #[test]
+    fn interrupt_escalates_when_sigint_is_ignored() {
+        let mut child = Command::new("sh")
+            .args(["-c", "trap '' INT; sleep 30"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn");
+        std::thread::sleep(Duration::from_millis(200));
+
+        let started = std::time::Instant::now();
+        interrupt_pid_with_grace(child.id(), Duration::from_millis(300)).expect("interrupt");
+
+        // Still alive right after the SIGINT: it was ignored.
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(
+            child.try_wait().expect("try_wait").is_none(),
+            "shell traps INT, so it must survive the graceful tier"
+        );
+
+        let status = child.wait().expect("wait");
+        assert_eq!(
+            status.signal(),
+            Some(libc::SIGTERM),
+            "escalation must SIGTERM the tree"
+        );
+        assert!(
+            started.elapsed() >= Duration::from_millis(300),
+            "escalation must wait out the full grace period"
+        );
+    }
+
+    #[test]
+    fn interrupt_reports_missing_process() {
+        // Reap a child, then signal its (now free) pid.
+        let mut child = Command::new("sh").args(["-c", "exit 0"]).spawn().expect("spawn");
+        let pid = child.id();
+        child.wait().expect("wait");
+        std::thread::sleep(Duration::from_millis(100));
+        assert!(interrupt_pid_with_grace(pid, Duration::from_millis(50)).is_err());
     }
 }
