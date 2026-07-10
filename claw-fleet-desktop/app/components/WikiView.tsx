@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { BookOpen, ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from "lucide-react";
@@ -275,20 +275,64 @@ export function WikiView() {
     load();
   };
 
+  // ── Drag a doc into another folder ─────────────────────────────────────────
+  // Moving a doc IS re-keying it: the drop target's path becomes the slug's
+  // directory prefix. `null` drop target means the tree root.
+  const [dragSlug, setDragSlug] = useState<string | null>(null);
+  const [dropPath, setDropPath] = useState<string | null>(null);
+  const [moveError, setMoveError] = useState<string | null>(null);
+
+  const handleDrop = async (folderPath: string) => {
+    const from = dragSlug;
+    setDragSlug(null);
+    setDropPath(null);
+    if (!from) return;
+    const to = folderPath ? `${folderPath}/${slugBasename(from)}` : slugBasename(from);
+    if (to === from) return;
+    setMoveError(null);
+    try {
+      await invoke<WikiDoc>("move_wiki_doc", { from, to });
+      if (selectedSlug === from) setSelectedSlug(to);
+      load();
+    } catch (e) {
+      setMoveError(String(e));
+    }
+  };
+
+  /**
+   * Accept a drop into folder `path` ("" is the root). Doc cards carry their
+   * parent folder's path, so anywhere in a folder's region drops into it; the
+   * stopPropagation keeps a nested card from bubbling up to the root zone.
+   */
+  const dropProps = (path: string) => ({
+    onDragOver: (e: DragEvent) => {
+      if (!dragSlug) return;
+      e.preventDefault();
+      e.stopPropagation();
+      setDropPath(path);
+    },
+    onDrop: (e: DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      handleDrop(path);
+    },
+  });
+
   /** Indent one tree level; depth 0 sits flush with the pane. */
   const indent = (depth: number) => ({ paddingLeft: `${depth * 12}px` });
 
-  const renderNodes = (nodes: TreeNode[], depth: number): ReactNode =>
+  const renderNodes = (nodes: TreeNode[], depth: number, parentPath: string): ReactNode =>
     nodes.map((node) => {
       if (node.type === "folder") {
         const isCollapsed = !searching && collapsed.has(node.path);
         return (
           <div key={`d:${node.path}`} className={styles.group}>
             <button
-              className={styles.group_header}
+              className={`${styles.group_header} ${dropPath === node.path ? styles.drop_target : ""}`}
               style={indent(depth)}
               onClick={() => toggleFolder(node.path)}
               title={node.path}
+              {...dropProps(node.path)}
             >
               {isCollapsed ? (
                 <ChevronRight size={12} strokeWidth={2} className={styles.group_chevron} />
@@ -298,7 +342,7 @@ export function WikiView() {
               <span className={styles.group_name}>{node.name}</span>
               <span className={styles.group_count}>{node.docCount}</span>
             </button>
-            {!isCollapsed && renderNodes(node.children, depth + 1)}
+            {!isCollapsed && renderNodes(node.children, depth + 1, node.path)}
           </div>
         );
       }
@@ -307,9 +351,23 @@ export function WikiView() {
       return (
         <button
           key={`f:${d.slug}`}
-          className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""}`}
+          className={`${styles.card} ${selectedSlug === d.slug ? styles.card_active : ""} ${
+            dragSlug === d.slug ? styles.card_dragging : ""
+          }`}
           style={indent(depth)}
           onClick={() => setSelectedSlug(d.slug)}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.effectAllowed = "move";
+            // Firefox refuses to start a drag with an empty payload.
+            e.dataTransfer.setData("text/plain", d.slug);
+            setDragSlug(d.slug);
+          }}
+          onDragEnd={() => {
+            setDragSlug(null);
+            setDropPath(null);
+          }}
+          {...dropProps(parentPath)}
         >
           <span className={`${styles.kind_badge} ${styles[KIND_CONFIG[d.kind]?.cssClass ?? "kind_md"]}`}>
             {KIND_CONFIG[d.kind]?.short ?? d.kind}
@@ -373,7 +431,17 @@ export function WikiView() {
       </header>
 
       <div className={styles.body}>
-        <aside className={styles.list_pane}>
+        {/* The pane itself is the root drop zone: dropping outside any folder
+            strips a doc's directory prefix. */}
+        <aside
+          className={`${styles.list_pane} ${dragSlug && dropPath === "" ? styles.drop_target_root : ""}`}
+          {...dropProps("")}
+        >
+          {moveError && (
+            <p className={styles.move_error} onClick={() => setMoveError(null)}>
+              {t("wiki.move_failed", "Move failed: {{error}}", { error: moveError })}
+            </p>
+          )}
           {!loaded && <p className={styles.empty}>{t("wiki.loading", "Loading…")}</p>}
           {loaded && filtered.length === 0 && (
             <EmptyState
@@ -385,7 +453,7 @@ export function WikiView() {
               )}
             />
           )}
-          {renderNodes(tree, 0)}
+          {renderNodes(tree, 0, "")}
         </aside>
 
         <main className={styles.detail_pane}>
