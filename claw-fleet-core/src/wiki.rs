@@ -887,7 +887,14 @@ fn strip_html(html: &str) -> String {
             let rest = &html[i..];
             // Skip container blocks whose text content is not prose.
             let block = ["<script", "<style"].iter().find_map(|open| {
-                if rest.len() >= open.len() && rest[..open.len()].eq_ignore_ascii_case(open) {
+                // Compare as bytes: `rest` may hold a multi-byte char within
+                // the first `open.len()` bytes (`<h1>对…`), and slicing a `str`
+                // off a char boundary panics.
+                let probe = rest.as_bytes();
+                let open_bytes = open.as_bytes();
+                if probe.len() >= open_bytes.len()
+                    && probe[..open_bytes.len()].eq_ignore_ascii_case(open_bytes)
+                {
                     let close = format!("</{}", &open[1..]);
                     Some(find_ci(rest, &close).map_or(html.len() - i, |p| p + close.len()))
                 } else {
@@ -1804,6 +1811,37 @@ mod tests {
         let docs = list_docs_in(root.path());
         assert_eq!(docs.len(), 1);
         assert_eq!(docs[0].slug, "good");
+    }
+
+    #[test]
+    fn strip_html_survives_multibyte_char_right_after_a_tag() {
+        // The `<script`/`<style` probe slices 6–7 bytes off each `<`. In
+        // `<h1>对…` byte 6 lands inside `对` (bytes 4..7), which used to panic
+        // the entire search on any CJK HTML doc.
+        let text = strip_html("<h1>对话交互状态机</h1><p>渲染 pipeline</p>");
+        assert!(text.contains("对话交互状态机"), "got: {text}");
+        assert!(text.contains("渲染"), "got: {text}");
+    }
+
+    #[test]
+    fn strip_html_still_drops_script_and_style_blocks() {
+        let text = strip_html("<style>.a{color:red}</style><p>keep</p><script>evil()</script>");
+        assert!(text.contains("keep"), "got: {text}");
+        assert!(!text.contains("color"), "style body leaked: {text}");
+        assert!(!text.contains("evil"), "script body leaked: {text}");
+    }
+
+    #[test]
+    fn search_finds_cjk_inside_an_html_doc() {
+        let root = tmp();
+        let ws = tmp();
+        let page = ws.path().join("page.html");
+        fs::write(&page, "<h1>对话交互状态机</h1>\n<p>渲染 pipeline 重构</p>\n").unwrap();
+        publish_in(root.path(), &page, None, None, ws.path()).unwrap();
+
+        let hits = search_docs_in(root.path(), "渲染");
+        assert_eq!(hits.len(), 1, "expected one content hit, got {hits:?}");
+        assert_eq!(hits[0].field, "content");
     }
 
     #[test]
