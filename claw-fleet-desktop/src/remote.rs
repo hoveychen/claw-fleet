@@ -497,6 +497,15 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn move_wiki_doc(&self, from: &str, to: &str) -> Result<crate::wiki::WikiDoc, String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            from: &'a str,
+            to: &'a str,
+        }
+        self.probe.post_json("/wiki_move", &Req { from, to })
+    }
+
     fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
         self.probe
             .get(&format!("/wiki_search?q={}", encode_path(query)))

@@ -20,8 +20,10 @@ export interface WikiLinkContext {
 }
 
 const WIKI_HASH = "#wiki=";
-const WIKI_REF = /\[\[([a-z0-9][a-z0-9-]*)(?:\|([^\]]+))?\]\]/g;
-const BARE_SLUG = /^(?:\.\/)?([a-z0-9][a-z0-9-]*)$/;
+/** One slug segment; `/` joins them into virtual directories (`arch/overview`). */
+const SEGMENTS = "[a-z0-9][a-z0-9-]*(?:/[a-z0-9][a-z0-9-]*)*";
+const WIKI_REF = new RegExp(`\\[\\[(${SEGMENTS})(?:\\|([^\\]]+))?\\]\\]`, "g");
+const BARE_SLUG = new RegExp(`^(?:\\./)?(${SEGMENTS})$`);
 
 /** remark plugin: split text nodes on [[slug]] refs and emit link nodes.
  *  Text-node-only, so fenced/inline code is naturally untouched. */
