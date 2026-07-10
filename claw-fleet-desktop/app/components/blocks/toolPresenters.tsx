@@ -13,6 +13,8 @@
  */
 
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { useAgentNav } from "../AgentNavContext";
 import {
   asAgentResult,
   asBashResult,
@@ -24,6 +26,7 @@ import {
   diffStats,
 } from "../../toolResults";
 import type { ToolResultBlock, ToolUseBlock as ToolUseBlockType } from "../../types";
+import { ExpandableText } from "./ExpandableText";
 import styles from "./toolPresenters.module.css";
 
 /**
@@ -139,23 +142,14 @@ export function headerStats(
 
 // ── Bodies ───────────────────────────────────────────────────────────────────
 
-const MAX_STREAM_CHARS = 4000;
-
+/** A named run of tool output — stdout, stderr, a subagent's answer. */
 function Stream({ label, text, error }: { label: string; text: string; error?: boolean }) {
-  const truncated = text.length > MAX_STREAM_CHARS;
   return (
     <div className={styles.stream}>
       <span className={`${styles.stream_label} ${error ? styles.stream_label_err : ""}`}>
         {label}
       </span>
-      <pre className={`${styles.stream_text} ${error ? styles.stream_text_err : ""}`}>
-        {truncated ? text.slice(0, MAX_STREAM_CHARS) : text}
-      </pre>
-      {truncated && (
-        <span className={styles.more}>
-          … {(text.length - MAX_STREAM_CHARS).toLocaleString()} more chars
-        </span>
-      )}
+      <ExpandableText text={text} className={error ? styles.stream_text_err : ""} />
     </div>
   );
 }
@@ -180,10 +174,14 @@ function BashBody({ block, meta }: { block: ToolUseBlockType; meta: unknown }) {
 }
 
 function AgentBody({ meta }: { meta: unknown }) {
+  const { t } = useTranslation();
   const agent = asAgentResult(meta);
+  const nav = useAgentNav();
   const [showPrompt, setShowPrompt] = useState(false);
   if (!agent) return null;
   const stats = Object.entries(agent.toolStats ?? {}).filter(([, v]) => v > 0);
+  const agentId = agent.agentId;
+  const canOpen = agentId !== undefined && nav !== null && nav.has(agentId);
   return (
     <>
       <div className={styles.agent_meta}>
@@ -191,6 +189,17 @@ function AgentBody({ meta }: { meta: unknown }) {
         <span className={styles.chip}>{agent.status}</span>
         {agent.totalToolUseCount !== undefined && (
           <span className={styles.chip}>{agent.totalToolUseCount} tool calls</span>
+        )}
+        {/* The card only summarises. The subagent's own transcript is where you
+            can see what it actually did. */}
+        {canOpen && agentId && (
+          <button
+            type="button"
+            className={styles.open_agent}
+            onClick={() => nav.open(agentId)}
+          >
+            {t("detail.open_subagent")} →
+          </button>
         )}
       </div>
       {stats.length > 0 && (
@@ -208,7 +217,7 @@ function AgentBody({ meta }: { meta: unknown }) {
           <button className={styles.toggle} onClick={() => setShowPrompt((v) => !v)}>
             {showPrompt ? "▾" : "▸"} prompt
           </button>
-          {showPrompt && <pre className={styles.stream_text}>{agent.prompt}</pre>}
+          {showPrompt && <ExpandableText text={agent.prompt} />}
         </>
       )}
       {agent.content && <Stream label="result" text={agent.content} />}
