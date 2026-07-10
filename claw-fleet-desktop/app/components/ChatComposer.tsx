@@ -107,7 +107,7 @@ export interface ChatComposerProps {
   /** Drop the outer rounded box so a host wrapper can supply its own framing. */
   bare?: boolean;
   /**
-   * Hero layout slots (the TaskComposer look). Providing either switches the
+   * Hero layout slots. Providing either switches the
    * composer from the inline single row ("+ | textarea | send") to the hero
    * arrangement: contextSlot row on top, full-width textarea, then a bottom
    * ghost toolbar of "+ | toolbarSlot | spacer | send".
