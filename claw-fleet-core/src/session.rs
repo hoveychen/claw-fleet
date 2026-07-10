@@ -4423,12 +4423,18 @@ mod interrupt_tests {
     use std::os::unix::process::ExitStatusExt;
     use std::process::{Command, Stdio};
 
-    /// `sh -c 'sleep 30'` execs sleep, which dies on SIGINT's default
-    /// disposition — the graceful tier, no escalation.
+    /// `sleep` dies on SIGINT's default disposition — the graceful tier, no
+    /// escalation. Spawned directly rather than via `sh -c 'sleep 30'`: dash
+    /// (Linux `/bin/sh`) does NOT exec a single-command `-c` string, it forks
+    /// `sleep` as a child, so a SIGINT aimed at the shell's own pid neither
+    /// kills the shell nor reaches sleep — the interrupt would wrongly escalate
+    /// to SIGTERM. (bash-as-/bin/sh on macOS execs, which is why it passed
+    /// locally but failed on CI.) Spawning `sleep` directly makes the signalled
+    /// pid the sleep process itself, with its default SIGINT disposition.
     #[test]
     fn interrupt_delivers_sigint_and_does_not_escalate() {
-        let mut child = Command::new("sh")
-            .args(["-c", "sleep 30"])
+        let mut child = Command::new("sleep")
+            .arg("30")
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
