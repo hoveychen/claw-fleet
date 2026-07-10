@@ -194,6 +194,16 @@ impl Backend for NullBackend {
     fn move_wiki_doc(&self, _: &str, _: &str) -> Result<claw_fleet_core::wiki::WikiDoc, String> {
         Err("backend not ready".into())
     }
+    fn move_wiki_folder(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> Result<Vec<claw_fleet_core::wiki::WikiDoc>, String> {
+        Err("backend not ready".into())
+    }
+    fn delete_wiki_folder(&self, _: &str) -> Result<usize, String> {
+        Err("backend not ready".into())
+    }
     fn search_wiki_docs(&self, _: &str) -> Vec<claw_fleet_core::wiki::WikiSearchHit> {
         vec![]
     }
