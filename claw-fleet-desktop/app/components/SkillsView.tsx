@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { Sparkles } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
-import { useConnectionStore } from "../store";
+import { useConnectionStore, useUIStore } from "../store";
+import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 
@@ -89,6 +90,8 @@ function indentLevel(relativePath: string): number {
 
 export function SkillsView() {
   const { t } = useTranslation();
+  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["skills"]);
+  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -142,6 +145,9 @@ export function SkillsView() {
       </header>
 
       <div className={styles.body}>
+        {collapsed ? (
+          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("skills", false)} />
+        ) : (
         <aside className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("skills.loading")}</p>}
           {loaded && filtered.length === 0 && (
@@ -162,6 +168,7 @@ export function SkillsView() {
             ))}
           </div>
         </aside>
+        )}
 
         <main className={styles.detail_pane}>
           {selected ? (

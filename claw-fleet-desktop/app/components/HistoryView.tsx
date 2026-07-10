@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { FolderGit2, History, Plus, Search } from "lucide-react";
-import { useSessionsStore } from "../store";
+import { useSessionsStore, useUIStore } from "../store";
+import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
 import { isFleetOwnedEntrypoint } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
@@ -119,6 +120,8 @@ function renderSnippet(snippet: string): ReactNode[] {
  */
 export function HistoryView() {
   const { t } = useTranslation();
+  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["history"]);
+  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const { sessions, scanReady } = useSessionsStore();
 
   const [query, setQuery] = useState("");
@@ -248,6 +251,9 @@ export function HistoryView() {
 
   return (
     <div className={styles.page}>
+      {collapsed ? (
+        <CollapsedSidebarRail onExpand={() => setSecondarySidebar("history", false)} />
+      ) : (
       <div className={styles.rail}>
         <div className={styles.header}>
           <span className={styles.header_title}>{t("history.title", "启动台")}</span>
@@ -406,6 +412,7 @@ export function HistoryView() {
           )}
         </div>
       </div>
+      )}
 
       <div className={styles.detail}>
         {pending ? (

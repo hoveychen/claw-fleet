@@ -57,6 +57,10 @@ interface UIState {
   lastSessionViewMode: SessionViewMode;
   liteMode: boolean;
   sidebarCollapsed: boolean;
+  /** Per-view collapse state for each view's secondary sidebar (二级侧边栏),
+   *  keyed by ViewMode. Re-clicking the already-active nav item toggles the
+   *  entry. Persisted to localStorage as JSON. A missing key ⇒ expanded. */
+  secondarySidebarCollapsed: Record<string, boolean>;
   mascotVisible: boolean;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
@@ -70,6 +74,10 @@ interface UIState {
   setLastSessionViewMode: (m: SessionViewMode) => void;
   setLiteMode: (on: boolean) => void;
   setSidebarCollapsed: (on: boolean) => void;
+  /** Toggle the collapsed state of `view`'s secondary sidebar. */
+  toggleSecondarySidebar: (view: ViewMode) => void;
+  /** Explicitly set `view`'s secondary sidebar collapsed state. */
+  setSecondarySidebar: (view: ViewMode, collapsed: boolean) => void;
   setMascotVisible: (on: boolean) => void;
   setLiteDecisionHistorySessionId: (id: string | null) => void;
   /** When true, the DecisionPanel renders as a minimized bar at the bottom
@@ -91,6 +99,19 @@ export function resolveTheme(theme: Theme): "dark" | "light" {
   return theme === "system" ? getSystemTheme() : theme;
 }
 
+/** Read the persisted per-view secondary-sidebar collapse map from
+ *  localStorage, tolerating absent / corrupt values. */
+function readSecondarySidebarCollapsed(): Record<string, boolean> {
+  try {
+    const raw = getItem("secondary-sidebar-collapsed");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
   viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
@@ -98,6 +119,7 @@ export const useUIStore = create<UIState>((set) => ({
     (getItem("lastSessionViewMode") as SessionViewMode) ?? "gallery",
   liteMode: getItem("liteMode") === "true",
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
+  secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
   mascotVisible: getItem("mascot-visible") === "true",
   liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
@@ -129,6 +151,21 @@ export const useUIStore = create<UIState>((set) => ({
     setItem("sidebar-collapsed", on ? "true" : "false");
     set({ sidebarCollapsed: on });
   },
+  toggleSecondarySidebar: (view) =>
+    set((s) => {
+      const next = {
+        ...s.secondarySidebarCollapsed,
+        [view]: !s.secondarySidebarCollapsed[view],
+      };
+      setItem("secondary-sidebar-collapsed", JSON.stringify(next));
+      return { secondarySidebarCollapsed: next };
+    }),
+  setSecondarySidebar: (view, collapsed) =>
+    set((s) => {
+      const next = { ...s.secondarySidebarCollapsed, [view]: collapsed };
+      setItem("secondary-sidebar-collapsed", JSON.stringify(next));
+      return { secondarySidebarCollapsed: next };
+    }),
   setMascotVisible: (on) => {
     setItem("mascot-visible", on ? "true" : "false");
     emit("overlay-mascot-visible-changed", on).catch(() => {});
