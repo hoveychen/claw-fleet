@@ -381,10 +381,10 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
     if let Some(plan) = &p.plan_id {
         match &p.next_task {
             Some(t) => out.push_str(&format!(
-                "本次接力属于 TASKS.md plan `{plan}`。先运行 `fleet plan start {plan} {t}` 声明接手，然后从 {t} 继续执行，直到整个 plan 完成。\n"
+                "本次接力属于 TASKS.md plan `{plan}`，Fleet 已把你归属到该 plan 的 {t}。直接从 {t} 继续执行，直到整个 plan 完成。\n"
             )),
             None => out.push_str(&format!(
-                "本次接力属于 TASKS.md plan `{plan}`。先运行 `fleet plan start {plan}` 声明接手，然后从第一个未完成的 P 继续执行，直到整个 plan 完成。\n"
+                "本次接力属于 TASKS.md plan `{plan}`，Fleet 已把你归属到该 plan。从第一个未完成的 P 继续执行，直到整个 plan 完成。\n"
             )),
         }
         out.push_str("plan 的完整任务清单会由 prd-context hook 自动注入你的上下文，以 TASKS.md 为准。\n");
@@ -693,7 +693,14 @@ mod tests {
         assert!(prompt.contains("第 3 棒"));
         assert!(prompt.contains("src-sid"));
         assert!(prompt.contains("P1-P3 已完成；P4 卡在 X"));
-        assert!(prompt.contains("fleet plan start auth-refactor P4"));
+        assert!(prompt.contains("auth-refactor"));
+        assert!(prompt.contains("P4"));
+        // `attribute_successor` already stamped the side-channel, so the prompt
+        // must NOT ask the agent to declare focus — that ceremony is obsolete.
+        assert!(
+            !prompt.contains("fleet plan resume") && !prompt.contains("fleet plan start"),
+            "successor is attributed by Fleet; prompt must not demand a resume:\n{prompt}"
+        );
 
         // free-form handoff: no plan pointer, still carries the note
         let free = PendingHandoff {
@@ -702,7 +709,6 @@ mod tests {
             ..p
         };
         let prompt = compose_successor_prompt(&free);
-        assert!(!prompt.contains("fleet plan start"));
         assert!(prompt.contains("按交接信息继续完成这项工作"));
     }
 }
