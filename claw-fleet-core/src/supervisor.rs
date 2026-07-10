@@ -102,62 +102,6 @@ pub fn enqueue(form: LauncherForm) -> Result<FleetSession, String> {
     Ok(new)
 }
 
-/// Enqueue a **Worker** session for `(task_id, p_item_id)` using the prebuilt
-/// `WorkerSpawnSpec`. Same pattern as `enqueue_master`: pre-allocate the
-/// session id, persist queued, supervisor tick spawns the subprocess.
-///
-/// Callers should also stamp the returned id into
-/// `task.plan.items[p_item_id].agent_session_id` so the master's
-/// `read-output` tool can locate the worker's transcript.
-pub fn enqueue_worker(spec: &crate::worker_executor::WorkerSpawnSpec) -> Result<String, String> {
-    let projects = project::list_projects();
-    let task = crate::task::get_task(&spec.task_id)?;
-    let proj = projects
-        .iter()
-        .find(|p| p.id == task.project_id)
-        .ok_or_else(|| format!("project {} not found for task {}", task.project_id, task.id))?;
-    let id = uuid::Uuid::new_v4().to_string();
-    let pitem = task.plan.get(&spec.p_item_id).ok_or_else(|| {
-        format!(
-            "p-item {} not found in task {} plan",
-            spec.p_item_id, task.id
-        )
-    })?;
-    let session = FleetSession {
-        id: id.clone(),
-        project_id: proj.id.clone(),
-        workspace: spec.cwd.to_string_lossy().to_string(),
-        fleetsession_path: None,
-        prompt: format!(
-            "Execute P-item `{}` per the SYSTEM prompt above. When you are done, \
-             stop the process; the master will run the acceptance audit.\n\n\
-             Your goal:\n{}",
-            spec.p_item_id, pitem.desc
-        ),
-        context_files: vec![],
-        status: DEFAULT_COLUMN_QUEUED.into(),
-        note: Some(format!("worker: {}/{}", task.id, spec.p_item_id)),
-        created_at: now_ms(),
-        started_at: None,
-        completed_at: None,
-        pid: None,
-        // Workers race the master's dispatch decision, not the kanban queue —
-        // expedited so a fleet workspace with full concurrency doesn't starve
-        // them.
-        expedited: true,
-        final_by_agent: false,
-        session_kind: project::SessionKind::Worker,
-        task_id: Some(task.id.clone()),
-        p_item_id: Some(spec.p_item_id.clone()),
-        system_prompt: Some(spec.system_prompt.clone()),
-        model: Some(spec.model.to_string()),
-    };
-    let mut sessions = project::list_fleet_sessions();
-    sessions.push(session);
-    project::save_fleet_sessions(&sessions)?;
-    Ok(id)
-}
-
 /// Cancel a fleet session by id. SIGTERMs the process if still running, then
 /// marks the session `complete` with note="cancelled".
 pub fn cancel(session_id: &str) -> Result<(), String> {
@@ -297,31 +241,6 @@ pub fn migrate_zombie_running() -> Result<usize, String> {
         project::save_fleet_sessions(&sessions)?;
     }
     Ok(migrated)
-}
-
-/// Build the "alive worktree" set from the task store and clean up the
-/// rest. Called at backend startup (LocalBackend::new + `fleet serve`).
-///
-/// Returns the count of orphan worktree dirs that were removed, for
-/// logging.
-pub fn gc_orphan_worktrees() -> Result<usize, String> {
-    let tasks = crate::task::list_tasks(None);
-    let alive: Vec<(String, Vec<String>)> = tasks
-        .iter()
-        .filter(|t| matches!(t.status, crate::task::TaskStatus::Running))
-        .map(|t| {
-            let running_p_ids = t
-                .plan
-                .items
-                .iter()
-                .filter(|(_, p)| matches!(p.status, crate::pitem::PItemStatus::Running))
-                .map(|(id, _)| id.clone())
-                .collect::<Vec<_>>();
-            (t.id.clone(), running_p_ids)
-        })
-        .collect();
-    let reaped = crate::worktree::gc_stale(&alive)?;
-    Ok(reaped.len())
 }
 
 // ── Background tick ──────────────────────────────────────────────────────────
@@ -476,10 +395,6 @@ fn tick_macos() -> Result<(), String> {
     if changed {
         project::save_fleet_sessions(&sessions)?;
     }
-    // Pass 4: reconcile task-as-unit completions — any Running task whose
-    // master subprocess just exited AND whose plan is fully terminal now
-    // flips to Done. Best-effort; an error here doesn't fail the tick.
-    let _ = crate::task::reconcile_task_completion();
     Ok(())
 }
 
@@ -841,106 +756,9 @@ fn kill_pid(_pid: u32) -> Result<(), String> {
     Err("kill not supported on this platform".into())
 }
 
-#[cfg(unix)]
-fn signal_pid(pid: u32, signal: i32) -> Result<(), String> {
-    let r = unsafe { libc::kill(pid as libc::pid_t, signal) };
-    if r == 0 {
-        Ok(())
-    } else {
-        Err(format!("signal {signal}: {}", std::io::Error::last_os_error()))
-    }
-}
 
 // signal_pid has no non-unix stub: every caller is itself inside
 // `#[cfg(unix)]`, so a Windows stub would just be unreachable dead code.
-
-// ── Task-as-unit signal helpers ──────────────────────────────────────────────
-
-/// SIGSTOP every live fleet session attached to `task_id` (the Master plus
-/// any in-flight Workers). Used by `task::pause_task` per TASKS P20 — user
-/// hits pause, master + worker subprocesses freeze in place until `resume`.
-///
-/// Sessions without a live pid are silently skipped (already terminal or
-/// not yet spawned). Returns the count of sessions signalled.
-pub fn pause_task_sessions(task_id: &str) -> Result<usize, String> {
-    #[cfg(unix)]
-    {
-        let mut n = 0usize;
-        for s in project::list_fleet_sessions() {
-            if s.task_id.as_deref() != Some(task_id) {
-                continue;
-            }
-            if let Some(pid) = s.pid {
-                if pid_alive(pid) {
-                    // Best-effort: a missed signal isn't fatal — user can
-                    // re-issue pause and the supervisor's next tick will
-                    // try again on still-running pids.
-                    let _ = signal_pid(pid, libc::SIGSTOP);
-                    n += 1;
-                }
-            }
-        }
-        Ok(n)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = task_id;
-        Ok(0)
-    }
-}
-
-/// SIGCONT counterpart to `pause_task_sessions`.
-pub fn resume_task_sessions(task_id: &str) -> Result<usize, String> {
-    #[cfg(unix)]
-    {
-        let mut n = 0usize;
-        for s in project::list_fleet_sessions() {
-            if s.task_id.as_deref() != Some(task_id) {
-                continue;
-            }
-            if let Some(pid) = s.pid {
-                if pid_alive(pid) {
-                    let _ = signal_pid(pid, libc::SIGCONT);
-                    n += 1;
-                }
-            }
-        }
-        Ok(n)
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = task_id;
-        Ok(0)
-    }
-}
-
-/// SIGTERM every live fleet session attached to `task_id` AND mark the
-/// session records `complete` with note="task cleared". Used by
-/// `task::clear_task`. The next supervisor tick reaps the pids; this
-/// function eagerly marks the records so the UI updates without waiting.
-pub fn terminate_task_sessions(task_id: &str) -> Result<usize, String> {
-    let mut sessions = project::list_fleet_sessions();
-    let mut n = 0usize;
-    for s in sessions.iter_mut() {
-        if s.task_id.as_deref() != Some(task_id) {
-            continue;
-        }
-        if let Some(pid) = s.pid {
-            if pid_alive(pid) {
-                let _ = kill_pid(pid);
-                n += 1;
-            }
-            s.pid = None;
-        }
-        if s.status != DEFAULT_COLUMN_COMPLETE {
-            s.status = DEFAULT_COLUMN_COMPLETE.into();
-            s.completed_at = Some(now_ms());
-            s.note = Some("task cleared".into());
-        }
-    }
-    project::save_fleet_sessions(&sessions)?;
-    Ok(n)
-}
 
 #[cfg(test)]
 mod tests {
