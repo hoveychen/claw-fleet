@@ -1339,6 +1339,7 @@
     "result_expand": "Show {{count}} more characters",
     "result_collapse": "Collapse",
     "result_capped": "Too long to render; the last {{count}} characters are omitted (copy to get all)",
+    "open_subagent": "Open subagent",
     "slash_command": "slash command",
     "today": "Today",
     "yesterday": "Yesterday",

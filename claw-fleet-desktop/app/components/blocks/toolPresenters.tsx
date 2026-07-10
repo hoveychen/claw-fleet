@@ -13,6 +13,8 @@
  */
 
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { useAgentNav } from "../AgentNavContext";
 import {
   asAgentResult,
   asBashResult,
@@ -172,10 +174,14 @@ function BashBody({ block, meta }: { block: ToolUseBlockType; meta: unknown }) {
 }
 
 function AgentBody({ meta }: { meta: unknown }) {
+  const { t } = useTranslation();
   const agent = asAgentResult(meta);
+  const nav = useAgentNav();
   const [showPrompt, setShowPrompt] = useState(false);
   if (!agent) return null;
   const stats = Object.entries(agent.toolStats ?? {}).filter(([, v]) => v > 0);
+  const agentId = agent.agentId;
+  const canOpen = agentId !== undefined && nav !== null && nav.has(agentId);
   return (
     <>
       <div className={styles.agent_meta}>
@@ -183,6 +189,17 @@ function AgentBody({ meta }: { meta: unknown }) {
         <span className={styles.chip}>{agent.status}</span>
         {agent.totalToolUseCount !== undefined && (
           <span className={styles.chip}>{agent.totalToolUseCount} tool calls</span>
+        )}
+        {/* The card only summarises. The subagent's own transcript is where you
+            can see what it actually did. */}
+        {canOpen && agentId && (
+          <button
+            type="button"
+            className={styles.open_agent}
+            onClick={() => nav.open(agentId)}
+          >
+            {t("detail.open_subagent")} →
+          </button>
         )}
       </div>
       {stats.length > 0 && (

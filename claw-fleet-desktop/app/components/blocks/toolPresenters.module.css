@@ -116,6 +116,23 @@
 
 .toggle:hover { color: var(--color-text); }
 
+/* Jump into the subagent's own transcript. */
+.open_agent {
+  margin-left: auto;
+  padding: 1px 7px;
+  font-size: 10px;
+  color: var(--color-accent, #60a5fa);
+  background: none;
+  border: 1px solid var(--color-accent, #60a5fa);
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.open_agent:hover {
+  background: var(--color-bg-secondary);
+}
+
 /* TodoWrite */
 .todo_list {
   list-style: none;
