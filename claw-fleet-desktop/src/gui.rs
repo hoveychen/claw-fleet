@@ -11,7 +11,7 @@ use std::sync::OnceLock;
 
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{Emitter, Listener, Manager};
+use tauri::{Emitter, Manager};
 use tauri::menu::{AboutMetadataBuilder, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::tray::TrayIconBuilder;
 
@@ -775,13 +775,6 @@ pub struct AppState {
     pub llm_config: Arc<Mutex<llm_provider::LlmConfig>>,
     /// Cached LLM provider info — pre-fetched at startup so Settings opens instantly.
     pub cached_llm_providers: Arc<Mutex<Vec<llm_provider::LlmProviderInfo>>>,
-    /// Mobile access: embedded HTTP server (None = not started).
-    pub mobile_server: Arc<Mutex<Option<embedded_server::EmbeddedServer>>>,
-    /// Mobile access: active tunnel handle (None = not started). Type-erased
-    /// so additional providers (localtunnel, OpenFrp) can plug in.
-    pub mobile_tunnel: Arc<Mutex<Option<tunnel::BoxedTunnelHandle>>>,
-    /// Whether mobile access setup (download + tunnel) is in progress.
-    pub mobile_setup_in_progress: Arc<std::sync::atomic::AtomicBool>,
     /// Serialized snapshot of the current decision queue, seeded by the main
     /// window before it pops the decision-float. The float window reads this
     /// on mount to hydrate its local store before live events arrive.
@@ -2897,7 +2890,6 @@ struct MenuLabels {
 
     help: &'static str,
     welcome: &'static str,
-    mobile_access: &'static str,
     report_issue: &'static str,
 }
 
@@ -2942,7 +2934,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
 
             help: "帮助",
             welcome: "欢迎向导",
-            mobile_access: "移动端接入",
             report_issue: "反馈问题…",
         }
     } else {
@@ -2985,7 +2976,6 @@ fn menu_labels(locale: &str) -> MenuLabels {
 
             help: "Help",
             welcome: "Welcome",
-            mobile_access: "Mobile Access",
             report_issue: "Report Issue…",
         }
     }
@@ -3108,11 +3098,6 @@ fn build_app_menu(
                 .id("menu-welcome")
                 .build(app)?,
         )
-        .item(
-            &MenuItemBuilder::new(l.mobile_access)
-                .id("menu-mobile-access")
-                .build(app)?,
-        )
         .separator()
         .item(
             &MenuItemBuilder::new(l.report_issue)
@@ -3216,13 +3201,6 @@ fn handle_app_menu_event(app: &tauri::AppHandle, id: &str) -> bool {
             }
             let _ = app.emit("menu-welcome", ());
         }
-        "menu-mobile-access" => {
-            if let Some(w) = app.get_webview_window("main") {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
-            let _ = app.emit("menu-mobile-access", ());
-        }
         "menu-report-issue" => {
             use tauri_plugin_opener::OpenerExt;
             let _ = app
@@ -3301,224 +3279,6 @@ fn build_tray_menu(
     );
 
     builder.build()
-}
-
-// ── Mobile access commands ──────────────────────────────────────────────────
-
-#[derive(serde::Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct MobileAccessInfo {
-    running: bool,
-    port: u16,
-    token: String,
-    tunnel_url: Option<String>,
-    connected_clients: usize,
-    cloudflared_available: bool,
-    /// True while cloudflared is being downloaded / tunnel is being set up.
-    setting_up: bool,
-    /// Error message if tunnel setup failed.
-    error: Option<String>,
-}
-
-#[tauri::command]
-async fn enable_mobile_access(
-    state: tauri::State<'_, AppState>,
-    app: tauri::AppHandle,
-    provider: Option<String>,
-) -> Result<MobileAccessInfo, String> {
-    // Stop existing server/tunnel if any.
-    {
-        let mut tunnel_guard = state.mobile_tunnel.lock().unwrap();
-        if let Some(mut t) = tunnel_guard.take() {
-            t.stop();
-        }
-        let mut server_guard = state.mobile_server.lock().unwrap();
-        if let Some(mut s) = server_guard.take() {
-            s.stop();
-        }
-    }
-
-    // Generate a random auth token.
-    let token: String = {
-        let mut hasher = DefaultHasher::new();
-        std::time::SystemTime::now().hash(&mut hasher);
-        std::process::id().hash(&mut hasher);
-        format!("{:016x}", hasher.finish())
-    };
-
-    // Pick an available port (bind to 0, get assigned port, release).
-    let port = {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0")
-            .map_err(|e| format!("cannot find available port: {e}"))?;
-        let port = listener.local_addr().unwrap().port();
-        drop(listener);
-        port
-    };
-
-    // Start the embedded HTTP server (waits for bind confirmation).
-    let backend = state.backend.clone();
-    let server = embedded_server::EmbeddedServer::start(backend, port, token.clone())
-        .map_err(|e| format!("embedded server failed: {e}"))?;
-
-    log_debug(&format!("[mobile-access] server started on port {port}"));
-
-    // Store server immediately so it's usable even while tunnel downloads.
-    *state.mobile_server.lock().unwrap() = Some(server);
-
-    // Mark setup as in-progress.
-    state.mobile_setup_in_progress.store(true, std::sync::atomic::Ordering::Relaxed);
-
-    // Bring up the tunnel — in a blocking thread so we don't freeze the UI.
-    // The provider drives the "downloading" → "tunnel" phase events itself.
-    let mobile_tunnel = state.mobile_tunnel.clone();
-    let setup_flag = state.mobile_setup_in_progress.clone();
-    let app_for_callbacks = app.clone();
-    let provider_pref = provider.clone();
-    let tunnel_result = tokio::task::spawn_blocking(move || {
-        let providers = tunnel::select_providers(provider_pref.as_deref());
-        let mut last_err: Option<String> = None;
-        for p in providers {
-            if !p.is_available() {
-                last_err = Some(format!("{}: provider not available", p.name()));
-                continue;
-            }
-            let app_phase = app_for_callbacks.clone();
-            let phase_cb: tunnel::PhaseFn = Box::new(move |phase: &'static str| {
-                let _ = app_phase.emit("mobile-access-phase", phase);
-            });
-            let app_progress = app_for_callbacks.clone();
-            let progress_cb: tunnel::ProgressFn = Box::new(move |downloaded, total| {
-                let _ = app_progress.emit("mobile-access-progress", serde_json::json!({
-                    "downloaded": downloaded,
-                    "total": total,
-                }));
-            });
-            match tunnel::TunnelProvider::start(&*p, port, Some(phase_cb), Some(progress_cb)) {
-                Ok(h) => return Ok(h),
-                Err(e) => {
-                    let msg = format!("{}: {e}", p.name());
-                    log_debug(&format!("[mobile-access] {msg}"));
-                    last_err = Some(msg);
-                }
-            }
-        }
-        Err(last_err.unwrap_or_else(|| "no tunnel provider available".to_string()))
-    })
-    .await
-    .map_err(|e| {
-        setup_flag.store(false, std::sync::atomic::Ordering::Relaxed);
-        format!("task failed: {e}")
-    })?;
-
-    // Setup done.
-    state.mobile_setup_in_progress.store(false, std::sync::atomic::Ordering::Relaxed);
-
-    let (tunnel_url, tunnel_error) = match &tunnel_result {
-        Ok(t) => (Some(t.url().to_string()), None),
-        Err(e) => {
-            log_debug(&format!("[mobile-access] tunnel failed: {e}"));
-            eprintln!("[mobile-access] tunnel failed: {e}");
-            (None, Some(e.clone()))
-        }
-    };
-
-    if let Ok(t) = tunnel_result {
-        *mobile_tunnel.lock().unwrap() = Some(t);
-    }
-
-    let server_guard = state.mobile_server.lock().unwrap();
-    let info = MobileAccessInfo {
-        running: true,
-        port,
-        token,
-        tunnel_url,
-        connected_clients: server_guard.as_ref().map_or(0, |s| s.broadcaster().client_count()),
-        cloudflared_available: tunnel::is_cloudflared_available(),
-        setting_up: false,
-        error: tunnel_error,
-    };
-
-    // Signal completion.
-    let _ = app.emit("mobile-access-ready", &info);
-
-    Ok(info)
-}
-
-#[tauri::command]
-async fn disable_mobile_access(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let mut tunnel = state.mobile_tunnel.lock().unwrap().take();
-    let mut server = state.mobile_server.lock().unwrap().take();
-    state.mobile_setup_in_progress.store(false, std::sync::atomic::Ordering::Relaxed);
-
-    // Stop in a blocking thread so we don't freeze the UI.
-    tokio::task::spawn_blocking(move || {
-        if let Some(ref mut t) = tunnel {
-            t.stop();
-        }
-        if let Some(ref mut s) = server {
-            s.stop();
-        }
-    })
-    .await
-    .map_err(|e| format!("stop failed: {e}"))?;
-
-    Ok(())
-}
-
-#[tauri::command]
-fn get_mobile_access_status(state: tauri::State<'_, AppState>) -> MobileAccessInfo {
-    let server_guard = state.mobile_server.lock().unwrap();
-    let tunnel_guard = state.mobile_tunnel.lock().unwrap();
-    let setting_up = state.mobile_setup_in_progress.load(std::sync::atomic::Ordering::Relaxed);
-
-    match server_guard.as_ref() {
-        Some(server) => {
-            let tunnel_url = tunnel_guard.as_ref().map(|t| t.url().to_string());
-            MobileAccessInfo {
-                running: true,
-                port: server.port(),
-                token: server.token().to_string(),
-                tunnel_url,
-                connected_clients: server.broadcaster().client_count(),
-                cloudflared_available: tunnel::is_cloudflared_available(),
-                setting_up,
-                error: None,
-            }
-        }
-        None => MobileAccessInfo {
-            running: false,
-            port: 0,
-            token: String::new(),
-            tunnel_url: None,
-            connected_clients: 0,
-            cloudflared_available: tunnel::is_cloudflared_available(),
-            setting_up,
-            error: None,
-        },
-    }
-}
-
-/// Returns the QR code data for mobile pairing.
-/// The QR encodes a URL: `https://xxx.trycloudflare.com/mobile?token=TOKEN`
-/// - Scanned by Claw Fleet app → parsed as connection URL
-/// - Scanned by generic QR reader → opens landing page in browser
-#[tauri::command]
-fn get_mobile_qr_data(state: tauri::State<'_, AppState>) -> Option<String> {
-    let server_guard = state.mobile_server.lock().unwrap();
-    let tunnel_guard = state.mobile_tunnel.lock().unwrap();
-
-    let server = server_guard.as_ref()?;
-    let tunnel = tunnel_guard.as_ref()?;
-
-    // URL format that serves both as a web page and as app connection data.
-    Some(format!("{}/mobile?token={}", tunnel.url(), server.token()))
-}
-
-/// Returns whether the user is likely in mainland China, used by the mobile
-/// panel to surface a one-line tip about provider reachability.
-#[tauri::command]
-fn is_china_region() -> bool {
-    matches!(crate::region::detect(), crate::region::Region::China)
 }
 
 // ── App setup ────────────────────────────────────────────────────────────────
@@ -3647,9 +3407,6 @@ pub fn run() {
             tray_rebuild_pending: Arc::new(Mutex::new(false)),
             llm_config: Arc::new(Mutex::new(llm_provider::LlmConfig::default())),
             cached_llm_providers: Arc::new(Mutex::new(Vec::new())),
-            mobile_server: Arc::new(Mutex::new(None)),
-            mobile_tunnel: Arc::new(Mutex::new(None)),
-            mobile_setup_in_progress: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             decision_float_snapshot: Arc::new(Mutex::new(None)),
         })
         .setup(move |app| {
@@ -3774,33 +3531,6 @@ pub fn run() {
             claw_fleet_core::account::start_background_sampler(
                 std::time::Duration::from_secs(600),
             );
-
-            // ── SSE forwarding for mobile access ──────────────────────────
-            // Listen for sessions-updated Tauri events and broadcast them to
-            // any connected SSE mobile clients.
-            {
-                let mobile_server = app.state::<AppState>().mobile_server.clone();
-                app.listen("sessions-updated", move |event| {
-                    let guard = mobile_server.lock().unwrap();
-                    if let Some(ref server) = *guard {
-                        if server.broadcaster().client_count() > 0 {
-                            // event.payload() is already a JSON string.
-                            server.broadcaster().broadcast("sessions-updated", event.payload());
-                        }
-                    }
-                });
-            }
-            {
-                let mobile_server = app.state::<AppState>().mobile_server.clone();
-                app.listen("waiting-alert", move |event| {
-                    let guard = mobile_server.lock().unwrap();
-                    if let Some(ref server) = *guard {
-                        if server.broadcaster().client_count() > 0 {
-                            server.broadcaster().broadcast("waiting-alert", event.payload());
-                        }
-                    }
-                });
-            }
 
             // ── Supervisor daemon auto-install (REMOVED in Phase 3) ──────
             // The legacy `fleet serve` LaunchAgent existed because the
@@ -4156,11 +3886,6 @@ pub fn run() {
             generate_daily_report_ai_summary,
             generate_daily_report_lessons,
             append_lesson_to_claude_md,
-            enable_mobile_access,
-            disable_mobile_access,
-            get_mobile_access_status,
-            get_mobile_qr_data,
-            is_china_region,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application")

@@ -7,18 +7,15 @@ pub use claw_fleet_core::*;
 // These are always compiled — this crate IS the GUI app, so no #[cfg] gates.
 pub mod app_nap;
 pub mod daemon_autostart;
-pub mod embedded_server;
 mod gui;
 pub mod keep_awake;
 pub mod local_backend;
-pub mod region;
 pub mod remote;
 pub mod fleet_task_client;
 pub mod fleet_task_spawn;
 pub mod runtime_registry;
 pub mod tasks_watcher;
 pub mod traffic_lights;
-pub mod tunnel;
 pub mod version_check;
 
 pub use gui::*;
