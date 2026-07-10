@@ -41,9 +41,6 @@ TARGET=$(rustc -vV | sed -n 's|host: ||p')
 echo "==> Target: $TARGET"
 
 # 1. Build fleet CLI sidecar (debug)
-#    The task lifecycle runtime is folded into this binary as the hidden
-#    `fleet task-runtime` subcommand, so the single `fleet` sidecar covers
-#    both the CLI and the task runtime the desktop spawns.
 echo "==> Building fleet CLI..."
 cargo build -p fleet-cli
 
@@ -85,17 +82,15 @@ echo "==> Installing frontend deps (pnpm)..."
 (cd claw-fleet-desktop && pnpm install --frozen-lockfile)
 
 # 4. Build Tauri app (debug)
-#    本地构建启用 Projects/Tasks feature flag（线上 release.yml 不设此变量，保持隐藏）
-export VITE_PROJECTS_ENABLED=true
-echo "==> Building Tauri app... (VITE_PROJECTS_ENABLED=$VITE_PROJECTS_ENABLED)"
+echo "==> Building Tauri app..."
 (cd claw-fleet-desktop && npx tauri build --debug --bundles app)
 
 # 5. Sign with entitlements (macOS only)
 #    Sign the sidecar FIRST with its own (non-sandbox) entitlements, then the
 #    outer app bundle. Using --deep would overwrite the sidecar signature with
 #    the app's sandbox entitlements, causing SIGTRAP when the sidecar is invoked
-#    externally (e.g. fleet by Claude Code hooks, or `fleet task-runtime` by the
-#    desktop). Kept as a loop so adding sidecars later stays a one-line change.
+#    externally (e.g. fleet by Claude Code hooks). Kept as a loop so adding
+#    sidecars later stays a one-line change.
 APP_BUNDLE="target/debug/bundle/macos/Claw Fleet.app"
 SIDECARS=("$APP_BUNDLE/Contents/MacOS/fleet")
 if [[ ! -d "$APP_BUNDLE" ]]; then

@@ -16,8 +16,7 @@ import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
 import { useDecisionPeerSync } from "./hooks/useDecisionPeerSync";
-import { useRuntimeTasksStore } from "./runtimeTasksStore";
-import { type Connection, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useTasksStore, useUIStore } from "./store";
+import { type Connection, resolveTheme, useConnectionStore, useDecisionStore, useDetailStore, useSessionsStore, useUIStore } from "./store";
 import { getItem, setItem, getSeenFeatures, ONBOARDING_FEATURES, type OnboardingFeatureId } from "./storage";
 import type { OnboardingMode } from "./components/Onboarding";
 import i18n from "./i18n";
@@ -143,36 +142,6 @@ function App() {
       unLangPromise.then((fn) => fn());
       unMascotPromise.then((fn) => fn());
       unFloatingDecisionPromise.then((fn) => fn());
-    };
-  }, []);
-
-  // Phase 3: hydrate + subscribe to the fleet-task runtime registry so the
-  // app can show which tasks are currently backed by a live process.
-  useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
-    useRuntimeTasksStore.getState().refresh();
-    useRuntimeTasksStore
-      .getState()
-      .subscribe()
-      .then((unsub) => {
-        unsubscribe = unsub;
-      });
-    return () => {
-      unsubscribe?.();
-    };
-  }, []);
-
-  // Phase 5: subscribe to tasks-updated emitted by the backend's
-  // TasksDirWatcher whenever an out-of-process tool (e.g. `fleet-task new`)
-  // creates / modifies / removes a task json. Re-runs list_tasks for the full
-  // task list (project views filter client-side) so the user doesn't have to
-  // switch projects.
-  useEffect(() => {
-    const un = listen("tasks-updated", () => {
-      useTasksStore.getState().refresh();
-    });
-    return () => {
-      un.then((fn) => fn());
     };
   }, []);
 

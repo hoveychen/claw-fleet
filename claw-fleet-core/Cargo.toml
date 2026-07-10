@@ -30,7 +30,6 @@ conch-parser = "0.1.1"
 shell-words = "1.1.1"
 ctrlc = { version = "3", features = ["termination"] }
 git2 = { version = "0.18", default-features = false }
-claw-fleet-task = { path = "../claw-fleet-task" }
 # Feishu WebSocket long-connection — hand-rolled minimal larkws client
 # (outbound, no public webhook, works behind a firewall). Frame codec via the
 # standalone, clean `lark-websocket-protobuf` crate (crates.io, no submodule

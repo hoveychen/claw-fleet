@@ -6,15 +6,11 @@ pub use claw_fleet_core::*;
 // ── Desktop-only modules ────────────────────────────────────────────────────
 // These are always compiled — this crate IS the GUI app, so no #[cfg] gates.
 pub mod app_nap;
-pub mod daemon_autostart;
+pub mod fleet_binary;
 mod gui;
 pub mod keep_awake;
 pub mod local_backend;
 pub mod remote;
-pub mod fleet_task_client;
-pub mod fleet_task_spawn;
-pub mod runtime_registry;
-pub mod tasks_watcher;
 pub mod traffic_lights;
 pub mod version_check;
 
@@ -258,56 +254,6 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
     fn remove_marketplace(&self, _: &str) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn list_projects(&self) -> Vec<claw_fleet_core::project::Project> {
-        vec![]
-    }
-    fn create_project(
-        &self,
-        _: claw_fleet_core::project::ProjectInput,
-    ) -> Result<claw_fleet_core::project::Project, String> {
-        Err("backend not ready".into())
-    }
-    fn update_project(&self, _: claw_fleet_core::project::Project) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn delete_project(&self, _: &str) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn list_fleet_sessions(&self) -> Vec<claw_fleet_core::project::FleetSession> {
-        vec![]
-    }
-    fn spawn_fleet_session(
-        &self,
-        _: claw_fleet_core::project::LauncherForm,
-    ) -> Result<claw_fleet_core::project::FleetSession, String> {
-        Err("backend not ready".into())
-    }
-    fn cancel_fleet_session(&self, _: &str) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn resume_fleet_session(&self, _: &str, _: &str) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn set_fleet_session_status(
-        &self,
-        _: &str,
-        _: &str,
-        _: Option<&str>,
-    ) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn is_fleet_daemon_installed(&self) -> bool {
-        false
-    }
-    fn install_fleet_daemon(&self, _: &str, _: u16, _: &str) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn uninstall_fleet_daemon(&self) -> Result<(), String> {
-        Err("backend not ready".into())
-    }
-    fn ensure_fleet_cli_link(&self, _: &str) -> Result<(), String> {
         Err("backend not ready".into())
     }
     fn get_waiting_alerts(&self) -> Vec<WaitingAlert> {

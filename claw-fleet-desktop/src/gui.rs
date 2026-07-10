@@ -1233,7 +1233,7 @@ fn respond_to_a2ui_render(
 /// located so the frontend can surface a useful hint.
 #[tauri::command]
 fn apply_mcp_injector(state: tauri::State<AppState>) -> Result<(), String> {
-    let p = crate::daemon_autostart::resolve_fleet_binary()
+    let p = crate::fleet_binary::resolve_fleet_binary()
         .ok_or("Fleet sibling binary not found near this Fleet desktop process — \
                  build fleet-cli or install the production sidecar so the MCP \
                  injector can point at a real `command` path")?;
@@ -1877,245 +1877,6 @@ fn add_marketplace(state: tauri::State<AppState>, source: String) -> Result<(), 
 #[tauri::command]
 fn remove_marketplace(state: tauri::State<AppState>, name: String) -> Result<(), String> {
     state.backend.read().unwrap().remove_marketplace(&name)
-}
-
-// ── Projects ─────────────────────────────────────────────────────────────────
-
-#[tauri::command]
-fn list_projects(state: tauri::State<AppState>) -> Vec<claw_fleet_core::project::Project> {
-    state.backend.read().unwrap().list_projects()
-}
-
-#[tauri::command]
-fn create_project(
-    state: tauri::State<AppState>,
-    input: claw_fleet_core::project::ProjectInput,
-) -> Result<claw_fleet_core::project::Project, String> {
-    state.backend.read().unwrap().create_project(input)
-}
-
-#[tauri::command]
-fn update_project(
-    state: tauri::State<AppState>,
-    project: claw_fleet_core::project::Project,
-) -> Result<(), String> {
-    state.backend.read().unwrap().update_project(project)
-}
-
-#[tauri::command]
-fn delete_project(state: tauri::State<AppState>, project_id: String) -> Result<(), String> {
-    state.backend.read().unwrap().delete_project(&project_id)
-}
-
-#[tauri::command]
-fn list_fleet_sessions(state: tauri::State<AppState>) -> Vec<claw_fleet_core::project::FleetSession> {
-    state.backend.read().unwrap().list_fleet_sessions()
-}
-
-#[tauri::command]
-fn spawn_fleet_session(
-    state: tauri::State<AppState>,
-    form: claw_fleet_core::project::LauncherForm,
-) -> Result<claw_fleet_core::project::FleetSession, String> {
-    state.backend.read().unwrap().spawn_fleet_session(form)
-}
-
-#[tauri::command]
-fn cancel_fleet_session(state: tauri::State<AppState>, session_id: String) -> Result<(), String> {
-    state.backend.read().unwrap().cancel_fleet_session(&session_id)
-}
-
-#[tauri::command]
-fn resume_fleet_session(
-    state: tauri::State<AppState>,
-    session_id: String,
-    follow_up_prompt: String,
-) -> Result<(), String> {
-    state
-        .backend
-        .read()
-        .unwrap()
-        .resume_fleet_session(&session_id, &follow_up_prompt)
-}
-
-#[tauri::command]
-fn set_fleet_session_status(
-    state: tauri::State<AppState>,
-    session_id: String,
-    status: String,
-    note: Option<String>,
-) -> Result<(), String> {
-    state
-        .backend
-        .read()
-        .unwrap()
-        .set_fleet_session_status(&session_id, &status, note.as_deref())
-}
-
-// ── Tasks (task-as-unit V1) ──────────────────────────────────────────────────
-
-#[tauri::command]
-fn create_task(
-    state: tauri::State<AppState>,
-    input: claw_fleet_core::task::TaskInput,
-) -> Result<claw_fleet_core::task::Task, String> {
-    state.backend.read().unwrap().create_task(input)
-}
-
-#[tauri::command]
-fn get_task(
-    state: tauri::State<AppState>,
-    task_id: String,
-) -> Result<claw_fleet_core::task::Task, String> {
-    state.backend.read().unwrap().get_task(&task_id)
-}
-
-#[tauri::command]
-fn get_task_deliverables(
-    state: tauri::State<AppState>,
-    task_id: String,
-) -> Result<claw_fleet_core::deliverables::TaskDeliverables, String> {
-    state.backend.read().unwrap().get_task_deliverables(&task_id)
-}
-
-#[tauri::command]
-fn list_tasks(
-    state: tauri::State<AppState>,
-    project_id: Option<String>,
-) -> Vec<claw_fleet_core::task::Task> {
-    state.backend.read().unwrap().list_tasks(project_id.as_deref())
-}
-
-#[tauri::command]
-fn update_task_plan(
-    state: tauri::State<AppState>,
-    task_id: String,
-    plan: claw_fleet_core::plan::DagPlan,
-) -> Result<(), String> {
-    state.backend.read().unwrap().update_plan(&task_id, plan)
-}
-
-#[tauri::command]
-fn start_task(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
-    state.backend.read().unwrap().start_task(&task_id)
-}
-
-#[tauri::command]
-fn accept_task(
-    state: tauri::State<AppState>,
-    task_id: String,
-    mode: Option<crate::task::AcceptMode>,
-) -> Result<(), String> {
-    // Default to MergeBack (合回+清理) when the caller omits the mode.
-    let mode = mode.unwrap_or_default();
-    state.backend.read().unwrap().accept_task(&task_id, mode)
-}
-
-#[tauri::command]
-fn rerun_task_e2e(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
-    state.backend.read().unwrap().rerun_task_e2e(&task_id)
-}
-
-#[tauri::command]
-fn clear_task(state: tauri::State<AppState>, task_id: String) -> Result<(), String> {
-    state.backend.read().unwrap().clear_task(&task_id)
-}
-
-#[tauri::command]
-fn list_runtime_tasks(
-    state: tauri::State<AppState>,
-) -> Vec<claw_fleet_core::registry::RegistryEntry> {
-    state.backend.read().unwrap().runtime_tasks()
-}
-
-#[tauri::command]
-fn fleet_task_state(
-    state: tauri::State<AppState>,
-    task_id: String,
-) -> Result<serde_json::Value, String> {
-    state.backend.read().unwrap().fleet_task_state(&task_id)
-}
-
-#[tauri::command]
-fn fleet_task_dispatch(
-    state: tauri::State<AppState>,
-    task_id: String,
-    p_item_id: String,
-) -> Result<(), String> {
-    state
-        .backend
-        .read()
-        .unwrap()
-        .fleet_task_dispatch(&task_id, &p_item_id)
-}
-
-#[tauri::command]
-fn update_task_title(
-    state: tauri::State<AppState>,
-    task_id: String,
-    title: String,
-) -> Result<(), String> {
-    state
-        .backend
-        .read()
-        .unwrap()
-        .set_task_title(&task_id, &title)
-}
-
-#[tauri::command]
-fn add_task_material(
-    state: tauri::State<AppState>,
-    task_id: String,
-    filename: String,
-    bytes: Vec<u8>,
-    media: claw_fleet_core::task::MediaKind,
-) -> Result<String, String> {
-    let path = state
-        .backend
-        .read()
-        .unwrap()
-        .add_task_material(&task_id, &filename, bytes, media)?;
-    Ok(path.to_string_lossy().into_owned())
-}
-
-#[tauri::command]
-fn subscribe_task_events(
-    state: tauri::State<AppState>,
-    task_id: String,
-) -> Result<String, String> {
-    state.backend.read().unwrap().subscribe_task_events(&task_id)
-}
-
-#[tauri::command]
-fn is_fleet_daemon_installed(state: tauri::State<AppState>) -> bool {
-    state.backend.read().unwrap().is_fleet_daemon_installed()
-}
-
-#[tauri::command]
-fn install_fleet_daemon(
-    state: tauri::State<AppState>,
-    fleet_path: String,
-    port: u16,
-    token: String,
-) -> Result<(), String> {
-    state
-        .backend
-        .read()
-        .unwrap()
-        .install_fleet_daemon(&fleet_path, port, &token)
-}
-
-#[tauri::command]
-fn uninstall_fleet_daemon(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().uninstall_fleet_daemon()
-}
-
-#[tauri::command]
-fn ensure_fleet_cli_link(
-    state: tauri::State<AppState>,
-    fleet_path: String,
-) -> Result<(), String> {
-    state.backend.read().unwrap().ensure_fleet_cli_link(&fleet_path)
 }
 
 // ── Agent sources config ─────────────────────────────────────────────────────
@@ -3483,7 +3244,7 @@ pub fn run() {
             if cfg!(debug_assertions)
                 && claw_fleet_core::mcp_injector::load_config().enabled
             {
-                match crate::daemon_autostart::resolve_fleet_binary() {
+                match crate::fleet_binary::resolve_fleet_binary() {
                     Some(p) => {
                         let path_str = p.to_string_lossy().to_string();
                         if let Err(e) = claw_fleet_core::mcp_injector::acquire(
@@ -3515,7 +3276,7 @@ pub fn run() {
             // list and no-ops. Thread runs until process exit; no handle
             // to keep.
             {
-                let fleet_path = crate::daemon_autostart::resolve_fleet_binary()
+                let fleet_path = crate::fleet_binary::resolve_fleet_binary()
                     .map(|p| p.to_string_lossy().to_string())
                     .unwrap_or_else(|| "fleet".to_string());
                 claw_fleet_core::injector_watchdog::start(fleet_path);
@@ -3532,13 +3293,6 @@ pub fn run() {
                 std::time::Duration::from_secs(600),
             );
 
-            // ── Supervisor daemon auto-install (REMOVED in Phase 3) ──────
-            // The legacy `fleet serve` LaunchAgent existed because the
-            // supervisor::tick loop had to be alive to spawn queued sessions.
-            // Phase 3 retired that path: the `fleet-task` standalone binary
-            // owns task lifecycle now, and the remaining hook endpoints
-            // (`fleet-hooks-server` — split out in Phase 3 P7) are launched
-            // on demand. No more auto-install at startup.
 
             // Truncate the hook events file if it has grown too large.
             hooks::maybe_truncate_events_file();
@@ -3768,34 +3522,6 @@ pub fn run() {
             list_marketplaces,
             add_marketplace,
             remove_marketplace,
-            list_projects,
-            create_project,
-            update_project,
-            delete_project,
-            list_fleet_sessions,
-            spawn_fleet_session,
-            cancel_fleet_session,
-            resume_fleet_session,
-            set_fleet_session_status,
-            create_task,
-            get_task,
-            get_task_deliverables,
-            list_tasks,
-            update_task_plan,
-            start_task,
-            accept_task,
-            rerun_task_e2e,
-            clear_task,
-            list_runtime_tasks,
-            fleet_task_state,
-            fleet_task_dispatch,
-            update_task_title,
-            add_task_material,
-            subscribe_task_events,
-            is_fleet_daemon_installed,
-            install_fleet_daemon,
-            uninstall_fleet_daemon,
-            ensure_fleet_cli_link,
             get_waiting_alerts,
             set_locale,
             get_hooks_setup_plan,
