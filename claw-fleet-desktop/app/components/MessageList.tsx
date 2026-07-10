@@ -345,7 +345,9 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, metaM
 
   const time = msg.timestamp ? formatMsgTime(msg.timestamp) : null;
 
-  // Status dot
+  // Turn status. Previously a timeline dot in the gutter; now a marker on the
+  // usage row, because roles are told apart by layout (full-width assistant vs.
+  // right-aligned user bubble) rather than by a gutter rail.
   const stopReason = msg.message.stop_reason;
   const dotClass =
     stopReason === "end_turn"
@@ -363,7 +365,6 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, metaM
       className={`${styles.message} ${isAssistant ? styles.assistant : styles.user}`}
       data-msg-idx={msgIdx}
     >
-      {isAssistant && <span className={`${styles.dot} ${dotClass}`} />}
       <div className={styles.content}>
         {isAssistant && Array.isArray(content) && (
           <ContentBlocks
@@ -392,6 +393,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, metaM
         )}
         {isAssistant && (msg.message.usage || time) && (
           <div className={styles.usage}>
+            {dotClass && <span className={`${styles.dot} ${dotClass}`} />}
             {msg.message.usage && (
               <>
                 ↑{msg.message.usage.input_tokens} ↓{msg.message.usage.output_tokens}
