@@ -1485,6 +1485,83 @@ fn extract_model(last_lines: &[Value]) -> Option<String> {
     None
 }
 
+/// Locate a session's transcript by id. Session jsonl lives at
+/// `~/.claude/projects/<encoded-cwd>/<session_id>.jsonl`; the encoded dir is
+/// derived from the workspace path, which the caller usually doesn't have, so
+/// scan the project dirs rather than reconstructing the encoding.
+pub fn find_session_jsonl(session_id: &str) -> Option<PathBuf> {
+    let projects = get_claude_dir()?.join("projects");
+    let name = format!("{session_id}.jsonl");
+    fs::read_dir(projects)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path().join(&name))
+        .find(|p| p.is_file())
+}
+
+/// The `model` field of `~/.claude/settings.json`, e.g. `opus[1m]`. This is the
+/// CLI's default when a session is launched without `--model`.
+fn configured_model_spec() -> Option<String> {
+    let raw = fs::read_to_string(get_claude_dir()?.join("settings.json")).ok()?;
+    let v: Value = serde_json::from_str(&raw).ok()?;
+    let m = v.get("model")?.as_str()?.trim();
+    (!m.is_empty()).then(|| m.to_string())
+}
+
+/// Split a model spec into its base id and its bracketed suffix:
+/// `opus[1m]` → `("opus", Some("[1m]"))`, `claude-fable-5` → `(.., None)`.
+fn split_model_suffix(spec: &str) -> (&str, Option<&str>) {
+    match spec.find('[') {
+        Some(i) if spec.ends_with(']') => (&spec[..i], Some(&spec[i..])),
+        _ => (spec, None),
+    }
+}
+
+/// Rebuild a `--model` spec for a session, given the model id its transcript
+/// recorded and the CLI's configured default.
+///
+/// Transcripts record the *resolved* id (`claude-opus-4-8`) and drop any
+/// bracketed opt-in suffix, so a session running the 1M-context `opus[1m]`
+/// looks identical on disk to one running the 200K `opus`. Relaunching from the
+/// bare id would silently halve the context window. When the configured default
+/// carries a suffix and names the same model family the transcript shows, the
+/// session was running that default — re-apply the suffix to the precise id
+/// from the transcript (keeping its exact version) rather than to the alias.
+/// A family mismatch means the session overrode the default, so its own id wins
+/// verbatim.
+fn reconcile_model_spec(transcript_model: &str, configured: Option<&str>) -> String {
+    let Some(configured) = configured.map(str::trim).filter(|c| !c.is_empty()) else {
+        return transcript_model.to_string();
+    };
+    let (base, suffix) = split_model_suffix(configured);
+    let Some(suffix) = suffix else {
+        return transcript_model.to_string();
+    };
+    let same_family = !base.is_empty()
+        && transcript_model
+            .to_lowercase()
+            .contains(&base.to_lowercase());
+    if same_family {
+        format!("{transcript_model}{suffix}")
+    } else {
+        transcript_model.to_string()
+    }
+}
+
+/// The `--model` spec a session is running, suitable for relaunching a
+/// successor on the same model. `None` when the transcript is missing or holds
+/// no assistant turn to read a model from.
+pub fn resolve_session_model_spec(session_id: &str) -> Option<String> {
+    let path = find_session_jsonl(session_id)?;
+    let raw = fs::read_to_string(path).ok()?;
+    let lines: Vec<Value> = raw
+        .lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    let model = extract_model(&lines)?;
+    Some(reconcile_model_spec(&model, configured_model_spec().as_deref()))
+}
+
 fn has_thinking_blocks(last_lines: &[Value]) -> bool {
     for msg in last_lines.iter() {
         if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
@@ -3044,6 +3121,72 @@ mod tests {
             assistant_msg(vec![text_block("hi")], Some("end_turn")),
         ];
         assert_eq!(extract_model(&lines), Some("claude-sonnet-4-20250514".into()));
+    }
+
+    // ── reconcile_model_spec tests ─────────────────────────────────────────
+    //
+    // Verified against the real CLI (2026-07-10): `claude --model` accepts all
+    // of `opus[1m]`, `claude-opus-4-8[1m]`, `claude-opus-4-8` and
+    // `claude-fable-5`, so re-attaching a suffix to a resolved id is legal.
+
+    /// The transcript never records the `[1m]` opt-in, so a session running the
+    /// configured `opus[1m]` default must not be relaunched on bare opus — that
+    /// would silently drop it from a 1M window to 200K.
+    #[test]
+    fn reconcile_reapplies_the_configured_suffix_to_the_resolved_id() {
+        assert_eq!(
+            reconcile_model_spec("claude-opus-4-8", Some("opus[1m]")),
+            "claude-opus-4-8[1m]"
+        );
+    }
+
+    /// The suffix rides on the transcript's exact version, not on the alias, so
+    /// a pinned older opus stays pinned.
+    #[test]
+    fn reconcile_keeps_the_transcript_version_not_the_alias() {
+        assert_eq!(
+            reconcile_model_spec("claude-opus-4-6", Some("opus[1m]")),
+            "claude-opus-4-6[1m]"
+        );
+    }
+
+    /// A session that overrode the default runs a different family; the default's
+    /// suffix must not leak onto it.
+    #[test]
+    fn reconcile_ignores_suffix_across_family_mismatch() {
+        assert_eq!(
+            reconcile_model_spec("claude-fable-5", Some("opus[1m]")),
+            "claude-fable-5"
+        );
+    }
+
+    /// No suffix to preserve, or no configured default at all — the transcript id
+    /// is already complete.
+    #[test]
+    fn reconcile_passes_through_when_nothing_to_reapply() {
+        assert_eq!(
+            reconcile_model_spec("claude-sonnet-5", Some("opus")),
+            "claude-sonnet-5"
+        );
+        assert_eq!(reconcile_model_spec("claude-sonnet-5", None), "claude-sonnet-5");
+        assert_eq!(reconcile_model_spec("claude-sonnet-5", Some("   ")), "claude-sonnet-5");
+    }
+
+    /// A full-name default with a suffix matches its own resolved id.
+    #[test]
+    fn reconcile_matches_full_name_configured_default() {
+        assert_eq!(
+            reconcile_model_spec("claude-opus-4-8", Some("claude-opus-4-8[1m]")),
+            "claude-opus-4-8[1m]"
+        );
+    }
+
+    #[test]
+    fn split_model_suffix_cases() {
+        assert_eq!(split_model_suffix("opus[1m]"), ("opus", Some("[1m]")));
+        assert_eq!(split_model_suffix("claude-fable-5"), ("claude-fable-5", None));
+        // malformed: an unterminated bracket is not a suffix
+        assert_eq!(split_model_suffix("opus[1m"), ("opus[1m", None));
     }
 
     #[test]
