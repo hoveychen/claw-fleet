@@ -1810,6 +1810,45 @@ fn delete_wiki_folder(prefix: String, state: tauri::State<AppState>) -> Result<u
     state.backend.read().unwrap().delete_wiki_folder(&prefix)
 }
 
+// ── File explorer ─────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_explorer_roots(
+    workspace: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerRoot>, String> {
+    state.backend.read().unwrap().list_explorer_roots(&workspace)
+}
+
+#[tauri::command]
+fn list_explorer_dir(
+    workspace: String,
+    root: String,
+    rel_path: String,
+    show_ignored: bool,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .list_explorer_dir(&workspace, &root, &rel_path, show_ignored)
+}
+
+#[tauri::command]
+fn read_explorer_file(
+    workspace: String,
+    root: String,
+    rel_path: String,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .read_explorer_file(&workspace, &root, &rel_path)
+}
+
 // ── Skills ────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -3514,6 +3553,9 @@ pub fn run() {
             delete_wiki_folder,
             search_wiki_docs,
             export_wiki_doc,
+            list_explorer_roots,
+            list_explorer_dir,
+            read_explorer_file,
             list_skills,
             get_skill_content,
             list_skill_files,
