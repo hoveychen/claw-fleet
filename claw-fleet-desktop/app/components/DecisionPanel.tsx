@@ -29,6 +29,7 @@ import { A2uiRenderCard } from "./A2uiRenderCard";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
+import { decisionAssetUrl } from "../decisionAssets";
 import styles from "./DecisionPanel.module.css";
 
 function shortId(id: string): string {
@@ -1275,19 +1276,6 @@ function SessionPendingCard({ decision }: { decision: SessionPendingDecision }) 
 // `options` still renders the existing button grid. The three sections compose
 // freely — a single question can carry any subset.
 
-/**
- * URL of one decision-asset file through the fleet-decision custom protocol.
- * Built by hand (not convertFileSrc) for the same reason as WikiView's
- * wikiFileUrl: percent-encoding the whole path collapses it to one segment and
- * breaks relative-asset resolution inside the served index.html.
- * `qidx` is the question's `q<step>` dir; `rel` defaults to the served entry.
- */
-export function decisionAssetUrl(id: string, qidx: string, rel = "index.html"): string {
-  const path = [id, qidx, ...rel.split("/")].map(encodeURIComponent).join("/");
-  return navigator.userAgent.includes("Windows")
-    ? `http://fleet-decision.localhost/${path}`
-    : `fleet-decision://localhost/${path}`;
-}
 
 function FleetAskFormFieldRow({
   decisionId,

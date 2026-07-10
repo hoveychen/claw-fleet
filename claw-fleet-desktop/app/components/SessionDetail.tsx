@@ -710,6 +710,7 @@ export function SessionDetail({
                   isLoading={isLoading}
                   searchQuery={searchQuery}
                   status={liveSession?.status ?? null}
+                  decisionRecords={decisionRecords}
                 />
                 {liveThinking?.streaming && liveThinking.thinking && (
                   <ThinkingBlock thinking={liveThinking.thinking} live />
