@@ -305,13 +305,70 @@ pub fn workspace_name_of(workspace_path: &str) -> String {
 }
 
 /// True when a doc tagged with `doc_workspace` belongs to the workspace the
-/// caller stands in. Either may nest under the other: a doc published from
-/// `<repo>/.worktrees/x` still belongs to `<repo>`, and a caller inside that
-/// worktree still sees docs published from the repo root. Comparison is
-/// component-wise, so `/a/foo` never matches `/a/foobar`.
+/// caller stands in.
+///
+/// Both sides normalize to their git checkout root, so a repo and any of its
+/// worktrees are one workspace — including Fleet's task worktrees under
+/// `~/.fleet/worktrees/`, which share no path prefix with the repo at all.
+/// Outside a checkout only an exact match counts: a plain path prefix must not
+/// relate two workspaces, or a doc published from `$HOME` would claim every
+/// project nested beneath it.
 pub fn workspace_contains(doc_workspace: &str, cwd_workspace: &str) -> bool {
-    let (doc, cwd) = (Path::new(doc_workspace), Path::new(cwd_workspace));
-    doc.starts_with(cwd) || cwd.starts_with(doc)
+    if doc_workspace == cwd_workspace {
+        return true;
+    }
+    match (
+        repo_root(Path::new(doc_workspace)),
+        repo_root(Path::new(cwd_workspace)),
+    ) {
+        (Some(a), Some(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// The checkout root `path` sits in: the nearest ancestor holding a `.git`.
+/// A linked worktree's `.git` is a file, and resolving it yields the *main*
+/// checkout, which is what makes a worktree and its repo compare equal.
+/// `None` when `path` is not inside a checkout at all.
+fn repo_root(path: &Path) -> Option<PathBuf> {
+    let mut dir = Some(path);
+    while let Some(d) = dir {
+        let dot_git = d.join(".git");
+        if dot_git.is_dir() {
+            return Some(canonical_or_owned(d));
+        }
+        if dot_git.is_file() {
+            // A malformed .git file still marks a checkout boundary; fall back
+            // to this directory rather than walking out into the parent repo.
+            return Some(main_checkout_of(&dot_git).unwrap_or_else(|| canonical_or_owned(d)));
+        }
+        dir = d.parent();
+    }
+    None
+}
+
+/// `gitdir: /path/to/main/.git/worktrees/<name>` → `/path/to/main`.
+fn main_checkout_of(dot_git_file: &Path) -> Option<PathBuf> {
+    let content = fs::read_to_string(dot_git_file).ok()?;
+    let raw = content.lines().next()?.strip_prefix("gitdir:")?.trim();
+    let gitdir = if Path::new(raw).is_absolute() {
+        PathBuf::from(raw)
+    } else {
+        dot_git_file.parent()?.join(raw)
+    };
+    let worktrees = gitdir.parent()?; // <main>/.git/worktrees
+    let dot_git = worktrees.parent()?; // <main>/.git
+    if worktrees.file_name()? != "worktrees" || dot_git.file_name()? != ".git" {
+        return None;
+    }
+    Some(canonical_or_owned(dot_git.parent()?))
+}
+
+/// Canonicalize when the path exists, otherwise keep it verbatim. Roots reached
+/// through a `.git` file and roots reached by walking up must agree, and on
+/// macOS one of them can arrive via the `/var` → `/private/var` symlink.
+fn canonical_or_owned(path: &Path) -> PathBuf {
+    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
 }
 
 /// Retag already-published docs whose workspace was recorded as a session
@@ -1863,20 +1920,96 @@ mod tests {
         assert_eq!(resolve_workspace_path(Path::new("/no/such/dir")), "/no/such/dir");
     }
 
+    /// `git init`-shaped checkout: a plain `.git` directory.
+    fn fake_repo(at: &Path) {
+        fs::create_dir_all(at.join(".git")).unwrap();
+    }
+
+    /// Linked-worktree-shaped checkout: `.git` is a file pointing into the
+    /// main checkout's `.git/worktrees/<name>`, the way `git worktree add`
+    /// writes it. Mirrors both `<repo>/.worktrees/x` and `~/.fleet/worktrees/`.
+    fn fake_linked_worktree(at: &Path, main_repo: &Path, name: &str) {
+        fs::create_dir_all(at).unwrap();
+        let gitdir = main_repo.join(".git").join("worktrees").join(name);
+        fs::create_dir_all(&gitdir).unwrap();
+        fs::write(at.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
+    }
+
     #[test]
-    fn workspace_contains_self_and_both_nesting_directions() {
-        assert!(workspace_contains("/a/repo", "/a/repo"));
-        // Doc published from a worktree; caller stands at the repo root.
-        assert!(workspace_contains("/a/repo/.worktrees/x", "/a/repo"));
-        // Doc published from the repo root; caller stands inside the worktree.
-        assert!(workspace_contains("/a/repo", "/a/repo/.worktrees/x"));
+    fn workspace_contains_self() {
+        let root = tmp();
+        let repo = root.path().join("repo");
+        fake_repo(&repo);
+        let p = repo.display().to_string();
+        assert!(workspace_contains(&p, &p));
+    }
+
+    #[test]
+    fn workspace_contains_spans_a_repo_and_its_linked_worktree() {
+        let root = tmp();
+        let repo = root.path().join("repo");
+        fake_repo(&repo);
+        let wt = repo.join(".worktrees").join("x");
+        fake_linked_worktree(&wt, &repo, "x");
+
+        let (repo, wt) = (repo.display().to_string(), wt.display().to_string());
+        // Doc published from the repo root; caller inside the worktree.
+        assert!(workspace_contains(&repo, &wt));
+        // Doc published from the worktree; caller at the repo root.
+        assert!(workspace_contains(&wt, &repo));
+    }
+
+    #[test]
+    fn workspace_contains_spans_an_out_of_tree_worktree() {
+        // Fleet's task workers live at ~/.fleet/worktrees/<task>/<p>, entirely
+        // outside the repo directory — path prefixes can never relate them.
+        let root = tmp();
+        let repo = root.path().join("repo");
+        fake_repo(&repo);
+        let wt = root.path().join("fleet-worktrees").join("t").join("p1");
+        fake_linked_worktree(&wt, &repo, "p1");
+
+        assert!(workspace_contains(
+            &repo.display().to_string(),
+            &wt.display().to_string()
+        ));
+    }
+
+    #[test]
+    fn workspace_contains_rejects_an_ancestor_outside_the_repo() {
+        // The regression that motivated repo-root normalization: a doc
+        // published from $HOME must not claim every project underneath it.
+        let home = tmp();
+        let repo = home.path().join("workspace").join("proj");
+        fake_repo(&repo);
+        assert!(!workspace_contains(
+            &home.path().display().to_string(),
+            &repo.display().to_string()
+        ));
     }
 
     #[test]
     fn workspace_contains_rejects_siblings_and_name_prefixes() {
-        assert!(!workspace_contains("/a/repo", "/a/other"));
+        let root = tmp();
+        for name in ["repo", "other", "foo", "foobar"] {
+            fake_repo(&root.path().join(name));
+        }
+        let p = |n: &str| root.path().join(n).display().to_string();
+        assert!(!workspace_contains(&p("repo"), &p("other")));
         // Component-wise, so a shared string prefix is not a match.
-        assert!(!workspace_contains("/a/foo", "/a/foobar"));
-        assert!(!workspace_contains("/a/foobar", "/a/foo"));
+        assert!(!workspace_contains(&p("foo"), &p("foobar")));
+        assert!(!workspace_contains(&p("foobar"), &p("foo")));
+    }
+
+    #[test]
+    fn workspace_contains_falls_back_to_exact_path_outside_git() {
+        // Neither side is a checkout: only an exact match counts. Nesting no
+        // longer implies "same workspace" without a repo to anchor it.
+        let root = tmp();
+        let dir = root.path().join("plain");
+        fs::create_dir_all(dir.join("sub")).unwrap();
+        let (d, sub) = (dir.display().to_string(), dir.join("sub").display().to_string());
+        assert!(workspace_contains(&d, &d));
+        assert!(!workspace_contains(&d, &sub));
     }
 }
