@@ -84,6 +84,9 @@ impl Backend for NullBackend {
     ) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
         None
     }
+    fn interrupt_pid(&self, _: u32) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn kill_pid(&self, _: u32) -> Result<(), String> {
         Err("backend not ready".into())
     }
