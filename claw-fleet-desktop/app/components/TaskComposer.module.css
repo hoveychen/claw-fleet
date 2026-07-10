@@ -35,6 +35,8 @@
 /* ── Composer card (mirrors ChatComposer: hairline border, no resting shadow) ── */
 
 .composer {
+  /* Anchors the wiki @-mention menu, which floats above the whole composer. */
+  position: relative;
   width: 100%;
   display: flex;
   flex-direction: column;
