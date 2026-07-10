@@ -506,6 +506,28 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json("/wiki_move", &Req { from, to })
     }
 
+    fn move_wiki_folder(&self, from: &str, to: &str) -> Result<Vec<crate::wiki::WikiDoc>, String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            from: &'a str,
+            to: &'a str,
+        }
+        self.probe.post_json("/wiki_move_folder", &Req { from, to })
+    }
+
+    fn delete_wiki_folder(&self, prefix: &str) -> Result<usize, String> {
+        #[derive(serde::Serialize)]
+        struct Req<'a> {
+            prefix: &'a str,
+        }
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            deleted: usize,
+        }
+        let resp: Resp = self.probe.post_json("/wiki_delete_folder", &Req { prefix })?;
+        Ok(resp.deleted)
+    }
+
     fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
         self.probe
             .get(&format!("/wiki_search?q={}", encode_path(query)))
