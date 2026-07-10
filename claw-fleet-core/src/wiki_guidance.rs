@@ -71,7 +71,23 @@ fleet wiki cat <slug> --file assets/app.js  # 目录型文档里的其他文件\
 - 默认输出当前版本的 entry 文件(markdown 文档就是正文,HTML 目录是 \
 `index.html`)。\n\
 - 不知道有哪些文档就 `fleet wiki list`;想看某篇的版本历史和 entry \
-文件名就 `fleet wiki show <slug>`。\n"
+文件名就 `fleet wiki show <slug>`。\n\
+\n\
+## 什么时候不该用 wiki\n\
+\n\
+渲染一份东西给人看,有三个近亲手段,别混用:\n\
+\n\
+- **一次性看一眼**(过目一张图、一段 diff,看完即弃)→ 用 `fleet__ask` 的 \
+`html` 或 `fleet__render_a2ui` 渲染成决策卡,不要 publish。\n\
+- **要把链接发给别人**→ 用 Claude Code 的 Artifact 工具(如果本 session \
+有)。它托管在 claude.ai 上、可分享,代价是内容会上传到外部服务,且必须单\
+文件自包含(CSS/JS 内联、图片转 data URI)。私有项目的产物别走这条。\n\
+- **要沉淀、之后还要读回来**→ wiki。只有 wiki 的文档能被后续 session 用 \
+`fleet wiki cat` 读到正文、用 `[[slug]]` 交叉引用、按 workspace 筛选和全文\
+搜索,也只有 wiki 收得下带 `assets/` 的多文件目录。\n\
+\n\
+判据不是「哪个能渲染」——三个都能;而是「这份产物之后还会不会被读第二次」。\
+会 → wiki。\n"
             .to_string();
     }
     "# Fleet Wiki knowledge base (managed by Claude Fleet — do not edit)\n\
@@ -121,7 +137,28 @@ fleet wiki cat <slug> --file assets/app.js    # another file in a dir doc\n\
 - Defaults to the current version's entry file (the body for markdown docs, \
 `index.html` for HTML directories).\n\
 - `fleet wiki list` shows the available slugs; `fleet wiki show <slug>` \
-shows its version history and entry filename.\n"
+shows its version history and entry filename.\n\
+\n\
+## When NOT to use the wiki\n\
+\n\
+Three close cousins render something for a human to look at. Don't confuse \
+them:\n\
+\n\
+- **A one-time glance** (show a chart or a diff, then throw it away) → render \
+it into a decision card with `fleet__ask`'s `html` or `fleet__render_a2ui`. \
+Don't publish it.\n\
+- **A link to send someone else** → use Claude Code's Artifact tool, if this \
+session has one. It's hosted on claude.ai and shareable; the cost is that the \
+content is uploaded to an external service, and it must be a single \
+self-contained file (inlined CSS/JS, images as data URIs). Keep private \
+project output off it.\n\
+- **Something that will be read again later** → the wiki. Only wiki docs can \
+be read back by a later session with `fleet wiki cat`, cross-linked with \
+`[[slug]]`, filtered by workspace, and full-text searched — and only the wiki \
+accepts a multi-file directory with an `assets/` folder.\n\
+\n\
+The test is not \"which one can render this\" — all three can. It's \"will this \
+output be read a second time?\" If yes → wiki.\n"
         .to_string()
 }
 
@@ -245,6 +282,18 @@ mod tests {
             assert!(g.contains("fleet wiki publish"), "{locale} guidance must mention the command");
             assert!(g.contains("slug"), "{locale} guidance must explain slug reuse");
             assert!(g.contains("[[slug]]"), "{locale} guidance must document cross-links");
+        }
+    }
+
+    #[test]
+    fn render_both_locales_delimit_wiki_from_its_cousins() {
+        // Without this section an agent picks between the wiki, Artifact, and
+        // the decision card at random, and durable output ends up scattered.
+        for locale in ["en", "zh"] {
+            let g = render_guidance(locale);
+            assert!(g.contains("Artifact"), "{locale} guidance must name the Artifact tool");
+            assert!(g.contains("fleet__ask"), "{locale} guidance must point one-off renders at the decision card");
+            assert!(g.contains("fleet wiki cat"), "{locale} guidance must justify the wiki by read-back");
         }
     }
 }
