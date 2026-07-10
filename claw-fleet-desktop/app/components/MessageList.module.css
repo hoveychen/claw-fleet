@@ -110,6 +110,55 @@
   50% { opacity: 0.4; }
 }
 
+/* Hover affordance. Absolutely positioned so revealing it never reflows the
+   row — a message that shifted on hover would be maddening to click. */
+.row_actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+/* The user bubble already hugs the right edge; put its control on the free
+   side instead of on top of the bubble's corner. */
+.message.user .row_actions {
+  right: auto;
+  left: 0;
+}
+
+.message:hover .row_actions,
+.row_actions:focus-within {
+  opacity: 1;
+}
+
+.copy_btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.copy_btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent, #60a5fa);
+}
+
+.copy_btn_failed {
+  color: var(--color-error-fg);
+  border-color: var(--color-error-fg);
+}
+
 /* Content area */
 .content {
   min-width: 0;

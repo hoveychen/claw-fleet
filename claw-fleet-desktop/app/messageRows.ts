@@ -30,6 +30,33 @@ export function isRenderableRow(msg: RawMessage): boolean {
   return true;
 }
 
+/**
+ * The prose of a message, as text worth putting on the clipboard.
+ *
+ * Assistant turns keep their markdown source — that is what a reader wants to
+ * paste into an issue or a doc. Reasoning, tool calls and tool output are left
+ * out: they are scaffolding, and the tool cards already offer their own bodies.
+ * Images become a placeholder rather than a wall of base64.
+ *
+ * Returns `""` when a message carries no prose at all (a turn that only called
+ * tools), which callers use to decide whether a copy control makes sense.
+ */
+export function messageToText(msg: RawMessage): string {
+  const content = msg.message?.content;
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+
+  const parts: string[] = [];
+  for (const block of content) {
+    if (block.type === "text") {
+      parts.push((block as { type: "text"; text: string }).text);
+    } else if (block.type === "image") {
+      parts.push("[image]");
+    }
+  }
+  return parts.join("\n\n").trim();
+}
+
 /** Local-time `YYYY-MM-DD` for a record, or null when it has no usable stamp. */
 export function dayKey(timestamp: string | undefined): string | null {
   if (!timestamp) return null;
