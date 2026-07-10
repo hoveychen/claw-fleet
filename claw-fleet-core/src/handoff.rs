@@ -767,6 +767,25 @@ mod tests {
         assert_eq!(rec.current_task, None);
     }
 
+    /// Pending files written before `model`/`effort` existed must still load —
+    /// an in-flight relay registered by the previous build must not be dropped
+    /// on upgrade.
+    #[test]
+    fn legacy_pending_file_without_model_still_deserializes() {
+        let (root, pdir, _cdir) = fresh_dirs("legacy");
+        fs::write(
+            pdir.join("s1.json"),
+            r#"{"fromSessionId":"s1","workspacePath":"/ws","note":"n",
+                "chainId":"c1","hop":1,"created":1000}"#,
+        )
+        .unwrap();
+        let rec = read_pending_in(&pdir, "s1").expect("legacy record must load");
+        assert_eq!(rec.model, None);
+        assert_eq!(rec.effort, None);
+        assert_eq!(rec.note, "n");
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn register_requires_note() {
         let (root, pdir, cdir) = fresh_dirs("note");
