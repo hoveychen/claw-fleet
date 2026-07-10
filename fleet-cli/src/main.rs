@@ -2696,7 +2696,7 @@ fn cmd_handoff(
         }
     }
     let ws = cwd.to_string_lossy().to_string();
-    match claw_fleet_core::handoff::register(&sid, &ws, note, plan, next) {
+    match claw_fleet_core::handoff::register(&sid, &ws, note, plan, next, None, None) {
         Ok(rec) => println!(
             "ok: handoff registered (chain {}, 第 {} 棒). \
              接力 session 将在本 session 结束 turn 后由 Stop hook 自动启动；请尽快结束当前 turn。",
