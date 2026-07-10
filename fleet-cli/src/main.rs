@@ -536,8 +536,9 @@ enum WikiCommands {
     Publish {
         /// Path to the .html file, .md file, or directory
         path: std::path::PathBuf,
-        /// Stable doc id (lowercase letters/digits/hyphens). Default:
-        /// normalized file/dir name.
+        /// Stable doc id (lowercase letters/digits/hyphens). `/` separates
+        /// virtual directories, e.g. `arch/overview`. Default: normalized
+        /// file/dir name.
         #[arg(long)]
         slug: Option<String>,
         /// Display title. Default: <title> tag / first `# ` heading / slug.

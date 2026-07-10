@@ -46,6 +46,10 @@ pub fn render_guidance(locale: &str) -> String {
 旧版本自动保留可回看;不要为同一份内容起新 slug。\n\
 - slug 用小写字母/数字/连字符;`--title` 缺省时取 `<title>` 标签或首个 \
 `# ` 标题。\n\
+- slug 里的 `/` 是**虚拟目录**分隔符(像对象存储的 key):发布成 \
+`--slug arch/overview` 后,桌面端知识库会把它显示在 `arch` 目录下。同一主题的 \
+文档用同一个前缀,别让根目录堆满散装文档。已发布的文档可以用 \
+`fleet wiki mv <旧 slug> <新 slug>` 改键搬进目录,版本历史会一起带走。\n\
 - 只归档最终成品,草稿、中间产物、一次性调试页不要 publish。\n\
 - markdown 文档里可以用 `[[slug]]` 或 `[[slug|显示文字]]` 引用知识库里\
 其他文档,渲染后可点击跳转;引用前先用 `fleet wiki list` 确认目标 slug \
@@ -71,6 +75,11 @@ that creates a new version and keeps old ones browsable; don't mint a new \
 slug for the same content.\n\
 - Slugs are lowercase letters/digits/hyphens; `--title` defaults to the \
 `<title>` tag or first `# ` heading.\n\
+- A `/` in a slug is a **virtual directory** separator, like an object-store \
+key: `--slug arch/overview` files the doc under an `arch` folder in the \
+desktop Wiki board. Share a prefix across docs on one topic instead of piling \
+everything at the root. Already-published docs move with \
+`fleet wiki mv <old-slug> <new-slug>`, version history included.\n\
 - Publish finished artifacts only — no drafts, intermediates, or one-off \
 debug pages.\n\
 - Markdown docs can reference other wiki docs with `[[slug]]` or \
