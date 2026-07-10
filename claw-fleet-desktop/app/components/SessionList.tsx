@@ -21,7 +21,6 @@ import { TasksView } from "./TasksView";
 import { SessionLauncher, type SessionLauncherProps } from "./SessionLauncher";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
-import { MobileAccessPanel } from "./MobileAccessPanel";
 import { HistoryView } from "./HistoryView";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
@@ -75,8 +74,6 @@ export function SessionList() {
     sidebarCollapsed,
     setSidebarCollapsed,
     mascotVisible,
-    showMobileAccess,
-    setShowMobileAccess,
     setShowNewProjectRequested,
   } = useUIStore();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
@@ -94,7 +91,6 @@ export function SessionList() {
   const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
   const [launcherInitial, setLauncherInitial] = useState<SessionLauncherProps["initial"]>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [mobileActive, setMobileActive] = useState(false);
   const projects = useProjectsStore((s) => s.projects);
   const tasks = useTasksStore((s) => s.tasks);
   const selectedProjectId = useProjectsStore((s) => s.selectedProjectId);
@@ -154,25 +150,20 @@ export function SessionList() {
     setViewMode("tasks");
   }, [setSelectedTaskId, setViewMode]);
 
-  // Sidebar 5s coalesced poller: mobile-access status indicator + projects
-  // store + tasks store. Three independent setInterval timers used to fire on
-  // their own 5s cadence (mobile / projects / tasks); merged into a single
-  // tick so the WebContent main thread only does one wave of state updates per
-  // 5s instead of three closely-spaced ones. Skips while the page is hidden.
+  // Sidebar 5s coalesced poller: projects store + tasks store, merged into a
+  // single tick so the WebContent main thread only does one wave of state
+  // updates per 5s. Skips while the page is hidden.
   useEffect(() => {
     let cancelled = false;
     const tick = () => {
       if (cancelled || document.visibilityState === "hidden") return;
-      invoke<{ running: boolean; tunnelUrl: string | null }>("get_mobile_access_status")
-        .then((s) => { if (!cancelled) setMobileActive(s.running && !!s.tunnelUrl); })
-        .catch(() => {});
       if (PROJECTS_FEATURE_ENABLED) {
         useProjectsStore.getState().refresh();
         useTasksStore.getState().refresh();
       }
     };
-    // Kick off once on mount (mobile-status, projects, tasks all want a
-    // first read before the 5s wait).
+    // Kick off once on mount (projects and tasks want a first read before
+    // the 5s wait).
     tick();
     const interval = setInterval(tick, 5000);
     return () => {
@@ -625,7 +616,7 @@ export function SessionList() {
                   </span>
                 </div>
                 <button
-                  className={styles.footer_mobile_btn}
+                  className={styles.footer_icon_btn}
                   onClick={(e) => { e.stopPropagation(); setLiteMode(true); }}
                   title={t("lite.enter")}
                 >
@@ -634,17 +625,6 @@ export function SessionList() {
                     <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
                     <rect x="8.5" y="7.5" width="5" height="4.5" rx="0.8" fill="currentColor" fillOpacity="0.4" />
                   </svg>
-                </button>
-                <button
-                  className={`${styles.footer_mobile_btn} ${mobileActive ? styles.footer_mobile_active : ""}`}
-                  onClick={(e) => { e.stopPropagation(); setShowMobileAccess(true); }}
-                  title={t("settings.mobile_access")}
-                >
-                  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-                    <rect x="4" y="1" width="8" height="14" rx="1.5" />
-                    <line x1="7" y1="12" x2="9" y2="12" />
-                  </svg>
-                  {mobileActive && <span className={styles.footer_mobile_dot} />}
                 </button>
               </>
             )}
@@ -660,9 +640,6 @@ export function SessionList() {
           />
         )}
       </aside>
-
-      {/* Mobile access panel */}
-      {showMobileAccess && <MobileAccessPanel onClose={() => setShowMobileAccess(false)} />}
 
       {/* Main content area */}
       {viewMode === "list" ? (
