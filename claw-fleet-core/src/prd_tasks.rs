@@ -42,19 +42,17 @@ pub struct SourcedBlock {
 
 // ── Display / Backend types ───────────────────────────────────────────────────
 
-/// Compact per-session task progress shown on the session card. `done`/`total`
-/// count only the plan this session is focused on, so the X/Y matches the
-/// P-label; `plan_count` counts every *active* plan the agent currently sees
-/// (main checkout + sibling worktrees) and drives the "+N" chip.
+/// Compact per-session task progress shown on the session card. Every field
+/// describes the one plan this session is provably working on — the summary is
+/// only produced when the `task_progress` side-channel attributes the session to
+/// an active plan, so `done`/`total` always match the named plan and its P-label.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskPlanSummary {
-    pub plan_count: u32,
     pub done: u32,
     pub total: u32,
-    /// Display name of the "currently focused" plan — the most recently modified
-    /// active block (its `**Plan:**` title, falling back to its sentinel id).
-    /// `None` for a single legacy anonymous block with no title.
+    /// Display name of the attributed plan — its `**Plan:**` title, falling back
+    /// to its sentinel id. `None` for a legacy anonymous block with no title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_plan: Option<String>,
     /// First still-pending top-level task in the focused plan (e.g. `**P3** — …`).
@@ -762,19 +760,23 @@ pub fn render_problem_warning(problems: &[(PathBuf, SentinelProblem)]) -> Option
 
 // ── High-level workspace queries (Backend) ────────────────────────────────────
 
-/// Aggregate active-plan progress for the workspace containing `cwd`. Scans
-/// the same source set the hook injects (main checkout + sibling worktrees).
-/// `None` when no TASKS.md exists or no plan is active.
+/// Progress of the one active plan `session_id` is provably working on, for the
+/// session card. Scans the same source set the hook injects (main checkout +
+/// sibling worktrees).
 ///
-/// `session_id`, when given, selects the focused plan from the per-session
-/// side-channel (`task_progress`) — the precise, attribution-correct signal
-/// recorded by `fleet plan` subcommands. Without a side-channel record (legacy
-/// hand-edited files, non-Fleet sessions) it falls back to the most-recently-
-/// modified active block.
+/// Attribution comes solely from the per-session `task_progress` side-channel,
+/// the precise signal recorded by the `fleet plan` subcommands. `None` — the
+/// card renders nothing — whenever that attribution is missing or unusable:
+/// no TASKS.md, no active plan, no `session_id`, no side-channel record (legacy
+/// hand-edited files, non-Fleet sessions), or a record naming a plan that is no
+/// longer active. A workspace's other active plans are never guessed at from
+/// mtime; the detail Tasks tab (`list_workspace_task_plans`) hides on the same
+/// terms.
 pub fn summarize_workspace_tasks(
     cwd: &Path,
     session_id: Option<&str>,
 ) -> Option<TaskPlanSummary> {
+    let rec = crate::task_progress::read(session_id?)?;
     let main_root = discover_main_checkout_root(cwd);
     let sources = collect_task_sources(cwd, main_root.as_deref());
     if sources.is_empty() {
@@ -782,46 +784,21 @@ pub fn summarize_workspace_tasks(
     }
     let (raw, _) = collect_from_sources(&sources, true);
     let deduped = dedup_blocks_keep_latest_mtime(raw);
-    if deduped.is_empty() {
-        return None;
-    }
-    // Resolve the single plan this session is focused on. Fallback focus = the
-    // most recently modified active block; within one TASKS.md (equal mtime)
-    // `reduce` keeps the first in scan order. A precise per-session record from
-    // a `fleet plan` subcommand overrides that when the plan is still active.
-    let mut focused = deduped
+    let focused = deduped
         .iter()
-        .reduce(|a, b| if b.mtime > a.mtime { b } else { a });
-    let mut current_task_override: Option<String> = None;
-    if let Some(sid) = session_id {
-        if let Some(rec) = crate::task_progress::read(sid) {
-            if let Some(block) = deduped.iter().find(|b| b.id.as_deref() == Some(rec.plan_id.as_str())) {
-                focused = Some(block);
-                current_task_override = rec.current_task.clone();
-            }
-        }
-    }
-    // Progress counts reflect ONLY the focused plan, so the X/Y matches the
-    // P-label on the card. `plan_count` still counts every active plan (it
-    // drives the "+N" chip). Summing across all plans was the old bug: the
-    // count showed the workspace total while the label named one plan.
-    let (done, total) = match focused {
-        Some(b) => count_tasks(&b.body),
-        None => (0, 0),
-    };
-    let (current_plan, current_task) = match focused {
-        Some(b) => (
-            extract_plan_name(&b.body).or_else(|| b.id.clone()),
-            current_task_override.or_else(|| first_pending_task(&b.body)),
-        ),
-        None => (None, None),
-    };
+        .find(|b| b.id.as_deref() == Some(rec.plan_id.as_str()))?;
+    // Counts reflect ONLY the attributed plan, so the X/Y matches the P-label.
+    // Summing across every plan in the workspace was the old bug: the count
+    // showed the workspace total while the label named one plan.
+    let (done, total) = count_tasks(&focused.body);
     Some(TaskPlanSummary {
-        plan_count: deduped.len() as u32,
         done,
         total,
-        current_plan,
-        current_task,
+        current_plan: extract_plan_name(&focused.body).or_else(|| focused.id.clone()),
+        current_task: rec
+            .current_task
+            .clone()
+            .or_else(|| first_pending_task(&focused.body)),
     })
 }
 
@@ -1434,7 +1411,7 @@ trailing notes outside\n";
     }
 
     #[test]
-    fn summarize_workspace_aggregates_active_plans() {
+    fn summarize_workspace_counts_the_attributed_plan() {
         let tmp = tempfile::tempdir().unwrap();
         let main = tmp.path();
         std::fs::write(
@@ -1446,16 +1423,20 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let s = summarize_workspace_tasks(main, None).expect("summary");
-        assert_eq!(s.plan_count, 1);
+        let sid = format!("test-summarize-counts-{}", std::process::id());
+        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "x", None).unwrap();
+        let s = summarize_workspace_tasks(main, Some(&sid)).expect("summary");
+        crate::task_progress::clear(&sid);
         assert_eq!(s.done, 1);
         assert_eq!(s.total, 3);
-        // Single plan → it is the focused one; current task is the first pending.
+        // No task recorded on the side-channel → first pending task in the plan.
         assert_eq!(s.current_task.as_deref(), Some("**P2** — todo"));
     }
 
+    /// With several active plans, the side-channel record — not mtime, not scan
+    /// order — decides which one the card describes.
     #[test]
-    fn summarize_session_focus_overrides_default() {
+    fn summarize_session_focus_selects_the_plan() {
         let tmp = tempfile::tempdir().unwrap();
         let main = tmp.path();
         std::fs::create_dir_all(main.join(".git")).unwrap();
@@ -1467,12 +1448,8 @@ trailing notes outside\n";
 **Plan:** Beta\n- [ ] **P1** — b\n<!-- fleet:prd:end id=\"beta\" -->\n",
         )
         .unwrap();
-        // Default (no session): first active plan (alpha) is focused.
-        let def = summarize_workspace_tasks(main, None).unwrap();
-        assert_eq!(def.current_plan.as_deref(), Some("Alpha"));
-
-        // Per-session record pointing at beta overrides the default focus.
-        let sid = format!("test-summarize-override-{}", std::process::id());
+        // Beta is second in scan order; the record still wins.
+        let sid = format!("test-summarize-focus-{}", std::process::id());
         crate::task_progress::set_current(
             &sid,
             &main.to_string_lossy(),
@@ -1484,8 +1461,6 @@ trailing notes outside\n";
         crate::task_progress::clear(&sid);
         assert_eq!(s.current_plan.as_deref(), Some("Beta"));
         assert_eq!(s.current_task.as_deref(), Some("**P1** — b"));
-        // plan_count still reflects every active plan (drives the "+N" chip).
-        assert_eq!(s.plan_count, 2);
     }
 
     #[test]
@@ -1511,8 +1486,51 @@ trailing notes outside\n";
         assert_eq!(s.current_plan.as_deref(), Some("Beta"));
         assert_eq!(s.done, 0, "done should count only the focused plan");
         assert_eq!(s.total, 3, "total should count only the focused plan");
-        // plan_count still sees both plans.
-        assert_eq!(s.plan_count, 2);
+    }
+
+    /// No per-session attribution record → the card must render nothing rather
+    /// than guessing at the most-recently-modified plan. Mirrors the detail
+    /// Tasks tab, which already hides in this case.
+    #[test]
+    fn summarize_hides_when_session_unattributed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"alpha\" v=\"2\" -->\n\
+**Plan:** Alpha\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"alpha\" -->\n\
+<!-- fleet:prd:begin id=\"beta\" v=\"2\" -->\n\
+**Plan:** Beta\n- [ ] **P1** — b\n<!-- fleet:prd:end id=\"beta\" -->\n",
+        )
+        .unwrap();
+        // No session id at all → nothing to attribute to.
+        assert!(summarize_workspace_tasks(main, None).is_none());
+        // A session with no side-channel record → still nothing.
+        let sid = format!("test-summarize-unattributed-{}", std::process::id());
+        crate::task_progress::clear(&sid);
+        assert!(summarize_workspace_tasks(main, Some(&sid)).is_none());
+    }
+
+    /// A focus record naming a plan that is no longer active (finished, deleted,
+    /// or belonging to another workspace) is not evidence of what this session is
+    /// doing — hide rather than fall back to another plan.
+    #[test]
+    fn summarize_hides_when_focus_record_is_stale() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"alpha\" v=\"2\" -->\n\
+**Plan:** Alpha\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"alpha\" -->\n",
+        )
+        .unwrap();
+        let sid = format!("test-summarize-stale-{}", std::process::id());
+        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "gone", None).unwrap();
+        let s = summarize_workspace_tasks(main, Some(&sid));
+        crate::task_progress::clear(&sid);
+        assert!(s.is_none(), "stale focus must not fall back to Alpha");
     }
 
     #[test]
@@ -1542,13 +1560,18 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let s = summarize_workspace_tasks(main, None).expect("summary");
+        let sid = format!("test-summarize-plan-name-{}", std::process::id());
+        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "x", None).unwrap();
+        let s = summarize_workspace_tasks(main, Some(&sid)).expect("summary");
+        crate::task_progress::clear(&sid);
         assert_eq!(s.current_plan.as_deref(), Some("重构会话中间件"));
         assert_eq!(s.current_task.as_deref(), Some("**P2** — 当前任务"));
     }
 
+    /// The attributed plan may live in a sibling worktree's TASKS.md rather than
+    /// the main checkout's — the record resolves against the whole source set.
     #[test]
-    fn summarize_focused_plan_is_newest_file_across_worktrees() {
+    fn summarize_resolves_plan_living_in_a_worktree() {
         let tmp = tempfile::tempdir().unwrap();
         let main = tmp.path();
         std::fs::create_dir_all(main.join(".git")).unwrap();
@@ -1561,24 +1584,17 @@ trailing notes outside\n";
         .unwrap();
         let wt = main.join(".worktrees").join("feat");
         std::fs::create_dir_all(&wt).unwrap();
-        let wt_tasks = wt.join("TASKS.md");
         std::fs::write(
-            &wt_tasks,
+            wt.join("TASKS.md"),
             "<!-- fleet:prd:begin id=\"new\" -->\n\
 **Plan:** 新计划\n- [ ] **P1** — 新任务\n\
 <!-- fleet:prd:end id=\"new\" -->\n",
         )
         .unwrap();
-        // Make the worktree file strictly newer so it wins the focus.
-        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
-        std::fs::OpenOptions::new()
-            .write(true)
-            .open(&wt_tasks)
-            .unwrap()
-            .set_modified(later)
-            .unwrap();
-        let s = summarize_workspace_tasks(main, None).expect("summary");
-        assert_eq!(s.plan_count, 2);
+        let sid = format!("test-summarize-worktree-{}", std::process::id());
+        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "new", None).unwrap();
+        let s = summarize_workspace_tasks(main, Some(&sid)).expect("summary");
+        crate::task_progress::clear(&sid);
         assert_eq!(s.current_plan.as_deref(), Some("新计划"));
         assert_eq!(s.current_task.as_deref(), Some("**P1** — 新任务"));
     }

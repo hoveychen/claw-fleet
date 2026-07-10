@@ -581,12 +581,11 @@
     "tip_cost": "会话花费 (USD)",
     "tip_cost_agent": "自身: ${{self}} · Agent 合计 (主 + 子代理): ${{total}}",
     "tip_todos": "TODO 进度：{{completed}} 已完成 · {{inProgress}} 进行中 · {{pending}} 待办",
-    "tip_task_plan": "TASKS.md 计划进度：{{done}}/{{total}} 已完成（{{plans}} 个活动计划）",
+    "tip_task_plan": "TASKS.md 计划进度：{{done}}/{{total}} 已完成",
     "handoff_chip": "接力 {{hop}}/{{len}}",
     "tip_handoff": "该 session 是一条接力链的第 {{hop}} 棒（共 {{len}} 棒）。点击查看完整链条。",
     "handoff_loading": "正在加载接力链…",
     "handoff_hop": "第 {{n}} 棒",
-    "task_plan_plans": "{{count}} 个计划",
     "tip_compact": "Context Compact：共 {{count}} 次 · 输入累计 {{pre}} tokens · 摘要累计 {{post}} tokens · 估算成本 ~${{cost}}（compact LLM 调用未单独入库，按 cache_read 和 output 单价估算）"
   },
   "onboarding": {
