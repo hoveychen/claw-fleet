@@ -1,10 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Brain } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
+import { useAutoFlip } from "./useAutoFlip";
 import styles from "./MemoryView.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -383,6 +384,8 @@ function FileDetail({
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [promoting, setPromoting] = useState(false);
   const [showPromoteMenu, setShowPromoteMenu] = useState(false);
+  const promoteMenuRef = useRef<HTMLDivElement | null>(null);
+  const promoteSide = useAutoFlip(showPromoteMenu, "below", promoteMenuRef);
 
   useEffect(() => {
     setTab("content");
@@ -448,7 +451,12 @@ function FileDetail({
                 {promoting ? t("memory.promoting") : t("memory.promote")}
               </button>
               {showPromoteMenu && (
-                <div className={styles.promote_menu}>
+                <div
+                  className={`${styles.promote_menu} ${
+                    promoteSide === "above" ? styles.promote_menu_above : styles.promote_menu_below
+                  }`}
+                  ref={promoteMenuRef}
+                >
                   <button
                     className={styles.promote_menu_item}
                     onClick={() => handlePromote("project")}

@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ImageLightbox } from "./ImageLightbox";
+import { useAutoFlip } from "./useAutoFlip";
 import { useWikiMentions } from "./useWikiMentions";
 import styles from "./ChatComposer.module.css";
 
@@ -142,6 +143,8 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const menuSide = useAutoFlip(menuOpen, "above", menuRef, menuWrapRef);
   const [previewing, setPreviewing] = useState<{ src: string; alt: string } | null>(null);
 
   useImperativeHandle(
@@ -318,7 +321,11 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         </svg>
       </button>
       {addMenuItems && addMenuItems.length > 0 && menuOpen && (
-        <div className={styles.menu} role="menu">
+        <div
+          className={`${styles.menu} ${menuSide === "above" ? styles.menu_above : styles.menu_below}`}
+          ref={menuRef}
+          role="menu"
+        >
           {addMenuItems.map((item) => (
             <button
               key={item.id}
