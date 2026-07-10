@@ -5,16 +5,20 @@
 //!
 //! Lifecycle (multi-process safe):
 //!
-//! - `acquire(pid)` snapshots the user's pre-injection state on the very first
-//!   holder, then adds the eight Fleet rules to `permissions.allow`.  Repeat
-//!   acquisitions just register additional pids without re-mutating settings.
-//! - `release(pid)` removes the pid from holders.  When the last holder leaves,
-//!   the snapshot is consulted to restore settings.json (or delete it if it
-//!   never existed before Fleet touched it) and the lock file is removed.
-//! - `prune_dead_holders` is called inside both acquire/release so a hard crash
-//!   (`kill -9`) self-heals on next Fleet boot: dead pids are dropped, and if
-//!   that empties the holder list the injection is restored before the new
-//!   acquire re-applies it.
+//! - `acquire(pid)` snapshots the user's pre-injection state the *first time the
+//!   lock file is created*, then adds Fleet's rules to `permissions.allow`.
+//!   Later acquisitions register another pid and re-assert any missing rule,
+//!   but never re-snapshot: the lock outlives every Fleet process, so its
+//!   snapshot is the only surviving record of the user's original state.
+//! - `release(pid)` removes the pid from holders and touches nothing else. The
+//!   injection deliberately survives app exit — `claude` sessions Fleet spawned
+//!   are detached and keep running after the app quits, and they would stall on
+//!   permission prompts if the allow rules vanished underneath them.
+//! - `deactivate()` is the sole cleanup path, wired to the settings-panel
+//!   toggle. It restores the snapshot (or deletes settings.json if it never
+//!   existed before Fleet touched it) and removes the lock file.
+//! - `prune_dead_holders`, called inside both acquire and release, drops pids
+//!   left behind by a `kill -9`.
 //!
 //! The lock file lives at `~/.fleet/permissions-lock.json`.
 
@@ -33,10 +37,10 @@ use crate::session::{
 /// `Bash(*)` is the load-bearing one — it suppresses Claude Code's built-in
 /// command prompt so `fleet guard` becomes the sole audit gate.  The other
 /// patterns smooth out incidental prompts the user already trusts Fleet to
-/// orchestrate (file IO, web fetch, skills, monitoring). The two `mcp__fleet__*`
-/// rules pre-authorise Fleet's own MCP tools (`fleet__ask` / `fleet__render_a2ui`)
-/// so Claude Code stops prompting on every invocation now that the desktop
-/// already renders + audits them via the Decision Panel.
+/// orchestrate (file IO, web fetch, skills, monitoring, workflows). The two
+/// `mcp__fleet__*` rules pre-authorise Fleet's own MCP tools (`fleet__ask` /
+/// `fleet__render_a2ui`) so Claude Code stops prompting on every invocation now
+/// that the desktop already renders + audits them via the Decision Panel.
 pub const INJECT_RULES: &[&str] = &[
     "Bash(*)",
     "Read(*)",
@@ -46,6 +50,7 @@ pub const INJECT_RULES: &[&str] = &[
     "WebSearch(*)",
     "Skill(*)",
     "Monitor(*)",
+    "Workflow(*)",
     "mcp__fleet__fleet__ask",
     "mcp__fleet__fleet__render_a2ui",
 ];
@@ -241,24 +246,39 @@ pub fn prune_dead_holders(lock: &mut PermissionsLock) {
 /// no-op after the first call.  Dead holders left behind by a crashed prior
 /// run are pruned before this call's pid is added.
 pub fn acquire(pid: u32) -> std::io::Result<()> {
-    let mut lock = read_lock().unwrap_or_default();
+    // The snapshot is taken exactly once — when the lock file is first created.
+    // The lock now outlives every Fleet process (`release` no longer deletes
+    // it), so `original_allow` is the sole record of what settings.json looked
+    // like before Fleet ever touched it. Re-snapshotting on a later acquire —
+    // e.g. after a `kill -9` left dead holders behind — would capture our own
+    // injection as if the user had written it, and `deactivate` could then
+    // never undo it.
+    let existing = read_lock();
+    let is_first_ever = existing.is_none();
+    let mut lock = existing.unwrap_or_default();
     prune_dead_holders(&mut lock);
-    let was_empty = lock.holders.is_empty();
 
-    if was_empty {
-        let (settings, existed) = read_settings()?;
-        let (allow, had_permissions) = extract_allow(&settings);
+    let (settings, existed) = read_settings()?;
+    let (allow, had_permissions) = extract_allow(&settings);
+
+    if is_first_ever {
         lock.original_allow = allow.clone();
         lock.original_existed = existed;
         lock.original_had_permissions = had_permissions;
+    }
 
-        let mut merged = allow;
-        for rule in INJECT_RULES {
-            if !merged.iter().any(|s| s == rule) {
-                merged.push((*rule).to_string());
-            }
+    // Idempotent inject: append only the rules that aren't already there, so a
+    // second Fleet process (or a restart after a crash) re-asserts the ruleset
+    // without disturbing user-added entries.
+    let mut merged = allow;
+    let mut changed = false;
+    for rule in INJECT_RULES {
+        if !merged.iter().any(|s| s == rule) {
+            merged.push((*rule).to_string());
+            changed = true;
         }
-
+    }
+    if changed {
         let mut new_settings = if existed {
             settings
         } else {
@@ -275,20 +295,39 @@ pub fn acquire(pid: u32) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Deregister `pid` as a holder.  When the last live holder leaves, the
-/// pre-injection settings state is restored from the snapshot stored in the
-/// lock file, and the lock file is removed.
+/// Deregister `pid` as a holder. **Never** touches settings.json — the
+/// injection deliberately outlives every Fleet process.
+///
+/// A `claude` session spawned by Fleet is detached: it keeps running after the
+/// app quits (see `session_launch::spawn_claude_detached_with_envs`). If exit
+/// restored settings.json, those surviving sessions would lose the allow rules
+/// mid-flight and stall on permission prompts that nothing is left to answer —
+/// `fleet guard` falls through silently once its consumer heartbeat stops, and
+/// headless `-p` sessions have no native prompt UI to fall back to.
+///
+/// Un-injecting is therefore an explicit user action only: [`deactivate`],
+/// reached by turning the toggle off in Fleet's settings panel.
 ///
 /// Safe to call when no lock exists (returns `Ok(())`).
 pub fn release(pid: u32) -> std::io::Result<()> {
     let Some(mut lock) = read_lock() else { return Ok(()) };
     prune_dead_holders(&mut lock);
     lock.holders.retain(|h| h.pid != pid);
+    write_lock(&lock)
+}
 
-    if !lock.holders.is_empty() {
-        return write_lock(&lock);
-    }
-
+/// The one and only cleanup path: restore settings.json to the snapshot taken
+/// when the lock was first created, then drop the lock.
+///
+/// Unconditional — it does not wait for peer holders to leave, because the
+/// toggle it backs (`permissions-config.json`'s `enabled`) is global: once the
+/// user turns the injection off, every Fleet process reads `enabled == false`
+/// and its watchdog stops re-injecting. A peer's later `release` is a no-op
+/// because the lock is already gone.
+///
+/// Safe to call when no lock exists (returns `Ok(())`).
+pub fn deactivate() -> std::io::Result<()> {
+    let Some(lock) = read_lock() else { return Ok(()) };
     restore_from_snapshot(&lock)?;
     delete_lock()?;
     Ok(())
@@ -548,8 +587,10 @@ mod tests {
         assert_eq!(count, 1);
     }
 
+    /// The load-bearing guarantee: quitting Fleet leaves the injection in place
+    /// so detached `claude` sessions don't stall on permission prompts.
     #[test]
-    fn release_last_holder_restores_original() {
+    fn release_last_holder_keeps_injection_and_lock() {
         let _env = setup();
         write_settings_for_test(&serde_json::json!({
             "permissions": { "allow": ["Bash(npm run:*)"] },
@@ -557,6 +598,25 @@ mod tests {
         }));
         acquire(1234).unwrap();
         release(1234).unwrap();
+
+        let allow = allow_of(&read_settings_for_test().expect("file preserved"));
+        assert!(allow.iter().any(|s| s == "Bash(*)"), "injection survives exit");
+        assert!(allow.contains(&"Bash(npm run:*)".to_string()), "user rule kept");
+
+        let lock = read_lock().expect("lock survives exit");
+        assert!(lock.holders.is_empty(), "pid deregistered");
+        assert_eq!(lock.original_allow, vec!["Bash(npm run:*)"], "snapshot retained");
+    }
+
+    #[test]
+    fn deactivate_restores_original() {
+        let _env = setup();
+        write_settings_for_test(&serde_json::json!({
+            "permissions": { "allow": ["Bash(npm run:*)"] },
+            "theme": "dark",
+        }));
+        acquire(1234).unwrap();
+        deactivate().unwrap();
         let v = read_settings_for_test().expect("file preserved");
         assert_eq!(allow_of(&v), vec!["Bash(npm run:*)"]);
         assert_eq!(v.get("theme").and_then(|t| t.as_str()), Some("dark"));
@@ -564,23 +624,61 @@ mod tests {
     }
 
     #[test]
-    fn release_last_holder_with_no_original_file_deletes_settings() {
+    fn deactivate_with_no_original_file_deletes_settings() {
         let _env = setup();
         acquire(1234).unwrap();
-        release(1234).unwrap();
+        deactivate().unwrap();
         assert!(read_settings_for_test().is_none());
         assert!(read_lock().is_none());
     }
 
     #[test]
-    fn release_last_holder_with_original_no_permissions_strips_block() {
+    fn deactivate_with_original_no_permissions_strips_block() {
         let _env = setup();
         write_settings_for_test(&serde_json::json!({ "theme": "dark" }));
         acquire(1234).unwrap();
-        release(1234).unwrap();
+        deactivate().unwrap();
         let v = read_settings_for_test().expect("file preserved");
         assert!(v.get("permissions").is_none());
         assert_eq!(v.get("theme").and_then(|t| t.as_str()), Some("dark"));
+    }
+
+    #[test]
+    fn deactivate_no_lock_is_noop() {
+        let _env = setup();
+        write_settings_for_test(&serde_json::json!({ "theme": "dark" }));
+        deactivate().unwrap();
+        let v = read_settings_for_test().expect("untouched");
+        assert_eq!(v.get("theme").and_then(|t| t.as_str()), Some("dark"));
+    }
+
+    /// End-to-end payoff of the snapshot fix: a crash between two runs must not
+    /// stop `deactivate` from undoing the injection completely.
+    #[test]
+    fn deactivate_after_crash_restores_true_original() {
+        let _env = setup();
+        write_settings_for_test(&serde_json::json!({
+            "permissions": { "allow": ["Bash(ls)"] },
+        }));
+
+        let mut first = live_child();
+        acquire(first.id()).unwrap();
+        first.kill().ok();
+        first.wait().ok();
+
+        // `kill -9`: no release ran, lock keeps a dead holder.
+        let mut lock = read_lock().unwrap();
+        lock.holders = vec![HolderEntry { pid: dead_pid(), start_time_secs: 0 }];
+        write_lock(&lock).unwrap();
+
+        acquire(1234).unwrap(); // next Fleet startup
+        deactivate().unwrap(); // user turns the toggle off
+
+        assert_eq!(
+            allow_of(&read_settings_for_test().expect("file preserved")),
+            vec!["Bash(ls)"],
+            "deactivate must undo the injection even across a crash"
+        );
     }
 
     #[test]
@@ -602,7 +700,7 @@ mod tests {
     }
 
     #[test]
-    fn release_preserves_user_entries_added_mid_run() {
+    fn deactivate_preserves_user_entries_added_mid_run() {
         let _env = setup();
         write_settings_for_test(&serde_json::json!({
             "permissions": { "allow": ["Bash(npm run:*)"] },
@@ -616,7 +714,7 @@ mod tests {
         set_allow(&mut v, allow);
         write_settings_for_test(&v);
 
-        release(1234).unwrap();
+        deactivate().unwrap();
         let allow = allow_of(&read_settings_for_test().unwrap());
         assert!(allow.contains(&"Bash(npm run:*)".to_string()), "original kept");
         assert!(allow.contains(&"Read(./secrets/*)".to_string()), "user addition kept");
@@ -645,6 +743,42 @@ mod tests {
         // Settings should have been injected (the dead holder didn't prevent cold-start).
         let allow = allow_of(&read_settings_for_test().unwrap());
         assert!(allow.iter().any(|s| s == "Bash(*)"));
+    }
+
+    /// A `kill -9` leaves the lock behind with a dead holder and settings.json
+    /// still injected. The next `acquire` must NOT mistake its own injection
+    /// for the user's pre-existing rules — the snapshot is taken once, when the
+    /// lock is first created, and never re-taken while the lock survives.
+    #[test]
+    fn acquire_after_dead_holders_preserves_original_snapshot() {
+        let _env = setup();
+        // The user's real pre-injection state: one hand-written rule.
+        let mut user = serde_json::Value::Object(Default::default());
+        set_allow(&mut user, vec!["Bash(ls)".to_string()]);
+        write_settings_for_test(&user);
+
+        let mut first = live_child();
+        acquire(first.id()).unwrap();
+        assert_eq!(read_lock().unwrap().original_allow, vec!["Bash(ls)".to_string()]);
+        first.kill().ok();
+        first.wait().ok();
+
+        // Simulate `kill -9`: the holder is dead, release() never ran, and
+        // settings.json still carries the injected rules.
+        let mut lock = read_lock().unwrap();
+        lock.holders = vec![HolderEntry { pid: dead_pid(), start_time_secs: 0 }];
+        write_lock(&lock).unwrap();
+        let injected = allow_of(&read_settings_for_test().unwrap());
+        assert!(injected.iter().any(|s| s == "Bash(*)"), "precondition: still injected");
+
+        // Next Fleet startup.
+        acquire(1234).unwrap();
+
+        assert_eq!(
+            read_lock().unwrap().original_allow,
+            vec!["Bash(ls)".to_string()],
+            "acquire re-snapshotted its own injection as the user's original state"
+        );
     }
 
     #[test]
