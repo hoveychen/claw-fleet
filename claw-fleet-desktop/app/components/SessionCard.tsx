@@ -573,7 +573,6 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           const tip = t("card.tip_task_plan", {
             done: tp.done,
             total: tp.total,
-            plans: tp.planCount,
           });
           const openTasks = (e: React.SyntheticEvent) => {
             e.stopPropagation();
@@ -592,11 +591,6 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
                 <span className={styles.taskplan_icon} aria-hidden>📋</span>
                 {planName && (
                   <span className={styles.taskplan_name} title={planName}>{planName}</span>
-                )}
-                {tp.planCount > 1 && (
-                  <span className={styles.taskplan_more} title={t("card.task_plan_plans", { count: tp.planCount })}>
-                    +{tp.planCount - 1}
-                  </span>
                 )}
                 <div className={styles.taskplan_bar} role="progressbar" aria-valuenow={tp.done} aria-valuemax={tp.total}>
                   <div className={styles.taskplan_bar_done} style={{ width: `${donePct}%` }} />

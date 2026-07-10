@@ -284,14 +284,17 @@ export interface TodoSummary {
   currentActive?: string;
 }
 
-/** Aggregate TASKS.md progress across the session workspace's active plans. */
+/**
+ * TASKS.md progress for the one plan a session is provably working on. Absent
+ * when the session cannot be attributed to an active plan — the card then shows
+ * no plan row rather than guessing among the workspace's plans.
+ */
 export interface TaskPlanSummary {
-  planCount: number;
   done: number;
   total: number;
-  /** Display name of the most-recently-modified active plan (its `**Plan:**` title or sentinel id). */
+  /** Display name of the attributed plan (its `**Plan:**` title or sentinel id). */
   currentPlan?: string;
-  /** First still-pending top-level task in the focused plan (e.g. `**P3** — …`). */
+  /** Current top-level task in that plan (e.g. `**P3** — …`). */
   currentTask?: string;
 }
 
