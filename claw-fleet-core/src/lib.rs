@@ -11,7 +11,7 @@ pub mod claude_cli;
 pub mod claude_source;
 pub mod cmd_ast;
 pub mod codex_source;
-pub use claw_fleet_task::console;
+pub mod console;
 pub mod consumer_heartbeat;
 pub mod cursor;
 pub use claw_fleet_task::dag;
@@ -50,10 +50,30 @@ pub mod pattern_update;
 pub mod permission_prompt_ipc;
 pub mod permissions_injector;
 pub mod phase_detector;
-pub use claw_fleet_task::process_util;
+pub mod process_util;
 pub use claw_fleet_task::actions;
 pub use claw_fleet_task::deliverables;
-pub use claw_fleet_task::paths;
+/// Path helpers, formerly re-exported from the (removed) `claw-fleet-task`
+/// crate. `real_home_dir` / `get_fleet_dir` live in [`session`];
+/// `fleet_home_lock` is the process-wide `FLEET_HOME` test mutex whose
+/// canonical implementation now lives here.
+pub mod paths {
+    pub use crate::session::{get_fleet_dir, real_home_dir};
+
+    /// Process-wide mutex used by tests to serialise access to the
+    /// `FLEET_HOME` environment variable. Exposed unconditionally so
+    /// integration tests (separate test binaries) can serialise against the
+    /// same notion of "claim FLEET_HOME" as in-crate unit tests.
+    pub fn fleet_home_lock() -> std::sync::MutexGuard<'static, ()> {
+        use std::sync::{Mutex, OnceLock};
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        let lock = LOCK.get_or_init(|| Mutex::new(()));
+        match lock.lock() {
+            Ok(g) => g,
+            Err(p) => p.into_inner(),
+        }
+    }
+}
 pub use claw_fleet_task::pitem;
 pub use claw_fleet_task::plan;
 pub use claw_fleet_task::registry;
