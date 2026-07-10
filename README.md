@@ -186,36 +186,6 @@ Claw Fleet reads directly from Claude Code's local data directory (`~/.claude/`)
 
 Everything runs in-process inside the Tauri Rust backend. The React frontend communicates via Tauri's IPC bridge.
 
----
-
-## Task-as-Unit Mode
-
-Beyond the legacy "spawn a session, watch it" launcher, Fleet supports a higher-level **task** abstraction where one user-stated goal becomes a DAG of small P-items orchestrated by a long-running **master** agent (Sonnet 4.6) that dispatches per-P-item **worker** subprocesses.
-
-**Lifecycle:**
-1. **Inbox** — click `+ New task` in the sidebar. Drop files, paste screenshots, or type a description.
-2. **Plan** — the `atomic-plan-tasks` skill drafts a DAG of P-items (with `touches` / `depends_on` / `resources` / `acceptance` / `human_gate`).
-3. **Start** — Fleet creates a `fleet/<title-slug>` git branch and spawns the master session. The master calls `fleet task get-dispatchable` and dispatches workers respecting resource locks.
-4. **Per-item worktree** — every dispatched P-item runs inside its own isolated git worktree at `~/.fleet/worktrees/<task>/<p>/` on branch `fleet/<task>/<p>`. Workers can `cargo build` / `cargo test` / `pnpm build` freely without trampling parallel siblings.
-5. **Acceptance audit + fast-forward merge** — workers stop on completion; the master verifies `acceptance`, then `mark-done` fast-forward-merges the P-item's worktree branch back into the task branch and reaps the worktree. `human_gate=true` P-items trigger an `AskUserQuestion` via the Decision Panel before mark-done.
-6. **Done** — when every P-item is terminal and the master exits, the task flips to Done and `completed_at` is stamped.
-
-**What can you do:**
-- Surface every active task in the sidebar (grouped by project) with progress chips
-- See macro metrics per project (active tasks, done this week, avg duration, longest running)
-- Flip `manual_review_all` on a project to force every P-item through user approval
-- Pause / resume / clear a task — master + workers respond to SIGSTOP / SIGCONT / SIGTERM
-
-**Current limits:**
-- Fast-forward-only merges; diverged worker / task branches surface as a Conflict and pause the P-item. LLM-driven conflict mediation is the next milestone (see [`design/task-as-unit-redesign.md`](design/task-as-unit-redesign.md) §V2).
-- The `atomic-plan-tasks` skill produces the initial DAG but doesn't iteratively refine it
-- No auto-generated architecture overview — drop one at `~/.fleet/projects/<id>/architecture.md` to get Layer-1 context injection
-- E2E mock harness in `e2e/task-as-unit.spec.ts` exercises the surface; real-agent dogfood lands in the dogfood PR per `design/task-as-unit-redesign.md`
-
-See [`design/task-as-unit-redesign.md`](design/task-as-unit-redesign.md) for the full architecture spec.
-
----
-
 ## Mobile Companion App
 
 Claw Fleet ships with an Android companion app that lets you monitor your agents from your phone.
