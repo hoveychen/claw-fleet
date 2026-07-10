@@ -895,47 +895,41 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       !allow && decision?.kind === "permission-prompt"
         ? decision.denyReason.trim()
         : "";
-    try {
-      await invoke("respond_to_permission_prompt", {
+    set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
+    fireDecisionResponse("respond_to_permission_prompt", () =>
+      invoke("respond_to_permission_prompt", {
         id,
         allow,
         reason: reason.length > 0 ? reason : null,
-      });
-    } catch (e) {
-      console.error("respond_to_permission_prompt failed:", e);
-    }
-    set((s) => removeDecision(s, id));
-    emit("decision-peer-dismiss", id).catch(() => {});
+      }),
+    );
   },
 
   approvePlan: async (id, editedPlan) => {
-    try {
-      await invoke("respond_to_plan_approval", {
+    set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
+    fireDecisionResponse("respond_to_plan_approval (approve)", () =>
+      invoke("respond_to_plan_approval", {
         id,
         decision: "approve",
         editedPlan: editedPlan ?? null,
         feedback: null,
-      });
-    } catch (e) {
-      console.error("respond_to_plan_approval (approve) failed:", e);
-    }
-    set((s) => removeDecision(s, id));
-    emit("decision-peer-dismiss", id).catch(() => {});
+      }),
+    );
   },
 
   rejectPlan: async (id, feedback) => {
-    try {
-      await invoke("respond_to_plan_approval", {
+    set((s) => removeDecision(s, id));
+    emit("decision-peer-dismiss", id).catch(() => {});
+    fireDecisionResponse("respond_to_plan_approval (reject)", () =>
+      invoke("respond_to_plan_approval", {
         id,
         decision: "reject",
         editedPlan: null,
         feedback: feedback || null,
-      });
-    } catch (e) {
-      console.error("respond_to_plan_approval (reject) failed:", e);
-    }
-    set((s) => removeDecision(s, id));
-    emit("decision-peer-dismiss", id).catch(() => {});
+      }),
+    );
   },
 
   setPlanEditedText: (id, text) => {
@@ -1091,27 +1085,19 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
       }
       answers[q.question] = answer;
     }
-    try {
-      await invoke("respond_to_elicitation", { id, declined: false, answers });
-    } catch (e) {
-      console.error("respond_to_elicitation failed:", e);
-    }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
+    fireDecisionResponse("respond_to_elicitation", () =>
+      invoke("respond_to_elicitation", { id, declined: false, answers }),
+    );
   },
 
   declineElicitation: async (id) => {
-    try {
-      await invoke("respond_to_elicitation", {
-        id,
-        declined: true,
-        answers: {},
-      });
-    } catch (e) {
-      console.error("respond_to_elicitation (decline) failed:", e);
-    }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
+    fireDecisionResponse("respond_to_elicitation (decline)", () =>
+      invoke("respond_to_elicitation", { id, declined: true, answers: {} }),
+    );
   },
 
   toggleFleetAskOption: (id, question, option, multiSelect) =>
@@ -1261,27 +1247,19 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
         }
       }
     }
-    try {
-      await invoke("respond_to_fleet_ask", { id, cancelled: false, answers });
-    } catch (e) {
-      console.error("respond_to_fleet_ask failed:", e);
-    }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
+    fireDecisionResponse("respond_to_fleet_ask", () =>
+      invoke("respond_to_fleet_ask", { id, cancelled: false, answers }),
+    );
   },
 
   cancelFleetAsk: async (id) => {
-    try {
-      await invoke("respond_to_fleet_ask", {
-        id,
-        cancelled: true,
-        answers: {},
-      });
-    } catch (e) {
-      console.error("respond_to_fleet_ask (cancel) failed:", e);
-    }
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
+    fireDecisionResponse("respond_to_fleet_ask (cancel)", () =>
+      invoke("respond_to_fleet_ask", { id, cancelled: true, answers: {} }),
+    );
   },
 
   submitA2uiRender: async (id) => {
@@ -1332,25 +1310,24 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   },
 
   respond: async (id, allow, alwaysAllow, reason) => {
-    try {
-      const trimmedReason = !allow && reason ? reason.trim() : "";
-      await invoke("respond_to_guard", {
-        id,
-        allow,
-        alwaysAllow:
-          allow && alwaysAllow && alwaysAllow.prefix.trim().length > 0
-            ? {
-                prefix: alwaysAllow.prefix.trim(),
-                sourceTag: alwaysAllow.sourceTag ?? null,
-              }
-            : null,
-        reason: trimmedReason.length > 0 ? trimmedReason : null,
-      });
-    } catch (e) {
-      console.error("respond_to_guard failed:", e);
-    }
+    const trimmedReason = !allow && reason ? reason.trim() : "";
+    const alwaysAllowPayload =
+      allow && alwaysAllow && alwaysAllow.prefix.trim().length > 0
+        ? {
+            prefix: alwaysAllow.prefix.trim(),
+            sourceTag: alwaysAllow.sourceTag ?? null,
+          }
+        : null;
     set((s) => removeDecision(s, id));
     emit("decision-peer-dismiss", id).catch(() => {});
+    fireDecisionResponse("respond_to_guard", () =>
+      invoke("respond_to_guard", {
+        id,
+        allow,
+        alwaysAllow: alwaysAllowPayload,
+        reason: trimmedReason.length > 0 ? trimmedReason : null,
+      }),
+    );
   },
 
   dismiss: (id) => set((s) => removeDecision(s, id)),
@@ -1366,6 +1343,20 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
 
   setActiveDecision: (id) => set({ activeDecisionId: id }),
 }));
+
+/**
+ * Fire a decision-response invoke in the background, after the card has already
+ * been removed from the UI optimistically. Each `respond_to_*` command is tiny
+ * (write one small IPC file, or one HTTP POST for RemoteBackend), but it runs on
+ * the Tauri main thread and can queue behind other synchronous commands — so
+ * awaiting it *before* removing the card is what made the submit button feel
+ * stuck. We remove first and let the write settle in the background. There is no
+ * rollback: re-inserting a card the user already dismissed would confuse more
+ * than a rare lost response, and the blocked agent times out cleanly anyway.
+ */
+function fireDecisionResponse(label: string, run: () => Promise<unknown>): void {
+  run().catch((e) => console.error(`${label} failed:`, e));
+}
 
 /** When a decision is removed, pick the next active: prefer the one after it, else before, else null. */
 function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
