@@ -219,19 +219,68 @@
   top: 6px;
   right: 8px;
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
+}
+
+/* The stop button is secondary: hidden until the row is hovered/focused so the
+   resting row stays quiet. Its slot keeps its layout box while hidden, so the
+   always-visible mark dot (last child) doesn't shift when it fades in. */
+.stop_slot {
   opacity: 0;
   transition: opacity 0.15s;
 }
 
-.row_wrap:hover .row_actions,
-.row_actions:focus-within {
+.row_wrap:hover .stop_slot,
+.stop_slot:focus-within {
   opacity: 1;
 }
 
-/* Give the control a backdrop so it stays legible over the row's own text. */
-.row_actions > button {
+/* Give the stop control a backdrop so it stays legible over the row's text. */
+.stop_slot > button {
   background: var(--color-bg-card);
+}
+
+/* Manual review mark — a second axis, orthogonal to the left run-status dot.
+   Always visible for new/pending so review state reads at a glance; "done"
+   collapses to nothing, revealed faintly on row hover so it stays clickable to
+   cycle back to unmarked. Colours and the done-reveal are driven by data-mark
+   so MarkControl (which imports this module) and the rows share them. */
+.mark_dot {
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  box-sizing: border-box;
+  transition:
+    opacity 0.15s,
+    transform 0.1s;
+}
+
+.mark_dot:hover {
+  transform: scale(1.2);
+}
+
+.mark_dot[data-mark="new"] {
+  background: #e0574a; /* red — new / needs review */
+}
+
+.mark_dot[data-mark="pending"] {
+  background: #4a90e0; /* blue — seen, in progress */
+}
+
+.mark_dot[data-mark="done"] {
+  background: transparent;
+  border: 1px solid var(--color-border);
+  opacity: 0;
+}
+
+.row_wrap:hover .mark_dot[data-mark="done"],
+.mark_dot[data-mark="done"]:focus-visible {
+  opacity: 0.5;
 }
 
 .row {
@@ -239,7 +288,9 @@
   align-items: flex-start;
   gap: 8px;
   width: 100%;
-  padding: 7px 8px;
+  /* Reserve a right gutter for the always-visible mark dot so it never overlaps
+     the title / time text. */
+  padding: 7px 26px 7px 8px;
   border: none;
   background: none;
   border-radius: 7px;
