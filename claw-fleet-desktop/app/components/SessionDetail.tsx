@@ -694,23 +694,17 @@ export function SessionDetail({
           {viewTab === "messages" && (
             <>
               <div ref={scrollRef} className={styles.scroll_area}>
-                {!fullyLoaded && messages.length > 0 && (
-                  <button
-                    className={styles.load_earlier_btn}
-                    onClick={loadEarlier}
-                    disabled={isLoading}
-                  >
-                    {isLoading
-                      ? t("detail.loading_earlier") || "Loading…"
-                      : t("detail.load_earlier") || "Load earlier messages"}
-                  </button>
-                )}
+                {/* The "load earlier" control lives inside MessageList, which
+                    owns the render window this button used to duplicate. */}
                 <MessageList
                   messages={messages}
                   isLoading={isLoading}
                   searchQuery={searchQuery}
                   status={liveSession?.status ?? null}
                   decisionRecords={decisionRecords}
+                  onLoadEarlier={loadEarlier}
+                  fullyLoaded={fullyLoaded}
+                  isLoadingEarlier={isLoading && messages.length > 0}
                 />
                 {liveThinking?.streaming && liveThinking.thinking && (
                   <ThinkingBlock thinking={liveThinking.thinking} live />
