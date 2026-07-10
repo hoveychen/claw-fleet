@@ -478,7 +478,13 @@
     "delete_doc_confirm": "\u5220\u9664\u300c{{slug}}\u300d\u53ca\u5176\u6240\u6709\u7248\u672c\uff1f",
     "delete_version_confirm": "\u5220\u9664\u300c{{slug}}\u300d\u7684\u7248\u672c {{version}}\uff1f",
     "export": "\u5bfc\u51fa\u5f53\u524d\u7248\u672c\u5230\u6587\u4ef6",
-    "export_short": "\u5bfc\u51fa"
+    "export_short": "\u5bfc\u51fa",
+    "move": "\u79fb\u52a8 / \u91cd\u547d\u540d\u2026",
+    "move_short": "\u79fb\u52a8",
+    "move_title": "\u79fb\u52a8 / \u91cd\u547d\u540d \u201c{{title}}\u201d",
+    "move_title_short": "\u79fb\u52a8\u6216\u91cd\u547d\u540d \u2014\u2014 slug \u91cc\u7528 / \u5c31\u80fd\u5efa\u51fa\u76ee\u5f55",
+    "move_hint": "\u8f93\u5165\u65b0\u7684 slug\u3002\u7528 / \u5206\u9694\u76ee\u5f55 \u2014\u2014 \u5199\u6210 design/foo \u5c31\u4f1a\u5efa\u51fa design \u76ee\u5f55\u3002\u6700\u591a 8 \u5c42\uff0c\u6bcf\u6bb5 \u226464 \u5b57\u7b26\u3002",
+    "move_confirm": "\u79fb\u52a8"
   },
   "live": {
     "section_title": "实时"
