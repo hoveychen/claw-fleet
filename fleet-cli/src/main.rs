@@ -2940,22 +2940,9 @@ fn plan_mutate_checkbox(
 
 fn plan_start(cwd: &std::path::Path, plan_id: &str, task: Option<&str>) -> Result<(), String> {
     use claw_fleet_core::prd_tasks as pt;
-    let path = pt::find_plan_source(cwd, plan_id)
-        .ok_or_else(|| format!("plan '{plan_id}' not found in any TASKS.md"))?;
-    let content =
-        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
-    let body = pt::plan_body(&content, plan_id)
-        .ok_or_else(|| format!("plan '{plan_id}' not found"))?;
+    let current = pt::resolve_current_task(cwd, plan_id, task)?;
     let sid = read_fleet_session_id()
         .ok_or("no session id (neither FLEET_SESSION_ID nor CLAUDE_CODE_SESSION_ID set)")?;
-    let current = match task {
-        Some(t) => pt::parse_task_items(&body)
-            .into_iter()
-            .find(|it| it.text.contains(&format!("**{t}**")))
-            .map(|it| it.text)
-            .or_else(|| Some(format!("**{t}**"))),
-        None => pt::first_pending_task(&body),
-    };
     let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
     claw_fleet_core::task_progress::set_current(&sid, &ws.to_string_lossy(), plan_id, current)?;
     println!("ok");

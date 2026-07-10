@@ -33,12 +33,8 @@ pub struct TaskProgressRecord {
     pub updated: u64,
 }
 
-fn progress_dir() -> Option<PathBuf> {
+pub(crate) fn progress_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("task-progress"))
-}
-
-fn record_path(session_id: &str) -> Option<PathBuf> {
-    progress_dir().map(|d| d.join(format!("{session_id}.json")))
 }
 
 fn now_ms() -> u64 {
@@ -58,8 +54,37 @@ pub fn set_current(
     current_task: Option<String>,
 ) -> Result<(), String> {
     let dir = progress_dir().ok_or("cannot determine home dir")?;
-    fs::create_dir_all(&dir).map_err(|e| format!("create task-progress dir: {e}"))?;
-    let path = record_path(session_id).unwrap();
+    set_current_in(&dir, session_id, workspace_path, plan_id, current_task)
+}
+
+/// Read a session's current plan focus, if any.
+pub fn read(session_id: &str) -> Option<TaskProgressRecord> {
+    read_in(&progress_dir()?, session_id)
+}
+
+/// Clear a session's focus record. Idempotent — missing file is OK.
+pub fn clear(session_id: &str) {
+    if let Some(d) = progress_dir() {
+        clear_in(&d, session_id);
+    }
+}
+
+// ── Directory-injecting variants ──────────────────────────────────────────────
+//
+// The public wrappers above resolve the record directory from `FLEET_HOME` /
+// the passwd entry, which is process-global state that other tests mutate. Tests
+// take these `_in` forms with a tempdir instead, so they neither race that env
+// var nor touch the developer's real `~/.fleet`. Same split as `handoff.rs`'s
+// `register_in`.
+
+pub(crate) fn set_current_in(
+    dir: &std::path::Path,
+    session_id: &str,
+    workspace_path: &str,
+    plan_id: &str,
+    current_task: Option<String>,
+) -> Result<(), String> {
+    fs::create_dir_all(dir).map_err(|e| format!("create task-progress dir: {e}"))?;
     let rec = TaskProgressRecord {
         workspace_path: workspace_path.to_string(),
         plan_id: plan_id.to_string(),
@@ -67,21 +92,17 @@ pub fn set_current(
         updated: now_ms(),
     };
     let json = serde_json::to_string(&rec).map_err(|e| format!("serialize: {e}"))?;
-    fs::write(&path, json).map_err(|e| format!("write task-progress: {e}"))
+    fs::write(dir.join(format!("{session_id}.json")), json)
+        .map_err(|e| format!("write task-progress: {e}"))
 }
 
-/// Read a session's current plan focus, if any.
-pub fn read(session_id: &str) -> Option<TaskProgressRecord> {
-    let path = record_path(session_id)?;
-    let s = fs::read_to_string(&path).ok()?;
+pub(crate) fn read_in(dir: &std::path::Path, session_id: &str) -> Option<TaskProgressRecord> {
+    let s = fs::read_to_string(dir.join(format!("{session_id}.json"))).ok()?;
     serde_json::from_str(&s).ok()
 }
 
-/// Clear a session's focus record. Idempotent — missing file is OK.
-pub fn clear(session_id: &str) {
-    if let Some(p) = record_path(session_id) {
-        let _ = fs::remove_file(p);
-    }
+pub(crate) fn clear_in(dir: &std::path::Path, session_id: &str) {
+    let _ = fs::remove_file(dir.join(format!("{session_id}.json")));
 }
 
 #[cfg(test)]

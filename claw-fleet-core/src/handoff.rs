@@ -397,6 +397,38 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
     out
 }
 
+/// Stamp the successor's plan attribution in the `task_progress` side-channel.
+///
+/// Fleet spawns the successor, so it alone knows both the new session id and the
+/// plan being relayed. Recording it here means the successor's card shows plan
+/// progress from its first scan, instead of depending on the agent noticing the
+/// `fleet plan resume` instruction in its opening prompt. A free-form relay
+/// (no `plan_id`) attributes nothing — there is no plan to point at.
+fn attribute_successor(pending: &PendingHandoff, to_sid: &str) {
+    let Some(dir) = crate::task_progress::progress_dir() else {
+        return;
+    };
+    attribute_successor_in(&dir, pending, to_sid);
+}
+
+/// `attribute_successor` against an explicit record dir, so tests don't race the
+/// process-global `FLEET_HOME` that other suites mutate.
+fn attribute_successor_in(dir: &Path, pending: &PendingHandoff, to_sid: &str) {
+    let Some(plan_id) = pending.plan_id.as_deref() else {
+        return;
+    };
+    let ws = Path::new(&pending.workspace_path);
+    let current = crate::prd_tasks::resolve_current_task(ws, plan_id, pending.next_task.as_deref())
+        .unwrap_or(None);
+    if let Err(e) =
+        crate::task_progress::set_current_in(dir, to_sid, &pending.workspace_path, plan_id, current)
+    {
+        crate::log_debug(&format!(
+            "handoff: could not attribute successor {to_sid} to plan {plan_id}: {e}"
+        ));
+    }
+}
+
 /// Stop-hook entrypoint: consume `session_id`'s pending handoff (if any),
 /// spawn the successor session, and archive the chain link. Returns the new
 /// session id when a relay fired. Errors never propagate to the hook exit
@@ -417,6 +449,7 @@ pub fn consume_and_spawn(session_id: &str) -> Result<Option<String>, String> {
     let to_sid = resp
         .session_id
         .ok_or_else(|| "spawn returned no session id".to_string())?;
+    attribute_successor(&pending, &to_sid);
     record_link(&pending, &to_sid)?;
     crate::log_debug(&format!(
         "handoff: relayed session {} -> {} (chain {}, hop {} -> {})",
@@ -459,6 +492,85 @@ mod tests {
         now: u64,
     ) -> Result<PendingHandoff, String> {
         register_in(pdir, cdir, sid, "/ws", note, Some("my-plan"), Some("P4"), now)
+    }
+
+    /// Build a `PendingHandoff` whose workspace holds `tasks_md`.
+    fn relay_pending(ws: &Path, plan_id: Option<&str>, next: Option<&str>) -> PendingHandoff {
+        PendingHandoff {
+            from_session_id: "s1".into(),
+            workspace_path: ws.to_string_lossy().into_owned(),
+            note: "n".into(),
+            plan_id: plan_id.map(str::to_string),
+            next_task: next.map(str::to_string),
+            chain_id: "c1".into(),
+            hop: 1,
+            created: 1,
+        }
+    }
+
+    /// The successor is spawned by Fleet, so Fleet knows its session id and the
+    /// plan being relayed — it must stamp the attribution side-channel itself
+    /// rather than trusting the agent to run `fleet plan resume`.
+    #[test]
+    fn attribute_successor_stamps_the_relayed_plan() {
+        let ws = tempfile::tempdir().unwrap();
+        let recs = tempfile::tempdir().unwrap();
+        std::fs::write(
+            ws.path().join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"relay\" v=\"2\" -->\n\
+**Plan:** Relay\n- [x] **P1** — a\n- [ ] **P2** — b\n- [ ] **P3** — c\n\
+<!-- fleet:prd:end id=\"relay\" -->\n",
+        )
+        .unwrap();
+        let pending = relay_pending(ws.path(), Some("relay"), Some("P3"));
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        let rec = crate::task_progress::read_in(recs.path(), "to-sid")
+            .expect("successor must be attributed");
+        assert_eq!(rec.plan_id, "relay");
+        assert_eq!(rec.workspace_path, pending.workspace_path);
+        // next_task "P3" resolves to that item's full text, not the bare token.
+        assert_eq!(rec.current_task.as_deref(), Some("**P3** — c"));
+    }
+
+    /// A free-form relay carries no plan pointer — there is nothing to attribute,
+    /// and the successor's card must stay blank rather than inherit a guess.
+    #[test]
+    fn attribute_successor_noop_for_free_form_relay() {
+        let recs = tempfile::tempdir().unwrap();
+        let pending = relay_pending(Path::new("/nonexistent-ws"), None, None);
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        assert!(crate::task_progress::read_in(recs.path(), "to-sid").is_none());
+    }
+
+    /// Relay says P9 but the plan omits a P9 item: fall back to the bare token
+    /// rather than dropping attribution entirely.
+    #[test]
+    fn attribute_successor_falls_back_to_bare_token() {
+        let ws = tempfile::tempdir().unwrap();
+        let recs = tempfile::tempdir().unwrap();
+        std::fs::write(
+            ws.path().join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"relay\" v=\"2\" -->\n\
+**Plan:** Relay\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"relay\" -->\n",
+        )
+        .unwrap();
+        let pending = relay_pending(ws.path(), Some("relay"), Some("P9"));
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        let rec = crate::task_progress::read_in(recs.path(), "to-sid").expect("attributed");
+        assert_eq!(rec.current_task.as_deref(), Some("**P9**"));
+    }
+
+    /// A relay whose plan isn't in the workspace's TASKS.md still attributes the
+    /// plan id (the successor may create it), but carries no task text.
+    #[test]
+    fn attribute_successor_without_resolvable_plan_still_records_id() {
+        let ws = tempfile::tempdir().unwrap();
+        let recs = tempfile::tempdir().unwrap();
+        let pending = relay_pending(ws.path(), Some("ghost"), Some("P2"));
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        let rec = crate::task_progress::read_in(recs.path(), "to-sid").expect("attributed");
+        assert_eq!(rec.plan_id, "ghost");
+        assert_eq!(rec.current_task, None);
     }
 
     #[test]
