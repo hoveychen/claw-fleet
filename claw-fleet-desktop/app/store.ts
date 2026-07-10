@@ -58,7 +58,6 @@ interface UIState {
   liteMode: boolean;
   sidebarCollapsed: boolean;
   mascotVisible: boolean;
-  showMobileAccess: boolean;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   showNewProjectRequested: boolean;
@@ -73,7 +72,6 @@ interface UIState {
   setLiteMode: (on: boolean) => void;
   setSidebarCollapsed: (on: boolean) => void;
   setMascotVisible: (on: boolean) => void;
-  setShowMobileAccess: (v: boolean) => void;
   setShowNewProjectRequested: (v: boolean) => void;
   setLiteDecisionHistorySessionId: (id: string | null) => void;
   /** When true, the DecisionPanel renders as a minimized bar at the bottom
@@ -103,7 +101,6 @@ export const useUIStore = create<UIState>((set) => ({
   liteMode: getItem("liteMode") === "true",
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   mascotVisible: getItem("mascot-visible") === "true",
-  showMobileAccess: false,
   showNewProjectRequested: false,
   liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
@@ -140,7 +137,6 @@ export const useUIStore = create<UIState>((set) => ({
     emit("overlay-mascot-visible-changed", on).catch(() => {});
     set({ mascotVisible: on });
   },
-  setShowMobileAccess: (v) => set({ showMobileAccess: v }),
   setShowNewProjectRequested: (v) => set({ showNewProjectRequested: v }),
   setLiteDecisionHistorySessionId: (id) =>
     set({ liteDecisionHistorySessionId: id }),

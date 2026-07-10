@@ -32,7 +32,7 @@ function computeUnseenFeatures(): OnboardingFeatureId[] {
 }
 
 function App() {
-  const { theme, liteMode, setTheme, setLiteMode, setViewMode, setShowMobileAccess } = useUIStore();
+  const { theme, liteMode, setTheme, setLiteMode, setViewMode } = useUIStore();
   const { connection, setConnection, disconnect } = useConnectionStore();
 
   // Always-mounted listeners for backend decision events. Must live at the
@@ -194,9 +194,6 @@ function App() {
     ps.push(listen("menu-welcome", () => {
       setOnboardingMode("full");
     }));
-    ps.push(listen("menu-mobile-access", () => {
-      setShowMobileAccess(true);
-    }));
     ps.push(listen("menu-check-updates", async () => {
       try {
         const result = await invoke<{ has_update: boolean; latest_version: string; release_url: string }>(
@@ -214,7 +211,7 @@ function App() {
     return () => {
       ps.forEach((p) => p.then((fn) => fn()).catch(() => {}));
     };
-  }, [setTheme, setLiteMode, setViewMode, setShowMobileAccess]);
+  }, [setTheme, setLiteMode, setViewMode]);
 
   // Open a session detail when the user clicks an agent in the tray menu.
   useEffect(() => {

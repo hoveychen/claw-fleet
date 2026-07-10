@@ -6,7 +6,6 @@ import { useConnectionStore, useDetailStore } from "../store";
 import { useKeepAwake } from "../hooks/useKeepAwake";
 import { getItem, setItem } from "../storage";
 import { playChime, speakText, getVoices, CHIME_PRESETS, type ChimePreset, type TtsVoice } from "../audio";
-import { QRCodeCanvas } from "qrcode.react";
 import { AccountInfo } from "./AccountInfo";
 import { LanguageSwitcher } from "./LanguageSwitcher";
 import { ThemeToggle } from "./ThemeToggle";
@@ -86,17 +85,6 @@ const FEISHU_SCOPES: { scope: string; glossKey: string }[] = [
 type SettingsTab = "general" | "alerts" | "account" | "interaction" | "model" | "integration" | "usage";
 const BASE_TABS: SettingsTab[] = ["general", "alerts", "account"];
 const ADVANCED_TABS: SettingsTab[] = ["interaction", "model", "integration", "usage"];
-
-interface MobileAccessInfo {
-  running: boolean;
-  port: number;
-  token: string;
-  tunnelUrl: string | null;
-  connectedClients: number;
-  cloudflaredAvailable: boolean;
-  settingUp: boolean;
-  error: string | null;
-}
 
 const tabIcons: Record<SettingsTab, React.ReactNode> = {
   general: (
@@ -989,39 +977,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
 
   // ── Keep-awake (caffeinate -i equivalent) ───────────────────────────────
   const { enabled: keepAwake, supported: keepAwakeSupported, setKeepAwake } = useKeepAwake();
-
-  // ── Mobile access state ──────────────────────────────────────────────
-  const [mobileAccess, setMobileAccess] = useState<MobileAccessInfo | null>(null);
-  const [mobileLoading, setMobileLoading] = useState(false);
-  const [mobileQrData, setMobileQrData] = useState<string | null>(null);
-
-  useEffect(() => {
-    invoke<MobileAccessInfo>("get_mobile_access_status").then((info) => {
-      setMobileAccess(info);
-      if (info.running) {
-        invoke<string | null>("get_mobile_qr_data").then(setMobileQrData).catch(() => {});
-      }
-    }).catch(() => {});
-  }, []);
-
-  const handleEnableMobileAccess = useCallback(async () => {
-    setMobileLoading(true);
-    try {
-      const info = await invoke<MobileAccessInfo>("enable_mobile_access");
-      setMobileAccess(info);
-      const qr = await invoke<string | null>("get_mobile_qr_data");
-      setMobileQrData(qr);
-    } catch (e) {
-      console.error("Failed to enable mobile access:", e);
-    }
-    setMobileLoading(false);
-  }, []);
-
-  const handleDisableMobileAccess = useCallback(async () => {
-    await invoke("disable_mobile_access").catch(() => {});
-    setMobileAccess(null);
-    setMobileQrData(null);
-  }, []);
 
   const handleSwitchConnection = useCallback(async () => {
     if (standalone) {
@@ -2197,82 +2152,6 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                       {t("settings.feishu_failed")}: {feishuError}
                     </span>
                   </div>
-                )}
-              </div>
-            )}
-
-            {/* ── Mobile Access — merged into Account ── */}
-            {activeTab === "account" && (
-              <div className={styles.section}>
-                <div className={styles.section_title}>{t("settings.mobile_access")}</div>
-                <div className={styles.row}>
-                  <span className={styles.row_label} style={{ fontSize: 11, color: "var(--color-text-dim)" }}>
-                    {t("settings.mobile_desc")}
-                  </span>
-                </div>
-
-                <div className={styles.row}>
-                  {mobileAccess?.running ? (
-                    <button className={styles.switch_btn} onClick={handleDisableMobileAccess}>
-                      {t("settings.mobile_disable")}
-                    </button>
-                  ) : (
-                    <button
-                      className={styles.hooks_install_btn}
-                      onClick={handleEnableMobileAccess}
-                      disabled={mobileLoading}
-                    >
-                      {mobileLoading ? t("account.loading") : t("settings.mobile_enable")}
-                    </button>
-                  )}
-                </div>
-
-                {mobileAccess?.running && (
-                  <>
-                    {/* Status info */}
-                    <div className={styles.row}>
-                      <span className={styles.row_label}>{t("settings.mobile_status")}</span>
-                      <span className={styles.hooks_ok}>
-                        {mobileAccess.tunnelUrl ? t("settings.mobile_tunnel_active") : t("settings.mobile_local_only")}
-                      </span>
-                    </div>
-
-                    {mobileAccess.tunnelUrl && (
-                      <div className={styles.row}>
-                        <span className={styles.row_label}>URL</span>
-                        <span className={styles.connection_badge} style={{ fontSize: 10, wordBreak: "break-all" }}>
-                          {mobileAccess.tunnelUrl}
-                        </span>
-                      </div>
-                    )}
-
-                    <div className={styles.row}>
-                      <span className={styles.row_label}>{t("settings.mobile_clients")}</span>
-                      <span>{mobileAccess.connectedClients}</span>
-                    </div>
-
-                    {/* QR Code */}
-                    {mobileQrData && (
-                      <div className={styles.row} style={{ justifyContent: "center", padding: "16px 0" }}>
-                        <div style={{
-                          background: "#fff",
-                          padding: 16,
-                          borderRadius: 8,
-                          display: "inline-block",
-                        }}>
-                          <QRCodeCanvas value={mobileQrData} size={200} />
-                        </div>
-                      </div>
-                    )}
-
-                    {!mobileAccess.tunnelUrl && !mobileAccess.cloudflaredAvailable && (
-                      <div className={styles.row}>
-                        <span className={styles.hooks_warn}>
-                          {t("settings.mobile_no_cloudflared")}
-                        </span>
-                      </div>
-                    )}
-                  </>
                 )}
               </div>
             )}

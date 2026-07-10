@@ -129,9 +129,6 @@ Download the latest pre-built binary for your platform from the [Releases page](
 | <img src="docs/icon-apple.svg" width="24"> | macOS | Universal (Intel + Apple Silicon) | [claw-fleet-macos.pkg](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-macos.pkg) |
 | <img src="docs/icon-windows.svg" width="24"> | Windows | x64 / ARM64 | [claw-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-x64-setup.exe) |
 | <img src="docs/icon-linux.svg" width="24"> | Linux | x86\_64 | [claw-fleet-linux-x64.deb](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.deb) · [claw-fleet-linux-x64.AppImage](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.AppImage) |
-| <img src="docs/icon-android.svg" width="24"> | Android | ARM64 / x86_64 | [claw-fleet-mobile.apk](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-mobile.apk) |
-
-> **Mobile app**: The Android companion app is released separately — look for the latest `mobile-v*` release on the [Releases page](https://github.com/hoveychen/claw-fleet/releases). Scan the QR code shown in Claw Fleet Desktop to connect.
 
 ### Prerequisites
 
@@ -213,28 +210,6 @@ Beyond the legacy "spawn a session, watch it" launcher, Fleet supports a higher-
 - E2E mock harness in `e2e/task-as-unit.spec.ts` exercises the surface; real-agent dogfood lands in the dogfood PR per `design/task-as-unit-redesign.md`
 
 See [`design/task-as-unit-redesign.md`](design/task-as-unit-redesign.md) for the full architecture spec.
-
----
-
-## Mobile Companion App
-
-Claw Fleet ships with an Android companion app that lets you monitor your agents from your phone.
-
-**Features:**
-- Live agent statuses with token speed and context usage
-- Conversation history with thinking blocks, tool calls, and code highlights
-- Security audit events
-- Stop agents remotely
-- Dark / light theme, follows system setting
-
-**How to connect:**
-1. Open Claw Fleet Desktop and click the phone icon in the sidebar (or go to Settings → Mobile)
-2. Click "Enable Mobile Access" — this starts a secure Cloudflare tunnel
-3. Scan the QR code with the mobile app
-
-The mobile app is a read-only client (except for stop commands). All data flows through the desktop app's embedded HTTP server via the tunnel — no direct access to your filesystem.
-
-**Building from source:** See [`claw-fleet-mobile/README.md`](claw-fleet-mobile/README.md) for build instructions.
 
 ---
 

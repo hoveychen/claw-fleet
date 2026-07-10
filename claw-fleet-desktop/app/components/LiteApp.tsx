@@ -1,5 +1,4 @@
 import { listen } from "@tauri-apps/api/event";
-import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -19,7 +18,6 @@ import { LiteSessionCard } from "./LiteSessionCard";
 import { MascotAlertBubble } from "./MascotAlertBubble";
 import { MascotEyes } from "./MascotEyes";
 import { useUsageRing } from "../hooks/useUsageRing";
-import { MobileAccessPanel } from "./MobileAccessPanel";
 import { SessionDetail } from "./SessionDetail";
 import { TokenSpeedChart } from "./TokenSpeedChart";
 import { UsagePanel } from "./UsagePanel";
@@ -41,8 +39,6 @@ export function LiteApp() {
   const { open, session: openedSession } = useDetailStore();
   const {
     setLiteMode,
-    showMobileAccess,
-    setShowMobileAccess,
     liteDecisionHistorySessionId,
     mascotVisible,
   } = useUIStore();
@@ -50,7 +46,6 @@ export function LiteApp() {
   const hasAlerts = useWaitingAlertsStore(
     (s) => s.alerts.some((a) => !s.dismissedIds.has(a.sessionId)),
   );
-  const [mobileActive, setMobileActive] = useState(false);
   const [ttsMuted, setTtsMuted] = useState(() => getItem("tts-muted") === "true");
   const [showUsage, setShowUsage] = useState(false);
   const usageRing = useUsageRing();
@@ -72,18 +67,6 @@ export function LiteApp() {
     };
   }, [setSessions, refresh]);
 
-  // Poll mobile access status for the icon-bar indicator dot.
-  useEffect(() => {
-    const check = () => {
-      invoke<{ running: boolean; tunnelUrl: string | null }>("get_mobile_access_status")
-        .then((s) => setMobileActive(s.running && !!s.tunnelUrl))
-        .catch(() => {});
-    };
-    check();
-    const interval = setInterval(check, 5000);
-    return () => clearInterval(interval);
-  }, []);
-
   const active = sessions.filter((s) =>
     ACTIVE_STATUSES.includes(s.status as typeof ACTIVE_STATUSES[number]),
   );
@@ -99,17 +82,6 @@ export function LiteApp() {
         <span className={styles.drag_title} data-tauri-drag-region>
           {t("title")}
         </span>
-        <button
-          className={`${styles.icon_btn} ${mobileActive ? styles.icon_btn_active : ""}`}
-          title={t("settings.mobile_access")}
-          onClick={() => setShowMobileAccess(true)}
-        >
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="4" y="1" width="8" height="14" rx="1.5" />
-            <line x1="7" y1="12" x2="9" y2="12" />
-          </svg>
-          {mobileActive && <span className={styles.icon_btn_dot} />}
-        </button>
         <button
           className={styles.icon_btn}
           title={t(ttsMuted ? "lite.unmute" : "lite.mute")}
@@ -150,8 +122,6 @@ export function LiteApp() {
           </svg>
         </button>
       </div>
-
-      {showMobileAccess && <MobileAccessPanel onClose={() => setShowMobileAccess(false)} />}
 
       {showUsage && (
         <div className={styles.usage_overlay} onClick={() => setShowUsage(false)}>

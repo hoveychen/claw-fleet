@@ -1558,10 +1558,6 @@
       "cursor-extension": "Cursor 扩展",
       "windsurf-extension": "Windsurf 扩展"
     },
-    "mobile_access": "移动端",
-    "mobile_desc": "开启移动端访问，从手机监控你的 Agent。远程访问需要安装 cloudflared。",
-    "mobile_enable": "开启移动端访问",
-    "mobile_clients": "已连接客户端",
     "notifications": "通知",
     "notification_mode": "Agent 等待时通知",
     "notify_all": "所有等待会话",
@@ -1855,22 +1851,6 @@
     "lesson_added": "已添加",
     "no_insights": "暂无动态。收集到数据后报告会出现在这里。",
     "earlier_section_title": "← 更早"
-  },
-  "mobile_panel": {
-    "scan_hint": "用 Claw Fleet 移动端扫描此二维码连接",
-    "downloading": "正在下载 cloudflared...",
-    "starting_tunnel": "正在启动隧道...",
-    "active": "移动端访问已开启",
-    "connected_devices": "台设备已连接",
-    "tunnel_failed": "隧道建立失败，请重试。",
-    "retry": "重试",
-    "stop_access": "终止移动端访问",
-    "confirm_disable": "确定终止移动端访问？所有已连接的移动设备将断开。",
-    "provider_label": "隧道服务商",
-    "provider_auto": "自动（推荐）",
-    "provider_cloudflare": "Cloudflare",
-    "provider_localtunnel": "localtunnel",
-    "china_hint": "检测到你在中国大陆：trycloudflare.com 在国内常常慢或不可达，自动模式会优先尝试 localtunnel。"
   },
   "command": {
     "nested": {
