@@ -14,7 +14,9 @@
   font-size: 13px;
 }
 
-.load_more {
+/* The single control for reaching older messages: reveals what is already in
+   memory, then goes to disk once the window catches up with what was fetched. */
+.load_earlier {
   display: block;
   width: 100%;
   padding: 8px 0;
@@ -27,9 +29,13 @@
   text-align: center;
   transition: background 0.15s, border-color 0.15s;
 }
-.load_more:hover {
+.load_earlier:hover:not(:disabled) {
   background: var(--color-bg-secondary);
   border-color: var(--color-accent, #60a5fa);
+}
+.load_earlier:disabled {
+  cursor: wait;
+  color: var(--color-text-dim);
 }
 
 /* Message row.
@@ -46,6 +52,95 @@
 /* Context-compaction marker: full-width banner, no bubble */
 .compact_row {
   padding: 4px 0;
+}
+
+/* Search navigation. Sticks above the day separators, which step down to make
+   room for it while a search is active. */
+.search_nav {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  align-self: flex-end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  margin-bottom: 4px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+}
+
+.search_count {
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: center;
+}
+
+.search_step {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-text);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.search_step:hover:not(:disabled) {
+  border-color: var(--color-accent, #60a5fa);
+  color: var(--color-accent, #60a5fa);
+}
+
+.search_step:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* The hit the reader jumped to. Without this the scroll lands somewhere and
+   nothing says which row was the match. */
+.active_match {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px var(--color-accent, #60a5fa);
+}
+
+/* Day separator. Sticks to the top of the scroll area so the date of whatever
+   is on screen stays visible while reading back through a long session. */
+.day_sep {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 0;
+  /* Rows scroll under this; an opaque backdrop keeps them from showing through.
+     Solid rather than a gradient/color-mix so it renders identically on the
+     older WebView2 builds Fleet still ships to. */
+  background: var(--color-bg);
+}
+
+/* Step the day header below the search bar so the two stickies don't collide. */
+.list_searching .day_sep {
+  top: 34px;
+}
+
+.day_sep_label {
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 2px 10px;
 }
 
 .message.assistant {
@@ -76,6 +171,55 @@
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.4; }
+}
+
+/* Hover affordance. Absolutely positioned so revealing it never reflows the
+   row — a message that shifted on hover would be maddening to click. */
+.row_actions {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 1;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+
+/* The user bubble already hugs the right edge; put its control on the free
+   side instead of on top of the bubble's corner. */
+.message.user .row_actions {
+  right: auto;
+  left: 0;
+}
+
+.message:hover .row_actions,
+.row_actions:focus-within {
+  opacity: 1;
+}
+
+.copy_btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 11px;
+  line-height: 1;
+  color: var(--color-text-dim);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.copy_btn:hover {
+  color: var(--color-text);
+  border-color: var(--color-accent, #60a5fa);
+}
+
+.copy_btn_failed {
+  color: var(--color-error-fg);
+  border-color: var(--color-error-fg);
 }
 
 /* Content area */

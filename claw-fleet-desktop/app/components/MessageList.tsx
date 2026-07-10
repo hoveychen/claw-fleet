@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
@@ -8,6 +8,16 @@ import type {
   ToolUseBlock,
 } from "../types";
 import { buildToolResultMetaMap, isDecisionTool } from "../toolResults";
+import { nextVisibleCount, visibleCountForMatch, windowSlice } from "../messageWindow";
+import {
+  dayKey,
+  daysAgo,
+  findMatches,
+  isRenderableRow,
+  messageSearchText,
+  messageToText,
+} from "../messageRows";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import {
@@ -219,10 +229,14 @@ interface MsgProps {
   decisionRecords: DecisionHistoryRecord[];
   searchTerms?: string[] | null;
   msgIdx?: number;
+  /** The hit the search navigation is currently parked on. */
+  isActiveMatch?: boolean;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx }: MsgProps) {
-  if (!msg.message) return null;
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch }: MsgProps) {
+  // Same predicate the list uses to build its window and day separators, so the
+  // two can never disagree about which records occupy a row.
+  if (!isRenderableRow(msg) || !msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
   const isUser = msg.type === "user";
@@ -247,18 +261,11 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     );
   }
 
-  // User messages: skip pure tool-result messages (rendered inline in tool blocks)
-  if (isUser) {
-    if (Array.isArray(content)) {
-      const hasText = content.some((b) => b.type !== "tool_result");
-      if (!hasText) return null;
-    }
-  }
-
   const isPartial =
     isAssistant && msg.message.stop_reason === null;
 
   const time = msg.timestamp ? formatMsgTime(msg.timestamp) : null;
+  const copyText = messageToText(msg);
 
   // Turn status. Previously a timeline dot in the gutter; now a marker on the
   // usage row, because roles are told apart by layout (full-width assistant vs.
@@ -277,9 +284,15 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
 
   return (
     <div
-      className={`${styles.message} ${isAssistant ? styles.assistant : styles.user}`}
+      className={`${styles.message} ${isAssistant ? styles.assistant : styles.user} ${isActiveMatch ? styles.active_match : ""}`}
       data-msg-idx={msgIdx}
     >
+      {/* Tool-only assistant turns have no prose worth copying. */}
+      {copyText && (
+        <div className={styles.row_actions}>
+          <CopyButton text={copyText} />
+        </div>
+      )}
       <div className={styles.content}>
         {isAssistant && Array.isArray(content) && (
           <ContentBlocks
@@ -335,6 +348,84 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
     </div>
   );
 });
+
+// ── Copy control ──────────────────────────────────────────────────────────────
+
+type CopyState = "idle" | "done" | "failed";
+
+/**
+ * Copies a message's prose. Revealed on row hover.
+ *
+ * The write is awaited and its rejection surfaced: `writeText` goes through
+ * Tauri's ACL, so a capability that lacks `clipboard-manager:allow-write-text`
+ * rejects it. A fire-and-forget call would flash "copied" while the clipboard
+ * stayed empty.
+ */
+function CopyButton({ text }: { text: string }) {
+  const { t } = useTranslation();
+  const [state, setState] = useState<CopyState>("idle");
+  const timerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(timerRef.current), []);
+
+  const copy = useCallback(async () => {
+    window.clearTimeout(timerRef.current);
+    try {
+      await writeText(text);
+      setState("done");
+    } catch {
+      setState("failed");
+    }
+    timerRef.current = window.setTimeout(() => setState("idle"), 1400);
+  }, [text]);
+
+  const label =
+    state === "done"
+      ? t("detail.copied")
+      : state === "failed"
+        ? t("detail.copy_failed")
+        : t("detail.copy");
+
+  return (
+    <button
+      type="button"
+      className={`${styles.copy_btn} ${state === "failed" ? styles.copy_btn_failed : ""}`}
+      onClick={copy}
+      title={label}
+      aria-label={label}
+    >
+      {state === "done" ? "✓" : state === "failed" ? "✕" : "⧉"}
+    </button>
+  );
+}
+
+// ── Day separator ─────────────────────────────────────────────────────────────
+
+/**
+ * Sticky date header shown above the first row of each day.
+ *
+ * The topmost visible row always gets one, so a reader who scrolled into the
+ * middle of an old session can still see which day they are looking at.
+ */
+function DaySeparator({ isoDay }: { isoDay: string }) {
+  const { t } = useTranslation();
+  const ago = daysAgo(isoDay, new Date());
+  const label =
+    ago === 0
+      ? t("detail.today")
+      : ago === 1
+        ? t("detail.yesterday")
+        : new Date(`${isoDay}T00:00:00`).toLocaleDateString(undefined, {
+            year: "numeric",
+            month: "short",
+            day: "numeric",
+          });
+  return (
+    <div className={styles.day_sep}>
+      <span className={styles.day_sep_label}>{label}</span>
+    </div>
+  );
+}
 
 // ── Waiting for input indicator ───────────────────────────────────────────────
 
@@ -394,28 +485,31 @@ interface Props {
   /** Decision records for this session. Inline decision cards read them for the
    *  asset id an image-bearing `fleet__ask` needs to re-serve its preview. */
   decisionRecords?: DecisionHistoryRecord[];
+  /** Pull older messages from disk. Awaited, so the reveal happens after the
+   *  fetch lands. Omit when the caller has no deeper history to offer. */
+  onLoadEarlier?: () => Promise<void> | void;
+  /** True when `messages` already reaches the start of the transcript. */
+  fullyLoaded?: boolean;
+  /** True while `onLoadEarlier` is in flight. */
+  isLoadingEarlier?: boolean;
 }
 
+/** Messages revealed per click, and the initial size of the render window. */
 const PAGE_SIZE = 100;
 
-/** Extract plain text from a message for search matching. */
-function messageText(msg: RawMessage): string {
-  if (!msg.message) return "";
-  const content = msg.message.content;
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content
-    .map((b) => {
-      if (b.type === "text") return (b as { type: "text"; text: string }).text;
-      if (b.type === "thinking") return (b as { type: "thinking"; thinking: string }).thinking;
-      return "";
-    })
-    .join(" ");
-}
 
 const NO_DECISIONS: DecisionHistoryRecord[] = [];
 
-export function MessageList({ messages, isLoading, searchQuery, status, decisionRecords }: Props) {
+export function MessageList({
+  messages,
+  isLoading,
+  searchQuery,
+  status,
+  decisionRecords,
+  onLoadEarlier,
+  fullyLoaded = true,
+  isLoadingEarlier = false,
+}: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -423,19 +517,23 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
   // omits the prop.
   const records = decisionRecords ?? NO_DECISIONS;
 
-  // visibleStart tracks the actual start index into displayMsgs.
-  // -1 is a sentinel meaning "show the tail (last PAGE_SIZE)".
-  const [visibleStart, setVisibleStart] = useState(-1);
-  // Saved before loading more; used by useLayoutEffect to restore scroll position
+  // How many trailing messages to render. Counting from the *end* rather than
+  // holding a start index is what lets this window coexist with the store's
+  // disk pagination: loading earlier history prepends messages, which shifts
+  // every index but leaves a count-from-the-end untouched, so the visible set
+  // does not jump under the reader.
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+  // Saved before revealing more; used by useLayoutEffect to restore scroll position
   const scrollAnchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   const resultMap = useMemo(() => buildResultMap(messages), [messages]);
   const metaMap = useMemo(() => buildToolResultMetaMap(messages), [messages]);
 
-  const displayMsgs = useMemo(
-    () => messages.filter((m) => m.type === "user" || m.type === "assistant"),
-    [messages]
-  );
+  // Only records that actually occupy a row. Excluding the 32% of user records
+  // that carry nothing but tool results keeps the render window honest (a
+  // "100 message" window used to show ~67 rows) and stops a day separator from
+  // landing above an invisible message.
+  const displayMsgs = useMemo(() => messages.filter(isRenderableRow), [messages]);
 
   // Parse search terms once for matching and highlighting
   const searchTerms = useMemo(() => {
@@ -443,15 +541,21 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
     return searchQuery.trim().toLowerCase().split(/\s+/).filter(Boolean);
   }, [searchQuery]);
 
-  // Find the index of the first matching message for search navigation
-  const searchMatchIndex = useMemo(() => {
-    if (!searchTerms || displayMsgs.length === 0) return -1;
-    for (let i = 0; i < displayMsgs.length; i++) {
-      const text = messageText(displayMsgs[i]).toLowerCase();
-      if (searchTerms.every((term) => text.includes(term))) return i;
-    }
-    return -1;
-  }, [searchTerms, displayMsgs]);
+  // Search haystacks are built from the messages alone, so typing another term
+  // re-scans strings instead of re-serialising every tool input.
+  const haystacks = useMemo(() => displayMsgs.map(messageSearchText), [displayMsgs]);
+  const matches = useMemo(
+    () => (searchTerms ? findMatches(haystacks, searchTerms) : []),
+    [haystacks, searchTerms],
+  );
+
+  // Which hit the reader is currently parked on.
+  const [activeMatch, setActiveMatch] = useState(0);
+  useEffect(() => {
+    setActiveMatch(0);
+  }, [searchTerms, displayMsgs.length === 0]);
+
+  const searchMatchIndex = matches.length > 0 ? matches[Math.min(activeMatch, matches.length - 1)] : -1;
 
   // Reset window when switching to a new session (total message count drops)
   const prevCountRef = useRef(displayMsgs.length);
@@ -465,42 +569,43 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
       sessionSwitchedRef.current = true;
       searchScrolledRef.current = false;
 
-      // If we have a search match, start the view window around that match
-      if (searchMatchIndex >= 0) {
-        const start = Math.max(0, searchMatchIndex - 10); // show some context before match
-        setVisibleStart(start);
-      } else {
-        setVisibleStart(-1);
-      }
+      // Widen the window far enough that the first search hit — plus a little
+      // context above it — is actually inside it.
+      setVisibleCount(
+        searchMatchIndex >= 0
+          ? visibleCountForMatch(displayMsgs.length, searchMatchIndex, PAGE_SIZE)
+          : PAGE_SIZE,
+      );
     }
     prevCountRef.current = displayMsgs.length;
   }, [displayMsgs.length, searchMatchIndex]);
 
-  // Compute effective start: -1 means "tail mode" (follow latest messages)
-  const tailStart = Math.max(0, displayMsgs.length - PAGE_SIZE);
-  const effectiveStart = visibleStart === -1 ? tailStart : Math.min(visibleStart, tailStart);
+  const { start: effectiveStart, hidden: hiddenCount } = windowSlice(
+    displayMsgs.length,
+    visibleCount,
+  );
   const visibleMsgs = displayMsgs.slice(effectiveStart);
-  const hiddenCount = effectiveStart;
 
-  // When in tail mode and new messages arrive, the window auto-advances.
-  // When user has scrolled up (visibleStart >= 0), the window stays put and grows.
-  const prevEffectiveStartRef = useRef(effectiveStart);
-  if (
-    visibleStart === -1 &&
-    effectiveStart > prevEffectiveStartRef.current &&
-    !scrollAnchor.current
-  ) {
-    const scroller = listRef.current?.parentElement;
-    if (scroller && listRef.current) {
-      scrollAnchor.current = {
-        scrollTop: scroller.scrollTop,
-        scrollHeight: listRef.current.scrollHeight,
-      };
-    }
-  }
-  prevEffectiveStartRef.current = effectiveStart;
+  // Keep the reader's place when the transcript grows.
+  //
+  // A *prepend* (older history arriving) needs nothing: the window counts from
+  // the end, so the visible set is already unchanged. An *append* (the agent
+  // writing a new turn) slides the window forward, dropping the oldest visible
+  // message — which is what we want while the reader sits at the bottom, but
+  // yanks content away once they have expanded the window to read back. So grow
+  // the window by the same delta in that case, pinning its start.
+  const prevFirstKeyRef = useRef<string | null>(null);
+  const prevLenRef = useRef(displayMsgs.length);
+  useEffect(() => {
+    const firstKey = displayMsgs[0]?.uuid ?? displayMsgs[0]?.timestamp ?? null;
+    const prepended = prevFirstKeyRef.current !== null && firstKey !== prevFirstKeyRef.current;
+    const delta = displayMsgs.length - prevLenRef.current;
+    prevFirstKeyRef.current = firstKey;
+    prevLenRef.current = displayMsgs.length;
+    setVisibleCount((v) => nextVisibleCount({ prepended, delta, visibleCount: v, pageSize: PAGE_SIZE }));
+  }, [displayMsgs]);
 
-  // After prepending/trimming messages, restore scroll so the viewport doesn't jump
+  // After revealing more rows, restore scroll so the viewport doesn't jump
   useLayoutEffect(() => {
     const anchor = scrollAnchor.current;
     if (!anchor || !listRef.current) return;
@@ -511,8 +616,7 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
     scrollAnchor.current = null;
   });
 
-  const loadMore = useCallback(() => {
-    if (hiddenCount === 0 || scrollAnchor.current) return;
+  const anchorScroll = useCallback(() => {
     const scroller = listRef.current?.parentElement;
     if (scroller && listRef.current) {
       scrollAnchor.current = {
@@ -520,8 +624,57 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
         scrollHeight: listRef.current.scrollHeight,
       };
     }
-    setVisibleStart(Math.max(0, prevEffectiveStartRef.current - PAGE_SIZE));
-  }, [hiddenCount]);
+  }, []);
+
+  /**
+   * The one control for reaching older messages.
+   *
+   * Two mechanisms used to be exposed as two identical-looking buttons: this
+   * component's render window, and the store's disk pagination. They are now
+   * stacked behind a single action — reveal what is already in memory, and only
+   * go to disk once the window has caught up with what was fetched.
+   */
+  const canReveal = hiddenCount > 0;
+  const canFetch = !fullyLoaded && !!onLoadEarlier;
+  const loadEarlier = useCallback(async () => {
+    if (scrollAnchor.current || isLoadingEarlier) return;
+    if (canReveal) {
+      anchorScroll();
+      setVisibleCount((v) => v + PAGE_SIZE);
+      return;
+    }
+    if (!canFetch) return;
+    await onLoadEarlier?.();
+    // The fetch prepends, leaving the visible set unchanged; widen to reveal it.
+    anchorScroll();
+    setVisibleCount((v) => v + PAGE_SIZE);
+  }, [canReveal, canFetch, onLoadEarlier, isLoadingEarlier, anchorScroll]);
+
+  /** Scroll a rendered row into the middle of the viewport, if it is mounted. */
+  const scrollToRow = useCallback((msgIdx: number) => {
+    const row = listRef.current?.querySelector(`[data-msg-idx="${msgIdx}"]`);
+    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, []);
+
+  /**
+   * Step to the next or previous hit, wrapping around.
+   *
+   * A hit above the render window is unreachable until the window covers it, so
+   * widen first; the scroll then happens on the next frame, once the row exists.
+   */
+  const stepMatch = useCallback(
+    (delta: number) => {
+      if (matches.length === 0) return;
+      const next = (activeMatch + delta + matches.length) % matches.length;
+      setActiveMatch(next);
+      const target = matches[next];
+      setVisibleCount((v) =>
+        Math.max(v, visibleCountForMatch(displayMsgs.length, target, PAGE_SIZE)),
+      );
+      requestAnimationFrame(() => scrollToRow(target));
+    },
+    [matches, activeMatch, displayMsgs.length, scrollToRow],
+  );
 
   // Auto-scroll to bottom (or to search match) when session switches
   useEffect(() => {
@@ -556,28 +709,77 @@ export function MessageList({ messages, isLoading, searchQuery, status, decision
   const lastAssistant = [...displayMsgs].reverse().find((m: RawMessage) => m.type === "assistant");
   const isWaiting = lastAssistant?.message?.stop_reason === "end_turn";
 
-  if (isLoading) {
+  // Only take over the panel when there is genuinely nothing to show. The same
+  // `isLoading` flag is raised while fetching *older* history, and blanking the
+  // whole conversation for that is how the previous "load earlier" button made
+  // the transcript flash empty on every click.
+  if (isLoading && displayMsgs.length === 0) {
     return <div className={styles.loading}>{t("loading", "Loading…")}</div>;
   }
 
   return (
-    <div ref={listRef} className={styles.list}>
-      {hiddenCount > 0 && (
-        <button className={styles.load_more} onClick={loadMore}>
-          ↑ {t("detail.load_more", { count: Math.min(PAGE_SIZE, hiddenCount) })}
+    <div ref={listRef} className={`${styles.list} ${searchTerms ? styles.list_searching : ""}`}>
+      {searchTerms && (
+        <div className={styles.search_nav}>
+          <span className={styles.search_count}>
+            {matches.length === 0
+              ? t("detail.search_no_match")
+              : `${activeMatch + 1} / ${matches.length}`}
+          </span>
+          <button
+            type="button"
+            className={styles.search_step}
+            onClick={() => stepMatch(-1)}
+            disabled={matches.length === 0}
+            title={t("detail.search_prev")}
+            aria-label={t("detail.search_prev")}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            className={styles.search_step}
+            onClick={() => stepMatch(1)}
+            disabled={matches.length === 0}
+            title={t("detail.search_next")}
+            aria-label={t("detail.search_next")}
+          >
+            ↓
+          </button>
+        </div>
+      )}
+      {(canReveal || canFetch) && (
+        <button
+          className={styles.load_earlier}
+          onClick={loadEarlier}
+          disabled={isLoadingEarlier}
+        >
+          {isLoadingEarlier
+            ? t("detail.loading_earlier")
+            : `↑ ${t("detail.load_earlier")}`}
         </button>
       )}
-      {visibleMsgs.map((msg, i) => (
-        <MessageRow
-          key={msg.uuid ?? (effectiveStart + i)}
-          msg={msg}
-          resultMap={resultMap}
-          metaMap={metaMap}
-          decisionRecords={records}
-          searchTerms={searchTerms}
-          msgIdx={effectiveStart + i}
-        />
-      ))}
+      {visibleMsgs.map((msg, i) => {
+        // A separator opens each new day, and also the top of the window — a
+        // reader scrolled into the middle of an old session needs the date too.
+        const today = dayKey(msg.timestamp);
+        const prev = i > 0 ? dayKey(visibleMsgs[i - 1].timestamp) : null;
+        const showDay = today !== null && (i === 0 || today !== prev);
+        return (
+          <Fragment key={msg.uuid ?? (effectiveStart + i)}>
+            {showDay && <DaySeparator isoDay={today} />}
+            <MessageRow
+              msg={msg}
+              resultMap={resultMap}
+              metaMap={metaMap}
+              decisionRecords={records}
+              searchTerms={searchTerms}
+              msgIdx={effectiveStart + i}
+              isActiveMatch={effectiveStart + i === searchMatchIndex}
+            />
+          </Fragment>
+        );
+      })}
       {status && WORKING_STATUSES.has(status) ? (
         <WorkingIndicator status={status} />
       ) : (
