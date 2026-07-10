@@ -294,7 +294,7 @@
   cursor: not-allowed;
 }
 
-/* ── Hero layout (contextSlot / toolbarSlot provided — the TaskComposer look) ── */
+/* ── Hero layout (contextSlot / toolbarSlot provided) ─────────────────────── */
 
 .context_row {
   display: flex;

@@ -1,7 +1,6 @@
 // PillMenu — the ghost-pill + popover-menu primitive of the composer design
-// language (see TaskComposer's header comment). Extracted so TaskComposer,
-// NewSessionForm and SessionLauncher render the exact same control instead of
-// three hand-rolled copies: a quiet transparent pill that opens a custom
+// language. Extracted so every composer surface renders the exact same control
+// instead of hand-rolled copies: a quiet transparent pill that opens a custom
 // check-list popover, no native <select> chrome, no form labels.
 
 import { type ReactNode, useEffect, useRef, useState } from "react";

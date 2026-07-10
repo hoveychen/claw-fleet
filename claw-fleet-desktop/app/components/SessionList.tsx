@@ -247,76 +247,72 @@ export function SessionList() {
           </svg>
         </button>
 
-        {/* Unified sidebar nav — top-level Monitor/Tasks tabs, then the
-            active tab's contents. */}
+        {/* Sidebar nav — sessions / audit / report + memory / skills / plugins. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
-          {/* ── Monitor: sessions / audit / report + memory / skills / plugins ── */}
-          <>
-              <button
-                className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
-                onClick={() => {
-                  if (!isSessionView) setViewMode(lastSessionViewMode);
-                }}
-              >
-                <span className={styles.nav_icon}><Menu size={14} strokeWidth={1.5} /></span>
-                <span className={styles.nav_label}>{t("view_sessions")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "history" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("history")}
-              >
-                <span className={styles.nav_icon}><Rocket size={14} strokeWidth={1.5} /></span>
-                <span className={styles.nav_label}>{t("view_history", "启动台")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("audit")}
-              >
-                <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
-                <span className={styles.nav_label}>{t("view_audit")}</span>
-                {unreadCriticalCount > 0 && (
-                  <span className={styles.nav_badge}>{unreadCriticalCount}</span>
-                )}
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("report")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
-                <span className={styles.nav_label}>{t("view_report")}</span>
-              </button>
+          <button
+            className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
+            onClick={() => {
+              if (!isSessionView) setViewMode(lastSessionViewMode);
+            }}
+          >
+            <span className={styles.nav_icon}><Menu size={14} strokeWidth={1.5} /></span>
+            <span className={styles.nav_label}>{t("view_sessions")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "history" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("history")}
+          >
+            <span className={styles.nav_icon}><Rocket size={14} strokeWidth={1.5} /></span>
+            <span className={styles.nav_label}>{t("view_history", "启动台")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("audit")}
+          >
+            <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
+            <span className={styles.nav_label}>{t("view_audit")}</span>
+            {unreadCriticalCount > 0 && (
+              <span className={styles.nav_badge}>{unreadCriticalCount}</span>
+            )}
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "report" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("report")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
+            <span className={styles.nav_label}>{t("view_report")}</span>
+          </button>
 
-              <div className={styles.nav_divider} />
+          <div className={styles.nav_divider} />
 
-              <button
-                className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("memory")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
-                <span className={styles.nav_label}>{t("view_memory")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("wiki")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3.5C6.8 2.4 5.2 2 3.5 2c-.6 0-1 .4-1 1v8.5c0 .6.4 1 1 1 1.7 0 3.3.4 4.5 1.5 1.2-1.1 2.8-1.5 4.5-1.5.6 0 1-.4 1-1V3c0-.6-.4-1-1-1-1.7 0-3.3.4-4.5 1.5Z"/><path d="M8 3.5V14"/></svg></span>
-                <span className={styles.nav_label}>{t("view_wiki", "知识库")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("skills")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
-                <span className={styles.nav_label}>{t("view_skills")}</span>
-              </button>
-              <button
-                className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
-                onClick={() => setViewMode("plugins")}
-              >
-                <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
-                <span className={styles.nav_label}>{t("view_plugins")}</span>
-              </button>
-            </>
+          <button
+            className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("memory")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
+            <span className={styles.nav_label}>{t("view_memory")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("wiki")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3.5C6.8 2.4 5.2 2 3.5 2c-.6 0-1 .4-1 1v8.5c0 .6.4 1 1 1 1.7 0 3.3.4 4.5 1.5 1.2-1.1 2.8-1.5 4.5-1.5.6 0 1-.4 1-1V3c0-.6-.4-1-1-1-1.7 0-3.3.4-4.5 1.5Z"/><path d="M8 3.5V14"/></svg></span>
+            <span className={styles.nav_label}>{t("view_wiki", "知识库")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("skills")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_skills")}</span>
+          </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("plugins")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_plugins")}</span>
+          </button>
         </nav>
 
         <div className={styles.separator} />
