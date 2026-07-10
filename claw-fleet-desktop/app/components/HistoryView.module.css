@@ -130,8 +130,15 @@
   to { transform: rotate(360deg); }
 }
 
+.filter_row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .project_select {
-  width: 100%;
+  flex: 1 1 auto;
+  min-width: 0;
   padding: 5px 8px;
   font-size: 12px;
   color: var(--color-text);
@@ -140,6 +147,45 @@
   border-radius: 7px;
   outline: none;
   cursor: pointer;
+}
+
+/* "Only active" pill — filters the list down to sessions the agent still owns. */
+.active_toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.active_toggle:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.active_toggle_on {
+  color: var(--color-text);
+  border-color: #5ac88c;
+  background: rgba(90, 200, 140, 0.12);
+}
+
+.active_toggle_dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #6b6b72;
+  flex: 0 0 auto;
+}
+
+.active_toggle_on .active_toggle_dot {
+  background: #5ac88c;
 }
 
 /* ── Session rows ────────────────────────────────────────────────────────── */
@@ -233,6 +279,17 @@
   max-width: 130px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Relay-chain position ("🔗 2/3"); the expandable chain lives in the detail column. */
+.row_handoff {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--color-text-dim);
+  background: var(--color-bg-card-hover);
+  border-radius: 5px;
+  padding: 1px 5px;
   white-space: nowrap;
 }
 

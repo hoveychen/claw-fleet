@@ -1683,6 +1683,8 @@
     "resume_permission_default": "沿用会话设置",
     "filter_workspace": "按工作目录筛选",
     "all_workspaces": "全部目录",
+    "only_active": "仅活跃",
+    "filter_active_tip": "只显示仍在运行或等待输入的会话",
     "select_hint": "从左侧选择一个会话查看详情"
   }
 }
