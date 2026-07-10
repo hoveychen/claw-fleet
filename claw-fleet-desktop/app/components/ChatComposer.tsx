@@ -11,49 +11,10 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { ImageLightbox } from "./ImageLightbox";
-import type { WikiDoc } from "./WikiView";
+import { useWikiMentions } from "./useWikiMentions";
 import styles from "./ChatComposer.module.css";
 
 const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
-
-/** Longest `@…` run still treated as a mention query rather than prose. */
-const MAX_MENTION_QUERY = 48;
-const MAX_MENTION_RESULTS = 8;
-
-/**
- * Find the `@query` the caret currently sits inside, if any. A mention starts
- * at an `@` that follows whitespace (or the very start of the text) and runs
- * up to the caret without crossing whitespace.
- */
-export function detectMention(
-  text: string,
-  caret: number,
-): { start: number; query: string } | null {
-  for (let i = caret - 1; i >= 0; i--) {
-    const ch = text[i];
-    if (/\s/.test(ch)) return null;
-    if (ch !== "@") continue;
-    const before = i > 0 ? text[i - 1] : "";
-    if (before !== "" && !/\s/.test(before)) return null;
-    const query = text.slice(i + 1, caret);
-    if (query.length > MAX_MENTION_QUERY) return null;
-    return { start: i, query };
-  }
-  return null;
-}
-
-/** Rank docs whose slug or title contains the query; slug matches come first. */
-export function filterWikiDocs(docs: WikiDoc[], query: string): WikiDoc[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return docs.slice(0, MAX_MENTION_RESULTS);
-  const bySlug: WikiDoc[] = [];
-  const byTitle: WikiDoc[] = [];
-  for (const d of docs) {
-    if (d.slug.toLowerCase().includes(q)) bySlug.push(d);
-    else if (d.title.toLowerCase().includes(q)) byTitle.push(d);
-  }
-  return [...bySlug, ...byTitle].slice(0, MAX_MENTION_RESULTS);
-}
 
 function mimeToExtension(mime: string): string {
   const m = mime.toLowerCase();
@@ -214,77 +175,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
     return () => window.removeEventListener("mousedown", onDown);
   }, [menuOpen]);
 
-  // ── Wiki @-mentions ────────────────────────────────────────────────────────
-  // The picker inserts `[[slug]]`, not a path: the slug is the doc's stable
-  // address and is what `fleet wiki cat` resolves on the agent's side.
-  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
-  const [wikiDocs, setWikiDocs] = useState<WikiDoc[] | null>(null);
-  const [activeIdx, setActiveIdx] = useState(0);
-  const mentionWrapRef = useRef<HTMLDivElement | null>(null);
-
-  // Load the doc list once, the first time an `@` actually opens the picker.
-  useEffect(() => {
-    if (!wikiMentions || !mention || wikiDocs !== null) return;
-    let cancelled = false;
-    invoke<WikiDoc[]>("list_wiki_docs")
-      .then((docs) => {
-        if (!cancelled) setWikiDocs(docs);
-      })
-      .catch(() => {
-        if (!cancelled) setWikiDocs([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [wikiMentions, mention, wikiDocs]);
-
-  const mentionMatches =
-    mention && wikiDocs ? filterWikiDocs(wikiDocs, mention.query) : [];
-  const mentionOpen = Boolean(mention) && mentionMatches.length > 0;
-
-  useEffect(() => {
-    setActiveIdx(0);
-  }, [mention?.query, mention?.start]);
-
-  const syncMention = useCallback(
-    (el: HTMLTextAreaElement) => {
-      if (!wikiMentions) return;
-      setMention(detectMention(el.value, el.selectionStart ?? el.value.length));
-    },
-    [wikiMentions],
-  );
-
-  const acceptMention = useCallback(
-    (doc: WikiDoc) => {
-      const el = textareaRef.current;
-      if (!el || !mention) return;
-      const caret = el.selectionStart ?? value.length;
-      const ref = `[[${doc.slug}]] `;
-      onChange(value.slice(0, mention.start) + ref + value.slice(caret));
-      setMention(null);
-      const next = mention.start + ref.length;
-      requestAnimationFrame(() => {
-        el.focus();
-        el.setSelectionRange(next, next);
-      });
-    },
-    [mention, onChange, value],
-  );
-
-  // Close the picker on outside click, same as the "+" popover.
-  useEffect(() => {
-    if (!mentionOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (
-        !mentionWrapRef.current?.contains(e.target as Node) &&
-        e.target !== textareaRef.current
-      ) {
-        setMention(null);
-      }
-    };
-    window.addEventListener("mousedown", onDown);
-    return () => window.removeEventListener("mousedown", onDown);
-  }, [mentionOpen]);
+  const mentions = useWikiMentions(Boolean(wikiMentions), value, onChange, textareaRef);
 
   const reportError = useCallback(
     (msg: string) => {
@@ -376,30 +267,9 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       // isComposing 状态的边角场景。
       if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 
-      // The mention picker owns the arrow/Enter/Tab/Escape keys while open, so
-      // Enter accepts a doc instead of submitting the prompt.
-      if (mentionOpen) {
-        if (e.key === "ArrowDown") {
-          e.preventDefault();
-          setActiveIdx((i) => (i + 1) % mentionMatches.length);
-          return;
-        }
-        if (e.key === "ArrowUp") {
-          e.preventDefault();
-          setActiveIdx((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
-          return;
-        }
-        if (e.key === "Enter" || e.key === "Tab") {
-          e.preventDefault();
-          acceptMention(mentionMatches[activeIdx]);
-          return;
-        }
-        if (e.key === "Escape") {
-          e.preventDefault();
-          setMention(null);
-          return;
-        }
-      }
+      // The mention picker owns arrows/Enter/Tab/Escape while open, so Enter
+      // accepts a doc instead of submitting the prompt.
+      if (mentions.handleKeyDown(e)) return;
 
       if (!onSubmit) return;
       if (e.key !== "Enter") return;
@@ -408,7 +278,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       e.preventDefault();
       if (!submitDisabled && !submitting) onSubmit();
     },
-    [acceptMention, activeIdx, mentionMatches, mentionOpen, onSubmit, submitDisabled, submitting],
+    [mentions, onSubmit, submitDisabled, submitting],
   );
 
   const triggerAttach = useCallback(() => {
@@ -479,7 +349,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
       placeholder={placeholder ?? t("composer.placeholder", "Type a message…")}
       onChange={(e) => {
         onChange(e.target.value);
-        syncMention(e.currentTarget);
+        mentions.sync(e.currentTarget);
       }}
       onPaste={handlePaste}
       onInput={(e) => {
@@ -488,35 +358,12 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
         el.style.height = `${el.scrollHeight}px`;
       }}
       // Clicking or arrowing out of an `@…` run must close the picker.
-      onSelect={(e) => syncMention(e.currentTarget)}
+      onSelect={(e) => mentions.sync(e.currentTarget)}
       onKeyDown={handleKeyDown}
-      onBlur={() => setMention(null)}
+      onBlur={mentions.close}
       disabled={disabled}
     />
   );
-
-  const mentionMenu = mentionOpen ? (
-    <div className={styles.mention_menu} ref={mentionWrapRef} role="listbox">
-      {mentionMatches.map((doc, i) => (
-        <button
-          key={doc.slug}
-          type="button"
-          role="option"
-          aria-selected={i === activeIdx}
-          className={`${styles.mention_item} ${i === activeIdx ? styles.mention_active : ""}`}
-          // mousedown fires before the textarea's blur, which would close us.
-          onMouseDown={(e) => {
-            e.preventDefault();
-            acceptMention(doc);
-          }}
-          onMouseEnter={() => setActiveIdx(i)}
-        >
-          <span className={styles.mention_slug}>{doc.slug}</span>
-          <span className={styles.mention_title}>{doc.title}</span>
-        </button>
-      ))}
-    </div>
-  ) : null;
 
   const sendControl = onSubmit ? (
     <button
@@ -546,7 +393,7 @@ export const ChatComposer = forwardRef<ChatComposerHandle, ChatComposerProps>(fu
 
   return (
     <div className={`${styles.composer} ${bare ? styles.bare : ""} ${className ?? ""}`}>
-      {mentionMenu}
+      {mentions.menu}
       {contextSlot && <div className={styles.context_row}>{contextSlot}</div>}
       {attachments.length > 0 && (
         <div className={styles.chips}>
