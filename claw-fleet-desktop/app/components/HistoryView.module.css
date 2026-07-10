@@ -188,6 +188,72 @@
   background: #5ac88c;
 }
 
+/* Segmented filter by manual review mark — one row can be active at a time;
+   each segment shows how many sessions fall in its bucket under the current
+   workspace / query / active filters. */
+.mark_filter {
+  display: flex;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.mark_seg {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 5px 6px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+  background: var(--color-bg);
+  border: none;
+  border-right: 1px solid var(--color-border);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+
+.mark_seg:last-child {
+  border-right: none;
+}
+
+.mark_seg:hover {
+  background: var(--color-bg-card-hover);
+}
+
+.mark_seg_on {
+  color: var(--color-text);
+  background: var(--color-bg-card-hover);
+  font-weight: 500;
+}
+
+.mark_seg_dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* "done" segment: a hollow ring, mirroring the no-fill done dot on the rows. */
+.mark_seg_dot_done {
+  background: transparent;
+  border: 1px solid var(--color-text-dim);
+}
+
+.mark_seg_count {
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.mark_seg_on .mark_seg_count {
+  color: var(--color-text);
+}
+
 /* ── Session rows ────────────────────────────────────────────────────────── */
 
 .list {
