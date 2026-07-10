@@ -487,6 +487,7 @@
     "close": "关闭",
     "path": "路径"
   },
+  "interrupt_session": "中断当前工具调用（会话保留，可恢复）",
   "stop_session": "停止会话（清除进程树）",
   "stop_session_imprecise": "停止该 workspace 下的所有会话（无法精确匹配 PID —— 该 workspace 有多个 claude 进程）",
   "cancel": "取消",
