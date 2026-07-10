@@ -420,8 +420,13 @@ fn attribute_successor_in(dir: &Path, pending: &PendingHandoff, to_sid: &str) {
     let ws = Path::new(&pending.workspace_path);
     let current = crate::prd_tasks::resolve_current_task(ws, plan_id, pending.next_task.as_deref())
         .unwrap_or(None);
+    // `register` stores the raw cwd, which may be a worktree. Stamp the main
+    // checkout instead, matching what `fleet plan resume/check` record — the
+    // card's workspace check compares main roots.
+    let ws_root = crate::prd_tasks::discover_main_checkout_root(ws)
+        .unwrap_or_else(|| ws.to_path_buf());
     if let Err(e) =
-        crate::task_progress::set_current_in(dir, to_sid, &pending.workspace_path, plan_id, current)
+        crate::task_progress::set_current_in(dir, to_sid, &ws_root.to_string_lossy(), plan_id, current)
     {
         crate::log_debug(&format!(
             "handoff: could not attribute successor {to_sid} to plan {plan_id}: {e}"
@@ -558,6 +563,41 @@ mod tests {
         attribute_successor_in(recs.path(), &pending, "to-sid");
         let rec = crate::task_progress::read_in(recs.path(), "to-sid").expect("attributed");
         assert_eq!(rec.current_task.as_deref(), Some("**P9**"));
+    }
+
+    /// `fleet handoff` stores the raw cwd, which is often a worktree. The record
+    /// must name the main checkout, because that is what the card's workspace
+    /// check compares against — stamping the worktree path would make the
+    /// successor's card go blank.
+    #[test]
+    fn attribute_successor_records_the_main_checkout_not_the_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let recs = tempfile::tempdir().unwrap();
+        let main = tmp.path().canonicalize().unwrap();
+        let main_gitdir = main.join(".git");
+        std::fs::create_dir_all(&main_gitdir).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"relay\" v=\"2\" -->\n\
+**Plan:** Relay\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"relay\" -->\n",
+        )
+        .unwrap();
+        let wt = main.join(".worktrees").join("feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        let wt_gitdir = main_gitdir.join("worktrees").join("feat");
+        std::fs::create_dir_all(&wt_gitdir).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}", wt_gitdir.display())).unwrap();
+        std::fs::write(wt_gitdir.join("commondir"), "../..").unwrap();
+
+        // The relay was registered from inside the worktree.
+        let pending = relay_pending(&wt, Some("relay"), None);
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        let rec = crate::task_progress::read_in(recs.path(), "to-sid").expect("attributed");
+        assert_eq!(
+            Path::new(&rec.workspace_path).canonicalize().unwrap(),
+            main,
+            "record must name the main checkout, not the worktree"
+        );
     }
 
     /// A relay whose plan isn't in the workspace's TASKS.md still attributes the

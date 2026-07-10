@@ -789,6 +789,13 @@ fn summarize_with_focus(
     rec: &crate::task_progress::TaskProgressRecord,
 ) -> Option<TaskPlanSummary> {
     let main_root = discover_main_checkout_root(cwd);
+    // The record names the workspace it was claimed in. Honour it, so a record
+    // from a different workspace that reuses this plan id can't bleed onto this
+    // session's card. Compare main roots, not raw cwds: a session inside
+    // `<main>/.worktrees/foo` has its record stamped with `<main>`.
+    if !same_workspace(main_root.as_deref().unwrap_or(cwd), &rec.workspace_path) {
+        return None;
+    }
     let sources = collect_task_sources(cwd, main_root.as_deref());
     if sources.is_empty() {
         return None;
@@ -901,6 +908,18 @@ pub fn find_plan_source(cwd: &Path, plan_id: &str) -> Option<PathBuf> {
         }
     }
     hits.into_iter().max_by_key(|(_, m)| *m).map(|(p, _)| p)
+}
+
+/// Whether a focus record's `workspace_path` names the same workspace as
+/// `main_root`. Both sides are canonicalized so macOS's `/var` → `/private/var`
+/// symlink (and any `..` in the recorded path) doesn't read as a mismatch; an
+/// unresolvable path falls back to a literal compare.
+fn same_workspace(main_root: &Path, recorded: &str) -> bool {
+    let rec_path = Path::new(recorded);
+    match (main_root.canonicalize(), rec_path.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => main_root == rec_path,
+    }
 }
 
 /// Display text of the task a session focusing on `plan_id` is now on: the item
@@ -1547,6 +1566,60 @@ trailing notes outside\n";
         // tempdir of its own.)
         let sid = "test-summarize-never-recorded-sid";
         assert!(summarize_workspace_tasks(main, Some(sid)).is_none());
+    }
+
+    /// The record carries the workspace it was written in. A record left over
+    /// from another workspace that happens to reuse the same plan id must not
+    /// bleed into this session's card.
+    #[test]
+    fn summarize_hides_when_focus_record_is_from_another_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"shared-id\" v=\"2\" -->\n\
+**Plan:** Ours\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"shared-id\" -->\n",
+        )
+        .unwrap();
+        // Same plan id, but the record says it was claimed in `other`.
+        let rec = focus_rec(other.path(), "shared-id", None);
+        assert!(
+            summarize_with_focus(main, &rec).is_none(),
+            "a record from another workspace must not attribute this session"
+        );
+    }
+
+    /// A session running inside `<main>/.worktrees/foo` has its record stamped
+    /// with the *main checkout* path (that is what `fleet plan resume` and the
+    /// handoff relay both store). The workspace check must compare main roots,
+    /// not raw cwds, or every worktree session loses its card.
+    #[test]
+    fn summarize_accepts_record_from_main_root_when_cwd_is_a_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().canonicalize().unwrap();
+        let main_gitdir = main.join(".git");
+        std::fs::create_dir_all(&main_gitdir).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"wt\" v=\"2\" -->\n\
+**Plan:** WT\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"wt\" -->\n",
+        )
+        .unwrap();
+        // A real linked worktree: `.git` file → `<main>/.git/worktrees/feat`,
+        // which holds a `commondir` pointing back at the main `.git`.
+        let wt = main.join(".worktrees").join("feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        let wt_gitdir = main_gitdir.join("worktrees").join("feat");
+        std::fs::create_dir_all(&wt_gitdir).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}", wt_gitdir.display())).unwrap();
+        std::fs::write(wt_gitdir.join("commondir"), "../..").unwrap();
+
+        let rec = focus_rec(&main, "wt", None);
+        let s = summarize_with_focus(&wt, &rec)
+            .expect("worktree session must keep its card when the record names the main root");
+        assert_eq!(s.current_plan.as_deref(), Some("WT"));
     }
 
     /// A focus record naming a plan that is no longer active (finished, deleted,
