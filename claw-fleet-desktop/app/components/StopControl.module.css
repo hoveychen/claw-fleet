@@ -1,0 +1,65 @@
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-dim);
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+
+/* Interrupt: the gentle tier. Reads as "pause", not "destroy". */
+.btn_interrupt {
+  font-size: 11px;
+}
+
+.btn_interrupt:hover {
+  background: var(--badge-executing-bg);
+  color: var(--badge-executing-fg);
+}
+
+/* Stop: the hard tier. */
+.btn_stop {
+  font-size: 9px;
+}
+
+.btn_stop:hover {
+  background: var(--badge-streaming-bg);
+  color: var(--badge-streaming-fg);
+}
+
+/* Imprecise pid — stopping takes the whole workspace with it. */
+.btn_warn {
+  color: var(--badge-executing-fg);
+}
+
+/* Spent: the process is gone, nothing left to stop. */
+.btn_spent {
+  font-size: 9px;
+  opacity: 0.3;
+  cursor: default;
+}
+
+.btn_busy {
+  animation: stop_control_pulse 0.8s ease-in-out infinite;
+}
+
+/* Keyframes are scoped to their CSS module, so this must live beside the rule
+   that uses it — referencing a `pulse` defined in another module silently
+   no-ops. */
+@keyframes stop_control_pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
