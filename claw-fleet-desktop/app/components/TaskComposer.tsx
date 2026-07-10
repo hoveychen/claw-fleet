@@ -18,6 +18,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Paperclip, FolderOpen, ArrowUp } from "lucide-react";
+import { useWikiMentions } from "./useWikiMentions";
 import styles from "./TaskComposer.module.css";
 import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
@@ -94,6 +95,7 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const mentions = useWikiMentions(true, description, setDescription, textareaRef);
 
   // Keep a valid project selected as the project list loads / changes.
   useEffect(() => {
@@ -263,6 +265,8 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
     ) {
       return;
     }
+    // The wiki @-mention picker owns arrows/Enter/Tab/Escape while it is open.
+    if (mentions.handleKeyDown(e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       void submit();
@@ -322,12 +326,18 @@ export function TaskComposer({ defaultProjectId, onCreated }: Props) {
           </div>
 
           {/* Hero textarea */}
+          {mentions.menu}
           <textarea
             ref={textareaRef}
             className={styles.textarea}
             value={description}
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => {
+              setDescription(e.target.value);
+              mentions.sync(e.currentTarget);
+            }}
+            onSelect={(e) => mentions.sync(e.currentTarget)}
             onKeyDown={onKeyDown}
+            onBlur={mentions.close}
             placeholder={t("composer.task_placeholder", "Describe the task…  (Enter to create, Shift+Enter for a new line)")}
             disabled={submitting}
             rows={1}
