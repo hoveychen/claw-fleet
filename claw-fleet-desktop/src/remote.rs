@@ -276,7 +276,7 @@ pub(crate) struct WikiDeleteFolderReq<'a> {
 }
 
 /// Response of `POST /wiki_delete_folder`.
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 pub(crate) struct WikiDeleteFolderResp {
     pub deleted: usize,
 }
@@ -2731,5 +2731,125 @@ mod tests {
         let after = claw_fleet_core::wiki::get_doc_in(&fx.wiki_root(), "notes").unwrap();
         assert_eq!(after.versions.len(), 1);
         assert_eq!(after.current_version, doc.current_version, "current version survives");
+    }
+
+    // ── /wiki_move_folder ───────────────────────────────────────────────────
+
+    #[test]
+    fn wiki_move_folder_rekeys_every_doc_beneath_and_returns_them() {
+        let fx = boot();
+        fx.seed("arch/one");
+        fx.seed("arch/deep/two");
+        fx.seed("arch"); // same name as the folder — renders beside it, must stay
+        fx.seed("unrelated");
+
+        let moved: Vec<claw_fleet_core::wiki::WikiDoc> = fx
+            .probe
+            .post_json("/wiki_move_folder", &super::WikiMoveReq { from: "arch", to: "design" })
+            .unwrap();
+
+        assert_eq!(moved.len(), 2, "server returns exactly the docs it moved");
+        assert_eq!(fx.slugs(), vec!["arch", "design/deep/two", "design/one", "unrelated"]);
+    }
+
+    /// `to: ""` is how the UI dissolves a folder. It has to survive JSON — an
+    /// empty string must not be dropped or coerced on the way in.
+    #[test]
+    fn wiki_move_folder_with_empty_target_dissolves_into_the_root() {
+        let fx = boot();
+        fx.seed("arch/one");
+        fx.seed("arch/two");
+
+        let moved: Vec<claw_fleet_core::wiki::WikiDoc> = fx
+            .probe
+            .post_json("/wiki_move_folder", &super::WikiMoveReq { from: "arch", to: "" })
+            .unwrap();
+
+        assert_eq!(moved.len(), 2);
+        assert_eq!(fx.slugs(), vec!["one", "two"]);
+    }
+
+    /// A collision anywhere under the prefix must abort the whole move, and the
+    /// 400 body must carry the reason.
+    #[test]
+    fn wiki_move_folder_collision_is_a_400_and_moves_nothing() {
+        let fx = boot();
+        fx.seed("a/x");
+        fx.seed("a/y");
+        fx.seed("b/y"); // b/y is taken, so a/y cannot land
+
+        let err = fx
+            .probe
+            .post_json::<_, Vec<claw_fleet_core::wiki::WikiDoc>>(
+                "/wiki_move_folder",
+                &super::WikiMoveReq { from: "a", to: "b" },
+            )
+            .unwrap_err();
+
+        assert!(err.contains("already exists"), "unexpected error: {err}");
+        assert_eq!(fx.slugs(), vec!["a/x", "a/y", "b/y"], "nothing moved");
+    }
+
+    // ── /wiki_delete_folder ─────────────────────────────────────────────────
+
+    /// The `{"deleted": n}` response shape is RemoteBackend's deserialization
+    /// contract — if the server ever renamed that field, only this test catches it.
+    #[test]
+    fn wiki_delete_folder_removes_everything_beneath_and_reports_the_count() {
+        let fx = boot();
+        fx.seed("a/x");
+        fx.seed("a/deep/y");
+        fx.seed("a"); // beside the folder, must survive
+        fx.seed("b/z");
+
+        let resp: super::WikiDeleteFolderResp = fx
+            .probe
+            .post_json("/wiki_delete_folder", &super::WikiDeleteFolderReq { prefix: "a" })
+            .unwrap();
+
+        assert_eq!(resp.deleted, 2);
+        assert_eq!(fx.slugs(), vec!["a", "b/z"]);
+    }
+
+    #[test]
+    fn wiki_delete_folder_on_an_empty_prefix_is_a_400() {
+        let fx = boot();
+        fx.seed("keeper");
+
+        let err = fx
+            .probe
+            .post_json::<_, super::WikiDeleteFolderResp>(
+                "/wiki_delete_folder",
+                &super::WikiDeleteFolderReq { prefix: "nosuch" },
+            )
+            .unwrap_err();
+
+        assert!(err.contains("no wiki docs under"), "unexpected error: {err}");
+        assert_eq!(fx.slugs(), vec!["keeper"]);
+    }
+
+    /// A malformed body must be rejected by the route, not panic the server.
+    #[test]
+    fn wiki_move_folder_rejects_a_malformed_body() {
+        let fx = boot();
+        fx.seed("a/x");
+
+        #[derive(serde::Serialize)]
+        struct Wrong<'a> {
+            nonsense: &'a str,
+        }
+        let err = fx
+            .probe
+            .post_json::<_, Vec<claw_fleet_core::wiki::WikiDoc>>(
+                "/wiki_move_folder",
+                &Wrong { nonsense: "x" },
+            )
+            .unwrap_err();
+        assert!(err.contains("bad /wiki_move_folder body"), "unexpected error: {err}");
+
+        // The server is still alive and the wiki is untouched.
+        let health: serde_json::Value = fx.probe.get("/health").unwrap();
+        assert_eq!(health["status"], "ok");
+        assert_eq!(fx.slugs(), vec!["a/x"]);
     }
 }
