@@ -381,6 +381,9 @@ pub trait Backend: Send + Sync {
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String>;
     /// Delete a single non-current version.
     fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String>;
+    /// Re-key a doc, which is how it moves between virtual directories. Version
+    /// history rides along; errors when `to` is already taken.
+    fn move_wiki_doc(&self, from: &str, to: &str) -> Result<crate::wiki::WikiDoc, String>;
     /// Full-text search over doc metadata and current-version entry files.
     fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit>;
     /// Exportable artifact of one version: the entry file for single-file

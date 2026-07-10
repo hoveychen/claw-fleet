@@ -540,8 +540,9 @@ enum WikiCommands {
     Publish {
         /// Path to the .html file, .md file, or directory
         path: std::path::PathBuf,
-        /// Stable doc id (lowercase letters/digits/hyphens). Default:
-        /// normalized file/dir name.
+        /// Stable doc id (lowercase letters/digits/hyphens). `/` separates
+        /// virtual directories, e.g. `arch/overview`. Default: normalized
+        /// file/dir name.
         #[arg(long)]
         slug: Option<String>,
         /// Display title. Default: <title> tag / first `# ` heading / slug.
@@ -577,6 +578,15 @@ enum WikiCommands {
         /// Remove only this version (refused for the current version)
         #[arg(long)]
         version: Option<String>,
+    },
+    /// Re-key a doc, which moves it between virtual directories. Version
+    /// history rides along. e.g. `fleet wiki mv overview arch/overview`
+    #[command(alias = "move")]
+    Mv {
+        /// Current slug
+        from: String,
+        /// New slug — `/` separates virtual directories
+        to: String,
     },
     /// Retag docs whose workspace was recorded as a session scratchpad
     /// directory (published before scratchpad decoding existed)
@@ -1810,7 +1820,7 @@ fn cmd_wiki(action: WikiCommands) {
                 return;
             }
             println!(
-                "{}{:<26} {:<8} {:<18} {:>4}  {:<9} TITLE{}",
+                "{}{:<36} {:<8} {:<18} {:>4}  {:<9} TITLE{}",
                 c_bold(),
                 "SLUG",
                 "KIND",
@@ -1821,8 +1831,8 @@ fn cmd_wiki(action: WikiCommands) {
             );
             for d in &docs {
                 println!(
-                    "{:<26} {:<8} {:<18} {:>4}  {:<9} {}",
-                    truncate(&d.slug, 25),
+                    "{:<36} {:<8} {:<18} {:>4}  {:<9} {}",
+                    truncate(&d.slug, 35),
                     d.kind,
                     truncate(&d.workspace_name, 17),
                     d.versions.len(),
@@ -1877,6 +1887,14 @@ fn cmd_wiki(action: WikiCommands) {
                 }
             }
         }
+
+        WikiCommands::Mv { from, to } => match wiki::move_doc(&from, &to) {
+            Ok(doc) => println!("Moved {from} → {}", doc.slug),
+            Err(e) => {
+                eprintln!("{}Error:{} {}", "\x1b[31m", c_reset(), e);
+                std::process::exit(1);
+            }
+        },
 
         WikiCommands::FixWorkspaces { json } => match wiki::fix_scratchpad_workspaces() {
             Ok(fixed) => {

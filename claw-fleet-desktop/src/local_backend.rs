@@ -1903,6 +1903,10 @@ impl Backend for LocalBackend {
         crate::wiki::delete_version(slug, version)
     }
 
+    fn move_wiki_doc(&self, from: &str, to: &str) -> Result<crate::wiki::WikiDoc, String> {
+        crate::wiki::move_doc(from, to)
+    }
+
     fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
         crate::wiki::search_docs(query)
     }
