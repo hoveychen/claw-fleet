@@ -7,6 +7,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { WikiDoc } from "./WikiView";
+import { useAutoFlip } from "./useAutoFlip";
 import styles from "./useWikiMentions.module.css";
 
 /** Longest `@…` run still treated as a mention query rather than prose. */
@@ -99,6 +100,12 @@ export function useWikiMentions(
   const matches = mention && docs ? filterWikiDocs(docs, mention.query) : [];
   const open = Boolean(mention) && matches.length > 0;
 
+  // Prefer opening upward (the composer usually sits low), but fall back to
+  // below when the composer is near the top of the window. The anchor defaults
+  // to the menu's offsetParent — the composer it spans.
+  // `matches.length` re-measures as the result list grows or shrinks.
+  const side = useAutoFlip(open, "above", wrapRef, undefined, matches.length);
+
   useEffect(() => {
     setActiveIdx(0);
   }, [mention?.query, mention?.start]);
@@ -171,7 +178,11 @@ export function useWikiMentions(
   );
 
   const menu = open ? (
-    <div className={styles.menu} ref={wrapRef} role="listbox">
+    <div
+      className={`${styles.menu} ${side === "above" ? styles.above : styles.below}`}
+      ref={wrapRef}
+      role="listbox"
+    >
       {matches.map((doc, i) => (
         <button
           key={doc.slug}
