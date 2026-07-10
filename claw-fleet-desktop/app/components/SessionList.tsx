@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, Rocket } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
+import type { ViewMode } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
 import { GalleryView } from "./GalleryView";
@@ -30,6 +31,19 @@ const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
 const DEFAULT_WIDTH = 280;
 
+/** Views whose page carries a secondary sidebar (二级侧边栏) that can be
+ *  collapsed by re-clicking the already-active nav item. Views without one
+ *  (sessions / gallery / report) just switch on click. */
+const SECONDARY_SIDEBAR_VIEWS = new Set<ViewMode>([
+  "history",
+  "audit",
+  "memory",
+  "wiki",
+  "skills",
+  "files",
+  "plugins",
+]);
+
 
 function getSavedWidth(): number {
   const saved = getItem("sidebar-width");
@@ -51,9 +65,23 @@ export function SessionList() {
     setLiteMode,
     sidebarCollapsed,
     setSidebarCollapsed,
+    toggleSecondarySidebar,
     mascotVisible,
   } = useUIStore();
   const isSessionView = viewMode === "list" || viewMode === "gallery";
+  // Views that own a secondary sidebar (二级侧边栏). Re-clicking the nav item of
+  // the already-active one collapses/expands its sidebar instead of being a
+  // no-op; every other view just switches as usual.
+  const navTo = useCallback(
+    (target: ViewMode) => {
+      if (viewMode === target && SECONDARY_SIDEBAR_VIEWS.has(target)) {
+        toggleSecondarySidebar(target);
+      } else {
+        setViewMode(target);
+      }
+    },
+    [viewMode, setViewMode, toggleSecondarySidebar],
+  );
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
   const [filter, setFilter] = useState("");
@@ -261,14 +289,14 @@ export function SessionList() {
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "history" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("history")}
+            onClick={() => navTo("history")}
           >
             <span className={styles.nav_icon}><Rocket size={14} strokeWidth={1.5} /></span>
             <span className={styles.nav_label}>{t("view_history", "启动台")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("audit")}
+            onClick={() => navTo("audit")}
           >
             <span className={styles.nav_icon}><Shield size={14} strokeWidth={1.5} /></span>
             <span className={styles.nav_label}>{t("view_audit")}</span>
@@ -288,35 +316,35 @@ export function SessionList() {
 
           <button
             className={`${styles.nav_item} ${viewMode === "files" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("files")}
+            onClick={() => navTo("files")}
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_files", "文件")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("memory")}
+            onClick={() => navTo("memory")}
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 2.5h6.5a2 2 0 0 1 2 2v9a1 1 0 0 1-1 1H4a1.5 1.5 0 0 1-1.5-1.5V4A1.5 1.5 0 0 1 4 2.5Z"/><path d="M2.5 11.5H12"/><path d="M5.5 5.5h4"/><path d="M5.5 7.5h3"/></svg></span>
             <span className={styles.nav_label}>{t("view_memory")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "wiki" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("wiki")}
+            onClick={() => navTo("wiki")}
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3.5C6.8 2.4 5.2 2 3.5 2c-.6 0-1 .4-1 1v8.5c0 .6.4 1 1 1 1.7 0 3.3.4 4.5 1.5 1.2-1.1 2.8-1.5 4.5-1.5.6 0 1-.4 1-1V3c0-.6-.4-1-1-1-1.7 0-3.3.4-4.5 1.5Z"/><path d="M8 3.5V14"/></svg></span>
             <span className={styles.nav_label}>{t("view_wiki", "知识库")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("skills")}
+            onClick={() => navTo("skills")}
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_skills")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
-            onClick={() => setViewMode("plugins")}
+            onClick={() => navTo("plugins")}
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_plugins")}</span>

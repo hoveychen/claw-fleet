@@ -21,6 +21,8 @@ import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { PromptDialog } from "./PromptDialog";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
+import { useUIStore } from "../store";
+import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import styles from "./WikiView.module.css";
 
 // ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
@@ -213,6 +215,8 @@ function buildTree(docs: WikiDoc[]): TreeNode[] {
 
 export function WikiView() {
   const { t } = useTranslation();
+  const secondaryCollapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["wiki"]);
+  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const [docs, setDocs] = useState<WikiDoc[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -627,6 +631,10 @@ export function WikiView() {
       </header>
 
       <div className={styles.body}>
+        {secondaryCollapsed ? (
+          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("wiki", false)} />
+        ) : (
+        <>
         {/* The pane itself is the root drop zone: dropping outside any folder
             strips a doc's directory prefix. */}
         <aside
@@ -651,6 +659,8 @@ export function WikiView() {
           )}
           {renderNodes(tree, 0, "")}
         </aside>
+        </>
+        )}
 
         <main className={styles.detail_pane}>
           {selected ? (

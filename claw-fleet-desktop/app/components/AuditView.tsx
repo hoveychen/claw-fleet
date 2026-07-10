@@ -13,6 +13,7 @@ import type {
 import { ShieldCheck } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import styles from "./AuditView.module.css";
+import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 
 // ── Risk level helpers ──────────────────────────────────────────────────────
 
@@ -90,6 +91,8 @@ function EventsTab() {
   const { sessions } = useSessionsStore();
   const { open } = useDetailStore();
   const { setViewMode } = useUIStore();
+  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["audit"]);
+  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const { isRead, markAsRead, getEventKey, setCriticalEvents, markAllCriticalAsRead, unreadCriticalCount } =
     useAuditStore();
 
@@ -248,7 +251,10 @@ function EventsTab() {
           ))}
         </aside>
 
-        {selectedEvent && (
+        {selectedEvent && collapsed && (
+          <CollapsedSidebarRail side="right" onExpand={() => setSecondarySidebar("audit", false)} />
+        )}
+        {selectedEvent && !collapsed && (
           <main className={styles.detail_pane}>
             <div className={styles.detail_header}>
               <div className={styles.detail_title}>
@@ -299,6 +305,8 @@ function EventsTab() {
 
 function RulesTab({ lang }: { lang: string }) {
   const { t } = useTranslation();
+  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["audit"]);
+  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const [rules, setRules] = useState<AuditRuleInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRule, setSelectedRule] = useState<AuditRuleInfo | null>(null);
@@ -459,7 +467,10 @@ function RulesTab({ lang }: { lang: string }) {
           ))}
         </aside>
 
-        {selectedRule && (
+        {selectedRule && collapsed && (
+          <CollapsedSidebarRail side="right" onExpand={() => setSecondarySidebar("audit", false)} />
+        )}
+        {selectedRule && !collapsed && (
           <main className={styles.detail_pane}>
             <div className={styles.detail_header}>
               <div className={styles.detail_title}>

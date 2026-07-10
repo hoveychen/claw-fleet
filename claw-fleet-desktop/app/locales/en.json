@@ -1174,7 +1174,9 @@
   },
   "sidebar": {
     "collapse": "Collapse sidebar",
-    "expand": "Expand sidebar"
+    "expand": "Expand sidebar",
+    "secondary_collapse": "Collapse this sidebar",
+    "secondary_expand": "Expand sidebar"
   },
   "detail": {
     "following": "Auto-following",
