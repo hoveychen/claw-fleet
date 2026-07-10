@@ -20,7 +20,7 @@ interface WikiVersion {
   sourcePath: string;
 }
 
-interface WikiDoc {
+export interface WikiDoc {
   slug: string;
   title: string;
   kind: "html" | "htmlDir" | "markdown";
