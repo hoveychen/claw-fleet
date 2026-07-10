@@ -333,6 +333,14 @@ pub trait Backend: Send + Sync {
         &self,
         config: crate::auto_resume::AutoResumeConfig,
     ) -> Result<(), String>;
+    /// Persist the human's manual review mark for a session. `Some(mark)`
+    /// sets/overwrites it; `None` clears it (back to "new / needs review").
+    fn set_session_mark(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        mark: Option<crate::session_mark::SessionMark>,
+    ) -> Result<(), String>;
     fn account_info(&self) -> AccountInfoFuture;
     /// Fetch account/profile info for the given source (e.g. "claude", "cursor", "openclaw").
     fn source_account(&self, source: &str) -> SourceDataFuture;
@@ -806,7 +814,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
-            task_plan: None, handoff: None,            compact_count: 0,
+            task_plan: None, handoff: None, user_mark: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,

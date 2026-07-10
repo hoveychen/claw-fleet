@@ -365,6 +365,20 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/auto_resume_config", &config)
     }
 
+    fn set_session_mark(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        mark: Option<claw_fleet_core::session_mark::SessionMark>,
+    ) -> Result<(), String> {
+        let req = claw_fleet_core::session_mark::SetSessionMarkRequest {
+            session_id,
+            workspace_path,
+            mark,
+        };
+        self.probe.post_json_ok("/session_mark", &req)
+    }
+
     fn account_info(&self) -> crate::backend::AccountInfoFuture {
         let probe = self.probe.clone();
         Box::pin(async move {

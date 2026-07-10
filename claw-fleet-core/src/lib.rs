@@ -78,6 +78,7 @@ pub mod scan_cache_disk;
 pub mod search_index;
 pub mod session;
 pub mod session_launch;
+pub mod session_mark;
 pub mod session_todos;
 pub mod skill_history;
 pub mod skills;
