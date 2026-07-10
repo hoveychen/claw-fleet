@@ -3563,14 +3563,6 @@ pub fn run() {
                 });
             }
 
-            // ── Supervisor daemon auto-install (REMOVED in Phase 3) ──────
-            // The legacy `fleet serve` LaunchAgent existed because the
-            // supervisor::tick loop had to be alive to spawn queued sessions.
-            // Phase 3 retired that path: the `fleet-task` standalone binary
-            // owns task lifecycle now, and the remaining hook endpoints
-            // (`fleet-hooks-server` — split out in Phase 3 P7) are launched
-            // on demand. No more auto-install at startup.
-
             // Truncate the hook events file if it has grown too large.
             hooks::maybe_truncate_events_file();
 

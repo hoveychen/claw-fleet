@@ -484,10 +484,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // Phase 4 P3: `/stop_workspace` and `/auto_resume_config` removed.
-            // Task lifecycle is owned by fleet-task; auto-resume of individual
-            // Claude Code sessions is a per-task concern now. Remote callers
-            // hitting those paths receive the catch-all 404 below.
-            // `/resume_session` was re-added later (POST, with follow-up
+            // Remote callers hitting those paths receive the catch-all 404
+            // below. `/resume_session` was re-added later (POST, with follow-up
             // prompt) for the history panel — see the handler further down.
 
             // ── Unified /sources/{name}/account and /sources/{name}/usage ──

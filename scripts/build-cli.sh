@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
-# Build and install the Phase 2–4 CLI binaries (fleet, fleet-hooks-server)
-# into a user-PATH location so you can dogfood the new task lifecycle without
-# the desktop app. The task runtime is folded into `fleet` (the hidden
-# `fleet task-runtime` subcommand); there is no separate fleet-task binary.
+# Build and install the CLI binaries (fleet, fleet-hooks-server) into a
+# user-PATH location so you can dogfood them without the desktop app.
 #
 # Defaults:
 #   - profile = debug (fast incremental builds)
@@ -15,9 +13,8 @@
 #   ./scripts/build-cli.sh --no-install          # only build, don't symlink
 #
 # After install the following are on PATH:
-#   - fleet                   (Phase 4 CLI: `fleet serve` + `fleet task <cmd>`;
-#                              owns the task lifecycle via `fleet task-runtime`)
-#   - fleet-hooks-server      (Phase 4: hook endpoints only, no task lifecycle)
+#   - fleet                   (`fleet serve` + wiki / plan / session / guard etc.)
+#   - fleet-hooks-server      (hook endpoints only)
 
 set -euo pipefail
 
@@ -97,7 +94,7 @@ echo ""
 echo "==> Installing symlinks into $INSTALL_DIR"
 link_or_replace "$TARGET_DIR/fleet-cli"           "$INSTALL_DIR/fleet-cli"          "fleet-cli"
 # `fleet` is the canonical name end-users see (the bundled sidecar is also
-# called `fleet`); alias fleet-cli under that name so `fleet task <cmd>` works.
+# called `fleet`); alias fleet-cli under that name.
 link_or_replace "$TARGET_DIR/fleet-cli"           "$INSTALL_DIR/fleet"              "fleet (alias)"
 link_or_replace "$TARGET_DIR/fleet-hooks-server"  "$INSTALL_DIR/fleet-hooks-server" "fleet-hooks-server"
 
@@ -113,33 +110,10 @@ cat <<'USAGE'
 
 ==> Done. Quick dogfood path:
 
-  # 1. Start a real task — opens the ratatui TUI in this terminal (P-item
-  #    list + status bar with task / port / pid; `q` to quit). Requires
-  #    `claude` on PATH and a git repo workspace.
-  fleet task-runtime new --workspace ~/code/my-repo --prompt "explore the codebase"
+  # Serve the hook/probe HTTP API (guard / elicitation / wiki / plans …):
+  fleet serve --port 0
 
-  # 2. Same task, headless (no TUI). Useful when desktop or another tool
-  #    drives it; foreground waits on SIGINT/SIGTERM.
-  fleet task-runtime new --workspace ~/code/my-repo --prompt "..." --no-tui
-
-  # 3. Smoke-test plumbing without `claude` installed (`sleep 60` stands in
-  #    for the master subprocess so registry / HTTP / shutdown all exercise):
-  FLEET_TASK_FAKE_LAUNCHER=1 \
-    fleet task-runtime new --workspace ~/code/my-repo --prompt "smoke" --no-tui &
-
-  # 4. From another terminal: list all tasks (shell-friendly table) or
-  #    pop a TUI picker that lets you Enter-to-resume any of them:
-  fleet task list                  # `--json` for jq pipelines
-  fleet task-runtime list          # ratatui picker; Enter to resume into single-task TUI
-
-  # 5. Inspect / drive the task via the CLI HTTP path:
-  TASK_ID=$(fleet task list --json | jq -r '.[0].id')
-  fleet task get-plan "$TASK_ID"
-  fleet task dispatch "$TASK_ID" <p-item-id>      # HTTP → task-runtime LocalDispatcher
-  fleet task mark-done "$TASK_ID" <p-item-id> "summary"
-
-  # 6. Standalone hook server (was 'fleet serve' supervisor + hooks; now just
-  #    hooks — no LaunchAgent, run it on demand when claude needs guard etc.):
+  # Standalone hook server (hook endpoints only, run on demand):
   fleet-hooks-server --port 0
 
 USAGE
