@@ -4,6 +4,7 @@ import { useDetailStore } from "../store";
 import type { SessionInfo } from "../types";
 import { MessageList } from "./MessageList";
 import { AgentSourceIcon, useMultiSource } from "./SessionCard";
+import { SessionIdRow } from "./SessionIdRow";
 import { SkillHistory } from "./SkillHistory";
 import styles from "./InspectModal.module.css";
 
@@ -67,6 +68,13 @@ export function InspectModal({ session, onClose }: Props) {
 
         {/* Path */}
         <div className={styles.path}>{session.workspacePath}</div>
+
+        {/* Session id + transcript path, both copyable */}
+        <SessionIdRow
+          id={session.id}
+          jsonlPath={session.jsonlPath}
+          className={styles.id_row}
+        />
 
         {/* Skill history */}
         <SkillHistory jsonlPath={session.jsonlPath} />

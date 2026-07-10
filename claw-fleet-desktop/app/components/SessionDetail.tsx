@@ -10,6 +10,7 @@ import { HandoffChainRow } from "./HandoffChainRow";
 import { MessageList } from "./MessageList";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { ResumeComposer } from "./ResumeComposer";
+import { SessionIdRow } from "./SessionIdRow";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { WorkflowDag } from "./blocks/WorkflowDag";
@@ -537,6 +538,7 @@ export function SessionDetail({
               )}
             </div>
             <div className={styles.path} title={liveSession.workspacePath}>{liveSession.workspacePath}</div>
+            <SessionIdRow id={liveSession.id} jsonlPath={liveSession.jsonlPath} />
             {/* Handoff relay chain — chip toggles the chain detail panel */}
             {liveSession.handoff && <HandoffChainRow session={liveSession} />}
           </div>
