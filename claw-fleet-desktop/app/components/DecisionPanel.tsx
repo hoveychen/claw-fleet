@@ -958,6 +958,7 @@ function SharedOptionsBlock({
           onRemoveAttachment={onRemoveAttachment}
           onAttachmentError={onAttachmentError}
           placeholder={t("elicitation.other_placeholder", "Type your answer…")}
+          wikiMentions
         />
       </div>
     </div>

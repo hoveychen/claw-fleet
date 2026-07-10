@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState, type DragEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
-import { BookOpen, ChevronDown, ChevronRight, Download, RefreshCw, Trash2 } from "lucide-react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import { BookOpen, Check, ChevronDown, ChevronRight, Copy, Download, RefreshCw, Trash2 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import type { WikiLinkContext } from "../markdown/wikiLinks";
 import { EmptyState } from "./EmptyState";
@@ -19,7 +20,7 @@ interface WikiVersion {
   sourcePath: string;
 }
 
-interface WikiDoc {
+export interface WikiDoc {
   slug: string;
   title: string;
   kind: "html" | "htmlDir" | "markdown";
@@ -520,6 +521,20 @@ function WikiDetail({
     ? version
     : doc.currentVersion;
 
+  // Copies the `[[slug]]` reference rather than an on-disk path: the slug is
+  // the doc's stable address, and it's what `fleet wiki cat` and the session
+  // composer's @-mention both resolve.
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const id = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(id);
+  }, [copied]);
+  const handleCopyRef = async () => {
+    await writeText(`[[${doc.slug}]]`);
+    setCopied(true);
+  };
+
   const [exporting, setExporting] = useState(false);
   const handleExport = async () => {
     // Mirrors core's wiki::export_filename — kind decides the artifact shape,
@@ -579,6 +594,14 @@ function WikiDetail({
               </option>
             ))}
           </select>
+          <button
+            className={styles.action_btn}
+            onClick={handleCopyRef}
+            title={t("wiki.copy_ref", "Copy [[slug]] — paste it into a session prompt")}
+          >
+            {copied ? <Check size={12} strokeWidth={1.7} /> : <Copy size={12} strokeWidth={1.7} />}
+            {copied ? t("wiki.copied", "Copied") : t("wiki.copy_ref_short", "Copy ref")}
+          </button>
           <button
             className={styles.action_btn}
             onClick={handleExport}

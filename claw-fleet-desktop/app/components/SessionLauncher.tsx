@@ -246,6 +246,7 @@ export function SessionLauncher({ initial, onClose, onSubmitted }: SessionLaunch
               submitDisabled={!projectId || !prompt.trim()}
               placeholder={t("launcher.prompt_placeholder")}
               disabled={submitting}
+              wikiMentions
               contextSlot={projectPill}
               toolbarSlot={expeditedPill}
               addMenuItems={[
