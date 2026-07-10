@@ -7,11 +7,16 @@
 //! concurrent publishes from several agents never contend on a shared file):
 //!
 //! ```text
-//! ~/.fleet/wiki/<slug>/
+//! ~/.fleet/wiki/<dirname>/
 //!   doc.json                  # WikiDoc metadata
 //!   versions/<version-id>/    # %Y%m%d-%H%M%S (suffix -2, -3 … on collision)
 //!     index.html + assets     # or the single .html / .md file
 //! ```
+//!
+//! Slugs are object-storage keys: `/` separates *virtual* directories that the
+//! UI renders as a tree, but storage stays flat — `<dirname>` is the slug with
+//! `/` percent-encoded (see [`slug_to_dirname`]). Nothing on disk nests, so
+//! the scan stays one level deep and no doc dir can contain another.
 //!
 //! Re-publishing an existing slug prepends a new version and advances
 //! `current_version`; old versions stay browsable.
@@ -37,7 +42,8 @@ const SKIPPED_DIRS: &[&str] = &["node_modules", ".git", "target", "__pycache__"]
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct WikiDoc {
-    /// Stable doc id — lowercase `[a-z0-9-]`, unique under the wiki root.
+    /// Stable doc id — lowercase `[a-z0-9-]` segments joined by `/`, unique
+    /// under the wiki root. Every segment but the last is a virtual directory.
     pub slug: String,
     pub title: String,
     /// "html" (single file) | "htmlDir" | "markdown".
@@ -88,10 +94,15 @@ fn wiki_dir_or_err() -> Result<PathBuf, String> {
 
 // ── Slug ─────────────────────────────────────────────────────────────────────
 
-/// Normalize a raw name into a slug: lowercase, non-alphanumerics collapse to
-/// single hyphens, trimmed. Errors when nothing usable remains or the result
-/// exceeds 64 chars.
-pub fn normalize_slug(raw: &str) -> Result<String, String> {
+/// Max characters in one `/`-separated slug segment.
+const MAX_SLUG_SEGMENT: usize = 64;
+/// Max characters in a whole slug, separators included.
+const MAX_SLUG_LEN: usize = 128;
+/// Max number of segments (`a/b/c` is 3).
+const MAX_SLUG_DEPTH: usize = 8;
+
+/// Lowercase, collapse runs of non-alphanumerics to a single hyphen, trim.
+fn normalize_segment(raw: &str) -> String {
     let mut out = String::new();
     let mut prev_hyphen = true; // suppress leading hyphen
     for c in raw.chars() {
@@ -104,14 +115,55 @@ pub fn normalize_slug(raw: &str) -> Result<String, String> {
             prev_hyphen = true;
         }
     }
-    let out = out.trim_matches('-').to_string();
-    if out.is_empty() {
+    out.trim_matches('-').to_string()
+}
+
+/// Normalize a raw name into a slug. `/` separates virtual directory segments
+/// and survives; every other non-alphanumeric run collapses to a single hyphen
+/// within its segment. Empty segments (`a//b`, `/a`, `a/`) are dropped, so a
+/// slug never has a leading, trailing, or doubled separator — which is also
+/// what makes `..` unrepresentable and path traversal structurally impossible.
+pub fn normalize_slug(raw: &str) -> Result<String, String> {
+    let mut segments: Vec<String> = Vec::new();
+    for part in raw.split('/') {
+        let seg = normalize_segment(part);
+        if seg.is_empty() {
+            continue;
+        }
+        if seg.len() > MAX_SLUG_SEGMENT {
+            return Err(format!(
+                "slug segment '{seg}' exceeds {MAX_SLUG_SEGMENT} characters — pass a shorter --slug"
+            ));
+        }
+        segments.push(seg);
+    }
+    if segments.is_empty() {
         return Err(format!("cannot derive a slug from '{raw}' — pass --slug"));
     }
-    if out.len() > 64 {
-        return Err(format!("slug '{out}' exceeds 64 characters — pass a shorter --slug"));
+    if segments.len() > MAX_SLUG_DEPTH {
+        return Err(format!(
+            "slug '{raw}' nests deeper than {MAX_SLUG_DEPTH} directories — pass a shallower --slug"
+        ));
+    }
+    let out = segments.join("/");
+    if out.len() > MAX_SLUG_LEN {
+        return Err(format!("slug '{out}' exceeds {MAX_SLUG_LEN} characters — pass a shorter --slug"));
     }
     Ok(out)
+}
+
+/// The doc's directory name under the wiki root. `/` is a virtual separator,
+/// so it is percent-encoded rather than nested: storage stays flat and one
+/// doc's directory can never live inside another's. A normalized slug contains
+/// only `[a-z0-9-/]`, so `%` never occurs in the input and the encoding is
+/// unambiguous.
+pub fn slug_to_dirname(slug: &str) -> String {
+    slug.replace('/', "%2F")
+}
+
+/// Everything after the last `/` — the doc's own name, without its directories.
+pub fn slug_basename(slug: &str) -> &str {
+    slug.rsplit('/').next().unwrap_or(slug)
 }
 
 // ── Mime ─────────────────────────────────────────────────────────────────────
@@ -251,7 +303,7 @@ pub fn fix_scratchpad_workspaces_in(root: &Path) -> Vec<(String, String, String)
             .and_then(|n| n.to_str())
             .unwrap_or(&new_path)
             .to_string();
-        if write_doc_json(&root.join(&doc.slug), &doc).is_ok() {
+        if write_doc_json(&root.join(slug_to_dirname(&doc.slug)), &doc).is_ok() {
             fixed.push((doc.slug.clone(), old, new_path));
         }
     }
@@ -330,10 +382,10 @@ pub fn publish_in(
     let entry_abs = if meta.is_dir() { source.join(&entry) } else { source.clone() };
     let title = match title {
         Some(t) if !t.trim().is_empty() => t.trim().to_string(),
-        _ => extract_title(&entry_abs, kind).unwrap_or_else(|| slug.clone()),
+        _ => extract_title(&entry_abs, kind).unwrap_or_else(|| slug_basename(&slug).to_string()),
     };
 
-    let doc_dir = root.join(&slug);
+    let doc_dir = root.join(slug_to_dirname(&slug));
     let versions_dir = doc_dir.join("versions");
     fs::create_dir_all(&versions_dir).map_err(|e| format!("create wiki dirs: {e}"))?;
 
@@ -679,12 +731,14 @@ pub struct WikiExport {
     pub bytes: Vec<u8>,
 }
 
-/// Suggested download filename for a doc, by kind.
+/// Suggested download filename for a doc, by kind. Built from the slug's last
+/// segment — the leading segments are virtual directories, not part of a name.
 pub fn export_filename(doc: &WikiDoc) -> String {
+    let base = slug_basename(&doc.slug);
     match doc.kind.as_str() {
-        "markdown" => format!("{}.md", doc.slug),
-        "html" => format!("{}.html", doc.slug),
-        _ => format!("{}.zip", doc.slug),
+        "markdown" => format!("{base}.md"),
+        "html" => format!("{base}.html"),
+        _ => format!("{base}.zip"),
     }
 }
 
@@ -709,7 +763,7 @@ pub fn export_doc_in(root: &Path, slug: &str, version: &str) -> Result<WikiExpor
     if version.contains('/') || version.contains('\\') || version.contains("..") {
         return Err("invalid version id".to_string());
     }
-    let dir = root.join(slug).join("versions").join(version);
+    let dir = root.join(slug_to_dirname(slug)).join("versions").join(version);
     if !dir.is_dir() {
         return Err(format!("version '{version}' not found for '{slug}'"));
     }
@@ -848,7 +902,7 @@ fn strip_html(html: &str) -> String {
 }
 
 pub fn get_doc_in(root: &Path, slug: &str) -> Result<WikiDoc, String> {
-    read_doc_json(&root.join(slug))
+    read_doc_json(&root.join(slug_to_dirname(slug)))
 }
 
 /// Read one file of one version. `version` empty or `"current"` resolves via
@@ -874,7 +928,7 @@ pub fn get_file_in(
     if version.contains('/') || version.contains('\\') || version.contains("..") {
         return Err("invalid version id".to_string());
     }
-    let version_dir = root.join(slug).join("versions").join(version);
+    let version_dir = root.join(slug_to_dirname(slug)).join("versions").join(version);
 
     // Reject absolute paths and any `..` segment before touching the fs.
     let rel = Path::new(relpath);
@@ -910,6 +964,38 @@ pub fn get_file_in(
     })
 }
 
+// ── Move ─────────────────────────────────────────────────────────────────────
+
+/// Re-key a doc: `from` → `to`. Renaming the key is how a doc changes virtual
+/// directory, so this backs both `fleet wiki mv` and the UI's drag-to-folder.
+/// Version history rides along untouched — the whole doc dir is renamed.
+pub fn move_doc(from: &str, to: &str) -> Result<WikiDoc, String> {
+    move_doc_in(&wiki_dir_or_err()?, from, to)
+}
+
+/// [`move_doc`] against an explicit wiki root.
+pub fn move_doc_in(root: &Path, from: &str, to: &str) -> Result<WikiDoc, String> {
+    let to = normalize_slug(to)?;
+    let from_dir = root.join(slug_to_dirname(from));
+    let mut doc = read_doc_json(&from_dir).map_err(|_| format!("no wiki doc '{from}'"))?;
+    if to == from {
+        return Ok(doc);
+    }
+    let to_dir = root.join(slug_to_dirname(&to));
+    if to_dir.join("doc.json").exists() {
+        return Err(format!("wiki doc '{to}' already exists"));
+    }
+    fs::rename(&from_dir, &to_dir).map_err(|e| format!("move '{from}' → '{to}': {e}"))?;
+    doc.slug = to;
+    // Roll the rename back if the metadata write fails, so the doc is never
+    // left at a path its own doc.json disagrees with.
+    if let Err(e) = write_doc_json(&to_dir, &doc) {
+        let _ = fs::rename(&to_dir, &from_dir);
+        return Err(e);
+    }
+    Ok(doc)
+}
+
 // ── Delete ───────────────────────────────────────────────────────────────────
 
 /// Remove a doc and all its versions.
@@ -918,7 +1004,7 @@ pub fn delete_doc(slug: &str) -> Result<(), String> {
 }
 
 pub fn delete_doc_in(root: &Path, slug: &str) -> Result<(), String> {
-    let doc_dir = root.join(slug);
+    let doc_dir = root.join(slug_to_dirname(slug));
     if !doc_dir.join("doc.json").exists() {
         return Err(format!("no wiki doc '{slug}'"));
     }
@@ -931,7 +1017,7 @@ pub fn delete_version(slug: &str, version: &str) -> Result<(), String> {
 }
 
 pub fn delete_version_in(root: &Path, slug: &str, version: &str) -> Result<(), String> {
-    let doc_dir = root.join(slug);
+    let doc_dir = root.join(slug_to_dirname(slug));
     let mut doc = read_doc_json(&doc_dir)?;
     if doc.current_version == version {
         return Err(format!(
@@ -992,6 +1078,111 @@ mod tests {
         assert!(normalize_slug("").is_err());
         assert!(normalize_slug("汉字").is_err());
         assert!(normalize_slug(&"x".repeat(70)).is_err());
+    }
+
+    #[test]
+    fn normalize_slug_keeps_directory_segments() {
+        assert_eq!(normalize_slug("arch/overview").unwrap(), "arch/overview");
+        assert_eq!(normalize_slug("Arch/Storage Layer").unwrap(), "arch/storage-layer");
+        assert_eq!(normalize_slug("a/b/c/d").unwrap(), "a/b/c/d");
+        // Empty segments collapse: no leading, trailing, or doubled separator.
+        assert_eq!(normalize_slug("/arch//overview/").unwrap(), "arch/overview");
+        // `..` cannot survive — the dots are non-alphanumeric, so the segment
+        // normalizes to empty and is dropped. Path traversal is unrepresentable.
+        assert_eq!(normalize_slug("../../etc/passwd").unwrap(), "etc/passwd");
+        assert!(normalize_slug("../..").is_err());
+        assert!(normalize_slug("///").is_err());
+        // Depth and length ceilings.
+        assert!(normalize_slug("a/b/c/d/e/f/g/h/i").is_err());
+        assert!(normalize_slug(&format!("arch/{}", "x".repeat(70))).is_err());
+    }
+
+    #[test]
+    fn slug_helpers() {
+        assert_eq!(slug_to_dirname("arch/overview"), "arch%2Foverview");
+        assert_eq!(slug_to_dirname("flat"), "flat");
+        assert_eq!(slug_basename("arch/deep/overview"), "overview");
+        assert_eq!(slug_basename("flat"), "flat");
+    }
+
+    /// A slug with directories must NOT create nested dirs on disk — storage is
+    /// flat, so `list_docs_in`'s one-level scan still sees every doc.
+    #[test]
+    fn nested_slug_stays_flat_on_disk() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("overview.md");
+        fs::write(&md, "# Overview\n").unwrap();
+
+        let doc = publish_in(root.path(), &md, Some("arch/overview"), None, ws.path()).unwrap();
+        assert_eq!(doc.slug, "arch/overview");
+        assert!(root.path().join("arch%2Foverview").join("doc.json").is_file());
+        assert!(!root.path().join("arch").exists());
+
+        // Round-trips through the flat scan and by-slug lookup.
+        let listed = list_docs_in(root.path());
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].slug, "arch/overview");
+        assert_eq!(get_doc_in(root.path(), "arch/overview").unwrap().title, "Overview");
+        let f = get_file_in(root.path(), "arch/overview", "current", "overview.md").unwrap();
+        assert_eq!(f.bytes, fs::read(&md).unwrap());
+
+        // A doc named `arch` can coexist with the `arch/` virtual directory.
+        publish_in(root.path(), &md, Some("arch"), None, ws.path()).unwrap();
+        assert_eq!(list_docs_in(root.path()).len(), 2);
+    }
+
+    #[test]
+    fn export_filename_uses_last_slug_segment() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("overview.md");
+        fs::write(&md, "# Overview\n").unwrap();
+        let doc = publish_in(root.path(), &md, Some("arch/deep/overview"), None, ws.path()).unwrap();
+        assert_eq!(export_filename(&doc), "overview.md");
+    }
+
+    #[test]
+    fn move_doc_rekeys_and_keeps_versions() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("overview.md");
+        fs::write(&md, "# V1\n").unwrap();
+        publish_in(root.path(), &md, Some("overview"), None, ws.path()).unwrap();
+        fs::write(&md, "# V2\n").unwrap();
+        let before = publish_in(root.path(), &md, Some("overview"), None, ws.path()).unwrap();
+        assert_eq!(before.versions.len(), 2);
+
+        let moved = move_doc_in(root.path(), "overview", "Arch/Overview").unwrap();
+        assert_eq!(moved.slug, "arch/overview");
+        assert_eq!(moved.versions.len(), 2, "version history rides along");
+
+        assert!(get_doc_in(root.path(), "overview").is_err());
+        let reread = get_doc_in(root.path(), "arch/overview").unwrap();
+        assert_eq!(reread.slug, "arch/overview");
+        assert_eq!(reread.versions.len(), 2);
+        // Old version content still resolves under the new key.
+        let old = &reread.versions[1].id;
+        let f = get_file_in(root.path(), "arch/overview", old, "overview.md").unwrap();
+        assert_eq!(f.bytes, b"# V1\n");
+    }
+
+    #[test]
+    fn move_doc_rejects_missing_source_and_occupied_target() {
+        let root = tmp();
+        let ws = tmp();
+        let md = ws.path().join("a.md");
+        fs::write(&md, "# A\n").unwrap();
+        publish_in(root.path(), &md, Some("a"), None, ws.path()).unwrap();
+        publish_in(root.path(), &md, Some("b"), None, ws.path()).unwrap();
+
+        assert!(move_doc_in(root.path(), "missing", "x").is_err());
+        assert!(move_doc_in(root.path(), "a", "b").is_err(), "target occupied");
+        // The rejected move left both docs intact.
+        assert!(get_doc_in(root.path(), "a").is_ok());
+        assert!(get_doc_in(root.path(), "b").is_ok());
+        // Moving onto itself is a no-op, not an "already exists" error.
+        assert_eq!(move_doc_in(root.path(), "a", "a").unwrap().slug, "a");
     }
 
     #[test]
