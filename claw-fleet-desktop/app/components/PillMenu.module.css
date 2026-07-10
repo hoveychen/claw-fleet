@@ -1,7 +1,5 @@
-/* PillMenu — ghost pill + popover menu, lifted verbatim from TaskComposer's
- * design tokens so every composer surface shares one look. `ghost_pill` /
- * `ghost_pill_active` are also imported directly by hosts that need a pill-
- * styled toggle button without a menu (e.g. SessionLauncher's expedited pill). */
+/* PillMenu — ghost pill + popover menu. `ghost_pill` is also imported directly
+ * by hosts that need a pill-styled toggle button without a menu. */
 
 .menu_wrap {
   position: relative;
@@ -32,17 +30,6 @@
 .ghost_pill:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.ghost_pill_active {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: rgba(var(--color-accent-rgb), 0.08);
-}
-
-.ghost_pill_active:hover:not(:disabled) {
-  color: var(--color-accent);
-  background: rgba(var(--color-accent-rgb), 0.14);
 }
 
 .pill_label {
