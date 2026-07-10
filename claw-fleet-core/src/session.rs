@@ -541,9 +541,18 @@ fn encode_workspace_path(path: &str) -> String {
 }
 
 fn workspace_name(path: &str) -> String {
-    path.split('/')
-        .filter(|s| !s.is_empty())
+    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    // Fleet develops plans inside `<repo-root>/.worktrees/<task-id>` (see the
+    // worktree workflow). Such a checkout belongs to the repo, so name it after
+    // the segment before `.worktrees` rather than the task-id leaf.
+    if let Some(idx) = segments.iter().position(|s| *s == ".worktrees") {
+        if idx > 0 {
+            return segments[idx - 1].to_string();
+        }
+    }
+    segments
         .last()
+        .copied()
         .unwrap_or(path)
         .to_string()
 }
@@ -3302,6 +3311,24 @@ mod tests {
     #[test]
     fn workspace_name_root() {
         assert_eq!(workspace_name("/"), "/");
+    }
+
+    #[test]
+    fn workspace_name_worktree_uses_repo_name() {
+        // Fleet develops each plan inside `<repo-root>/.worktrees/<task-id>`.
+        // The workspace name must be the repo (`maliang`), not the task id.
+        assert_eq!(
+            workspace_name("/Users/hoveychen/workspace/maliang/.worktrees/script-runtime"),
+            "maliang"
+        );
+    }
+
+    #[test]
+    fn workspace_name_worktree_trailing_slash() {
+        assert_eq!(
+            workspace_name("/Users/foo/my-repo/.worktrees/fix-bug/"),
+            "my-repo"
+        );
     }
 
     #[test]
