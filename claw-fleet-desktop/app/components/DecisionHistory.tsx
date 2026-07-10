@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import { safeMarkdownComponents, safeRemarkPlugins } from "../markdown/safeLinks";
+import { normalizeAnswer, summarizeQuestion } from "../decisionText";
 import type {
   DecisionHistoryRecord,
   ElicitationHistoryRecord,
@@ -12,7 +13,7 @@ import type {
 } from "../types";
 import { History } from "lucide-react";
 import { EmptyState } from "./EmptyState";
-import { decisionAssetUrl } from "./DecisionPanel";
+import { decisionAssetUrl } from "../decisionAssets";
 import styles from "./DecisionHistory.module.css";
 
 // Inline-only markdown variant: unwraps the surrounding <p> so we can drop the
@@ -191,35 +192,20 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
  */
 function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
   const { t } = useTranslation();
-  // Pull `@path` mention suffixes off the answer string so the option
-  // matcher below sees just the option label / "Other" text.
-  const splitAttachments = (raw: string): { core: string; paths: string[] } => {
-    const tokens = raw.trim().split(/\s+/);
-    const paths: string[] = [];
-    const kept: string[] = [];
-    for (const tok of tokens) {
-      if (tok.startsWith("@/") || tok.startsWith("@~")) paths.push(tok.slice(1));
-      else kept.push(tok);
-    }
-    return { core: kept.join(" "), paths };
-  };
 
   return (
     <div className={styles.body}>
       {rec.questions.map((q, qi) => {
-        const rawAnswer = rec.answers[q.question] ?? "";
-        const { core: answerCore, paths } = splitAttachments(rawAnswer);
-        const knownLabels = new Set((q.options ?? []).map((o) => o.label));
+        // `normalizeAnswer` peels `@path` mention suffixes off the answer and
+        // decides option-vs-"Other"; shared with the inline DecisionToolCard.
+        const answer = normalizeAnswer(rec.answers[q.question], (q.options ?? []).map((o) => o.label));
+        const answerCore = answer?.label ?? "";
+        const paths = answer?.attachments ?? [];
+        const isOther = answer?.other ?? false;
         const selectedLabels = answerCore
           .split(",")
           .map((s) => s.trim())
           .filter((s) => s.length > 0);
-        // "Other" appears when the user typed text that doesn't match any
-        // existing option label (or when there are no options at all and
-        // only formFields / attachments are present).
-        const isOther =
-          answerCore.length > 0 &&
-          (knownLabels.size === 0 || selectedLabels.some((s) => !knownLabels.has(s)));
 
         return (
           <div key={qi} className={styles.question_block}>
@@ -326,12 +312,7 @@ function recordSummary(rec: DecisionHistoryRecord): string {
   if (rec.kind === "elicitation" || rec.kind === "fleet-ask") {
     const first = rec.questions[0];
     if (!first) return rec.kind === "fleet-ask" ? "fleet__ask" : "AskUserQuestion";
-    // Strip the "Speech Summary Divider" preamble if present.
-    const body = first.question;
-    const m = body.match(/^\s*---\s*$/m);
-    return (m && m.index !== undefined ? body.slice(0, m.index) : body)
-      .trim()
-      .slice(0, 80);
+    return summarizeQuestion(first.question);
   }
   if (rec.kind === "user-prompt") {
     return rec.text.replace(/\s+/g, " ").trim().slice(0, 80);

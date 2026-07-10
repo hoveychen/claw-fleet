@@ -1,22 +1,24 @@
 import { useMemo } from "react";
+import type { PatchHunk } from "../../toolResults";
+import { rowsFromHunks, type DiffLine, type Row } from "../../diffRows";
 import styles from "./DiffView.module.css";
 
 interface Props {
   filePath?: string;
   before: string | null;
   after: string;
+  /**
+   * Real unified-diff hunks from Claude Code's `toolUseResult.structuredPatch`.
+   * When present they win: they carry true line numbers, cost nothing to
+   * compute, and never hit the LCS size ceiling below. `before`/`after` remain
+   * the fallback for transcripts that carry no structured payload.
+   */
+  hunks?: PatchHunk[] | null;
   /** Override the right-hand-side tag (e.g. "Edit" / "MultiEdit"). */
   tag?: string;
   /** Lines of unchanged context around each change. */
   context?: number;
 }
-
-type DiffLine =
-  | { kind: "ctx"; oldLine: number; newLine: number; text: string }
-  | { kind: "del"; oldLine: number; text: string }
-  | { kind: "add"; newLine: number; text: string };
-
-type Row = DiffLine | { kind: "sep" };
 
 const MAX_LCS_CELLS = 4_000_000; // ~2k × 2k lines budget
 
@@ -88,8 +90,17 @@ function asNewFileRows(content: string): Row[] {
   return lines.map((text, i) => ({ kind: "add" as const, newLine: i + 1, text }));
 }
 
-export function DiffView({ filePath, before, after, tag, context = 3 }: Props) {
+export function DiffView({ filePath, before, after, hunks, tag, context = 3 }: Props) {
   const { rows, tooLarge, isNew, baselineMissing, allEqual } = useMemo(() => {
+    if (hunks && hunks.length > 0) {
+      return {
+        rows: rowsFromHunks(hunks),
+        tooLarge: false,
+        isNew: false,
+        baselineMissing: false,
+        allEqual: false,
+      };
+    }
     if (before === null) {
       return {
         rows: asNewFileRows(after),
@@ -113,7 +124,7 @@ export function DiffView({ filePath, before, after, tag, context = 3 }: Props) {
       baselineMissing: false,
       allEqual: false,
     };
-  }, [before, after, context]);
+  }, [hunks, before, after, context]);
 
   const rightTag = tag ?? (isNew ? "New file" : "Diff");
 

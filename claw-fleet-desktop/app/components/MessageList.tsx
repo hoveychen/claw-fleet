@@ -2,16 +2,20 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, mem
 import { useTranslation } from "react-i18next";
 import type {
   ContentBlock,
+  DecisionHistoryRecord,
   RawMessage,
   ToolResultBlock,
   ToolUseBlock,
 } from "../types";
+import { buildToolResultMetaMap, isDecisionTool } from "../toolResults";
 import { TextBlock } from "./blocks/TextBlock";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import {
   GroupedToolUseBlocks,
   ToolUseBlock as ToolUseBlockComp,
 } from "./blocks/ToolUseBlock";
+import { DecisionToolCard, hasDecisionQuestions } from "./blocks/DecisionToolCard";
+import { UserContent } from "./blocks/UserContent";
 import { CompactSummaryBlock } from "./blocks/CompactSummaryBlock";
 import styles from "./MessageList.module.css";
 
@@ -58,104 +62,20 @@ function buildResultMap(
   return map;
 }
 
-// ── Write baseline replay ─────────────────────────────────────────────────────
-
-/** Strip Claude Code's `cat -n` line-number prefix from a Read result. */
-function stripCatNFormat(s: string): string {
-  return s.split("\n").map((line) => line.replace(/^\s*\d+\t/, "")).join("\n");
-}
-
-/**
- * Walk session messages forward, tracking each `file_path`'s reconstructed
- * content as Read results land and Write/Edit/MultiEdit ops apply. For each
- * `Write` tool_use we capture the prior content (if known) so the diff view
- * can render an accurate "before vs after". Edit/MultiEdit don't need this —
- * their input already carries old/new strings.
- */
-function buildWriteBaselineMap(messages: RawMessage[]): Map<string, string> {
-  const fileState = new Map<string, string>();
-  const baseline = new Map<string, string>();
-  const pendingReads = new Map<string, { path: string; full: boolean }>();
-
-  for (const msg of messages) {
-    if (!msg.message) continue;
-    const content = msg.message.content;
-    if (!Array.isArray(content)) continue;
-
-    for (const block of content) {
-      if (block.type === "tool_use") {
-        const tu = block as ToolUseBlock;
-        const path = typeof tu.input.file_path === "string" ? tu.input.file_path : undefined;
-        if (!path) continue;
-
-        if (tu.name === "Read") {
-          const full =
-            tu.input.offset === undefined && tu.input.limit === undefined;
-          pendingReads.set(tu.id, { path, full });
-        } else if (tu.name === "Write") {
-          const cur = fileState.get(path);
-          if (cur !== undefined) baseline.set(tu.id, cur);
-          const next = typeof tu.input.content === "string" ? tu.input.content : "";
-          fileState.set(path, next);
-        } else if (tu.name === "Edit") {
-          const cur = fileState.get(path);
-          if (cur !== undefined) {
-            const oldS = String(tu.input.old_string ?? "");
-            const newS = String(tu.input.new_string ?? "");
-            const replaceAll = tu.input.replace_all === true;
-            const next = replaceAll ? cur.split(oldS).join(newS) : cur.replace(oldS, newS);
-            fileState.set(path, next);
-          }
-        } else if (tu.name === "MultiEdit") {
-          let cur = fileState.get(path);
-          if (cur !== undefined) {
-            const edits = Array.isArray(tu.input.edits)
-              ? (tu.input.edits as Array<{
-                  old_string?: string;
-                  new_string?: string;
-                  replace_all?: boolean;
-                }>)
-              : [];
-            for (const e of edits) {
-              const oldS = String(e.old_string ?? "");
-              const newS = String(e.new_string ?? "");
-              cur = e.replace_all
-                ? cur.split(oldS).join(newS)
-                : cur.replace(oldS, newS);
-            }
-            fileState.set(path, cur);
-          }
-        }
-      } else if (block.type === "tool_result") {
-        const tr = block as ToolResultBlock;
-        const pending = pendingReads.get(tr.tool_use_id);
-        if (
-          pending &&
-          pending.full &&
-          !tr.is_error &&
-          typeof tr.content === "string"
-        ) {
-          fileState.set(pending.path, stripCatNFormat(tr.content));
-        }
-        pendingReads.delete(tr.tool_use_id);
-      }
-    }
-  }
-
-  return baseline;
-}
-
 // ── Content blocks renderer ───────────────────────────────────────────────────
 
 interface BlocksProps {
   content: ContentBlock[];
   resultMap: Map<string, ToolResultBlock>;
-  baselineMap: Map<string, string>;
+  /** tool_use_id → Claude Code's structured `toolUseResult` for that call. */
+  metaMap: Map<string, unknown>;
+  /** Session decision records; supply asset ids for image-bearing cards. */
+  decisionRecords: DecisionHistoryRecord[];
   isPartial: boolean;
   searchTerms?: string[] | null;
 }
 
-const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baselineMap, isPartial, searchTerms }: BlocksProps) {
+const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms }: BlocksProps) {
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -200,6 +120,24 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
       const toolBlock = block as ToolUseBlock;
       const result = resultMap.get(toolBlock.id);
 
+      // A decision card is where the conversation turned — never let it degrade
+      // into the generic card's `JSON.stringify(input)` header. An unrenderable
+      // shape (rejected call, future schema) still falls through to that card.
+      if (isDecisionTool(toolBlock.name) && hasDecisionQuestions(toolBlock.input)) {
+        elements.push(
+          <DecisionToolCard
+            key={i}
+            block={toolBlock}
+            result={result}
+            meta={metaMap.get(toolBlock.id)}
+            records={decisionRecords}
+            isPartial={isPartial && !result}
+          />
+        );
+        i++;
+        continue;
+      }
+
       // Note: the Claude Code Workflow tool renders as an ordinary tool card
       // here; its progress DAG is surfaced at the session level (the "Workflow"
       // tab in SessionDetail), not inline in the conversation.
@@ -210,14 +148,18 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
       ]);
 
       if (READ_ONLY.has(toolBlock.name)) {
-        const group: Array<{ block: ToolUseBlock; result?: ToolResultBlock }> =
-          [{ block: toolBlock, result }];
+        const group: Array<{ block: ToolUseBlock; result?: ToolResultBlock; meta?: unknown }> =
+          [{ block: toolBlock, result, meta: metaMap.get(toolBlock.id) }];
 
         let j = i + 1;
         while (j < content.length && content[j].type === "tool_use") {
           const next = content[j] as ToolUseBlock;
           if (!READ_ONLY.has(next.name)) break;
-          group.push({ block: next, result: resultMap.get(next.id) });
+          group.push({
+            block: next,
+            result: resultMap.get(next.id),
+            meta: metaMap.get(next.id),
+          });
           j++;
         }
 
@@ -234,7 +176,7 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, baseline
           block={toolBlock}
           result={result}
           isPartial={isPartial && !result}
-          baseline={baselineMap.has(toolBlock.id) ? baselineMap.get(toolBlock.id) : null}
+          meta={metaMap.get(toolBlock.id)}
         />
       );
       i++;
@@ -273,12 +215,13 @@ function formatMsgTime(ts: string): { short: string; full: string } | null {
 interface MsgProps {
   msg: RawMessage;
   resultMap: Map<string, ToolResultBlock>;
-  baselineMap: Map<string, string>;
+  metaMap: Map<string, unknown>;
+  decisionRecords: DecisionHistoryRecord[];
   searchTerms?: string[] | null;
   msgIdx?: number;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searchTerms, msgIdx }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx }: MsgProps) {
   if (!msg.message) return null;
 
   const isAssistant = msg.type === "assistant";
@@ -317,7 +260,9 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
 
   const time = msg.timestamp ? formatMsgTime(msg.timestamp) : null;
 
-  // Status dot
+  // Turn status. Previously a timeline dot in the gutter; now a marker on the
+  // usage row, because roles are told apart by layout (full-width assistant vs.
+  // right-aligned user bubble) rather than by a gutter rail.
   const stopReason = msg.message.stop_reason;
   const dotClass =
     stopReason === "end_turn"
@@ -335,38 +280,34 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, baselineMap, searc
       className={`${styles.message} ${isAssistant ? styles.assistant : styles.user}`}
       data-msg-idx={msgIdx}
     >
-      {isAssistant && <span className={`${styles.dot} ${dotClass}`} />}
       <div className={styles.content}>
         {isAssistant && Array.isArray(content) && (
           <ContentBlocks
             content={content}
             resultMap={resultMap}
-            baselineMap={baselineMap}
+            metaMap={metaMap}
+            decisionRecords={decisionRecords}
             isPartial={isPartial}
             searchTerms={searchTerms}
           />
         )}
         {isUser && (
           <div className={styles.user_text}>
-            {typeof content === "string"
-              ? (searchTerms ? <HighlightedText text={content} terms={searchTerms} /> : content)
-              : Array.isArray(content)
-                ? content
-                    .filter((b) => b.type !== "tool_result")
-                    .map((b, i) =>
-                      b.type === "text" ? (
-                        <span key={i}>
-                          {searchTerms
-                            ? <HighlightedText text={(b as { type: "text"; text: string }).text} terms={searchTerms} />
-                            : (b as { type: "text"; text: string }).text}
-                        </span>
-                      ) : null
-                    )
-                : null}
+            <UserContent
+              content={content}
+              renderText={(text, key) =>
+                searchTerms ? (
+                  <HighlightedText key={key} text={text} terms={searchTerms} />
+                ) : (
+                  text
+                )
+              }
+            />
           </div>
         )}
         {isAssistant && (msg.message.usage || time) && (
           <div className={styles.usage}>
+            {dotClass && <span className={`${styles.dot} ${dotClass}`} />}
             {msg.message.usage && (
               <>
                 ↑{msg.message.usage.input_tokens} ↓{msg.message.usage.output_tokens}
@@ -450,6 +391,9 @@ interface Props {
   /** Live scanner status of the session (e.g. "thinking", "executing");
    *  drives the animated activity indicator under the newest message. */
   status?: string | null;
+  /** Decision records for this session. Inline decision cards read them for the
+   *  asset id an image-bearing `fleet__ask` needs to re-serve its preview. */
+  decisionRecords?: DecisionHistoryRecord[];
 }
 
 const PAGE_SIZE = 100;
@@ -469,10 +413,15 @@ function messageText(msg: RawMessage): string {
     .join(" ");
 }
 
-export function MessageList({ messages, isLoading, searchQuery, status }: Props) {
+const NO_DECISIONS: DecisionHistoryRecord[] = [];
+
+export function MessageList({ messages, isLoading, searchQuery, status, decisionRecords }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Stable identity so memoized MessageRows don't re-render when the caller
+  // omits the prop.
+  const records = decisionRecords ?? NO_DECISIONS;
 
   // visibleStart tracks the actual start index into displayMsgs.
   // -1 is a sentinel meaning "show the tail (last PAGE_SIZE)".
@@ -481,7 +430,7 @@ export function MessageList({ messages, isLoading, searchQuery, status }: Props)
   const scrollAnchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
 
   const resultMap = useMemo(() => buildResultMap(messages), [messages]);
-  const baselineMap = useMemo(() => buildWriteBaselineMap(messages), [messages]);
+  const metaMap = useMemo(() => buildToolResultMetaMap(messages), [messages]);
 
   const displayMsgs = useMemo(
     () => messages.filter((m) => m.type === "user" || m.type === "assistant"),
@@ -623,7 +572,8 @@ export function MessageList({ messages, isLoading, searchQuery, status }: Props)
           key={msg.uuid ?? (effectiveStart + i)}
           msg={msg}
           resultMap={resultMap}
-          baselineMap={baselineMap}
+          metaMap={metaMap}
+          decisionRecords={records}
           searchTerms={searchTerms}
           msgIdx={effectiveStart + i}
         />
