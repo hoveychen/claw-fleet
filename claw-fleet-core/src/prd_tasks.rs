@@ -776,8 +776,26 @@ pub fn summarize_workspace_tasks(
     cwd: &Path,
     session_id: Option<&str>,
 ) -> Option<TaskPlanSummary> {
+    // Reading the side-channel is the only impure step; the scan + focus
+    // resolution below is pure, so it unit-tests without touching `~/.fleet`
+    // (or racing the process-global FLEET_HOME that other suites mutate).
     let rec = crate::task_progress::read(session_id?)?;
+    summarize_with_focus(cwd, &rec)
+}
+
+/// `summarize_workspace_tasks` once the session's focus record is in hand.
+fn summarize_with_focus(
+    cwd: &Path,
+    rec: &crate::task_progress::TaskProgressRecord,
+) -> Option<TaskPlanSummary> {
     let main_root = discover_main_checkout_root(cwd);
+    // The record names the workspace it was claimed in. Honour it, so a record
+    // from a different workspace that reuses this plan id can't bleed onto this
+    // session's card. Compare main roots, not raw cwds: a session inside
+    // `<main>/.worktrees/foo` has its record stamped with `<main>`.
+    if !same_workspace(main_root.as_deref().unwrap_or(cwd), &rec.workspace_path) {
+        return None;
+    }
     let sources = collect_task_sources(cwd, main_root.as_deref());
     if sources.is_empty() {
         return None;
@@ -890,6 +908,46 @@ pub fn find_plan_source(cwd: &Path, plan_id: &str) -> Option<PathBuf> {
         }
     }
     hits.into_iter().max_by_key(|(_, m)| *m).map(|(p, _)| p)
+}
+
+/// Whether a focus record's `workspace_path` names the same workspace as
+/// `main_root`. Both sides are canonicalized so macOS's `/var` → `/private/var`
+/// symlink (and any `..` in the recorded path) doesn't read as a mismatch; an
+/// unresolvable path falls back to a literal compare.
+fn same_workspace(main_root: &Path, recorded: &str) -> bool {
+    let rec_path = Path::new(recorded);
+    match (main_root.canonicalize(), rec_path.canonicalize()) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => main_root == rec_path,
+    }
+}
+
+/// Display text of the task a session focusing on `plan_id` is now on: the item
+/// whose bold token matches `task` (e.g. `P4`) when given, else the plan's first
+/// pending item. `Ok(None)` means the plan exists but has no such task — a
+/// P-token with no matching item falls back to the bare `**P4**` token, and an
+/// all-done plan yields `None`. `Err` when the plan is in no TASKS.md here.
+///
+/// Shared by `fleet plan resume/check` and the handoff relay so both stamp the
+/// side-channel with the same text the card renders.
+pub fn resolve_current_task(
+    cwd: &Path,
+    plan_id: &str,
+    task: Option<&str>,
+) -> Result<Option<String>, String> {
+    let path = find_plan_source(cwd, plan_id)
+        .ok_or_else(|| format!("plan '{plan_id}' not found in any TASKS.md"))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let body = plan_body(&content, plan_id).ok_or_else(|| format!("plan '{plan_id}' not found"))?;
+    Ok(match task {
+        Some(t) => parse_task_items(&body)
+            .into_iter()
+            .find(|it| it.text.contains(&format!("**{t}**")))
+            .map(|it| it.text)
+            .or_else(|| Some(format!("**{t}**"))),
+        None => first_pending_task(&body),
+    })
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -1410,6 +1468,18 @@ trailing notes outside\n";
         assert!(out.contains("actionable detail"));
     }
 
+    /// Build a focus record without touching `~/.fleet`, so these tests neither
+    /// pollute the developer's real records nor race the process-global
+    /// FLEET_HOME that `session_launch`'s tests mutate.
+    fn focus_rec(ws: &Path, plan_id: &str, task: Option<&str>) -> crate::task_progress::TaskProgressRecord {
+        crate::task_progress::TaskProgressRecord {
+            workspace_path: ws.to_string_lossy().into_owned(),
+            plan_id: plan_id.to_string(),
+            current_task: task.map(str::to_string),
+            updated: 0,
+        }
+    }
+
     #[test]
     fn summarize_workspace_counts_the_attributed_plan() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1423,10 +1493,7 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let sid = format!("test-summarize-counts-{}", std::process::id());
-        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "x", None).unwrap();
-        let s = summarize_workspace_tasks(main, Some(&sid)).expect("summary");
-        crate::task_progress::clear(&sid);
+        let s = summarize_with_focus(main, &focus_rec(main, "x", None)).expect("summary");
         assert_eq!(s.done, 1);
         assert_eq!(s.total, 3);
         // No task recorded on the side-channel → first pending task in the plan.
@@ -1449,16 +1516,7 @@ trailing notes outside\n";
         )
         .unwrap();
         // Beta is second in scan order; the record still wins.
-        let sid = format!("test-summarize-focus-{}", std::process::id());
-        crate::task_progress::set_current(
-            &sid,
-            &main.to_string_lossy(),
-            "beta",
-            Some("**P1** — b".to_string()),
-        )
-        .unwrap();
-        let s = summarize_workspace_tasks(main, Some(&sid)).unwrap();
-        crate::task_progress::clear(&sid);
+        let s = summarize_with_focus(main, &focus_rec(main, "beta", Some("**P1** — b"))).unwrap();
         assert_eq!(s.current_plan.as_deref(), Some("Beta"));
         assert_eq!(s.current_task.as_deref(), Some("**P1** — b"));
     }
@@ -1478,10 +1536,7 @@ trailing notes outside\n";
         )
         .unwrap();
         // Focus this session on beta.
-        let sid = format!("test-summarize-focused-count-{}", std::process::id());
-        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "beta", None).unwrap();
-        let s = summarize_workspace_tasks(main, Some(&sid)).unwrap();
-        crate::task_progress::clear(&sid);
+        let s = summarize_with_focus(main, &focus_rec(main, "beta", None)).unwrap();
         // Counts must reflect ONLY beta (0/3), not the 1/5 workspace aggregate.
         assert_eq!(s.current_plan.as_deref(), Some("Beta"));
         assert_eq!(s.done, 0, "done should count only the focused plan");
@@ -1506,10 +1561,65 @@ trailing notes outside\n";
         .unwrap();
         // No session id at all → nothing to attribute to.
         assert!(summarize_workspace_tasks(main, None).is_none());
-        // A session with no side-channel record → still nothing.
-        let sid = format!("test-summarize-unattributed-{}", std::process::id());
-        crate::task_progress::clear(&sid);
-        assert!(summarize_workspace_tasks(main, Some(&sid)).is_none());
+        // A session whose id has no side-channel record → still nothing. (`read`
+        // misses in whichever dir FLEET_HOME resolves to, so this needs no
+        // tempdir of its own.)
+        let sid = "test-summarize-never-recorded-sid";
+        assert!(summarize_workspace_tasks(main, Some(sid)).is_none());
+    }
+
+    /// The record carries the workspace it was written in. A record left over
+    /// from another workspace that happens to reuse the same plan id must not
+    /// bleed into this session's card.
+    #[test]
+    fn summarize_hides_when_focus_record_is_from_another_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let other = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::create_dir_all(main.join(".git")).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"shared-id\" v=\"2\" -->\n\
+**Plan:** Ours\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"shared-id\" -->\n",
+        )
+        .unwrap();
+        // Same plan id, but the record says it was claimed in `other`.
+        let rec = focus_rec(other.path(), "shared-id", None);
+        assert!(
+            summarize_with_focus(main, &rec).is_none(),
+            "a record from another workspace must not attribute this session"
+        );
+    }
+
+    /// A session running inside `<main>/.worktrees/foo` has its record stamped
+    /// with the *main checkout* path (that is what `fleet plan resume` and the
+    /// handoff relay both store). The workspace check must compare main roots,
+    /// not raw cwds, or every worktree session loses its card.
+    #[test]
+    fn summarize_accepts_record_from_main_root_when_cwd_is_a_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().canonicalize().unwrap();
+        let main_gitdir = main.join(".git");
+        std::fs::create_dir_all(&main_gitdir).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"wt\" v=\"2\" -->\n\
+**Plan:** WT\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"wt\" -->\n",
+        )
+        .unwrap();
+        // A real linked worktree: `.git` file → `<main>/.git/worktrees/feat`,
+        // which holds a `commondir` pointing back at the main `.git`.
+        let wt = main.join(".worktrees").join("feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        let wt_gitdir = main_gitdir.join("worktrees").join("feat");
+        std::fs::create_dir_all(&wt_gitdir).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}", wt_gitdir.display())).unwrap();
+        std::fs::write(wt_gitdir.join("commondir"), "../..").unwrap();
+
+        let rec = focus_rec(&main, "wt", None);
+        let s = summarize_with_focus(&wt, &rec)
+            .expect("worktree session must keep its card when the record names the main root");
+        assert_eq!(s.current_plan.as_deref(), Some("WT"));
     }
 
     /// A focus record naming a plan that is no longer active (finished, deleted,
@@ -1526,10 +1636,7 @@ trailing notes outside\n";
 **Plan:** Alpha\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"alpha\" -->\n",
         )
         .unwrap();
-        let sid = format!("test-summarize-stale-{}", std::process::id());
-        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "gone", None).unwrap();
-        let s = summarize_workspace_tasks(main, Some(&sid));
-        crate::task_progress::clear(&sid);
+        let s = summarize_with_focus(main, &focus_rec(main, "gone", None));
         assert!(s.is_none(), "stale focus must not fall back to Alpha");
     }
 
@@ -1560,10 +1667,7 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"x\" -->\n",
         )
         .unwrap();
-        let sid = format!("test-summarize-plan-name-{}", std::process::id());
-        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "x", None).unwrap();
-        let s = summarize_workspace_tasks(main, Some(&sid)).expect("summary");
-        crate::task_progress::clear(&sid);
+        let s = summarize_with_focus(main, &focus_rec(main, "x", None)).expect("summary");
         assert_eq!(s.current_plan.as_deref(), Some("重构会话中间件"));
         assert_eq!(s.current_task.as_deref(), Some("**P2** — 当前任务"));
     }
@@ -1591,10 +1695,7 @@ trailing notes outside\n";
 <!-- fleet:prd:end id=\"new\" -->\n",
         )
         .unwrap();
-        let sid = format!("test-summarize-worktree-{}", std::process::id());
-        crate::task_progress::set_current(&sid, &main.to_string_lossy(), "new", None).unwrap();
-        let s = summarize_workspace_tasks(main, Some(&sid)).expect("summary");
-        crate::task_progress::clear(&sid);
+        let s = summarize_with_focus(main, &focus_rec(main, "new", None)).expect("summary");
         assert_eq!(s.current_plan.as_deref(), Some("新计划"));
         assert_eq!(s.current_task.as_deref(), Some("**P1** — 新任务"));
     }

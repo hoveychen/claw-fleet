@@ -381,10 +381,10 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
     if let Some(plan) = &p.plan_id {
         match &p.next_task {
             Some(t) => out.push_str(&format!(
-                "本次接力属于 TASKS.md plan `{plan}`。先运行 `fleet plan start {plan} {t}` 声明接手，然后从 {t} 继续执行，直到整个 plan 完成。\n"
+                "本次接力属于 TASKS.md plan `{plan}`，Fleet 已把你归属到该 plan 的 {t}。直接从 {t} 继续执行，直到整个 plan 完成。\n"
             )),
             None => out.push_str(&format!(
-                "本次接力属于 TASKS.md plan `{plan}`。先运行 `fleet plan start {plan}` 声明接手，然后从第一个未完成的 P 继续执行，直到整个 plan 完成。\n"
+                "本次接力属于 TASKS.md plan `{plan}`，Fleet 已把你归属到该 plan。从第一个未完成的 P 继续执行，直到整个 plan 完成。\n"
             )),
         }
         out.push_str("plan 的完整任务清单会由 prd-context hook 自动注入你的上下文，以 TASKS.md 为准。\n");
@@ -395,6 +395,43 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
         "\n若你的上下文也接近上限，先用 `fleet handoff --note \"<交接信息>\"` 注册下一棒再结束 turn，不要中途弃工。",
     );
     out
+}
+
+/// Stamp the successor's plan attribution in the `task_progress` side-channel.
+///
+/// Fleet spawns the successor, so it alone knows both the new session id and the
+/// plan being relayed. Recording it here means the successor's card shows plan
+/// progress from its first scan, instead of depending on the agent noticing the
+/// `fleet plan resume` instruction in its opening prompt. A free-form relay
+/// (no `plan_id`) attributes nothing — there is no plan to point at.
+fn attribute_successor(pending: &PendingHandoff, to_sid: &str) {
+    let Some(dir) = crate::task_progress::progress_dir() else {
+        return;
+    };
+    attribute_successor_in(&dir, pending, to_sid);
+}
+
+/// `attribute_successor` against an explicit record dir, so tests don't race the
+/// process-global `FLEET_HOME` that other suites mutate.
+fn attribute_successor_in(dir: &Path, pending: &PendingHandoff, to_sid: &str) {
+    let Some(plan_id) = pending.plan_id.as_deref() else {
+        return;
+    };
+    let ws = Path::new(&pending.workspace_path);
+    let current = crate::prd_tasks::resolve_current_task(ws, plan_id, pending.next_task.as_deref())
+        .unwrap_or(None);
+    // `register` stores the raw cwd, which may be a worktree. Stamp the main
+    // checkout instead, matching what `fleet plan resume/check` record — the
+    // card's workspace check compares main roots.
+    let ws_root = crate::prd_tasks::discover_main_checkout_root(ws)
+        .unwrap_or_else(|| ws.to_path_buf());
+    if let Err(e) =
+        crate::task_progress::set_current_in(dir, to_sid, &ws_root.to_string_lossy(), plan_id, current)
+    {
+        crate::log_debug(&format!(
+            "handoff: could not attribute successor {to_sid} to plan {plan_id}: {e}"
+        ));
+    }
 }
 
 /// Stop-hook entrypoint: consume `session_id`'s pending handoff (if any),
@@ -417,6 +454,7 @@ pub fn consume_and_spawn(session_id: &str) -> Result<Option<String>, String> {
     let to_sid = resp
         .session_id
         .ok_or_else(|| "spawn returned no session id".to_string())?;
+    attribute_successor(&pending, &to_sid);
     record_link(&pending, &to_sid)?;
     crate::log_debug(&format!(
         "handoff: relayed session {} -> {} (chain {}, hop {} -> {})",
@@ -459,6 +497,120 @@ mod tests {
         now: u64,
     ) -> Result<PendingHandoff, String> {
         register_in(pdir, cdir, sid, "/ws", note, Some("my-plan"), Some("P4"), now)
+    }
+
+    /// Build a `PendingHandoff` whose workspace holds `tasks_md`.
+    fn relay_pending(ws: &Path, plan_id: Option<&str>, next: Option<&str>) -> PendingHandoff {
+        PendingHandoff {
+            from_session_id: "s1".into(),
+            workspace_path: ws.to_string_lossy().into_owned(),
+            note: "n".into(),
+            plan_id: plan_id.map(str::to_string),
+            next_task: next.map(str::to_string),
+            chain_id: "c1".into(),
+            hop: 1,
+            created: 1,
+        }
+    }
+
+    /// The successor is spawned by Fleet, so Fleet knows its session id and the
+    /// plan being relayed — it must stamp the attribution side-channel itself
+    /// rather than trusting the agent to run `fleet plan resume`.
+    #[test]
+    fn attribute_successor_stamps_the_relayed_plan() {
+        let ws = tempfile::tempdir().unwrap();
+        let recs = tempfile::tempdir().unwrap();
+        std::fs::write(
+            ws.path().join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"relay\" v=\"2\" -->\n\
+**Plan:** Relay\n- [x] **P1** — a\n- [ ] **P2** — b\n- [ ] **P3** — c\n\
+<!-- fleet:prd:end id=\"relay\" -->\n",
+        )
+        .unwrap();
+        let pending = relay_pending(ws.path(), Some("relay"), Some("P3"));
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        let rec = crate::task_progress::read_in(recs.path(), "to-sid")
+            .expect("successor must be attributed");
+        assert_eq!(rec.plan_id, "relay");
+        assert_eq!(rec.workspace_path, pending.workspace_path);
+        // next_task "P3" resolves to that item's full text, not the bare token.
+        assert_eq!(rec.current_task.as_deref(), Some("**P3** — c"));
+    }
+
+    /// A free-form relay carries no plan pointer — there is nothing to attribute,
+    /// and the successor's card must stay blank rather than inherit a guess.
+    #[test]
+    fn attribute_successor_noop_for_free_form_relay() {
+        let recs = tempfile::tempdir().unwrap();
+        let pending = relay_pending(Path::new("/nonexistent-ws"), None, None);
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        assert!(crate::task_progress::read_in(recs.path(), "to-sid").is_none());
+    }
+
+    /// Relay says P9 but the plan omits a P9 item: fall back to the bare token
+    /// rather than dropping attribution entirely.
+    #[test]
+    fn attribute_successor_falls_back_to_bare_token() {
+        let ws = tempfile::tempdir().unwrap();
+        let recs = tempfile::tempdir().unwrap();
+        std::fs::write(
+            ws.path().join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"relay\" v=\"2\" -->\n\
+**Plan:** Relay\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"relay\" -->\n",
+        )
+        .unwrap();
+        let pending = relay_pending(ws.path(), Some("relay"), Some("P9"));
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        let rec = crate::task_progress::read_in(recs.path(), "to-sid").expect("attributed");
+        assert_eq!(rec.current_task.as_deref(), Some("**P9**"));
+    }
+
+    /// `fleet handoff` stores the raw cwd, which is often a worktree. The record
+    /// must name the main checkout, because that is what the card's workspace
+    /// check compares against — stamping the worktree path would make the
+    /// successor's card go blank.
+    #[test]
+    fn attribute_successor_records_the_main_checkout_not_the_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let recs = tempfile::tempdir().unwrap();
+        let main = tmp.path().canonicalize().unwrap();
+        let main_gitdir = main.join(".git");
+        std::fs::create_dir_all(&main_gitdir).unwrap();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"relay\" v=\"2\" -->\n\
+**Plan:** Relay\n- [ ] **P1** — a\n<!-- fleet:prd:end id=\"relay\" -->\n",
+        )
+        .unwrap();
+        let wt = main.join(".worktrees").join("feat");
+        std::fs::create_dir_all(&wt).unwrap();
+        let wt_gitdir = main_gitdir.join("worktrees").join("feat");
+        std::fs::create_dir_all(&wt_gitdir).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}", wt_gitdir.display())).unwrap();
+        std::fs::write(wt_gitdir.join("commondir"), "../..").unwrap();
+
+        // The relay was registered from inside the worktree.
+        let pending = relay_pending(&wt, Some("relay"), None);
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        let rec = crate::task_progress::read_in(recs.path(), "to-sid").expect("attributed");
+        assert_eq!(
+            Path::new(&rec.workspace_path).canonicalize().unwrap(),
+            main,
+            "record must name the main checkout, not the worktree"
+        );
+    }
+
+    /// A relay whose plan isn't in the workspace's TASKS.md still attributes the
+    /// plan id (the successor may create it), but carries no task text.
+    #[test]
+    fn attribute_successor_without_resolvable_plan_still_records_id() {
+        let ws = tempfile::tempdir().unwrap();
+        let recs = tempfile::tempdir().unwrap();
+        let pending = relay_pending(ws.path(), Some("ghost"), Some("P2"));
+        attribute_successor_in(recs.path(), &pending, "to-sid");
+        let rec = crate::task_progress::read_in(recs.path(), "to-sid").expect("attributed");
+        assert_eq!(rec.plan_id, "ghost");
+        assert_eq!(rec.current_task, None);
     }
 
     #[test]
@@ -581,7 +733,14 @@ mod tests {
         assert!(prompt.contains("第 3 棒"));
         assert!(prompt.contains("src-sid"));
         assert!(prompt.contains("P1-P3 已完成；P4 卡在 X"));
-        assert!(prompt.contains("fleet plan start auth-refactor P4"));
+        assert!(prompt.contains("auth-refactor"));
+        assert!(prompt.contains("P4"));
+        // `attribute_successor` already stamped the side-channel, so the prompt
+        // must NOT ask the agent to declare focus — that ceremony is obsolete.
+        assert!(
+            !prompt.contains("fleet plan resume") && !prompt.contains("fleet plan start"),
+            "successor is attributed by Fleet; prompt must not demand a resume:\n{prompt}"
+        );
 
         // free-form handoff: no plan pointer, still carries the note
         let free = PendingHandoff {
@@ -590,7 +749,6 @@ mod tests {
             ..p
         };
         let prompt = compose_successor_prompt(&free);
-        assert!(!prompt.contains("fleet plan start"));
         assert!(prompt.contains("按交接信息继续完成这项工作"));
     }
 }

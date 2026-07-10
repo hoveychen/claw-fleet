@@ -208,19 +208,24 @@ plan/P, with a timestamp — so the desktop app can show *your* current plan and
 P even when several sessions share one TASKS.md (Fleet knows your \
 `FLEET_SESSION_ID`; you can't read the wall clock yourself). Commands:\n\
 \n\
-- `fleet plan check <id> <P>` — tick a task done (`[ ]`→`[x]`) and mark this \
-  session focused on `<id>`. e.g. `fleet plan check auth-refactor P2`.\n\
+- `fleet plan create <id> --title \"...\"` — add a new v2 plan block **and** \
+  record this session as its executor. Creating a plan is starting it, so no \
+  separate declaration is needed.\n\
+- `fleet plan check <id> <P>` — tick a task done (`[ ]`→`[x]`) and refresh this \
+  session's focus onto `<id>`. e.g. `fleet plan check auth-refactor P2`.\n\
 - `fleet plan uncheck <id> <P>` — untick.\n\
-- `fleet plan start <id> [P]` — declare you're now working `<id>` (no file \
-  change; sets your current P, defaults to the first pending).\n\
-- `fleet plan create <id> --title \"...\"` — add a new v2 plan block.\n\
-- `fleet plan add <id> <P> --text \"...\"` — append a pending task.\n\
+- `fleet plan resume <id> [P]` — take over an **existing** plan you did not \
+  create (no file change; sets your current P, defaults to the first pending). \
+  You do not need this after `create`, nor after a handoff — Fleet attributes \
+  the successor for you.\n\
+- `fleet plan add <id> <P> --text \"...\"` — append a pending task. Records no \
+  focus: editing a plan's shape says nothing about who executes it.\n\
 - `fleet plan migrate` — upgrade this workspace's v1 TASKS.md to v2 (idempotent).\n\
 - `fleet plan list` / `fleet plan get <id>` — read.\n\
 \n\
-Call `fleet plan start <id>` when you begin a plan, and `fleet plan check` as \
-you finish each P. Hand-editing still works (the file is the source of truth \
-for checkboxes), but then your session's *current P* falls back to a guess.\n\
+Hand-editing TASKS.md still works — the file is the source of truth for \
+checkboxes — but it records no attribution, so the desktop app cannot tell \
+which plan your session is on and shows nothing on your card.\n\
 \n\
 Rules of thumb for the format itself:\n\
 - Use `- [ ]` for pending and `- [x]` for done (`fleet plan check/uncheck` \
@@ -420,11 +425,21 @@ pausing for {title}'s confirmation:\n\
    reference point. Outside Rule 3 (e.g. config-only plans), this step is \
    skipped.\n\
 \n\
-After step 3, tick the TASKS.md checkbox and **proceed to the next P-task \
-immediately**. Do NOT pause to summarise. Do NOT ask \"should I continue \
-with P2?\" or \"want to review progress before P4?\". Do NOT offer \"I've \
-written quite a few P-tasks now, want me to summarise?\". Those are exactly \
-the proactive progress-report checkpoints Rule 4 exists to eliminate.\n\
+After step 3, tick the checkbox with `fleet plan check <plan-id> <P>` — not by \
+hand-editing TASKS.md — and **proceed to the next P-task immediately**. The \
+`check` is what keeps your session attributed to this plan; a hand-edited \
+checkbox leaves the desktop card blank. Do NOT pause to summarise. Do NOT ask \
+\"should I continue with P2?\" or \"want to review progress before P4?\". Do \
+NOT offer \"I've written quite a few P-tasks now, want me to summarise?\". \
+Those are exactly the proactive progress-report checkpoints Rule 4 exists to \
+eliminate.\n\
+\n\
+**Attribution.** Fleet shows your current plan and P on the session card, but \
+only when it can attribute your session to a plan. `fleet plan create` (you \
+authored the plan) and a Fleet handoff (Fleet spawned you into it) attribute \
+you automatically; `fleet plan check` refreshes it as you go. The one case \
+needing an explicit claim is **picking up a plan you did not create and were \
+not handed**: run `fleet plan resume <plan-id> [P]` before your first P-task.\n\
 \n\
 ### When the rhythm DOES pause\n\
 \n\
@@ -476,8 +491,9 @@ fleet handoff --note \"<交接信息>\" [--plan <plan-id>] [--next <P>]\n\
 - **--note is mandatory** and is everything the successor knows beyond \
 TASKS.md: what's done, what's in flight, key files, gotchas, the next \
 concrete step. Write it like a shift-change briefing.\n\
-- **Pass --plan/--next when the work is a TASKS.md plan** so the successor \
-starts with `fleet plan start <plan-id> <P>` and continues the rhythm.\n\
+- **Pass --plan/--next when the work is a TASKS.md plan** so Fleet attributes \
+the successor to that plan and P automatically; it resumes the rhythm there \
+without any `fleet plan` ceremony of its own.\n\
 - **Then finish the turn cleanly**: commit worktree progress per Rule 3 \
 first, then stop. The moment you yield, Fleet's Stop hook consumes the \
 registration and spawns a fresh session in the same workspace whose opening \
