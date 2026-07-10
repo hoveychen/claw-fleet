@@ -1034,6 +1034,21 @@ fn resolve_agent(id_prefix: &str, verb: &str) -> (SessionInfo, u32) {
 fn cmd_interrupt(id_prefix: &str) {
     let (s, pid) = resolve_agent(id_prefix, "interrupt");
 
+    // An interactive claude treats a real SIGINT as "quit" and orphans its tool
+    // child; only the headless sessions Fleet spawns abort the call and stay
+    // resumable. Calling that an "interrupt" would be a hard kill in disguise.
+    if !claw_fleet_core::session_launch::is_fleet_owned_entrypoint(s.entrypoint.as_deref()) {
+        eprintln!(
+            "Error: {} ({}) was not launched by Fleet (entrypoint: {}). Only headless \
+             Fleet-spawned sessions can be interrupted — an interactive claude treats \
+             SIGINT as 'quit'. Use `fleet stop` instead.",
+            short_id(&s.id),
+            s.workspace_name,
+            s.entrypoint.as_deref().unwrap_or("unknown")
+        );
+        std::process::exit(1);
+    }
+
     if !s.pid_precise {
         eprintln!(
             "Error: multiple claude processes share workspace '{}', so the PID \
