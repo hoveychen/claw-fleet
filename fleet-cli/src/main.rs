@@ -2,8 +2,6 @@ use clap::{Parser, Subcommand};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 mod feishu;
-mod fleet_cli_host;
-mod task_runtime;
 
 use claw_fleet_core::account::{fetch_account_info_blocking as fetch_account_info, AccountInfo, UsageStats};
 use claw_fleet_core::agent_source::{build_sources, find_source_for_path};
@@ -297,14 +295,6 @@ enum Commands {
         #[command(subcommand)]
         action: SessionCommands,
     },
-    /// Manage tasks. Master agent tools: `get-plan`, `get-dispatchable`,
-    /// `dispatch`, `mark-done`, `mark-failed`, `update-plan`. Shell utility:
-    /// `list`, `clear`. Process lifecycle (pause/resume/kill) lives with the
-    /// owning fleet-task process — signal its pid or use the TUI.
-    Task {
-        #[command(subcommand)]
-        action: TaskCommands,
-    },
     /// Manage this workspace's TASKS.md PRD plans (PRD Discipline mode). Use
     /// these instead of hand-editing TASKS.md so Fleet records which session is
     /// working which plan/P, with a timestamp. Reads FLEET_SESSION_ID.
@@ -335,99 +325,6 @@ enum Commands {
     PrdDiscipline {
         #[command(subcommand)]
         action: PrdDisciplineCommands,
-    },
-    /// [internal] Own one task's lifecycle in this process (master + workers +
-    /// plan). The desktop spawns `fleet task-runtime resume <id>`; bare
-    /// invocation opens the launchpad. Was the standalone `fleet-task` binary.
-    #[command(hide = true)]
-    TaskRuntime {
-        #[command(subcommand)]
-        cmd: Option<TaskRuntimeCommand>,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum TaskRuntimeCommand {
-    /// Start a new task in the given workspace and spawn its master agent.
-    New {
-        /// Project workspace directory (must be a git repo).
-        #[arg(long)]
-        workspace: std::path::PathBuf,
-        /// Initial task description / prompt for the master agent.
-        #[arg(long)]
-        prompt: String,
-        /// Task title; defaults to the prompt's first 40 chars.
-        #[arg(long)]
-        title: Option<String>,
-        /// Skip the TUI; run as a headless HTTP-only daemon.
-        #[arg(long, default_value_t = false)]
-        no_tui: bool,
-    },
-    /// Resume an existing task by id (`~/.fleet/tasks/<id>.json`).
-    Resume {
-        /// Task id to resume.
-        task_id: String,
-        /// Workspace directory.
-        #[arg(long)]
-        workspace: std::path::PathBuf,
-        #[arg(long, default_value_t = false)]
-        no_tui: bool,
-    },
-    /// Open a TUI picker over all tasks on disk; Enter resumes the highlighted
-    /// task.
-    List {
-        /// Override the workspace path for the resumed task.
-        #[arg(long)]
-        workspace: Option<std::path::PathBuf>,
-        #[arg(long, default_value_t = false)]
-        no_tui: bool,
-    },
-}
-
-#[derive(Subcommand)]
-enum TaskCommands {
-    /// Print the task's current plan as YAML. Master tool.
-    GetPlan {
-        task_id: String,
-    },
-    /// Print the IDs of P-items the scheduler can dispatch right now.
-    /// Master tool.
-    GetDispatchable {
-        task_id: String,
-        /// Output raw JSON instead of one-id-per-line.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Request the supervisor to dispatch a worker for `p_id`. Master tool.
-    Dispatch {
-        task_id: String,
-        p_id: String,
-    },
-    /// Replace the task's plan with a new YAML document. Reads from stdin
-    /// when `--from-stdin`, otherwise from `--file <path>`. Used by the
-    /// planning session to write the DAG.
-    UpdatePlan {
-        task_id: String,
-        #[arg(long)]
-        from_stdin: bool,
-        #[arg(long)]
-        file: Option<std::path::PathBuf>,
-    },
-    /// Delete a task's json + materials dir. **Does not touch any running
-    /// fleet-task process** — kill that separately (e.g. SIGTERM the pid in
-    /// `~/.fleet/runtime/<task_id>.json`) before clearing if you want a
-    /// clean teardown.
-    Clear { task_id: String },
-    /// List all tasks on disk with their status, plan progress, and whether
-    /// they're backed by a live fleet-task process. Shell-friendly: pipe
-    /// `--json` into `jq` to grab task IDs by status.
-    List {
-        /// Only list tasks for this project_id.
-        #[arg(long)]
-        project_id: Option<String>,
-        /// Output raw JSON (one task per record).
-        #[arg(long)]
-        json: bool,
     },
 }
 
@@ -679,8 +576,7 @@ fn main() {
             | Commands::Elicitation
             | Commands::Mcp
             | Commands::PlanApproval
-            | Commands::PrdContext
-            | Commands::TaskRuntime { .. } => {
+            | Commands::PrdContext => {
                 eprintln!("Error: --remote is not supported with the '{}' subcommand.",
                     match &cli.command {
                         Commands::Serve { .. } => "serve",
@@ -690,7 +586,6 @@ fn main() {
                         Commands::Mcp => "mcp",
                         Commands::PlanApproval => "plan-approval",
                         Commands::PrdContext => "prd-context",
-                        Commands::TaskRuntime { .. } => "task-runtime",
                         _ => unreachable!(),
                     }
                 );
@@ -731,8 +626,6 @@ fn main() {
             SessionCommands::Idle => cmd_session_idle(),
             SessionCommands::Resume => cmd_session_resume(),
         },
-        Commands::Task { action } => cmd_task(action),
-        Commands::TaskRuntime { cmd } => cmd_task_runtime(cmd),
         Commands::Plan { action } => cmd_plan(action),
         Commands::Handoff {
             note,
@@ -745,198 +638,6 @@ fn main() {
                 cmd_prd_discipline_apply(&title, &locale)
             }
         },
-    }
-}
-
-// ── task-runtime dispatcher (folded-in fleet-task lifecycle) ──────────────────
-
-fn cmd_task_runtime(cmd: Option<TaskRuntimeCommand>) {
-    if let Err(e) = task_runtime::run(cmd) {
-        eprintln!("error: {e:#}");
-        std::process::exit(1);
-    }
-}
-
-// ── Task subcommand dispatcher ────────────────────────────────────────────────
-
-fn cmd_task(action: TaskCommands) {
-    fn die(msg: String) -> ! {
-        eprintln!("error: {msg}");
-        std::process::exit(1);
-    }
-
-    match action {
-        TaskCommands::GetPlan { task_id } => {
-            let task = claw_fleet_core::task::get_task(&task_id).unwrap_or_else(|e| die(e));
-            // Convert plan JSON → YAML so the master can read it cleanly.
-            let json = serde_json::to_value(&task.plan).unwrap_or(serde_json::Value::Null);
-            match serde_yaml::to_string(&json) {
-                Ok(s) => print!("{s}"),
-                Err(e) => die(format!("yaml encode: {e}")),
-            }
-        }
-        TaskCommands::GetDispatchable { task_id, json } => {
-            let task = claw_fleet_core::task::get_task(&task_id).unwrap_or_else(|e| die(e));
-            // Dispatch is purely by dependency topology now (resource
-            // scheduling was removed in the task-subsystem rebuild).
-            let dispatch = claw_fleet_core::scheduler::dispatchable(&task.plan);
-            if let Some(e) = &dispatch.error {
-                die(e.clone());
-            }
-            if json {
-                println!("{}", serde_json::to_string(&dispatch.ready).unwrap_or_default());
-            } else {
-                for id in dispatch.ready {
-                    println!("{id}");
-                }
-            }
-        }
-        TaskCommands::Dispatch { task_id, p_id } => {
-            // Phase 3: dispatch belongs to the fleet-task runtime's LocalHost
-            // so the spawned worker is tracked by fleet-task's pid HashMap
-            // (otherwise SIGSTOP/CONT/TERM wouldn't reach it). Route via the
-            // HTTP endpoint on the live fleet-task process; error if no
-            // process is serving this task.
-            match crate::fleet_cli_host::lookup_task_port(&task_id) {
-                Some(port) => {
-                    let url = format!("http://127.0.0.1:{port}/p-items/{p_id}/dispatch");
-                    let resp = ureq::post(&url).call().unwrap_or_else(|e| {
-                        die(format!("dispatch http: {e}"));
-                    });
-                    let status = resp.status();
-                    if !(200..300).contains(&status) {
-                        die(format!("dispatch returned http {status}"));
-                    }
-                    println!("dispatched");
-                }
-                None => die(format!(
-                    "no fleet-task process for task {task_id} (no runtime registry entry)"
-                )),
-            }
-        }
-        TaskCommands::UpdatePlan {
-            task_id,
-            from_stdin,
-            file,
-        } => {
-            let yaml_text = if from_stdin {
-                let mut buf = String::new();
-                std::io::Read::read_to_string(&mut std::io::stdin(), &mut buf)
-                    .unwrap_or_else(|e| die(format!("stdin: {e}")));
-                buf
-            } else if let Some(p) = file {
-                std::fs::read_to_string(&p).unwrap_or_else(|e| die(format!("read {}: {e}", p.display())))
-            } else {
-                die("provide --from-stdin or --file <path>".into());
-            };
-            // YAML → JSON Value → DagPlan (sidesteps serde_yaml's external-
-            // tagged-enum tuple-variant gotcha, same trick as the skill
-            // examples integration test).
-            let yv: serde_yaml::Value =
-                serde_yaml::from_str(&yaml_text).unwrap_or_else(|e| die(format!("yaml parse: {e}")));
-            let jv: serde_json::Value =
-                serde_json::to_value(&yv).unwrap_or_else(|e| die(format!("yaml → json: {e}")));
-            let plan: claw_fleet_core::plan::DagPlan = serde_json::from_value(jv)
-                .unwrap_or_else(|e| die(format!("plan schema: {e}")));
-            if let Err(e) = plan.validate() {
-                die(format!("plan validation: {e:?}"));
-            }
-            claw_fleet_core::task::update_plan(&task_id, plan).unwrap_or_else(|e| die(e));
-            println!("plan updated");
-        }
-        TaskCommands::Clear { task_id } => {
-            // File-only delete: bypass the legacy SupervisorHost terminate
-            // path (it can't reach fleet-task subprocesses anyway). If a
-            // fleet-task process is still serving this task, the user
-            // should SIGTERM it via the pid in `~/.fleet/runtime/<id>.json`
-            // *before* calling clear.
-            let json = claw_fleet_core::task::task_json_path(&task_id)
-                .unwrap_or_else(|e| die(e));
-            if json.exists() {
-                std::fs::remove_file(&json)
-                    .unwrap_or_else(|e| die(format!("remove task json: {e}")));
-            }
-            let materials = claw_fleet_core::task::tasks_dir()
-                .unwrap_or_else(|e| die(e))
-                .join(&task_id);
-            if materials.exists() {
-                std::fs::remove_dir_all(&materials)
-                    .unwrap_or_else(|e| die(format!("remove materials dir: {e}")));
-            }
-            println!("cleared");
-        }
-        TaskCommands::List { project_id, json } => {
-            cmd_task_list(project_id.as_deref(), json);
-        }
-    }
-}
-
-fn cmd_task_list(project_id: Option<&str>, as_json: bool) {
-    use std::collections::HashMap;
-    use claw_fleet_core::registry;
-
-    let tasks = claw_fleet_core::task::list_tasks(project_id);
-    let runtime: HashMap<String, registry::RegistryEntry> = registry::list_alive()
-        .unwrap_or_default()
-        .into_iter()
-        .map(|e| (e.task_id.clone(), e))
-        .collect();
-
-    if as_json {
-        let records: Vec<serde_json::Value> = tasks
-            .iter()
-            .map(|t| {
-                let live = runtime.get(&t.id);
-                serde_json::json!({
-                    "id": t.id,
-                    "project_id": t.project_id,
-                    "title": t.title,
-                    "status": format!("{:?}", t.status).to_lowercase(),
-                    "branch": t.task_branch,
-                    "workspace": t.workspace,
-                    "plan_total": t.plan.len(),
-                    "plan_done": t.plan.items.values()
-                        .filter(|p| matches!(p.status, claw_fleet_core::pitem::PItemStatus::Done))
-                        .count(),
-                    "live": live.is_some(),
-                    "port": live.map(|e| e.port),
-                    "pid": live.map(|e| e.pid),
-                })
-            })
-            .collect();
-        println!("{}", serde_json::to_string(&records).unwrap_or_default());
-        return;
-    }
-
-    if tasks.is_empty() {
-        println!("(no tasks under ~/.fleet/tasks/)");
-        return;
-    }
-
-    // Table: ID(8) | live | status | done/total | title | branch
-    println!(
-        "{:<10} {:<6} {:<10} {:<7} {:<40} {}",
-        "ID", "LIVE", "STATUS", "DONE", "TITLE", "BRANCH"
-    );
-    for t in &tasks {
-        let short = if t.id.len() >= 8 { &t.id[..8] } else { &t.id };
-        let live = if runtime.contains_key(&t.id) { "●" } else { "" };
-        let status = format!("{:?}", t.status).to_lowercase();
-        let total = t.plan.len();
-        let done = t.plan.items.values()
-            .filter(|p| matches!(p.status, claw_fleet_core::pitem::PItemStatus::Done))
-            .count();
-        let title = truncate(&t.title, 38);
-        let branch = t.task_branch.as_deref().unwrap_or("-");
-        println!(
-            "{:<10} {:<6} {:<10} {:<7} {:<40} {}",
-            short,
-            live,
-            status,
-            format!("{done}/{total}"),
-            title,
-            branch
-        );
     }
 }
 

@@ -1,6 +1,5 @@
 pub mod account;
 pub mod agent_source;
-pub use claw_fleet_task::architecture_overview;
 pub mod audit;
 pub mod auto_resume;
 pub mod backend;
@@ -14,11 +13,9 @@ pub mod codex_source;
 pub mod console;
 pub mod consumer_heartbeat;
 pub mod cursor;
-pub use claw_fleet_task::dag;
 pub mod daily_report;
 pub mod decision_history;
 pub mod decision_panel_config;
-pub mod deviation_ledger;
 #[cfg(windows)]
 pub mod dpapi;
 pub mod elicitation;
@@ -43,16 +40,12 @@ pub mod mcp_ipc;
 pub mod mcp_a2ui_ipc;
 pub mod mcp_server;
 pub mod memory;
-pub mod merge_mediator;
 pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
 pub mod permission_prompt_ipc;
 pub mod permissions_injector;
-pub mod phase_detector;
 pub mod process_util;
-pub use claw_fleet_task::actions;
-pub use claw_fleet_task::deliverables;
 /// Path helpers, formerly re-exported from the (removed) `claw-fleet-task`
 /// crate. `real_home_dir` / `get_fleet_dir` live in [`session`];
 /// `fleet_home_lock` is the process-wide `FLEET_HOME` test mutex whose
@@ -74,10 +67,6 @@ pub mod paths {
         }
     }
 }
-pub use claw_fleet_task::pitem;
-pub use claw_fleet_task::plan;
-pub use claw_fleet_task::registry;
-pub use claw_fleet_task::runner;
 pub mod plan_approval;
 pub mod plugins;
 pub mod prd_discipline;
@@ -87,30 +76,18 @@ pub mod task_progress;
 pub mod supervisor;
 pub mod rate_limit_parser;
 pub mod scan_cache_disk;
-pub mod scheduler;
 pub mod search_index;
 pub mod session;
 pub mod session_launch;
 pub mod session_todos;
 pub mod skill_history;
 pub mod skills;
-mod task_actions;
-pub mod lifecycle_host;
-pub mod task {
-    pub use claw_fleet_task::task::*;
-    pub use super::task_actions::*;
-}
 pub mod tcc;
 pub mod token_analysis;
-pub mod touches_hook;
 pub mod wiki;
 pub mod wiki_guidance;
 pub mod workflow;
 pub mod workflow_sidecar;
-pub mod worker_executor {
-    pub use claw_fleet_task::worker::*;
-}
-pub use claw_fleet_task::worktree;
 
 use std::fs;
 use session::SessionInfo;
