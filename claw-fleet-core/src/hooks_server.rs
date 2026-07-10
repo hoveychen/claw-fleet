@@ -523,10 +523,42 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            // Phase 4 P3: `/stop_workspace` and `/auto_resume_config` removed.
-            // Remote callers hitting those paths receive the catch-all 404
-            // below. `/resume_session` was re-added later (POST, with follow-up
-            // prompt) for the history panel — see the handler further down.
+            // `/stop_workspace` kills every agent process (and its tree) rooted
+            // in a workspace. Retired in Phase 4 as a "lifecycle endpoint", but
+            // RemoteBackend::kill_workspace never stopped calling it, so a remote
+            // stop on an imprecise pid 404'd silently. Re-added to match the
+            // still-live client. `?path=` is percent-encoded (slashes as %2F).
+            "/stop_workspace" => {
+                let path_param = query
+                    .get("path")
+                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                    .unwrap_or_default();
+                if path_param.is_empty() {
+                    let _ = request.respond(tiny_http::Response::empty(400));
+                    continue;
+                }
+                match crate::session::kill_workspace_impl(&path_param) {
+                    Ok(()) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                .with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = format!(r#"{{"error":"{}"}}"#, e.replace('"', "'"));
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
+            // Phase 4 P3: `/auto_resume_config` removed. Remote callers hitting
+            // that path receive the catch-all 404 below. `/resume_session` was
+            // re-added later (POST, with follow-up prompt) for the history
+            // panel — see the handler further down.
 
             // ── Unified /sources/{name}/account and /sources/{name}/usage ──
             _ if path.starts_with("/sources/") => {
