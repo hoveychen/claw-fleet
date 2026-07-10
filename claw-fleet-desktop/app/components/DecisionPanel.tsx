@@ -29,6 +29,7 @@ import { A2uiRenderCard } from "./A2uiRenderCard";
 import { ChatComposer, type ChatComposerHandle } from "./ChatComposer";
 import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
+import { useAutoFlip } from "./useAutoFlip";
 import styles from "./DecisionPanel.module.css";
 
 function shortId(id: string): string {
@@ -164,6 +165,10 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [blockReason, setBlockReason] = useState("");
   const menuWrapRef = useRef<HTMLDivElement | null>(null);
+  const menuPanelRef = useRef<HTMLDivElement | null>(null);
+  // Decision cards sit anywhere in a scrolling list, so a card near the top of
+  // the viewport would push this panel off screen if it always opened upward.
+  const menuSide = useAutoFlip(menuOpen, "above", menuPanelRef, menuWrapRef);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -285,7 +290,13 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
               {t("guard.always_allow_menu", "Always allow")} <span aria-hidden>▾</span>
             </button>
             {menuOpen && (
-              <div className={styles.always_allow_menu_panel} role="menu">
+              <div
+                className={`${styles.always_allow_menu_panel} ${
+                  menuSide === "above" ? styles.menu_above : styles.menu_below
+                }`}
+                ref={menuPanelRef}
+                role="menu"
+              >
                 <div className={styles.always_allow_menu_title}>
                   {t("guard.always_allow_pick_hint", "Pick which command to always allow")}
                 </div>
