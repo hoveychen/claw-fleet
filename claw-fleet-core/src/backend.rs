@@ -426,6 +426,28 @@ pub trait Backend: Send + Sync {
         session_id: Option<&str>,
     ) -> Vec<crate::prd_tasks::TaskPlanDetail>;
 
+    // ── File explorer ─────────────────────────────────────────────────────────
+    // Read-only browsing of a known session workspace (and its linked git
+    // worktrees). `workspace` must match a session's workspace_path; `root`
+    // must be one of the paths returned by `list_explorer_roots`.
+    fn list_explorer_roots(
+        &self,
+        workspace: &str,
+    ) -> Result<Vec<crate::file_explorer::ExplorerRoot>, String>;
+    fn list_explorer_dir(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_path: &str,
+        show_ignored: bool,
+    ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String>;
+    fn read_explorer_file(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String>;
+
     // ── Skills ────────────────────────────────────────────────────────────────
     fn list_skills(&self) -> Vec<SkillItem>;
     fn get_skill_content(&self, path: &str) -> Result<String, String>;

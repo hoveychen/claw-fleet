@@ -1411,6 +1411,53 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            "/explorer_roots" | "/explorer_dir" | "/explorer_file" => {
+                let decode = |key: &str| {
+                    query
+                        .get(key)
+                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                        .unwrap_or_default()
+                };
+                let ws = decode("ws");
+                let known: Vec<String> = sources
+                    .iter()
+                    .flat_map(|s| s.scan_sessions())
+                    .map(|s| s.workspace_path)
+                    .collect();
+                let result: Result<String, String> = match path {
+                    "/explorer_roots" => crate::file_explorer::list_roots(&ws, &known)
+                        .map(|r| serde_json::to_string(&r).unwrap_or_default()),
+                    "/explorer_dir" => {
+                        let show_ignored = query.get("ignored").map(|s| s == "true").unwrap_or(false);
+                        crate::file_explorer::list_dir(
+                            &ws,
+                            &decode("root"),
+                            &decode("rel"),
+                            show_ignored,
+                            &known,
+                        )
+                        .map(|e| serde_json::to_string(&e).unwrap_or_default())
+                    }
+                    _ => crate::file_explorer::read_file(&ws, &decode("root"), &decode("rel"), &known)
+                        .map(|c| serde_json::to_string(&c).unwrap_or_default()),
+                };
+                match result {
+                    Ok(body) => {
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             "/skill_content" => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();

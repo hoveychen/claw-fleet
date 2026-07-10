@@ -569,6 +569,44 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&url).unwrap_or_default()
     }
 
+    fn list_explorer_roots(
+        &self,
+        workspace: &str,
+    ) -> Result<Vec<crate::file_explorer::ExplorerRoot>, String> {
+        self.probe
+            .get(&format!("/explorer_roots?ws={}", encode_path(workspace)))
+    }
+
+    fn list_explorer_dir(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_path: &str,
+        show_ignored: bool,
+    ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String> {
+        self.probe.get(&format!(
+            "/explorer_dir?ws={}&root={}&rel={}&ignored={}",
+            encode_path(workspace),
+            encode_path(root),
+            encode_path(rel_path),
+            show_ignored,
+        ))
+    }
+
+    fn read_explorer_file(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
+        self.probe.get(&format!(
+            "/explorer_file?ws={}&root={}&rel={}",
+            encode_path(workspace),
+            encode_path(root),
+            encode_path(rel_path),
+        ))
+    }
+
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
         self.probe.get("/skills").unwrap_or_default()
     }

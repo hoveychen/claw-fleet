@@ -112,6 +112,30 @@ impl Drop for LocalBackend {
 }
 
 impl LocalBackend {
+    /// Workspace paths the file explorer may browse. Prefers the session
+    /// cache; falls back to a direct source scan when the first background
+    /// scan hasn't populated it yet.
+    fn known_workspaces(&self) -> Vec<String> {
+        let mut paths: Vec<String> = self
+            .sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|s| s.workspace_path.clone())
+            .collect();
+        if paths.is_empty() {
+            paths = self
+                .sources
+                .iter()
+                .flat_map(|s| s.scan_sessions())
+                .map(|s| s.workspace_path)
+                .collect();
+        }
+        paths.sort();
+        paths.dedup();
+        paths
+    }
+
     pub fn new(
         app: AppHandle,
         locale: Arc<Mutex<String>>,
@@ -1799,6 +1823,38 @@ impl Backend for LocalBackend {
         session_id: Option<&str>,
     ) -> Vec<crate::prd_tasks::TaskPlanDetail> {
         crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace_path), session_id)
+    }
+
+    fn list_explorer_roots(
+        &self,
+        workspace: &str,
+    ) -> Result<Vec<crate::file_explorer::ExplorerRoot>, String> {
+        crate::file_explorer::list_roots(workspace, &self.known_workspaces())
+    }
+
+    fn list_explorer_dir(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_path: &str,
+        show_ignored: bool,
+    ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String> {
+        crate::file_explorer::list_dir(
+            workspace,
+            root,
+            rel_path,
+            show_ignored,
+            &self.known_workspaces(),
+        )
+    }
+
+    fn read_explorer_file(
+        &self,
+        workspace: &str,
+        root: &str,
+        rel_path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
+        crate::file_explorer::read_file(workspace, root, rel_path, &self.known_workspaces())
     }
 
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {

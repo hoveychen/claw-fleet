@@ -15,6 +15,7 @@ import { WikiView } from "./WikiView";
 import { AuditView } from "./AuditView";
 import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
+import { FilesView } from "./FilesView";
 import { PluginsView } from "./PluginsView";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
@@ -286,6 +287,13 @@ export function SessionList() {
           <div className={styles.nav_divider} />
 
           <button
+            className={`${styles.nav_item} ${viewMode === "files" ? styles.nav_active : ""}`}
+            onClick={() => setViewMode("files")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z"/></svg></span>
+            <span className={styles.nav_label}>{t("view_files", "文件")}</span>
+          </button>
+          <button
             className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
             onClick={() => setViewMode("memory")}
           >
@@ -437,6 +445,8 @@ export function SessionList() {
         <WikiView />
       ) : viewMode === "skills" ? (
         <SkillsView />
+      ) : viewMode === "files" ? (
+        <FilesView />
       ) : viewMode === "plugins" ? (
         <PluginsView />
       ) : (

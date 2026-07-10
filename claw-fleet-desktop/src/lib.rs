@@ -90,6 +90,29 @@ impl Backend for NullBackend {
     fn kill_pid(&self, _: u32) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn list_explorer_roots(
+        &self,
+        _: &str,
+    ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerRoot>, String> {
+        Err("backend not ready".into())
+    }
+    fn list_explorer_dir(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: bool,
+    ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
+        Err("backend not ready".into())
+    }
+    fn read_explorer_file(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
+        Err("backend not ready".into())
+    }
     fn kill_workspace(&self, _: String) -> Result<(), String> {
         Err("backend not ready".into())
     }
