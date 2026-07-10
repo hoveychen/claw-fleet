@@ -570,6 +570,7 @@ export function WikiView() {
             <WikiDetail
               doc={selected}
               wikiLinks={wikiLinks}
+              onMove={() => openMoveDialog(selected)}
               onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
               onDeleteVersion={(version) =>
                 setConfirmDelete({ kind: "version", slug: selected.slug, version })
@@ -629,11 +630,13 @@ export function WikiView() {
 function WikiDetail({
   doc,
   wikiLinks,
+  onMove,
   onDeleteDoc,
   onDeleteVersion,
 }: {
   doc: WikiDoc;
   wikiLinks: WikiLinkContext;
+  onMove: () => void;
   onDeleteDoc: () => void;
   onDeleteVersion: (version: string) => void;
 }) {
@@ -713,6 +716,14 @@ function WikiDetail({
               </option>
             ))}
           </select>
+          <button
+            className={styles.action_btn}
+            onClick={onMove}
+            title={t("wiki.move_title_short", "Move or rename — type a slug with / to make a folder")}
+          >
+            <FolderInput size={12} strokeWidth={1.7} />
+            {t("wiki.move_short", "移动")}
+          </button>
           <button
             className={styles.action_btn}
             onClick={handleCopyRef}
