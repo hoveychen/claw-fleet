@@ -435,6 +435,23 @@ export interface RawMessage {
     stop_reason?: string | null;
     usage?: MessageUsage;
   };
+  /**
+   * Structured result Claude Code writes alongside the `tool_result` block in
+   * this message — far richer than that block's stringified `content` (real
+   * diff hunks for Edit, separated stdout/stderr for Bash, the answered
+   * questions for AskUserQuestion, …).
+   *
+   * The backend reads transcripts as raw `serde_json::Value` and never strips
+   * fields (`claude_source.rs`), so this has always reached the webview; it
+   * simply had no declaration until now.
+   *
+   * Deliberately `unknown`. This is a Claude Code *internal* field, not a
+   * public contract: its key set differs per tool, and only the Claude source
+   * emits it (codex / openclaw / agent sources never do). Narrow it through the
+   * guards in `toolResults.ts`, every one of which returns `null` on a shape
+   * mismatch so callers degrade to the generic renderer.
+   */
+  toolUseResult?: unknown;
 }
 
 // ── Security audit types ────────────────────────────────────────────────────
