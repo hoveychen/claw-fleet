@@ -540,7 +540,9 @@ fn encode_workspace_path(path: &str) -> String {
     path.replace('/', "-")
 }
 
-fn workspace_name(path: &str) -> String {
+/// Human-facing name for a workspace path. Shared with the memory module so
+/// both derive worktree names identically.
+pub(crate) fn workspace_name(path: &str) -> String {
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     // Fleet develops plans inside `<repo-root>/.worktrees/<task-id>` (see the
     // worktree workflow). Such a checkout belongs to the repo, so name it after
