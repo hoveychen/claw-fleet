@@ -23,8 +23,6 @@ import {
   MOCK_HOOKS_PLAN,
   MOCK_DETECTED_TOOLS,
   MOCK_WAITING_ALERTS,
-  MOCK_PROJECTS,
-  MOCK_FLEET_SESSIONS,
   MOCK_SKILL_HISTORY,
   MOCK_AUDIT_SUMMARY,
   MOCK_DAILY_REPORT,
@@ -92,10 +90,6 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
 
     case "list_skills":
       return [];
-    case "list_projects":
-      return MOCK_PROJECTS;
-    case "list_fleet_sessions":
-      return MOCK_FLEET_SESSIONS;
     case "search_sessions":
       return [];
     case "resume_fleet_session":

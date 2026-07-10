@@ -11,7 +11,6 @@ import type {
   PendingDecisions,
   PermissionPromptRequest,
   PlanApprovalRequest,
-  SessionPendingRequest,
 } from "../types";
 
 // Split a `question` field on a line containing only `---` (per Fleet
@@ -50,7 +49,6 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   const addFleetAskRequest = useDecisionStore((s) => s.addFleetAskRequest);
   const addA2uiRenderRequest = useDecisionStore((s) => s.addA2uiRenderRequest);
   const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
-  const addSessionPendingRequest = useDecisionStore((s) => s.addSessionPendingRequest);
   const addPermissionPromptRequest = useDecisionStore((s) => s.addPermissionPromptRequest);
   const dismiss = useDecisionStore((s) => s.dismiss);
 
@@ -192,20 +190,6 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     };
   }, [addPlanApprovalRequest, silent]);
 
-  useEffect(() => {
-    const unlisten = listen<SessionPendingRequest>("session-pending-request", (e) => {
-      const r = e.payload;
-      if (!silent && !announcedIds.current.has(r.id)) {
-        announcedIds.current.add(r.id);
-        // Reuse the elicitation chime — same "agent yielded, your turn" feel.
-        playDecisionAlert("elicitation", r.promptPreview ?? "");
-      }
-      addSessionPendingRequest(r);
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [addSessionPendingRequest, silent]);
 
   useEffect(() => {
     const unlisten = listen<PermissionPromptRequest>("permission-prompt-request", (e) => {
@@ -237,7 +221,6 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
       "fleet-ask-dismissed",
       "a2ui-render-dismissed",
       "plan-approval-dismissed",
-      "session-pending-dismissed",
       "permission-prompt-dismissed",
     ].map(
       (evt) => listen<string>(evt, (e) => {
