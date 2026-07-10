@@ -20,6 +20,7 @@ pub mod decision_panel_config;
 pub mod dpapi;
 pub mod elicitation;
 pub mod feishu;
+pub mod file_explorer;
 pub mod foxy;
 pub mod guard;
 pub mod handoff;
