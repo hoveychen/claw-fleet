@@ -136,6 +136,24 @@ impl LocalBackend {
         paths
     }
 
+    /// Re-stamp the cached sessions from the on-disk mark / read state and push
+    /// them to the frontend. The mark and read toggles only write a file, so
+    /// without this the launchpad's segment counts and unread badge wouldn't
+    /// move until the next natural rescan. Re-runs the enrichers rather than
+    /// patching the one row by hand so this can't drift from the scan path.
+    /// Holds the lock across the enrich so a concurrent rescan can't be
+    /// clobbered by a stale snapshot.
+    fn restamp_marks_and_emit(&self) {
+        let snapshot = {
+            let mut list = self.sessions.lock().unwrap();
+            claw_fleet_core::session_mark::enrich_sessions(&mut list);
+            claw_fleet_core::session_read::enrich_sessions(&mut list);
+            list.clone()
+        };
+        let _ = self.app.emit("sessions-updated", &snapshot);
+        crate::update_tray(&self.app, &snapshot);
+    }
+
     pub fn new(
         app: AppHandle,
         locale: Arc<Mutex<String>>,
@@ -1155,16 +1173,18 @@ fn rescan_and_emit(
     crate::update_tray(app, &s);
 }
 
-/// Incremental rescan: only rescan sources whose indices appear in `dirty`.
-/// Sessions from clean sources are kept as-is, avoiding expensive readdir/stat
-/// calls for directories that haven't changed.
-fn incremental_rescan_and_emit(
+/// Build the session list an incremental rescan should produce: keep the
+/// sessions of clean sources (aged out), re-scan only the dirty ones, then
+/// re-apply the scan-time enrichers over the merged list.
+///
+/// Split out of `incremental_rescan_and_emit` so it can be tested without an
+/// `AppHandle` — the enrichers are exactly what this path used to get wrong.
+fn build_incremental_sessions(
     sources: &[Box<dyn AgentSource>],
-    app: &AppHandle,
-    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
-    outcomes: &Arc<Mutex<HashMap<String, Vec<String>>>>,
+    existing: &[SessionInfo],
     dirty: &HashSet<usize>,
-) {
+    now_ms: u64,
+) -> Vec<SessionInfo> {
     // Collect the source names of dirty sources so we can partition existing sessions.
     // Must use `name()` (e.g. "claude-code") not `api_name()` (e.g. "claude")
     // because `SessionInfo::agent_source` stores the full source name.
@@ -1176,18 +1196,11 @@ fn incremental_rescan_and_emit(
     // Keep sessions from clean sources, rescan only dirty ones.
     // Re-apply age_out_status to retained sessions so their status still
     // transitions to Idle when the underlying file hasn't been touched.
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64;
-    let mut s: Vec<SessionInfo> = {
-        let existing = sessions.lock().unwrap();
-        existing
-            .iter()
-            .filter(|sess| !dirty_names.contains(sess.agent_source.as_str()))
-            .cloned()
-            .collect()
-    };
+    let mut s: Vec<SessionInfo> = existing
+        .iter()
+        .filter(|sess| !dirty_names.contains(sess.agent_source.as_str()))
+        .cloned()
+        .collect();
     for sess in &mut s {
         let age_secs = now_ms.saturating_sub(sess.last_activity_ms) as f64 / 1000.0;
         crate::session::age_out_status(sess, age_secs);
@@ -1201,10 +1214,33 @@ fn incremental_rescan_and_emit(
         }
     }
 
-    // Refresh relay positions for retained AND freshly-scanned sessions — a
-    // handoff link can appear while a predecessor's source stays clean.
-    crate::handoff::enrich_sessions(&mut s);
+    // Re-stamp the out-of-jsonl state for retained AND freshly-scanned sessions.
+    // Freshly-scanned ones arrive with `user_mark` / `last_read_ms` / `handoff`
+    // unset, and a handoff link can appear while a predecessor's source stays
+    // clean — so this runs over the whole merged list, not just the new rows.
+    crate::session::enrich_all(&mut s);
     crate::session::sort_sessions(&mut s);
+    s
+}
+
+/// Incremental rescan: only rescan sources whose indices appear in `dirty`.
+/// Sessions from clean sources are kept as-is, avoiding expensive readdir/stat
+/// calls for directories that haven't changed.
+fn incremental_rescan_and_emit(
+    sources: &[Box<dyn AgentSource>],
+    app: &AppHandle,
+    sessions: &Arc<Mutex<Vec<SessionInfo>>>,
+    outcomes: &Arc<Mutex<HashMap<String, Vec<String>>>>,
+    dirty: &HashSet<usize>,
+) {
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64;
+    let mut s = {
+        let existing = sessions.lock().unwrap();
+        build_incremental_sessions(sources, &existing, dirty, now_ms)
+    };
 
     // Inject cached outcome tags into each session.
     {
@@ -1635,14 +1671,18 @@ impl Backend for LocalBackend {
         workspace_path: String,
         mark: Option<claw_fleet_core::session_mark::SessionMark>,
     ) -> Result<(), String> {
-        claw_fleet_core::session_mark::set_mark(&session_id, &workspace_path, mark)
+        claw_fleet_core::session_mark::set_mark(&session_id, &workspace_path, mark)?;
+        self.restamp_marks_and_emit();
+        Ok(())
     }
 
     fn mark_sessions_read(
         &self,
         items: Vec<claw_fleet_core::session_read::SessionReadItem>,
     ) -> Result<(), String> {
-        claw_fleet_core::session_read::mark_read(&items)
+        claw_fleet_core::session_read::mark_read(&items)?;
+        self.restamp_marks_and_emit();
+        Ok(())
     }
 
     fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
@@ -3119,6 +3159,102 @@ mod tests {
     use crate::backend::{SourceUsageSummary, UsageBar};
     use serde_json::json;
 
+    fn mk_session(id: &str, source: &str) -> crate::session::SessionInfo {
+        use crate::session::{SessionInfo, SessionStatus};
+        SessionInfo {
+            id: id.into(),
+            workspace_path: "/tmp/test".into(),
+            workspace_name: "test".into(),
+            ide_name: None,
+            entrypoint: None,
+            is_subagent: false,
+            parent_session_id: None,
+            agent_type: None,
+            agent_description: None,
+            slug: None,
+            ai_title: None,
+            status: SessionStatus::Idle,
+            token_speed: 0.0,
+            agent_token_speed: 0.0,
+            total_output_tokens: 0,
+            total_cost_usd: 0.0,
+            agent_total_cost_usd: 0.0,
+            cost_speed_usd_per_min: 0.0,
+            last_message_preview: None,
+            last_activity_ms: 0,
+            created_at_ms: 0,
+            jsonl_path: format!("/tmp/{id}.jsonl"),
+            model: None,
+            thinking_level: None,
+            pid: None,
+            pid_precise: false,
+            last_skill: None,
+            context_percent: None,
+            agent_source: source.into(),
+            last_outcome: None,
+            rate_limit: None,
+            todos: None,
+            task_plan: None,
+            handoff: None,
+            user_mark: None,
+            last_read_ms: None,
+            compact_count: 0,
+            compact_pre_tokens: 0,
+            compact_post_tokens: 0,
+            compact_cost_usd: 0.0,
+        }
+    }
+
+    /// The launchpad's mark filter reads `user_mark` off the sessions the
+    /// scanner emits, and the read/unread dot reads `last_read_ms`. Both are
+    /// stamped by scan-time enrichers, and the *incremental* rescan (the hot
+    /// path behind every file event) used to run only the handoff enricher —
+    /// so a freshly-scanned session came back with both fields cleared and the
+    /// segment counts never moved off "all pending".
+    #[test]
+    fn incremental_rescan_stamps_mark_and_read_state() {
+        use claw_fleet_core::session_mark::SessionMark;
+        use claw_fleet_core::session_read::SessionReadItem;
+
+        let _lock = claw_fleet_core::paths::fleet_home_lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", tmp.path());
+
+        // The human marked this session done and read it — both live on disk.
+        claw_fleet_core::session_mark::set_mark("sess-1", "/tmp/test", Some(SessionMark::Done))
+            .unwrap();
+        claw_fleet_core::session_read::mark_read(&[SessionReadItem {
+            session_id: "sess-1".into(),
+            workspace_path: "/tmp/test".into(),
+        }])
+        .unwrap();
+
+        // A file event marks the source dirty, so its sessions get re-scanned
+        // fresh off the jsonl — i.e. with `user_mark`/`last_read_ms` unset.
+        let sources: Vec<Box<dyn AgentSource>> = vec![Box::new(MockSource {
+            sessions: vec![mk_session("sess-1", "claude-code")],
+            ..MockSource::new("claude-code", "claude", "")
+        })];
+        let out = build_incremental_sessions(&sources, &[], &HashSet::from([0]), 0);
+
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].user_mark,
+            Some(SessionMark::Done),
+            "incremental rescan dropped the on-disk done mark",
+        );
+        assert!(
+            out[0].last_read_ms.is_some(),
+            "incremental rescan dropped the on-disk read state",
+        );
+    }
+
     /// Minimal mock for local_backend tests (duplicated to avoid cross-module test deps).
     struct MockSource {
         name: &'static str,
@@ -3128,6 +3264,7 @@ mod tests {
         account: Result<serde_json::Value, String>,
         usage: Result<serde_json::Value, String>,
         summary: Option<SourceUsageSummary>,
+        sessions: Vec<crate::session::SessionInfo>,
     }
 
     impl MockSource {
@@ -3138,6 +3275,7 @@ mod tests {
                 account: Err("n/a".into()),
                 usage: Err("n/a".into()),
                 summary: None,
+                sessions: vec![],
             }
         }
     }
@@ -3147,7 +3285,7 @@ mod tests {
         fn api_name(&self) -> &'static str { self.api_name }
         fn uri_prefix(&self) -> &'static str { self.prefix }
         fn is_available(&self) -> bool { self.available }
-        fn scan_sessions(&self) -> Vec<crate::session::SessionInfo> { vec![] }
+        fn scan_sessions(&self) -> Vec<crate::session::SessionInfo> { self.sessions.clone() }
         fn get_messages(&self, _: &str) -> Result<Vec<serde_json::Value>, String> { Ok(vec![]) }
         fn watch_strategy(&self) -> WatchStrategy { WatchStrategy::Poll(Duration::from_secs(5)) }
         fn fetch_account(&self) -> Result<serde_json::Value, String> { self.account.clone() }

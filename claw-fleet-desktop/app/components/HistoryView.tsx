@@ -7,7 +7,16 @@ import {
   type ReactNode,
 } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCheck, Clock, FolderGit2, History, List, Plus, Search } from "lucide-react";
+import {
+  CheckCheck,
+  CheckCircle2,
+  Circle,
+  Clock,
+  FolderGit2,
+  History,
+  Plus,
+  Search,
+} from "lucide-react";
 import { useReadStore, useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
@@ -63,13 +72,14 @@ const LIVE_STATUSES = new Set([
 
 /** Segments for the pending/done filter. "all" shows everything; the other two
  *  map to the binary mark buckets (unmarked collapses to "pending"). The
- *  read/unread axis is deliberately NOT filterable — only pending/done is. */
+ *  read/unread axis is deliberately NOT filterable — only pending/done is.
+ *
+ *  The two bucket segments render the exact icons `MarkControl` puts on the row
+ *  (hollow circle = pending, green check = done) so a segment reads as "show me
+ *  the rows wearing this icon". "all" is spelled out in words instead — any
+ *  third icon here just competes with those two for meaning. */
 type MarkFilter = "all" | "pending" | "done";
-const MARK_SEGMENTS: { key: MarkFilter; dot?: string }[] = [
-  { key: "all" },
-  { key: "pending", dot: "#d0a85a" },
-  { key: "done" },
-];
+const MARK_SEGMENTS: MarkFilter[] = ["all", "pending", "done"];
 
 /** Which bucket a session falls in — `done` is explicit, everything else is
  *  pending. */
@@ -514,36 +524,30 @@ export function HistoryView() {
             role="group"
             aria-label={t("history.mark_filter_label", "按标记状态筛选")}
           >
-            {MARK_SEGMENTS.map((seg) => {
+            {MARK_SEGMENTS.map((key) => {
               const label =
-                seg.key === "all"
+                key === "all"
                   ? t("history.mark_f_all", "全部")
-                  : seg.key === "pending"
+                  : key === "pending"
                     ? t("history.mark_f_pending", "进行中")
                     : t("history.mark_f_done", "已完成");
               return (
                 <button
-                  key={seg.key}
+                  key={key}
                   type="button"
-                  className={`${styles.mark_seg} ${markFilter === seg.key ? styles.mark_seg_on : ""}`}
-                  aria-pressed={markFilter === seg.key}
-                  onClick={() => setMarkFilter(seg.key)}
+                  className={`${styles.mark_seg} ${markFilter === key ? styles.mark_seg_on : ""}`}
+                  data-seg={key}
+                  aria-pressed={markFilter === key}
+                  onClick={() => setMarkFilter(key)}
                   title={label}
-                  aria-label={`${label} (${markCounts[seg.key]})`}
+                  aria-label={`${label} (${markCounts[key]})`}
                 >
-                  {seg.key === "all" && <List size={12} strokeWidth={1.8} />}
-                  {seg.dot && (
-                    <span
-                      className={styles.mark_seg_dot}
-                      style={{ background: seg.dot }}
-                    />
+                  {key === "all" && (
+                    <span className={styles.mark_seg_label}>{label}</span>
                   )}
-                  {seg.key === "done" && (
-                    <span
-                      className={`${styles.mark_seg_dot} ${styles.mark_seg_dot_done}`}
-                    />
-                  )}
-                  <span className={styles.mark_seg_count}>{markCounts[seg.key]}</span>
+                  {key === "pending" && <Circle size={13} strokeWidth={1.8} />}
+                  {key === "done" && <CheckCircle2 size={14} strokeWidth={1.8} />}
+                  <span className={styles.mark_seg_count}>{markCounts[key]}</span>
                 </button>
               );
             })}
