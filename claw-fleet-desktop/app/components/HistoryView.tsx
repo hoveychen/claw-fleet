@@ -107,10 +107,10 @@ function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>
   return t("ran_d", { n: Math.floor(diff / 86_400_000) });
 }
 
-/** Left accent-bar colour for run status: green = agent still live, amber =
- *  waiting for input. Ended sessions get no bar (null) — the bar is a positive
- *  "this one's doing something" signal, not another dot on every row. Distinct
- *  in shape from the round review mark on the right. */
+/** Run-status colour: green = agent still live, amber = waiting for input.
+ *  Ended sessions get nothing (null) — this is a positive "this one's doing
+ *  something" signal, not another mark on every row. Drives both the left dot
+ *  and the "已运行 N" runtime label, which are two views of the same fact. */
 function rowBarColor(s: SessionInfo): string | null {
   if (!LIVE_STATUSES.has(s.status)) return null;
   if (s.status === "waitingInput") return "#d0a85a";
@@ -187,26 +187,29 @@ const SessionRow = memo(function SessionRow({
   onClick,
 }: SessionRowProps) {
   const { t } = useTranslation();
+  const runColor = rowBarColor(s);
   return (
     <div className={styles.row_wrap}>
       <button
         type="button"
-        className={`${styles.row} ${isSelected ? styles.row_active : ""}`}
+        className={`${styles.row} ${isSelected ? styles.row_active : ""} ${unread ? styles.row_unread : ""}`}
         onClick={() => onClick(s)}
         title={s.lastMessagePreview ?? undefined}
+        aria-label={unread ? t("history.unread", "未读 — 有新消息") : undefined}
       >
-        {rowBarColor(s) && (
-          <span className={styles.row_bar} style={{ background: rowBarColor(s)! }} />
-        )}
-        {unread && (
+        {runColor && (
           <span
-            className={styles.unread_dot}
-            title={t("history.unread", "未读 — 有新消息")}
-            aria-label={t("history.unread", "未读 — 有新消息")}
+            className={styles.row_status_dot}
+            style={{ background: runColor }}
+            title={
+              s.status === "waitingInput"
+                ? t("history.waiting", "等待输入")
+                : t("history.running", "运行中")
+            }
           />
         )}
         <span className={styles.row_body}>
-          <span className={styles.row_title}>
+          <span className={`${styles.row_title} ${unread ? styles.row_title_unread : ""}`}>
             {s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
           </span>
           <span className={styles.row_meta}>
@@ -228,7 +231,7 @@ const SessionRow = memo(function SessionRow({
             {LIVE_STATUSES.has(s.status) && (
               <span
                 className={styles.row_runtime}
-                style={{ color: rowBarColor(s) ?? undefined }}
+                style={{ color: runColor ?? undefined }}
                 title={new Date(s.createdAtMs).toLocaleString()}
               >
                 <Clock size={10} strokeWidth={1.6} />
