@@ -256,6 +256,11 @@ function SkillDetail({
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [fileQuery, setFileQuery] = useState("");
   const [deleting, setDeleting] = useState(false);
+  const {
+    width: treeWidth,
+    isDragging: treeDragging,
+    onMouseDown: onTreeMouseDown,
+  } = useResizableWidth("skills-tree-width", { min: 140, max: 480, initial: 220 });
 
   useEffect(() => {
     setFiles(null);
@@ -386,7 +391,7 @@ function SkillDetail({
 
       <div className={skillStyles.detail_split}>
         {fileCount > 1 && (
-          <aside className={skillStyles.tree_pane}>
+          <aside className={skillStyles.tree_pane} style={{ width: treeWidth }}>
             <div className={skillStyles.tree_label}>
               {t("skills.files_label")}
             </div>
@@ -435,6 +440,8 @@ function SkillDetail({
                 </button>
               );
             })}
+
+            <ResizeHandle active={treeDragging} onMouseDown={onTreeMouseDown} />
           </aside>
         )}
 
