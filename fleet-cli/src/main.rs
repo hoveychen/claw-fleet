@@ -561,6 +561,17 @@ enum PrdDisciplineCommands {
 
 fn main() {
     claw_fleet_core::console::init_utf8();
+
+    // `fleet fleet-proc-host <id>` — re-exec target for detached workspace
+    // command hosts (see `claw_fleet_core::proc_runner`). Intercepted before
+    // clap so the marker never collides with real subcommands.
+    {
+        let args: Vec<String> = std::env::args().collect();
+        if args.len() >= 3 && args[1] == claw_fleet_core::proc_runner::HOST_ARGV_MARKER {
+            claw_fleet_core::proc_runner::host_main(&args[2]);
+        }
+    }
+
     let cli = Cli::parse();
 
     if let Some(ref host) = cli.remote {
