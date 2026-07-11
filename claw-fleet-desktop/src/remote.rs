@@ -629,6 +629,48 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn git_status(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitStatus, String> {
+        self.probe.get(&format!(
+            "/git_status?ws={}&root={}",
+            encode_path(workspace),
+            encode_path(root),
+        ))
+    }
+
+    fn git_push(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitOpResult, String> {
+        self.probe.post_json(
+            &format!(
+                "/git_push?ws={}&root={}",
+                encode_path(workspace),
+                encode_path(root),
+            ),
+            &serde_json::json!({}),
+        )
+    }
+
+    fn git_pull(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitOpResult, String> {
+        self.probe.post_json(
+            &format!(
+                "/git_pull?ws={}&root={}",
+                encode_path(workspace),
+                encode_path(root),
+            ),
+            &serde_json::json!({}),
+        )
+    }
+
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
         self.probe.get("/skills").unwrap_or_default()
     }

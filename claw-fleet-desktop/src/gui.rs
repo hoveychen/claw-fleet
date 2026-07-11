@@ -1898,6 +1898,35 @@ fn read_explorer_file(
         .read_explorer_file(&workspace, &root, &rel_path)
 }
 
+// ── Source control ──────────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn git_status(
+    workspace: String,
+    root: String,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::git_ops::GitStatus, String> {
+    state.backend.read().unwrap().git_status(&workspace, &root)
+}
+
+#[tauri::command]
+fn git_push(
+    workspace: String,
+    root: String,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
+    state.backend.read().unwrap().git_push(&workspace, &root)
+}
+
+#[tauri::command]
+fn git_pull(
+    workspace: String,
+    root: String,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
+    state.backend.read().unwrap().git_pull(&workspace, &root)
+}
+
 // ── Skills ────────────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -3606,6 +3635,9 @@ pub fn run() {
             search_wiki_docs,
             export_wiki_doc,
             list_explorer_roots,
+            git_status,
+            git_push,
+            git_pull,
             list_explorer_dir,
             read_explorer_file,
             list_skills,
