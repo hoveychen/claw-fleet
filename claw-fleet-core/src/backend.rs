@@ -456,6 +456,25 @@ pub trait Backend: Send + Sync {
         rel_path: &str,
     ) -> Result<crate::file_explorer::ExplorerFileContent, String>;
 
+    // ── Source control ──────────────────────────────────────────────────────────
+    // Simple git status + push/pull for an explorer `root`. `workspace` / `root`
+    // are validated the same way as the explorer methods above.
+    fn git_status(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitStatus, String>;
+    fn git_push(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitOpResult, String>;
+    fn git_pull(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitOpResult, String>;
+
     // ── Skills ────────────────────────────────────────────────────────────────
     fn list_skills(&self) -> Vec<SkillItem>;
     fn get_skill_content(&self, path: &str) -> Result<String, String>;

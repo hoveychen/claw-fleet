@@ -1866,6 +1866,30 @@ impl Backend for LocalBackend {
         crate::file_explorer::read_file(workspace, root, rel_path, &self.known_workspaces())
     }
 
+    fn git_status(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitStatus, String> {
+        crate::git_ops::git_status(workspace, root, &self.known_workspaces())
+    }
+
+    fn git_push(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitOpResult, String> {
+        crate::git_ops::git_push(workspace, root, &self.known_workspaces())
+    }
+
+    fn git_pull(
+        &self,
+        workspace: &str,
+        root: &str,
+    ) -> Result<crate::git_ops::GitOpResult, String> {
+        crate::git_ops::git_pull(workspace, root, &self.known_workspaces())
+    }
+
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
         crate::skills::scan_all_skills()
     }
