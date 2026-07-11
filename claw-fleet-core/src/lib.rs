@@ -87,6 +87,7 @@ pub mod skill_history;
 pub mod skills;
 pub mod tcc;
 pub mod token_analysis;
+pub mod user_attachments;
 pub mod wiki;
 pub mod wiki_guidance;
 pub mod workflow;

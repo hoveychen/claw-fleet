@@ -9,6 +9,8 @@ import {
   wikiLinkComponent,
   type WikiLinkContext,
 } from "../../markdown/wikiLinks";
+import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
+import { parsePathRef } from "../../markdown/pathRef";
 import styles from "./TextBlock.module.css";
 
 /** Recursively walk React children and highlight matching terms in string nodes. */
@@ -41,9 +43,19 @@ interface Props {
   /** When set, [[slug]] refs and bare slug hrefs resolve to other wiki docs
    *  (in-app navigation, dead links grayed). Chat rendering leaves this unset. */
   wiki?: WikiLinkContext;
+  /** When set, inline-code spans that parse as filesystem paths become chips
+   *  that open the file in the 文件 page. Needs a workspace root to resolve
+   *  relative paths against, so only callers that know one pass it. */
+  paths?: PathLinkContext;
 }
 
-export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms, wiki }: Props) {
+export const TextBlock = memo(function TextBlock({
+  text,
+  isPartial,
+  searchTerms,
+  wiki,
+  paths,
+}: Props) {
   // When streaming, strip the last incomplete paragraph to avoid visual flicker
   const content = isPartial ? stripLastParagraph(text) : text;
 
@@ -106,6 +118,17 @@ export const TextBlock = memo(function TextBlock({ text, isPartial, searchTerms,
                     {String(children).replace(/\n$/, "")}
                   </SyntaxHighlighter>
                 </div>
+              );
+            }
+            // An inline-code span that reads as a path becomes a clickable
+            // chip. Anything else keeps the plain inline-code styling.
+            const raw = typeof children === "string" ? children : null;
+            const pathRef = paths && raw ? parsePathRef(raw) : null;
+            if (paths && pathRef) {
+              return (
+                <PathChip pathRef={pathRef} ctx={paths}>
+                  {children}
+                </PathChip>
               );
             }
             return (

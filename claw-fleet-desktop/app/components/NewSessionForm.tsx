@@ -14,6 +14,7 @@ import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
 import { SessionOptionPills } from "./SessionOptionPills";
 import { useComposerDraft } from "../composerDraft";
+import { resolveStagedAttachment } from "../userAttachments";
 import styles from "./NewSessionForm.module.css";
 
 export interface NewSessionCreated {
@@ -150,15 +151,8 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
     patch({ attachments: [...attachments, entry] });
   };
 
-  const handleAddAttachment = (s: ChatComposerStagedAttachment) => {
-    addAttachmentEntry({
-      path: s.path,
-      name: s.name,
-      fromClipboard: s.fromClipboard,
-      previewUrl: s.preview?.previewUrl,
-      width: s.preview?.width,
-      height: s.preview?.height,
-    });
+  const handleAddAttachment = async (s: ChatComposerStagedAttachment) => {
+    addAttachmentEntry(await resolveStagedAttachment(s));
   };
 
   const handleRemoveAttachment = (path: string) => {

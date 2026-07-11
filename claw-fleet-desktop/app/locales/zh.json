@@ -285,7 +285,6 @@
     "feedback": "反馈：{{text}}",
     "has_image": "（含粘贴的截图）",
     "fleet_ask_html_marker": "［显示过 HTML 预览］",
-    "fleet_ask_attachments": "附件：{{paths}}",
     "empty": "本次会话还没有决策或提示。"
   },
   "audit": {
@@ -1211,6 +1210,7 @@
     "decision_answered_other": "已回答",
     "decision_unanswered": "未回答",
     "user_image": "附带的图片",
+    "attachments": "附件",
     "result_image": "工具返回的图片",
     "result_expand": "展开剩余 {{count}} 个字符",
     "result_collapse": "收起",
@@ -1688,7 +1688,7 @@
   },
   "history": {
     "title": "启动台",
-    "search_placeholder": "搜索标题、提示词、全文…",
+    "search_placeholder": "搜索标题、计划、全文…",
     "empty": "还没有会话，点右上角“新会话”发起一个",
     "no_match": "没有匹配的会话",
     "untitled": "（无标题）",
@@ -1754,5 +1754,12 @@
       "op_ok": "操作完成。",
       "op_failed": "操作失败。"
     }
+  },
+  "paths": {
+    "open_in_files": "在文件页中打开",
+    "reveal_in_finder": "在访达中显示",
+    "reveal_in_explorer": "在资源管理器中显示",
+    "open_hint": "打开 {{path}}",
+    "not_found": "路径不存在"
   }
 }

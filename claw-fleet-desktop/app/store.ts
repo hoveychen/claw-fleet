@@ -89,6 +89,23 @@ interface UIState {
    *  of whether the main window is minimized. */
   floatingDecisionPanel: boolean;
   setFloatingDecisionPanel: (on: boolean) => void;
+  /** A pending "reveal this file in the 文件 page" request, raised when the
+   *  user clicks a path in agent prose. FilesView owns the explorer's
+   *  selection state internally, so a request travels through the store
+   *  rather than through props. FilesView clears it once consumed. */
+  fileNav: FileNavRequest | null;
+  requestFileNav: (req: Omit<FileNavRequest, "nonce">) => void;
+  clearFileNav: () => void;
+}
+
+export interface FileNavRequest {
+  workspacePath: string;
+  /** Absolute path — already resolved against the workspace root. */
+  absPath: string;
+  line: number | null;
+  /** Bumped on every request so clicking the same path twice re-navigates
+   *  even when nothing else in the request changed. */
+  nonce: number;
 }
 
 function getSystemTheme(): "dark" | "light" {
@@ -147,6 +164,18 @@ export const useUIStore = create<UIState>((set) => ({
     invoke("set_lite_mode", { enabled: on }).catch(() => {});
     set({ liteMode: on });
   },
+  fileNav: null,
+  requestFileNav: (req) =>
+    set((s) => {
+      // Same persistence as setViewMode — a nav that skipped it would snap
+      // back to the previous view on the next launch.
+      setItem("viewMode", "files");
+      return {
+        viewMode: "files",
+        fileNav: { ...req, nonce: (s.fileNav?.nonce ?? 0) + 1 },
+      };
+    }),
+  clearFileNav: () => set({ fileNav: null }),
   setSidebarCollapsed: (on) => {
     setItem("sidebar-collapsed", on ? "true" : "false");
     set({ sidebarCollapsed: on });
@@ -1077,6 +1106,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   addElicitationAttachment: async (id, question, sourcePath, displayName, fromClipboard, preview) => {
     const resolvedPath = await invoke<string>("upload_elicitation_attachment", {
       sourcePath,
+      fromClipboard,
     });
     set((s) => ({
       decisions: s.decisions.map((d) => {
@@ -1242,6 +1272,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   addFleetAskAttachment: async (id, question, sourcePath, displayName, fromClipboard, preview) => {
     const resolvedPath = await invoke<string>("upload_elicitation_attachment", {
       sourcePath,
+      fromClipboard,
     });
     set((s) => ({
       decisions: s.decisions.map((d) => {

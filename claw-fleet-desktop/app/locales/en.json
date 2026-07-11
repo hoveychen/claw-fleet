@@ -288,7 +288,6 @@
     "feedback": "Feedback: {{text}}",
     "has_image": "(includes pasted image)",
     "fleet_ask_html_marker": "[HTML preview was shown]",
-    "fleet_ask_attachments": "Attachments: {{paths}}",
     "empty": "No decisions or prompts yet for this session."
   },
   "audit": {
@@ -1201,6 +1200,7 @@
     "decision_answered_other": "Answered",
     "decision_unanswered": "Unanswered",
     "user_image": "Attached image",
+    "attachments": "Attachments",
     "result_image": "Image returned by the tool",
     "result_expand": "Show {{count}} more characters",
     "result_collapse": "Collapse",
@@ -1678,7 +1678,7 @@
   },
   "history": {
     "title": "Launchpad",
-    "search_placeholder": "Search title, prompt, full text…",
+    "search_placeholder": "Search title, plan, full text…",
     "empty": "No sessions yet — hit New Session in the top-right to launch one",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
@@ -1744,5 +1744,12 @@
       "op_ok": "Done.",
       "op_failed": "Operation failed."
     }
+  },
+  "paths": {
+    "open_in_files": "Open in Files",
+    "reveal_in_finder": "Reveal in Finder",
+    "reveal_in_explorer": "Show in File Explorer",
+    "open_hint": "Open {{path}}",
+    "not_found": "Path not found"
   }
 }

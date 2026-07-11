@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -52,15 +52,34 @@ export function formatSize(bytes: number): string {
 // checkout, the session scratchpad reads a temp dir — which is the only
 // difference between the two surfaces.
 
+/**
+ * A request to open the tree down to `relPath` and select it.
+ *
+ * The tree owns its expansion state, so revealing a path has to happen in here.
+ * The caller still decides *what* to reveal — it is the one that knows about
+ * roots and absolute paths — and bumps `nonce` to re-fire a request for a path
+ * that is already showing.
+ */
+export interface RevealRequest {
+  relPath: string;
+  nonce: number;
+}
+
 export function FileTree({
   loadDir,
   activeFile,
   onPick,
+  reveal,
+  onRevealed,
 }: {
   /** Lists one level; "" is the root. null means the level is unreadable. */
   loadDir: (rel: string) => Promise<ExplorerEntry[] | null>;
   activeFile: ExplorerEntry | null;
   onPick: (entry: ExplorerEntry) => void;
+  /** Path to open the tree down to, e.g. from a path clicked in agent prose. */
+  reveal?: RevealRequest | null;
+  /** Fired once the request above has been served (or found to be unservable). */
+  onRevealed?: () => void;
 }) {
   const { t } = useTranslation();
   const [children, setChildren] = useState<Record<string, ExplorerEntry[]>>({});
@@ -79,6 +98,59 @@ export function FileTree({
       stale = true;
     };
   }, [loadDir]);
+
+  // ── Serve a reveal request ─────────────────────────────────────────────────
+  //
+  // Ordering matters. A fresh `loadDir` fires the reset effect above, whose
+  // async loadDir("") *replaces* `children` wholesale — so expanding the tree
+  // before the top level lands would have its work overwritten. We therefore
+  // wait for `children[""]`, then load the whole ancestor chain and commit it in
+  // one setChildren. The nonce ref keeps that commit from re-entering this
+  // effect through its own `children` dependency.
+  const revealedNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!reveal || reveal.nonce === revealedNonce.current) return;
+    if (!children[""]) return; // top level still loading — retry once it lands
+
+    const parts = reveal.relPath.split("/").filter(Boolean);
+    if (!parts.length) {
+      revealedNonce.current = reveal.nonce;
+      onRevealed?.();
+      return;
+    }
+    revealedNonce.current = reveal.nonce;
+
+    let stale = false;
+    void (async () => {
+      // Every ancestor directory, outermost first: a/b/c.rs → ["a", "a/b"].
+      const ancestors = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
+      const loaded: Record<string, ExplorerEntry[]> = {};
+      for (const dir of ancestors) {
+        const entries = children[dir] ?? (await loadDir(dir));
+        if (!entries) return; // directory gone — leave the tree as it was
+        loaded[dir] = entries;
+      }
+      if (stale) return;
+
+      const parentRel = ancestors.length ? ancestors[ancestors.length - 1] : "";
+      const siblings = loaded[parentRel] ?? children[parentRel] ?? [];
+      const target = siblings.find((e) => e.relativePath === reveal.relPath);
+
+      setChildren((prev) => ({ ...prev, ...loaded }));
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const dir of ancestors) next.add(dir);
+        // A directory ref (`app/markdown/`) opens itself rather than selecting.
+        if (target?.isDir) next.add(reveal.relPath);
+        return next;
+      });
+      if (target && !target.isDir) onPick(target);
+      onRevealed?.();
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [reveal, children, loadDir, onPick, onRevealed]);
 
   const toggleDir = useCallback(
     async (rel: string) => {

@@ -523,7 +523,14 @@ impl Backend for NullBackend {
     fn usage_history(&self, _: i64, _: i64) -> Vec<account::UsageHistoryPoint> {
         vec![]
     }
-    fn upload_attachment(&self, _: &std::path::Path) -> Result<String, String> {
+    fn upload_attachment(&self, _: &std::path::Path, _: bool) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
+    fn get_user_attachment(
+        &self,
+        _: &str,
+        _: &str,
+    ) -> Result<claw_fleet_core::mcp_ipc::DecisionAssetBytes, String> {
         Err("backend not ready".into())
     }
     fn list_claude_binaries(&self) -> Vec<claw_fleet_core::claude_binary::ClaudeBinary> {

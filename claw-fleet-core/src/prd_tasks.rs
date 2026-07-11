@@ -55,6 +55,12 @@ pub struct TaskPlanSummary {
     /// to its sentinel id. `None` for a legacy anonymous block with no title.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub current_plan: Option<String>,
+    /// Sentinel id of the attributed plan (e.g. `scene-items`). Carried alongside
+    /// `current_plan` because the two diverge whenever the block has a title: the
+    /// card shows the title, but humans refer to the plan by its id, and the
+    /// launcher's search box matches both.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan_id: Option<String>,
     /// First still-pending top-level task in the focused plan (e.g. `**P3** — …`).
     /// `None` when the focused plan has no pending task (shouldn't happen for an
     /// active plan, but kept optional for safety).
@@ -813,6 +819,7 @@ fn summarize_with_focus(
         done,
         total,
         current_plan: extract_plan_name(&focused.body).or_else(|| focused.id.clone()),
+        plan_id: focused.id.clone(),
         current_task: rec
             .current_task
             .clone()
@@ -1670,6 +1677,25 @@ trailing notes outside\n";
         let s = summarize_with_focus(main, &focus_rec(main, "x", None)).expect("summary");
         assert_eq!(s.current_plan.as_deref(), Some("重构会话中间件"));
         assert_eq!(s.current_task.as_deref(), Some("**P2** — 当前任务"));
+    }
+
+    /// The sentinel id survives alongside the title — the launcher searches both,
+    /// and humans name plans by id (`scene-items`) far more often than by title.
+    #[test]
+    fn summarize_carries_plan_id_beside_the_title() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path();
+        std::fs::write(
+            main.join("TASKS.md"),
+            "<!-- fleet:prd:begin id=\"scene-items\" -->\n\
+**Plan:** 场景物品交互\n\
+- [ ] **P1** — 建模\n\
+<!-- fleet:prd:end id=\"scene-items\" -->\n",
+        )
+        .unwrap();
+        let s = summarize_with_focus(main, &focus_rec(main, "scene-items", None)).expect("summary");
+        assert_eq!(s.plan_id.as_deref(), Some("scene-items"));
+        assert_eq!(s.current_plan.as_deref(), Some("场景物品交互"));
     }
 
     /// The attributed plan may live in a sibling worktree's TASKS.md rather than

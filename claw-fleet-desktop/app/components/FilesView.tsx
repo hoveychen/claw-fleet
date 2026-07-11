@@ -14,12 +14,18 @@ import {
 import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { runningProcCounts, useProcStore, useSessionsStore, useUIStore } from "../store";
+import {
+  runningProcCounts,
+  useProcStore,
+  useSessionsStore,
+  useUIStore,
+  type FileNavRequest,
+} from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { ProcPanel } from "./ProcPanel";
 import { ProcTerminal } from "./ProcTerminal";
 import { FilePreview, FileTree } from "./ExplorerPane";
-import type { ExplorerEntry, ExplorerFileContent } from "./ExplorerPane";
+import type { ExplorerEntry, ExplorerFileContent, RevealRequest } from "./ExplorerPane";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
@@ -48,6 +54,26 @@ interface GitOpResult {
   output: string;
 }
 
+// ── Helpers ──────────────────────────────────────────────────────────────────
+//
+// Tree rendering and its size/markdown helpers live in ExplorerPane, shared with
+// the session scratchpad. Root-picking stays here: it is the workspace
+// explorer's own concern — the scratchpad has a single root and never needs it.
+
+/** The root that owns `absPath` — longest matching prefix, so a worktree root
+ *  wins over the main checkout it lives inside. */
+function pickRoot(roots: ExplorerRoot[], absPath: string): ExplorerRoot | null {
+  let best: ExplorerRoot | null = null;
+  for (const root of roots) {
+    const prefix = root.path.endsWith("/") ? root.path : `${root.path}/`;
+    if (absPath.startsWith(prefix) && (!best || root.path.length > best.path.length)) {
+      best = root;
+    }
+  }
+  return best;
+}
+
+
 // ── Root view: workspace picker + explorer ──────────────────────────────────
 
 export function FilesView() {
@@ -57,7 +83,14 @@ export function FilesView() {
   const sessions = useSessionsStore((s) => s.sessions);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const procs = useProcStore((s) => s.procs);
+  const fileNav = useUIStore((s) => s.fileNav);
   const [selected, setSelected] = useState<string | null>(null);
+
+  // A path clicked in agent prose lands here: select its workspace, then hand
+  // the request down so the explorer can expand to the file itself.
+  useEffect(() => {
+    if (fileNav) setSelected(fileNav.workspacePath);
+  }, [fileNav]);
 
   // Running workspace-command count per workspace → card badges.
   const runningCounts = useMemo(() => runningProcCounts(procs), [procs]);
@@ -133,7 +166,12 @@ export function FilesView() {
 
         <main className={styles.detail_pane}>
           {active ? (
-            <WorkspaceExplorer key={active.path} workspace={active.path} name={active.name} />
+            <WorkspaceExplorer
+              key={active.path}
+              workspace={active.path}
+              name={active.name}
+              nav={fileNav?.workspacePath === active.path ? fileNav : null}
+            />
           ) : (
             <div className={styles.placeholder}>{t("files.select_workspace")}</div>
           )}
@@ -145,8 +183,17 @@ export function FilesView() {
 
 // ── Explorer for one workspace ───────────────────────────────────────────────
 
-function WorkspaceExplorer({ workspace, name }: { workspace: string; name: string }) {
+function WorkspaceExplorer({
+  workspace,
+  name,
+  nav,
+}: {
+  workspace: string;
+  name: string;
+  nav: FileNavRequest | null;
+}) {
   const { t } = useTranslation();
+  const clearFileNav = useUIStore((s) => s.clearFileNav);
   const [roots, setRoots] = useState<ExplorerRoot[] | null>(null);
   const [rootsError, setRootsError] = useState<string | null>(null);
   const [activeRoot, setActiveRoot] = useState<ExplorerRoot | null>(null);
@@ -198,6 +245,32 @@ function WorkspaceExplorer({ workspace, name }: { workspace: string; name: strin
       }),
     [workspace, activeRoot],
   );
+
+  // ── Reveal a path clicked in agent prose ───────────────────────────────────
+  //
+  // Pick the root that owns the path and reduce it to a root-relative one; the
+  // tree does the actual expanding, since it is what holds the expansion state.
+  // Switching roots re-runs this effect, so a path in a root we are not showing
+  // resolves on the second pass.
+  const [reveal, setReveal] = useState<RevealRequest | null>(null);
+  useEffect(() => {
+    if (!nav || !roots || !activeRoot) return;
+
+    const owner = pickRoot(roots, nav.absPath);
+    if (!owner) {
+      // Path lies outside every root of this workspace — nothing to reveal.
+      clearFileNav();
+      return;
+    }
+    if (owner.path !== activeRoot.path) {
+      setActiveRoot(owner); // this effect retries once the new root is active
+      return;
+    }
+
+    const prefix = owner.path.endsWith("/") ? owner.path : `${owner.path}/`;
+    const rel = nav.absPath.slice(prefix.length).replace(/\/$/, "");
+    setReveal({ relPath: rel, nonce: nav.nonce });
+  }, [nav, roots, activeRoot, clearFileNav]);
 
   return (
     <>
@@ -255,7 +328,13 @@ function WorkspaceExplorer({ workspace, name }: { workspace: string; name: strin
           {roots === null && <p className={skillStyles.tree_empty}>{t("files.loading")}</p>}
           {rootsError && <p className={skillStyles.tree_empty}>{rootsError}</p>}
           {activeRoot && (
-            <FileTree loadDir={loadDir} activeFile={activeFile} onPick={setActiveFile} />
+            <FileTree
+              loadDir={loadDir}
+              activeFile={activeFile}
+              onPick={setActiveFile}
+              reveal={reveal}
+              onRevealed={clearFileNav}
+            />
           )}
         </aside>
 

@@ -91,7 +91,7 @@ export function wikiLinkComponent(wiki: WikiLinkContext): Components["a"] {
         onClick={(e) => {
           e.preventDefault();
           if (isExternal && href) {
-            void openUrl(href);
+            openUrl(href).catch((err) => console.error("openUrl failed:", href, err));
           } else if (isLive && slug) {
             wiki.openSlug(slug);
           }

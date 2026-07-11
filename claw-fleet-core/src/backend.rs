@@ -823,14 +823,39 @@ pub trait Backend: Send + Sync {
     /// (epoch ms) for the 24h occupancy-trend chart. Sorted ascending by ts.
     fn usage_history(&self, from_ms: i64, to_ms: i64) -> Vec<UsageHistoryPoint>;
 
-    // ── Decision-panel attachments ──────────────────────────────────────────
+    // ── User-direction attachments ──────────────────────────────────────────
     /// Make a local file available to the agent process as an absolute path.
+    /// UI layers splice the returned path into the prompt (`Context files:`) or
+    /// the decision answer (`@<path>`) so Claude Code picks it up.
     ///
-    /// LocalBackend returns the source path unchanged (agent runs on the same
-    /// machine). RemoteBackend uploads the file bytes to the probe host and
-    /// returns the server-side temp path. UI layers concatenate the returned
-    /// path into the textarea as `@<path>` so Claude Code picks it up.
-    fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String>;
+    /// `from_clipboard` distinguishes the two kinds of attachment, which need
+    /// opposite treatment:
+    ///
+    /// * `true` — pasted/dropped bytes. They have no home of their own, so they
+    ///   are ingested into the persistent store ([`crate::user_attachments`]) and
+    ///   the store path is returned. That path is what lands in the transcript,
+    ///   so history can still resolve (and render) the image later.
+    /// * `false` — a file the user *picked*, which already has a meaningful path.
+    ///   It is returned unchanged: copying it into the store would point the
+    ///   agent at a snapshot instead of the file the user meant.
+    ///
+    /// RemoteBackend uploads the bytes to the probe host either way, since the
+    /// agent runs there and cannot see the desktop's filesystem at all.
+    fn upload_attachment(
+        &self,
+        source_path: &std::path::Path,
+        from_clipboard: bool,
+    ) -> Result<String, String>;
+
+    /// Raw bytes + mime of one file in the user-attachment store
+    /// (`~/.fleet/user-attachments/<key>/<name>`). Backs the
+    /// `fleet-attachment://` protocol that renders thumbnails in history, so it
+    /// must work for both local and remote backends.
+    fn get_user_attachment(
+        &self,
+        key: &str,
+        name: &str,
+    ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String>;
 
     // ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────
     // Skeleton: default impls report "not configured" until the operator sets
