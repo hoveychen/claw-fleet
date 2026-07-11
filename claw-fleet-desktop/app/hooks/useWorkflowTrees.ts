@@ -14,6 +14,7 @@ import type { WorkflowTree } from "../types";
 export function useWorkflowTrees(
   jsonlPath: string | null | undefined,
   enabled: boolean,
+  paused = false,
 ): WorkflowTree[] {
   const [trees, setTrees] = useState<WorkflowTree[]>([]);
 
@@ -22,6 +23,10 @@ export function useWorkflowTrees(
       setTrees([]);
       return;
     }
+    // Backgrounded (hidden tab): hold the last DAG rather than clearing it, so
+    // the workflow tab doesn't vanish and reappear across a tab switch. Coming
+    // back re-arms the effect, which re-polls immediately.
+    if (paused) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
@@ -44,7 +49,7 @@ export function useWorkflowTrees(
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [jsonlPath, enabled]);
+  }, [jsonlPath, enabled, paused]);
 
   return trees;
 }
