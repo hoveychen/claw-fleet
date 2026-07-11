@@ -9,7 +9,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { isFleetOwnedEntrypoint } from "../types";
+import { canResumeSession } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
@@ -294,16 +294,12 @@ export function SessionDetail({
   }, [liveSession?.id]);
 
   // Resume entry: only for "新会话"-launched main sessions (transcript
-  // entrypoint tag) that are not currently running — spawns
+  // entrypoint tag) whose process has exited — spawns
   // `claude --resume <sid> -p <追问>` detached via the generic resume chain.
   // The form itself (prompt + attachments + model/effort/permission overrides)
   // lives in ResumeComposer, docked at the bottom of the 对话 tab whenever the
   // session is resumable — no separate "恢复会话" toggle to click.
-  const canResume =
-    !!liveSession &&
-    !liveSession.isSubagent &&
-    !ACTIVE_STATUSES.has(liveSession.status) &&
-    isFleetOwnedEntrypoint(liveSession.entrypoint);
+  const canResume = !!liveSession && canResumeSession(liveSession);
 
   useEffect(() => {
     const sid = liveSession?.id;

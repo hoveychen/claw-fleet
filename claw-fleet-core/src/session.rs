@@ -102,6 +102,15 @@ pub struct SessionInfo {
     /// False when multiple claude processes share the same cwd and none carries
     /// a matching --resume flag — stopping may affect sibling sessions.
     pub pid_precise: bool,
+    /// True when a live CLI process carries this exact session id in its argv
+    /// (`--session-id` on the first turn, `--resume` on follow-ups). Unlike
+    /// `pid_precise` — which also goes true for a lone root process in the cwd
+    /// that never named this session — this is a definitive liveness signal for
+    /// Fleet-spawned sessions, and the only way to tell apart the two meanings
+    /// of `WaitingInput`: "turn ended, process gone" (resumable) vs "process
+    /// alive, parked on a decision card" (resuming would race a live turn).
+    #[serde(default)]
+    pub proc_alive: bool,
     pub last_skill: Option<String>,
     /// Approximate context-window utilisation (0.0 – 1.0) derived from the
     /// last finalized assistant message's usage fields.  `None` when no
@@ -2212,6 +2221,9 @@ pub fn parse_session_info(
         thinking_level,
         pid,
         pid_precise,
+        // Stamped by `apply_pid_liveness` right after this returns — the parse
+        // itself has no view of the process table.
+        proc_alive: false,
         context_percent,
         last_skill,
         agent_source: "claude-code".to_string(),
@@ -2365,6 +2377,10 @@ pub fn apply_pid_liveness(
     exact_proc_alive: bool,
     hook_state: Option<&HookState>,
 ) {
+    // Stamped for every session (subagents included, where it is always false):
+    // the UI needs the raw liveness bit, not just the status it feeds into.
+    info.proc_alive = exact_proc_alive;
+
     if info.is_subagent
         || info.entrypoint.as_deref() != Some(crate::session_launch::NEW_SESSION_ENTRYPOINT)
     {
@@ -2942,6 +2958,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         thinking_level: None,
         pid: None,
         pid_precise: false,
+        proc_alive: false,
         last_skill: None,
         context_percent: None,
         agent_source: "claude-code".into(),
@@ -3247,6 +3264,7 @@ mod tests {
             thinking_level: None,
             pid: None,
             pid_precise: false,
+            proc_alive: false,
             last_skill: None,
             context_percent: None,
             agent_source: "claude-code".into(),
@@ -4461,6 +4479,26 @@ mod tests {
         let mut s = make_launchpad_session(SessionStatus::WaitingInput);
         apply_pid_liveness(&mut s, false, None);
         assert_eq!(s.status, SessionStatus::WaitingInput);
+    }
+
+    #[test]
+    fn pid_liveness_stamps_proc_alive_even_when_status_is_untouched() {
+        // The UI can't read `WaitingInput` as "resumable" on its own — it means
+        // both "turn ended, process gone" and "alive, parked on a decision
+        // card". `proc_alive` is what separates them, so it must be stamped on
+        // every session, including ones this function returns early on.
+        let mut dead = make_launchpad_session(SessionStatus::WaitingInput);
+        apply_pid_liveness(&mut dead, false, None);
+        assert!(!dead.proc_alive);
+
+        let mut alive = make_launchpad_session(SessionStatus::WaitingInput);
+        apply_pid_liveness(&mut alive, true, None);
+        assert!(alive.proc_alive);
+
+        let mut sub = make_launchpad_session(SessionStatus::WaitingInput);
+        sub.is_subagent = true;
+        apply_pid_liveness(&mut sub, false, None);
+        assert!(!sub.proc_alive);
     }
 
     #[test]

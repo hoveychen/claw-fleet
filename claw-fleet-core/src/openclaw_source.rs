@@ -402,6 +402,8 @@ fn parse_openclaw_session(
         thinking_level,
         pid,
         pid_precise: pid.is_some(),
+        // OpenClaw sessions are never Fleet-spawned, so no argv carries their id.
+        proc_alive: false,
         last_skill: None,
         context_percent: extract_last_context_usage(&all_lines)
             .and_then(|(used, m, max)| compute_context_percent(used, Some(&m), max)),
