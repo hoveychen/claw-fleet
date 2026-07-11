@@ -931,6 +931,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
+            background_tasks: Vec::new(),
             task_plan: None, handoff: None, user_mark: None, last_read_ms: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,

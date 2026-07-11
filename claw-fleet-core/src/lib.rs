@@ -3,6 +3,7 @@ pub mod agent_source;
 pub mod audit;
 pub mod auto_resume;
 pub mod backend;
+pub mod bg_guard;
 pub mod bom;
 pub mod claude_analyze;
 pub mod claude_binary;

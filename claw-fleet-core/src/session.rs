@@ -130,6 +130,15 @@ pub struct SessionInfo {
     /// compact task-progress row on the session card.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub task_plan: Option<crate::prd_tasks::TaskPlanSummary>,
+    /// Background tasks (shells, monitors, …) that were still running the last
+    /// time this session ended a turn — i.e. what it is waiting on. Empty for
+    /// the overwhelming majority of sessions.
+    ///
+    /// Read from the `background_tasks` array of the Stop hook payload, which
+    /// Fleet already records. Stamped at scan time from the hook snapshot rather
+    /// than the cached deep parse: the task list changes while the jsonl doesn't.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub background_tasks: Vec<crate::bg_guard::BackgroundTask>,
     /// Relay-chain position when this session is part of a handoff chain
     /// (`fleet handoff`). `None` = never relayed. Stamped by
     /// `handoff::enrich_sessions` at scan time, not during the cached deep
@@ -586,6 +595,31 @@ pub struct CliProcess {
     /// of the two (launchpad spawns pass `--session-id`, follow-up turns pass
     /// `--resume`), so their pids resolve to exactly one session.
     pub resume_session_id: Option<String>,
+    /// True when the process was launched in headless print mode (`-p` /
+    /// `--print`) — the shape Fleet uses for every session it spawns.
+    ///
+    /// Load-bearing for the background-task guard: a headless run kills its
+    /// background shells ~5s after the final result and nothing can re-invoke
+    /// the model afterwards, whereas an interactive CLI keeps them alive across
+    /// turns. See `crate::bg_guard`.
+    pub headless: bool,
+}
+
+/// Was this `claude` process started in headless print mode?
+///
+/// Matches the flag as a standalone argv element, so a prompt that merely
+/// *mentions* `-p` (prompts arrive as a single argv element) can't trip it.
+///
+/// Deliberately *not* `session_launch::is_fleet_owned_entrypoint`, which answers
+/// a different question: that one asks "did Fleet spawn this?" (an ownership
+/// check, used to gate interrupts) by reading the entrypoint stamped in the
+/// transcript. The guard needs "will this process kill its background shells on
+/// exit?", and that is a property of `-p`, not of who launched it. Fleet's hooks
+/// are installed globally, so they also fire for a `claude -p` the user ran by
+/// hand in a terminal — same dead end, no Fleet entrypoint.
+fn is_headless_argv(cmd: &[std::ffi::OsString]) -> bool {
+    cmd.iter()
+        .any(|arg| arg == "-p" || arg == "--print")
 }
 
 fn extract_resume_id(cmd: &[std::ffi::OsString]) -> Option<String> {
@@ -683,18 +717,45 @@ pub fn scan_cli_processes() -> Vec<CliProcess> {
             if let Some(cwd) = process.cwd() {
                 if let Some(path) = cwd.to_str() {
                     let resume_session_id = extract_resume_id(process.cmd());
+                    let headless = is_headless_argv(process.cmd());
                     let ppid = process.parent().map(|p| p.as_u32());
                     result.push(CliProcess {
                         pid: pid.as_u32(),
                         ppid,
                         cwd: path.to_string(),
                         resume_session_id,
+                        headless,
                     });
                 }
             }
         }
     }
     result
+}
+
+/// Is `session_id` being run by a headless (`claude -p`) process right now?
+///
+/// Pure half, so the decision is testable without real processes. Only an argv
+/// that names this exact session counts — `resolve_pid`'s looser cwd-based
+/// heuristics would happily hand back a *sibling* session's process, and
+/// mistaking an interactive session for a headless one would block a turn that
+/// had every right to end.
+///
+/// Unknown ⇒ `false`: when no process names the session (already exited, or the
+/// scan came back empty), the guard stays out of the way. Failing to block costs
+/// a lost background task; blocking by mistake wedges a session that was fine.
+pub fn is_headless_session_in(procs: &[CliProcess], session_id: &str) -> bool {
+    procs
+        .iter()
+        .find(|p| p.resume_session_id.as_deref() == Some(session_id))
+        .map(|p| p.headless)
+        .unwrap_or(false)
+}
+
+/// Live-process version of [`is_headless_session_in`], for hook entrypoints that
+/// only know their own session id.
+pub fn is_headless_session(session_id: &str) -> bool {
+    is_headless_session_in(&scan_cli_processes(), session_id)
 }
 
 // ── IDE session scanning ─────────────────────────────────────────────────────
@@ -1817,6 +1878,7 @@ pub fn parse_session_info(
         rate_limit,
         todos,
         task_plan,
+        background_tasks: Vec::new(),
         handoff: None,
         user_mark: None,
         last_read_ms: None,
@@ -2061,7 +2123,10 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         guard.1.clone()
     };
 
-    let hook_states = crate::hooks::read_hook_states();
+    // One pass over hooks.jsonl yields both the state map and the outstanding
+    // background tasks — the file is huge, so the scan must not read it twice.
+    let hook_snapshot = crate::hooks::read_hook_snapshot();
+    let hook_states = &hook_snapshot.states;
     let session_cache_snapshot = scan_cache.session_cache.lock().unwrap().clone();
 
     let projects_dir = claude_dir.join("projects");
@@ -2162,6 +2227,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
                     age_out_status(&mut info, age);
                     apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
+                    info.background_tasks = hook_snapshot
+                        .background_tasks
+                        .get(&session_id)
+                        .cloned()
+                        .unwrap_or_default();
                     info.pid = session_pid;
                     info.pid_precise = pid_precise;
                     info.ide_name = ide_name.clone();
@@ -2183,6 +2253,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     hook_states.get(&session_id),
                 ) {
                     apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
+                    info.background_tasks = hook_snapshot
+                        .background_tasks
+                        .get(&session_id)
+                        .cloned()
+                        .unwrap_or_default();
                     scan_cache.session_cache.lock().unwrap()
                         .insert(path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
                     sessions.push(info);
@@ -2749,6 +2824,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
+            background_tasks: Vec::new(),
             task_plan: None, handoff: None, user_mark: None, last_read_ms: None,
             compact_count: 0,
             compact_pre_tokens: 0,
@@ -3542,11 +3618,65 @@ mod tests {
         assert_eq!(resolve_pid(&[], "sess1"), (None, false));
     }
 
+    fn argv(args: &[&str]) -> Vec<std::ffi::OsString> {
+        args.iter().map(std::ffi::OsString::from).collect()
+    }
+
+    #[test]
+    fn headless_argv_matches_fleets_own_spawn_shape() {
+        // Verbatim from `ps` for a session Fleet spawned (prompt elided).
+        assert!(is_headless_argv(&argv(&[
+            "claude", "-p", "帮我查一下这个 handoff",
+            "--session-id", "f74954c1-5deb-4098-889a-721e1d83ff1e",
+            "--output-format", "stream-json", "--permission-mode", "acceptEdits",
+        ])));
+    }
+
+    #[test]
+    fn interactive_ide_argv_is_not_headless() {
+        // Verbatim from `ps` for the VS Code extension's CLI: no `-p`, and it
+        // keeps background shells alive across turns — must never be blocked.
+        assert!(!is_headless_argv(&argv(&[
+            "claude", "--output-format", "stream-json", "--verbose",
+            "--input-format", "stream-json", "--permission-prompt-tool", "stdio",
+            "--resume", "822b7957-4d5d-4d77-b84d-56f76a3acff3",
+            "--permission-mode", "acceptEdits", "--include-partial-messages",
+        ])));
+    }
+
+    #[test]
+    fn a_prompt_mentioning_dash_p_is_not_headless() {
+        // The prompt is one argv element, so its text can't be mistaken for the
+        // flag — guard against a future switch to substring matching.
+        assert!(!is_headless_argv(&argv(&[
+            "claude", "--resume", "s1", "run it with -p and --print",
+        ])));
+    }
+
+    #[test]
+    fn long_form_print_flag_is_headless() {
+        assert!(is_headless_argv(&argv(&["claude", "--print", "hi"])));
+    }
+
+    #[test]
+    fn is_headless_session_needs_an_exact_session_match() {
+        let procs = vec![
+            CliProcess { pid: 1, ppid: None, cwd: "/w".into(), resume_session_id: Some("headless-one".into()), headless: true },
+            CliProcess { pid: 2, ppid: None, cwd: "/w".into(), resume_session_id: Some("ide-one".into()), headless: false },
+        ];
+        assert!(is_headless_session_in(&procs, "headless-one"));
+        assert!(!is_headless_session_in(&procs, "ide-one"));
+        // A session no live process names — e.g. it already exited. Unknown must
+        // not be treated as headless, or we'd block turns we know nothing about.
+        assert!(!is_headless_session_in(&procs, "who-dis"));
+        assert!(!is_headless_session_in(&[], "headless-one"));
+    }
+
     #[test]
     fn resolve_pid_exact_resume_match() {
         let procs = vec![
-            CliProcess { pid: 100, ppid: None, cwd: "/tmp".into(), resume_session_id: Some("sess1".into()) },
-            CliProcess { pid: 200, ppid: None, cwd: "/tmp".into(), resume_session_id: None },
+            CliProcess { pid: 100, ppid: None, cwd: "/tmp".into(), resume_session_id: Some("sess1".into()), headless: false },
+            CliProcess { pid: 200, ppid: None, cwd: "/tmp".into(), resume_session_id: None, headless: false },
         ];
         assert_eq!(resolve_pid(&procs, "sess1"), (Some(100), true));
     }
@@ -3554,7 +3684,7 @@ mod tests {
     #[test]
     fn resolve_pid_single_process() {
         let procs = vec![
-            CliProcess { pid: 42, ppid: None, cwd: "/tmp".into(), resume_session_id: None },
+            CliProcess { pid: 42, ppid: None, cwd: "/tmp".into(), resume_session_id: None, headless: false },
         ];
         assert_eq!(resolve_pid(&procs, "other"), (Some(42), true));
     }
@@ -3562,8 +3692,8 @@ mod tests {
     #[test]
     fn resolve_pid_parent_child_filtering() {
         let procs = vec![
-            CliProcess { pid: 100, ppid: Some(1), cwd: "/tmp".into(), resume_session_id: None },
-            CliProcess { pid: 200, ppid: Some(100), cwd: "/tmp".into(), resume_session_id: None },
+            CliProcess { pid: 100, ppid: Some(1), cwd: "/tmp".into(), resume_session_id: None, headless: false },
+            CliProcess { pid: 200, ppid: Some(100), cwd: "/tmp".into(), resume_session_id: None, headless: false },
         ];
         assert_eq!(resolve_pid(&procs, "any"), (Some(100), true));
     }
@@ -3571,8 +3701,8 @@ mod tests {
     #[test]
     fn resolve_pid_multiple_roots_imprecise() {
         let procs = vec![
-            CliProcess { pid: 100, ppid: Some(1), cwd: "/tmp".into(), resume_session_id: None },
-            CliProcess { pid: 200, ppid: Some(2), cwd: "/tmp".into(), resume_session_id: None },
+            CliProcess { pid: 100, ppid: Some(1), cwd: "/tmp".into(), resume_session_id: None, headless: false },
+            CliProcess { pid: 200, ppid: Some(2), cwd: "/tmp".into(), resume_session_id: None, headless: false },
         ];
         let (pid, precise) = resolve_pid(&procs, "any");
         assert!(pid.is_some());
