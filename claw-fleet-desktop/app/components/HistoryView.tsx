@@ -314,6 +314,18 @@ export function HistoryView() {
         <div className={styles.header}>
           <span className={styles.header_title}>{t("history.title", "启动台")}</span>
           <span className={styles.header_count}>{rows.length}</span>
+          {/* Icon-only in the header: the rail is 300px and "Mark all read" spelled
+              out would push the new-session button off the row in en locale. */}
+          <button
+            type="button"
+            className={styles.header_read_btn}
+            disabled={unreadSessions.length === 0}
+            onClick={() => markManyRead(unreadSessions)}
+            title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
+            aria-label={t("history.mark_all_read", "全部已读")}
+          >
+            <CheckCheck size={14} strokeWidth={1.8} />
+          </button>
           <button
             type="button"
             className={`${styles.header_new_btn} ${composing ? styles.header_new_btn_active : ""}`}
@@ -359,16 +371,6 @@ export function HistoryView() {
               <span className={styles.active_toggle_dot} />
               {t("history.only_active", "仅活跃")}
               <span>{activeCount}</span>
-            </button>
-            <button
-              type="button"
-              className={styles.mark_all_read}
-              disabled={unreadSessions.length === 0}
-              onClick={() => markManyRead(unreadSessions)}
-              title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
-            >
-              <CheckCheck size={13} strokeWidth={1.8} />
-              {t("history.mark_all_read", "全部已读")}
             </button>
           </div>
           <div
