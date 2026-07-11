@@ -1686,6 +1686,8 @@
     "all_workspaces": "All workspaces",
     "only_active": "Active only",
     "filter_active_tip": "Show only sessions still running or waiting for input",
+    "mark_all_read": "Mark all read",
+    "mark_all_read_tip": "Mark every unread session as read",
     "mark_new": "Not reviewed — click to mark in progress",
     "mark_pending": "In progress — click to mark done",
     "mark_done": "Done — click to clear the mark",
