@@ -49,6 +49,7 @@ export function SessionDetail({
   inline = false,
   sessionInfo = null,
   searchQuery: standaloneSearchQuery = null,
+  paused = false,
 }: {
   lite?: boolean;
   inline?: boolean;
@@ -63,6 +64,13 @@ export function SessionDetail({
    *  the FTS query that matched this session in HistoryView). Ignored in
    *  global-store mode, which reads the query from useDetailStore. */
   searchQuery?: string | null;
+  /** Standalone mode only: this instance is mounted but hidden (a background
+   *  tab in HistoryView's tab bar). Kept alive so its messages, scroll and
+   *  view-tab survive a tab switch, but every poller is frozen — otherwise
+   *  each open tab of an active session would keep hitting `read_live_thinking`
+   *  every 700ms and `get_messages_tail` every 1.5s in the background. Coming
+   *  back to the foreground refetches the tail once, immediately. */
+  paused?: boolean;
 } = {}) {
   const { t } = useTranslation();
   const isStandalone = sessionInfo != null;
@@ -92,19 +100,26 @@ export function SessionDetail({
     }
   }, [isStandalone, sessionInfo?.id]);
 
-  // Fetch initial tail when localSession.jsonlPath changes.
+  // Fetch the tail when localSession.jsonlPath changes — and again whenever a
+  // background tab returns to the foreground, which is what makes `paused` a
+  // dependency here. That second case is load-bearing: the live-tail poll below
+  // only arms for *active* sessions, so a session that finished while its tab
+  // was hidden would otherwise be left showing a stale transcript missing its
+  // final messages. Refetching the *current* window (not INITIAL_TAIL) keeps
+  // any earlier history the user had already loaded in this tab.
   useEffect(() => {
-    if (!isStandalone || !localSession) return;
+    if (!isStandalone || !localSession || paused) return;
     let cancelled = false;
+    const tail = localTailRef.current;
     setLocalLoading(true);
     invoke<RawMessage[]>("get_messages_tail", {
       jsonlPath: localSession.jsonlPath,
-      tail: INITIAL_TAIL,
+      tail,
     })
       .then((msgs) => {
         if (cancelled) return;
         setLocalMessages(msgs);
-        setLocalFullyLoaded(msgs.length < INITIAL_TAIL);
+        setLocalFullyLoaded(msgs.length < tail);
         setLocalLoading(false);
       })
       .catch(() => {
@@ -114,7 +129,7 @@ export function SessionDetail({
     return () => {
       cancelled = true;
     };
-  }, [isStandalone, localSession?.jsonlPath]);
+  }, [isStandalone, localSession?.jsonlPath, paused]);
 
   const standaloneLoadEarlier = useCallback(async () => {
     if (!isStandalone || !localSession || localFullyLoaded) return;
@@ -185,7 +200,7 @@ export function SessionDetail({
   // a session-level "Workflow" tab (not inline in the conversation). Publishing
   // the run rollup to the store drives the SessionCard chip.
   const setWorkflowRunCount = useSessionsStore((s) => s.setWorkflowRunCount);
-  const workflowTrees = useWorkflowTrees(liveSession?.jsonlPath ?? null, !!liveSession);
+  const workflowTrees = useWorkflowTrees(liveSession?.jsonlPath ?? null, !!liveSession, paused);
   const hasWorkflows = workflowTrees.length > 0;
   useEffect(() => {
     const sid = liveSession?.id;
@@ -208,6 +223,10 @@ export function SessionDetail({
       setLiveThinking(null);
       return;
     }
+    // Backgrounded (hidden tab): freeze on the last reasoning we showed rather
+    // than clearing it. This is the hottest poller in the component (700ms), so
+    // leaving it running for every open tab is exactly what we're avoiding.
+    if (paused) return;
     let cancelled = false;
     const poll = () => {
       invoke<LiveThinking | null>("read_live_thinking", { sessionId: liveSessionId })
@@ -224,7 +243,7 @@ export function SessionDetail({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [liveSessionId, liveActive]);
+  }, [liveSessionId, liveActive, paused]);
 
   // Standalone-mode live tail: the initial fetch above is a one-shot, which
   // was fine when the only standalone consumer was DecisionPanel (a pending
@@ -234,9 +253,11 @@ export function SessionDetail({
   // trait, so local and remote sessions both work. The status flip to
   // non-active lags the final transcript writes by a scan cycle, so the last
   // polls before the interval stops still catch the closing messages.
+  // Frozen while backgrounded; the fetch effect above catches the tab up the
+  // moment it returns to the foreground.
   const standaloneJsonlPath = isStandalone ? localSession?.jsonlPath : undefined;
   useEffect(() => {
-    if (!standaloneJsonlPath || !liveActive) return;
+    if (!standaloneJsonlPath || !liveActive || paused) return;
     let cancelled = false;
     let inFlight = false;
     const poll = () => {
@@ -268,7 +289,7 @@ export function SessionDetail({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [standaloneJsonlPath, liveActive]);
+  }, [standaloneJsonlPath, liveActive, paused]);
 
   // Open a subagent's session — a workflow fan-out agent from the DAG, or a
   // Task subagent from its tool card. The scan registers both as
