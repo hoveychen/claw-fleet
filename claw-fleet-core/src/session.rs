@@ -1245,13 +1245,20 @@ impl StatsAcc {
     /// Safe to call repeatedly; re-feeding a line that was already folded in is
     /// a no-op for token/cost totals thanks to the msg-id dedup above.
     pub fn push_lines(&mut self, lines: &[&str]) {
+        for line in lines {
+            if let Ok(v) = serde_json::from_str::<Value>(line) {
+                self.push_value(&v);
+            }
+        }
+    }
+
+    /// Fold one already-parsed record. Split out from [`push_lines`] so that
+    /// [`SessionAcc`] can parse each line once and fan the same `Value` out to
+    /// every extractor, instead of re-parsing the file per extractor.
+    pub fn push_value(&mut self, v: &Value) {
         use crate::model_cost::{get_model_costs, turn_cost_usd, TurnUsage};
 
-        for line in lines {
-            let Ok(v): Result<Value, _> = serde_json::from_str(line) else {
-                continue;
-            };
-
+        {
             // `compact_boundary` is a system meta event Claude Code emits each time
             // it summarises the conversation. The summary LLM call itself is not
             // logged as a standalone assistant turn, so its true cost is not in
@@ -1280,22 +1287,22 @@ impl StatsAcc {
                 let costs = get_model_costs(pricing_model);
                 self.compact_cost_usd += (pre as f64 / 1_000_000.0) * costs.cache_read
                     + (post as f64 / 1_000_000.0) * costs.output;
-                continue;
+                return;
             }
 
             if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-                continue;
+                return;
             }
             let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
-                continue;
+                return;
             };
             // Only count finalized messages
             if msg.get("stop_reason").map_or(true, |s| s.is_null()) {
-                continue;
+                return;
             }
             let msg_id = msg.get("id").and_then(|i| i.as_str()).unwrap_or_default();
             if !msg_id.is_empty() && !self.seen_msg_ids.insert(hash_msg_id(msg_id)) {
-                continue;
+                return;
             }
 
             let usage = msg.get("usage");
@@ -1430,6 +1437,175 @@ fn compute_session_stats(lines: &[&str]) -> SessionStats {
     let mut acc = StatsAcc::new();
     acc.push_lines(lines);
     acc.finish()
+}
+
+/// Everything `parse_session_info` used to derive by re-reading the whole
+/// transcript, folded in a single forward pass that can be resumed.
+///
+/// Two wins over the old shape, which read the file with `read_to_string` and
+/// then walked `all_lines` once per extractor:
+///
+/// 1. **One parse, many extractors.** Each line is turned into a `Value` once
+///    and fanned out, instead of being re-parsed by `compute_session_stats`,
+///    `extract_last_context_usage`, the ai-title scan, and the todo scan.
+/// 2. **Resumable.** Every field folds over batches, so a session that appended
+///    a few lines can be advanced with just those lines rather than re-read from
+///    byte zero on every 2s scan tick.
+///
+/// Each field's fold rule is chosen to match the batch-free original exactly —
+/// see the comments on the fields that are not simple last-write-wins.
+#[derive(Clone, Debug, Default)]
+pub struct SessionAcc {
+    stats: StatsAcc,
+
+    /// Latest live (non-sidechain) assistant usage: `(total_input, model)`.
+    ctx_last: Option<(u64, String)>,
+    /// Largest single-turn total input seen *since the last compact summary*.
+    ctx_session_max: u64,
+
+    /// First `ai-title` record wins; `None` simply means "not seen yet", so a
+    /// title written later is still picked up.
+    ai_title: Option<String>,
+
+    /// The *first* `user` record decides the entrypoint — including when that
+    /// record carries no `entrypoint` field at all, which settles it to `None`.
+    /// Hence the explicit flag: without it, a later `user` record's entrypoint
+    /// would wrongly fill in a value the original would have left empty.
+    entrypoint: Option<String>,
+    entrypoint_settled: bool,
+
+    /// Latest todo block wins.
+    todos: Option<crate::session_todos::TodoSummary>,
+}
+
+impl SessionAcc {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fold a batch of newly-appended lines. Parses each line once.
+    pub fn push_lines(&mut self, lines: &[&str]) {
+        for line in lines {
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            self.stats.push_value(&v);
+            self.push_context(&v);
+
+            if self.ai_title.is_none()
+                && v.get("type").and_then(|t| t.as_str()) == Some("ai-title")
+            {
+                self.ai_title = v
+                    .get("aiTitle")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string());
+            }
+
+            if !self.entrypoint_settled && v.get("type").and_then(|t| t.as_str()) == Some("user")
+            {
+                self.entrypoint_settled = true;
+                self.entrypoint = v
+                    .get("entrypoint")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string());
+            }
+
+            if let Some(summary) = crate::session_todos::todo_summary_from_value(&v) {
+                self.todos = Some(summary);
+            }
+        }
+    }
+
+    /// Context-window usage, folded as a little state machine.
+    ///
+    /// The batch-free original first located the *last* compact-summary line and
+    /// only scanned after it, because pre-compact `input_tokens` are stale
+    /// (Claude Code strips them at load time). Folding forward, that same rule is
+    /// just "a compact summary resets what we know" — after the final reset the
+    /// surviving state is exactly the post-cutoff scan the original performed.
+    fn push_context(&mut self, v: &Value) {
+        if v.get("type").and_then(|t| t.as_str()) == Some("user")
+            && v.get("isCompactSummary")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false)
+        {
+            self.ctx_last = None;
+            self.ctx_session_max = 0;
+            return;
+        }
+
+        // Subagent turns have their own context window; they must not pollute
+        // the parent's number.
+        if v.get("isSidechain")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+            return;
+        }
+        let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
+            return;
+        };
+
+        // Deliberately no `stop_reason` filter: Claude Code counts in-progress
+        // turns toward context, so the percentage updates while streaming.
+        let usage = msg.get("usage");
+        let get = |k: &str| {
+            usage
+                .and_then(|u| u.get(k))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0)
+        };
+        let total_input =
+            get("input_tokens") + get("cache_creation_input_tokens") + get("cache_read_input_tokens");
+        if total_input == 0 {
+            return;
+        }
+        if total_input > self.ctx_session_max {
+            self.ctx_session_max = total_input;
+        }
+        let model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
+        self.ctx_last = Some((total_input, model));
+    }
+
+    pub fn stats_at(&self, now_secs: f64) -> SessionStats {
+        self.stats.finish_at(now_secs)
+    }
+
+    pub fn stats(&self) -> SessionStats {
+        self.stats.finish()
+    }
+
+    /// `(input_tokens_used, model, session_max_input_tokens)`, matching
+    /// [`extract_last_context_usage`].
+    pub fn context_usage(&self) -> Option<(u64, String, u64)> {
+        self.ctx_last
+            .clone()
+            .map(|(used, model)| (used, model, self.ctx_session_max))
+    }
+
+    pub fn ai_title(&self) -> Option<String> {
+        self.ai_title.clone()
+    }
+
+    pub fn entrypoint(&self) -> Option<String> {
+        self.entrypoint.clone()
+    }
+
+    pub fn todos(&self) -> Option<crate::session_todos::TodoSummary> {
+        self.todos.clone()
+    }
+
+    /// Bound the speed-window samples carried between scans.
+    pub fn prune(&mut self, now_secs: f64) {
+        self.stats.prune_timed(now_secs);
+    }
 }
 
 /// Extract context-window usage from a Claude-Code JSONL session.
@@ -3209,6 +3385,138 @@ mod tests {
         assert!(before.token_speed > 0.0, "sanity: window should be non-empty");
         assert_eq!(after.token_speed, before.token_speed);
         assert_eq!(after.cost_speed_usd_per_min, before.cost_speed_usd_per_min);
+    }
+
+    // ── SessionAcc: equivalence with the whole-file extractors ──────────────
+    //
+    // SessionAcc replaces four separate full-file passes. These tests pin it
+    // against the originals rather than against hand-computed expectations, so
+    // the incremental path cannot quietly drift from the batch-free behaviour.
+
+    /// Fold a transcript in three uneven batches, the way the scanner would as
+    /// the file grows.
+    fn fold_in_batches(lines: &[&str]) -> SessionAcc {
+        let mut acc = SessionAcc::new();
+        let a = lines.len() / 3;
+        let b = lines.len() * 2 / 3;
+        acc.push_lines(&lines[..a]);
+        acc.push_lines(&lines[a..b]);
+        acc.push_lines(&lines[b..]);
+        acc
+    }
+
+    fn user_line(entrypoint: Option<&str>) -> String {
+        match entrypoint {
+            Some(e) => json!({"type": "user", "entrypoint": e}).to_string(),
+            None => json!({"type": "user"}).to_string(),
+        }
+    }
+
+    #[test]
+    fn session_acc_context_matches_whole_file_extractor() {
+        let owned = vec![
+            asst_usage_line(1000, 0, 0, false),
+            asst_usage_line(5000, 0, 0, false),  // the session max
+            asst_usage_line(200, 0, 0, true),    // sidechain — must be ignored
+            asst_usage_line(3000, 0, 0, false),  // the latest live turn
+        ];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = extract_last_context_usage(&lines);
+        assert_eq!(fold_in_batches(&lines).context_usage(), expected);
+        assert_eq!(expected.map(|(used, _, max)| (used, max)), Some((3000, 5000)));
+    }
+
+    /// A compact summary invalidates everything before it — including the
+    /// running max. If the batch boundary falls before the compact line, a naive
+    /// fold would carry the stale pre-compact max forward.
+    #[test]
+    fn session_acc_context_resets_at_a_compact_summary_across_batches() {
+        let big = asst_usage_line(90_000, 0, 0, false); // huge, pre-compact
+        let compact = json!({"type": "user", "isCompactSummary": true}).to_string();
+        let after = asst_usage_line(4000, 0, 0, false);
+        let owned = vec![big, compact, after];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = extract_last_context_usage(&lines);
+
+        // Batch boundary deliberately placed so the pre-compact turn lands in an
+        // earlier batch than the compact line.
+        let mut acc = SessionAcc::new();
+        acc.push_lines(&lines[..1]);
+        acc.push_lines(&lines[1..]);
+
+        assert_eq!(acc.context_usage(), expected);
+        assert_eq!(
+            expected.map(|(used, _, max)| (used, max)),
+            Some((4000, 4000)),
+            "the 90k pre-compact turn must not survive as the session max"
+        );
+    }
+
+    /// The first `user` record settles the entrypoint even when it has none —
+    /// a later record's entrypoint must not backfill it.
+    #[test]
+    fn session_acc_entrypoint_settles_on_the_first_user_record() {
+        let owned = vec![user_line(None), user_line(Some("vscode"))];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        assert_eq!(extract_entrypoint(&lines), None, "sanity: original settles to None");
+        assert_eq!(fold_in_batches(&lines).entrypoint(), None);
+    }
+
+    #[test]
+    fn session_acc_entrypoint_matches_whole_file_extractor() {
+        let owned = vec![user_line(Some("cli")), user_line(Some("vscode"))];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = extract_entrypoint(&lines);
+        assert_eq!(expected.as_deref(), Some("cli"));
+        assert_eq!(fold_in_batches(&lines).entrypoint(), expected);
+    }
+
+    #[test]
+    fn session_acc_ai_title_takes_the_first_and_survives_batching() {
+        let owned = vec![
+            json!({"type": "user"}).to_string(),
+            json!({"type": "ai-title", "aiTitle": "first"}).to_string(),
+            json!({"type": "ai-title", "aiTitle": "second"}).to_string(),
+        ];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+        assert_eq!(fold_in_batches(&lines).ai_title().as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn session_acc_todos_match_the_reverse_scan() {
+        let todo = |content: &str, status: &str| {
+            json!({
+                "type": "assistant",
+                "message": {"content": [{
+                    "type": "tool_use", "name": "TodoWrite",
+                    "input": {"todos": [{"content": content, "status": status,
+                                         "activeForm": content}]}
+                }]}
+            })
+            .to_string()
+        };
+        let owned = vec![todo("old", "completed"), todo("new", "in_progress")];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = crate::session_todos::latest_todo_summary_from_lines(&lines);
+        assert!(expected.is_some(), "sanity: the fixture must carry a todo block");
+        assert_eq!(fold_in_batches(&lines).todos(), expected);
+    }
+
+    #[test]
+    fn session_acc_stats_match_compute_session_stats() {
+        let owned: Vec<String> = (0..12).map(|i| turn(&format!("m{i}"), 7)).collect();
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = compute_session_stats(&lines);
+        let got = fold_in_batches(&lines).stats_at(0.0);
+        assert_eq!(got.total_output_tokens, expected.total_output_tokens);
+        assert_eq!(got.total_cost_usd, expected.total_cost_usd);
+        assert_eq!(got.total_output_tokens, 84);
     }
 
     // ── compute_session_stats tests ─────────────────────────────────────────
