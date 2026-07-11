@@ -605,6 +605,14 @@ interface ReportState {
   generatingSummary: boolean;
   generatingLessons: boolean;
 
+  // "New report" red dot on the 每日报告 nav item. `latestReportDate` is the most
+  // recent date that has report data; `lastSeenReportDate` is the newest date the
+  // user has actually opened the report view at (persisted). A dot shows while the
+  // former is newer than the latter.
+  latestReportDate: string;
+  lastSeenReportDate: string;
+  hasNewReport: boolean;
+
   // Timeline (earlier-days feed below the selected-day detail)
   timelineReports: DailyReport[];
   timelineLoading: boolean;
@@ -613,6 +621,10 @@ interface ReportState {
 
   loadReport: (date: string) => Promise<void>;
   loadHeatmap: (from: string, to: string) => Promise<void>;
+  /** Fetch recent stats (without touching heatmapData) and recompute hasNewReport. */
+  refreshNewReportFlag: () => Promise<void>;
+  /** Mark the current latest report date as seen and clear the red dot. */
+  markReportSeen: () => void;
   generateReport: (date: string) => Promise<void>;
   generateSummary: (date: string) => Promise<void>;
   generateLessons: (date: string) => Promise<void>;
@@ -627,6 +639,15 @@ function yesterday(): string {
   return d.toISOString().slice(0, 10);
 }
 
+/** Newest date among stats that actually have activity, or "" when none. */
+function latestDateWithData(stats: DailyReportStats[]): string {
+  let latest = "";
+  for (const s of stats) {
+    if ((s.totalTokens > 0 || s.totalSessions > 0) && s.date > latest) latest = s.date;
+  }
+  return latest;
+}
+
 const TIMELINE_PAGE_SIZE = 7;
 
 export const useReportStore = create<ReportState>((set, get) => ({
@@ -636,6 +657,10 @@ export const useReportStore = create<ReportState>((set, get) => ({
   loading: false,
   generatingSummary: false,
   generatingLessons: false,
+
+  latestReportDate: "",
+  lastSeenReportDate: getItem("daily-report-last-seen") ?? "",
+  hasNewReport: false,
 
   timelineReports: [],
   timelineLoading: false,
@@ -665,9 +690,39 @@ export const useReportStore = create<ReportState>((set, get) => ({
   loadHeatmap: async (from: string, to: string) => {
     try {
       const stats = await invoke<DailyReportStats[]>("list_daily_report_stats", { from, to });
-      set({ heatmapData: stats });
+      const latest = latestDateWithData(stats);
+      set((s) => ({
+        heatmapData: stats,
+        latestReportDate: latest,
+        hasNewReport: latest !== "" && latest > s.lastSeenReportDate,
+      }));
     } catch {
       set({ heatmapData: [] });
+    }
+  },
+
+  refreshNewReportFlag: async () => {
+    try {
+      const to = new Date().toISOString().slice(0, 10);
+      const from = new Date(Date.now() - 90 * 86400000).toISOString().slice(0, 10);
+      const stats = await invoke<DailyReportStats[]>("list_daily_report_stats", { from, to });
+      const latest = latestDateWithData(stats);
+      set((s) => ({
+        latestReportDate: latest,
+        hasNewReport: latest !== "" && latest > s.lastSeenReportDate,
+      }));
+    } catch {
+      // Best-effort — leave the flag as-is on failure.
+    }
+  },
+
+  markReportSeen: () => {
+    const latest = get().latestReportDate;
+    if (latest) {
+      setItem("daily-report-last-seen", latest);
+      set({ lastSeenReportDate: latest, hasNewReport: false });
+    } else {
+      set({ hasNewReport: false });
     }
   },
 

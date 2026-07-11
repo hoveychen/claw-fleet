@@ -46,13 +46,17 @@ function summaryPreview(aiSummary: string | null): string | null {
 
 export function ReportView() {
   const { t } = useTranslation();
-  const { loadHeatmap, loadReport, selectedDate } = useReportStore();
+  const { loadHeatmap, loadReport, selectedDate, markReportSeen } = useReportStore();
 
   useEffect(() => {
+    // Entering the report view clears the "new report" red dot. Clear
+    // immediately for snappy feedback, then reconcile against the freshly
+    // loaded heatmap (which sets the true latest date).
+    markReportSeen();
     const to = new Date().toISOString().slice(0, 10);
     const from = new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
-    loadHeatmap(from, to);
-  }, [loadHeatmap]);
+    loadHeatmap(from, to).then(() => markReportSeen());
+  }, [loadHeatmap, markReportSeen]);
 
   useEffect(() => {
     loadReport(selectedDate);
