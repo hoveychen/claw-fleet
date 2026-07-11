@@ -1417,3 +1417,81 @@ export const MOCK_WIKI_DOCS = [
     ],
   },
 ];
+
+// ── Explorer / Skills file trees ────────────────────────────────────────────
+// Same trap as the wiki: without a handler the mock returns null and the view
+// blows up (or silently shows nothing) — see tauri-mock's default branch.
+export const MOCK_EXPLORER_ROOTS = [
+  { label: "claw-fleet", path: "/Users/demo/workspace/claw-fleet", branch: "main", isWorktree: false },
+  { label: "prd/resizable-rails", path: "/Users/demo/workspace/claw-fleet/.worktrees/resizable-rails", branch: "prd/resizable-rails", isWorktree: true },
+];
+
+const dirEntry = (name: string, rel: string) => ({
+  name,
+  relativePath: rel,
+  sizeBytes: 0,
+  isDir: true,
+  modifiedMs: NOW - 3 * HOUR,
+  isIgnored: false,
+  isSymlink: false,
+});
+
+const fileEntry = (name: string, rel: string, sizeBytes: number, isIgnored = false) => ({
+  name,
+  relativePath: rel,
+  sizeBytes,
+  isDir: false,
+  modifiedMs: NOW - 2 * HOUR,
+  isIgnored,
+  isSymlink: false,
+});
+
+/** relativePath of the directory being listed ("" = root) → its children. */
+export const MOCK_EXPLORER_TREE: Record<string, ReturnType<typeof fileEntry>[]> = {
+  "": [
+    dirEntry("src", "src"),
+    dirEntry("app", "app"),
+    dirEntry("node_modules", "node_modules"),
+    fileEntry("package.json", "package.json", 2_140),
+    fileEntry("README.md", "README.md", 8_900),
+    fileEntry(".env.local", ".env.local", 210, true),
+  ],
+  src: [
+    dirEntry("components", "src/components"),
+    fileEntry("main.rs", "src/main.rs", 4_200),
+    fileEntry("lib.rs", "src/lib.rs", 12_800),
+  ],
+  "src/components": [
+    fileEntry("SessionList.tsx", "src/components/SessionList.tsx", 31_400),
+    fileEntry("HistoryView.tsx", "src/components/HistoryView.tsx", 27_100),
+  ],
+  app: [
+    fileEntry("storage.ts", "app/storage.ts", 3_100),
+    fileEntry("store.ts", "app/store.ts", 18_600),
+  ],
+  node_modules: [dirEntry("react", "node_modules/react")],
+  "node_modules/react": [fileEntry("index.js", "node_modules/react/index.js", 990, true)],
+};
+
+export const MOCK_GIT_STATUS = {
+  isGit: true,
+  branch: "main",
+  upstream: "origin/main",
+  ahead: 2,
+  behind: 0,
+  dirtyCount: 3,
+};
+
+export const MOCK_SKILLS = [
+  { name: "muveectl", description: "Operate the Muvee self-hosted PaaS via the muveectl CLI.", path: "/Users/demo/.claude/skills/muveectl", sizeBytes: 24_800, modifiedMs: NOW - 2 * DAY },
+  { name: "fleet", description: "Monitor and manage multiple Claude Code agents using the Fleet CLI.", path: "/Users/demo/.claude/skills/fleet", sizeBytes: 12_300, modifiedMs: NOW - 5 * HOUR },
+  { name: "dataviz", description: "Charts, dashboards, and data visualization guidance.", path: "/Users/demo/.claude/skills/dataviz", sizeBytes: 41_900, modifiedMs: NOW - 9 * DAY },
+];
+
+/** Multi-file skill so SkillDetail renders its file-tree column (needs > 1 file). */
+export const MOCK_SKILL_FILES = [
+  { name: "SKILL.md", relativePath: "SKILL.md", absolutePath: "/Users/demo/.claude/skills/muveectl/SKILL.md", sizeBytes: 9_400, isDir: false },
+  { name: "reference", relativePath: "reference", absolutePath: "/Users/demo/.claude/skills/muveectl/reference", sizeBytes: 0, isDir: true },
+  { name: "cli.md", relativePath: "reference/cli.md", absolutePath: "/Users/demo/.claude/skills/muveectl/reference/cli.md", sizeBytes: 12_200, isDir: false },
+  { name: "datasets.md", relativePath: "reference/datasets.md", absolutePath: "/Users/demo/.claude/skills/muveectl/reference/datasets.md", sizeBytes: 6_800, isDir: false },
+];

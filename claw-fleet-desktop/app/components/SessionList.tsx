@@ -2,7 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Menu, Shield, Rocket } from "lucide-react";
+import { Menu, Shield, ListChecks } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useReadStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
@@ -275,8 +275,8 @@ export function SessionList() {
             className={`${styles.nav_item} ${viewMode === "history" ? styles.nav_active : ""}`}
             onClick={() => navTo("history")}
           >
-            <span className={styles.nav_icon}><Rocket size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("view_history", "启动台")}</span>
+            <span className={styles.nav_icon}><ListChecks size={14} strokeWidth={1.5} /></span>
+            <span className={styles.nav_label}>{t("view_history", "任务")}</span>
             {unreadLaunchpadCount > 0 && (
               <span className={styles.nav_badge}>{unreadLaunchpadCount}</span>
             )}

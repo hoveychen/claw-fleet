@@ -78,7 +78,7 @@
   "view_wiki": "知识库",
   "view_skills": "技能",
   "view_plugins": "插件",
-  "view_history": "启动台",
+  "view_history": "任务",
   "new_session": {
     "button": "新会话",
     "title": "新建 Claude 会话",
@@ -1694,7 +1694,7 @@
     }
   },
   "history": {
-    "title": "启动台",
+    "title": "任务",
     "search_placeholder": "搜索标题、计划、全文…",
     "empty": "还没有会话，点右上角“新会话”发起一个",
     "no_match": "没有匹配的会话",

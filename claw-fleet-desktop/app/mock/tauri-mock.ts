@@ -17,6 +17,11 @@ import {
   MOCK_OPENCLAW_ACCOUNT,
   MOCK_MEMORIES,
   MOCK_WIKI_DOCS,
+  MOCK_EXPLORER_ROOTS,
+  MOCK_EXPLORER_TREE,
+  MOCK_GIT_STATUS,
+  MOCK_SKILLS,
+  MOCK_SKILL_FILES,
   MOCK_MEMORY_CONTENT,
   MOCK_MEMORY_HISTORY,
   MOCK_SOURCES_CONFIG,
@@ -91,7 +96,21 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return null;
 
     case "list_skills":
-      return [];
+      return MOCK_SKILLS;
+    case "list_skill_files":
+      return MOCK_SKILL_FILES;
+    case "get_skill_content":
+      return "# muveectl\n\nmock 模式下的占位正文。";
+
+    // File explorer (Repos view + the scratchpad tab).
+    case "list_explorer_roots":
+      return MOCK_EXPLORER_ROOTS;
+    case "list_explorer_dir":
+      return MOCK_EXPLORER_TREE[(args.relativePath as string) ?? ""] ?? [];
+    case "read_explorer_file":
+      return { kind: "text", content: "mock 模式下的占位文件内容。\n", truncated: false, sizeBytes: 42 };
+    case "git_status":
+      return MOCK_GIT_STATUS;
 
     // Wiki / Plugins. These MUST return a list rather than falling through to
     // `default: return null` — both views do `setState(await invoke(...))` and
