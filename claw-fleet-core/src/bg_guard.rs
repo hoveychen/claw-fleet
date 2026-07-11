@@ -65,11 +65,20 @@ impl BackgroundTask {
     }
 }
 
-/// A cron the session registered (`session_crons[]` of the same payload).
+/// A cron the session registered (`session_crons[]` of the same payload) — the
+/// array Claude Code fills from `CronCreate`, `ScheduleWakeup` and `/loop`.
 ///
-/// Carried through for the session card's "what is this session waiting on"
-/// display; it does not affect the block decision, because a cron fires a *new*
-/// session rather than resuming this one.
+/// These are **session-scoped in-process timers**, not durable jobs: Claude
+/// Code's own field description calls them "cron tasks ... that will wake *this
+/// session* later", `CronCreate` answers with "Session-only (not written to
+/// disk, dies when Claude exits)", its `durable` parameter is documented as
+/// "Has no effect — durable persistence is not available", and the tool's docs
+/// note jobs "only fire while the REPL is idle".
+///
+/// A headless `claude -p` run has no REPL and exits the moment the turn ends, so
+/// every one of these fires into a dead process. The agent is told the job is
+/// scheduled and it silently never runs — which is why the guard blocks on them
+/// (see [`block_reason`]) rather than merely displaying them.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionCron {
     pub id: String,
@@ -79,6 +88,18 @@ pub struct SessionCron {
     pub recurring: bool,
     #[serde(default)]
     pub prompt: String,
+}
+
+impl SessionCron {
+    /// One line for the block reason: the schedule plus the prompt, so the agent
+    /// recognises which of its own `/loop`s is about to evaporate.
+    fn summarize(&self) -> String {
+        let kind = if self.recurring { "循环" } else { "一次性" };
+        format!(
+            "  - [{kind} {}] {} (id: {})",
+            self.schedule, self.prompt, self.id
+        )
+    }
 }
 
 /// The subset of the `Stop` hook payload the guard needs.
@@ -131,29 +152,58 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
     }
 
     let running = running_tasks(payload);
-    if running.is_empty() {
+    let crons = &payload.session_crons;
+    if running.is_empty() && crons.is_empty() {
         return None;
     }
 
-    let listing = running
-        .iter()
-        .map(|t| t.summarize())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let mut out = String::from(
+        "⚠️ Fleet 后台任务守卫：本会话是 headless (`claude -p`) 进程——\
+         **turn 一结束，进程立刻退出**，没有任何东西能在之后唤醒你。\n\n",
+    );
 
-    Some(format!(
-        "⚠️ Fleet 后台任务守卫：你还有 {n} 个后台任务在运行，但本会话是 headless (`claude -p`) 进程。\
-         \n\n{listing}\n\n\
-         你一旦结束本轮，这些后台任务会在约 5 秒后被终止，而且**没有任何机制会在它们完成时重新唤醒你**——\
-         它们的输出会永久丢失，你承诺的「稍后汇报」永远不会发生。\n\n\
-         请三选一，不要就这样结束本轮：\n\
-         1. **前台等待**：直接用不带 `run_in_background` 的 Bash 跑等待循环（或 BashOutput 轮询到任务结束），\
-         把结果拿到手再收尾——进程活着，任务才活着。\n\
-         2. **交棒**：如果要等很久，用 `fleet handoff --note \"...\"` 注册接力，让后继会话接手这件事。\n\
-         3. **放弃**：如果这些任务已经不重要，用 KillShell 显式终止它们，然后正常结束。",
-        n = running.len(),
-        listing = listing,
-    ))
+    if !running.is_empty() {
+        let listing = running
+            .iter()
+            .map(|t| t.summarize())
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str(&format!(
+            "你还有 {n} 个后台任务在运行：\n\n{listing}\n\n\
+             它们会在约 5 秒后被终止，输出永久丢失，你承诺的「稍后汇报」永远不会发生。\n\n\
+             请三选一：\n\
+             1. **前台等待**：直接用不带 `run_in_background` 的 Bash 跑等待循环（或 BashOutput 轮询到任务结束），\
+             把结果拿到手再收尾——进程活着，任务才活着。\n\
+             2. **交棒**：如果要等很久，用 `fleet handoff --note \"...\"` 注册接力，让后继会话接手这件事。\n\
+             3. **放弃**：如果这些任务已经不重要，用 KillShell 显式终止它们，然后正常结束。\n\n",
+            n = running.len(),
+            listing = listing,
+        ));
+    }
+
+    if !crons.is_empty() {
+        let listing = crons
+            .iter()
+            .map(|c| c.summarize())
+            .collect::<Vec<_>>()
+            .join("\n");
+        out.push_str(&format!(
+            "你注册了 {n} 个 cron / wakeup（CronCreate、ScheduleWakeup 或 `/loop`）：\n\n{listing}\n\n\
+             **这些在 headless 会话里根本不会触发。** Claude Code 的 cron 是进程内定时器：\
+             `CronCreate` 自己就写着「Session-only (not written to disk, dies when Claude exits)」，\
+             `durable` 参数「Has no effect」，而且任务「only fire while the REPL is idle」——\
+             headless 没有 REPL。工具骗你说排上了，实际上你一收尾它就随进程一起消失，不会有任何报错。\n\n\
+             要真正的跨 turn 定时/循环，用 Fleet 的机制：\n\
+             - **循环**：`fleet loop create --interval <5m|1h> --prompt \"...\"`——\
+             Fleet 会在到点时拉起一个新会话执行该 prompt，进程退出也不影响。`fleet loop stop <id>` 停止。\n\
+             - **一次性接力**：`fleet handoff --note \"...\"`，在本轮结束时立刻交棒给后继会话。\n\n\
+             请先用 `CronDelete` 删掉上面这些无效的 cron，再改用上述机制；如果这个循环其实不需要，删掉即可正常结束。\n",
+            n = crons.len(),
+            listing = listing,
+        ));
+    }
+
+    Some(out.trim_end().to_string())
 }
 
 #[cfg(test)]
@@ -283,7 +333,66 @@ mod tests {
         assert_eq!(p.session_crons.len(), 1);
         assert_eq!(p.session_crons[0].schedule, "0 9 * * 1-5");
         assert!(p.session_crons[0].recurring);
-        // Crons spawn a fresh session rather than resuming this one — not a block.
-        assert_eq!(block_reason(&p, true), None);
+    }
+
+    /// A cron does NOT spawn a fresh session — it wakes *this* one, and a headless
+    /// `-p` process is gone by the time it would fire. Claude Code's own text is
+    /// unambiguous: CronCreate returns "Session-only (not written to disk, dies
+    /// when Claude exits)", its `durable` param is documented as "Has no effect",
+    /// and jobs "only fire while the REPL is idle" — headless has no REPL. So the
+    /// agent gets told the job is scheduled and it silently never runs.
+    ///
+    /// Verified by isolation experiment: a `claude -p` run that called
+    /// ScheduleWakeup(60s) reported "Next wakeup scheduled ... in 64s" and then
+    /// exited after 19s; the wake-up never fired.
+    #[test]
+    fn blocks_a_headless_stop_with_a_pending_cron() {
+        let json = r#"{
+            "session_id": "s1",
+            "background_tasks": [],
+            "session_crons": [
+                {"id":"c1","schedule":"*/5 * * * *","recurring":true,"prompt":"check the deploy"}
+            ]
+        }"#;
+        let p = parse_stop_payload(json).unwrap();
+        let reason = block_reason(&p, true).expect("must block: the cron can never fire");
+        // Names the job so the agent recognises its own /loop.
+        assert!(reason.contains("check the deploy"), "{reason}");
+        assert!(reason.contains("*/5 * * * *"), "{reason}");
+        // Points at the mechanism that actually survives a turn boundary.
+        assert!(reason.contains("fleet loop"), "{reason}");
+    }
+
+    /// An interactive REPL *does* honour its crons — blocking there would be a
+    /// false alarm, exactly as with background tasks.
+    #[test]
+    fn never_blocks_an_interactive_stop_with_a_pending_cron() {
+        let json = r#"{
+            "session_id": "s1",
+            "session_crons": [
+                {"id":"c1","schedule":"*/5 * * * *","recurring":true,"prompt":"poll"}
+            ]
+        }"#;
+        let p = parse_stop_payload(json).unwrap();
+        assert_eq!(block_reason(&p, false), None);
+    }
+
+    /// Both kinds of doomed work at once: the reason must name each, not just the
+    /// first category it happens to check.
+    #[test]
+    fn blocks_and_reports_tasks_and_crons_together() {
+        let json = r#"{
+            "session_id": "s1",
+            "background_tasks": [
+                {"id":"m1","type":"monitor","status":"running","description":"watch CI"}
+            ],
+            "session_crons": [
+                {"id":"c1","schedule":"*/5 * * * *","recurring":true,"prompt":"re-check"}
+            ]
+        }"#;
+        let p = parse_stop_payload(json).unwrap();
+        let reason = block_reason(&p, true).expect("must block");
+        assert!(reason.contains("watch CI"), "{reason}");
+        assert!(reason.contains("re-check"), "{reason}");
     }
 }
