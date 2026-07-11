@@ -45,6 +45,11 @@
   border-bottom-color: var(--color-accent, #60a5fa);
 }
 
+/* The tab being dragged fades so the gap it will land in reads clearly. */
+.tab_dragging {
+  opacity: 0.4;
+}
+
 .dot {
   width: 6px;
   height: 6px;

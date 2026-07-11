@@ -29,6 +29,14 @@ import { ResizeHandle } from "./ResizeHandle";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import { SessionTabs } from "./SessionTabs";
+import {
+  closeOtherTabs as closeOtherTabsState,
+  closeTab as closeTabState,
+  closeTabsToRight as closeTabsToRightState,
+  openTab as openTabState,
+  reorderTabs as reorderTabIds,
+  type TabState,
+} from "../sessionTabs";
 import { StopControl, canControl } from "./StopControl";
 import { MarkControl } from "./MarkControl";
 import styles from "./HistoryView.module.css";
@@ -411,14 +419,42 @@ export function HistoryView() {
   // the user back on the tab they left, exactly where they left it.
   const overlaid = pending != null || composing;
 
-  const openTab = useCallback((s: SessionInfo, highlight: string | null) => {
+  // Clicking a tab also dismisses whatever overlay was covering the column, so
+  // the strip doubles as the way back out of the composer.
+  const activateTab = useCallback((id: string) => {
     setComposing(false);
     setPending(null);
     setStartTimedOut(false);
-    setTabIds((prev) => (prev.includes(s.id) ? prev : [...prev, s.id]));
-    setActiveId(s.id);
-    setQueryById((prev) => ({ ...prev, [s.id]: highlight }));
+    setActiveId(id);
   }, []);
+
+  // The close/reorder rules (chiefly: where focus lands after a close) live in
+  // `sessionTabs.ts` as pure reducers so they can be unit-tested.
+  const applyTabs = useCallback(
+    (fn: (state: TabState) => TabState) => {
+      const next = fn({ tabIds, activeId });
+      setTabIds(next.tabIds);
+      setActiveId(next.activeId);
+      // Drop highlights for tabs that are no longer open.
+      setQueryById((prev) =>
+        Object.fromEntries(
+          Object.entries(prev).filter(([id]) => next.tabIds.includes(id)),
+        ),
+      );
+    },
+    [tabIds, activeId],
+  );
+
+  const openTab = useCallback(
+    (s: SessionInfo, highlight: string | null) => {
+      setComposing(false);
+      setPending(null);
+      setStartTimedOut(false);
+      applyTabs((st) => openTabState(st, s.id));
+      setQueryById((prev) => ({ ...prev, [s.id]: highlight }));
+    },
+    [applyTabs],
+  );
 
   // Stable identity: SessionRow is memoised, and a fresh closure each render
   // would defeat it for every row.
@@ -430,54 +466,24 @@ export function HistoryView() {
     [query, ftsMatchPaths, openTab],
   );
 
-  // Clicking a tab also dismisses whatever overlay was covering the column, so
-  // the strip doubles as the way back out of the composer.
-  const activateTab = useCallback((id: string) => {
-    setComposing(false);
-    setPending(null);
-    setStartTimedOut(false);
-    setActiveId(id);
-  }, []);
-
   const closeTab = useCallback(
-    (id: string) => {
-      const idx = tabIds.indexOf(id);
-      if (idx < 0) return;
-      const next = tabIds.filter((t) => t !== id);
-      setTabIds(next);
-      // Closing the tab you're looking at hands focus to its right neighbour,
-      // falling back to its left — the editor convention.
-      if (activeId === id) setActiveId(next[idx] ?? next[idx - 1] ?? null);
-      setQueryById((prev) => {
-        const rest = { ...prev };
-        delete rest[id];
-        return rest;
-      });
-    },
-    [tabIds, activeId],
+    (id: string) => applyTabs((s) => closeTabState(s, id)),
+    [applyTabs],
   );
-
-  const closeOtherTabs = useCallback((id: string) => {
-    setTabIds([id]);
-    setActiveId(id);
-    setQueryById((prev) => ({ [id]: prev[id] ?? null }));
-  }, []);
-
+  const closeOtherTabs = useCallback(
+    (id: string) => applyTabs((s) => closeOtherTabsState(s, id)),
+    [applyTabs],
+  );
   const closeTabsToRight = useCallback(
-    (id: string) => {
-      const idx = tabIds.indexOf(id);
-      if (idx < 0) return;
-      const next = tabIds.slice(0, idx + 1);
-      setTabIds(next);
-      if (activeId && !next.includes(activeId)) setActiveId(id);
-    },
-    [tabIds, activeId],
+    (id: string) => applyTabs((s) => closeTabsToRightState(s, id)),
+    [applyTabs],
   );
-
-  const closeAllTabs = useCallback(() => {
-    setTabIds([]);
-    setActiveId(null);
-    setQueryById({});
+  const closeAllTabs = useCallback(
+    () => applyTabs(() => ({ tabIds: [], activeId: null })),
+    [applyTabs],
+  );
+  const reorderTabs = useCallback((fromId: string, toId: string) => {
+    setTabIds((prev) => reorderTabIds(prev, fromId, toId));
   }, []);
 
   // "+新会话" → swap the detail column to the inline compose form. Open tabs are
@@ -692,6 +698,7 @@ export function HistoryView() {
           onCloseOthers={closeOtherTabs}
           onCloseRight={closeTabsToRight}
           onCloseAll={closeAllTabs}
+          onReorder={reorderTabs}
         />
 
         <div className={styles.detail_body}>
