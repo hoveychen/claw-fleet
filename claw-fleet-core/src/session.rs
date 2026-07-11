@@ -790,6 +790,22 @@ pub fn scan_ide_sessions(claude_dir: &Path) -> Vec<IdeSession> {
     sessions
 }
 
+/// A workspace-level IDE lock describes the interactive session running
+/// *inside* that IDE — not every session that happens to share the workspace.
+/// The scan stamps the lock's `ide_name` per workspace, so without this pass a
+/// launchpad-spawned headless session in a workspace that also has VS Code
+/// open would wear a "Visual Studio Code" badge — and be skipped by
+/// auto-resume, which treats `ide_name.is_some()` as "IDE-attached".
+/// Fleet-owned entrypoints are headless by construction, so they never keep
+/// the badge.
+fn strip_ide_name_from_fleet_spawns(sessions: &mut [SessionInfo]) {
+    for session in sessions {
+        if crate::session_launch::is_fleet_owned_entrypoint(session.entrypoint.as_deref()) {
+            session.ide_name = None;
+        }
+    }
+}
+
 // ── JSONL parsing ────────────────────────────────────────────────────────────
 
 /// Compute seconds between now and the most recent `user` or `assistant`
@@ -2365,6 +2381,8 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         }
     }
 
+    strip_ide_name_from_fleet_spawns(&mut sessions);
+
     // Promote main sessions to Delegating if they have at least one actively-working subagent.
     // A subagent that is WaitingInput has finished its turn and should not cause the parent
     // to show as Delegating — otherwise the parent's own WaitingInput status gets hidden.
@@ -2789,6 +2807,39 @@ mod tests {
             ),
         ];
         assert!(detect_rate_limit(&lines).is_none());
+    }
+
+    #[test]
+    fn ide_badge_stays_off_fleet_spawned_sessions() {
+        // A VS Code lock in the workspace must not decorate (or auto-resume-
+        // exclude) launchpad/handoff headless sessions that merely share the
+        // cwd; genuinely interactive sessions keep the badge.
+        let mut vscode = make_session(SessionStatus::Idle);
+        vscode.entrypoint = Some("claude-vscode".into());
+        vscode.ide_name = Some("Visual Studio Code".into());
+        let mut launchpad = make_session(SessionStatus::Idle);
+        launchpad.entrypoint = Some(crate::session_launch::NEW_SESSION_ENTRYPOINT.into());
+        launchpad.ide_name = Some("Visual Studio Code".into());
+        let mut handoff = make_session(SessionStatus::Idle);
+        handoff.entrypoint = Some(crate::handoff::HANDOFF_ENTRYPOINT.into());
+        handoff.ide_name = Some("Visual Studio Code".into());
+
+        let mut sessions = vec![vscode, launchpad, handoff];
+        strip_ide_name_from_fleet_spawns(&mut sessions);
+
+        assert_eq!(
+            sessions[0].ide_name.as_deref(),
+            Some("Visual Studio Code"),
+            "interactive IDE session must keep its badge"
+        );
+        assert_eq!(
+            sessions[1].ide_name, None,
+            "launchpad-spawned session must not inherit the workspace IDE badge"
+        );
+        assert_eq!(
+            sessions[2].ide_name, None,
+            "handoff-spawned session must not inherit the workspace IDE badge"
+        );
     }
 
     fn make_session(status: SessionStatus) -> SessionInfo {
