@@ -101,6 +101,34 @@ pub fn list_dir(
 ) -> Result<Vec<ExplorerEntry>, String> {
     let ws = validate_workspace(workspace, known_workspaces)?;
     let root = resolve_root(&ws, root)?;
+    list_dir_in(&root, rel_path, show_ignored)
+}
+
+/// Read a file for preview. Kind is decided by content, not extension:
+/// image extensions become base64 previews, NUL bytes in the head mean
+/// binary, everything else is (possibly truncated) text.
+pub fn read_file(
+    workspace: &str,
+    root: &str,
+    rel_path: &str,
+    known_workspaces: &[String],
+) -> Result<ExplorerFileContent, String> {
+    let ws = validate_workspace(workspace, known_workspaces)?;
+    let root = resolve_root(&ws, root)?;
+    read_file_at(&root, rel_path)
+}
+
+// ── Root-agnostic core ────────────────────────────────────────────────────────
+// `root` must already be canonical and vetted by the caller. The scratchpad
+// surface below reuses these with a root derived from the session id instead
+// of one of the workspace's git checkouts.
+
+fn list_dir_in(
+    root: &Path,
+    rel_path: &str,
+    show_ignored: bool,
+) -> Result<Vec<ExplorerEntry>, String> {
+    let root = root.to_path_buf();
     let dir = resolve_rel(&root, rel_path)?;
     if !dir.is_dir() {
         return Err("not a directory".into());
@@ -165,18 +193,8 @@ pub fn list_dir(
     Ok(out)
 }
 
-/// Read a file for preview. Kind is decided by content, not extension:
-/// image extensions become base64 previews, NUL bytes in the head mean
-/// binary, everything else is (possibly truncated) text.
-pub fn read_file(
-    workspace: &str,
-    root: &str,
-    rel_path: &str,
-    known_workspaces: &[String],
-) -> Result<ExplorerFileContent, String> {
-    let ws = validate_workspace(workspace, known_workspaces)?;
-    let root = resolve_root(&ws, root)?;
-    let path = resolve_rel(&root, rel_path)?;
+fn read_file_at(root: &Path, rel_path: &str) -> Result<ExplorerFileContent, String> {
+    let path = resolve_rel(root, rel_path)?;
     if !path.is_file() {
         return Err("not a file".into());
     }
@@ -211,6 +229,94 @@ pub fn read_file(
         truncated: size_bytes > TEXT_PREVIEW_CAP,
         size_bytes,
     })
+}
+
+// ── Scratchpad ────────────────────────────────────────────────────────────────
+// Claude Code hands each session a private scratch directory and tells it (in
+// the system prompt) to put temp files there rather than in /tmp. The layout is
+// not a documented contract — it is read off the path CC injects:
+//
+//     /tmp/claude-<uid>/<workspace-slug>/<session-id>/scratchpad
+//
+// so we probe for it instead of asserting it. `scratchpad_root` returns None
+// when nothing matches and the UI then hides the tab, which keeps a future CC
+// layout change a missing tab rather than a wrong directory read.
+
+/// Where CC roots its per-uid scratch trees. Unix is a hardcoded `/tmp` — CC
+/// does not honour `$TMPDIR` here, which on macOS is a per-user `/var/folders`
+/// path. Windows has no such convention, so fall back to the system temp dir.
+fn scratch_tmp_base() -> PathBuf {
+    if cfg!(windows) {
+        std::env::temp_dir()
+    } else {
+        PathBuf::from("/tmp")
+    }
+}
+
+/// Session ids are uuids; refusing anything else keeps the id from ever
+/// contributing a `..` or a path separator to the derived root.
+fn is_safe_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Locate the scratchpad of `session_id` under `workspace`, or None when there
+/// is none — the session never wrote a temp file, it ran on another machine, or
+/// CC changed its layout.
+pub fn scratchpad_root(workspace: &str, session_id: &str) -> Option<PathBuf> {
+    scratchpad_root_in(&scratch_tmp_base(), workspace, session_id)
+}
+
+fn scratchpad_root_in(base: &Path, workspace: &str, session_id: &str) -> Option<PathBuf> {
+    if !is_safe_session_id(session_id) {
+        return None;
+    }
+    let ws = fs::canonicalize(workspace).ok()?;
+    let slug = crate::session::encode_workspace_path(&ws.to_string_lossy());
+    // The uid in `claude-<uid>` is whoever ran CC. Scanning for it beats
+    // hardcoding getuid(): a remote `fleet serve` may well run as another user.
+    for entry in fs::read_dir(base).ok()?.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if !name.starts_with("claude-") {
+            continue;
+        }
+        let candidate = entry.path().join(&slug).join(session_id).join("scratchpad");
+        if candidate.is_dir() {
+            if let Ok(canon) = fs::canonicalize(&candidate) {
+                return Some(canon);
+            }
+        }
+    }
+    None
+}
+
+/// List one level of a session's scratchpad. Errors when the session has no
+/// scratchpad — the caller treats that as "hide the tab", not as a failure.
+pub fn list_scratchpad_dir(
+    workspace: &str,
+    session_id: &str,
+    rel_path: &str,
+    known_workspaces: &[String],
+) -> Result<Vec<ExplorerEntry>, String> {
+    validate_workspace(workspace, known_workspaces)?;
+    let root = scratchpad_root(workspace, session_id).ok_or("no scratchpad for this session")?;
+    // Nothing here is a git checkout, so gitignore filtering has no meaning.
+    list_dir_in(&root, rel_path, true)
+}
+
+pub fn read_scratchpad_file(
+    workspace: &str,
+    session_id: &str,
+    rel_path: &str,
+    known_workspaces: &[String],
+) -> Result<ExplorerFileContent, String> {
+    validate_workspace(workspace, known_workspaces)?;
+    let root = scratchpad_root(workspace, session_id).ok_or("no scratchpad for this session")?;
+    read_file_at(&root, rel_path)
 }
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -561,6 +667,93 @@ mod tests {
             ExplorerFileContent::Text { content, .. } => assert_eq!(content, "wt"),
             other => panic!("expected text, got {other:?}"),
         }
+    }
+
+    /// Build `<base>/claude-501/<slug>/<sid>/scratchpad` for a workspace, the
+    /// layout CC uses, and return the scratchpad path.
+    fn make_scratchpad(base: &Path, ws: &Path, sid: &str) -> PathBuf {
+        let canon = fs::canonicalize(ws).unwrap();
+        let slug = crate::session::encode_workspace_path(&canon.to_string_lossy());
+        let pad = base.join("claude-501").join(slug).join(sid).join("scratchpad");
+        fs::create_dir_all(&pad).unwrap();
+        pad
+    }
+
+    #[test]
+    fn scratchpad_root_derived_from_slug_and_session_id() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("tmpbase");
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        let sid = "112e4ce4-87ad-4251-99b6-cf83be9607c9";
+        let pad = make_scratchpad(&base, &ws, sid);
+        fs::write(pad.join("note.txt"), "hi").unwrap();
+
+        let root = scratchpad_root_in(&base, ws.to_str().unwrap(), sid).expect("scratchpad found");
+        assert_eq!(root, fs::canonicalize(&pad).unwrap());
+
+        let entries = list_dir_in(&root, "", true).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "note.txt");
+        match read_file_at(&root, "note.txt").unwrap() {
+            ExplorerFileContent::Text { content, .. } => assert_eq!(content, "hi"),
+            other => panic!("expected text, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn scratchpad_root_none_when_absent_or_id_unsafe() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("tmpbase");
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        let sid = "112e4ce4-87ad-4251-99b6-cf83be9607c9";
+        let w = ws.to_str().unwrap();
+
+        // Nothing on disk yet — the tab must stay hidden rather than error.
+        assert!(scratchpad_root_in(&base, w, sid).is_none());
+
+        make_scratchpad(&base, &ws, sid);
+        assert!(scratchpad_root_in(&base, w, sid).is_some());
+        // A session that never wrote anything has no directory of its own.
+        assert!(scratchpad_root_in(&base, w, "00000000-0000-0000-0000-000000000000").is_none());
+        // Ids that could inject path components are refused outright.
+        for bad in ["..", "../..", "a/b", "a\\b", ""] {
+            assert!(scratchpad_root_in(&base, w, bad).is_none(), "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn scratchpad_rejects_traversal_and_symlink_escape() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let base = tmp.path().join("tmpbase");
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        fs::write(tmp.path().join("victim.txt"), "secret").unwrap();
+        let sid = "112e4ce4-87ad-4251-99b6-cf83be9607c9";
+        let pad = make_scratchpad(&base, &ws, sid);
+        let root = scratchpad_root_in(&base, ws.to_str().unwrap(), sid).unwrap();
+
+        let err = read_file_at(&root, "../../../victim.txt").unwrap_err();
+        assert!(err.contains("traversal"), "got: {err}");
+        let err = list_dir_in(&root, "..", true).unwrap_err();
+        assert!(err.contains("traversal"), "got: {err}");
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(tmp.path().join("victim.txt"), pad.join("link.txt")).unwrap();
+            let err = read_file_at(&root, "link.txt").unwrap_err();
+            assert!(err.contains("escapes root"), "got: {err}");
+        }
+    }
+
+    #[test]
+    fn scratchpad_surface_requires_a_known_workspace() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        fs::create_dir_all(&ws).unwrap();
+        let err = list_scratchpad_dir(ws.to_str().unwrap(), "abc", "", &[]).unwrap_err();
+        assert!(err.contains("not a known session workspace"), "got: {err}");
     }
 
     #[test]
