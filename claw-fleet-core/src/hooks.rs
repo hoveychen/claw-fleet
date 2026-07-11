@@ -86,6 +86,8 @@ pub struct HookEvent {
     pub session_id: String,
     pub event_name: String,
     pub timestamp_ms: u64,
+    /// Only `Stop` / `SubagentStop` carry these (CLI ≥ 2.1.145); empty otherwise.
+    pub background_tasks: Vec<crate::bg_guard::BackgroundTask>,
 }
 
 // ── Paths ────────────────────────────────────────────────────────────────────
@@ -760,15 +762,34 @@ fn is_idle_resume_group(group: &Value) -> bool {
 
 // ── Read hook events ─────────────────────────────────────────────────────────
 
+/// Everything the session scan derives from one pass over the hook events.
+///
+/// Bundled because `read_recent_events` reads the whole `hooks.jsonl` to keep
+/// its tail, and that file runs to tens of megabytes on a busy machine — the
+/// scan must not pay for it twice per tick.
+#[derive(Debug, Default, Clone)]
+pub struct HookSnapshot {
+    /// session_id → derived agent state.
+    pub states: HashMap<String, HookState>,
+    /// session_id → the background tasks that were still running the last time
+    /// the session ended a turn. Empty for sessions with nothing outstanding.
+    pub background_tasks: HashMap<String, Vec<crate::bg_guard::BackgroundTask>>,
+}
+
 /// Read the hook events file and compute per-session HookState.
 /// Returns a map from session_id to the derived state.
 pub fn read_hook_states() -> HashMap<String, HookState> {
+    read_hook_snapshot().states
+}
+
+/// One pass over the hook events → both the state map and the outstanding
+/// background tasks per session.
+pub fn read_hook_snapshot() -> HookSnapshot {
     let Some(path) = hooks_events_path() else {
-        return HashMap::new();
+        return HookSnapshot::default();
     };
 
     let events = read_recent_events(&path, 500);
-    let mut result: HashMap<String, HookState> = HashMap::new();
 
     // Group by session_id, keep only the latest event per session.
     let mut latest: HashMap<String, HookEvent> = HashMap::new();
@@ -784,6 +805,8 @@ pub fn read_hook_states() -> HashMap<String, HookState> {
         .unwrap_or_default()
         .as_millis() as u64;
 
+    let mut snapshot = HookSnapshot::default();
+
     for (sid, ev) in latest {
         let age_ms = now_ms.saturating_sub(ev.timestamp_ms);
 
@@ -792,16 +815,29 @@ pub fn read_hook_states() -> HashMap<String, HookState> {
             continue;
         }
 
+        // Background tasks are only reported on Stop, and only the *latest* Stop
+        // matters: a later PreToolUse means the session is off doing something
+        // else, at which point last turn's snapshot says nothing about now.
+        let running: Vec<_> = ev
+            .background_tasks
+            .iter()
+            .filter(|t| t.is_running())
+            .cloned()
+            .collect();
+        if !running.is_empty() {
+            snapshot.background_tasks.insert(sid.clone(), running);
+        }
+
         let state = match ev.event_name.as_str() {
             "PreToolUse" => HookState::ToolExecuting,
             "PostToolUse" | "PostToolUseFailure" => HookState::ModelProcessing,
             "Stop" | "SubagentStop" => HookState::Stopped,
             _ => HookState::Unknown,
         };
-        result.insert(sid, state);
+        snapshot.states.insert(sid, state);
     }
 
-    result
+    snapshot
 }
 
 /// Truncate the hooks events file if it exceeds a threshold (e.g. 10000 lines).
@@ -924,10 +960,17 @@ fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
                 })
                 .unwrap_or(file_mtime_ms);
 
+            // Present on Stop payloads only; a CLI older than 2.1.145 omits it.
+            let background_tasks = v
+                .get("background_tasks")
+                .and_then(|t| serde_json::from_value(t.clone()).ok())
+                .unwrap_or_default();
+
             Some(HookEvent {
                 session_id,
                 event_name,
                 timestamp_ms,
+                background_tasks,
             })
         })
         .collect()
