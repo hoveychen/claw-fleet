@@ -341,6 +341,13 @@ pub trait Backend: Send + Sync {
         workspace_path: String,
         mark: Option<crate::session_mark::SessionMark>,
     ) -> Result<(), String>;
+    /// Mark a batch of sessions read as of now. "Unread" is derived
+    /// (`last_activity_ms > last_read_ms`), so this only stamps the read time;
+    /// a single mark is a batch of one, "mark all read" a batch of many.
+    fn mark_sessions_read(
+        &self,
+        items: Vec<crate::session_read::SessionReadItem>,
+    ) -> Result<(), String>;
     fn account_info(&self) -> AccountInfoFuture;
     /// Fetch account/profile info for the given source (e.g. "claude", "cursor", "openclaw").
     fn source_account(&self, source: &str) -> SourceDataFuture;

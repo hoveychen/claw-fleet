@@ -1638,6 +1638,13 @@ impl Backend for LocalBackend {
         claw_fleet_core::session_mark::set_mark(&session_id, &workspace_path, mark)
     }
 
+    fn mark_sessions_read(
+        &self,
+        items: Vec<claw_fleet_core::session_read::SessionReadItem>,
+    ) -> Result<(), String> {
+        claw_fleet_core::session_read::mark_read(&items)
+    }
+
     fn account_info(&self) -> crate::backend::AccountInfoFuture {
         Box::pin(crate::account::fetch_account_info())
     }
