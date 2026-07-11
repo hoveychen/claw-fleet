@@ -134,6 +134,36 @@
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Wrap to a second line on a narrow rail rather than squashing the pills. */
+  flex-wrap: wrap;
+}
+
+/* "全部已读" — clears every unread session's dot in one call. Mirrors the
+   active-toggle pill; disabled (dimmed, non-interactive) when nothing is unread. */
+.mark_all_read {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
+}
+
+.mark_all_read:hover:not(:disabled) {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.mark_all_read:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .project_select {
@@ -291,7 +321,7 @@
 
 /* The stop button is secondary: hidden until the row is hovered/focused so the
    resting row stays quiet. Its slot keeps its layout box while hidden, so the
-   always-visible mark dot (last child) doesn't shift when it fades in. */
+   always-visible pending/done toggle (last child) doesn't shift when it fades in. */
 .stop_slot {
   opacity: 0;
   transition: opacity 0.15s;
@@ -307,60 +337,37 @@
   background: var(--color-bg-card);
 }
 
-/* Manual review mark — a small notification-style dot, orthogonal to the left
-   run-status dot. The <button> is a transparent, comfortably-sized hit target;
-   the visible mark is a tiny 7px ::after badge (not a big fill). Always shown
-   for new (red) / pending (blue); "done" collapses to nothing, revealed as a
-   faint hollow ring on row hover so it stays clickable to cycle back. Colours
-   and the done-reveal are driven by data-mark so MarkControl (which imports
-   this module) and the rows share them. */
-.mark_dot {
-  position: relative;
+/* Pending/done toggle — the manual "finished?" axis, orthogonal to the top-left
+   unread dot and the left run-status bar. Always visible (unlike the old review
+   dot): a hollow circle for pending, a filled green check for done. The glyph
+   itself is a lucide icon rendered by MarkControl; this styles the button box +
+   colour. `data-done` drives the colour so MarkControl (which imports this
+   module) and the rows share it. */
+.mark_toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   padding: 0;
   border: none;
   background: none;
-  cursor: pointer;
-}
-
-.mark_dot::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 7px;
-  height: 7px;
   border-radius: 50%;
-  box-sizing: border-box;
-  transform: translate(-50%, -50%);
+  cursor: pointer;
+  color: var(--color-text-dim);
   transition:
-    opacity 0.15s,
+    color 0.15s,
     transform 0.1s;
 }
 
-.mark_dot:hover::after {
-  transform: translate(-50%, -50%) scale(1.25);
+.mark_toggle:hover {
+  transform: scale(1.12);
+  color: var(--color-text);
 }
 
-.mark_dot[data-mark="new"]::after {
-  background: #e0574a; /* red — new / needs review */
-}
-
-.mark_dot[data-mark="pending"]::after {
-  background: #4a90e0; /* blue — seen, in progress */
-}
-
-.mark_dot[data-mark="done"]::after {
-  background: transparent;
-  border: 1px solid var(--color-border);
-  opacity: 0;
-}
-
-.row_wrap:hover .mark_dot[data-mark="done"]::after,
-.mark_dot[data-mark="done"]:focus-visible::after {
-  opacity: 0.5;
+.mark_toggle[data-done="true"] {
+  color: #5ac88c; /* green — finished */
 }
 
 .row {
@@ -371,9 +378,10 @@
   position: relative;
   /* Clip the left accent bar to the row's rounded corners. */
   overflow: hidden;
-  /* Reserve a right gutter for the always-visible mark dot so it never overlaps
-     the title / time text. */
-  padding: 7px 26px 7px 10px;
+  /* Right gutter reserves space for the pending/done toggle; the wider left
+     gutter clears the top-left unread dot so the title never sits under it
+     (kept constant whether or not the dot shows, to avoid reflow). */
+  padding: 7px 26px 7px 18px;
   border: none;
   background: none;
   border-radius: 7px;
@@ -407,6 +415,22 @@
   gap: 3px;
   min-width: 0;
   flex: 1;
+}
+
+/* Unread indicator — a small red dot pinned to the row's top-left corner,
+   just inside the run-status accent bar. Present only while the session has
+   newer activity than its last read (see sessionUnread); a 2s dwell on the row
+   clears it. A faint ring keeps it legible over the hover background. */
+.unread_dot {
+  position: absolute;
+  top: 8px;
+  left: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #e0574a;
+  box-shadow: 0 0 0 2px var(--color-bg);
+  pointer-events: none;
 }
 
 .row_title {

@@ -483,6 +483,48 @@ export const useAuditStore = create<AuditState>((set, get) => ({
     }),
 }));
 
+// ── Session read/unread store ─────────────────────────────────────────────────
+//
+// Unread is derived from `SessionInfo.lastReadMs` (stamped by the backend scan)
+// vs `lastActivityMs`. The scan lags a few seconds behind a dwell-read, so this
+// store holds optimistic client-side read stamps that make the red dot clear (and
+// the sidebar badge decrement) immediately; they're harmless once the scan
+// catches up because `sessionUnread` takes the max of both.
+
+interface ReadState {
+  /** session id → optimistic read timestamp (epoch ms). */
+  overrides: Record<string, number>;
+  /** Mark one session read locally + persist to the backend (batch of one). */
+  markRead: (session: SessionInfo) => void;
+  /** Mark many sessions read locally + persist in a single backend call. */
+  markManyRead: (sessions: SessionInfo[]) => void;
+}
+
+export const useReadStore = create<ReadState>((set) => ({
+  overrides: {},
+  markRead: (session) => useReadStore.getState().markManyRead([session]),
+  markManyRead: (sessions) => {
+    if (sessions.length === 0) return;
+    const now = Date.now();
+    set((state) => {
+      const next = { ...state.overrides };
+      for (const s of sessions) {
+        next[s.id] = Math.max(next[s.id] ?? 0, now);
+      }
+      return { overrides: next };
+    });
+    invoke("mark_sessions_read", {
+      items: sessions.map((s) => ({
+        sessionId: s.id,
+        workspacePath: s.workspacePath,
+      })),
+    }).catch(() => {
+      // Best-effort: the optimistic override still hides the dot this session;
+      // a failed persist just means the dot returns after the next scan.
+    });
+  },
+}));
+
 // ── Report store ────────────────────────────────────────────────────────────
 
 interface ReportState {
