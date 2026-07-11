@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderGit2, History, Plus, Search } from "lucide-react";
+import { FolderGit2, History, List, Plus, Search } from "lucide-react";
 import { useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
@@ -326,7 +326,10 @@ export function HistoryView() {
                   className={`${styles.mark_seg} ${markFilter === seg.key ? styles.mark_seg_on : ""}`}
                   aria-pressed={markFilter === seg.key}
                   onClick={() => setMarkFilter(seg.key)}
+                  title={label}
+                  aria-label={`${label} (${markCounts[seg.key]})`}
                 >
+                  {seg.key === "all" && <List size={12} strokeWidth={1.8} />}
                   {seg.dot && (
                     <span
                       className={styles.mark_seg_dot}
@@ -338,7 +341,6 @@ export function HistoryView() {
                       className={`${styles.mark_seg_dot} ${styles.mark_seg_dot_done}`}
                     />
                   )}
-                  {label}
                   <span className={styles.mark_seg_count}>{markCounts[seg.key]}</span>
                 </button>
               );
