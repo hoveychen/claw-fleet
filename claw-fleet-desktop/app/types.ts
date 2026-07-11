@@ -107,6 +107,12 @@ export interface SessionInfo {
   todos?: TodoSummary | null;
   /** Aggregate TASKS.md plan progress for this session's workspace; absent when PRD Discipline isn't in use. */
   taskPlan?: TaskPlanSummary | null;
+  /**
+   * Background tasks (shells, monitors, …) that were still running when this
+   * session last ended a turn — i.e. what it is waiting on. Absent/empty for
+   * almost every session.
+   */
+  backgroundTasks?: BackgroundTask[];
   /** Relay-chain position when this session took part in a handoff (`fleet handoff`); absent otherwise. */
   handoff?: SessionHandoffInfo | null;
   /** Human's manual pending/done toggle. Absent/undefined reads as "pending";
@@ -317,6 +323,26 @@ export interface TodoSummary {
  * when the session cannot be attributed to an active plan — the card then shows
  * no plan row rather than guessing among the workspace's plans.
  */
+/**
+ * A background task the session started and never collected — mirrors the
+ * `background_tasks[]` entries of Claude Code's Stop hook payload.
+ *
+ * In a headless (`claude -p`) session these die ~5s after the turn ends and
+ * nothing can wake the agent to read them, which is why Fleet blocks such a stop
+ * (`fleet session idle` → exit 2). A card showing these is a session that is
+ * actively waiting on them.
+ */
+export interface BackgroundTask {
+  id: string;
+  /** `shell` | `monitor` | `subagent` | `workflow` | … */
+  type: string;
+  /** `running` while live. */
+  status: string;
+  description: string;
+  /** Shell tasks only. */
+  command?: string | null;
+}
+
 export interface TaskPlanSummary {
   done: number;
   total: number;
