@@ -1367,3 +1367,53 @@ export const MOCK_TIMELINE_REPORTS: Map<string, DailyReport> = new Map([
   [MOCK_DAILY_REPORT.date, MOCK_DAILY_REPORT],
   ...TIMELINE_SUMMARIES.map((e) => [dateStr(e.daysAgo), buildMockReport(e)] as [string, DailyReport]),
 ]);
+
+// ── Wiki ────────────────────────────────────────────────────────────────────
+// Without these the mock's `default:` branch returns null for list_wiki_docs,
+// WikiView does setDocs(null), and the first docs.filter() blanks the app.
+export const MOCK_WIKI_DOCS = [
+  {
+    slug: "arch/overview",
+    title: "架构总览",
+    kind: "markdown" as const,
+    entry: "overview.md",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
+    createdMs: NOW - 9 * DAY,
+    updatedMs: NOW - 2 * HOUR,
+    currentVersion: "v3",
+    versions: [
+      { id: "v3", publishedMs: NOW - 2 * HOUR, sizeBytes: 18_400, fileCount: 1, sourcePath: "/tmp/overview.md" },
+      { id: "v2", publishedMs: NOW - 3 * DAY, sizeBytes: 16_900, fileCount: 1, sourcePath: "/tmp/overview.md" },
+    ],
+  },
+  {
+    slug: "arch/session-scanner",
+    title: "会话扫描器设计",
+    kind: "markdown" as const,
+    entry: "session-scanner.md",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
+    createdMs: NOW - 5 * DAY,
+    updatedMs: NOW - 1 * DAY,
+    currentVersion: "v1",
+    versions: [
+      { id: "v1", publishedMs: NOW - 1 * DAY, sizeBytes: 9_200, fileCount: 1, sourcePath: "/tmp/scanner.md" },
+    ],
+  },
+  {
+    slug: "perf-report",
+    title: "启动台性能分析",
+    kind: "htmlDir" as const,
+    entry: "index.html",
+    workspacePath: "/Users/demo/workspace/api-server",
+    workspaceName: "api-server",
+    createdMs: NOW - 12 * HOUR,
+    updatedMs: NOW - 40 * 60_000,
+    currentVersion: "v2",
+    versions: [
+      { id: "v2", publishedMs: NOW - 40 * 60_000, sizeBytes: 142_000, fileCount: 5, sourcePath: "/tmp/perf" },
+      { id: "v1", publishedMs: NOW - 12 * HOUR, sizeBytes: 138_000, fileCount: 5, sourcePath: "/tmp/perf" },
+    ],
+  },
+];

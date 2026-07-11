@@ -23,6 +23,8 @@ import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
 import { isFleetOwnedEntrypoint, sessionUnread } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import { StopControl, canControl } from "./StopControl";
@@ -280,6 +282,11 @@ export function HistoryView() {
   const { t } = useTranslation();
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["history"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
+  const {
+    width: railWidth,
+    isDragging: railDragging,
+    onMouseDown: onRailMouseDown,
+  } = useResizableWidth("history-rail-width", { min: 240, max: 640, initial: 300 });
   // Subscribe per-field: the store also carries speedHistory/costHistory, which
   // grow on every scan tick. Destructuring the whole slice would re-render the
   // launchpad on that churn even when the session list itself is unchanged.
@@ -461,12 +468,12 @@ export function HistoryView() {
       {collapsed ? (
         <CollapsedSidebarRail onExpand={() => setSecondarySidebar("history", false)} />
       ) : (
-      <div className={styles.rail}>
+      <div className={styles.rail} style={{ width: railWidth }}>
         <div className={styles.header}>
           <span className={styles.header_title}>{t("history.title", "启动台")}</span>
           <span className={styles.header_count}>{rows.length}</span>
-          {/* Icon-only in the header: the rail is 300px and "Mark all read" spelled
-              out would push the new-session button off the row in en locale. */}
+          {/* Icon-only in the header: the rail starts at 300px and "Mark all read"
+              spelled out would push the new-session button off the row in en locale. */}
           <button
             type="button"
             className={styles.header_read_btn}
@@ -584,6 +591,8 @@ export function HistoryView() {
             ))
           )}
         </div>
+
+        <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
       </div>
       )}
 

@@ -23,6 +23,8 @@ import { PromptDialog } from "./PromptDialog";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
 import { useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 import styles from "./WikiView.module.css";
 
 // ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
@@ -217,6 +219,11 @@ export function WikiView() {
   const { t } = useTranslation();
   const secondaryCollapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["wiki"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
+  const {
+    width: railWidth,
+    isDragging: railDragging,
+    onMouseDown: onRailMouseDown,
+  } = useResizableWidth("wiki-rail-width", { min: 200, max: 640, initial: 320 });
   const [docs, setDocs] = useState<WikiDoc[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -639,6 +646,7 @@ export function WikiView() {
             strips a doc's directory prefix. */}
         <aside
           className={`${styles.list_pane} ${dragSlug && dropPath === "" ? styles.drop_target_root : ""}`}
+          style={{ width: railWidth }}
           {...dropProps("")}
         >
           {moveError && (
@@ -658,6 +666,8 @@ export function WikiView() {
             />
           )}
           {renderNodes(tree, 0, "")}
+
+          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
         </aside>
         </>
         )}

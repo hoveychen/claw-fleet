@@ -715,28 +715,5 @@
   margin-top: 40px;
 }
 
-/* ── Resize handle ───────────────────────────────────────────────────────── */
-
-.resize_handle {
-  position: absolute;
-  top: 0;
-  right: -3px;
-  width: 6px;
-  height: 100%;
-  cursor: col-resize;
-  z-index: 10;
-  transition: background 0.15s;
-}
-
-/* Floating sidebar clips its overflow, so pull the handle inside the panel
-   to keep the full hit-area usable. */
-:global([data-platform]) .resize_handle {
-  right: 0;
-  width: 6px;
-}
-
-.resize_handle:hover,
-.resize_handle_active {
-  background: var(--color-accent);
-  opacity: 0.5;
-}
+/* Resize handle lives in ResizeHandle.module.css (shared with the secondary
+   sidebars); .sidebar's position: relative anchors it. */

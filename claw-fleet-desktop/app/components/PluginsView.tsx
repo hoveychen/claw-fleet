@@ -5,6 +5,8 @@ import { Blocks } from "lucide-react";
 import { useConnectionStore, useUIStore } from "../store";
 import { EmptyState } from "./EmptyState";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 import styles from "./MemoryView.module.css";
 import pluginStyles from "./PluginsView.module.css";
 
@@ -168,6 +170,11 @@ export function PluginsView() {
   const { t } = useTranslation();
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["plugins"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
+  const {
+    width: railWidth,
+    isDragging: railDragging,
+    onMouseDown: onRailMouseDown,
+  } = useResizableWidth("plugins-rail-width", { min: 200, max: 640, initial: 340 });
   const [plugins, setPlugins] = useState<PluginItem[]>([]);
   const [marketplaces, setMarketplaces] = useState<MarketplaceItem[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -295,7 +302,7 @@ export function PluginsView() {
         {collapsed ? (
           <CollapsedSidebarRail onExpand={() => setSecondarySidebar("plugins", false)} />
         ) : (
-        <aside className={styles.list_pane}>
+        <aside className={styles.list_pane} style={{ width: railWidth }}>
           {!loaded && <p className={styles.empty}>{t("plugins.loading")}</p>}
           {loaded && plugins.length === 0 && (
             <EmptyState
@@ -334,6 +341,8 @@ export function PluginsView() {
               )}
             </>
           )}
+
+          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
         </aside>
         )}
 

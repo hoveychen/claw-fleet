@@ -16,6 +16,7 @@ import {
   MOCK_OPENCLAW_USAGE,
   MOCK_OPENCLAW_ACCOUNT,
   MOCK_MEMORIES,
+  MOCK_WIKI_DOCS,
   MOCK_MEMORY_CONTENT,
   MOCK_MEMORY_HISTORY,
   MOCK_SOURCES_CONFIG,
@@ -90,6 +91,20 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return null;
 
     case "list_skills":
+      return [];
+
+    // Wiki / Plugins. These MUST return a list rather than falling through to
+    // `default: return null` — both views do `setState(await invoke(...))` and
+    // then filter the result, so a null blanks the whole app.
+    case "list_wiki_docs":
+      return MOCK_WIKI_DOCS;
+    case "search_wiki_docs":
+      return [];
+    case "get_wiki_file_text":
+      return "# 架构总览\n\nmock 模式下的占位正文。";
+    case "list_plugins":
+      return [];
+    case "list_marketplaces":
       return [];
     case "list_workspace_procs":
       return [];

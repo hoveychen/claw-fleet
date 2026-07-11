@@ -75,7 +75,10 @@
   overflow: hidden;
 }
 
+/* Shared by Memory / Skills / Files / Plugins — each passes its own persisted
+   width inline (useResizableWidth); the value here is just the start width. */
 .list_pane {
+  position: relative; /* anchors the ResizeHandle */
   width: 340px;
   flex-shrink: 0;
   overflow-y: auto;
