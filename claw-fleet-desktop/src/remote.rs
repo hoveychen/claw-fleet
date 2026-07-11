@@ -387,6 +387,59 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok("/session_read", &req)
     }
 
+    fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
+        self.probe.get("/procs").unwrap_or_default()
+    }
+
+    fn spawn_proc(
+        &self,
+        workspace_path: String,
+        command: String,
+        cols: u16,
+        rows: u16,
+    ) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
+        let req = claw_fleet_core::proc_runner::SpawnProcRequest {
+            workspace_path,
+            command,
+            cols,
+            rows,
+        };
+        self.probe.post_json("/proc_run", &req)
+    }
+
+    fn kill_proc(&self, id: String, force: bool) -> Result<(), String> {
+        self.probe
+            .post_ok(&format!("/proc_kill?id={}&force={}", encode_path(&id), force))
+    }
+
+    fn proc_output(
+        &self,
+        id: String,
+        offset: Option<u64>,
+    ) -> Result<claw_fleet_core::proc_runner::ProcOutputChunk, String> {
+        let mut endpoint = format!("/proc_output?id={}", encode_path(&id));
+        if let Some(off) = offset {
+            endpoint.push_str(&format!("&offset={off}"));
+        }
+        self.probe.get(&endpoint)
+    }
+
+    fn proc_input(&self, id: String, data_b64: String) -> Result<(), String> {
+        let req = claw_fleet_core::proc_runner::ProcInputRequest { id, data_b64 };
+        self.probe.post_json_ok("/proc_input", &req)
+    }
+
+    fn proc_resize(&self, id: String, cols: u16, rows: u16) -> Result<(), String> {
+        let req = claw_fleet_core::proc_runner::ProcResizeRequest { id, cols, rows };
+        self.probe.post_json_ok("/proc_resize", &req)
+    }
+
+    fn clear_procs(&self, id: Option<String>, workspace_path: Option<String>) -> Result<u32, String> {
+        let req = claw_fleet_core::proc_runner::ClearProcRequest { id, workspace_path };
+        let resp: serde_json::Value = self.probe.post_json("/proc_clear", &req)?;
+        Ok(resp["cleared"].as_u64().unwrap_or(0) as u32)
+    }
+
     fn account_info(&self) -> crate::backend::AccountInfoFuture {
         let probe = self.probe.clone();
         Box::pin(async move {

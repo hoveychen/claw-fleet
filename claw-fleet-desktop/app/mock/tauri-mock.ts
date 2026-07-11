@@ -91,6 +91,10 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
 
     case "list_skills":
       return [];
+    case "list_workspace_procs":
+      return [];
+    case "clear_workspace_procs":
+      return 0;
     case "search_sessions":
       return [];
     case "resume_fleet_session":

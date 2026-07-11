@@ -1645,6 +1645,50 @@ impl Backend for LocalBackend {
         claw_fleet_core::session_read::mark_read(&items)
     }
 
+    fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
+        claw_fleet_core::proc_runner::list_procs()
+    }
+
+    fn spawn_proc(
+        &self,
+        workspace_path: String,
+        command: String,
+        cols: u16,
+        rows: u16,
+    ) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
+        // The desktop binary itself is the host re-exec target — its main()
+        // intercepts the fleet-proc-host marker before Tauri boots.
+        let exe = std::env::current_exe().map_err(|e| format!("cannot locate own binary: {e}"))?;
+        claw_fleet_core::proc_runner::spawn_proc(&exe, &workspace_path, &command, cols, rows)
+    }
+
+    fn kill_proc(&self, id: String, force: bool) -> Result<(), String> {
+        claw_fleet_core::proc_runner::kill_proc(&id, force)
+    }
+
+    fn proc_output(
+        &self,
+        id: String,
+        offset: Option<u64>,
+    ) -> Result<claw_fleet_core::proc_runner::ProcOutputChunk, String> {
+        claw_fleet_core::proc_runner::proc_output(&id, offset)
+    }
+
+    fn proc_input(&self, id: String, data_b64: String) -> Result<(), String> {
+        claw_fleet_core::proc_runner::proc_input(&id, &data_b64)
+    }
+
+    fn proc_resize(&self, id: String, cols: u16, rows: u16) -> Result<(), String> {
+        claw_fleet_core::proc_runner::proc_resize(&id, cols, rows)
+    }
+
+    fn clear_procs(&self, id: Option<String>, workspace_path: Option<String>) -> Result<u32, String> {
+        match id {
+            Some(id) => claw_fleet_core::proc_runner::clear_proc(&id).map(|()| 1),
+            None => claw_fleet_core::proc_runner::clear_finished_procs(workspace_path.as_deref()),
+        }
+    }
+
     fn account_info(&self) -> crate::backend::AccountInfoFuture {
         Box::pin(crate::account::fetch_account_info())
     }

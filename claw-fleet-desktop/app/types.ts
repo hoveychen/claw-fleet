@@ -1066,3 +1066,30 @@ export interface DailyReportStats {
   totalToolCalls: number;
   totalProjects: number;
 }
+
+// ── Workspace command runner (mirror claw-fleet-core/src/proc_runner.rs) ────
+
+export type ProcStatus = "starting" | "running" | "exited";
+
+export interface ProcRecord {
+  id: string;
+  workspacePath: string;
+  command: string;
+  status: ProcStatus;
+  /** Pid of the command's shell — also its process-group id. */
+  childPid?: number;
+  hostPid?: number;
+  hostStartTime?: number;
+  /** Absent on an exited record when the exit was inferred, not observed. */
+  exitCode?: number;
+  startedMs: number;
+  finishedMs?: number;
+  cols: number;
+  rows: number;
+}
+
+export interface ProcOutputChunk {
+  dataB64: string;
+  nextOffset: number;
+  record: ProcRecord;
+}

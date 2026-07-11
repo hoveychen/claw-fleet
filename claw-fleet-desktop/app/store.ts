@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { emit, listen, UnlistenFn } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import type { RemoteConnection } from "./components/ConnectionDialog";
-import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, RawMessage, SessionInfo, WaitingAlert } from "./types";
+import type { A2uiRenderRequest, DailyReport, DailyReportStats, ElicitationAttachment, ElicitationRequest, FleetAskRequest, GuardRequest, Lesson, PendingDecision, PermissionPromptRequest, PlanApprovalRequest, ProcRecord, RawMessage, SessionInfo, WaitingAlert } from "./types";
 import { getItem, setItem } from "./storage";
 import i18n from "./i18n";
 import { playChime } from "./audio";
@@ -1452,4 +1452,34 @@ function removeDecision(s: DecisionState, id: string): Partial<DecisionState> {
     }
   }
   return { decisions: next, activeDecisionId };
+}
+
+// ── Workspace command runner ─────────────────────────────────────────────────
+
+interface ProcState {
+  procs: ProcRecord[];
+  /** Re-fetch the proc list from the backend (polled while 文件 page is open). */
+  fetchProcs: () => Promise<void>;
+}
+
+export const useProcStore = create<ProcState>((set) => ({
+  procs: [],
+  fetchProcs: async () => {
+    try {
+      const procs = await invoke<ProcRecord[] | null>("list_workspace_procs");
+      set({ procs: procs ?? [] });
+    } catch {
+      // Backend not ready (startup) — keep the previous list.
+    }
+  },
+}));
+
+/** Running proc count per workspace path — drives the sidebar badges. */
+export function runningProcCounts(procs: ProcRecord[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const p of procs) {
+    if (p.status === "exited") continue;
+    counts.set(p.workspacePath, (counts.get(p.workspacePath) ?? 0) + 1);
+  }
+  return counts;
 }

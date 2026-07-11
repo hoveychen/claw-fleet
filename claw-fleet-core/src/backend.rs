@@ -348,6 +348,55 @@ pub trait Backend: Send + Sync {
         &self,
         items: Vec<crate::session_read::SessionReadItem>,
     ) -> Result<(), String>;
+
+    // ── Workspace command runner (文件 page) ────────────────────────────────
+    // Commands launched at a workspace's cwd, each hosted by a detached
+    // `fleet-proc-host` process so it survives the app/probe restarting. See
+    // `crate::proc_runner`. Defaults are the NullBackend behaviour.
+    /// All known workspace procs (running and exited), newest first.
+    fn list_procs(&self) -> Vec<crate::proc_runner::ProcRecord> {
+        Vec::new()
+    }
+    /// Launch `command` at `workspace_path` under a detached pty host.
+    fn spawn_proc(
+        &self,
+        _workspace_path: String,
+        _command: String,
+        _cols: u16,
+        _rows: u16,
+    ) -> Result<crate::proc_runner::ProcRecord, String> {
+        Err("backend not ready".into())
+    }
+    /// Kill the proc's whole process group (SIGTERM → SIGKILL escalation).
+    fn kill_proc(&self, _id: String, _force: bool) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    /// Incremental pty output read; `offset = None` tails the recent output.
+    fn proc_output(
+        &self,
+        _id: String,
+        _offset: Option<u64>,
+    ) -> Result<crate::proc_runner::ProcOutputChunk, String> {
+        Err("backend not ready".into())
+    }
+    /// Forward raw stdin bytes (base64) to the proc's pty.
+    fn proc_input(&self, _id: String, _data_b64: String) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    /// Resize the proc's pty.
+    fn proc_resize(&self, _id: String, _cols: u16, _rows: u16) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
+    /// Clear one exited proc (`id = Some`) or every exited proc, optionally
+    /// scoped to a workspace. Returns how many were cleared.
+    fn clear_procs(
+        &self,
+        _id: Option<String>,
+        _workspace_path: Option<String>,
+    ) -> Result<u32, String> {
+        Err("backend not ready".into())
+    }
+
     fn account_info(&self) -> AccountInfoFuture;
     /// Fetch account/profile info for the given source (e.g. "claude", "cursor", "openclaw").
     fn source_account(&self, source: &str) -> SourceDataFuture;
