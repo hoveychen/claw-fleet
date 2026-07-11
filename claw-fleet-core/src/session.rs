@@ -1439,6 +1439,67 @@ fn compute_session_stats(lines: &[&str]) -> SessionStats {
     acc.finish()
 }
 
+/// A transcript's fold state carried between scans: how far we have folded, and
+/// the accumulator holding the result.
+#[derive(Clone, Debug, Default)]
+pub struct IncrParse {
+    /// Offset of the first byte not yet folded. Always sits just past a newline
+    /// (see [`SessionAcc::fold_chunk`]).
+    pub offset: u64,
+    pub acc: SessionAcc,
+}
+
+/// Advance a transcript's fold state by reading only what was appended since
+/// last time, re-reading from scratch when the file cannot have been appended to.
+///
+/// Rewrite detection follows the same rule `search_index` has run in production:
+/// a file shorter than our offset was truncated or rewritten, so the carried
+/// state is meaningless and we start over. The residual assumption — that a file
+/// which is *not* shorter was only appended to — is the same one that module
+/// relies on, and holds because Claude Code only ever appends to a transcript
+/// (compaction adds a boundary record; it does not rewrite history).
+///
+/// `prev` is `None` on a cold cache, which simply means "fold the whole file".
+pub fn advance_incremental(
+    jsonl_path: &Path,
+    prev: Option<IncrParse>,
+) -> std::io::Result<IncrParse> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let file_len = fs::metadata(jsonl_path)?.len();
+
+    let mut state = match prev {
+        // Truncated or rewritten: nothing we carried can be trusted.
+        Some(p) if file_len < p.offset => IncrParse::default(),
+        Some(p) => p,
+        None => IncrParse::default(),
+    };
+
+    if file_len == state.offset {
+        return Ok(state); // nothing new
+    }
+
+    let mut f = fs::File::open(jsonl_path)?;
+    if state.offset > 0 {
+        f.seek(SeekFrom::Start(state.offset))?;
+    }
+    let mut buf = Vec::with_capacity((file_len - state.offset) as usize);
+    f.read_to_end(&mut buf)?;
+
+    // A transcript is UTF-8, but a chunk boundary can land mid-codepoint only
+    // if the writer flushed a partial codepoint — treat any such tail the same
+    // way as a partial line: leave it for the next tick.
+    let text = match std::str::from_utf8(&buf) {
+        Ok(s) => s,
+        Err(e) => std::str::from_utf8(&buf[..e.valid_up_to()])
+            .expect("valid_up_to marks a valid boundary"),
+    };
+
+    let consumed = state.acc.fold_chunk(text);
+    state.offset += consumed as u64;
+    Ok(state)
+}
+
 /// Everything `parse_session_info` used to derive by re-reading the whole
 /// transcript, folded in a single forward pass that can be resumed.
 ///
@@ -1605,6 +1666,26 @@ impl SessionAcc {
     /// Bound the speed-window samples carried between scans.
     pub fn prune(&mut self, now_secs: f64) {
         self.stats.prune_timed(now_secs);
+    }
+
+    /// Fold the complete lines in `chunk` and report how many bytes were
+    /// consumed.
+    ///
+    /// **A trailing fragment with no newline is left unconsumed.** Scans race
+    /// the CLI's writes, so the tail of a growing transcript is routinely a
+    /// half-written line. Folding it would parse-fail (silently dropping that
+    /// turn's tokens and cost forever, because the offset would have moved past
+    /// it); leaving it unconsumed means the next tick re-reads it once it is
+    /// complete. The returned count is therefore the offset advance, not
+    /// `chunk.len()`.
+    pub fn fold_chunk(&mut self, chunk: &str) -> usize {
+        let consumed = match chunk.rfind('\n') {
+            Some(i) => i + 1,
+            None => return 0, // nothing complete yet
+        };
+        let lines: Vec<&str> = chunk[..consumed].lines().collect();
+        self.push_lines(&lines);
+        consumed
     }
 }
 
@@ -3517,6 +3598,128 @@ mod tests {
         assert_eq!(got.total_output_tokens, expected.total_output_tokens);
         assert_eq!(got.total_cost_usd, expected.total_cost_usd);
         assert_eq!(got.total_output_tokens, 84);
+    }
+
+    // ── Incremental read: offsets, partial lines, rewrites ──────────────────
+
+    fn tmp_jsonl(name: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "incr_{}_{}_{}.jsonl",
+            name,
+            std::process::id(),
+            // Distinct per test even within a process.
+            name.len()
+        ));
+        let _ = fs::remove_file(&p);
+        p
+    }
+
+    fn append(path: &Path, s: &str) {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        f.write_all(s.as_bytes()).unwrap();
+    }
+
+    /// The scan races the CLI's writes, so a half-written trailing line is
+    /// normal. It must be folded once — when it is complete — and never lost.
+    ///
+    /// This is the case a naive `lines()`-to-EOF reader gets wrong: it would
+    /// parse-fail on the fragment and still advance the offset past it, dropping
+    /// that turn's tokens from the total permanently.
+    #[test]
+    fn incremental_defers_a_half_written_line_until_it_is_complete() {
+        let p = tmp_jsonl("partial");
+        let full = turn("m1", 100);
+
+        // The CLI has flushed only the first half of the record.
+        let split = full.len() / 2;
+        append(&p, &full[..split]);
+
+        let s1 = advance_incremental(&p, None).unwrap();
+        assert_eq!(s1.offset, 0, "no complete line yet — offset must not move");
+        assert_eq!(s1.acc.stats_at(0.0).total_output_tokens, 0);
+
+        // The rest of the record lands, terminated.
+        append(&p, &format!("{}\n", &full[split..]));
+
+        let s2 = advance_incremental(&p, Some(s1)).unwrap();
+        assert_eq!(
+            s2.acc.stats_at(0.0).total_output_tokens,
+            100,
+            "the once-partial line must be folded exactly once, not lost"
+        );
+        assert_eq!(s2.offset, fs::metadata(&p).unwrap().len());
+
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn incremental_folds_only_appended_bytes_and_matches_a_full_reparse() {
+        let p = tmp_jsonl("append");
+        append(&p, &format!("{}\n", turn("m1", 10)));
+        append(&p, &format!("{}\n", turn("m2", 20)));
+
+        let s1 = advance_incremental(&p, None).unwrap();
+        assert_eq!(s1.acc.stats_at(0.0).total_output_tokens, 30);
+        let after_first = s1.offset;
+
+        append(&p, &format!("{}\n", turn("m3", 5)));
+        let s2 = advance_incremental(&p, Some(s1)).unwrap();
+
+        assert!(s2.offset > after_first);
+        assert_eq!(s2.acc.stats_at(0.0).total_output_tokens, 35);
+
+        // Equivalence with reading the whole file from scratch.
+        let content = fs::read_to_string(&p).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(
+            s2.acc.stats_at(0.0).total_output_tokens,
+            compute_session_stats(&lines).total_output_tokens
+        );
+
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn incremental_is_a_noop_when_nothing_was_appended() {
+        let p = tmp_jsonl("noop");
+        append(&p, &format!("{}\n", turn("m1", 10)));
+
+        let s1 = advance_incremental(&p, None).unwrap();
+        let s2 = advance_incremental(&p, Some(s1.clone())).unwrap();
+
+        assert_eq!(s2.offset, s1.offset);
+        assert_eq!(s2.acc.stats_at(0.0).total_output_tokens, 10);
+
+        let _ = fs::remove_file(&p);
+    }
+
+    /// A file shorter than our offset cannot have been appended to — the carried
+    /// accumulator is meaningless and must be rebuilt, not extended.
+    #[test]
+    fn incremental_reparses_from_scratch_when_the_file_shrinks() {
+        let p = tmp_jsonl("shrink");
+        append(&p, &format!("{}\n", turn("m1", 10)));
+        append(&p, &format!("{}\n", turn("m2", 20)));
+        let s1 = advance_incremental(&p, None).unwrap();
+        assert_eq!(s1.acc.stats_at(0.0).total_output_tokens, 30);
+
+        // Rewritten shorter, with different content.
+        fs::write(&p, format!("{}\n", turn("z1", 7))).unwrap();
+
+        let s2 = advance_incremental(&p, Some(s1)).unwrap();
+        assert_eq!(
+            s2.acc.stats_at(0.0).total_output_tokens,
+            7,
+            "stale pre-rewrite totals must not survive"
+        );
+        assert_eq!(s2.offset, fs::metadata(&p).unwrap().len());
+
+        let _ = fs::remove_file(&p);
     }
 
     // ── compute_session_stats tests ─────────────────────────────────────────
