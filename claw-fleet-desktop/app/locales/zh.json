@@ -1751,5 +1751,12 @@
       "op_ok": "操作完成。",
       "op_failed": "操作失败。"
     }
+  },
+  "paths": {
+    "open_in_files": "在文件页中打开",
+    "reveal_in_finder": "在访达中显示",
+    "reveal_in_explorer": "在资源管理器中显示",
+    "open_hint": "打开 {{path}}",
+    "not_found": "路径不存在"
   }
 }

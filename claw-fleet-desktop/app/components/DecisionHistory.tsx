@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
-import { safeMarkdownComponents, safeRemarkPlugins } from "../markdown/safeLinks";
+import { safeRemarkPlugins } from "../markdown/safeLinks";
+import { usePathMarkdown } from "../hooks/usePathLinks";
 import { normalizeAnswer, summarizeQuestion } from "../decisionText";
 import type {
   DecisionHistoryRecord,
@@ -16,13 +17,22 @@ import { EmptyState } from "./EmptyState";
 import { decisionAssetUrl } from "../decisionAssets";
 import styles from "./DecisionHistory.module.css";
 
-// Inline-only markdown variant: unwraps the surrounding <p> so we can drop the
-// rendered output inside <span>s (option label/desc) without producing invalid
-// HTML or unwanted block margins.
-const inlineMarkdownComponents: Components = {
-  ...safeMarkdownComponents,
-  p: ({ children }) => <>{children}</>,
-};
+/**
+ * Block + inline markdown variants for one record, with that workspace's paths
+ * clickable. Records carry their own sessionId, so each body resolves its own
+ * workspace rather than inheriting one from the list.
+ *
+ * The inline variant unwraps the surrounding <p> so rendered output can sit
+ * inside the <span>s used for option labels/descriptions without producing
+ * invalid HTML or unwanted block margins.
+ */
+function useRecordMarkdown(sessionId: string): { block: Components; inline: Components } {
+  const block = usePathMarkdown(sessionId);
+  return useMemo(
+    () => ({ block, inline: { ...block, p: ({ children }) => <>{children}</> } }),
+    [block],
+  );
+}
 
 interface Props {
   records: DecisionHistoryRecord[];
@@ -70,6 +80,7 @@ function outcomeClass(outcome: string): string {
 
 function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
   const { t } = useTranslation();
+  const md = useRecordMarkdown(rec.sessionId);
   return (
     <div className={styles.body}>
       {rec.questions.map((q, qi) => {
@@ -79,7 +90,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
             <div className={styles.question_text}>
               <ReactMarkdown
                 remarkPlugins={safeRemarkPlugins}
-                components={safeMarkdownComponents}
+                components={md.block}
               >
                 {q.question}
               </ReactMarkdown>
@@ -98,7 +109,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                     <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
                     <ReactMarkdown
                       remarkPlugins={safeRemarkPlugins}
-                      components={inlineMarkdownComponents}
+                      components={md.inline}
                     >
                       {opt.label}
                     </ReactMarkdown>
@@ -107,7 +118,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                     <span className={styles.option_desc}>
                       <ReactMarkdown
                         remarkPlugins={safeRemarkPlugins}
-                        components={inlineMarkdownComponents}
+                        components={md.inline}
                       >
                         {opt.description}
                       </ReactMarkdown>
@@ -148,12 +159,13 @@ function UserPromptBody({ rec }: { rec: UserPromptHistoryRecord }) {
 
 function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
   const { t } = useTranslation();
+  const md = useRecordMarkdown(rec.sessionId);
   return (
     <div className={styles.body}>
       <div className={styles.plan_content}>
         <ReactMarkdown
           remarkPlugins={safeRemarkPlugins}
-          components={safeMarkdownComponents}
+          components={md.block}
         >
           {rec.planContent}
         </ReactMarkdown>
@@ -166,7 +178,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
           <div className={styles.plan_content}>
             <ReactMarkdown
               remarkPlugins={safeRemarkPlugins}
-              components={safeMarkdownComponents}
+              components={md.block}
             >
               {rec.editedPlan}
             </ReactMarkdown>
@@ -192,6 +204,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
  */
 function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
   const { t } = useTranslation();
+  const md = useRecordMarkdown(rec.sessionId);
 
   return (
     <div className={styles.body}>
@@ -212,7 +225,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
             <div className={styles.question_text}>
               <ReactMarkdown
                 remarkPlugins={safeRemarkPlugins}
-                components={safeMarkdownComponents}
+                components={md.block}
               >
                 {q.question}
               </ReactMarkdown>
@@ -253,7 +266,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                     <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
                     <ReactMarkdown
                       remarkPlugins={safeRemarkPlugins}
-                      components={inlineMarkdownComponents}
+                      components={md.inline}
                     >
                       {opt.label}
                     </ReactMarkdown>
@@ -262,7 +275,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                     <span className={styles.option_desc}>
                       <ReactMarkdown
                         remarkPlugins={safeRemarkPlugins}
-                        components={inlineMarkdownComponents}
+                        components={md.inline}
                       >
                         {opt.description}
                       </ReactMarkdown>

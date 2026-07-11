@@ -52,3 +52,35 @@
   text-decoration: line-through;
   text-decoration-style: dotted;
 }
+
+/* ── Clickable file paths (markdown/pathLinks.tsx) ────────────────────────── */
+
+/* Deliberately still reads as inline code rather than a link: agent prose is
+   dense with paths, and styling them all as blue underlined links would drown
+   the text. Affordance shows up on hover instead. */
+.path_chip {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-code-fg);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+
+.path_chip:hover,
+.path_chip:focus-visible {
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+/* The agent named a path that isn't there — flashed briefly, then reverts. */
+.path_chip_failed,
+.path_chip_failed:hover {
+  border-color: var(--color-error);
+  color: var(--color-error);
+}

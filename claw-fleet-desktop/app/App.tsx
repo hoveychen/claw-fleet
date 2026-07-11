@@ -12,6 +12,7 @@ import { SessionList } from "./components/SessionList";
 import { WaitingAlerts } from "./components/WaitingAlerts";
 import { DecisionPanel } from "./components/DecisionPanel";
 import { UpdateNotice } from "./components/UpdateNotice";
+import { OPEN_FILE_EVENT, type OpenFilePayload } from "./hooks/usePathLinks";
 import { Wizard } from "./components/Wizard";
 import { WindowsFrameOverlay } from "./components/WindowsFrameOverlay";
 import { useDecisionEvents } from "./hooks/useDecisionEvents";
@@ -56,6 +57,17 @@ function App() {
     invoke<boolean>("is_main_window_minimized")
       .then((v) => setMainMinimized(!!v))
       .catch(() => {});
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, []);
+
+  // The decision-float window has no explorer of its own, so a path clicked on
+  // a floating card hops here (it also calls show_main_window).
+  useEffect(() => {
+    const unlisten = listen<OpenFilePayload>(OPEN_FILE_EVENT, (e) => {
+      useUIStore.getState().requestFileNav(e.payload);
+    });
     return () => {
       unlisten.then((fn) => fn());
     };

@@ -8,6 +8,7 @@
     "core:window:allow-set-theme",
     "core:window:allow-close",
     "core:event:default",
+    "opener:default",
     "store:default",
     "clipboard-manager:allow-write-text",
     "dialog:default"
