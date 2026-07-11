@@ -194,12 +194,25 @@ function WorkspaceExplorer({
 }) {
   const { t } = useTranslation();
   const clearFileNav = useUIStore((s) => s.clearFileNav);
+  const procs = useProcStore((s) => s.procs);
   const [roots, setRoots] = useState<ExplorerRoot[] | null>(null);
   const [rootsError, setRootsError] = useState<string | null>(null);
   const [activeRoot, setActiveRoot] = useState<ExplorerRoot | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
+  const [tab, setTab] = useState<"files" | "procs">("files");
 
   const [activeFile, setActiveFile] = useState<ExplorerEntry | null>(null);
+
+  const procCount = useMemo(
+    () => procs.filter((p) => p.workspacePath === workspace).length,
+    [procs, workspace],
+  );
+
+  // A path clicked in agent prose always means "show me the file" — pull the
+  // explorer back to the files tab even if the user left it on 命令.
+  useEffect(() => {
+    if (nav) setTab("files");
+  }, [nav]);
 
   useEffect(() => {
     invoke<ExplorerRoot[]>("list_explorer_roots", { workspace })
@@ -277,7 +290,7 @@ function WorkspaceExplorer({
       <div className={styles.detail_header}>
         <div className={styles.detail_title}>
           <span className={styles.detail_name}>{name}</span>
-          {activeFile && (
+          {tab === "files" && activeFile && (
             <>
               <span className={styles.detail_sep}>·</span>
               {activeFile.relativePath}
@@ -285,73 +298,95 @@ function WorkspaceExplorer({
           )}
         </div>
         <div className={styles.detail_actions}>
-          {activeFile && activeRoot && (
+          {tab === "files" && activeFile && activeRoot && (
             <CopyButton text={`${activeRoot.path}/${activeFile.relativePath}`} />
           )}
-          <label className={fileStyles.ignored_toggle}>
-            <input
-              type="checkbox"
-              checked={showIgnored}
-              onChange={(e) => setShowIgnored(e.target.checked)}
-            />
-            {t("files.show_ignored")}
-          </label>
+          {tab === "files" && (
+            <label className={fileStyles.ignored_toggle}>
+              <input
+                type="checkbox"
+                checked={showIgnored}
+                onChange={(e) => setShowIgnored(e.target.checked)}
+              />
+              {t("files.show_ignored")}
+            </label>
+          )}
         </div>
       </div>
 
-      {roots && roots.length > 1 && (
-        <div className={fileStyles.root_pills}>
-          {roots.map((root) => (
-            <button
-              key={root.path}
-              className={`${fileStyles.root_pill} ${activeRoot?.path === root.path ? fileStyles.root_pill_active : ""}`}
-              onClick={() => setActiveRoot(root)}
-              title={root.path}
-            >
-              {root.isWorktree && <GitBranch size={11} strokeWidth={1.5} />}
-              {root.label}
-              {!root.isWorktree && root.branch && (
-                <span className={fileStyles.root_branch}>{root.branch}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className={styles.tabs}>
+        <button
+          className={`${styles.tab} ${tab === "files" ? styles.tab_active : ""}`}
+          onClick={() => setTab("files")}
+        >
+          {t("files.tab_files")}
+        </button>
+        <button
+          className={`${styles.tab} ${tab === "procs" ? styles.tab_active : ""}`}
+          onClick={() => setTab("procs")}
+        >
+          {t("files.proc_panel_title")}
+          {procCount > 0 && ` (${procCount})`}
+        </button>
+      </div>
 
-      {activeRoot && (
-        <GitStatusBar key={activeRoot.path} workspace={workspace} root={activeRoot.path} />
-      )}
+      {tab === "procs" ? (
+        <ProcPanel
+          workspace={workspace}
+          name={name}
+          renderTerminal={(p) => <ProcTerminal proc={p} />}
+        />
+      ) : (
+        <>
+          {roots && roots.length > 1 && (
+            <div className={fileStyles.root_pills}>
+              {roots.map((root) => (
+                <button
+                  key={root.path}
+                  className={`${fileStyles.root_pill} ${activeRoot?.path === root.path ? fileStyles.root_pill_active : ""}`}
+                  onClick={() => setActiveRoot(root)}
+                  title={root.path}
+                >
+                  {root.isWorktree && <GitBranch size={11} strokeWidth={1.5} />}
+                  {root.label}
+                  {!root.isWorktree && root.branch && (
+                    <span className={fileStyles.root_branch}>{root.branch}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
 
-      <div className={skillStyles.detail_split}>
-        <aside className={skillStyles.tree_pane}>
-          <div className={skillStyles.tree_label}>{t("files.tree_label")}</div>
-          {roots === null && <p className={skillStyles.tree_empty}>{t("files.loading")}</p>}
-          {rootsError && <p className={skillStyles.tree_empty}>{rootsError}</p>}
           {activeRoot && (
-            <FileTree
-              loadDir={loadDir}
-              activeFile={activeFile}
-              onPick={setActiveFile}
-              reveal={reveal}
-              onRevealed={clearFileNav}
-            />
+            <GitStatusBar key={activeRoot.path} workspace={workspace} root={activeRoot.path} />
           )}
-        </aside>
 
-        <div className={styles.detail_body}>
-          {activeFile && activeRoot ? (
-            <FilePreview file={activeFile} load={readFile} />
-          ) : (
-            <p className={styles.empty}>{t("files.select_file")}</p>
-          )}
-        </div>
-      </div>
+          <div className={skillStyles.detail_split}>
+            <aside className={skillStyles.tree_pane}>
+              <div className={skillStyles.tree_label}>{t("files.tree_label")}</div>
+              {roots === null && <p className={skillStyles.tree_empty}>{t("files.loading")}</p>}
+              {rootsError && <p className={skillStyles.tree_empty}>{rootsError}</p>}
+              {activeRoot && (
+                <FileTree
+                  loadDir={loadDir}
+                  activeFile={activeFile}
+                  onPick={setActiveFile}
+                  reveal={reveal}
+                  onRevealed={clearFileNav}
+                />
+              )}
+            </aside>
 
-      <ProcPanel
-        workspace={workspace}
-        name={name}
-        renderTerminal={(p) => <ProcTerminal proc={p} />}
-      />
+            <div className={styles.detail_body}>
+              {activeFile && activeRoot ? (
+                <FilePreview file={activeFile} load={readFile} />
+              ) : (
+                <p className={styles.empty}>{t("files.select_file")}</p>
+              )}
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 }
