@@ -549,7 +549,7 @@ fn read_level_dirs(parent: &str) -> std::collections::HashMap<String, String> {
     map
 }
 
-fn encode_workspace_path(path: &str) -> String {
+pub(crate) fn encode_workspace_path(path: &str) -> String {
     // "/Users/foo/bar-baz" → "-Users-foo-bar-baz"  (inverse of decode, but lossless for matching)
     path.replace('/', "-")
 }
