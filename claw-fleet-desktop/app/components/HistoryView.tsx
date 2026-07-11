@@ -204,7 +204,14 @@ export function HistoryView() {
           (s.aiTitle?.toLowerCase().includes(q) ?? false) ||
           (s.slug?.toLowerCase().includes(q) ?? false) ||
           (s.lastMessagePreview?.toLowerCase().includes(q) ?? false) ||
-          s.workspaceName.toLowerCase().includes(q);
+          s.workspaceName.toLowerCase().includes(q) ||
+          // The attributed TASKS.md plan — id (`scene-items`), title, and the
+          // current P-task. Sessions pulled onto a plan by `fleet handoff`
+          // inherit the attribution, so the whole relay chain is reachable by
+          // searching the plan the way a human names it.
+          (s.taskPlan?.planId?.toLowerCase().includes(q) ?? false) ||
+          (s.taskPlan?.currentPlan?.toLowerCase().includes(q) ?? false) ||
+          (s.taskPlan?.currentTask?.toLowerCase().includes(q) ?? false);
         return clientMatch || ftsMatchPaths.has(s.jsonlPath);
       });
     const counts: Record<MarkFilter, number> = {
@@ -325,7 +332,7 @@ export function HistoryView() {
               className={styles.search_input}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("history.search_placeholder", "搜索标题、提示词、全文…")}
+              placeholder={t("history.search_placeholder", "搜索标题、计划、全文…")}
               spellCheck={false}
             />
             {searching && <span className={styles.search_spinner} />}
