@@ -554,6 +554,7 @@ pub fn scan_cursor_sessions(_cursor_dir: &Path) -> Vec<SessionInfo> {
             thinking_level: None,
             pid: None,
             pid_precise: false,
+            proc_alive: false,
             last_skill: None,
             context_percent: token_stats
                 .get(&c.composer_id)
