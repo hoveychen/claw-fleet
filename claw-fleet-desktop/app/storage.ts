@@ -29,6 +29,11 @@ const ALL_KEYS = [
   "skills-tree-width",
   "files-tree-width",
   "scratchpad-tree-width",
+  // 启动台 (HistoryView) rail filters — the search box is deliberately absent,
+  // it stays in-memory only.
+  "history-mark-filter",
+  "history-workspace-filter",
+  "history-active-only",
   "onboarding-dismissed",
   "wizard-completed",
   "hooks-banner-dismissed",
