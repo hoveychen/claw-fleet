@@ -7,7 +7,7 @@
 
 use std::collections::HashSet;
 use std::fs;
-use std::io::{BufRead, BufReader, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom};
 use std::time::UNIX_EPOCH;
 
 use rusqlite::{params, Connection};
@@ -162,22 +162,33 @@ impl SearchIndex {
                 .map_err(|e| format!("seek {jsonl_path}: {e}"))?;
         }
 
-        let reader = BufReader::new(file);
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)
+            .map_err(|e| format!("read {jsonl_path}: {e}"))?;
+
+        // Consume only up to the last newline. We race the CLI's writes, so the
+        // tail of a growing transcript is routinely a half-flushed record.
+        // Reading to EOF would hand that fragment to serde_json, fail, and still
+        // save an offset past it — the record's first half would never be re-read
+        // and the line would stay unindexed forever. Leaving the fragment behind
+        // lets the next pass index it once it is complete.
+        let consumed = match buf.iter().rposition(|b| *b == b'\n') {
+            Some(i) => i + 1,
+            None => 0,
+        };
+        let chunk = String::from_utf8_lossy(&buf[..consumed]);
+
         let mut new_lines = 0i64;
 
         let tx = self.conn.unchecked_transaction().map_err(|e| format!("tx: {e}"))?;
 
-        for line in reader.lines() {
-            let line = match line {
-                Ok(l) => l,
-                Err(_) => continue,
-            };
+        for line in chunk.lines() {
             if line.trim().is_empty() {
                 new_lines += 1;
                 continue;
             }
 
-            let parsed: Value = match serde_json::from_str(&line) {
+            let parsed: Value = match serde_json::from_str(line) {
                 Ok(v) => v,
                 Err(_) => {
                     new_lines += 1;
@@ -205,7 +216,10 @@ impl SearchIndex {
                 jsonl_path,
                 session_id,
                 mtime_ms,
-                file_size,
+                // What we actually folded — NOT file_size. A half-flushed tail
+                // record leaves this short of the file end on purpose, so the
+                // next pass re-reads it once it is terminated.
+                start_offset + consumed as i64,
                 start_line + new_lines,
             ],
         )
@@ -408,6 +422,54 @@ mod tests {
             extract_searchable_text(&line),
             "Continue extracting decision history"
         );
+    }
+
+    /// The indexer races the CLI's writes, so it routinely sees a transcript
+    /// whose last line is only half-flushed. That fragment must be indexed once
+    /// it is complete — not skipped forever.
+    ///
+    /// The bug: reading to EOF consumed the fragment, `serde_json` rejected it,
+    /// and the saved `byte_offset` was still set to the full file size. The next
+    /// pass therefore resumed *past* the fragment, so the second half of that
+    /// record was never re-read and the line stayed permanently unindexed.
+    #[test]
+    fn a_half_written_line_is_indexed_once_it_is_complete() {
+        use std::io::Write;
+
+        let dir = std::env::temp_dir().join("fleet-search-partial-test");
+        let _ = fs::create_dir_all(&dir);
+        let jsonl = dir.join("partial.jsonl");
+        let _ = fs::remove_file(&jsonl);
+
+        let complete = r#"{"type":"user","message":{"content":"first message"}}"#;
+        let racy = r#"{"type":"user","message":{"content":"zqunique partial phrase"}}"#;
+        let split = racy.len() / 2;
+
+        // The CLI has flushed one whole record plus half of the next.
+        fs::write(&jsonl, format!("{complete}\n{}", &racy[..split])).unwrap();
+
+        let db = dir.join("idx-partial.db");
+        let _ = fs::remove_file(&db);
+        let idx = SearchIndex::open_at(&db).unwrap();
+        idx.index_session(jsonl.to_str().unwrap(), "sess-p").unwrap();
+
+        // The CLI finishes writing that record.
+        let mut f = fs::OpenOptions::new().append(true).open(&jsonl).unwrap();
+        f.write_all(format!("{}\n", &racy[split..]).as_bytes()).unwrap();
+        drop(f);
+
+        idx.index_session(jsonl.to_str().unwrap(), "sess-p").unwrap();
+
+        let hits = idx.search("zqunique", 10).unwrap();
+        assert_eq!(
+            hits.len(),
+            1,
+            "a line that was half-written during an earlier pass must still be \
+             indexed once complete"
+        );
+
+        let _ = fs::remove_file(&jsonl);
+        let _ = fs::remove_file(&db);
     }
 
     #[test]

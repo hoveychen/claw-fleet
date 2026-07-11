@@ -122,6 +122,29 @@ pub fn summarize(todos: &[TodoItem]) -> TodoSummary {
     s
 }
 
+/// Summary of the TodoWrite tool_use carried by a single already-parsed record,
+/// or `None` if it carries none.
+///
+/// The last todo block in the record wins, matching
+/// [`latest_todo_summary_from_lines`], which walks a record's content array in
+/// reverse and takes the first hit. Exposed so the session scan can fold
+/// records forward one at a time (see `session::SessionAcc`) instead of
+/// re-scanning the whole transcript backwards on every tick.
+pub fn todo_summary_from_value(msg: &Value) -> Option<TodoSummary> {
+    if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+        return None;
+    }
+    let content = msg
+        .get("message")
+        .and_then(|m| m.get("content"))
+        .and_then(|c| c.as_array())?;
+    content
+        .iter()
+        .rev()
+        .find_map(parse_todo_block)
+        .map(|todos| summarize(&todos))
+}
+
 /// Scan raw JSONL lines from newest to oldest and return the summary of the
 /// most recent TodoWrite tool_use.  Stops at the first match to minimise work
 /// during the session scan path.  Returns `None` when the file contains no
@@ -133,20 +156,8 @@ pub fn latest_todo_summary_from_lines(lines: &[&str]) -> Option<TodoSummary> {
             Ok(v) => v,
             Err(_) => continue,
         };
-        if msg.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-            continue;
-        }
-        let Some(content) = msg
-            .get("message")
-            .and_then(|m| m.get("content"))
-            .and_then(|c| c.as_array())
-        else {
-            continue;
-        };
-        for block in content.iter().rev() {
-            if let Some(todos) = parse_todo_block(block) {
-                return Some(summarize(&todos));
-            }
+        if let Some(summary) = todo_summary_from_value(&msg) {
+            return Some(summary);
         }
     }
     None
