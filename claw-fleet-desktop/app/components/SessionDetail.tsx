@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
-import { INITIAL_TAIL, LOAD_EARLIER_STEP, useDetailStore, useSessionsStore } from "../store";
+import {
+  INITIAL_TAIL,
+  LOAD_EARLIER_STEP,
+  useConnectionStore,
+  useDetailStore,
+  useSessionsStore,
+  useUIStore,
+} from "../store";
 import { isFleetOwnedEntrypoint } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
 import { HandoffChainRow } from "./HandoffChainRow";
 import { MessageList } from "./MessageList";
+import type { PathLinkContext } from "../markdown/pathLinks";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { ResumeComposer } from "./ResumeComposer";
 import { SessionIdRow } from "./SessionIdRow";
@@ -143,6 +151,8 @@ export function SessionDetail({
   const loadEarlier = isStandalone ? standaloneLoadEarlier : global.loadEarlier;
 
   const sessions = useSessionsStore((s) => s.sessions);
+  const connection = useConnectionStore((s) => s.connection);
+  const requestFileNav = useUIStore((s) => s.requestFileNav);
   const liveSession = useMemo(() => {
     if (!session) return null;
     return sessions.find((s) => s.id === session.id) ?? session;
@@ -319,6 +329,18 @@ export function SessionDetail({
   // sessions. No session id → nothing to scope to → show nothing.
   const workspacePath = liveSession?.workspacePath;
   const sessionId = liveSession?.id;
+
+  // Paths the agent wrote in backticks become clickable chips. Memoised because
+  // MessageRow is memo'd — a fresh object each render would re-render every row.
+  const pathLinks = useMemo<PathLinkContext | undefined>(() => {
+    if (!workspacePath) return undefined;
+    return {
+      workspaceRoot: workspacePath,
+      isLocal: connection?.type !== "remote",
+      openInFiles: (absPath, line) => requestFileNav({ workspacePath, absPath, line }),
+    };
+  }, [workspacePath, connection?.type, requestFileNav]);
+
   useEffect(() => {
     if (!workspacePath || !sessionId) {
       setTaskPlans([]);
@@ -702,6 +724,7 @@ export function SessionDetail({
                     onLoadEarlier={loadEarlier}
                     fullyLoaded={fullyLoaded}
                     isLoadingEarlier={isLoading && messages.length > 0}
+                    paths={pathLinks}
                   />
                 </AgentNavProvider>
                 {liveThinking?.streaming && liveThinking.thinking && (

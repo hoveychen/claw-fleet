@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -16,7 +16,13 @@ import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
 import { ConfirmDialog } from "./ConfirmDialog";
-import { runningProcCounts, useProcStore, useSessionsStore, useUIStore } from "../store";
+import {
+  runningProcCounts,
+  useProcStore,
+  useSessionsStore,
+  useUIStore,
+  type FileNavRequest,
+} from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { ProcPanel } from "./ProcPanel";
 import { ProcTerminal } from "./ProcTerminal";
@@ -83,6 +89,19 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)}M`;
 }
 
+/** The root that owns `absPath` — longest matching prefix, so a worktree root
+ *  wins over the main checkout it lives inside. */
+function pickRoot(roots: ExplorerRoot[], absPath: string): ExplorerRoot | null {
+  let best: ExplorerRoot | null = null;
+  for (const root of roots) {
+    const prefix = root.path.endsWith("/") ? root.path : `${root.path}/`;
+    if (absPath.startsWith(prefix) && (!best || root.path.length > best.path.length)) {
+      best = root;
+    }
+  }
+  return best;
+}
+
 // ── Root view: workspace picker + explorer ──────────────────────────────────
 
 export function FilesView() {
@@ -92,7 +111,14 @@ export function FilesView() {
   const sessions = useSessionsStore((s) => s.sessions);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const procs = useProcStore((s) => s.procs);
+  const fileNav = useUIStore((s) => s.fileNav);
   const [selected, setSelected] = useState<string | null>(null);
+
+  // A path clicked in agent prose lands here: select its workspace, then hand
+  // the request down so the explorer can expand to the file itself.
+  useEffect(() => {
+    if (fileNav) setSelected(fileNav.workspacePath);
+  }, [fileNav]);
 
   // Running workspace-command count per workspace → card badges.
   const runningCounts = useMemo(() => runningProcCounts(procs), [procs]);
@@ -168,7 +194,12 @@ export function FilesView() {
 
         <main className={styles.detail_pane}>
           {active ? (
-            <WorkspaceExplorer key={active.path} workspace={active.path} name={active.name} />
+            <WorkspaceExplorer
+              key={active.path}
+              workspace={active.path}
+              name={active.name}
+              nav={fileNav?.workspacePath === active.path ? fileNav : null}
+            />
           ) : (
             <div className={styles.placeholder}>{t("files.select_workspace")}</div>
           )}
@@ -180,8 +211,17 @@ export function FilesView() {
 
 // ── Explorer for one workspace ───────────────────────────────────────────────
 
-function WorkspaceExplorer({ workspace, name }: { workspace: string; name: string }) {
+function WorkspaceExplorer({
+  workspace,
+  name,
+  nav,
+}: {
+  workspace: string;
+  name: string;
+  nav: FileNavRequest | null;
+}) {
   const { t } = useTranslation();
+  const clearFileNav = useUIStore((s) => s.clearFileNav);
   const [roots, setRoots] = useState<ExplorerRoot[] | null>(null);
   const [rootsError, setRootsError] = useState<string | null>(null);
   const [activeRoot, setActiveRoot] = useState<ExplorerRoot | null>(null);
@@ -254,6 +294,73 @@ function WorkspaceExplorer({ workspace, name }: { workspace: string; name: strin
     },
     [expanded, children, loadDir],
   );
+
+  // ── Reveal a path clicked in agent prose ───────────────────────────────────
+  //
+  // Ordering matters. Switching activeRoot fires the reset effect above, whose
+  // async loadDir("") *replaces* `children` wholesale — so expanding the tree
+  // before the top level lands would have its work overwritten. We therefore
+  // wait for `children[""]`, then load the whole ancestor chain and commit it
+  // in one setChildren. The nonce ref keeps that commit from re-entering this
+  // effect through its own `children` dependency.
+  const revealedNonce = useRef<number | null>(null);
+  useEffect(() => {
+    if (!nav || nav.nonce === revealedNonce.current) return;
+    if (!roots || !activeRoot || !children[""]) return;
+
+    const owner = pickRoot(roots, nav.absPath);
+    if (!owner) {
+      // Path lies outside every root of this workspace — nothing to reveal.
+      revealedNonce.current = nav.nonce;
+      clearFileNav();
+      return;
+    }
+    if (owner.path !== activeRoot.path) {
+      setActiveRoot(owner); // reset effect re-runs; this effect retries after
+      return;
+    }
+
+    const prefix = owner.path.endsWith("/") ? owner.path : `${owner.path}/`;
+    const rel = nav.absPath.slice(prefix.length).replace(/\/$/, "");
+    const parts = rel.split("/").filter(Boolean);
+    if (!parts.length) {
+      revealedNonce.current = nav.nonce;
+      clearFileNav();
+      return;
+    }
+    revealedNonce.current = nav.nonce;
+
+    let stale = false;
+    void (async () => {
+      // Every ancestor directory, outermost first: a/b/c.rs → ["a", "a/b"].
+      const ancestors = parts.slice(0, -1).map((_, i) => parts.slice(0, i + 1).join("/"));
+      const loaded: Record<string, ExplorerEntry[]> = {};
+      for (const dir of ancestors) {
+        const entries = children[dir] ?? (await loadDir(dir));
+        if (!entries) return; // directory gone — leave the tree as it was
+        loaded[dir] = entries;
+      }
+      if (stale) return;
+
+      const parentRel = ancestors.length ? ancestors[ancestors.length - 1] : "";
+      const siblings = loaded[parentRel] ?? children[parentRel] ?? [];
+      const target = siblings.find((e) => e.relativePath === rel);
+
+      setChildren((prev) => ({ ...prev, ...loaded }));
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        for (const dir of ancestors) next.add(dir);
+        // A directory ref (`app/markdown/`) opens itself rather than selecting.
+        if (target?.isDir) next.add(rel);
+        return next;
+      });
+      if (target && !target.isDir) setActiveFile(target);
+      clearFileNav();
+    })();
+    return () => {
+      stale = true;
+    };
+  }, [nav, roots, activeRoot, children, loadDir, clearFileNav]);
 
   const renderLevel = (rel: string, depth: number): ReactNode[] => {
     const entries = children[rel] ?? [];
