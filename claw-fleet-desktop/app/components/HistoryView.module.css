@@ -398,12 +398,12 @@
   background: var(--color-bg-card-hover);
 }
 
-/* Left accent bar — run status (green = live, amber = waiting). Placed against
-   the card's left edge and clipped to the rounded corners by the row's
-   overflow. Ended rows render no bar at all (see rowBarColor). */
+/* Left accent bar — run status (green = live, amber = waiting). Sits just
+   inside the unread dot, which owns the row's left edge. Ended rows render no
+   bar at all (see rowBarColor). */
 .row_bar {
   position: absolute;
-  left: 0;
+  left: 13px;
   top: 0;
   bottom: 0;
   width: 3px;
@@ -418,13 +418,13 @@
 }
 
 /* Unread indicator — a small red dot pinned to the row's top-left corner,
-   just inside the run-status accent bar. Present only while the session has
+   outboard of the run-status accent bar. Present only while the session has
    newer activity than its last read (see sessionUnread); a 2s dwell on the row
    clears it. A faint ring keeps it legible over the hover background. */
 .unread_dot {
   position: absolute;
   top: 8px;
-  left: 6px;
+  left: 3px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
