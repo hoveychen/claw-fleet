@@ -1,12 +1,13 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, Rocket } from "lucide-react";
-import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
+import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useReadStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
+import { isFleetOwnedEntrypoint, sessionUnread } from "../types";
 import { GalleryView } from "./GalleryView";
 import { SessionEmptyState } from "./EmptyState";
 import { MascotEyes } from "./MascotEyes";
@@ -84,6 +85,19 @@ export function SessionList() {
   );
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
+  // Unread launchpad sessions — same scope the 启动台 (HistoryView) lists
+  // (Fleet-owned, non-subagent) — surfaced as a count badge on its nav item.
+  const readOverrides = useReadStore((s) => s.overrides);
+  const unreadLaunchpadCount = useMemo(
+    () =>
+      sessions.filter(
+        (s) =>
+          !s.isSubagent &&
+          isFleetOwnedEntrypoint(s.entrypoint) &&
+          sessionUnread(s, readOverrides[s.id]),
+      ).length,
+    [sessions, readOverrides],
+  );
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
@@ -293,6 +307,9 @@ export function SessionList() {
           >
             <span className={styles.nav_icon}><Rocket size={14} strokeWidth={1.5} /></span>
             <span className={styles.nav_label}>{t("view_history", "启动台")}</span>
+            {unreadLaunchpadCount > 0 && (
+              <span className={styles.nav_badge}>{unreadLaunchpadCount}</span>
+            )}
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "audit" ? styles.nav_active : ""}`}

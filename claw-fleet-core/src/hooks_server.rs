@@ -1969,6 +1969,40 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            // ── Session read (batch mark-read; unread is derived) ─────────────
+            "/session_read" => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                match serde_json::from_slice::<crate::session_read::MarkSessionsReadRequest>(
+                    &body_bytes,
+                ) {
+                    Ok(req_body) => match crate::session_read::mark_read(&req_body.items) {
+                        Ok(()) => {
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(r#"{"ok":true}"#)
+                                    .with_header(json_header),
+                            );
+                        }
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e.to_string()}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             // ── Interaction mode endpoints ───────────────────────────────────
             "/apply_interaction_mode" => {
                 let mut body_bytes = Vec::new();
