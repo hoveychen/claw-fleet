@@ -1196,178 +1196,240 @@ pub struct SessionStats {
     pub compact_cost_usd: f64,
 }
 
-fn compute_session_stats(lines: &[&str]) -> SessionStats {
-    use crate::model_cost::{get_model_costs, turn_cost_usd, TurnUsage};
+/// Running state behind [`compute_session_stats`], split out so a session's
+/// stats can be advanced by only the lines appended since the last scan.
+///
+/// Transcripts are append-only, so every field here is either a running sum, a
+/// running max, or a last-write-wins scalar — all of which fold correctly over
+/// batches. The one field that does *not* is `seen_msg_ids`: a finalized
+/// assistant message can be re-logged, and dedup is what keeps its tokens and
+/// cost from being counted twice.
+///
+/// **`seen_msg_ids` must stay complete for the whole file — a bounded window is
+/// not sound.** Measured across the 120 largest transcripts on disk: every one
+/// of them re-logs message ids (42k duplicate instances), and while most repeats
+/// sit within 10 lines of each other, 100 of them span more than 100 lines and
+/// the widest is 2437. A sliding window would silently miss those and
+/// double-count the turn's tokens and USD.
+///
+/// Ids are stored as 64-bit hashes rather than strings to keep the per-session
+/// footprint at ~8 bytes/turn; a collision would drop one turn from the totals,
+/// which at a few thousand ids against a 64-bit space is not a real risk.
+#[derive(Clone, Debug, Default)]
+pub struct StatsAcc {
+    total_output: u64,
+    total_cost: f64,
+    /// (timestamp_secs, output_tokens, turn_cost_usd) — feeds the speed window.
+    timed: Vec<(f64, u64, f64)>,
+    seen_msg_ids: HashSet<u64>,
+    last_model: Option<String>,
+    compact_count: u32,
+    compact_pre_tokens: u64,
+    compact_post_tokens: u64,
+    compact_cost_usd: f64,
+}
 
-    let mut total_output: u64 = 0;
-    let mut total_cost: f64 = 0.0;
-    // (timestamp_secs, output_tokens, turn_cost_usd)
-    let mut timed: Vec<(f64, u64, f64)> = Vec::new();
-    let mut seen_msg_ids: HashSet<String> = HashSet::new();
-    let mut last_model: Option<String> = None;
+fn hash_msg_id(id: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut h);
+    h.finish()
+}
 
-    let mut compact_count: u32 = 0;
-    let mut compact_pre_tokens: u64 = 0;
-    let mut compact_post_tokens: u64 = 0;
-    let mut compact_cost_usd: f64 = 0.0;
+impl StatsAcc {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    for line in lines {
-        let Ok(v): Result<Value, _> = serde_json::from_str(line) else {
-            continue;
-        };
+    /// Fold a batch of newly-appended transcript lines into the running state.
+    /// Safe to call repeatedly; re-feeding a line that was already folded in is
+    /// a no-op for token/cost totals thanks to the msg-id dedup above.
+    pub fn push_lines(&mut self, lines: &[&str]) {
+        use crate::model_cost::{get_model_costs, turn_cost_usd, TurnUsage};
 
-        // `compact_boundary` is a system meta event Claude Code emits each time
-        // it summarises the conversation. The summary LLM call itself is not
-        // logged as a standalone assistant turn, so its true cost is not in
-        // the transcript — we approximate from `compactMetadata`.
-        if v.get("type").and_then(|t| t.as_str()) == Some("system")
-            && v.get("subtype").and_then(|s| s.as_str()) == Some("compact_boundary")
-        {
-            compact_count += 1;
-            let meta = v.get("compactMetadata");
-            let pre = meta
-                .and_then(|m| m.get("preTokens"))
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            let post = meta
-                .and_then(|m| m.get("postTokens"))
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            compact_pre_tokens += pre;
-            compact_post_tokens += post;
+        for line in lines {
+            let Ok(v): Result<Value, _> = serde_json::from_str(line) else {
+                continue;
+            };
 
-            // Price the compact call against the most recently seen model.
-            // `get_model_costs("")` falls back to the default tier when no
-            // assistant turn has been seen yet (defensive — compact almost
-            // never precedes the first assistant turn).
-            let pricing_model = last_model.as_deref().unwrap_or("");
-            let costs = get_model_costs(pricing_model);
-            compact_cost_usd += (pre as f64 / 1_000_000.0) * costs.cache_read
-                + (post as f64 / 1_000_000.0) * costs.output;
-            continue;
-        }
+            // `compact_boundary` is a system meta event Claude Code emits each time
+            // it summarises the conversation. The summary LLM call itself is not
+            // logged as a standalone assistant turn, so its true cost is not in
+            // the transcript — we approximate from `compactMetadata`.
+            if v.get("type").and_then(|t| t.as_str()) == Some("system")
+                && v.get("subtype").and_then(|s| s.as_str()) == Some("compact_boundary")
+            {
+                self.compact_count += 1;
+                let meta = v.get("compactMetadata");
+                let pre = meta
+                    .and_then(|m| m.get("preTokens"))
+                    .and_then(|t| t.as_u64())
+                    .unwrap_or(0);
+                let post = meta
+                    .and_then(|m| m.get("postTokens"))
+                    .and_then(|t| t.as_u64())
+                    .unwrap_or(0);
+                self.compact_pre_tokens += pre;
+                self.compact_post_tokens += post;
 
-        if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-            continue;
-        }
-        let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
-            continue;
-        };
-        // Only count finalized messages
-        if msg.get("stop_reason").map_or(true, |s| s.is_null()) {
-            continue;
-        }
-        let msg_id = msg
-            .get("id")
-            .and_then(|i| i.as_str())
-            .unwrap_or_default()
-            .to_string();
-        if !msg_id.is_empty() {
-            if seen_msg_ids.contains(&msg_id) {
+                // Price the compact call against the most recently seen model.
+                // `get_model_costs("")` falls back to the default tier when no
+                // assistant turn has been seen yet (defensive — compact almost
+                // never precedes the first assistant turn).
+                let pricing_model = self.last_model.as_deref().unwrap_or("");
+                let costs = get_model_costs(pricing_model);
+                self.compact_cost_usd += (pre as f64 / 1_000_000.0) * costs.cache_read
+                    + (post as f64 / 1_000_000.0) * costs.output;
                 continue;
             }
-            seen_msg_ids.insert(msg_id);
-        }
 
-        let usage = msg.get("usage");
-        let input_tokens = usage
-            .and_then(|u| u.get("input_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let output_tokens = usage
-            .and_then(|u| u.get("output_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let cache_creation_tokens = usage
-            .and_then(|u| u.get("cache_creation_input_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let cache_read_tokens = usage
-            .and_then(|u| u.get("cache_read_input_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let web_search_requests = usage
-            .and_then(|u| u.get("server_tool_use"))
-            .and_then(|s| s.get("web_search_requests"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
+            if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+                continue;
+            }
+            let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
+                continue;
+            };
+            // Only count finalized messages
+            if msg.get("stop_reason").map_or(true, |s| s.is_null()) {
+                continue;
+            }
+            let msg_id = msg.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+            if !msg_id.is_empty() && !self.seen_msg_ids.insert(hash_msg_id(msg_id)) {
+                continue;
+            }
 
-        total_output += output_tokens;
+            let usage = msg.get("usage");
+            let input_tokens = usage
+                .and_then(|u| u.get("input_tokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let output_tokens = usage
+                .and_then(|u| u.get("output_tokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let cache_creation_tokens = usage
+                .and_then(|u| u.get("cache_creation_input_tokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let cache_read_tokens = usage
+                .and_then(|u| u.get("cache_read_input_tokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let web_search_requests = usage
+                .and_then(|u| u.get("server_tool_use"))
+                .and_then(|s| s.get("web_search_requests"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
 
-        // Per-turn cost uses this turn's own model; fall back to most-recently-
-        // seen model when a turn omits it (model can change mid-session).
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
-        if let Some(m) = turn_model {
-            last_model = Some(m.to_string());
-        }
-        let cost_model = turn_model.or(last_model.as_deref()).unwrap_or("");
-        let turn_cost = turn_cost_usd(
-            cost_model,
-            &TurnUsage {
-                input_tokens,
-                output_tokens,
-                cache_creation_tokens,
-                cache_read_tokens,
-                web_search_requests,
-            },
-        );
-        total_cost += turn_cost;
+            self.total_output += output_tokens;
 
-        // Timestamp for speed
-        if let Some(ts_str) = v.get("timestamp").and_then(|t| t.as_str()) {
-            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
-                timed.push((dt.timestamp() as f64, output_tokens, turn_cost));
+            // Per-turn cost uses this turn's own model; fall back to most-recently-
+            // seen model when a turn omits it (model can change mid-session).
+            let turn_model = msg.get("model").and_then(|m| m.as_str());
+            if let Some(m) = turn_model {
+                self.last_model = Some(m.to_string());
+            }
+            let cost_model = turn_model.or(self.last_model.as_deref()).unwrap_or("");
+            let turn_cost = turn_cost_usd(
+                cost_model,
+                &TurnUsage {
+                    input_tokens,
+                    output_tokens,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                    web_search_requests,
+                },
+            );
+            self.total_cost += turn_cost;
+
+            // Timestamp for speed
+            if let Some(ts_str) = v.get("timestamp").and_then(|t| t.as_str()) {
+                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
+                    self.timed
+                        .push((dt.timestamp() as f64, output_tokens, turn_cost));
+                }
             }
         }
     }
 
-    // Speed: tokens/s and cost/min over the last 5-minute window.
-    //
-    // Divide by `now - first_ts`, not `last_ts - first_ts`. The inter-turn
-    // gap version makes speed a step function that holds the old rate until
-    // the oldest turn slides out of the window — so a session that finished
-    // a burst 4 minutes ago still reports the burst's speed, inflating
-    // fleet-wide totals while nothing is actually generating. Measuring
-    // against "now" lets speed decay smoothly as the idle tail grows.
-    let (token_speed, cost_speed_usd_per_min) = if timed.len() >= 2 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
-        let window_start = now - 300.0;
+    /// Materialise the stats. `now_secs` is the clock the speed window is
+    /// measured against — taken as a parameter so the window is testable
+    /// without freezing the system clock.
+    pub fn finish_at(&self, now_secs: f64) -> SessionStats {
+        // Speed: tokens/s and cost/min over the last 5-minute window.
+        //
+        // Divide by `now - first_ts`, not `last_ts - first_ts`. The inter-turn
+        // gap version makes speed a step function that holds the old rate until
+        // the oldest turn slides out of the window — so a session that finished
+        // a burst 4 minutes ago still reports the burst's speed, inflating
+        // fleet-wide totals while nothing is actually generating. Measuring
+        // against "now" lets speed decay smoothly as the idle tail grows.
+        let (token_speed, cost_speed_usd_per_min) = if self.timed.len() >= 2 {
+            let window_start = now_secs - 300.0;
 
-        let recent: Vec<_> = timed.iter().filter(|(ts, _, _)| *ts > window_start).collect();
+            let recent: Vec<_> = self
+                .timed
+                .iter()
+                .filter(|(ts, _, _)| *ts > window_start)
+                .collect();
 
-        if recent.len() >= 2 {
-            let total_recent_tokens: u64 = recent.iter().map(|(_, t, _)| t).sum();
-            let total_recent_cost: f64 = recent.iter().map(|(_, _, c)| c).sum();
-            let first_ts = recent.first().map(|(ts, _, _)| *ts).unwrap_or(0.0);
-            let duration = now - first_ts;
-            if duration > 0.0 {
-                (
-                    total_recent_tokens as f64 / duration,
-                    total_recent_cost * 60.0 / duration,
-                )
+            if recent.len() >= 2 {
+                let total_recent_tokens: u64 = recent.iter().map(|(_, t, _)| t).sum();
+                let total_recent_cost: f64 = recent.iter().map(|(_, _, c)| c).sum();
+                let first_ts = recent.first().map(|(ts, _, _)| *ts).unwrap_or(0.0);
+                let duration = now_secs - first_ts;
+                if duration > 0.0 {
+                    (
+                        total_recent_tokens as f64 / duration,
+                        total_recent_cost * 60.0 / duration,
+                    )
+                } else {
+                    (0.0, 0.0)
+                }
             } else {
                 (0.0, 0.0)
             }
         } else {
             (0.0, 0.0)
-        }
-    } else {
-        (0.0, 0.0)
-    };
+        };
 
-    SessionStats {
-        token_speed,
-        total_output_tokens: total_output,
-        total_cost_usd: total_cost,
-        cost_speed_usd_per_min,
-        compact_count,
-        compact_pre_tokens,
-        compact_post_tokens,
-        compact_cost_usd,
+        SessionStats {
+            token_speed,
+            total_output_tokens: self.total_output,
+            total_cost_usd: self.total_cost,
+            cost_speed_usd_per_min,
+            compact_count: self.compact_count,
+            compact_pre_tokens: self.compact_pre_tokens,
+            compact_post_tokens: self.compact_post_tokens,
+            compact_cost_usd: self.compact_cost_usd,
+        }
     }
+
+    /// Same as [`finish_at`], against the wall clock.
+    pub fn finish(&self) -> SessionStats {
+        self.finish_at(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64(),
+        )
+    }
+
+    /// Drop speed samples that can no longer influence the 5-minute window.
+    /// Called as the accumulator is carried across scans so `timed` doesn't
+    /// grow without bound on a long-lived session. The margin over 300s is
+    /// deliberate slack — pruning exactly at the window edge would race the
+    /// next `finish` call's slightly later clock.
+    pub fn prune_timed(&mut self, now_secs: f64) {
+        let keep_after = now_secs - 900.0;
+        self.timed.retain(|(ts, _, _)| *ts > keep_after);
+    }
+}
+
+fn compute_session_stats(lines: &[&str]) -> SessionStats {
+    let mut acc = StatsAcc::new();
+    acc.push_lines(lines);
+    acc.finish()
 }
 
 /// Extract context-window usage from a Claude-Code JSONL session.
@@ -3007,6 +3069,146 @@ mod tests {
             ds(&lines, 2.0, Some(&HookState::Stopped)),
             SessionStatus::Thinking,
         );
+    }
+
+    // ── StatsAcc: incremental folding ───────────────────────────────────────
+    //
+    // The scan carries a StatsAcc across ticks and feeds it only the lines a
+    // session appended since last time. These pin the property that makes that
+    // sound: folding in batches must equal folding the whole file at once.
+
+    /// A finalized assistant turn with an explicit id, so tests can control
+    /// exactly which turns are duplicates of which.
+    fn turn(id: &str, output: u64) -> String {
+        json!({
+            "type": "assistant",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "message": {
+                "id": id,
+                "role": "assistant",
+                "model": "claude-sonnet-4-20250514",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": output,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0
+                }
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn stats_acc_batched_equals_whole_file() {
+        let owned: Vec<String> = (0..30).map(|i| turn(&format!("m{i}"), 10)).collect();
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let whole = {
+            let mut a = StatsAcc::new();
+            a.push_lines(&lines);
+            a.finish_at(0.0)
+        };
+
+        // Same lines, but handed over in three appends like the scanner would.
+        let batched = {
+            let mut a = StatsAcc::new();
+            a.push_lines(&lines[..7]);
+            a.push_lines(&lines[7..19]);
+            a.push_lines(&lines[19..]);
+            a.finish_at(0.0)
+        };
+
+        assert_eq!(batched.total_output_tokens, whole.total_output_tokens);
+        assert_eq!(batched.total_cost_usd, whole.total_cost_usd);
+        assert_eq!(whole.total_output_tokens, 300);
+    }
+
+    /// The reason `seen_msg_ids` is a full set and not a sliding window.
+    ///
+    /// Real transcripts re-log a finalized assistant message far from its first
+    /// occurrence: across the 120 largest transcripts on disk, 100 duplicate
+    /// pairs sit >100 lines apart and the widest gap measured was 2437. Here the
+    /// duplicate lands in a *later batch* than the original — exactly the case a
+    /// bounded window would miss, double-counting the turn's tokens and cost.
+    #[test]
+    fn stats_acc_dedups_a_duplicate_that_arrives_in_a_later_batch() {
+        let first = turn("msg-repeated", 50);
+        let filler: Vec<String> = (0..2500).map(|i| turn(&format!("f{i}"), 1)).collect();
+        let dup = turn("msg-repeated", 50); // re-logged ~2500 lines later
+
+        let mut acc = StatsAcc::new();
+        acc.push_lines(&[first.as_str()]);
+        let filler_refs: Vec<&str> = filler.iter().map(|s| s.as_str()).collect();
+        acc.push_lines(&filler_refs);
+        let before = acc.finish_at(0.0).total_output_tokens;
+
+        acc.push_lines(&[dup.as_str()]); // must be recognised as already counted
+        let after = acc.finish_at(0.0);
+
+        assert_eq!(before, 50 + 2500);
+        assert_eq!(
+            after.total_output_tokens, before,
+            "a re-logged msg id must not be counted twice, however many lines \
+             separate it from the original"
+        );
+    }
+
+    #[test]
+    fn stats_acc_folds_compact_events_across_batches() {
+        let c = |pre: u64, post: u64| {
+            json!({
+                "type": "system",
+                "subtype": "compact_boundary",
+                "compactMetadata": {"preTokens": pre, "postTokens": post}
+            })
+            .to_string()
+        };
+        let (a1, a2) = (c(1000, 100), c(2000, 200));
+
+        let mut acc = StatsAcc::new();
+        acc.push_lines(&[a1.as_str()]);
+        acc.push_lines(&[a2.as_str()]);
+        let s = acc.finish_at(0.0);
+
+        assert_eq!(s.compact_count, 2);
+        assert_eq!(s.compact_pre_tokens, 3000);
+        assert_eq!(s.compact_post_tokens, 300);
+        assert!(s.compact_cost_usd > 0.0);
+    }
+
+    #[test]
+    fn prune_timed_keeps_the_speed_window_intact() {
+        // Two turns inside the 5-minute window, one long past it.
+        let now = 1_000_000.0;
+        let mk = |ts: &str, id: &str| {
+            json!({
+                "type": "assistant",
+                "timestamp": ts,
+                "message": {
+                    "id": id, "role": "assistant", "model": "claude-sonnet-4-20250514",
+                    "content": [], "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 0, "output_tokens": 100,
+                              "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+                }
+            })
+            .to_string()
+        };
+        // 1_000_000s ≈ 1970-01-12T13:46:40Z; place two turns 60s and 120s back.
+        let recent_a = mk("1970-01-12T13:44:40Z", "a"); // now - 120
+        let recent_b = mk("1970-01-12T13:45:40Z", "b"); // now - 60
+
+        let mut acc = StatsAcc::new();
+        acc.push_lines(&[recent_a.as_str(), recent_b.as_str()]);
+        let before = acc.finish_at(now);
+
+        acc.prune_timed(now); // must not evict samples the window still needs
+        let after = acc.finish_at(now);
+
+        assert!(before.token_speed > 0.0, "sanity: window should be non-empty");
+        assert_eq!(after.token_speed, before.token_speed);
+        assert_eq!(after.cost_speed_usd_per_min, before.cost_speed_usd_per_min);
     }
 
     // ── compute_session_stats tests ─────────────────────────────────────────
