@@ -1696,6 +1696,8 @@
     "all_workspaces": "全部目录",
     "only_active": "仅活跃",
     "filter_active_tip": "只显示仍在运行或等待输入的会话",
+    "mark_all_read": "全部已读",
+    "mark_all_read_tip": "把所有未读会话标记为已读",
     "mark_new": "未 review — 点击标为「进行中」",
     "mark_pending": "进行中 — 点击标为「已完成」",
     "mark_done": "已完成 — 点击清除标记",
