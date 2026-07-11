@@ -756,6 +756,76 @@ fn mark_sessions_read(
     state.backend.read().unwrap().mark_sessions_read(items)
 }
 
+// ── Workspace command runner (文件 page) ─────────────────────────────────────
+
+#[tauri::command]
+fn list_workspace_procs(
+    state: tauri::State<'_, AppState>,
+) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
+    state.backend.read().unwrap().list_procs()
+}
+
+#[tauri::command]
+fn run_workspace_proc(
+    workspace_path: String,
+    command: String,
+    cols: u16,
+    rows: u16,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::proc_runner::ProcRecord, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .spawn_proc(workspace_path, command, cols, rows)
+}
+
+#[tauri::command]
+fn kill_workspace_proc(
+    id: String,
+    force: bool,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.read().unwrap().kill_proc(id, force)
+}
+
+#[tauri::command]
+fn read_workspace_proc_output(
+    id: String,
+    offset: Option<u64>,
+    state: tauri::State<'_, AppState>,
+) -> Result<claw_fleet_core::proc_runner::ProcOutputChunk, String> {
+    state.backend.read().unwrap().proc_output(id, offset)
+}
+
+#[tauri::command]
+fn write_workspace_proc_input(
+    id: String,
+    data_b64: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.read().unwrap().proc_input(id, data_b64)
+}
+
+#[tauri::command]
+fn resize_workspace_proc(
+    id: String,
+    cols: u16,
+    rows: u16,
+    state: tauri::State<'_, AppState>,
+) -> Result<(), String> {
+    state.backend.read().unwrap().proc_resize(id, cols, rows)
+}
+
+#[tauri::command]
+fn clear_workspace_procs(
+    id: Option<String>,
+    workspace_path: Option<String>,
+    state: tauri::State<'_, AppState>,
+) -> Result<u32, String> {
+    state.backend.read().unwrap().clear_procs(id, workspace_path)
+}
+
 // ── Keep-awake (caffeinate -i equivalent) ────────────────────────────────────
 // Desktop-local power state, deliberately NOT routed through the Backend
 // trait: the assertion controls the machine the desktop app runs on (like
@@ -3571,6 +3641,13 @@ pub fn run() {
             set_auto_resume_config,
             set_session_mark,
             mark_sessions_read,
+            list_workspace_procs,
+            run_workspace_proc,
+            kill_workspace_proc,
+            read_workspace_proc_output,
+            write_workspace_proc_input,
+            resize_workspace_proc,
+            clear_workspace_procs,
             keep_awake_supported,
             get_keep_awake,
             set_keep_awake,
