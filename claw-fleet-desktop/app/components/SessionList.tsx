@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, ListChecks } from "lucide-react";
-import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useReadStore, useSessionsStore, useUIStore } from "../store";
+import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useReadStore, useReportStore, useSessionsStore, useUIStore } from "../store";
 import type { ViewMode } from "../store";
 import { isWorkflowAgent } from "../workflowAgent";
 import type { SessionInfo } from "../types";
@@ -77,6 +77,7 @@ export function SessionList() {
   );
   const { connection } = useConnectionStore();
   const unreadCriticalCount = useAuditStore((s) => s.unreadCriticalCount);
+  const hasNewReport = useReportStore((s) => s.hasNewReport);
   // Unread launchpad sessions — same scope the 启动台 (HistoryView) lists
   // (Fleet-owned, non-subagent) — surfaced as a count badge on its nav item.
   const readOverrides = useReadStore((s) => s.overrides);
@@ -112,6 +113,8 @@ export function SessionList() {
         );
       })
       .catch(() => {});
+    // Compute the "new report" red dot without opening the report view.
+    useReportStore.getState().refreshNewReportFlag();
     // Register event listeners BEFORE calling refresh() to avoid a race
     // condition: on Linux the initial background scan can complete so fast
     // that the "sessions-updated" event fires before the listener is set up,
@@ -297,6 +300,7 @@ export function SessionList() {
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3"><rect x="1.5" y="2.5" width="13" height="12" rx="1.5"/><line x1="1.5" y1="5.5" x2="14.5" y2="5.5"/><line x1="5" y1="1" x2="5" y2="4"/><line x1="11" y1="1" x2="11" y2="4"/></svg></span>
             <span className={styles.nav_label}>{t("view_report")}</span>
+            {hasNewReport && <span className={styles.nav_dot} />}
           </button>
 
           <div className={styles.nav_divider} />
