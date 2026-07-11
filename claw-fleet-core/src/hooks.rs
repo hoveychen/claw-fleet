@@ -921,11 +921,63 @@ fn fault_tolerant_command(fleet_bin: &str, subcommand: &str) -> String {
     )
 }
 
-/// Read the last `max_lines` from the events file and parse them.
-fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
-    let Ok(content) = fs::read_to_string(path) else {
+/// Read the last `max_lines` lines of a file without loading all of it.
+///
+/// `hooks.jsonl` is append-only and reaches tens of megabytes on a busy machine
+/// (72 MB when this was written), while the session scan wants only its tail —
+/// and re-reads it on every tick. Slurping the whole file to keep the last 500
+/// lines was throwing away >99% of the bytes it read.
+///
+/// Walks backwards in chunks until it has counted more than `max_lines`
+/// newlines. That overshoot is what makes the result safe: a chunk boundary can
+/// land mid-line (and mid-UTF-8-sequence), but only ever at the *front* of the
+/// buffer, and the extra newline guarantees that partial first line is dropped
+/// by the `saturating_sub` below rather than parsed. When the walk reaches
+/// offset 0 the whole file is in hand and every line is intact by construction.
+fn read_tail_lines(path: &Path, max_lines: usize) -> Vec<String> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    const CHUNK: u64 = 64 * 1024;
+
+    let Ok(mut f) = fs::File::open(path) else {
         return Vec::new();
     };
+    let Ok(len) = f.seek(SeekFrom::End(0)) else {
+        return Vec::new();
+    };
+
+    let mut buf: Vec<u8> = Vec::new();
+    let mut pos = len;
+    let mut newlines = 0usize;
+
+    while pos > 0 && newlines <= max_lines {
+        let read_size = CHUNK.min(pos);
+        pos -= read_size;
+
+        let mut chunk = vec![0u8; read_size as usize];
+        if f.seek(SeekFrom::Start(pos)).is_err() || f.read_exact(&mut chunk).is_err() {
+            break;
+        }
+        newlines += chunk.iter().filter(|&&b| b == b'\n').count();
+
+        chunk.extend_from_slice(&buf);
+        buf = chunk;
+    }
+
+    // Lossy only where a chunk boundary split a multi-byte char — always in the
+    // partial first line, which the tail slice discards.
+    let text = String::from_utf8_lossy(&buf);
+    let lines: Vec<&str> = text.lines().collect();
+    let start = lines.len().saturating_sub(max_lines);
+    lines[start..].iter().map(|s| (*s).to_string()).collect()
+}
+
+/// Read the last `max_lines` from the events file and parse them.
+fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
+    let lines = read_tail_lines(path, max_lines);
+    if lines.is_empty() {
+        return Vec::new();
+    }
 
     // Claude Code's hook payloads do NOT carry a "timestamp" field, so the
     // per-record lookup below almost always misses. Use the file's mtime as
@@ -940,10 +992,7 @@ fn read_recent_events(path: &Path, max_lines: usize) -> Vec<HookEvent> {
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
 
-    let lines: Vec<&str> = content.lines().collect();
-    let start = lines.len().saturating_sub(max_lines);
-
-    lines[start..]
+    lines
         .iter()
         .filter_map(|line| {
             let v: Value = serde_json::from_str(line).ok()?;
@@ -1225,5 +1274,123 @@ mod tests {
         // PRD-context must survive; only the unrelated entry + prd-context remain.
         assert_eq!(user_prompt_arr.len(), 2, "prd-context must not be filtered");
         assert!(user_prompt_arr.iter().any(|g| is_prd_context_group(g)));
+    }
+
+    // ── read_tail_lines ─────────────────────────────────────────────────────
+    //
+    // The scan reads hooks.jsonl on every tick and the file reaches tens of MB,
+    // so it now walks backwards from the end instead of slurping the whole file.
+    // These pin the behaviour that made the old (correct but wasteful) version
+    // safe: the tail must come back byte-identical, including across the chunk
+    // boundaries the new reader introduces.
+
+    fn write_tmp(name: &str, content: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "fleet_tail_{}_{}_{name}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::write(&p, content).unwrap();
+        p
+    }
+
+    /// The property the whole optimisation rests on: same answer as reading the
+    /// entire file and taking the last N lines.
+    fn slurp_tail(content: &str, n: usize) -> Vec<String> {
+        let lines: Vec<&str> = content.lines().collect();
+        let start = lines.len().saturating_sub(n);
+        lines[start..].iter().map(|s| (*s).to_string()).collect()
+    }
+
+    #[test]
+    fn tail_matches_a_full_read_on_a_multi_chunk_file() {
+        // > 64 KiB, so the reader must walk several chunks backwards.
+        let content: String = (0..4000)
+            .map(|i| format!("{{\"session_id\":\"s{i}\",\"hook_event_name\":\"Stop\",\"pad\":\"{}\"}}\n", "x".repeat(40)))
+            .collect();
+        assert!(content.len() > 64 * 1024, "test needs a multi-chunk file");
+        let p = write_tmp("multi.jsonl", &content);
+
+        assert_eq!(read_tail_lines(&p, 500), slurp_tail(&content, 500));
+        // And the last line really is the last line.
+        assert!(read_tail_lines(&p, 1)[0].contains("\"s3999\""));
+
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn tail_does_not_corrupt_multibyte_chars_at_a_chunk_boundary() {
+        // Chinese descriptions are the norm in this codebase's payloads. A chunk
+        // boundary lands mid-character constantly; the affected line is the
+        // partial leading one and must be dropped, never mangled into the result.
+        let content: String = (0..3000)
+            .map(|i| format!("{{\"session_id\":\"s{i}\",\"description\":\"等待生产部署完成并上传矩阵\"}}\n"))
+            .collect();
+        assert!(content.len() > 64 * 1024);
+        let p = write_tmp("utf8.jsonl", &content);
+
+        let tail = read_tail_lines(&p, 500);
+        assert_eq!(tail, slurp_tail(&content, 500));
+        // Every returned line must still be valid JSON with the text intact —
+        // a split multi-byte char would have produced U+FFFD here.
+        for line in &tail {
+            let v: Value = serde_json::from_str(line).expect("tail line must be valid JSON");
+            assert_eq!(v["description"], "等待生产部署完成并上传矩阵");
+            assert!(!line.contains('\u{FFFD}'), "no replacement chars in the tail");
+        }
+
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn tail_returns_everything_when_the_file_is_shorter_than_max_lines() {
+        let content = "a\nb\nc\n";
+        let p = write_tmp("short.jsonl", content);
+        assert_eq!(read_tail_lines(&p, 500), vec!["a", "b", "c"]);
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn tail_handles_a_missing_trailing_newline() {
+        let content = "a\nb\nlast-line-no-newline";
+        let p = write_tmp("nonl.jsonl", content);
+        assert_eq!(read_tail_lines(&p, 2), vec!["b", "last-line-no-newline"]);
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn tail_of_empty_or_missing_file_is_empty() {
+        let p = write_tmp("empty.jsonl", "");
+        assert!(read_tail_lines(&p, 500).is_empty());
+        let _ = fs::remove_file(&p);
+
+        assert!(read_tail_lines(Path::new("/nonexistent/hooks.jsonl"), 500).is_empty());
+    }
+
+    #[test]
+    fn read_recent_events_parses_background_tasks_from_a_stop_payload() {
+        // End-to-end through the tail reader: the Stop payload's background_tasks
+        // must survive into the HookEvent the scan consumes.
+        let content = concat!(
+            r#"{"session_id":"s1","hook_event_name":"PreToolUse","tool_name":"Bash"}"#, "\n",
+            r#"{"session_id":"s1","hook_event_name":"Stop","background_tasks":[{"id":"b1","type":"shell","status":"running","description":"等部署"}]}"#, "\n",
+        );
+        let p = write_tmp("events.jsonl", content);
+
+        let evs = read_recent_events(&p, 500);
+        assert_eq!(evs.len(), 2);
+        let stop = evs.iter().find(|e| e.event_name == "Stop").unwrap();
+        assert_eq!(stop.background_tasks.len(), 1);
+        assert_eq!(stop.background_tasks[0].id, "b1");
+        assert!(stop.background_tasks[0].is_running());
+        assert_eq!(stop.background_tasks[0].description, "等部署");
+        // Non-Stop events carry none.
+        let pre = evs.iter().find(|e| e.event_name == "PreToolUse").unwrap();
+        assert!(pre.background_tasks.is_empty());
+
+        let _ = fs::remove_file(&p);
     }
 }
