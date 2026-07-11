@@ -1996,30 +1996,35 @@ fn read_explorer_file(
 }
 
 // ── Source control ──────────────────────────────────────────────────────────────
+//
+// All three run on tauri's threadpool (`command(async)` on a plain `fn`), never
+// the main thread: `push` / `pull` shell out to git and block for a whole network
+// round-trip, and `status` walks the working tree. On the main thread that stalls
+// the webview — the UI froze for the duration of every push.
 
-#[tauri::command]
+#[tauri::command(async)]
 fn git_status(
     workspace: String,
     root: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitStatus, String> {
     state.backend.read().unwrap().git_status(&workspace, &root)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn git_push(
     workspace: String,
     root: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
     state.backend.read().unwrap().git_push(&workspace, &root)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn git_pull(
     workspace: String,
     root: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
     state.backend.read().unwrap().git_pull(&workspace, &root)
 }
