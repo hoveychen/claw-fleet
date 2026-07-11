@@ -1,6 +1,8 @@
 /* Inline "new session" form — rendered inside the History page's detail
  * column (no modal overlay). Fills the column and centres its content so the
- * composer sits where the empty-state hint used to be. */
+ * composer sits where the empty-state hint used to be. `margin: auto` on both
+ * axes (paired with `align-self: center`) centres the capped-width card
+ * horizontally *and* vertically within the flex detail column. */
 .form {
   flex: 1;
   min-width: 0;
@@ -12,9 +14,9 @@
   overflow: visible;
   width: 100%;
   max-width: 620px;
-  margin: 0 auto;
+  margin: auto;
   padding: 32px 28px;
-  align-self: flex-start;
+  align-self: center;
 }
 
 .header {
