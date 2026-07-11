@@ -42,6 +42,60 @@ function basename(p: string): string {
   return slash >= 0 ? normalized.slice(slash + 1) : normalized;
 }
 
+/** Collapse an in-repo worktree checkout to its repo root. Fleet develops plans
+ *  inside `<repo-root>/.worktrees/<task-id>` (see the worktree workflow), which
+ *  are transient — removed once the plan merges. The launcher must offer the
+ *  durable repo root, never the task-id leaf. Mirrors the backend's
+ *  `workspace_name` segment logic (session.rs), but returns the *path* prefix
+ *  instead of the name. Paths without a `.worktrees` segment (including the
+ *  unrelated `~/.fleet/worktrees/` task-workers, whose segment is `worktrees`)
+ *  are returned unchanged. */
+export function repoRootPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/");
+  const idx = normalized.split("/").indexOf(".worktrees");
+  if (idx <= 0) return path;
+  // Rejoin the segments before `.worktrees`, preserving the original separators
+  // by slicing the raw string at the segment boundary.
+  const before = normalized.split("/").slice(0, idx).join("/");
+  return before || path;
+}
+
+export interface WorkspaceOption {
+  path: string;
+  name: string;
+  lastMs: number;
+}
+
+interface WorkspaceSessionLike {
+  workspacePath?: string | null;
+  workspaceName?: string | null;
+  lastActivityMs: number;
+}
+
+/** Distinct workspaces from known sessions, most-recently-active first. In-repo
+ *  worktree checkouts are collapsed onto their repo root so a repo with both a
+ *  main checkout and a live worktree appears once, pointing at the durable root
+ *  (see {@link repoRootPath}). */
+export function distinctWorkspaces(
+  sessions: WorkspaceSessionLike[],
+  limit = 30,
+): WorkspaceOption[] {
+  const byPath = new Map<string, WorkspaceOption>();
+  for (const s of sessions) {
+    if (!s.workspacePath) continue;
+    const path = repoRootPath(s.workspacePath);
+    const prev = byPath.get(path);
+    if (!prev || s.lastActivityMs > prev.lastMs) {
+      byPath.set(path, {
+        path,
+        name: s.workspaceName || basename(path),
+        lastMs: s.lastActivityMs,
+      });
+    }
+  }
+  return [...byPath.values()].sort((a, b) => b.lastMs - a.lastMs).slice(0, limit);
+}
+
 /** Plain "start a new claude session" form — no project, no task, no queue.
  *  Pick a workspace directory + type the initial prompt; the backend spawns a
  *  detached `claude -p "<prompt>"` and the scanner picks the session up. Rendered
@@ -74,21 +128,8 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const composerRef = useRef<ChatComposerHandle | null>(null);
 
   // Distinct workspaces from known sessions, most recently active first.
-  const recentWorkspaces = useMemo(() => {
-    const byPath = new Map<string, { path: string; name: string; lastMs: number }>();
-    for (const s of sessions) {
-      if (!s.workspacePath) continue;
-      const prev = byPath.get(s.workspacePath);
-      if (!prev || s.lastActivityMs > prev.lastMs) {
-        byPath.set(s.workspacePath, {
-          path: s.workspacePath,
-          name: s.workspaceName || basename(s.workspacePath),
-          lastMs: s.lastActivityMs,
-        });
-      }
-    }
-    return [...byPath.values()].sort((a, b) => b.lastMs - a.lastMs).slice(0, 30);
-  }, [sessions]);
+  // Worktree checkouts collapse onto their repo root — see distinctWorkspaces.
+  const recentWorkspaces = useMemo(() => distinctWorkspaces(sessions), [sessions]);
 
   // Seed the workspace to the most-recent one once, on mount. The form is
   // remounted each time the user re-enters "new session" mode, so a plain
