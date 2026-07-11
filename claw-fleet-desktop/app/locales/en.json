@@ -78,7 +78,7 @@
   "view_wiki": "Wiki",
   "view_skills": "Skills",
   "view_plugins": "Plugins",
-  "view_history": "Launchpad",
+  "view_history": "Tasks",
   "new_session": {
     "button": "New Session",
     "title": "New Claude Session",
@@ -1678,7 +1678,7 @@
     }
   },
   "history": {
-    "title": "Launchpad",
+    "title": "Tasks",
     "search_placeholder": "Search title, plan, full text…",
     "empty": "No sessions yet — hit New Session in the top-right to launch one",
     "no_match": "No matching sessions",
