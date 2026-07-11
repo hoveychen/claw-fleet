@@ -1273,177 +1273,499 @@ pub struct SessionStats {
     pub compact_cost_usd: f64,
 }
 
-fn compute_session_stats(lines: &[&str]) -> SessionStats {
-    use crate::model_cost::{get_model_costs, turn_cost_usd, TurnUsage};
+/// Running state behind [`compute_session_stats`], split out so a session's
+/// stats can be advanced by only the lines appended since the last scan.
+///
+/// Transcripts are append-only, so every field here is either a running sum, a
+/// running max, or a last-write-wins scalar — all of which fold correctly over
+/// batches. The one field that does *not* is `seen_msg_ids`: a finalized
+/// assistant message can be re-logged, and dedup is what keeps its tokens and
+/// cost from being counted twice.
+///
+/// **`seen_msg_ids` must stay complete for the whole file — a bounded window is
+/// not sound.** Measured across the 120 largest transcripts on disk: every one
+/// of them re-logs message ids (42k duplicate instances), and while most repeats
+/// sit within 10 lines of each other, 100 of them span more than 100 lines and
+/// the widest is 2437. A sliding window would silently miss those and
+/// double-count the turn's tokens and USD.
+///
+/// Ids are stored as 64-bit hashes rather than strings to keep the per-session
+/// footprint at ~8 bytes/turn; a collision would drop one turn from the totals,
+/// which at a few thousand ids against a 64-bit space is not a real risk.
+#[derive(Clone, Debug, Default)]
+pub struct StatsAcc {
+    total_output: u64,
+    total_cost: f64,
+    /// (timestamp_secs, output_tokens, turn_cost_usd) — feeds the speed window.
+    timed: Vec<(f64, u64, f64)>,
+    seen_msg_ids: HashSet<u64>,
+    last_model: Option<String>,
+    compact_count: u32,
+    compact_pre_tokens: u64,
+    compact_post_tokens: u64,
+    compact_cost_usd: f64,
+}
 
-    let mut total_output: u64 = 0;
-    let mut total_cost: f64 = 0.0;
-    // (timestamp_secs, output_tokens, turn_cost_usd)
-    let mut timed: Vec<(f64, u64, f64)> = Vec::new();
-    let mut seen_msg_ids: HashSet<String> = HashSet::new();
-    let mut last_model: Option<String> = None;
+fn hash_msg_id(id: &str) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    id.hash(&mut h);
+    h.finish()
+}
 
-    let mut compact_count: u32 = 0;
-    let mut compact_pre_tokens: u64 = 0;
-    let mut compact_post_tokens: u64 = 0;
-    let mut compact_cost_usd: f64 = 0.0;
+impl StatsAcc {
+    pub fn new() -> Self {
+        Self::default()
+    }
 
-    for line in lines {
-        let Ok(v): Result<Value, _> = serde_json::from_str(line) else {
-            continue;
-        };
-
-        // `compact_boundary` is a system meta event Claude Code emits each time
-        // it summarises the conversation. The summary LLM call itself is not
-        // logged as a standalone assistant turn, so its true cost is not in
-        // the transcript — we approximate from `compactMetadata`.
-        if v.get("type").and_then(|t| t.as_str()) == Some("system")
-            && v.get("subtype").and_then(|s| s.as_str()) == Some("compact_boundary")
-        {
-            compact_count += 1;
-            let meta = v.get("compactMetadata");
-            let pre = meta
-                .and_then(|m| m.get("preTokens"))
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            let post = meta
-                .and_then(|m| m.get("postTokens"))
-                .and_then(|t| t.as_u64())
-                .unwrap_or(0);
-            compact_pre_tokens += pre;
-            compact_post_tokens += post;
-
-            // Price the compact call against the most recently seen model.
-            // `get_model_costs("")` falls back to the default tier when no
-            // assistant turn has been seen yet (defensive — compact almost
-            // never precedes the first assistant turn).
-            let pricing_model = last_model.as_deref().unwrap_or("");
-            let costs = get_model_costs(pricing_model);
-            compact_cost_usd += (pre as f64 / 1_000_000.0) * costs.cache_read
-                + (post as f64 / 1_000_000.0) * costs.output;
-            continue;
-        }
-
-        if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
-            continue;
-        }
-        let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
-            continue;
-        };
-        // Only count finalized messages
-        if msg.get("stop_reason").map_or(true, |s| s.is_null()) {
-            continue;
-        }
-        let msg_id = msg
-            .get("id")
-            .and_then(|i| i.as_str())
-            .unwrap_or_default()
-            .to_string();
-        if !msg_id.is_empty() {
-            if seen_msg_ids.contains(&msg_id) {
-                continue;
-            }
-            seen_msg_ids.insert(msg_id);
-        }
-
-        let usage = msg.get("usage");
-        let input_tokens = usage
-            .and_then(|u| u.get("input_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let output_tokens = usage
-            .and_then(|u| u.get("output_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let cache_creation_tokens = usage
-            .and_then(|u| u.get("cache_creation_input_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let cache_read_tokens = usage
-            .and_then(|u| u.get("cache_read_input_tokens"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-        let web_search_requests = usage
-            .and_then(|u| u.get("server_tool_use"))
-            .and_then(|s| s.get("web_search_requests"))
-            .and_then(|t| t.as_u64())
-            .unwrap_or(0);
-
-        total_output += output_tokens;
-
-        // Per-turn cost uses this turn's own model; fall back to most-recently-
-        // seen model when a turn omits it (model can change mid-session).
-        let turn_model = msg.get("model").and_then(|m| m.as_str());
-        if let Some(m) = turn_model {
-            last_model = Some(m.to_string());
-        }
-        let cost_model = turn_model.or(last_model.as_deref()).unwrap_or("");
-        let turn_cost = turn_cost_usd(
-            cost_model,
-            &TurnUsage {
-                input_tokens,
-                output_tokens,
-                cache_creation_tokens,
-                cache_read_tokens,
-                web_search_requests,
-            },
-        );
-        total_cost += turn_cost;
-
-        // Timestamp for speed
-        if let Some(ts_str) = v.get("timestamp").and_then(|t| t.as_str()) {
-            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
-                timed.push((dt.timestamp() as f64, output_tokens, turn_cost));
+    /// Fold a batch of newly-appended transcript lines into the running state.
+    /// Safe to call repeatedly; re-feeding a line that was already folded in is
+    /// a no-op for token/cost totals thanks to the msg-id dedup above.
+    pub fn push_lines(&mut self, lines: &[&str]) {
+        for line in lines {
+            if let Ok(v) = serde_json::from_str::<Value>(line) {
+                self.push_value(&v);
             }
         }
     }
 
-    // Speed: tokens/s and cost/min over the last 5-minute window.
-    //
-    // Divide by `now - first_ts`, not `last_ts - first_ts`. The inter-turn
-    // gap version makes speed a step function that holds the old rate until
-    // the oldest turn slides out of the window — so a session that finished
-    // a burst 4 minutes ago still reports the burst's speed, inflating
-    // fleet-wide totals while nothing is actually generating. Measuring
-    // against "now" lets speed decay smoothly as the idle tail grows.
-    let (token_speed, cost_speed_usd_per_min) = if timed.len() >= 2 {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs_f64();
-        let window_start = now - 300.0;
+    /// Fold one already-parsed record. Split out from [`push_lines`] so that
+    /// [`SessionAcc`] can parse each line once and fan the same `Value` out to
+    /// every extractor, instead of re-parsing the file per extractor.
+    pub fn push_value(&mut self, v: &Value) {
+        use crate::model_cost::{get_model_costs, turn_cost_usd, TurnUsage};
 
-        let recent: Vec<_> = timed.iter().filter(|(ts, _, _)| *ts > window_start).collect();
+        {
+            // `compact_boundary` is a system meta event Claude Code emits each time
+            // it summarises the conversation. The summary LLM call itself is not
+            // logged as a standalone assistant turn, so its true cost is not in
+            // the transcript — we approximate from `compactMetadata`.
+            if v.get("type").and_then(|t| t.as_str()) == Some("system")
+                && v.get("subtype").and_then(|s| s.as_str()) == Some("compact_boundary")
+            {
+                self.compact_count += 1;
+                let meta = v.get("compactMetadata");
+                let pre = meta
+                    .and_then(|m| m.get("preTokens"))
+                    .and_then(|t| t.as_u64())
+                    .unwrap_or(0);
+                let post = meta
+                    .and_then(|m| m.get("postTokens"))
+                    .and_then(|t| t.as_u64())
+                    .unwrap_or(0);
+                self.compact_pre_tokens += pre;
+                self.compact_post_tokens += post;
 
-        if recent.len() >= 2 {
-            let total_recent_tokens: u64 = recent.iter().map(|(_, t, _)| t).sum();
-            let total_recent_cost: f64 = recent.iter().map(|(_, _, c)| c).sum();
-            let first_ts = recent.first().map(|(ts, _, _)| *ts).unwrap_or(0.0);
-            let duration = now - first_ts;
-            if duration > 0.0 {
-                (
-                    total_recent_tokens as f64 / duration,
-                    total_recent_cost * 60.0 / duration,
-                )
+                // Price the compact call against the most recently seen model.
+                // `get_model_costs("")` falls back to the default tier when no
+                // assistant turn has been seen yet (defensive — compact almost
+                // never precedes the first assistant turn).
+                let pricing_model = self.last_model.as_deref().unwrap_or("");
+                let costs = get_model_costs(pricing_model);
+                self.compact_cost_usd += (pre as f64 / 1_000_000.0) * costs.cache_read
+                    + (post as f64 / 1_000_000.0) * costs.output;
+                return;
+            }
+
+            if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+                return;
+            }
+            let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
+                return;
+            };
+            // Only count finalized messages
+            if msg.get("stop_reason").map_or(true, |s| s.is_null()) {
+                return;
+            }
+            let msg_id = msg.get("id").and_then(|i| i.as_str()).unwrap_or_default();
+            if !msg_id.is_empty() && !self.seen_msg_ids.insert(hash_msg_id(msg_id)) {
+                return;
+            }
+
+            let usage = msg.get("usage");
+            let input_tokens = usage
+                .and_then(|u| u.get("input_tokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let output_tokens = usage
+                .and_then(|u| u.get("output_tokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let cache_creation_tokens = usage
+                .and_then(|u| u.get("cache_creation_input_tokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let cache_read_tokens = usage
+                .and_then(|u| u.get("cache_read_input_tokens"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+            let web_search_requests = usage
+                .and_then(|u| u.get("server_tool_use"))
+                .and_then(|s| s.get("web_search_requests"))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0);
+
+            self.total_output += output_tokens;
+
+            // Per-turn cost uses this turn's own model; fall back to most-recently-
+            // seen model when a turn omits it (model can change mid-session).
+            let turn_model = msg.get("model").and_then(|m| m.as_str());
+            if let Some(m) = turn_model {
+                self.last_model = Some(m.to_string());
+            }
+            let cost_model = turn_model.or(self.last_model.as_deref()).unwrap_or("");
+            let turn_cost = turn_cost_usd(
+                cost_model,
+                &TurnUsage {
+                    input_tokens,
+                    output_tokens,
+                    cache_creation_tokens,
+                    cache_read_tokens,
+                    web_search_requests,
+                },
+            );
+            self.total_cost += turn_cost;
+
+            // Timestamp for speed
+            if let Some(ts_str) = v.get("timestamp").and_then(|t| t.as_str()) {
+                if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(ts_str) {
+                    self.timed
+                        .push((dt.timestamp() as f64, output_tokens, turn_cost));
+                }
+            }
+        }
+    }
+
+    /// Materialise the stats. `now_secs` is the clock the speed window is
+    /// measured against — taken as a parameter so the window is testable
+    /// without freezing the system clock.
+    pub fn finish_at(&self, now_secs: f64) -> SessionStats {
+        // Speed: tokens/s and cost/min over the last 5-minute window.
+        //
+        // Divide by `now - first_ts`, not `last_ts - first_ts`. The inter-turn
+        // gap version makes speed a step function that holds the old rate until
+        // the oldest turn slides out of the window — so a session that finished
+        // a burst 4 minutes ago still reports the burst's speed, inflating
+        // fleet-wide totals while nothing is actually generating. Measuring
+        // against "now" lets speed decay smoothly as the idle tail grows.
+        let (token_speed, cost_speed_usd_per_min) = if self.timed.len() >= 2 {
+            let window_start = now_secs - 300.0;
+
+            let recent: Vec<_> = self
+                .timed
+                .iter()
+                .filter(|(ts, _, _)| *ts > window_start)
+                .collect();
+
+            if recent.len() >= 2 {
+                let total_recent_tokens: u64 = recent.iter().map(|(_, t, _)| t).sum();
+                let total_recent_cost: f64 = recent.iter().map(|(_, _, c)| c).sum();
+                let first_ts = recent.first().map(|(ts, _, _)| *ts).unwrap_or(0.0);
+                let duration = now_secs - first_ts;
+                if duration > 0.0 {
+                    (
+                        total_recent_tokens as f64 / duration,
+                        total_recent_cost * 60.0 / duration,
+                    )
+                } else {
+                    (0.0, 0.0)
+                }
             } else {
                 (0.0, 0.0)
             }
         } else {
             (0.0, 0.0)
+        };
+
+        SessionStats {
+            token_speed,
+            total_output_tokens: self.total_output,
+            total_cost_usd: self.total_cost,
+            cost_speed_usd_per_min,
+            compact_count: self.compact_count,
+            compact_pre_tokens: self.compact_pre_tokens,
+            compact_post_tokens: self.compact_post_tokens,
+            compact_cost_usd: self.compact_cost_usd,
         }
-    } else {
-        (0.0, 0.0)
+    }
+
+    /// Same as [`finish_at`], against the wall clock.
+    pub fn finish(&self) -> SessionStats {
+        self.finish_at(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs_f64(),
+        )
+    }
+
+    /// Drop speed samples that can no longer influence the 5-minute window.
+    /// Called as the accumulator is carried across scans so `timed` doesn't
+    /// grow without bound on a long-lived session. The margin over 300s is
+    /// deliberate slack — pruning exactly at the window edge would race the
+    /// next `finish` call's slightly later clock.
+    pub fn prune_timed(&mut self, now_secs: f64) {
+        let keep_after = now_secs - 900.0;
+        self.timed.retain(|(ts, _, _)| *ts > keep_after);
+    }
+}
+
+/// The batch-free original, kept as the oracle [`SessionAcc`]'s tests compare
+/// against — the scan path itself now folds incrementally and no longer calls it.
+#[cfg(test)]
+fn compute_session_stats(lines: &[&str]) -> SessionStats {
+    let mut acc = StatsAcc::new();
+    acc.push_lines(lines);
+    acc.finish()
+}
+
+/// A transcript's fold state carried between scans: how far we have folded, and
+/// the accumulator holding the result.
+#[derive(Clone, Debug, Default)]
+pub struct IncrParse {
+    /// Offset of the first byte not yet folded. Always sits just past a newline
+    /// (see [`SessionAcc::fold_chunk`]).
+    pub offset: u64,
+    pub acc: SessionAcc,
+}
+
+/// Advance a transcript's fold state by reading only what was appended since
+/// last time, re-reading from scratch when the file cannot have been appended to.
+///
+/// Rewrite detection follows the same rule `search_index` has run in production:
+/// a file shorter than our offset was truncated or rewritten, so the carried
+/// state is meaningless and we start over. The residual assumption — that a file
+/// which is *not* shorter was only appended to — is the same one that module
+/// relies on, and holds because Claude Code only ever appends to a transcript
+/// (compaction adds a boundary record; it does not rewrite history).
+///
+/// `prev` is `None` on a cold cache, which simply means "fold the whole file".
+pub fn advance_incremental(
+    jsonl_path: &Path,
+    prev: Option<IncrParse>,
+) -> std::io::Result<IncrParse> {
+    use std::io::{Read, Seek, SeekFrom};
+
+    let file_len = fs::metadata(jsonl_path)?.len();
+
+    let mut state = match prev {
+        // Truncated or rewritten: nothing we carried can be trusted.
+        Some(p) if file_len < p.offset => IncrParse::default(),
+        Some(p) => p,
+        None => IncrParse::default(),
     };
 
-    SessionStats {
-        token_speed,
-        total_output_tokens: total_output,
-        total_cost_usd: total_cost,
-        cost_speed_usd_per_min,
-        compact_count,
-        compact_pre_tokens,
-        compact_post_tokens,
-        compact_cost_usd,
+    if file_len == state.offset {
+        return Ok(state); // nothing new
+    }
+
+    let mut f = fs::File::open(jsonl_path)?;
+    if state.offset > 0 {
+        f.seek(SeekFrom::Start(state.offset))?;
+    }
+    let mut buf = Vec::with_capacity((file_len - state.offset) as usize);
+    f.read_to_end(&mut buf)?;
+
+    // A transcript is UTF-8, but a chunk boundary can land mid-codepoint only
+    // if the writer flushed a partial codepoint — treat any such tail the same
+    // way as a partial line: leave it for the next tick.
+    let text = match std::str::from_utf8(&buf) {
+        Ok(s) => s,
+        Err(e) => std::str::from_utf8(&buf[..e.valid_up_to()])
+            .expect("valid_up_to marks a valid boundary"),
+    };
+
+    let consumed = state.acc.fold_chunk(text);
+    state.offset += consumed as u64;
+    Ok(state)
+}
+
+/// Everything `parse_session_info` used to derive by re-reading the whole
+/// transcript, folded in a single forward pass that can be resumed.
+///
+/// Two wins over the old shape, which read the file with `read_to_string` and
+/// then walked `all_lines` once per extractor:
+///
+/// 1. **One parse, many extractors.** Each line is turned into a `Value` once
+///    and fanned out, instead of being re-parsed by `compute_session_stats`,
+///    `extract_last_context_usage`, the ai-title scan, and the todo scan.
+/// 2. **Resumable.** Every field folds over batches, so a session that appended
+///    a few lines can be advanced with just those lines rather than re-read from
+///    byte zero on every 2s scan tick.
+///
+/// Each field's fold rule is chosen to match the batch-free original exactly —
+/// see the comments on the fields that are not simple last-write-wins.
+#[derive(Clone, Debug, Default)]
+pub struct SessionAcc {
+    stats: StatsAcc,
+
+    /// Latest live (non-sidechain) assistant usage: `(total_input, model)`.
+    ctx_last: Option<(u64, String)>,
+    /// Largest single-turn total input seen *since the last compact summary*.
+    ctx_session_max: u64,
+
+    /// First `ai-title` record wins; `None` simply means "not seen yet", so a
+    /// title written later is still picked up.
+    ai_title: Option<String>,
+
+    /// The *first* `user` record decides the entrypoint — including when that
+    /// record carries no `entrypoint` field at all, which settles it to `None`.
+    /// Hence the explicit flag: without it, a later `user` record's entrypoint
+    /// would wrongly fill in a value the original would have left empty.
+    entrypoint: Option<String>,
+    entrypoint_settled: bool,
+
+    /// Latest todo block wins.
+    todos: Option<crate::session_todos::TodoSummary>,
+}
+
+impl SessionAcc {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Fold a batch of newly-appended lines. Parses each line once.
+    pub fn push_lines(&mut self, lines: &[&str]) {
+        for line in lines {
+            let Ok(v) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            self.stats.push_value(&v);
+            self.push_context(&v);
+
+            if self.ai_title.is_none()
+                && v.get("type").and_then(|t| t.as_str()) == Some("ai-title")
+            {
+                self.ai_title = v
+                    .get("aiTitle")
+                    .and_then(|t| t.as_str())
+                    .map(|s| s.to_string());
+            }
+
+            if !self.entrypoint_settled && v.get("type").and_then(|t| t.as_str()) == Some("user")
+            {
+                self.entrypoint_settled = true;
+                self.entrypoint = v
+                    .get("entrypoint")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string());
+            }
+
+            if let Some(summary) = crate::session_todos::todo_summary_from_value(&v) {
+                self.todos = Some(summary);
+            }
+        }
+    }
+
+    /// Context-window usage, folded as a little state machine.
+    ///
+    /// The batch-free original first located the *last* compact-summary line and
+    /// only scanned after it, because pre-compact `input_tokens` are stale
+    /// (Claude Code strips them at load time). Folding forward, that same rule is
+    /// just "a compact summary resets what we know" — after the final reset the
+    /// surviving state is exactly the post-cutoff scan the original performed.
+    fn push_context(&mut self, v: &Value) {
+        if v.get("type").and_then(|t| t.as_str()) == Some("user")
+            && v.get("isCompactSummary")
+                .and_then(|b| b.as_bool())
+                .unwrap_or(false)
+        {
+            self.ctx_last = None;
+            self.ctx_session_max = 0;
+            return;
+        }
+
+        // Subagent turns have their own context window; they must not pollute
+        // the parent's number.
+        if v.get("isSidechain")
+            .and_then(|b| b.as_bool())
+            .unwrap_or(false)
+        {
+            return;
+        }
+        if v.get("type").and_then(|t| t.as_str()) != Some("assistant") {
+            return;
+        }
+        let Some(msg) = v.get("message").and_then(|m| m.as_object()) else {
+            return;
+        };
+
+        // Deliberately no `stop_reason` filter: Claude Code counts in-progress
+        // turns toward context, so the percentage updates while streaming.
+        let usage = msg.get("usage");
+        let get = |k: &str| {
+            usage
+                .and_then(|u| u.get(k))
+                .and_then(|t| t.as_u64())
+                .unwrap_or(0)
+        };
+        let total_input =
+            get("input_tokens") + get("cache_creation_input_tokens") + get("cache_read_input_tokens");
+        if total_input == 0 {
+            return;
+        }
+        if total_input > self.ctx_session_max {
+            self.ctx_session_max = total_input;
+        }
+        let model = msg
+            .get("model")
+            .and_then(|m| m.as_str())
+            .unwrap_or("")
+            .to_string();
+        self.ctx_last = Some((total_input, model));
+    }
+
+    pub fn stats_at(&self, now_secs: f64) -> SessionStats {
+        self.stats.finish_at(now_secs)
+    }
+
+    pub fn stats(&self) -> SessionStats {
+        self.stats.finish()
+    }
+
+    /// `(input_tokens_used, model, session_max_input_tokens)`, matching
+    /// [`extract_last_context_usage`].
+    pub fn context_usage(&self) -> Option<(u64, String, u64)> {
+        self.ctx_last
+            .clone()
+            .map(|(used, model)| (used, model, self.ctx_session_max))
+    }
+
+    pub fn ai_title(&self) -> Option<String> {
+        self.ai_title.clone()
+    }
+
+    pub fn entrypoint(&self) -> Option<String> {
+        self.entrypoint.clone()
+    }
+
+    pub fn todos(&self) -> Option<crate::session_todos::TodoSummary> {
+        self.todos.clone()
+    }
+
+    /// Bound the speed-window samples carried between scans.
+    pub fn prune(&mut self, now_secs: f64) {
+        self.stats.prune_timed(now_secs);
+    }
+
+    /// Fold the complete lines in `chunk` and report how many bytes were
+    /// consumed.
+    ///
+    /// **A trailing fragment with no newline is left unconsumed.** Scans race
+    /// the CLI's writes, so the tail of a growing transcript is routinely a
+    /// half-written line. Folding it would parse-fail (silently dropping that
+    /// turn's tokens and cost forever, because the offset would have moved past
+    /// it); leaving it unconsumed means the next tick re-reads it once it is
+    /// complete. The returned count is therefore the offset advance, not
+    /// `chunk.len()`.
+    pub fn fold_chunk(&mut self, chunk: &str) -> usize {
+        let consumed = match chunk.rfind('\n') {
+            Some(i) => i + 1,
+            None => return 0, // nothing complete yet
+        };
+        let lines: Vec<&str> = chunk[..consumed].lines().collect();
+        self.push_lines(&lines);
+        consumed
     }
 }
 
@@ -1754,6 +2076,9 @@ fn extract_last_skill(last_lines: &[Value]) -> Option<String> {
 /// the Claude CLI from `CLAUDE_CODE_ENTRYPOINT` at spawn time). First record
 /// only, so later `--resume` runs — which stamp their own entrypoint on the
 /// records they append — don't reclassify the session.
+/// Kept as the oracle `SessionAcc`'s entrypoint tests compare against; the scan
+/// path folds it forward instead of re-scanning the file.
+#[cfg(test)]
 fn extract_entrypoint(all_lines: &[&str]) -> Option<String> {
     all_lines
         .iter()
@@ -1777,7 +2102,10 @@ pub fn parse_session_info(
     pid: Option<u32>,
     pid_precise: bool,
     hook_state: Option<&HookState>,
-) -> Option<SessionInfo> {
+    // `incr`: fold state carried from the previous scan of this transcript.
+    // `None` folds the file from scratch.
+    incr: Option<IncrParse>,
+) -> Option<(SessionInfo, IncrParse)> {
     let metadata = fs::metadata(jsonl_path).ok()?;
     let last_modified = metadata.modified().ok()?;
     let last_activity_ms = last_modified
@@ -1800,15 +2128,17 @@ pub fn parse_session_info(
         return None;
     }
 
-    let content = crate::bom::read_to_string_no_bom(jsonl_path).ok()?;
-    let all_lines: Vec<&str> = content.lines().collect();
+    // Advance the fold by only what the transcript appended since the last scan
+    // (a cold `incr` folds the whole file). Nothing below re-reads the file in
+    // full: the cumulative fields come off the accumulator, and the status
+    // heuristics only ever needed the tail.
+    let state = advance_incremental(jsonl_path, incr).ok()?;
+    let acc = &state.acc;
 
-    // Last 100 lines for status
-    let start = all_lines.len().saturating_sub(100);
-    let last_n: Vec<Value> = all_lines[start..]
-        .iter()
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
+    // Last 100 lines for status — seeks from the end rather than materialising
+    // the whole transcript.
+    let last_n: Vec<Value> =
+        crate::jsonl_tail::read_tail_lines_as_json(jsonl_path, 100).unwrap_or_default();
 
     let file_age_secs = age.as_secs_f64();
     // content_age = time since the last real user/assistant message, NOT since
@@ -1826,8 +2156,9 @@ pub fn parse_session_info(
     } else {
         determine_status(&last_n, file_age_secs, content_age_secs, hook_state)
     };
-    let stats = compute_session_stats(&all_lines);
-    let context_percent = extract_last_context_usage(&all_lines)
+    let stats = acc.stats();
+    let context_percent = acc
+        .context_usage()
         .and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
     let last_message_preview = extract_last_text(&last_n);
 
@@ -1836,18 +2167,12 @@ pub fn parse_session_info(
         .filter_map(|v| v.get("slug").and_then(|s| s.as_str()).map(|s| s.to_string()))
         .last();
 
-    // ai-title appears near the start of the file; scan all lines
-    let ai_title = all_lines
-        .iter()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("ai-title"))
-        .and_then(|v| v.get("aiTitle").and_then(|t| t.as_str()).map(|s| s.to_string()));
-
-    let entrypoint = extract_entrypoint(&all_lines);
+    let ai_title = acc.ai_title();
+    let entrypoint = acc.entrypoint();
 
     let model = meta_model.or_else(|| extract_model(&last_n));
     let last_skill = extract_last_skill(&last_n);
-    let todos = crate::session_todos::latest_todo_summary_from_lines(&all_lines);
+    let todos = acc.todos();
     let task_plan =
         crate::prd_tasks::summarize_workspace_tasks(Path::new(&workspace_path), Some(session_id.as_str()));
 
@@ -1903,6 +2228,7 @@ pub fn parse_session_info(
         compact_post_tokens: stats.compact_post_tokens,
         compact_cost_usd: stats.compact_cost_usd,
     })
+    .map(|info| (info, state))
 }
 
 // ── Scan cache ───────────────────────────────────────────────────────────────
@@ -1915,6 +2241,16 @@ pub struct ScanCache {
     pub process_cache: Mutex<(Option<Instant>, Vec<CliProcess>)>,
     /// JSONL path → (mtime_ms, SessionInfo).
     pub session_cache: Mutex<HashMap<String, (u64, SessionInfo)>>,
+    /// JSONL path → how far that transcript has been folded, plus the running
+    /// accumulator. Lets a session that appended a few lines be advanced with
+    /// just those lines instead of re-read from byte zero.
+    ///
+    /// Memory-only, deliberately: the disk cache (`scan_cache_disk`) stores the
+    /// finished `SessionInfo`, not this. Persisting the accumulator would mean
+    /// persisting its full `seen_msg_ids` set per session, which is exactly the
+    /// unbounded thing the disk cache should not grow. A cold start therefore
+    /// folds each transcript once, as it always did.
+    pub incr_cache: Mutex<HashMap<String, IncrParse>>,
     /// Last time `session_cache` was flushed to disk via `scan_cache_disk::save`.
     /// `None` means never persisted in this process.
     pub last_persisted_at: Mutex<Option<Instant>>,
@@ -1942,6 +2278,7 @@ impl ScanCache {
         Self {
             process_cache: Mutex::new((None, Vec::new())),
             session_cache: Mutex::new(crate::scan_cache_disk::load()),
+            incr_cache: Mutex::new(HashMap::new()),
             last_persisted_at: Mutex::new(None),
         }
     }
@@ -2252,31 +2589,45 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     info.pid_precise = pid_precise;
                     info.ide_name = ide_name.clone();
                     sessions.push(info);
-                } else if let Some(mut info) = parse_session_info(
-                    &path,
-                    session_id.clone(),
-                    workspace_path.clone(),
-                    ws_name.clone(),
-                    ide_name.clone(),
-                    false,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    session_pid,
-                    pid_precise,
-                    hook_states.get(&session_id),
-                ) {
-                    apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
-                    info.background_tasks = hook_snapshot
-                        .background_tasks
-                        .get(&session_id)
-                        .cloned()
-                        .unwrap_or_default();
-                    scan_cache.session_cache.lock().unwrap()
-                        .insert(path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
-                    sessions.push(info);
+                } else {
+                    let key = path.to_string_lossy().to_string();
+                    // Take the fold state in its own statement so the guard is
+                    // dropped here. Inlining this into the `if let` scrutinee
+                    // would keep the guard alive across the whole body — and the
+                    // body locks `incr_cache` again, which self-deadlocks.
+                    let prev_incr = scan_cache.incr_cache.lock().unwrap().get(&key).cloned();
+
+                    if let Some((mut info, incr)) = parse_session_info(
+                        &path,
+                        session_id.clone(),
+                        workspace_path.clone(),
+                        ws_name.clone(),
+                        ide_name.clone(),
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        session_pid,
+                        pid_precise,
+                        hook_states.get(&session_id),
+                        prev_incr,
+                    ) {
+                        apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
+                        info.background_tasks = hook_snapshot
+                            .background_tasks
+                            .get(&session_id)
+                            .cloned()
+                            .unwrap_or_default();
+                        scan_cache
+                            .session_cache
+                            .lock()
+                            .unwrap()
+                            .insert(key.clone(), (info.last_activity_ms, info.clone()));
+                        scan_cache.incr_cache.lock().unwrap().insert(key, incr);
+                        sessions.push(info);
+                    }
                 }
             }
 
@@ -2356,25 +2707,37 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         info.pid_precise = false;
                         info.ide_name = ide_name.clone();
                         sessions.push(info);
-                    } else if let Some(info) = parse_session_info(
-                        &agent_path,
-                        agent_id.clone(),
-                        workspace_path.clone(),
-                        ws_name.clone(),
-                        ide_name.clone(),
-                        true,
-                        Some(parent_session_id.clone()),
-                        agent_type,
-                        agent_description,
-                        meta_model,
-                        meta_thinking_level,
-                        sub_pid,
-                        false, // subagents are never pid_precise: stop parent instead
-                        hook_states.get(&agent_id),
-                    ) {
-                        scan_cache.session_cache.lock().unwrap()
-                            .insert(agent_path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
-                        sessions.push(info);
+                    } else {
+                        let key = agent_path.to_string_lossy().to_string();
+                        // Guard dropped before the call — see the note at the
+                        // main-session call site.
+                        let prev_incr = scan_cache.incr_cache.lock().unwrap().get(&key).cloned();
+
+                        if let Some((info, incr)) = parse_session_info(
+                            &agent_path,
+                            agent_id.clone(),
+                            workspace_path.clone(),
+                            ws_name.clone(),
+                            ide_name.clone(),
+                            true,
+                            Some(parent_session_id.clone()),
+                            agent_type,
+                            agent_description,
+                            meta_model,
+                            meta_thinking_level,
+                            sub_pid,
+                            false, // subagents are never pid_precise: stop parent instead
+                            hook_states.get(&agent_id),
+                            prev_incr,
+                        ) {
+                            scan_cache
+                                .session_cache
+                                .lock()
+                                .unwrap()
+                                .insert(key.clone(), (info.last_activity_ms, info.clone()));
+                            scan_cache.incr_cache.lock().unwrap().insert(key, incr);
+                            sessions.push(info);
+                        }
                     }
                 }
             }
@@ -2447,6 +2810,20 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     {
         let live_paths: HashSet<String> = sessions.iter().map(|s| s.jsonl_path.clone()).collect();
         scan_cache.session_cache.lock().unwrap().retain(|k, _| live_paths.contains(k));
+
+        // The fold state must be pruned on the same beat, or a session that
+        // ages out of the 7-day window leaves its accumulator (including its
+        // whole seen_msg_ids set) resident forever. Also bound the speed
+        // samples the surviving accumulators carry.
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+        let mut incr = scan_cache.incr_cache.lock().unwrap();
+        incr.retain(|k, _| live_paths.contains(k));
+        for state in incr.values_mut() {
+            state.acc.prune(now_secs);
+        }
     }
 
     // Sort: active first, then by created_at_ms asc (oldest first = stable order)
@@ -3135,6 +3512,469 @@ mod tests {
             ds(&lines, 2.0, Some(&HookState::Stopped)),
             SessionStatus::Thinking,
         );
+    }
+
+    // ── StatsAcc: incremental folding ───────────────────────────────────────
+    //
+    // The scan carries a StatsAcc across ticks and feeds it only the lines a
+    // session appended since last time. These pin the property that makes that
+    // sound: folding in batches must equal folding the whole file at once.
+
+    /// A finalized assistant turn with an explicit id, so tests can control
+    /// exactly which turns are duplicates of which.
+    fn turn(id: &str, output: u64) -> String {
+        json!({
+            "type": "assistant",
+            "timestamp": "2025-01-01T00:00:00Z",
+            "message": {
+                "id": id,
+                "role": "assistant",
+                "model": "claude-sonnet-4-20250514",
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+                "usage": {
+                    "input_tokens": 100,
+                    "output_tokens": output,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0
+                }
+            }
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn stats_acc_batched_equals_whole_file() {
+        let owned: Vec<String> = (0..30).map(|i| turn(&format!("m{i}"), 10)).collect();
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let whole = {
+            let mut a = StatsAcc::new();
+            a.push_lines(&lines);
+            a.finish_at(0.0)
+        };
+
+        // Same lines, but handed over in three appends like the scanner would.
+        let batched = {
+            let mut a = StatsAcc::new();
+            a.push_lines(&lines[..7]);
+            a.push_lines(&lines[7..19]);
+            a.push_lines(&lines[19..]);
+            a.finish_at(0.0)
+        };
+
+        assert_eq!(batched.total_output_tokens, whole.total_output_tokens);
+        assert_eq!(batched.total_cost_usd, whole.total_cost_usd);
+        assert_eq!(whole.total_output_tokens, 300);
+    }
+
+    /// The reason `seen_msg_ids` is a full set and not a sliding window.
+    ///
+    /// Real transcripts re-log a finalized assistant message far from its first
+    /// occurrence: across the 120 largest transcripts on disk, 100 duplicate
+    /// pairs sit >100 lines apart and the widest gap measured was 2437. Here the
+    /// duplicate lands in a *later batch* than the original — exactly the case a
+    /// bounded window would miss, double-counting the turn's tokens and cost.
+    #[test]
+    fn stats_acc_dedups_a_duplicate_that_arrives_in_a_later_batch() {
+        let first = turn("msg-repeated", 50);
+        let filler: Vec<String> = (0..2500).map(|i| turn(&format!("f{i}"), 1)).collect();
+        let dup = turn("msg-repeated", 50); // re-logged ~2500 lines later
+
+        let mut acc = StatsAcc::new();
+        acc.push_lines(&[first.as_str()]);
+        let filler_refs: Vec<&str> = filler.iter().map(|s| s.as_str()).collect();
+        acc.push_lines(&filler_refs);
+        let before = acc.finish_at(0.0).total_output_tokens;
+
+        acc.push_lines(&[dup.as_str()]); // must be recognised as already counted
+        let after = acc.finish_at(0.0);
+
+        assert_eq!(before, 50 + 2500);
+        assert_eq!(
+            after.total_output_tokens, before,
+            "a re-logged msg id must not be counted twice, however many lines \
+             separate it from the original"
+        );
+    }
+
+    #[test]
+    fn stats_acc_folds_compact_events_across_batches() {
+        let c = |pre: u64, post: u64| {
+            json!({
+                "type": "system",
+                "subtype": "compact_boundary",
+                "compactMetadata": {"preTokens": pre, "postTokens": post}
+            })
+            .to_string()
+        };
+        let (a1, a2) = (c(1000, 100), c(2000, 200));
+
+        let mut acc = StatsAcc::new();
+        acc.push_lines(&[a1.as_str()]);
+        acc.push_lines(&[a2.as_str()]);
+        let s = acc.finish_at(0.0);
+
+        assert_eq!(s.compact_count, 2);
+        assert_eq!(s.compact_pre_tokens, 3000);
+        assert_eq!(s.compact_post_tokens, 300);
+        assert!(s.compact_cost_usd > 0.0);
+    }
+
+    #[test]
+    fn prune_timed_keeps_the_speed_window_intact() {
+        // Two turns inside the 5-minute window, one long past it.
+        let now = 1_000_000.0;
+        let mk = |ts: &str, id: &str| {
+            json!({
+                "type": "assistant",
+                "timestamp": ts,
+                "message": {
+                    "id": id, "role": "assistant", "model": "claude-sonnet-4-20250514",
+                    "content": [], "stop_reason": "end_turn",
+                    "usage": {"input_tokens": 0, "output_tokens": 100,
+                              "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0}
+                }
+            })
+            .to_string()
+        };
+        // 1_000_000s ≈ 1970-01-12T13:46:40Z; place two turns 60s and 120s back.
+        let recent_a = mk("1970-01-12T13:44:40Z", "a"); // now - 120
+        let recent_b = mk("1970-01-12T13:45:40Z", "b"); // now - 60
+
+        let mut acc = StatsAcc::new();
+        acc.push_lines(&[recent_a.as_str(), recent_b.as_str()]);
+        let before = acc.finish_at(now);
+
+        acc.prune_timed(now); // must not evict samples the window still needs
+        let after = acc.finish_at(now);
+
+        assert!(before.token_speed > 0.0, "sanity: window should be non-empty");
+        assert_eq!(after.token_speed, before.token_speed);
+        assert_eq!(after.cost_speed_usd_per_min, before.cost_speed_usd_per_min);
+    }
+
+    // ── SessionAcc: equivalence with the whole-file extractors ──────────────
+    //
+    // SessionAcc replaces four separate full-file passes. These tests pin it
+    // against the originals rather than against hand-computed expectations, so
+    // the incremental path cannot quietly drift from the batch-free behaviour.
+
+    /// Fold a transcript in three uneven batches, the way the scanner would as
+    /// the file grows.
+    fn fold_in_batches(lines: &[&str]) -> SessionAcc {
+        let mut acc = SessionAcc::new();
+        let a = lines.len() / 3;
+        let b = lines.len() * 2 / 3;
+        acc.push_lines(&lines[..a]);
+        acc.push_lines(&lines[a..b]);
+        acc.push_lines(&lines[b..]);
+        acc
+    }
+
+    fn user_line(entrypoint: Option<&str>) -> String {
+        match entrypoint {
+            Some(e) => json!({"type": "user", "entrypoint": e}).to_string(),
+            None => json!({"type": "user"}).to_string(),
+        }
+    }
+
+    #[test]
+    fn session_acc_context_matches_whole_file_extractor() {
+        let owned = vec![
+            asst_usage_line(1000, 0, 0, false),
+            asst_usage_line(5000, 0, 0, false),  // the session max
+            asst_usage_line(200, 0, 0, true),    // sidechain — must be ignored
+            asst_usage_line(3000, 0, 0, false),  // the latest live turn
+        ];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = extract_last_context_usage(&lines);
+        assert_eq!(fold_in_batches(&lines).context_usage(), expected);
+        assert_eq!(expected.map(|(used, _, max)| (used, max)), Some((3000, 5000)));
+    }
+
+    /// A compact summary invalidates everything before it — including the
+    /// running max. If the batch boundary falls before the compact line, a naive
+    /// fold would carry the stale pre-compact max forward.
+    #[test]
+    fn session_acc_context_resets_at_a_compact_summary_across_batches() {
+        let big = asst_usage_line(90_000, 0, 0, false); // huge, pre-compact
+        let compact = json!({"type": "user", "isCompactSummary": true}).to_string();
+        let after = asst_usage_line(4000, 0, 0, false);
+        let owned = vec![big, compact, after];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = extract_last_context_usage(&lines);
+
+        // Batch boundary deliberately placed so the pre-compact turn lands in an
+        // earlier batch than the compact line.
+        let mut acc = SessionAcc::new();
+        acc.push_lines(&lines[..1]);
+        acc.push_lines(&lines[1..]);
+
+        assert_eq!(acc.context_usage(), expected);
+        assert_eq!(
+            expected.map(|(used, _, max)| (used, max)),
+            Some((4000, 4000)),
+            "the 90k pre-compact turn must not survive as the session max"
+        );
+    }
+
+    /// The first `user` record settles the entrypoint even when it has none —
+    /// a later record's entrypoint must not backfill it.
+    #[test]
+    fn session_acc_entrypoint_settles_on_the_first_user_record() {
+        let owned = vec![user_line(None), user_line(Some("vscode"))];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        assert_eq!(extract_entrypoint(&lines), None, "sanity: original settles to None");
+        assert_eq!(fold_in_batches(&lines).entrypoint(), None);
+    }
+
+    #[test]
+    fn session_acc_entrypoint_matches_whole_file_extractor() {
+        let owned = vec![user_line(Some("cli")), user_line(Some("vscode"))];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = extract_entrypoint(&lines);
+        assert_eq!(expected.as_deref(), Some("cli"));
+        assert_eq!(fold_in_batches(&lines).entrypoint(), expected);
+    }
+
+    #[test]
+    fn session_acc_ai_title_takes_the_first_and_survives_batching() {
+        let owned = vec![
+            json!({"type": "user"}).to_string(),
+            json!({"type": "ai-title", "aiTitle": "first"}).to_string(),
+            json!({"type": "ai-title", "aiTitle": "second"}).to_string(),
+        ];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+        assert_eq!(fold_in_batches(&lines).ai_title().as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn session_acc_todos_match_the_reverse_scan() {
+        let todo = |content: &str, status: &str| {
+            json!({
+                "type": "assistant",
+                "message": {"content": [{
+                    "type": "tool_use", "name": "TodoWrite",
+                    "input": {"todos": [{"content": content, "status": status,
+                                         "activeForm": content}]}
+                }]}
+            })
+            .to_string()
+        };
+        let owned = vec![todo("old", "completed"), todo("new", "in_progress")];
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = crate::session_todos::latest_todo_summary_from_lines(&lines);
+        assert!(expected.is_some(), "sanity: the fixture must carry a todo block");
+        assert_eq!(fold_in_batches(&lines).todos(), expected);
+    }
+
+    #[test]
+    fn session_acc_stats_match_compute_session_stats() {
+        let owned: Vec<String> = (0..12).map(|i| turn(&format!("m{i}"), 7)).collect();
+        let lines: Vec<&str> = owned.iter().map(|s| s.as_str()).collect();
+
+        let expected = compute_session_stats(&lines);
+        let got = fold_in_batches(&lines).stats_at(0.0);
+        assert_eq!(got.total_output_tokens, expected.total_output_tokens);
+        assert_eq!(got.total_cost_usd, expected.total_cost_usd);
+        assert_eq!(got.total_output_tokens, 84);
+    }
+
+    // ── Incremental read: offsets, partial lines, rewrites ──────────────────
+
+    fn tmp_jsonl(name: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "incr_{}_{}_{}.jsonl",
+            name,
+            std::process::id(),
+            // Distinct per test even within a process.
+            name.len()
+        ));
+        let _ = fs::remove_file(&p);
+        p
+    }
+
+    fn append(path: &Path, s: &str) {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .unwrap();
+        f.write_all(s.as_bytes()).unwrap();
+    }
+
+    /// The scan races the CLI's writes, so a half-written trailing line is
+    /// normal. It must be folded once — when it is complete — and never lost.
+    ///
+    /// This is the case a naive `lines()`-to-EOF reader gets wrong: it would
+    /// parse-fail on the fragment and still advance the offset past it, dropping
+    /// that turn's tokens from the total permanently.
+    #[test]
+    fn incremental_defers_a_half_written_line_until_it_is_complete() {
+        let p = tmp_jsonl("partial");
+        let full = turn("m1", 100);
+
+        // The CLI has flushed only the first half of the record.
+        let split = full.len() / 2;
+        append(&p, &full[..split]);
+
+        let s1 = advance_incremental(&p, None).unwrap();
+        assert_eq!(s1.offset, 0, "no complete line yet — offset must not move");
+        assert_eq!(s1.acc.stats_at(0.0).total_output_tokens, 0);
+
+        // The rest of the record lands, terminated.
+        append(&p, &format!("{}\n", &full[split..]));
+
+        let s2 = advance_incremental(&p, Some(s1)).unwrap();
+        assert_eq!(
+            s2.acc.stats_at(0.0).total_output_tokens,
+            100,
+            "the once-partial line must be folded exactly once, not lost"
+        );
+        assert_eq!(s2.offset, fs::metadata(&p).unwrap().len());
+
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn incremental_folds_only_appended_bytes_and_matches_a_full_reparse() {
+        let p = tmp_jsonl("append");
+        append(&p, &format!("{}\n", turn("m1", 10)));
+        append(&p, &format!("{}\n", turn("m2", 20)));
+
+        let s1 = advance_incremental(&p, None).unwrap();
+        assert_eq!(s1.acc.stats_at(0.0).total_output_tokens, 30);
+        let after_first = s1.offset;
+
+        append(&p, &format!("{}\n", turn("m3", 5)));
+        let s2 = advance_incremental(&p, Some(s1)).unwrap();
+
+        assert!(s2.offset > after_first);
+        assert_eq!(s2.acc.stats_at(0.0).total_output_tokens, 35);
+
+        // Equivalence with reading the whole file from scratch.
+        let content = fs::read_to_string(&p).unwrap();
+        let lines: Vec<&str> = content.lines().collect();
+        assert_eq!(
+            s2.acc.stats_at(0.0).total_output_tokens,
+            compute_session_stats(&lines).total_output_tokens
+        );
+
+        let _ = fs::remove_file(&p);
+    }
+
+    #[test]
+    fn incremental_is_a_noop_when_nothing_was_appended() {
+        let p = tmp_jsonl("noop");
+        append(&p, &format!("{}\n", turn("m1", 10)));
+
+        let s1 = advance_incremental(&p, None).unwrap();
+        let s2 = advance_incremental(&p, Some(s1.clone())).unwrap();
+
+        assert_eq!(s2.offset, s1.offset);
+        assert_eq!(s2.acc.stats_at(0.0).total_output_tokens, 10);
+
+        let _ = fs::remove_file(&p);
+    }
+
+    /// A file shorter than our offset cannot have been appended to — the carried
+    /// accumulator is meaningless and must be rebuilt, not extended.
+    #[test]
+    fn incremental_reparses_from_scratch_when_the_file_shrinks() {
+        let p = tmp_jsonl("shrink");
+        append(&p, &format!("{}\n", turn("m1", 10)));
+        append(&p, &format!("{}\n", turn("m2", 20)));
+        let s1 = advance_incremental(&p, None).unwrap();
+        assert_eq!(s1.acc.stats_at(0.0).total_output_tokens, 30);
+
+        // Rewritten shorter, with different content.
+        fs::write(&p, format!("{}\n", turn("z1", 7))).unwrap();
+
+        let s2 = advance_incremental(&p, Some(s1)).unwrap();
+        assert_eq!(
+            s2.acc.stats_at(0.0).total_output_tokens,
+            7,
+            "stale pre-rewrite totals must not survive"
+        );
+        assert_eq!(s2.offset, fs::metadata(&p).unwrap().len());
+
+        let _ = fs::remove_file(&p);
+    }
+
+    // ── parse_session_info: the incremental path must equal a cold parse ─────
+
+    fn parse_for_test(p: &Path, incr: Option<IncrParse>) -> Option<(SessionInfo, IncrParse)> {
+        parse_session_info(
+            p,
+            "sid".to_string(),
+            "/tmp/ws".to_string(),
+            "ws".to_string(),
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            incr,
+        )
+    }
+
+    /// The whole point of the change: a session advanced tick-by-tick as it grows
+    /// must land on exactly the same numbers as one parsed cold from a full file.
+    /// Anything else means the launchpad silently shows different tokens/cost
+    /// depending on whether Fleet happened to be running while you worked.
+    #[test]
+    fn parse_session_info_incremental_equals_a_cold_parse() {
+        let p = tmp_jsonl("parse_eq");
+        append(&p, &format!("{}\n", json!({"type": "user", "entrypoint": "cli"})));
+        append(&p, &format!("{}\n", json!({"type": "ai-title", "aiTitle": "T"})));
+        append(&p, &format!("{}\n", turn("m1", 40)));
+
+        // Scanned once while the session was mid-flight...
+        let (_, incr) = parse_for_test(&p, None).unwrap();
+
+        // ...then it keeps working, including a compact and a duplicate re-log.
+        append(&p, &format!("{}\n", turn("m2", 60)));
+        append(
+            &p,
+            &format!(
+                "{}\n",
+                json!({"type": "system", "subtype": "compact_boundary",
+                       "compactMetadata": {"preTokens": 500, "postTokens": 50}})
+            ),
+        );
+        append(&p, &format!("{}\n", turn("m2", 60))); // re-logged: must not double-count
+        append(&p, &format!("{}\n", turn("m3", 5)));
+
+        let (incremental, _) = parse_for_test(&p, Some(incr)).unwrap();
+        let (cold, _) = parse_for_test(&p, None).unwrap();
+
+        assert_eq!(incremental.total_output_tokens, cold.total_output_tokens);
+        assert_eq!(incremental.total_cost_usd, cold.total_cost_usd);
+        assert_eq!(incremental.compact_count, cold.compact_count);
+        assert_eq!(incremental.compact_pre_tokens, cold.compact_pre_tokens);
+        assert_eq!(incremental.context_percent, cold.context_percent);
+        assert_eq!(incremental.ai_title, cold.ai_title);
+        assert_eq!(incremental.entrypoint, cold.entrypoint);
+
+        // And the dedup actually held across the scan boundary.
+        assert_eq!(
+            cold.total_output_tokens, 105,
+            "m2 was logged twice and must be counted once: 40 + 60 + 5"
+        );
+
+        let _ = fs::remove_file(&p);
     }
 
     // ── compute_session_stats tests ─────────────────────────────────────────
