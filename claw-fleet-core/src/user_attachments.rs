@@ -96,10 +96,23 @@ fn content_key(bytes: &[u8]) -> String {
     digest.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
+/// Reserved key for attachments that pre-date the store: Fleet used to stage
+/// pastes into `$TMPDIR/fleet-pasted/` and write *that* path into the prompt, so
+/// every transcript from before this change names a file there. They are still
+/// on disk until the OS reaps them, so history can show them meanwhile — which
+/// is the whole point, since the transcripts a user goes back and reads are
+/// exactly the old ones.
+///
+/// Not a hazard the store isn't: one fixed directory, bare filenames only.
+pub const LEGACY_PASTED_KEY: &str = "_pasted";
+
 /// Read one file back out of the store. Backs the `fleet-attachment://`
 /// protocol, so it carries the same path-traversal defense as
 /// [`crate::mcp_ipc::read_decision_asset`].
 pub fn read_user_attachment(key: &str, name: &str) -> Result<DecisionAssetBytes, String> {
+    if key == LEGACY_PASTED_KEY {
+        return read_legacy_pasted(name);
+    }
     let base = user_attachments_dir().ok_or("cannot determine home dir")?;
     if key.is_empty() || key.contains('/') || key.contains('\\') || key.contains("..") {
         return Err("invalid user-attachment key".to_string());
@@ -120,6 +133,30 @@ pub fn read_user_attachment(key: &str, name: &str) -> Result<DecisionAssetBytes,
         return Err(format!("invalid path '{name}'"));
     }
 
+    let bytes = fs::read(&canon_file).map_err(|e| format!("read '{name}': {e}"))?;
+    Ok(DecisionAssetBytes {
+        bytes,
+        mime: crate::wiki::mime_for_path(&canon_file).to_string(),
+    })
+}
+
+/// Serve a pre-store paste out of `$TMPDIR/fleet-pasted/`. Bare filenames only,
+/// so this reads nothing outside that one directory.
+fn read_legacy_pasted(name: &str) -> Result<DecisionAssetBytes, String> {
+    if !valid_name(name) {
+        return Err(format!("invalid attachment name '{name}'"));
+    }
+    let dir = std::env::temp_dir().join("fleet-pasted");
+    let joined = dir.join(name);
+    let canon_dir = dir
+        .canonicalize()
+        .map_err(|_| "legacy paste dir not found".to_string())?;
+    let canon_file = joined
+        .canonicalize()
+        .map_err(|_| format!("attachment '{name}' not found"))?;
+    if !canon_file.starts_with(&canon_dir) {
+        return Err(format!("invalid path '{name}'"));
+    }
     let bytes = fs::read(&canon_file).map_err(|e| format!("read '{name}': {e}"))?;
     Ok(DecisionAssetBytes {
         bytes,
@@ -194,5 +231,27 @@ mod tests {
             }
         }
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn legacy_key_serves_pre_store_pastes() {
+        // Transcripts written before the store exists name files in
+        // $TMPDIR/fleet-pasted/. Those are the histories a user actually goes
+        // back to read, so they have to render while the files survive.
+        let dir = std::env::temp_dir().join("fleet-pasted");
+        std::fs::create_dir_all(&dir).unwrap();
+        let name = "paste-legacy-test-0001.png";
+        let src = dir.join(name);
+        std::fs::write(&src, b"\x89PNG\r\n\x1a\nOLD").unwrap();
+
+        let got = read_user_attachment(LEGACY_PASTED_KEY, name).unwrap();
+        assert_eq!(got.bytes, b"\x89PNG\r\n\x1a\nOLD");
+        assert_eq!(got.mime, "image/png");
+
+        // The escape hatch is still just one directory of bare filenames.
+        assert!(read_user_attachment(LEGACY_PASTED_KEY, "../../etc/passwd").is_err());
+        assert!(read_user_attachment(LEGACY_PASTED_KEY, "nope.png").is_err());
+
+        let _ = std::fs::remove_file(&src);
     }
 }

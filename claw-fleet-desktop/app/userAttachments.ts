@@ -49,27 +49,43 @@ export async function resolveStagedAttachment(
  */
 const STORE_RE = /(?:^|\/)\.fleet\/user-attachments\/([^/]+)\/([^/]+)$/;
 
+/**
+ * Pastes from before the store existed were staged in `$TMPDIR/fleet-pasted/`,
+ * and it is *that* path the transcript froze. The backend serves them under a
+ * reserved key while the files last — see `LEGACY_PASTED_KEY`. Without this,
+ * every history predating the store would show a chip where the screenshot is.
+ */
+const LEGACY_PASTED_RE = /(?:^|\/)fleet-pasted\/([^/]+)$/;
+const LEGACY_PASTED_KEY = "_pasted";
+
 /** True when `path` names a file in the persistent user-attachment store. */
 export function isStoredAttachment(path: string): boolean {
   return STORE_RE.test(path);
 }
 
 /**
- * URL of a stored attachment through the `fleet-attachment` custom protocol, or
- * null when the path isn't in the store (a file the user picked keeps its own
- * path — we have no license to read arbitrary paths off the agent host).
+ * URL of an attachment through the `fleet-attachment` custom protocol, or null
+ * when the path is neither in the store nor a legacy paste (a file the user
+ * picked keeps its own path — we have no license to read arbitrary paths off
+ * the agent host just to preview them).
  *
  * Built by hand rather than with `convertFileSrc` for the same reason as
  * `decisionAssetUrl`: the desktop may be pointed at a remote backend, where the
  * file is on the probe host and no local file:// URL could reach it.
  */
 export function userAttachmentUrl(path: string): string | null {
-  const m = path.match(STORE_RE);
-  if (!m) return null;
-  const seg = [m[1], m[2]].map(encodeURIComponent).join("/");
+  const stored = path.match(STORE_RE);
+  const seg = stored
+    ? [stored[1], stored[2]]
+    : (() => {
+        const legacy = path.match(LEGACY_PASTED_RE);
+        return legacy ? [LEGACY_PASTED_KEY, legacy[1]] : null;
+      })();
+  if (!seg) return null;
+  const joined = seg.map(encodeURIComponent).join("/");
   return navigator.userAgent.includes("Windows")
-    ? `http://fleet-attachment.localhost/${seg}`
-    : `fleet-attachment://localhost/${seg}`;
+    ? `http://fleet-attachment.localhost/${joined}`
+    : `fleet-attachment://localhost/${joined}`;
 }
 
 /** True when the name looks like an image we can show inline. */
