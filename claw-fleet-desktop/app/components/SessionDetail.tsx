@@ -35,6 +35,9 @@ const ACTIVE_STATUSES = new Set([
  *  while the session is in an active status. */
 const LIVE_TAIL_POLL_MS = 1500;
 
+/** How close to the bottom still counts as "following the newest message". */
+const FOLLOW_SLACK_PX = 200;
+
 function shortId(id: string) {
   return id.slice(0, 8);
 }
@@ -364,12 +367,21 @@ export function SessionDetail({
     setViewTab(tab);
   }, []);
 
+  // `isFollowing` drives the footer, but the pin below runs from a
+  // ResizeObserver callback that must not re-subscribe on every state change —
+  // so mirror the flag into a ref and write both through one setter.
+  const followingRef = useRef(true);
+  const setFollowing = useCallback((next: boolean) => {
+    followingRef.current = next;
+    setIsFollowing(next);
+  }, []);
+
   const checkFollow = useCallback(() => {
     const el = scrollRef.current;
     if (!el) return;
     const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
-    setIsFollowing(dist < 200);
-  }, []);
+    setFollowing(dist < FOLLOW_SLACK_PX);
+  }, [setFollowing]);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -378,64 +390,43 @@ export function SessionDetail({
     return () => el.removeEventListener("scroll", checkFollow);
   }, [checkFollow, session, viewTab]);
 
-  // Auto-scroll bookkeeping for the messages tab.
-  const initialScrollDoneRef = useRef(false);
-  const firstMessageKeyRef = useRef<string | null>(null);
-  const lastMessageKeyRef = useRef<string | null>(null);
-
+  // A different session, or a fresh visit to the tab, starts pinned again.
   useEffect(() => {
-    initialScrollDoneRef.current = false;
-    firstMessageKeyRef.current = null;
-    lastMessageKeyRef.current = null;
-  }, [liveSession?.id, viewTab]);
+    setFollowing(true);
+  }, [liveSession?.id, viewTab, setFollowing]);
 
-  // First mount with content: jump to bottom and sync isFollowing with reality
-  // (the initial `true` default is wrong when the freshly mounted scroll area
-  // already overflows but no user-scroll has fired yet).
-  useEffect(() => {
-    if (viewTab !== "messages") return;
-    if (initialScrollDoneRef.current) return;
-    if (messages.length === 0) return;
-    if (!scrollRef.current) return;
-    const id = requestAnimationFrame(() => {
-      const e = scrollRef.current;
-      if (!e) return;
-      e.scrollTop = e.scrollHeight;
-      initialScrollDoneRef.current = true;
-      checkFollow();
-    });
-    return () => cancelAnimationFrame(id);
-  }, [viewTab, messages.length, checkFollow]);
-
-  // Live tail: on new trailing messages (not load-earlier), follow if user is
-  // already at the bottom. Skip when the first message changed — that means
-  // load-earlier prepended history and we must preserve the read position.
+  // Pin the viewport to the newest message for as long as the reader has not
+  // scrolled away to read history.
+  //
+  // A transcript's height is not final on the frame it mounts: message images
+  // carry no intrinsic size, and syntax highlighting and markdown settle over
+  // later frames. Jumping to `scrollHeight` once inside a rAF — as this used to
+  // — measures a container that is still nearly empty on a long transcript, so
+  // the browser clamps scrollTop back to ~0; the old code then latched a
+  // done-flag, and nothing ever corrected the position once the content grew.
+  // That parked the reader at the top of several thousand px of messages.
+  // Re-pin on every height change instead.
+  const hasMessages = messages.length > 0;
+  const hasLiveThinking = !!(liveThinking?.streaming && liveThinking.thinking);
   useEffect(() => {
     if (viewTab !== "messages") return;
-    if (!initialScrollDoneRef.current) return;
-    if (messages.length === 0) {
-      firstMessageKeyRef.current = null;
-      lastMessageKeyRef.current = null;
-      return;
-    }
-    const firstKey = messages[0]?.uuid ?? messages[0]?.timestamp ?? null;
-    const last = messages[messages.length - 1];
-    const lastKey = last?.uuid ?? last?.timestamp ?? null;
-    const prevFirst = firstMessageKeyRef.current;
-    const prevLast = lastMessageKeyRef.current;
-    firstMessageKeyRef.current = firstKey;
-    lastMessageKeyRef.current = lastKey;
-    if (firstKey !== prevFirst) return;
-    if (lastKey === prevLast) return;
-    if (!isFollowing) return;
     const el = scrollRef.current;
     if (!el) return;
-    requestAnimationFrame(() => {
-      const e = scrollRef.current;
-      if (!e) return;
-      e.scrollTop = e.scrollHeight;
-    });
-  }, [messages, viewTab, isFollowing]);
+
+    const pin = () => {
+      if (!followingRef.current) return;
+      el.scrollTop = el.scrollHeight;
+    };
+
+    // Observe the children, not the scroll box: the box's own border box never
+    // changes size, it is the content inside it that grows. Re-subscribing when
+    // the child set changes (loading placeholder -> list, live thinking block)
+    // is why those two flags are in the dependency list.
+    const ro = new ResizeObserver(pin);
+    for (const child of Array.from(el.children)) ro.observe(child);
+    pin();
+    return () => ro.disconnect();
+  }, [viewTab, liveSession?.id, hasMessages, hasLiveThinking]);
 
   const scrollToBottom = useCallback(() => {
     const el = scrollRef.current;
