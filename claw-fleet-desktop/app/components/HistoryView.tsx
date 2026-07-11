@@ -174,6 +174,9 @@ type SessionRowProps = {
   session: SessionInfo;
   snippet: string | undefined;
   isSelected: boolean;
+  /** Open in a tab, but not the tab currently on screen. Weaker half of the
+   *  same axis as `isSelected` — never both at once. */
+  isOpen: boolean;
   unread: boolean;
   /** Bumped every 30s by the parent so relative times keep advancing. Without
    *  it the memo would freeze the elapsed "3 分钟" at whatever it said on mount. */
@@ -185,6 +188,7 @@ const SessionRow = memo(function SessionRow({
   session: s,
   snippet,
   isSelected,
+  isOpen,
   unread,
   onClick,
 }: SessionRowProps) {
@@ -194,7 +198,7 @@ const SessionRow = memo(function SessionRow({
     <div className={styles.row_wrap}>
       <button
         type="button"
-        className={`${styles.row} ${isSelected ? styles.row_active : ""} ${unread ? styles.row_unread : ""}`}
+        className={`${styles.row} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""} ${unread ? styles.row_unread : ""}`}
         onClick={() => onClick(s)}
         title={s.lastMessagePreview ?? undefined}
         aria-label={unread ? t("history.unread", "未读 — 有新消息") : undefined}
@@ -259,6 +263,7 @@ const SessionRow = memo(function SessionRow({
 },
 (prev, next) =>
   prev.isSelected === next.isSelected &&
+  prev.isOpen === next.isOpen &&
   prev.unread === next.unread &&
   prev.snippet === next.snippet &&
   prev.nowTick === next.nowTick &&
@@ -707,6 +712,7 @@ export function HistoryView() {
                   query.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined
                 }
                 isSelected={activeId === s.id}
+                isOpen={activeId !== s.id && tabIds.includes(s.id)}
                 unread={sessionUnread(s, readOverrides[s.id])}
                 nowTick={nowTick}
                 onClick={handleRowClick}

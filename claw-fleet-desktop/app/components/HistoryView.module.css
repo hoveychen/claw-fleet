@@ -399,6 +399,15 @@
   background: var(--color-bg-card-hover);
 }
 
+/* Open in a background tab. This is NOT a fourth axis competing with the three
+   below — it is the *same* axis as .row_active ("is the detail column showing
+   this session"), just its weaker half: open-but-not-looking-at vs looking-at.
+   So it shares the background channel rather than inventing a new mark, and is
+   only applied when .row_active isn't (see the className in SessionRow). */
+.row_open {
+  background: color-mix(in srgb, var(--color-bg-card-hover) 45%, transparent);
+}
+
 /* The row carries three orthogonal axes and each gets its own visual channel,
    so they can't be mistaken for one another:
      run status  -> colour   (.row_status_dot: green live / amber waiting)
