@@ -2440,6 +2440,17 @@ pub fn scan_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionIn
     sessions
 }
 
+/// Stamp the scan-time state that lives outside the jsonl — relay position,
+/// manual mark, read state. Every path that hands sessions to the frontend must
+/// go through this, including the incremental rescan: a source's sessions come
+/// back off disk with these fields unset, so skipping an enricher silently
+/// clears whatever the human had set.
+pub fn enrich_all(sessions: &mut [SessionInfo]) {
+    crate::handoff::enrich_sessions(sessions);
+    crate::session_mark::enrich_sessions(sessions);
+    crate::session_read::enrich_sessions(sessions);
+}
+
 /// Scan all registered agent sources and merge into a single sorted list.
 pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
@@ -2448,9 +2459,7 @@ pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -
             sessions.extend(source.scan_sessions());
         }
     }
-    crate::handoff::enrich_sessions(&mut sessions);
-    crate::session_mark::enrich_sessions(&mut sessions);
-    crate::session_read::enrich_sessions(&mut sessions);
+    enrich_all(&mut sessions);
     sort_sessions(&mut sessions);
     sessions
 }
