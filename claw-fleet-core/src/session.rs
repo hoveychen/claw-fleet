@@ -2019,7 +2019,10 @@ pub fn parse_session_info(
     pid: Option<u32>,
     pid_precise: bool,
     hook_state: Option<&HookState>,
-) -> Option<SessionInfo> {
+    // `incr`: fold state carried from the previous scan of this transcript.
+    // `None` folds the file from scratch.
+    incr: Option<IncrParse>,
+) -> Option<(SessionInfo, IncrParse)> {
     let metadata = fs::metadata(jsonl_path).ok()?;
     let last_modified = metadata.modified().ok()?;
     let last_activity_ms = last_modified
@@ -2042,15 +2045,17 @@ pub fn parse_session_info(
         return None;
     }
 
-    let content = crate::bom::read_to_string_no_bom(jsonl_path).ok()?;
-    let all_lines: Vec<&str> = content.lines().collect();
+    // Advance the fold by only what the transcript appended since the last scan
+    // (a cold `incr` folds the whole file). Nothing below re-reads the file in
+    // full: the cumulative fields come off the accumulator, and the status
+    // heuristics only ever needed the tail.
+    let state = advance_incremental(jsonl_path, incr).ok()?;
+    let acc = &state.acc;
 
-    // Last 100 lines for status
-    let start = all_lines.len().saturating_sub(100);
-    let last_n: Vec<Value> = all_lines[start..]
-        .iter()
-        .filter_map(|l| serde_json::from_str(l).ok())
-        .collect();
+    // Last 100 lines for status — seeks from the end rather than materialising
+    // the whole transcript.
+    let last_n: Vec<Value> =
+        crate::jsonl_tail::read_tail_lines_as_json(jsonl_path, 100).unwrap_or_default();
 
     let file_age_secs = age.as_secs_f64();
     // content_age = time since the last real user/assistant message, NOT since
@@ -2068,8 +2073,9 @@ pub fn parse_session_info(
     } else {
         determine_status(&last_n, file_age_secs, content_age_secs, hook_state)
     };
-    let stats = compute_session_stats(&all_lines);
-    let context_percent = extract_last_context_usage(&all_lines)
+    let stats = acc.stats();
+    let context_percent = acc
+        .context_usage()
         .and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
     let last_message_preview = extract_last_text(&last_n);
 
@@ -2078,18 +2084,12 @@ pub fn parse_session_info(
         .filter_map(|v| v.get("slug").and_then(|s| s.as_str()).map(|s| s.to_string()))
         .last();
 
-    // ai-title appears near the start of the file; scan all lines
-    let ai_title = all_lines
-        .iter()
-        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
-        .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("ai-title"))
-        .and_then(|v| v.get("aiTitle").and_then(|t| t.as_str()).map(|s| s.to_string()));
-
-    let entrypoint = extract_entrypoint(&all_lines);
+    let ai_title = acc.ai_title();
+    let entrypoint = acc.entrypoint();
 
     let model = meta_model.or_else(|| extract_model(&last_n));
     let last_skill = extract_last_skill(&last_n);
-    let todos = crate::session_todos::latest_todo_summary_from_lines(&all_lines);
+    let todos = acc.todos();
     let task_plan =
         crate::prd_tasks::summarize_workspace_tasks(Path::new(&workspace_path), Some(session_id.as_str()));
 
@@ -2144,6 +2144,7 @@ pub fn parse_session_info(
         compact_post_tokens: stats.compact_post_tokens,
         compact_cost_usd: stats.compact_cost_usd,
     })
+    .map(|info| (info, state))
 }
 
 // ── Scan cache ───────────────────────────────────────────────────────────────
@@ -2156,6 +2157,16 @@ pub struct ScanCache {
     pub process_cache: Mutex<(Option<Instant>, Vec<CliProcess>)>,
     /// JSONL path → (mtime_ms, SessionInfo).
     pub session_cache: Mutex<HashMap<String, (u64, SessionInfo)>>,
+    /// JSONL path → how far that transcript has been folded, plus the running
+    /// accumulator. Lets a session that appended a few lines be advanced with
+    /// just those lines instead of re-read from byte zero.
+    ///
+    /// Memory-only, deliberately: the disk cache (`scan_cache_disk`) stores the
+    /// finished `SessionInfo`, not this. Persisting the accumulator would mean
+    /// persisting its full `seen_msg_ids` set per session, which is exactly the
+    /// unbounded thing the disk cache should not grow. A cold start therefore
+    /// folds each transcript once, as it always did.
+    pub incr_cache: Mutex<HashMap<String, IncrParse>>,
     /// Last time `session_cache` was flushed to disk via `scan_cache_disk::save`.
     /// `None` means never persisted in this process.
     pub last_persisted_at: Mutex<Option<Instant>>,
@@ -2183,6 +2194,7 @@ impl ScanCache {
         Self {
             process_cache: Mutex::new((None, Vec::new())),
             session_cache: Mutex::new(crate::scan_cache_disk::load()),
+            incr_cache: Mutex::new(HashMap::new()),
             last_persisted_at: Mutex::new(None),
         }
     }
@@ -2485,26 +2497,40 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     info.pid_precise = pid_precise;
                     info.ide_name = ide_name.clone();
                     sessions.push(info);
-                } else if let Some(mut info) = parse_session_info(
-                    &path,
-                    session_id.clone(),
-                    workspace_path.clone(),
-                    ws_name.clone(),
-                    ide_name.clone(),
-                    false,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    session_pid,
-                    pid_precise,
-                    hook_states.get(&session_id),
-                ) {
-                    apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
-                    scan_cache.session_cache.lock().unwrap()
-                        .insert(path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
-                    sessions.push(info);
+                } else {
+                    let key = path.to_string_lossy().to_string();
+                    // Take the fold state in its own statement so the guard is
+                    // dropped here. Inlining this into the `if let` scrutinee
+                    // would keep the guard alive across the whole body — and the
+                    // body locks `incr_cache` again, which self-deadlocks.
+                    let prev_incr = scan_cache.incr_cache.lock().unwrap().get(&key).cloned();
+
+                    if let Some((mut info, incr)) = parse_session_info(
+                        &path,
+                        session_id.clone(),
+                        workspace_path.clone(),
+                        ws_name.clone(),
+                        ide_name.clone(),
+                        false,
+                        None,
+                        None,
+                        None,
+                        None,
+                        None,
+                        session_pid,
+                        pid_precise,
+                        hook_states.get(&session_id),
+                        prev_incr,
+                    ) {
+                        apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
+                        scan_cache
+                            .session_cache
+                            .lock()
+                            .unwrap()
+                            .insert(key.clone(), (info.last_activity_ms, info.clone()));
+                        scan_cache.incr_cache.lock().unwrap().insert(key, incr);
+                        sessions.push(info);
+                    }
                 }
             }
 
@@ -2584,25 +2610,37 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         info.pid_precise = false;
                         info.ide_name = ide_name.clone();
                         sessions.push(info);
-                    } else if let Some(info) = parse_session_info(
-                        &agent_path,
-                        agent_id.clone(),
-                        workspace_path.clone(),
-                        ws_name.clone(),
-                        ide_name.clone(),
-                        true,
-                        Some(parent_session_id.clone()),
-                        agent_type,
-                        agent_description,
-                        meta_model,
-                        meta_thinking_level,
-                        sub_pid,
-                        false, // subagents are never pid_precise: stop parent instead
-                        hook_states.get(&agent_id),
-                    ) {
-                        scan_cache.session_cache.lock().unwrap()
-                            .insert(agent_path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
-                        sessions.push(info);
+                    } else {
+                        let key = agent_path.to_string_lossy().to_string();
+                        // Guard dropped before the call — see the note at the
+                        // main-session call site.
+                        let prev_incr = scan_cache.incr_cache.lock().unwrap().get(&key).cloned();
+
+                        if let Some((info, incr)) = parse_session_info(
+                            &agent_path,
+                            agent_id.clone(),
+                            workspace_path.clone(),
+                            ws_name.clone(),
+                            ide_name.clone(),
+                            true,
+                            Some(parent_session_id.clone()),
+                            agent_type,
+                            agent_description,
+                            meta_model,
+                            meta_thinking_level,
+                            sub_pid,
+                            false, // subagents are never pid_precise: stop parent instead
+                            hook_states.get(&agent_id),
+                            prev_incr,
+                        ) {
+                            scan_cache
+                                .session_cache
+                                .lock()
+                                .unwrap()
+                                .insert(key.clone(), (info.last_activity_ms, info.clone()));
+                            scan_cache.incr_cache.lock().unwrap().insert(key, incr);
+                            sessions.push(info);
+                        }
                     }
                 }
             }
@@ -2673,6 +2711,20 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
     {
         let live_paths: HashSet<String> = sessions.iter().map(|s| s.jsonl_path.clone()).collect();
         scan_cache.session_cache.lock().unwrap().retain(|k, _| live_paths.contains(k));
+
+        // The fold state must be pruned on the same beat, or a session that
+        // ages out of the 7-day window leaves its accumulator (including its
+        // whole seen_msg_ids set) resident forever. Also bound the speed
+        // samples the surviving accumulators carry.
+        let now_secs = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs_f64();
+        let mut incr = scan_cache.incr_cache.lock().unwrap();
+        incr.retain(|k, _| live_paths.contains(k));
+        for state in incr.values_mut() {
+            state.acc.prune(now_secs);
+        }
     }
 
     // Sort: active first, then by created_at_ms asc (oldest first = stable order)
@@ -3718,6 +3770,75 @@ mod tests {
             "stale pre-rewrite totals must not survive"
         );
         assert_eq!(s2.offset, fs::metadata(&p).unwrap().len());
+
+        let _ = fs::remove_file(&p);
+    }
+
+    // ── parse_session_info: the incremental path must equal a cold parse ─────
+
+    fn parse_for_test(p: &Path, incr: Option<IncrParse>) -> Option<(SessionInfo, IncrParse)> {
+        parse_session_info(
+            p,
+            "sid".to_string(),
+            "/tmp/ws".to_string(),
+            "ws".to_string(),
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            incr,
+        )
+    }
+
+    /// The whole point of the change: a session advanced tick-by-tick as it grows
+    /// must land on exactly the same numbers as one parsed cold from a full file.
+    /// Anything else means the launchpad silently shows different tokens/cost
+    /// depending on whether Fleet happened to be running while you worked.
+    #[test]
+    fn parse_session_info_incremental_equals_a_cold_parse() {
+        let p = tmp_jsonl("parse_eq");
+        append(&p, &format!("{}\n", json!({"type": "user", "entrypoint": "cli"})));
+        append(&p, &format!("{}\n", json!({"type": "ai-title", "aiTitle": "T"})));
+        append(&p, &format!("{}\n", turn("m1", 40)));
+
+        // Scanned once while the session was mid-flight...
+        let (_, incr) = parse_for_test(&p, None).unwrap();
+
+        // ...then it keeps working, including a compact and a duplicate re-log.
+        append(&p, &format!("{}\n", turn("m2", 60)));
+        append(
+            &p,
+            &format!(
+                "{}\n",
+                json!({"type": "system", "subtype": "compact_boundary",
+                       "compactMetadata": {"preTokens": 500, "postTokens": 50}})
+            ),
+        );
+        append(&p, &format!("{}\n", turn("m2", 60))); // re-logged: must not double-count
+        append(&p, &format!("{}\n", turn("m3", 5)));
+
+        let (incremental, _) = parse_for_test(&p, Some(incr)).unwrap();
+        let (cold, _) = parse_for_test(&p, None).unwrap();
+
+        assert_eq!(incremental.total_output_tokens, cold.total_output_tokens);
+        assert_eq!(incremental.total_cost_usd, cold.total_cost_usd);
+        assert_eq!(incremental.compact_count, cold.compact_count);
+        assert_eq!(incremental.compact_pre_tokens, cold.compact_pre_tokens);
+        assert_eq!(incremental.context_percent, cold.context_percent);
+        assert_eq!(incremental.ai_title, cold.ai_title);
+        assert_eq!(incremental.entrypoint, cold.entrypoint);
+
+        // And the dedup actually held across the scan boundary.
+        assert_eq!(
+            cold.total_output_tokens, 105,
+            "m2 was logged twice and must be counted once: 40 + 60 + 5"
+        );
 
         let _ = fs::remove_file(&p);
     }
