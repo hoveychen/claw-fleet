@@ -22,6 +22,7 @@ import type {
   ToolUseBlock as ToolUseBlockType,
 } from "../../types";
 import { decisionAssetUrl } from "../../decisionAssets";
+import { AutoHeightFrame } from "../AutoHeightFrame";
 import { AttachmentRow } from "./AttachmentRow";
 import styles from "./DecisionToolCard.module.css";
 
@@ -230,11 +231,11 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
                     Without a matched record there is no asset id, so fall back
                     to a marker rather than replaying agent-authored HTML. */}
                 {q.images && q.images.length > 0 && record ? (
-                  <iframe
+                  <AutoHeightFrame
                     title={`decision-${record.id}-${qi}`}
-                    sandbox=""
                     className={styles.preview_frame}
                     src={decisionAssetUrl(record.id, `q${qi}`)}
+                    minHeight={160}
                   />
                 ) : (
                   (q.html || (q.images && q.images.length > 0)) && (
