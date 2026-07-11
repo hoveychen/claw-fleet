@@ -51,6 +51,23 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
   );
 }
 
+/** Statuses that mean "this session still has something going on" — the agent
+ *  is working, or it is parked waiting for the user. Anything else has ended. */
+export const LIVE_STATUSES = new Set([
+  "thinking", "executing", "streaming", "processing",
+  "waitingInput", "active", "delegating",
+]);
+
+/** Run-status colour: green = agent still live, amber = waiting for input.
+ *  Ended sessions get nothing (null) — this is a positive "this one's doing
+ *  something" signal, not another mark on every row. Shared by the 启动台 list
+ *  rows and its detail tab bar so a session wears the same dot in both. */
+export function rowBarColor(s: SessionInfo): string | null {
+  if (!LIVE_STATUSES.has(s.status)) return null;
+  if (s.status === "waitingInput") return "#d0a85a";
+  return "#5ac88c";
+}
+
 /**
  * Whether a session counts as *unread*: it has newer activity than the last
  * time it was read. `overrideReadMs` is the optimistic client-side read stamp

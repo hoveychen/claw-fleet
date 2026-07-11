@@ -21,7 +21,7 @@ import {
 import { useReadStore, useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
-import { isFleetOwnedEntrypoint, sessionUnread } from "../types";
+import { LIVE_STATUSES, isFleetOwnedEntrypoint, rowBarColor, sessionUnread } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
@@ -68,11 +68,6 @@ function matchSpawnedSession(
     .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
 }
 
-const LIVE_STATUSES = new Set([
-  "thinking", "executing", "streaming", "processing",
-  "waitingInput", "active", "delegating",
-]);
-
 /** Segments for the pending/done filter. "all" shows everything; the other two
  *  map to the binary mark buckets (unmarked collapses to "pending"). The
  *  read/unread axis is deliberately NOT filterable — only pending/done is.
@@ -108,16 +103,6 @@ function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>
   if (diff < 3_600_000) return t("ran_m", { n: Math.floor(diff / 60_000) });
   if (diff < 86_400_000) return t("ran_h", { n: Math.floor(diff / 3_600_000) });
   return t("ran_d", { n: Math.floor(diff / 86_400_000) });
-}
-
-/** Run-status colour: green = agent still live, amber = waiting for input.
- *  Ended sessions get nothing (null) — this is a positive "this one's doing
- *  something" signal, not another mark on every row. Drives both the left dot
- *  and the runtime label, which are two views of the same fact. */
-function rowBarColor(s: SessionInfo): string | null {
-  if (!LIVE_STATUSES.has(s.status)) return null;
-  if (s.status === "waitingInput") return "#d0a85a";
-  return "#5ac88c";
 }
 
 /** Rows keep their control while there is a live process to aim it at; once the
