@@ -154,6 +154,12 @@ impl Backend for NullBackend {
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn mark_sessions_read(
+        &self,
+        _: Vec<claw_fleet_core::session_read::SessionReadItem>,
+    ) -> Result<(), String> {
+        Err("backend not ready".into())
+    }
     fn account_info(&self) -> AccountInfoFuture {
         Box::pin(async { Err("backend not ready".into()) })
     }
