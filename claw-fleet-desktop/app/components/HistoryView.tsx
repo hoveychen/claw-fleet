@@ -470,7 +470,7 @@ export function HistoryView() {
       ) : (
       <div className={styles.rail} style={{ width: railWidth }}>
         <div className={styles.header}>
-          <span className={styles.header_title}>{t("history.title", "启动台")}</span>
+          <span className={styles.header_title}>{t("history.title", "任务")}</span>
           <span className={styles.header_count}>{rows.length}</span>
           {/* Icon-only in the header: the rail starts at 300px and "Mark all read"
               spelled out would push the new-session button off the row in en locale. */}
