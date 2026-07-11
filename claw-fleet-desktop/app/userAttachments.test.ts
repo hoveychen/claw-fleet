@@ -51,6 +51,16 @@ describe("userAttachmentUrl", () => {
     );
   });
 
+  // The histories a user actually goes back and reads pre-date the store, and
+  // name a file in $TMPDIR/fleet-pasted/. They must still render.
+  it("maps a pre-store paste onto the reserved legacy key", () => {
+    const p = "/var/folders/3_/hh7x/T/fleet-pasted/paste-1783758261668884000-55605.png";
+    expect(isStoredAttachment(p)).toBe(false);
+    expect(userAttachmentUrl(p)).toBe(
+      "fleet-attachment://localhost/_pasted/paste-1783758261668884000-55605.png",
+    );
+  });
+
   it("refuses a path outside the store", () => {
     expect(isStoredAttachment("/Users/x/project/src/main.rs")).toBe(false);
     expect(userAttachmentUrl("/Users/x/project/shot.png")).toBeNull();
