@@ -512,6 +512,31 @@ pub fn load_usage_history(from_ms: i64, to_ms: i64) -> Vec<UsageHistoryPoint> {
     points
 }
 
+/// Pick the newest snapshot out of an unsorted history slice.
+fn latest_of(history: &[SnapshotEntry]) -> Option<UsageHistoryPoint> {
+    history.iter().max_by_key(|e| e.ts).map(|e| UsageHistoryPoint {
+        ts: e.ts,
+        five_hour: e.five_hour.as_ref().map(|m| m.utilization),
+        seven_day: e.seven_day.as_ref().map(|m| m.utilization),
+        seven_day_sonnet: e.seven_day_sonnet.as_ref().map(|m| m.utilization),
+    })
+}
+
+/// The most recent usage snapshot the background sampler has persisted, read
+/// straight off disk with **no network call**. `ts` is the sample time in epoch
+/// ms so callers can reject a stale reading; the utilization fields are the
+/// 0–1 fraction (same convention as `load_usage_history`, NOT the 0–100 the
+/// Anthropic API hands back — `normalize_snap` has already divided).
+///
+/// This is the read side of the auto-resume "has the account's limit actually
+/// come back?" check (`auto_resume::limit_recovered`). Deliberately cache-only:
+/// the sampler already refreshes on its own interval, and the auto-resume
+/// ticker runs every 30s — hitting the usage API from that hot loop would be a
+/// request amplifier for no benefit.
+pub fn latest_usage_snapshot() -> Option<UsageHistoryPoint> {
+    latest_of(&load_snapshots())
+}
+
 use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Guards against spawning more than one sampler thread per process.
@@ -547,6 +572,23 @@ mod tests {
             seven_day: None,
             seven_day_sonnet: None,
         }
+    }
+
+    #[test]
+    fn latest_of_picks_newest_regardless_of_order() {
+        assert!(latest_of(&[]).is_none());
+
+        let mut newer = snap_at(2_000);
+        newer.five_hour = Some(MetricSnap { utilization: 0.91, resets_at: String::new() });
+        newer.seven_day = Some(MetricSnap { utilization: 0.12, resets_at: String::new() });
+        // Deliberately out of order: the newest entry is not last.
+        let history = vec![newer, snap_at(1_000), snap_at(500)];
+
+        let got = latest_of(&history).expect("non-empty history has a latest");
+        assert_eq!(got.ts, 2_000);
+        assert_eq!(got.five_hour, Some(0.91));
+        assert_eq!(got.seven_day, Some(0.12));
+        assert_eq!(got.seven_day_sonnet, None);
     }
 
     #[test]
