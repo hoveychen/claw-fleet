@@ -228,7 +228,7 @@ pub fn remove_fleet_hooks() -> Result<(), String> {
 // ── Guard hook (synchronous interception) ────────────────────────────────────
 
 /// Resolve the `fleet` binary path for use in the guard hook command.
-fn resolve_fleet_binary() -> Option<String> {
+pub(crate) fn resolve_fleet_binary() -> Option<String> {
     // 1. Check if this process IS the fleet binary (desktop app has sidecar).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
