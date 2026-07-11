@@ -143,6 +143,13 @@ pub struct SessionInfo {
     /// parse — the mark changes while the session's jsonl doesn't.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub user_mark: Option<crate::session_mark::SessionMark>,
+    /// Epoch-ms of the last time the human read this session, or `None` if never
+    /// read. Orthogonal to both `status` and `user_mark`: a session is "unread"
+    /// when `last_activity_ms > last_read_ms` (or this is `None`). Stamped by
+    /// `session_read::enrich_sessions` at scan time, not during the cached deep
+    /// parse — the read state changes while the session's jsonl doesn't.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub last_read_ms: Option<u64>,
     /// Number of times this session was context-compacted (auto or manual /compact).
     #[serde(default)]
     pub compact_count: u32,
@@ -1788,6 +1795,7 @@ pub fn parse_session_info(
         task_plan,
         handoff: None,
         user_mark: None,
+        last_read_ms: None,
         compact_count: stats.compact_count,
         compact_pre_tokens: stats.compact_pre_tokens,
         compact_post_tokens: stats.compact_post_tokens,
@@ -2380,6 +2388,7 @@ pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -
     }
     crate::handoff::enrich_sessions(&mut sessions);
     crate::session_mark::enrich_sessions(&mut sessions);
+    crate::session_read::enrich_sessions(&mut sessions);
     sort_sessions(&mut sessions);
     sessions
 }
@@ -2620,7 +2629,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
-            task_plan: None, handoff: None, user_mark: None,
+            task_plan: None, handoff: None, user_mark: None, last_read_ms: None,
             compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
