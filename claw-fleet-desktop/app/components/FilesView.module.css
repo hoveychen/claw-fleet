@@ -85,3 +85,101 @@
   justify-content: flex-end;
   margin-bottom: 4px;
 }
+
+/* ── Source control status bar ─────────────────────────────────────────────── */
+
+.scm_bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding: 8px 16px 0;
+}
+
+.scm_chips {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+}
+
+.scm_chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.scm_chip_ahead {
+  color: var(--accent, #7aa2f7);
+}
+
+.scm_chip_behind,
+.scm_chip_dirty {
+  color: #e0af68;
+}
+
+.scm_synced {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #9ece6a;
+}
+
+.scm_muted {
+  color: var(--text-secondary, #999);
+  opacity: 0.7;
+}
+
+.scm_spacer {
+  flex: 1;
+}
+
+.scm_actions {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.scm_btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  background: transparent;
+  color: var(--text-secondary, #999);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.scm_btn:hover:not(:disabled) {
+  color: var(--text-primary, #ddd);
+  border-color: var(--accent, #7aa2f7);
+}
+
+.scm_btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.scm_msg {
+  width: 100%;
+  margin: 4px 16px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono, ui-monospace, monospace);
+  background: rgba(128, 128, 128, 0.12);
+  color: var(--text-secondary, #999);
+}
+
+.scm_msg_ok {
+  color: #9ece6a;
+}
+
+.scm_msg_err {
+  color: #f7768e;
+}
