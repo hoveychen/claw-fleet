@@ -1917,6 +1917,34 @@ impl Backend for LocalBackend {
         crate::file_explorer::read_file(workspace, root, rel_path, &self.known_workspaces())
     }
 
+    fn list_scratchpad_dir(
+        &self,
+        workspace: &str,
+        session_id: &str,
+        rel_path: &str,
+    ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String> {
+        crate::file_explorer::list_scratchpad_dir(
+            workspace,
+            session_id,
+            rel_path,
+            &self.known_workspaces(),
+        )
+    }
+
+    fn read_scratchpad_file(
+        &self,
+        workspace: &str,
+        session_id: &str,
+        rel_path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
+        crate::file_explorer::read_scratchpad_file(
+            workspace,
+            session_id,
+            rel_path,
+            &self.known_workspaces(),
+        )
+    }
+
     fn git_status(
         &self,
         workspace: &str,

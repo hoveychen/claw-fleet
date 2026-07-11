@@ -105,6 +105,22 @@ impl Backend for NullBackend {
     ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
         Err("backend not ready".into())
     }
+    fn list_scratchpad_dir(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
+        Err("backend not ready".into())
+    }
+    fn read_scratchpad_file(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
+        Err("backend not ready".into())
+    }
     fn read_explorer_file(
         &self,
         _: &str,
