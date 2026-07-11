@@ -1,6 +1,6 @@
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Menu, Shield, Rocket } from "lucide-react";
 import { openSettingsWindow, useAuditStore, useConnectionStore, useDetailStore, useReadStore, useSessionsStore, useUIStore } from "../store";
@@ -26,7 +26,8 @@ import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
 import { UsagePanel } from "./UsagePanel";
 import { useSessionSearch } from "../hooks/useSessionSearch";
-import { getItem, setItem } from "../storage";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
@@ -45,15 +46,6 @@ const SECONDARY_SIDEBAR_VIEWS = new Set<ViewMode>([
   "plugins",
 ]);
 
-
-function getSavedWidth(): number {
-  const saved = getItem("sidebar-width");
-  if (saved) {
-    const n = parseInt(saved, 10);
-    if (n >= MIN_WIDTH && n <= MAX_WIDTH) return n;
-  }
-  return DEFAULT_WIDTH;
-}
 
 export function SessionList() {
   const { t } = useTranslation();
@@ -100,11 +92,16 @@ export function SessionList() {
   );
   const [filter, setFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
-  const [sidebarWidth, setSidebarWidth] = useState(getSavedWidth);
-  const [isDragging, setIsDragging] = useState(false);
+  const {
+    width: sidebarWidth,
+    isDragging,
+    onMouseDown: handleResizeMouseDown,
+  } = useResizableWidth("sidebar-width", {
+    min: MIN_WIDTH,
+    max: MAX_WIDTH,
+    initial: DEFAULT_WIDTH,
+  });
   const usageRing = useUsageRing();
-
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null);
 
   useEffect(() => {
     // Load audit data for the unread critical badge
@@ -135,33 +132,6 @@ export function SessionList() {
       unlistenScanReady.then((u) => u());
     };
   }, []);
-
-  const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
-    e.preventDefault();
-    dragRef.current = { startX: e.clientX, startWidth: sidebarWidth };
-    setIsDragging(true);
-
-    function onMouseMove(e: MouseEvent) {
-      if (!dragRef.current) return;
-      const delta = e.clientX - dragRef.current.startX;
-      const newWidth = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, dragRef.current.startWidth + delta));
-      setSidebarWidth(newWidth);
-    }
-
-    function onMouseUp() {
-      dragRef.current = null;
-      setIsDragging(false);
-      setSidebarWidth((prev) => {
-        setItem("sidebar-width", String(prev));
-        return prev;
-      });
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    }
-
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-  }, [sidebarWidth]);
 
   const { searching, ftsMatchPaths } = useSessionSearch(filter);
 
@@ -428,10 +398,7 @@ export function SessionList() {
 
         {/* Resize handle — hidden when collapsed */}
         {!sidebarCollapsed && (
-          <div
-            className={`${styles.resize_handle} ${isDragging ? styles.resize_handle_active : ""}`}
-            onMouseDown={handleResizeMouseDown}
-          />
+          <ResizeHandle active={isDragging} onMouseDown={handleResizeMouseDown} />
         )}
       </aside>
 
