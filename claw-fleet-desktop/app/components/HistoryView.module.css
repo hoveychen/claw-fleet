@@ -41,6 +41,9 @@
 }
 
 .header_count {
+  /* Pushes the button group to the right edge; keeps them together instead of
+     spreading, which a margin-left:auto on each button would do. */
+  margin-right: auto;
   font-size: 11px;
   color: var(--color-text-dim);
   background: var(--color-bg-card-hover);
@@ -48,11 +51,36 @@
   padding: 1px 7px;
 }
 
+/* "全部已读" — clears every unread session's dot in one call. Icon-only so it
+   fits beside the new-session button; dimmed and inert when nothing is unread. */
+.header_read_btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg);
+  color: var(--color-text-dim);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, opacity 0.15s;
+}
+
+.header_read_btn:hover:not(:disabled) {
+  background: var(--color-bg-card-hover);
+  color: var(--color-text);
+}
+
+.header_read_btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
 .header_new_btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  margin-left: auto;
   padding: 3px 9px;
   border-radius: 6px;
   border: 1px solid var(--color-accent);
@@ -136,34 +164,6 @@
   gap: 8px;
   /* Wrap to a second line on a narrow rail rather than squashing the pills. */
   flex-wrap: wrap;
-}
-
-/* "全部已读" — clears every unread session's dot in one call. Mirrors the
-   active-toggle pill; disabled (dimmed, non-interactive) when nothing is unread. */
-.mark_all_read {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex: 0 0 auto;
-  padding: 5px 9px;
-  font-size: 12px;
-  color: var(--color-text-dim);
-  background: var(--color-bg);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background 0.15s, border-color 0.15s, color 0.15s, opacity 0.15s;
-}
-
-.mark_all_read:hover:not(:disabled) {
-  background: var(--color-bg-card-hover);
-  color: var(--color-text);
-}
-
-.mark_all_read:disabled {
-  opacity: 0.4;
-  cursor: default;
 }
 
 .project_select {
@@ -398,12 +398,12 @@
   background: var(--color-bg-card-hover);
 }
 
-/* Left accent bar — run status (green = live, amber = waiting). Placed against
-   the card's left edge and clipped to the rounded corners by the row's
-   overflow. Ended rows render no bar at all (see rowBarColor). */
+/* Left accent bar — run status (green = live, amber = waiting). Sits just
+   inside the unread dot, which owns the row's left edge. Ended rows render no
+   bar at all (see rowBarColor). */
 .row_bar {
   position: absolute;
-  left: 0;
+  left: 13px;
   top: 0;
   bottom: 0;
   width: 3px;
@@ -418,13 +418,13 @@
 }
 
 /* Unread indicator — a small red dot pinned to the row's top-left corner,
-   just inside the run-status accent bar. Present only while the session has
+   outboard of the run-status accent bar. Present only while the session has
    newer activity than its last read (see sessionUnread); a 2s dwell on the row
    clears it. A faint ring keeps it legible over the hover background. */
 .unread_dot {
   position: absolute;
   top: 8px;
-  left: 6px;
+  left: 3px;
   width: 7px;
   height: 7px;
   border-radius: 50%;
