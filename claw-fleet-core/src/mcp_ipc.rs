@@ -295,6 +295,56 @@ fn html_escape_attr(s: &str) -> String {
     html_escape_text(s).replace('"', "&quot;")
 }
 
+/// Marker the injected script carries; doubles as the idempotency probe so a
+/// document already carrying the script is never given a second copy.
+pub const AUTOHEIGHT_MARKER: &str = "__fleetAskHeight";
+
+/// Script appended to every document a decision card renders in its iframe.
+///
+/// The card's iframe is `sandbox="allow-scripts"` **without** `allow-same-origin`,
+/// so the document stays on an opaque origin: this script cannot read the app's
+/// DOM, cookies or storage — the only thing it can do is `postMessage` its own
+/// height up. That's the whole point: an iframe has the 300x150 intrinsic size of
+/// a replaced element and no auto-sizing, so without a measurement handshake the
+/// card has to hard-code a height and every taller preview renders squashed into
+/// an inner scroll box. Cross-origin, the parent cannot read `contentDocument`,
+/// so the measurement has to originate inside.
+///
+/// The `last` guard keeps the child from re-posting an unchanged height, and the
+/// parent applies a clamp + dead-band (see `decisionFrame.ts`), so a document
+/// whose own layout depends on the viewport (`100vh`, `height: 100%`) settles
+/// instead of oscillating.
+pub const AUTOHEIGHT_SCRIPT: &str = "\n<script>(function(){var last=0;function send(){var d=document.documentElement,b=document.body;\
+var h=Math.ceil(Math.max(d.scrollHeight,b?b.scrollHeight:0,d.getBoundingClientRect().height));\
+if(h&&h!==last){last=h;parent.postMessage({__fleetAskHeight:h},'*');}}\
+addEventListener('load',send);addEventListener('resize',send);\
+if(window.ResizeObserver){new ResizeObserver(send).observe(document.documentElement);}\
+setTimeout(send,0);setTimeout(send,120);setTimeout(send,400);})();</script>";
+
+/// Append [`AUTOHEIGHT_SCRIPT`] unless the document already carries it.
+pub fn with_autoheight(html: &str) -> String {
+    if html.contains(AUTOHEIGHT_MARKER) {
+        return html.to_string();
+    }
+    format!("{html}{AUTOHEIGHT_SCRIPT}")
+}
+
+/// Inject the height-reporting script into every question's `html`, so both
+/// iframe paths in the card carry it: the `srcDoc` one (html, no images) reads
+/// `q.html` straight from this request, and the served one (images) writes the
+/// same string into `index.html` in [`ingest_images`]. Injecting here — once, at
+/// request time — keeps a single copy of the script in the tree instead of one
+/// per rendering path.
+pub fn inject_autoheight(req: &mut FleetAskRequest) {
+    for q in &mut req.questions {
+        if let Some(h) = &q.html {
+            if !h.trim().is_empty() {
+                q.html = Some(with_autoheight(h));
+            }
+        }
+    }
+}
+
 /// Build a minimal stacked-image gallery document for questions that ship
 /// `images` but no `html` of their own.
 fn synthesize_gallery(images: &[FleetAskImage]) -> String {
@@ -358,8 +408,8 @@ pub fn ingest_images(req: &mut FleetAskRequest) -> Result<(), String> {
         // provided one (referencing images relatively), else a gallery.
         let index = dir.join("index.html");
         let html = match &q.html {
-            Some(h) if !h.trim().is_empty() => h.clone(),
-            _ => synthesize_gallery(&q.images),
+            Some(h) if !h.trim().is_empty() => with_autoheight(h),
+            _ => with_autoheight(&synthesize_gallery(&q.images)),
         };
         fs::write(&index, html).map_err(|e| format!("write decision-asset index.html: {e}"))?;
     }
@@ -823,6 +873,29 @@ mod tests {
     }
 
     #[test]
+    fn inject_autoheight_covers_both_iframe_paths_and_is_idempotent() {
+        // srcDoc path: a question's own html gets the script, so the card's
+        // iframe can size itself instead of clipping into a fixed-height box.
+        let mut req = empty_request("card-ah");
+        req.questions[0].html = Some("<p>hi</p>".into());
+        inject_autoheight(&mut req);
+        let once = req.questions[0].html.clone().unwrap();
+        assert!(once.starts_with("<p>hi</p>"), "author's html must survive intact: {once}");
+        assert!(once.contains(AUTOHEIGHT_MARKER));
+
+        // Re-injecting (e.g. a replayed request) must not stack a second copy.
+        inject_autoheight(&mut req);
+        assert_eq!(req.questions[0].html.as_deref(), Some(once.as_str()));
+        assert_eq!(once.matches(AUTOHEIGHT_MARKER).count(), 1);
+
+        // A question with no html stays without one — nothing to size.
+        let mut blank = empty_request("card-blank");
+        blank.questions[0].html = Some("   ".into());
+        inject_autoheight(&mut blank);
+        assert_eq!(blank.questions[0].html.as_deref(), Some("   "));
+    }
+
+    #[test]
     fn ingest_images_copies_serves_and_defends() {
         let _lock = crate::session::fleet_home_lock();
         let tmp = fresh_tmp_dir("assets");
@@ -852,10 +925,13 @@ mod tests {
             "absolute local path must not persist into the request/history"
         );
 
-        // index.html == the agent's html (not the synthesized gallery).
+        // index.html == the agent's html (not the synthesized gallery), plus the
+        // height-reporting script the card's iframe needs to size itself.
         let index = read_decision_asset("card-img", "q0", "index.html").unwrap();
         assert_eq!(index.mime, "text/html; charset=utf-8");
-        assert_eq!(String::from_utf8_lossy(&index.bytes), "<img src=\"chart.png\">");
+        let idx = String::from_utf8_lossy(&index.bytes);
+        assert!(idx.starts_with("<img src=\"chart.png\">"), "agent html served verbatim: {idx}");
+        assert!(idx.contains(AUTOHEIGHT_MARKER), "served entry must report its height: {idx}");
 
         // The image serves with correct bytes + mime.
         let png = read_decision_asset("card-img", "q0", "chart.png").unwrap();
@@ -893,6 +969,7 @@ mod tests {
         let gallery = read_decision_asset("card-img2", "q0", "index.html").unwrap();
         let g = String::from_utf8_lossy(&gallery.bytes);
         assert!(g.contains("src=\"ok.png\""), "gallery must reference survivor: {g}");
+        assert!(g.contains(AUTOHEIGHT_MARKER), "synthesized gallery must report its height: {g}");
 
         // restore env + clean up
         unsafe {
