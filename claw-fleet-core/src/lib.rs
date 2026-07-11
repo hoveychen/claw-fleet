@@ -1,4 +1,5 @@
 pub mod account;
+pub mod agent_loop;
 pub mod agent_source;
 pub mod audit;
 pub mod auto_resume;
