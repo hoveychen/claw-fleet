@@ -18,6 +18,7 @@ import {
   messageToText,
 } from "../messageRows";
 import { TextBlock } from "./blocks/TextBlock";
+import type { PathLinkContext } from "../markdown/pathLinks";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import {
   GroupedToolUseBlocks,
@@ -83,9 +84,11 @@ interface BlocksProps {
   decisionRecords: DecisionHistoryRecord[];
   isPartial: boolean;
   searchTerms?: string[] | null;
+  /** Makes path-shaped inline-code spans clickable. */
+  paths?: PathLinkContext;
 }
 
-const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms }: BlocksProps) {
+const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap, decisionRecords, isPartial, searchTerms, paths }: BlocksProps) {
   const elements: React.ReactNode[] = [];
   let i = 0;
 
@@ -99,6 +102,7 @@ const ContentBlocks = memo(function ContentBlocks({ content, resultMap, metaMap,
           text={(block as { type: "text"; text: string }).text}
           isPartial={isPartial && i === content.length - 1}
           searchTerms={searchTerms}
+          paths={paths}
         />
       );
       i++;
@@ -231,9 +235,10 @@ interface MsgProps {
   msgIdx?: number;
   /** The hit the search navigation is currently parked on. */
   isActiveMatch?: boolean;
+  paths?: PathLinkContext;
 }
 
-const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch }: MsgProps) {
+const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionRecords, searchTerms, msgIdx, isActiveMatch, paths }: MsgProps) {
   // Same predicate the list uses to build its window and day separators, so the
   // two can never disagree about which records occupy a row.
   if (!isRenderableRow(msg) || !msg.message) return null;
@@ -302,6 +307,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
             decisionRecords={decisionRecords}
             isPartial={isPartial}
             searchTerms={searchTerms}
+            paths={paths}
           />
         )}
         {isUser && (
@@ -442,6 +448,10 @@ interface Props {
   fullyLoaded?: boolean;
   /** True while `onLoadEarlier` is in flight. */
   isLoadingEarlier?: boolean;
+  /** Workspace context that turns path-shaped inline code into clickable
+   *  chips. Callers that know the session's workspace pass it; InspectModal
+   *  and other context-free callers leave it out and paths stay inert. */
+  paths?: PathLinkContext;
 }
 
 /** Messages revealed per click, and the initial size of the render window. */
@@ -459,6 +469,7 @@ export function MessageList({
   onLoadEarlier,
   fullyLoaded = true,
   isLoadingEarlier = false,
+  paths,
 }: Props) {
   const { t } = useTranslation();
   const listRef = useRef<HTMLDivElement>(null);
@@ -726,6 +737,7 @@ export function MessageList({
               searchTerms={searchTerms}
               msgIdx={effectiveStart + i}
               isActiveMatch={effectiveStart + i === searchMatchIndex}
+              paths={paths}
             />
           </Fragment>
         );

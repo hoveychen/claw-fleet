@@ -40,6 +40,32 @@ fn get_platform() -> String {
     std::env::consts::OS.to_string()
 }
 
+/// Reveal a path in the OS file manager (Finder / Explorer).
+///
+/// The `~` expansion happens here rather than in the webview: `reveal_item_in_dir`
+/// does not accept `~`, and handing the home dir to the frontend just to rebuild
+/// the path there would be a data round-trip for something the host already knows.
+///
+/// Local-only by nature — a remote workspace's files do not exist on this disk.
+/// This is a shell action rather than a data-fetching capability, so it does not
+/// belong on the Backend trait; the UI hides it when the connection is remote.
+#[tauri::command]
+fn reveal_path(app: tauri::AppHandle, path: String) -> Result<(), String> {
+    use tauri_plugin_opener::OpenerExt;
+    let expanded = match path.strip_prefix("~/") {
+        Some(rest) => session::real_home_dir()
+            .ok_or_else(|| "home directory unknown".to_string())?
+            .join(rest),
+        None => std::path::PathBuf::from(&path),
+    };
+    if !expanded.exists() {
+        return Err(format!("path does not exist: {}", expanded.display()));
+    }
+    app.opener()
+        .reveal_item_in_dir(&expanded)
+        .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn check_app_version() -> version_check::VersionCheckResult {
     version_check::check_app_version()
@@ -3659,6 +3685,7 @@ pub fn run() {
             get_account_info,
             get_log_path,
             get_platform,
+            reveal_path,
             check_app_version,
             get_app_version,
             interrupt_session,

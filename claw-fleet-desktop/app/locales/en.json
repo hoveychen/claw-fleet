@@ -1741,5 +1741,12 @@
       "op_ok": "Done.",
       "op_failed": "Operation failed."
     }
+  },
+  "paths": {
+    "open_in_files": "Open in Files",
+    "reveal_in_finder": "Reveal in Finder",
+    "reveal_in_explorer": "Show in File Explorer",
+    "open_hint": "Open {{path}}",
+    "not_found": "Path not found"
   }
 }
