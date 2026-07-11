@@ -1,14 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ChevronDown, ChevronRight, Play, Square, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Play, RotateCw, Square, Trash2 } from "lucide-react";
 import { useProcStore } from "../store";
 import type { ProcRecord } from "../types";
 import styles from "./FilesView.module.css";
 
-/** Docked "命令" panel at the bottom of a workspace's 文件 detail pane:
- * quick command launcher at the workspace cwd + the list of procs (running
- * and exited) hosted by detached `fleet-proc-host` processes. */
+/** The "命令" tab of a workspace's 仓库 detail pane: quick command launcher at
+ * the workspace cwd + the list of procs (running and exited) hosted by detached
+ * `fleet-proc-host` processes. */
 export function ProcPanel({
   workspace,
   name,
@@ -33,9 +33,10 @@ export function ProcPanel({
   );
   const hasFinished = wsProcs.some((p) => p.status === "exited");
 
-  const run = async () => {
-    const cmd = command.trim();
-    if (!cmd) return;
+  /** Start `cmd` as a brand-new proc at the workspace cwd. Both the launcher
+   * input and a row's 重跑 button land here — a re-run is just another launch. */
+  const launch = async (cmd: string): Promise<boolean> => {
+    if (!cmd) return false;
     setRunError(null);
     try {
       const rec = await invoke<ProcRecord>("run_workspace_proc", {
@@ -44,12 +45,17 @@ export function ProcPanel({
         cols: 80,
         rows: 24,
       });
-      setCommand("");
       setOpenTermId(rec.id);
       void fetchProcs();
+      return true;
     } catch (e) {
       setRunError(String(e));
+      return false;
     }
+  };
+
+  const run = async () => {
+    if (await launch(command.trim())) setCommand("");
   };
 
   const kill = async (id: string) => {
@@ -76,19 +82,15 @@ export function ProcPanel({
 
   return (
     <section className={styles.proc_panel}>
-      <div className={styles.proc_header}>
-        <span className={styles.proc_title}>{t("files.proc_panel_title")}</span>
-        {wsProcs.length > 0 && (
-          <span className={styles.proc_count}>{wsProcs.length}</span>
-        )}
-        <span className={styles.proc_spacer} />
-        {hasFinished && (
+      {hasFinished && (
+        <div className={styles.proc_header}>
+          <span className={styles.proc_spacer} />
           <button className={styles.proc_action} onClick={() => void clear(null)}>
             <Trash2 size={12} strokeWidth={1.5} />
             {t("files.proc_clear_finished")}
           </button>
-        )}
-      </div>
+        </div>
+      )}
 
       <form
         className={styles.proc_input_row}
@@ -139,6 +141,14 @@ export function ProcPanel({
                   />
                   <code className={styles.proc_command}>{p.command}</code>
                   <span className={styles.proc_status}>{statusLabel(p, t)}</span>
+                </button>
+                <button
+                  className={styles.proc_action}
+                  onClick={() => void launch(p.command)}
+                  title={p.command}
+                >
+                  <RotateCw size={11} strokeWidth={1.5} />
+                  {t("files.proc_rerun")}
                 </button>
                 {running ? (
                   <button
