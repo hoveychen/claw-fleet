@@ -539,6 +539,27 @@
   height: 100%;
   overflow: hidden;
   display: flex;
+  /* Column now: the tab strip stacks above the detail body. */
+  flex-direction: column;
+}
+
+/* Holds the open tabs' panes plus the compose/pending/empty overlays — all of
+ * which are siblings competing for the same space, so it stays a flex row and
+ * whichever one is visible takes it with flex: 1. */
+.detail_body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+/* One open tab's SessionDetail. Every tab stays *mounted* and is hidden with
+ * display:none rather than unmounted, so its messages, scroll position and
+ * view-tab survive a switch away and back — that is the whole point of the tab
+ * strip. Hidden panes are handed `paused`, which freezes their pollers. */
+.pane {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
 }
 
 .detail_empty {
