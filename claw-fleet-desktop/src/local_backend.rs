@@ -2708,9 +2708,11 @@ impl Backend for LocalBackend {
         crate::account::load_usage_history(from_ms, to_ms)
     }
 
-    fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String> {
-        // Agent runs on this machine — just hand back the absolute path so the
-        // UI can splice `@<path>` into the textarea.
+    fn upload_attachment(
+        &self,
+        source_path: &std::path::Path,
+        from_clipboard: bool,
+    ) -> Result<String, String> {
         let abs = source_path.canonicalize().map_err(|e| e.to_string())?;
         let meta = std::fs::metadata(&abs).map_err(|e| e.to_string())?;
         if meta.len() > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
@@ -2720,7 +2722,27 @@ impl Backend for LocalBackend {
                 claw_fleet_core::backend::MAX_ATTACHMENT_BYTES
             ));
         }
-        Ok(abs.to_string_lossy().into_owned())
+        if !from_clipboard {
+            // A file the user picked — the agent runs on this machine and the
+            // path already means something. Hand it back untouched.
+            return Ok(abs.to_string_lossy().into_owned());
+        }
+        // Pasted bytes, currently parked in $TMPDIR. Move them somewhere that
+        // outlives the OS's temp reaper, since this path goes into the transcript.
+        let name = abs
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| "attachment.bin".to_string());
+        let stored = claw_fleet_core::user_attachments::ingest(&abs, &name)?;
+        Ok(stored.to_string_lossy().into_owned())
+    }
+
+    fn get_user_attachment(
+        &self,
+        key: &str,
+        name: &str,
+    ) -> Result<claw_fleet_core::mcp_ipc::DecisionAssetBytes, String> {
+        claw_fleet_core::user_attachments::read_user_attachment(key, name)
     }
 
     fn start_feishu_oauth(&self) -> Result<claw_fleet_core::feishu::OauthHandle, String> {

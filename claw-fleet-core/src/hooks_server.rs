@@ -2810,40 +2810,85 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     continue;
                 }
 
-                let dir = std::env::temp_dir().join("fleet-attachments");
-                if let Err(e) = std::fs::create_dir_all(&dir) {
-                    let body = serde_json::json!({"error": format!("mkdir: {e}")}).to_string();
-                    let _ = request.respond(
-                        tiny_http::Response::from_string(body)
-                            .with_status_code(500)
-                            .with_header(json_header),
-                    );
-                    continue;
-                }
+                // Pasted bytes go into the persistent user-attachment store: the
+                // path we return here is spliced into the prompt / decision
+                // answer, so it has to survive the temp reaper for history to
+                // resolve it later. Picked files still land in $TMPDIR — the
+                // desktop only uploads them because the agent host can't see the
+                // desktop's disk, and nothing renders them back.
+                let from_clipboard = query.get("from_clipboard").is_some_and(|v| v == "1");
 
-                let nanos = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap_or_default()
-                    .as_nanos();
-                let pid = std::process::id();
-                let filename = format!("{nanos}-{pid}-{safe_name}");
-                let dest = dir.join(&filename);
+                let dest = if from_clipboard {
+                    match crate::user_attachments::ingest_bytes(&body_bytes, &safe_name) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let body = serde_json::json!({"error": e}).to_string();
+                            let _ = request.respond(
+                                tiny_http::Response::from_string(body)
+                                    .with_status_code(500)
+                                    .with_header(json_header),
+                            );
+                            continue;
+                        }
+                    }
+                } else {
+                    let dir = std::env::temp_dir().join("fleet-attachments");
+                    if let Err(e) = std::fs::create_dir_all(&dir) {
+                        let body = serde_json::json!({"error": format!("mkdir: {e}")}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                        continue;
+                    }
 
-                if let Err(e) = std::fs::write(&dest, &body_bytes) {
-                    let body = serde_json::json!({"error": format!("write: {e}")}).to_string();
-                    let _ = request.respond(
-                        tiny_http::Response::from_string(body)
-                            .with_status_code(500)
-                            .with_header(json_header),
-                    );
-                    continue;
-                }
+                    let nanos = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos();
+                    let pid = std::process::id();
+                    let dest = dir.join(format!("{nanos}-{pid}-{safe_name}"));
+
+                    if let Err(e) = std::fs::write(&dest, &body_bytes) {
+                        let body = serde_json::json!({"error": format!("write: {e}")}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                        continue;
+                    }
+                    dest
+                };
 
                 let abs = dest.to_string_lossy().into_owned();
                 let body = serde_json::json!({"path": abs}).to_string();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
+            }
+
+            "/user_attachment" => {
+                let dec = |key: &str| {
+                    query
+                        .get(key)
+                        .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                        .unwrap_or_default()
+                };
+                let (key, name) = (dec("key"), dec("name"));
+                match crate::user_attachments::read_user_attachment(&key, &name) {
+                    Ok(f) => {
+                        let mime_header: tiny_http::Header =
+                            format!("Content-Type: {}", f.mime).parse().unwrap();
+                        let _ = request.respond(
+                            tiny_http::Response::from_data(f.bytes).with_header(mime_header),
+                        );
+                    }
+                    Err(_) => {
+                        let _ = request.respond(tiny_http::Response::empty(404));
+                    }
+                }
             }
 
             "/search" => {
