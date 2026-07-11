@@ -1,0 +1,95 @@
+/* IDE-style tab strip above the 启动台 detail column.
+ *
+ * Sits directly on top of SessionDetail's own header, so it borrows the sidebar
+ * background to read as chrome rather than as content, and the active tab is
+ * the one that "connects" to the detail below it — hence the accent underline
+ * on the bottom edge (same idiom as .view_tab in SessionDetail.module.css)
+ * rather than a floating pill. */
+.strip {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  background: var(--color-bg-sidebar);
+  border-bottom: 1px solid var(--color-border);
+  /* Tabs overflow horizontally instead of squeezing to illegibility. The
+   * scrollbar itself is hidden — the strip is short and the overflow is
+   * discoverable by scrolling/dragging, so a visible bar just eats height. */
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.strip::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  max-width: 200px;
+  padding: 7px 8px 7px 10px;
+  border-right: 1px solid var(--color-border);
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  transition: background 0.12s, color 0.12s;
+}
+.tab:hover {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+.tab_active {
+  background: var(--color-bg);
+  color: var(--color-text);
+  border-bottom-color: var(--color-accent, #60a5fa);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* Ended sessions keep the dot's footprint so titles stay aligned down the
+ * strip, but wear a muted ring instead of a colour — "nothing running" is the
+ * absence of a signal, not another signal. */
+.dot[data-idle] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-text-dim);
+  opacity: 0.5;
+}
+
+.label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.close {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 3px;
+  background: none;
+  color: inherit;
+  font-size: 9px;
+  line-height: 1;
+  cursor: pointer;
+  /* Hidden until the tab is hovered/active so an idle strip stays quiet, but
+   * it keeps its box either way — revealing it must not reflow the title. */
+  opacity: 0;
+  transition: opacity 0.12s, background 0.12s;
+}
+.tab:hover .close,
+.tab_active .close {
+  opacity: 0.65;
+}
+.close:hover {
+  opacity: 1;
+  background: var(--color-bg-secondary);
+}

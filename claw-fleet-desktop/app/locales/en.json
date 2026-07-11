@@ -1182,6 +1182,12 @@
     "secondary_collapse": "Collapse this sidebar",
     "secondary_expand": "Expand sidebar"
   },
+  "tabs": {
+    "close": "Close",
+    "close_others": "Close Others",
+    "close_right": "Close to the Right",
+    "close_all": "Close All"
+  },
   "detail": {
     "following": "Auto-following",
     "scroll_to_latest": "Scroll to latest",
