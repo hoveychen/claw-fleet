@@ -77,6 +77,10 @@ const ALL_KEYS = [
   "floating-decision-panel",
   // Read-state for audit entries, stored as a JSON blob.
   "audit-read-keys",
+  // The 任务 (HistoryView) detail column's open tabs: {tabIds, activeId}.
+  // Restored on boot and pruned against the first scan, so ids of sessions that
+  // have since been deleted drop out instead of accumulating forever.
+  "launchpad-tabs",
 ] as const;
 
 // ── Onboarding feature registry ─────────────────────────────────────────────

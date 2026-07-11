@@ -1192,6 +1192,12 @@
     "secondary_collapse": "折叠此侧边栏",
     "secondary_expand": "展开侧边栏"
   },
+  "tabs": {
+    "close": "关闭",
+    "close_others": "关闭其他",
+    "close_right": "关闭右侧",
+    "close_all": "全部关闭"
+  },
   "detail": {
     "following": "自动跟随中",
     "scroll_to_latest": "滚动到最新",
