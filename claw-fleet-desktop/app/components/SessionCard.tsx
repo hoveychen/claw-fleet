@@ -547,6 +547,30 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
         })()
       )}
 
+      {/* Background tasks the session is still waiting on when it last yielded.
+          Fleet blocks a headless stop that leaves these running (see
+          `bg_guard`), so a card showing this row is a session actively waiting
+          — not one that silently dropped its work. */}
+      {(session.backgroundTasks?.length ?? 0) > 0 && (
+        (() => {
+          const tasks = session.backgroundTasks!;
+          const tip = tasks
+            .map((bt) => `[${bt.type}] ${bt.description || bt.command || bt.id}`)
+            .join("\n");
+          return (
+            <div className={styles.bgtask_row} title={tip}>
+              <span className={styles.bgtask_icon} aria-hidden>⏳</span>
+              <span className={styles.bgtask_label}>
+                {t("card.bg_tasks", { count: tasks.length })}
+              </span>
+              <span className={styles.bgtask_desc}>
+                {tasks[0].description || tasks[0].command || tasks[0].id}
+              </span>
+            </div>
+          );
+        })()
+      )}
+
       {/* Handoff relay chain — chip toggles the chain detail panel */}
       {session.handoff && <HandoffChainRow session={session} />}
 

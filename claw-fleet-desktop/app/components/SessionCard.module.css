@@ -382,6 +382,38 @@
   padding-left: 18px;
 }
 
+/* Background tasks the session is waiting on */
+.bgtask_row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+}
+
+.bgtask_icon {
+  flex: 0 0 auto;
+  font-size: 10px;
+  opacity: 0.8;
+}
+
+.bgtask_label {
+  flex: 0 0 auto;
+  font-weight: 500;
+  color: var(--color-warning, #d29922);
+}
+
+.bgtask_desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-dim);
+}
+
 /* Footer */
 .footer {
   display: flex;

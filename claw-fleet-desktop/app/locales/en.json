@@ -502,6 +502,7 @@
     "tip_cost_agent": "Self: ${{self}} · Agent total (main + subagents): ${{total}}",
     "tip_todos": "Todos: {{completed}} done · {{inProgress}} in progress · {{pending}} pending",
     "tip_task_plan": "TASKS.md plan: {{done}}/{{total}} done",
+    "bg_tasks": "waiting on {{count}} background task(s)",
     "handoff_chip": "Relay {{hop}}/{{len}}",
     "tip_handoff": "This session is leg {{hop}} of a {{len}}-leg handoff chain. Click to view the chain.",
     "handoff_loading": "Loading relay chain…",
