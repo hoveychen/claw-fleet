@@ -47,6 +47,7 @@ pub mod openclaw_source;
 pub mod pattern_update;
 pub mod permission_prompt_ipc;
 pub mod permissions_injector;
+pub mod proc_runner;
 pub mod process_util;
 /// Path helpers, formerly re-exported from the (removed) `claw-fleet-task`
 /// crate. `real_home_dir` / `get_fleet_dir` live in [`session`];
