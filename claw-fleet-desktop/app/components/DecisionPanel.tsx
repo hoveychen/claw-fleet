@@ -8,7 +8,8 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { safeMarkdownComponents, safeRemarkPlugins } from "../markdown/safeLinks";
+import { safeRemarkPlugins } from "../markdown/safeLinks";
+import { usePathMarkdown } from "../hooks/usePathLinks";
 import { usePrecedingAgentMessages } from "../hooks/usePrecedingAgentMessages";
 import type {
   DecisionHistoryRecord,
@@ -116,6 +117,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
   const { t } = useTranslation();
   const { respond } = useDecisionStore();
   const req = decision.request;
+  const mdComponents = usePathMarkdown(req.sessionId);
 
   const allowPrefixes = useMemo(() => computeGuardAllowPrefixes(req), [req]);
   const sourceTag = req.riskTags[0] ?? null;
@@ -194,7 +196,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         <div className={`${styles.analysis} ${decision.analyzing ? styles.analysis_loading : ""}`}>
           {decision.analyzing
             ? t("guard.analyzing", "Analyzing command...")
-            : <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{decision.analysis ?? ""}</ReactMarkdown>}
+            : <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>{decision.analysis ?? ""}</ReactMarkdown>}
         </div>
       )}
 
@@ -399,6 +401,7 @@ function PrecedingAgentMessagesRegion({
 }) {
   const { t } = useTranslation();
   const { messages, loading } = usePrecedingAgentMessages(sessionId, requestId);
+  const mdComponents = usePathMarkdown(sessionId);
   const [expanded, setExpanded] = useState(false);
 
   // Collapse again whenever a fresh question arrives for this card so the next
@@ -441,7 +444,7 @@ function PrecedingAgentMessagesRegion({
         <div className={styles.preceding_body}>
           {messages.map((m, i) => (
             <div key={m.uuid ?? i} className={styles.preceding_msg}>
-              <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
+              <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>
                 {m.text}
               </ReactMarkdown>
             </div>
@@ -514,6 +517,7 @@ function OptionsCollapseBar({
 
 function ElicitationCard({ decision, compact = false }: { decision: ElicitationDecision; compact?: boolean }) {
   const { t } = useTranslation();
+  const mdComponents = usePathMarkdown(decision.request.sessionId);
   const {
     submitElicitation,
     declineElicitation,
@@ -671,7 +675,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>{q.question}</ReactMarkdown>
         </div>
       </div>
       </div>
@@ -688,6 +692,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
         {!optionsCollapsed && (
         <SharedOptionsBlock
           decisionId={decision.id}
+          sessionId={decision.request.sessionId}
           question={q}
           compact={compact}
           effectiveMulti={effectiveMulti}
@@ -781,6 +786,7 @@ interface SharedOptionsQuestion {
 // own store actions in via callbacks, so the same UI surface drives both.
 function SharedOptionsBlock({
   decisionId,
+  sessionId,
   question,
   compact,
   effectiveMulti,
@@ -794,6 +800,7 @@ function SharedOptionsBlock({
   onAttachmentError,
 }: {
   decisionId: string;
+  sessionId: string;
   question: SharedOptionsQuestion;
   compact: boolean;
   effectiveMulti: boolean;
@@ -811,6 +818,7 @@ function SharedOptionsBlock({
   onRemoveAttachment: (path: string) => void;
   onAttachmentError: (msg: string) => void;
 }) {
+  const mdComponents = usePathMarkdown(sessionId);
   const { t } = useTranslation();
   const composerRef = useRef<ChatComposerHandle | null>(null);
   // Preview side-by-side layout only applies when question is single-select per
@@ -937,7 +945,7 @@ function SharedOptionsBlock({
       {list}
       <div className={styles.elicitation_preview}>
         {focusedPreview ? (
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{focusedPreview}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>{focusedPreview}</ReactMarkdown>
         ) : null}
       </div>
     </div>
@@ -948,6 +956,7 @@ function SharedOptionsBlock({
 
 function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
   const { t } = useTranslation();
+  const mdComponents = usePathMarkdown(decision.request.sessionId);
   const { approvePlan, rejectPlan, setPlanEditedText, setPlanFeedback } = useDecisionStore();
   const [editing, setEditing] = useState(false);
   const [rejectMode, setRejectMode] = useState(false);
@@ -1009,7 +1018,7 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
         />
       ) : (
         <div className={styles.plan_content}>
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>
             {decision.editedPlan ?? req.planContent}
           </ReactMarkdown>
         </div>
@@ -1312,6 +1321,7 @@ function FleetAskCard({
   compact?: boolean;
 }) {
   const { t } = useTranslation();
+  const mdComponents = usePathMarkdown(decision.request.sessionId);
   const {
     submitFleetAsk,
     cancelFleetAsk,
@@ -1501,7 +1511,7 @@ function FleetAskCard({
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{q.question}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>{q.question}</ReactMarkdown>
         </div>
 
         {q.images && q.images.length > 0 ? (
@@ -1571,6 +1581,7 @@ function FleetAskCard({
         {!optionsCollapsed && (
           <SharedOptionsBlock
             decisionId={decision.id}
+            sessionId={decision.request.sessionId}
             question={{
               question: q.question,
               multiSelect: q.multiSelect,

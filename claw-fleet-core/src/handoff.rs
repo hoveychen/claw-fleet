@@ -32,8 +32,17 @@ use serde::{Deserialize, Serialize};
 #[serde(rename_all = "camelCase")]
 pub struct PendingHandoff {
     pub from_session_id: String,
-    /// Workspace the successor session must be spawned in.
+    /// Workspace the successor session must be spawned in — the *session's* cwd,
+    /// not the agent's shell cwd. See `predecessor_cwd`.
     pub workspace_path: String,
+    /// Where the predecessor's shell was working when it registered the handoff,
+    /// recorded only when it differs from `workspace_path` — under the Rule-3
+    /// worktree workflow that is `<repo>/.worktrees/<task>`. The successor is
+    /// told about it but is NOT spawned there: the same plan ends by merging and
+    /// removing that worktree, which would delete the successor's own cwd and
+    /// make the session invisible to the scan (its workspace dir is gone).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub predecessor_cwd: Option<String>,
     /// Mandatory relay note: what's done, what's next, key files, gotchas.
     pub note: String,
     /// TASKS.md plan the relay continues, when the work is plan-bound.
@@ -159,6 +168,7 @@ fn now_ms() -> u64 {
 pub fn register(
     session_id: &str,
     workspace_path: &str,
+    predecessor_cwd: Option<&str>,
     note: &str,
     plan_id: Option<&str>,
     next_task: Option<&str>,
@@ -168,7 +178,16 @@ pub fn register(
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
     let cdir = chain_dir().ok_or("cannot determine home dir")?;
     register_in(
-        &pdir, &cdir, session_id, workspace_path, note, plan_id, next_task, model, effort,
+        &pdir,
+        &cdir,
+        session_id,
+        workspace_path,
+        predecessor_cwd,
+        note,
+        plan_id,
+        next_task,
+        model,
+        effort,
         now_ms(),
     )
 }
@@ -179,6 +198,7 @@ fn register_in(
     chain_dir: &Path,
     session_id: &str,
     workspace_path: &str,
+    predecessor_cwd: Option<&str>,
     note: &str,
     plan_id: Option<&str>,
     next_task: Option<&str>,
@@ -209,6 +229,9 @@ fn register_in(
     let rec = PendingHandoff {
         from_session_id: session_id.to_string(),
         workspace_path: workspace_path.to_string(),
+        predecessor_cwd: predecessor_cwd
+            .filter(|c| !c.trim().is_empty() && *c != workspace_path)
+            .map(str::to_string),
         note: note.to_string(),
         plan_id: plan_id.map(str::to_string),
         next_task: next_task.map(str::to_string),
@@ -399,6 +422,12 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
     out.push_str("上一棒留下的交接信息：\n\n---\n");
     out.push_str(&p.note);
     out.push_str("\n---\n\n");
+    if let Some(cwd) = &p.predecessor_cwd {
+        out.push_str(&format!(
+            "上一棒的代码工作在 `{cwd}`（多半是 Rule 3 的 worktree），而你被启动在会话原本的 workspace 里。\
+             该目录若仍存在，先 `cd` 进去再继续；若计划已合并、worktree 已清理，就留在当前目录。\n\n"
+        ));
+    }
     if let Some(plan) = &p.plan_id {
         match &p.next_task {
             Some(t) => out.push_str(&format!(
@@ -556,6 +585,7 @@ mod tests {
             cdir,
             sid,
             "/ws",
+            None,
             note,
             Some("my-plan"),
             Some("P4"),
@@ -586,6 +616,7 @@ mod tests {
             &cdir,
             "s1",
             "/ws",
+            None,
             "note",
             None,
             None,
@@ -656,6 +687,7 @@ mod tests {
         PendingHandoff {
             from_session_id: "s1".into(),
             workspace_path: ws.to_string_lossy().into_owned(),
+            predecessor_cwd: None,
             note: "n".into(),
             plan_id: plan_id.map(str::to_string),
             next_task: next.map(str::to_string),
@@ -895,6 +927,7 @@ mod tests {
         let p = PendingHandoff {
             from_session_id: "src-sid".into(),
             workspace_path: "/ws".into(),
+            predecessor_cwd: None,
             note: "P1-P3 已完成；P4 卡在 X".into(),
             plan_id: Some("auth-refactor".into()),
             next_task: Some("P4".into()),

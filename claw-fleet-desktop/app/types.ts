@@ -322,6 +322,9 @@ export interface TaskPlanSummary {
   total: number;
   /** Display name of the attributed plan (its `**Plan:**` title or sentinel id). */
   currentPlan?: string;
+  /** Sentinel id of the attributed plan (e.g. `scene-items`) — diverges from
+   *  `currentPlan` whenever the block has a title, and is how humans name plans. */
+  planId?: string;
   /** Current top-level task in that plan (e.g. `**P3** — …`). */
   currentTask?: string;
 }

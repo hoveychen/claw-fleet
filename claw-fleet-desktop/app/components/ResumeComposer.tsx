@@ -11,6 +11,7 @@ import {
 } from "./ChatComposer";
 import { SessionOptionPills } from "./SessionOptionPills";
 import { useComposerDraft } from "../composerDraft";
+import { resolveStagedAttachment } from "../userAttachments";
 import styles from "./ResumeComposer.module.css";
 
 function basename(p: string): string {
@@ -57,15 +58,8 @@ export function ResumeComposer({
     patch({ attachments: [...attachments, entry] });
   };
 
-  const handleAddAttachment = (s: ChatComposerStagedAttachment) => {
-    addAttachmentEntry({
-      path: s.path,
-      name: s.name,
-      fromClipboard: s.fromClipboard,
-      previewUrl: s.preview?.previewUrl,
-      width: s.preview?.width,
-      height: s.preview?.height,
-    });
+  const handleAddAttachment = async (s: ChatComposerStagedAttachment) => {
+    addAttachmentEntry(await resolveStagedAttachment(s));
   };
 
   const handleRemoveAttachment = (path: string) => {
