@@ -32,6 +32,7 @@ export function SessionTabs({
   onCloseOthers,
   onCloseRight,
   onCloseAll,
+  onReorder,
 }: {
   tabs: SessionInfo[];
   activeId: string | null;
@@ -40,6 +41,8 @@ export function SessionTabs({
   onCloseOthers: (id: string) => void;
   onCloseRight: (id: string) => void;
   onCloseAll: () => void;
+  /** Move `fromId` to `toId`'s slot. Called live during a drag, not on drop. */
+  onReorder: (fromId: string, toId: string) => void;
 }) {
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
@@ -47,6 +50,7 @@ export function SessionTabs({
   // Which tab the open context menu belongs to — `useContextMenu` only tracks
   // the cursor anchor, not the subject.
   const [menuTabId, setMenuTabId] = useState<string | null>(null);
+  const [dragId, setDragId] = useState<string | null>(null);
   const activeRef = useRef<HTMLDivElement>(null);
 
   const liveById = useMemo(
@@ -103,8 +107,30 @@ export function SessionTabs({
             ref={isActive ? activeRef : undefined}
             role="tab"
             aria-selected={isActive}
-            className={`${styles.tab} ${isActive ? styles.tab_active : ""}`}
+            className={`${styles.tab} ${isActive ? styles.tab_active : ""} ${
+              tab.id === dragId ? styles.tab_dragging : ""
+            }`}
             title={`${label}\n${live.workspaceName}`}
+            draggable
+            onDragStart={(e) => {
+              setDragId(tab.id);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            // Reorder live as the pointer crosses a neighbour rather than on
+            // drop, so the strip shows the result under the cursor. Once the
+            // swap lands, the tab under the pointer *is* the dragged one, so
+            // the id guard below stops this from thrashing on repeat fires.
+            onDragOver={(e) => {
+              e.preventDefault();
+              e.dataTransfer.dropEffect = "move";
+              if (!dragId || dragId === tab.id) return;
+              onReorder(dragId, tab.id);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragId(null);
+            }}
+            onDragEnd={() => setDragId(null)}
             onClick={() => onActivate(tab.id)}
             onContextMenu={(e) => {
               setMenuTabId(tab.id);
