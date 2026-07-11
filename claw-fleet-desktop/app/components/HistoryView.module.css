@@ -475,18 +475,23 @@
   white-space: nowrap;
 }
 
-/* Relay-chain position ("🔗 2/3"); the expandable chain lives in the detail column. */
+/* Relay-chain position (waypoints icon + "2/3"); tinted away from the dim meta
+   chips so a handed-off session is spottable while scanning the list. The
+   expandable chain itself lives in the detail column. */
 .row_handoff {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   font-size: 10px;
-  color: var(--color-text-dim);
+  color: var(--color-accent-tool);
   background: var(--color-bg-card-hover);
   border-radius: 5px;
   padding: 1px 5px;
   white-space: nowrap;
 }
 
-/* Live elapsed run time ("已运行 5分钟"); colour inherits the status accent
+/* Live elapsed run time (clock icon + "5分钟"); colour inherits the status accent
    (green busy / amber waiting) so it reads as a "still going" signal. */
 .row_runtime {
   flex: 0 0 auto;

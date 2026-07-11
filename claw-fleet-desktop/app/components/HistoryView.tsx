@@ -16,6 +16,7 @@ import {
   History,
   Plus,
   Search,
+  Waypoints,
 } from "lucide-react";
 import { useReadStore, useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
@@ -110,7 +111,7 @@ function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>
 /** Run-status colour: green = agent still live, amber = waiting for input.
  *  Ended sessions get nothing (null) — this is a positive "this one's doing
  *  something" signal, not another mark on every row. Drives both the left dot
- *  and the "已运行 N" runtime label, which are two views of the same fact. */
+ *  and the runtime label, which are two views of the same fact. */
 function rowBarColor(s: SessionInfo): string | null {
   if (!LIVE_STATUSES.has(s.status)) return null;
   if (s.status === "waitingInput") return "#d0a85a";
@@ -174,7 +175,7 @@ type SessionRowProps = {
   isSelected: boolean;
   unread: boolean;
   /** Bumped every 30s by the parent so relative times keep advancing. Without
-   *  it the memo would freeze "已运行 3 分钟" at whatever it said on mount. */
+   *  it the memo would freeze the elapsed "3 分钟" at whatever it said on mount. */
   nowTick: number;
   onClick: (s: SessionInfo) => void;
 };
@@ -225,7 +226,8 @@ const SessionRow = memo(function SessionRow({
                   len: s.handoff.chainLen,
                 })}
               >
-                🔗 {s.handoff.hop}/{s.handoff.chainLen}
+                <Waypoints size={10} strokeWidth={1.6} />
+                {s.handoff.hop}/{s.handoff.chainLen}
               </span>
             )}
             {LIVE_STATUSES.has(s.status) && (
@@ -292,7 +294,7 @@ export function HistoryView() {
   const [query, setQuery] = useState("");
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
   // Re-render on a slow tick so the relative "last updated" and the live
-  // "已运行" durations keep counting even when no scan lands (a waiting-input
+  // Elapsed-runtime durations keep counting even when no scan lands (a waiting-input
   // session can sit idle for minutes). 30s granularity matches the minute-level
   // display without churning the list.
   const [nowTick, setNowTick] = useState(0);
