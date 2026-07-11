@@ -24,7 +24,10 @@
   overflow: hidden;
 }
 
+/* Shared by Skills / Files / Scratchpad — each passes its own persisted width
+   inline (useResizableWidth); the value here is just the start width. */
 .tree_pane {
+  position: relative; /* anchors the ResizeHandle */
   width: 220px;
   flex-shrink: 0;
   overflow-y: auto;
