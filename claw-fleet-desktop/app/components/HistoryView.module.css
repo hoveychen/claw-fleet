@@ -261,17 +261,18 @@
   font-weight: 500;
 }
 
-.mark_seg_dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: 0 0 auto;
+/* The bucket segments wear the same icons as the rows' MarkControl — hollow
+   circle for pending, check for done — so "filter by this icon" is literal.
+   "all" spells itself out instead of competing for a third icon. */
+.mark_seg_label {
+  font-size: 12px;
 }
 
-/* "done" segment: a hollow ring, mirroring the no-fill done dot on the rows. */
-.mark_seg_dot_done {
-  background: transparent;
-  border: 1px solid var(--color-text-dim);
+/* Done reads green only once it's the active filter: an always-green check in
+   the toolbar would out-shout the actual done rows, which is where the colour
+   carries meaning. */
+.mark_seg_on[data-seg="done"] {
+  color: #5ac88c;
 }
 
 .mark_seg_count {
