@@ -136,6 +136,24 @@ impl LocalBackend {
         paths
     }
 
+    /// Re-stamp the cached sessions from the on-disk mark / read state and push
+    /// them to the frontend. The mark and read toggles only write a file, so
+    /// without this the launchpad's segment counts and unread badge wouldn't
+    /// move until the next natural rescan. Re-runs the enrichers rather than
+    /// patching the one row by hand so this can't drift from the scan path.
+    /// Holds the lock across the enrich so a concurrent rescan can't be
+    /// clobbered by a stale snapshot.
+    fn restamp_marks_and_emit(&self) {
+        let snapshot = {
+            let mut list = self.sessions.lock().unwrap();
+            claw_fleet_core::session_mark::enrich_sessions(&mut list);
+            claw_fleet_core::session_read::enrich_sessions(&mut list);
+            list.clone()
+        };
+        let _ = self.app.emit("sessions-updated", &snapshot);
+        crate::update_tray(&self.app, &snapshot);
+    }
+
     pub fn new(
         app: AppHandle,
         locale: Arc<Mutex<String>>,
@@ -1653,14 +1671,18 @@ impl Backend for LocalBackend {
         workspace_path: String,
         mark: Option<claw_fleet_core::session_mark::SessionMark>,
     ) -> Result<(), String> {
-        claw_fleet_core::session_mark::set_mark(&session_id, &workspace_path, mark)
+        claw_fleet_core::session_mark::set_mark(&session_id, &workspace_path, mark)?;
+        self.restamp_marks_and_emit();
+        Ok(())
     }
 
     fn mark_sessions_read(
         &self,
         items: Vec<claw_fleet_core::session_read::SessionReadItem>,
     ) -> Result<(), String> {
-        claw_fleet_core::session_read::mark_read(&items)
+        claw_fleet_core::session_read::mark_read(&items)?;
+        self.restamp_marks_and_emit();
+        Ok(())
     }
 
     fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
