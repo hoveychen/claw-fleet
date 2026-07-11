@@ -1705,6 +1705,22 @@
     "binary_file": "Binary or non-text file; cannot preview here.",
     "read_error": "Failed to read file.",
     "truncated_notice": "Large file — showing the first 1MB of {{size}}.",
-    "show_ignored": "Show ignored files"
+    "show_ignored": "Show ignored files",
+    "scm": {
+      "synced": "In sync",
+      "no_upstream": "No upstream tracking",
+      "ahead": "{{n}} to push",
+      "behind": "{{n}} behind",
+      "dirty": "{{n}} uncommitted",
+      "push": "Push",
+      "pull": "Pull",
+      "pushing": "Pushing…",
+      "pulling": "Pulling…",
+      "push_confirm": "Push {{branch}} to {{upstream}}?",
+      "pull_confirm": "Pull (fast-forward) into {{branch}}?",
+      "default_remote": "remote",
+      "op_ok": "Done.",
+      "op_failed": "Operation failed."
+    }
   }
 }
