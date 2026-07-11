@@ -1995,31 +1995,66 @@ fn read_explorer_file(
         .read_explorer_file(&workspace, &root, &rel_path)
 }
 
-// ── Source control ──────────────────────────────────────────────────────────────
+// ── Session scratchpad ──────────────────────────────────────────────────────────
 
 #[tauri::command]
+fn list_scratchpad_dir(
+    workspace: String,
+    session_id: String,
+    rel_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .list_scratchpad_dir(&workspace, &session_id, &rel_path)
+}
+
+#[tauri::command]
+fn read_scratchpad_file(
+    workspace: String,
+    session_id: String,
+    rel_path: String,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .read_scratchpad_file(&workspace, &session_id, &rel_path)
+}
+
+// ── Source control ──────────────────────────────────────────────────────────────
+//
+// All three run on tauri's threadpool (`command(async)` on a plain `fn`), never
+// the main thread: `push` / `pull` shell out to git and block for a whole network
+// round-trip, and `status` walks the working tree. On the main thread that stalls
+// the webview — the UI froze for the duration of every push.
+
+#[tauri::command(async)]
 fn git_status(
     workspace: String,
     root: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitStatus, String> {
     state.backend.read().unwrap().git_status(&workspace, &root)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn git_push(
     workspace: String,
     root: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
     state.backend.read().unwrap().git_push(&workspace, &root)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn git_pull(
     workspace: String,
     root: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::git_ops::GitOpResult, String> {
     state.backend.read().unwrap().git_pull(&workspace, &root)
 }
@@ -3784,6 +3819,8 @@ pub fn run() {
             git_pull,
             list_explorer_dir,
             read_explorer_file,
+            list_scratchpad_dir,
+            read_scratchpad_file,
             list_skills,
             get_skill_content,
             list_skill_files,
