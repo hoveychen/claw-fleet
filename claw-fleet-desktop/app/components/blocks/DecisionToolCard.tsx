@@ -22,6 +22,7 @@ import type {
   ToolUseBlock as ToolUseBlockType,
 } from "../../types";
 import { decisionAssetUrl } from "../../decisionAssets";
+import { AttachmentRow } from "./AttachmentRow";
 import styles from "./DecisionToolCard.module.css";
 
 // Inline markdown: unwrap the <p> so option labels sit inside a <span>.
@@ -294,14 +295,7 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
                   );
                 })}
 
-                {answer && answer.attachments.length > 0 && (
-                  <div className={styles.attachments}>
-                    {t("decision_history.fleet_ask_attachments", {
-                      defaultValue: "Attachments: {{paths}}",
-                      paths: answer.attachments.join(", "),
-                    })}
-                  </div>
-                )}
+                {answer && <AttachmentRow paths={answer.attachments} />}
               </div>
             );
           })}

@@ -1233,7 +1233,11 @@ impl crate::backend::Backend for RemoteBackend {
             .unwrap_or_default()
     }
 
-    fn upload_attachment(&self, source_path: &std::path::Path) -> Result<String, String> {
+    fn upload_attachment(
+        &self,
+        source_path: &std::path::Path,
+        from_clipboard: bool,
+    ) -> Result<String, String> {
         let meta = std::fs::metadata(source_path).map_err(|e| e.to_string())?;
         if meta.len() > claw_fleet_core::backend::MAX_ATTACHMENT_BYTES {
             return Err(format!(
@@ -1248,13 +1252,31 @@ impl crate::backend::Backend for RemoteBackend {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_else(|| "attachment.bin".to_string());
         let encoded = utf8_percent_encode(&name, NON_ALPHANUMERIC).to_string();
+        // The agent host never sees the desktop's disk, so both kinds of
+        // attachment have to be uploaded. `from_clipboard` only decides where
+        // the probe puts them: the persistent store (renderable in history) or
+        // its temp dir.
+        let clip = if from_clipboard { "1" } else { "0" };
         #[derive(serde::Deserialize)]
         struct Resp { path: String }
         let resp: Resp = self.probe.post_bytes(
-            &format!("/elicitation/upload?name={encoded}"),
+            &format!("/elicitation/upload?name={encoded}&from_clipboard={clip}"),
             bytes,
         )?;
         Ok(resp.path)
+    }
+
+    fn get_user_attachment(
+        &self,
+        key: &str,
+        name: &str,
+    ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String> {
+        let (bytes, mime) = self.probe.get_bytes(&format!(
+            "/user_attachment?key={}&name={}",
+            encode_path(key),
+            encode_path(name),
+        ))?;
+        Ok(crate::mcp_ipc::DecisionAssetBytes { bytes, mime })
     }
 
     fn start_feishu_oauth(&self) -> Result<claw_fleet_core::feishu::OauthHandle, String> {
