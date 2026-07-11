@@ -1411,7 +1411,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/explorer_roots" | "/explorer_dir" | "/explorer_file" => {
+            "/explorer_roots" | "/explorer_dir" | "/explorer_file" | "/scratchpad_dir"
+            | "/scratchpad_file" => {
                 let decode = |key: &str| {
                     query
                         .get(key)
@@ -1438,6 +1439,20 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         )
                         .map(|e| serde_json::to_string(&e).unwrap_or_default())
                     }
+                    "/scratchpad_dir" => crate::file_explorer::list_scratchpad_dir(
+                        &ws,
+                        &decode("session"),
+                        &decode("rel"),
+                        &known,
+                    )
+                    .map(|e| serde_json::to_string(&e).unwrap_or_default()),
+                    "/scratchpad_file" => crate::file_explorer::read_scratchpad_file(
+                        &ws,
+                        &decode("session"),
+                        &decode("rel"),
+                        &known,
+                    )
+                    .map(|c| serde_json::to_string(&c).unwrap_or_default()),
                     _ => crate::file_explorer::read_file(&ws, &decode("root"), &decode("rel"), &known)
                         .map(|c| serde_json::to_string(&c).unwrap_or_default()),
                 };

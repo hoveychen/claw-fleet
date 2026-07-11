@@ -682,6 +682,34 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
+    fn list_scratchpad_dir(
+        &self,
+        workspace: &str,
+        session_id: &str,
+        rel_path: &str,
+    ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String> {
+        self.probe.get(&format!(
+            "/scratchpad_dir?ws={}&session={}&rel={}",
+            encode_path(workspace),
+            encode_path(session_id),
+            encode_path(rel_path),
+        ))
+    }
+
+    fn read_scratchpad_file(
+        &self,
+        workspace: &str,
+        session_id: &str,
+        rel_path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
+        self.probe.get(&format!(
+            "/scratchpad_file?ws={}&session={}&rel={}",
+            encode_path(workspace),
+            encode_path(session_id),
+            encode_path(rel_path),
+        ))
+    }
+
     fn git_status(
         &self,
         workspace: &str,

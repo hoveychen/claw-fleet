@@ -512,6 +512,23 @@ pub trait Backend: Send + Sync {
         rel_path: &str,
     ) -> Result<crate::file_explorer::ExplorerFileContent, String>;
 
+    // ── Session scratchpad ────────────────────────────────────────────────────
+    // Read-only browsing of the private temp dir Claude Code hands a session.
+    // The root is derived server-side from `workspace` + `session_id`; an Err
+    // means the session has no scratchpad, and the UI hides the tab.
+    fn list_scratchpad_dir(
+        &self,
+        workspace: &str,
+        session_id: &str,
+        rel_path: &str,
+    ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String>;
+    fn read_scratchpad_file(
+        &self,
+        workspace: &str,
+        session_id: &str,
+        rel_path: &str,
+    ) -> Result<crate::file_explorer::ExplorerFileContent, String>;
+
     // ── Source control ──────────────────────────────────────────────────────────
     // Simple git status + push/pull for an explorer `root`. `workspace` / `root`
     // are validated the same way as the explorer methods above.
