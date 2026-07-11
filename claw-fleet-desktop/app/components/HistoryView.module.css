@@ -377,11 +377,10 @@
   gap: 8px;
   width: 100%;
   position: relative;
-  /* Clip the left accent bar to the row's rounded corners. */
   overflow: hidden;
-  /* Right gutter reserves space for the pending/done toggle; the wider left
-     gutter clears the top-left unread dot so the title never sits under it
-     (kept constant whether or not the dot shows, to avoid reflow). */
+  /* Right gutter reserves space for the pending/done toggle; the left gutter
+     clears the run-status dot so the title never sits under it (kept constant
+     whether or not the dot shows, to avoid reflow). */
   padding: 7px 26px 7px 18px;
   border: none;
   background: none;
@@ -399,15 +398,32 @@
   background: var(--color-bg-card-hover);
 }
 
-/* Left accent bar — run status (green = live, amber = waiting). Sits just
-   inside the unread dot, which owns the row's left edge. Ended rows render no
-   bar at all (see rowBarColor). */
-.row_bar {
+/* The row carries three orthogonal axes and each gets its own visual channel,
+   so they can't be mistaken for one another:
+     run status  -> colour   (.row_status_dot: green live / amber waiting)
+     unread      -> weight   (.row_unread: bold title + a faint row wash)
+     done/pending-> control  (MarkControl, right gutter)
+   An earlier design put unread on a red dot right next to the run-status bar;
+   two marks 10px apart in different shapes and clashing hues read as one
+   broken traffic light rather than two facts. */
+.row_status_dot {
   position: absolute;
-  left: 13px;
-  top: 0;
-  bottom: 0;
-  width: 3px;
+  left: 7px;
+  top: 11px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+/* Unread wash — deliberately weaker than :hover so a hovered read row still
+   looks distinct from an unhovered unread one. */
+.row_unread {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+:global([data-theme="light"]) .row_unread {
+  background: rgba(9, 12, 20, 0.04);
 }
 
 .row_body {
@@ -418,31 +434,23 @@
   flex: 1;
 }
 
-/* Unread indicator — a small red dot pinned to the row's top-left corner,
-   outboard of the run-status accent bar. Present only while the session has
-   newer activity than its last read (see sessionUnread); a 2s dwell on the row
-   clears it. A faint ring keeps it legible over the hover background. */
-.unread_dot {
-  position: absolute;
-  top: 8px;
-  left: 3px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #e0574a;
-  box-shadow: 0 0 0 2px var(--color-bg);
-  pointer-events: none;
-}
-
 .row_title {
   font-size: 12px;
-  color: var(--color-text);
+  color: var(--color-text-secondary);
   line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   word-break: break-word;
+}
+
+/* Unread rows carry the title at full contrast and weight; read rows fall back
+   to the secondary text colour. The whole title line responds, which scans
+   faster down a long list than a 7px dot did. */
+.row_title_unread {
+  color: var(--color-text);
+  font-weight: 600;
 }
 
 .row_meta {
