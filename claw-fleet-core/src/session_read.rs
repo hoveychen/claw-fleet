@@ -81,10 +81,16 @@ pub fn mark_read(items: &[SessionReadItem]) -> Result<(), String> {
 /// over the sessions — cheaper than a file read per session.
 pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
     let Some(dir) = read_dir_path() else { return };
-    let idx = read_index(&dir);
-    if idx.is_empty() {
-        return;
-    }
+    enrich_sessions_in(&dir, sessions);
+}
+
+/// Same contract as `session_mark::enrich_sessions_in`: the index is the whole
+/// truth, so an empty one clears `last_read_ms` instead of being a no-op.
+pub(crate) fn enrich_sessions_in(
+    dir: &std::path::Path,
+    sessions: &mut [crate::session::SessionInfo],
+) {
+    let idx = read_index(dir);
     for s in sessions.iter_mut() {
         s.last_read_ms = idx.get(&s.id).copied();
     }
@@ -200,5 +206,29 @@ mod tests {
         mark_read_in(dir.path(), &[item("sess-x")], 100).unwrap();
         mark_read_in(dir.path(), &[item("sess-x")], 200).unwrap();
         assert_eq!(read_in(dir.path(), "sess-x").unwrap().last_read_ms, 200);
+    }
+
+    #[test]
+    fn enrich_stamps_from_the_index() {
+        let dir = tempfile::tempdir().unwrap();
+        mark_read_in(dir.path(), &[item("sess-x")], 700).unwrap();
+        let mut sessions = vec![
+            crate::session::test_session("sess-x"),
+            crate::session::test_session("sess-y"),
+        ];
+        enrich_sessions_in(dir.path(), &mut sessions);
+        assert_eq!(sessions[0].last_read_ms, Some(700));
+        assert_eq!(sessions[1].last_read_ms, None, "never-read stays unread");
+    }
+
+    /// Same empty-index contract as `session_mark`: an empty index means "read
+    /// by nobody", so enrich clears rather than short-circuiting.
+    #[test]
+    fn enrich_clears_when_the_index_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sessions = vec![crate::session::test_session("sess-x")];
+        sessions[0].last_read_ms = Some(700);
+        enrich_sessions_in(dir.path(), &mut sessions);
+        assert_eq!(sessions[0].last_read_ms, None);
     }
 }

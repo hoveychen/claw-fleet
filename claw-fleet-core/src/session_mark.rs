@@ -93,10 +93,19 @@ pub fn read(session_id: &str) -> Option<SessionMark> {
 /// the sessions — cheaper than a file read per session.
 pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
     let Some(dir) = mark_dir() else { return };
-    let idx = mark_index(&dir);
-    if idx.is_empty() {
-        return;
-    }
+    enrich_sessions_in(&dir, sessions);
+}
+
+/// The index is the whole truth: a session missing from it is *unmarked*, so an
+/// empty index clears every mark rather than being a no-op. Skipping the loop
+/// when the index is empty would be safe for a fresh scan (those sessions carry
+/// no mark yet) but wrong when re-stamping an already-enriched list — clearing
+/// the last remaining mark would leave it stuck on the cached row.
+pub(crate) fn enrich_sessions_in(
+    dir: &std::path::Path,
+    sessions: &mut [crate::session::SessionInfo],
+) {
+    let idx = mark_index(dir);
     for s in sessions.iter_mut() {
         s.user_mark = idx.get(&s.id).copied();
     }
@@ -204,5 +213,30 @@ mod tests {
         assert_eq!(idx.get("aaa"), Some(&SessionMark::Pending));
         assert_eq!(idx.get("bbb"), Some(&SessionMark::Done));
         assert_eq!(idx.get("ccc"), None);
+    }
+
+    #[test]
+    fn enrich_stamps_from_the_index() {
+        let dir = tempfile::tempdir().unwrap();
+        set_mark_in(dir.path(), "aaa", "/ws", Some(SessionMark::Done)).unwrap();
+        let mut sessions = vec![
+            crate::session::test_session("aaa"),
+            crate::session::test_session("bbb"),
+        ];
+        enrich_sessions_in(dir.path(), &mut sessions);
+        assert_eq!(sessions[0].user_mark, Some(SessionMark::Done));
+        assert_eq!(sessions[1].user_mark, None, "unmarked stays unmarked");
+    }
+
+    /// Un-marking the *last* done session empties the index. Enrich must still
+    /// clear the field — an early return on an empty index would strand the
+    /// stale mark on an already-enriched (cached) list forever.
+    #[test]
+    fn enrich_clears_when_the_index_is_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut sessions = vec![crate::session::test_session("aaa")];
+        sessions[0].user_mark = Some(SessionMark::Done);
+        enrich_sessions_in(dir.path(), &mut sessions);
+        assert_eq!(sessions[0].user_mark, None);
     }
 }
