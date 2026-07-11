@@ -77,9 +77,12 @@ function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => s
   return t("d_ago", { n: Math.floor(diff / 86_400_000) });
 }
 
-/** Green = agent still live, amber = waiting for input, gray = ended. */
-function rowDotColor(s: SessionInfo): string {
-  if (!LIVE_STATUSES.has(s.status)) return "#6b6b72";
+/** Left accent-bar colour for run status: green = agent still live, amber =
+ *  waiting for input. Ended sessions get no bar (null) — the bar is a positive
+ *  "this one's doing something" signal, not another dot on every row. Distinct
+ *  in shape from the round review mark on the right. */
+function rowBarColor(s: SessionInfo): string | null {
+  if (!LIVE_STATUSES.has(s.status)) return null;
   if (s.status === "waitingInput") return "#d0a85a";
   return "#5ac88c";
 }
@@ -369,10 +372,12 @@ export function HistoryView() {
                     onClick={() => handleRowClick(s)}
                     title={s.lastMessagePreview ?? undefined}
                   >
-                    <span
-                      className={styles.row_dot}
-                      style={{ background: rowDotColor(s) }}
-                    />
+                    {rowBarColor(s) && (
+                      <span
+                        className={styles.row_bar}
+                        style={{ background: rowBarColor(s)! }}
+                      />
+                    )}
                     <span className={styles.row_body}>
                       <span className={styles.row_title}>
                         {s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
