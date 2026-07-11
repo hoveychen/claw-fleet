@@ -19,7 +19,7 @@ import {
   Search,
   Waypoints,
 } from "lucide-react";
-import { useReadStore, useSessionsStore, useUIStore } from "../store";
+import { useReadStore, useSessionsStore, useUIStore, type MarkFilter } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, isFleetOwnedEntrypoint, rowBarColor, sessionUnread } from "../types";
@@ -89,8 +89,10 @@ function matchSpawnedSession(
  *  The two bucket segments render the exact icons `MarkControl` puts on the row
  *  (hollow circle = pending, green check = done) so a segment reads as "show me
  *  the rows wearing this icon". "all" is spelled out in words instead — any
- *  third icon here just competes with those two for meaning. */
-type MarkFilter = "all" | "pending" | "done";
+ *  third icon here just competes with those two for meaning.
+ *
+ *  The selected segment itself lives in `useUIStore` (and on disk), not in this
+ *  component — see the `history*` fields there for why. */
 const MARK_SEGMENTS: MarkFilter[] = ["all", "pending", "done"];
 
 /** Which bucket a session falls in — `done` is explicit, everything else is
@@ -302,8 +304,13 @@ export function HistoryView() {
   const markRead = useReadStore((s) => s.markRead);
   const markManyRead = useReadStore((s) => s.markManyRead);
 
-  const [query, setQuery] = useState("");
-  const [workspaceFilter, setWorkspaceFilter] = useState("all");
+  // Rail filters live in the store, not here: this component is unmounted every
+  // time `viewMode` leaves "history", which would otherwise reset them behind
+  // the user's back (a waiting-input alert forcing setViewMode("list") is enough).
+  const query = useUIStore((s) => s.historyQuery);
+  const setQuery = useUIStore((s) => s.setHistoryQuery);
+  const workspaceFilter = useUIStore((s) => s.historyWorkspaceFilter);
+  const setWorkspaceFilter = useUIStore((s) => s.setHistoryWorkspaceFilter);
   // Re-render on a slow tick so the relative "last updated" and the live
   // Elapsed-runtime durations keep counting even when no scan lands (a waiting-input
   // session can sit idle for minutes). 30s granularity matches the minute-level
@@ -315,9 +322,11 @@ export function HistoryView() {
   }, []);
   // Narrow the rail to sessions whose agent is still live — same status set that
   // colours the row dot green/amber.
-  const [activeOnly, setActiveOnly] = useState(false);
+  const activeOnly = useUIStore((s) => s.historyActiveOnly);
+  const setActiveOnly = useUIStore((s) => s.setHistoryActiveOnly);
   // Segmented filter by manual review mark; "all" shows every bucket.
-  const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
+  const markFilter = useUIStore((s) => s.historyMarkFilter);
+  const setMarkFilter = useUIStore((s) => s.setHistoryMarkFilter);
   // Inline detail column selection — local to the page, deliberately NOT the
   // global useDetailStore (that one drives the drawer overlaying every view).
   //
@@ -362,6 +371,17 @@ export function HistoryView() {
     for (const s of adhocSessions) byPath.set(s.workspacePath, s.workspaceName);
     return [...byPath.entries()].sort((a, b) => a[1].localeCompare(b[1]));
   }, [adhocSessions]);
+
+  // The workspace filter is persisted, but the dropdown's options only cover
+  // workspaces with sessions inside the scanner's 7-day window. A restored path
+  // whose sessions have aged out would render a blank <select> over an empty
+  // rail, with no obvious way back — fall back to "all" once the scan lands.
+  useEffect(() => {
+    if (!scanReady || workspaceFilter === "all") return;
+    if (!workspaces.some(([path]) => path === workspaceFilter)) {
+      setWorkspaceFilter("all");
+    }
+  }, [scanReady, workspaces, workspaceFilter, setWorkspaceFilter]);
 
   const { rows, markCounts } = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -651,7 +671,7 @@ export function HistoryView() {
               type="button"
               className={`${styles.active_toggle} ${activeOnly ? styles.active_toggle_on : ""}`}
               aria-pressed={activeOnly}
-              onClick={() => setActiveOnly((v) => !v)}
+              onClick={() => setActiveOnly(!activeOnly)}
               title={t("history.filter_active_tip", "只显示仍在运行或等待输入的会话")}
             >
               <span className={styles.active_toggle_dot} />

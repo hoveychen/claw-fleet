@@ -47,6 +47,8 @@ export async function openSettingsWindow(): Promise<void> {
 export type Theme = "dark" | "light" | "system";
 export type ViewMode = "list" | "gallery" | "history" | "audit" | "report" | "memory" | "wiki" | "skills" | "plugins" | "files";
 export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
+/** 启动台's segmented mark filter. "all" shows every bucket. */
+export type MarkFilter = "all" | "pending" | "done";
 
 interface UIState {
   theme: Theme;
@@ -62,6 +64,22 @@ interface UIState {
    *  entry. Persisted to localStorage as JSON. A missing key ⇒ expanded. */
   secondarySidebarCollapsed: Record<string, boolean>;
   mascotVisible: boolean;
+  /** 启动台 rail filters. HistoryView is mounted through SessionList's `viewMode`
+   *  ternary, so it unmounts on every trip to another page — including the
+   *  involuntary hops a waiting-input alert or the mascot bubble make by calling
+   *  setViewMode("list"). Component state would be thrown away each time and the
+   *  segmented filter would snap back to 「全部」, so these live in the store.
+   *  markFilter / workspaceFilter / activeOnly are also written to disk;
+   *  `historyQuery` is deliberately store-only — a search box restored on boot
+   *  would fire an FTS query the user never asked for. */
+  historyMarkFilter: MarkFilter;
+  historyWorkspaceFilter: string;
+  historyActiveOnly: boolean;
+  historyQuery: string;
+  setHistoryMarkFilter: (f: MarkFilter) => void;
+  setHistoryWorkspaceFilter: (workspacePath: string) => void;
+  setHistoryActiveOnly: (on: boolean) => void;
+  setHistoryQuery: (q: string) => void;
   /** "+ New project" CTA → ProjectsView opens the
    *  ProjectFormDialog in create mode. */
   // Lite-mode hop from the active DecisionPanel into a dedicated decision-
@@ -129,6 +147,12 @@ function readSecondarySidebarCollapsed(): Record<string, boolean> {
   }
 }
 
+/** Persisted mark filter, tolerating an absent / corrupt value. */
+function readMarkFilter(): MarkFilter {
+  const raw = getItem("history-mark-filter");
+  return raw === "pending" || raw === "done" ? raw : "all";
+}
+
 export const useUIStore = create<UIState>((set) => ({
   theme: (getItem("theme") as Theme) ?? "system",
   viewMode: (getItem("viewMode") as ViewMode) ?? "gallery",
@@ -138,6 +162,23 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarCollapsed: getItem("sidebar-collapsed") === "true",
   secondarySidebarCollapsed: readSecondarySidebarCollapsed(),
   mascotVisible: getItem("mascot-visible") === "true",
+  historyMarkFilter: readMarkFilter(),
+  historyWorkspaceFilter: getItem("history-workspace-filter") ?? "all",
+  historyActiveOnly: getItem("history-active-only") === "true",
+  historyQuery: "",
+  setHistoryMarkFilter: (f) => {
+    setItem("history-mark-filter", f);
+    set({ historyMarkFilter: f });
+  },
+  setHistoryWorkspaceFilter: (p) => {
+    setItem("history-workspace-filter", p);
+    set({ historyWorkspaceFilter: p });
+  },
+  setHistoryActiveOnly: (on) => {
+    setItem("history-active-only", on ? "true" : "false");
+    set({ historyActiveOnly: on });
+  },
+  setHistoryQuery: (q) => set({ historyQuery: q }),
   liteDecisionHistorySessionId: null,
   decisionPanelCollapsed: getItem("decision-panel-collapsed") === "true",
   floatingDecisionPanel: getItem("floating-decision-panel") === "true",

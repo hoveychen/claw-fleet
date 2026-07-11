@@ -11,12 +11,24 @@ import { load, type Store } from "@tauri-apps/plugin-store";
 let store: Store | null = null;
 const cache = new Map<string, string>();
 
-/** Keys we persist — add new ones here. */
+/** Keys we persist — add new ones here.
+ *
+ *  This list is also the *boot preload* list: `initStorage` only pulls these
+ *  keys into the synchronous cache, so a key written with `setItem` but missing
+ *  here is saved to disk and then never read back — `getItem` returns null on
+ *  the next launch and whatever it feeds silently reverts to its default. Any
+ *  new `setItem` key MUST be registered here. */
 const ALL_KEYS = [
   "theme",
   "viewMode",
+  // Which session sub-view (list vs gallery) the unified "Sessions" nav returns to.
+  "lastSessionViewMode",
+  "liteMode",
   "lang",
   "sidebar-width",
+  "sidebar-collapsed",
+  // Per-view collapse map for the secondary sidebars, stored as a JSON blob.
+  "secondary-sidebar-collapsed",
   // Secondary sidebar (二级侧边栏) widths — one per view that owns one.
   "history-rail-width",
   "memory-rail-width",
@@ -29,6 +41,11 @@ const ALL_KEYS = [
   "skills-tree-width",
   "files-tree-width",
   "scratchpad-tree-width",
+  // 启动台 (HistoryView) rail filters — the search box is deliberately absent,
+  // it stays in-memory only.
+  "history-mark-filter",
+  "history-workspace-filter",
+  "history-active-only",
   "onboarding-dismissed",
   "wizard-completed",
   "hooks-banner-dismissed",
@@ -47,11 +64,22 @@ const ALL_KEYS = [
   "guard-enabled",
   "guard-llm-analysis",
   "elicitation-enabled",
+  // Onboarding toggles whose checkbox state is read back through getItem. The
+  // features themselves live in ~/.claude hook config; these only drive the UI.
+  "interaction-mode-enabled",
+  "prd-mode-enabled",
+  "wiki-guidance-enabled",
+  "plan-approval-enabled",
   "onboarding-seen-features",
   "usage-auto-refresh",
-  // The 启动台 detail column's open tabs: {tabIds, activeId}. Restored on boot
-  // and pruned against the first scan, so ids of sessions that have since been
-  // deleted drop out instead of accumulating forever.
+  // DecisionPanel presentation.
+  "decision-panel-collapsed",
+  "floating-decision-panel",
+  // Read-state for audit entries, stored as a JSON blob.
+  "audit-read-keys",
+  // The 任务 (HistoryView) detail column's open tabs: {tabIds, activeId}.
+  // Restored on boot and pruned against the first scan, so ids of sessions that
+  // have since been deleted drop out instead of accumulating forever.
   "launchpad-tabs",
 ] as const;
 
