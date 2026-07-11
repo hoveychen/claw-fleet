@@ -58,10 +58,14 @@
   max-height: 340px;
 }
 
-.session_list::-webkit-scrollbar {
+/* Windows only, same rationale as App.css's scrollbar block: on macOS, matching
+   an element with `::-webkit-scrollbar` opts it out of the native overlay
+   scrollbar and into a permanent gutter that never fades. Let macOS keep its
+   own; override only WebView2's chunky default. */
+:global(html.os-windows) .session_list::-webkit-scrollbar {
   width: 4px;
 }
-.session_list::-webkit-scrollbar-thumb {
+:global(html.os-windows) .session_list::-webkit-scrollbar-thumb {
   background: var(--color-border);
   border-radius: 4px;
 }
