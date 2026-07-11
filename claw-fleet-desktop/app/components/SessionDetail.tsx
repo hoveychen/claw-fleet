@@ -10,6 +10,8 @@ import { HandoffChainRow } from "./HandoffChainRow";
 import { MessageList } from "./MessageList";
 import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { ResumeComposer } from "./ResumeComposer";
+import { ScratchpadView } from "./ScratchpadView";
+import type { ExplorerEntry } from "./ExplorerPane";
 import { SessionIdRow } from "./SessionIdRow";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
@@ -153,7 +155,14 @@ export function SessionDetail({
   // or when viewing a subagent (show sibling tabs + parent).
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowing, setIsFollowing] = useState(true);
-  type ViewTab = "decisions" | "skills" | "messages" | "tokens" | "workflow" | "tasks";
+  type ViewTab =
+    | "decisions"
+    | "skills"
+    | "messages"
+    | "tokens"
+    | "workflow"
+    | "tasks"
+    | "scratchpad";
   const [viewTab, setViewTab] = useState<ViewTab>("messages");
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
   const [taskPlans, setTaskPlans] = useState<TaskPlanDetail[]>([]);
@@ -337,6 +346,41 @@ export function SessionDetail({
     };
   }, [workspacePath, sessionId]);
   const hasTaskPlans = taskPlans.length > 0;
+
+  // Claude Code gives every session a private scratch dir and tells it to keep
+  // temp files there rather than in /tmp. Probe the top level once per session:
+  // an empty list (or an error — the session predates the convention, ran on
+  // another machine, or never wrote a file) means no tab at all. Goes through
+  // the Backend trait, so remote sessions resolve it on the probe host.
+  const [scratchpadCount, setScratchpadCount] = useState(0);
+  useEffect(() => {
+    if (!workspacePath || !sessionId) {
+      setScratchpadCount(0);
+      return;
+    }
+    let cancelled = false;
+    invoke<ExplorerEntry[]>("list_scratchpad_dir", {
+      workspace: workspacePath,
+      sessionId,
+      relPath: "",
+    })
+      .then((entries) => {
+        if (!cancelled) setScratchpadCount(entries?.length ?? 0);
+      })
+      .catch(() => {
+        if (!cancelled) setScratchpadCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [workspacePath, sessionId]);
+  const hasScratchpad = scratchpadCount > 0;
+
+  // Switching to a session without a scratchpad would otherwise strand the view
+  // on a tab whose button no longer renders.
+  useEffect(() => {
+    if (viewTab === "scratchpad" && !hasScratchpad) setViewTab("messages");
+  }, [viewTab, hasScratchpad]);
 
   const pickTab = useCallback((tab: ViewTab) => {
     setViewTab(tab);
@@ -577,6 +621,14 @@ export function SessionDetail({
                 {t("detail.tab_tasks")}
               </button>
             )}
+            {hasScratchpad && (
+              <button
+                className={`${styles.view_tab} ${viewTab === "scratchpad" ? styles.view_tab_active : ""}`}
+                onClick={() => pickTab("scratchpad")}
+              >
+                {t("detail.tab_scratchpad")} ({scratchpadCount})
+              </button>
+            )}
             {hasWorkflows && (
               <button
                 className={`${styles.view_tab} ${viewTab === "workflow" ? styles.view_tab_active : ""}`}
@@ -586,6 +638,10 @@ export function SessionDetail({
               </button>
             )}
           </div>
+
+          {viewTab === "scratchpad" && workspacePath && sessionId && (
+            <ScratchpadView workspace={workspacePath} sessionId={sessionId} />
+          )}
 
           {viewTab === "decisions" && (
             <DecisionHistory records={decisionRecords} mode="tab" />
