@@ -18,7 +18,11 @@ export function safeLinkComponent(): Components["a"] {
         onClick={(e) => {
           e.preventDefault();
           if (isExternal && href) {
-            void openUrl(href);
+            // Surfaced rather than swallowed: when a window's capability is
+            // missing `opener:default`, the ACL rejects this and the link
+            // silently does nothing — which is exactly how that bug hid in
+            // the decision-float window.
+            openUrl(href).catch((err) => console.error("openUrl failed:", href, err));
           }
         }}
       >
