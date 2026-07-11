@@ -1,5 +1,8 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { stampHostClasses } from "./hostClass";
+
+stampHostClasses();
 
 async function boot() {
   const params = new URLSearchParams(window.location.search);
