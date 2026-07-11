@@ -28,6 +28,7 @@ import { SessionDetail } from "./SessionDetail";
 import { StructuredCommandView } from "./StructuredCommandView";
 import { useAutoFlip } from "./useAutoFlip";
 import { decisionAssetUrl } from "../decisionAssets";
+import { AutoHeightFrame } from "./AutoHeightFrame";
 import styles from "./DecisionPanel.module.css";
 
 function shortId(id: string): string {
@@ -1098,14 +1099,24 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
 //
 // Mirrors the elicitation card: stepped questions, header chip, workspace +
 // AI title chips. Extends it with two optional render hooks per the P3 plan:
-//   * `html` field non-empty → sandboxed `<iframe srcdoc>` between the
-//     question body and the answer controls. `sandbox=""` means: no scripts,
-//     no same-origin, no forms, no top-navigation, no popups. The agent gets
-//     a static preview without an XSS vector.
+//   * `html` field non-empty → sandboxed <AutoHeightFrame> between the question
+//     body and the answer controls. No same-origin, no forms, no top-navigation,
+//     no popups; scripts are allowed solely so the opaque-origin document can
+//     postMessage its height back (see AutoHeightFrame). The agent gets a
+//     self-sizing preview without a route into the app's DOM.
 //   * `formFields` non-empty → dynamic controls dispatched on `kind`
 //     (text / textarea / number / select / radio / checkbox).
 // `options` still renders the existing button grid. The three sections compose
 // freely — a single question can carry any subset.
+
+// Shared by both preview paths (served index.html vs inline srcDoc) so a card
+// looks the same whether or not it carries images.
+const FLEET_ASK_FRAME_STYLE = {
+  width: "100%",
+  border: "1px solid var(--decision-card-border, #ccc)",
+  borderRadius: "0.4rem",
+  background: "#fff",
+} as const;
 
 
 function FleetAskFormFieldRow({
@@ -1517,33 +1528,20 @@ function FleetAskCard({
         {q.images && q.images.length > 0 ? (
           // Image-bearing card: load the served index.html (agent html or auto
           // gallery) via the fleet-decision:// protocol so <img src="name">
-          // resolves to the copied files — no base64 in the tool call. Still
-          // sandbox="" (no scripts, opaque origin).
-          <iframe
+          // resolves to the copied files — no base64 in the tool call.
+          <AutoHeightFrame
             title={`fleet-ask-html-${decision.id}-${step}`}
-            sandbox=""
             src={decisionAssetUrl(decision.id, `q${step}`)}
-            style={{
-              width: "100%",
-              minHeight: "200px",
-              border: "1px solid var(--decision-card-border, #ccc)",
-              borderRadius: "0.4rem",
-              background: "#fff",
-            }}
+            minHeight={200}
+            style={FLEET_ASK_FRAME_STYLE}
           />
         ) : (
           q.html && (
-            <iframe
+            <AutoHeightFrame
               title={`fleet-ask-html-${decision.id}-${step}`}
-              sandbox=""
               srcDoc={q.html}
-              style={{
-                width: "100%",
-                minHeight: "200px",
-                border: "1px solid var(--decision-card-border, #ccc)",
-                borderRadius: "0.4rem",
-                background: "#fff",
-              }}
+              minHeight={200}
+              style={FLEET_ASK_FRAME_STYLE}
             />
           )
         )}
