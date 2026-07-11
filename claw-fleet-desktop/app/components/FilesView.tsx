@@ -209,6 +209,11 @@ function WorkspaceExplorer({
   const [activeRoot, setActiveRoot] = useState<ExplorerRoot | null>(null);
   const [showIgnored, setShowIgnored] = useState(false);
   const [tab, setTab] = useState<"files" | "procs">("files");
+  const {
+    width: treeWidth,
+    isDragging: treeDragging,
+    onMouseDown: onTreeMouseDown,
+  } = useResizableWidth("files-tree-width", { min: 140, max: 480, initial: 220 });
 
   const [activeFile, setActiveFile] = useState<ExplorerEntry | null>(null);
 
@@ -371,7 +376,7 @@ function WorkspaceExplorer({
           )}
 
           <div className={skillStyles.detail_split}>
-            <aside className={skillStyles.tree_pane}>
+            <aside className={skillStyles.tree_pane} style={{ width: treeWidth }}>
               <div className={skillStyles.tree_label}>{t("files.tree_label")}</div>
               {roots === null && <p className={skillStyles.tree_empty}>{t("files.loading")}</p>}
               {rootsError && <p className={skillStyles.tree_empty}>{rootsError}</p>}
@@ -384,6 +389,8 @@ function WorkspaceExplorer({
                   onRevealed={clearFileNav}
                 />
               )}
+
+              <ResizeHandle active={treeDragging} onMouseDown={onTreeMouseDown} />
             </aside>
 
             <div className={styles.detail_body}>
