@@ -130,6 +130,15 @@ pub struct SessionInfo {
     /// compact task-progress row on the session card.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub task_plan: Option<crate::prd_tasks::TaskPlanSummary>,
+    /// Background tasks (shells, monitors, …) that were still running the last
+    /// time this session ended a turn — i.e. what it is waiting on. Empty for
+    /// the overwhelming majority of sessions.
+    ///
+    /// Read from the `background_tasks` array of the Stop hook payload, which
+    /// Fleet already records. Stamped at scan time from the hook snapshot rather
+    /// than the cached deep parse: the task list changes while the jsonl doesn't.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub background_tasks: Vec<crate::bg_guard::BackgroundTask>,
     /// Relay-chain position when this session is part of a handoff chain
     /// (`fleet handoff`). `None` = never relayed. Stamped by
     /// `handoff::enrich_sessions` at scan time, not during the cached deep
@@ -1869,6 +1878,7 @@ pub fn parse_session_info(
         rate_limit,
         todos,
         task_plan,
+        background_tasks: Vec::new(),
         handoff: None,
         user_mark: None,
         last_read_ms: None,
@@ -2113,7 +2123,10 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         guard.1.clone()
     };
 
-    let hook_states = crate::hooks::read_hook_states();
+    // One pass over hooks.jsonl yields both the state map and the outstanding
+    // background tasks — the file is huge, so the scan must not read it twice.
+    let hook_snapshot = crate::hooks::read_hook_snapshot();
+    let hook_states = &hook_snapshot.states;
     let session_cache_snapshot = scan_cache.session_cache.lock().unwrap().clone();
 
     let projects_dir = claude_dir.join("projects");
@@ -2214,6 +2227,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
                     age_out_status(&mut info, age);
                     apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
+                    info.background_tasks = hook_snapshot
+                        .background_tasks
+                        .get(&session_id)
+                        .cloned()
+                        .unwrap_or_default();
                     info.pid = session_pid;
                     info.pid_precise = pid_precise;
                     info.ide_name = ide_name.clone();
@@ -2235,6 +2253,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                     hook_states.get(&session_id),
                 ) {
                     apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
+                    info.background_tasks = hook_snapshot
+                        .background_tasks
+                        .get(&session_id)
+                        .cloned()
+                        .unwrap_or_default();
                     scan_cache.session_cache.lock().unwrap()
                         .insert(path.to_string_lossy().to_string(), (info.last_activity_ms, info.clone()));
                     sessions.push(info);
@@ -2743,6 +2766,7 @@ mod tests {
             last_outcome: None,
             rate_limit: None,
             todos: None,
+            background_tasks: Vec::new(),
             task_plan: None, handoff: None, user_mark: None, last_read_ms: None,
             compact_count: 0,
             compact_pre_tokens: 0,
