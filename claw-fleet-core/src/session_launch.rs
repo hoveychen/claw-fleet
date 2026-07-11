@@ -106,6 +106,31 @@ pub fn permission_prompt_tool_args() -> Vec<String> {
     }
 }
 
+/// Args that turn a headless spawn's stdout into the live-thinking stream:
+/// emit the streaming JSON payload (incremental `thinking_delta` events) so it
+/// can be teed to a sidecar (see [`crate::live_thinking`]). This only changes
+/// stdout, which Fleet otherwise discards; the JSONL transcript the scanner
+/// reads is unaffected. `--verbose` is required for stream-json in `--print`
+/// mode; `--include-partial-messages` adds the token-level deltas.
+pub(crate) fn live_thinking_stream_args() -> Vec<String> {
+    vec![
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--include-partial-messages".to_string(),
+        // Claude 5-family / Opus 4.8 default `thinking.display` to "omitted",
+        // which turns every thinking_delta (and the persisted JSONL thinking
+        // block) into empty text. Explicitly request the summarized display so
+        // headless sessions stream readable thinking again. Hidden CLI flag
+        // (not in --help), present since 2.1.206; models whose summarizer is
+        // unavailable (opus-4-8 as of 2026-07-11) still return empty text, and
+        // models that never had a display distinction ignore it — the flag is
+        // additive-only either way.
+        "--thinking-display".to_string(),
+        "summarized".to_string(),
+    ]
+}
+
 /// Spawn `claude <args>` detached in `workspace_path`, with stderr redirected
 /// to `stderr_log` and a background thread that reaps the child and records
 /// its exit status — so failures are not silent and we don't accumulate
@@ -393,15 +418,7 @@ pub fn spawn_new_session_with_entrypoint(
         "--session-id".to_string(),
         session_id.clone(),
     ];
-    // Emit the streaming JSON payload (incremental thinking_delta events) to
-    // stdout so it can be teed to a live-thinking sidecar. This only changes
-    // stdout, which Fleet otherwise discards; the JSONL transcript the scanner
-    // reads is unaffected. `--verbose` is required for stream-json in
-    // `--print` mode; `--include-partial-messages` adds the token-level deltas.
-    args.push("--output-format".to_string());
-    args.push("stream-json".to_string());
-    args.push("--verbose".to_string());
-    args.push("--include-partial-messages".to_string());
+    args.extend(live_thinking_stream_args());
     args.extend(override_args);
     args.extend(permission_prompt_tool_args());
     crate::log_debug(&format!(
@@ -434,6 +451,25 @@ pub fn spawn_new_session_with_entrypoint(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn live_thinking_stream_args_request_summarized_thinking() {
+        // Claude 5-family and Opus 4.8 default `thinking.display` to "omitted",
+        // so a headless `-p` spawn gets thinking_delta events (and JSONL
+        // thinking blocks) with empty text — the live-thinking sidecar renders
+        // nothing. The spawn must explicitly request "summarized" to get
+        // content back (verified against CLI 2.1.206 / fable-5, 2026-07-11).
+        let args = super::live_thinking_stream_args();
+        let idx = args.iter().position(|a| a == "--thinking-display");
+        assert!(
+            idx.is_some(),
+            "headless spawns must pass --thinking-display, got: {args:?}"
+        );
+        assert_eq!(
+            args.get(idx.unwrap() + 1).map(String::as_str),
+            Some("summarized")
+        );
+    }
+
     #[test]
     fn spawn_new_session_rejects_empty_prompt() {
         // Prompt validation must fire before any CLI/filesystem checks so the
