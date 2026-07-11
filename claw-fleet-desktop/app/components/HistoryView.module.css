@@ -202,11 +202,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 4px;
+  gap: 5px;
   flex: 1 1 0;
   min-width: 0;
-  padding: 5px 6px;
-  font-size: 11px;
+  padding: 6px 8px;
   color: var(--color-text-dim);
   background: var(--color-bg);
   border: none;
@@ -246,6 +245,7 @@
 }
 
 .mark_seg_count {
+  font-size: 12px;
   color: var(--color-text-dim);
   font-variant-numeric: tabular-nums;
 }
