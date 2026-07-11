@@ -629,10 +629,18 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
             Ok(())
         });
     }
+    // 3. Control socket: stdin + resize, JSON lines per connection. Bound
+    //    BEFORE the command spawns — a bind failure must not leave an
+    //    unmanaged command behind.
+    let sock = sock_path(dir, id);
+    let _ = fs::remove_file(&sock);
+    let listener = std::os::unix::net::UnixListener::bind(&sock)
+        .map_err(|e| format!("bind {}: {e}", sock.display()))?;
+
     let mut child = cmd.spawn().map_err(|e| format!("spawn {shell}: {e}"))?;
     drop(slave_fd);
 
-    // 3. Report in: from here the host owns the meta file.
+    // 4. Report in: from here the host owns the meta file.
     let host_pid = std::process::id();
     rec.status = ProcStatus::Running;
     rec.child_pid = Some(child.id());
@@ -640,11 +648,6 @@ fn run_host(dir: &Path, id: &str) -> Result<i32, String> {
     rec.host_start_time = crate::session::process_start_time(host_pid);
     write_record(dir, &rec)?;
 
-    // 4. Control socket: stdin + resize, JSON lines per connection.
-    let sock = sock_path(dir, id);
-    let _ = fs::remove_file(&sock);
-    let listener = std::os::unix::net::UnixListener::bind(&sock)
-        .map_err(|e| format!("bind {}: {e}", sock.display()))?;
     {
         use std::os::fd::AsRawFd;
         let master_raw = master_fd.as_raw_fd();
