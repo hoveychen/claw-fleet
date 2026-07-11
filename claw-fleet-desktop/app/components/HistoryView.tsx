@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderGit2, History, List, Plus, Search } from "lucide-react";
-import { useSessionsStore, useUIStore } from "../store";
+import { CheckCheck, FolderGit2, History, List, Plus, Search } from "lucide-react";
+import { useReadStore, useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
-import { isFleetOwnedEntrypoint } from "../types";
+import { isFleetOwnedEntrypoint, sessionUnread } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
@@ -126,6 +126,11 @@ export function HistoryView() {
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["history"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const { sessions, scanReady } = useSessionsStore();
+  // Read/unread axis — optimistic overrides hide the dot before the next scan
+  // re-stamps `lastReadMs`; see useReadStore.
+  const readOverrides = useReadStore((s) => s.overrides);
+  const markRead = useReadStore((s) => s.markRead);
+  const markManyRead = useReadStore((s) => s.markManyRead);
 
   const [query, setQuery] = useState("");
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
@@ -200,6 +205,14 @@ export function HistoryView() {
     [adhocSessions],
   );
 
+  // Every launchpad session with newer activity than its last read — drives the
+  // "一键清除未读" button. Scoped to all adhoc sessions (not the filtered rows) so
+  // the button truly zeroes the unread count / sidebar badge.
+  const unreadSessions = useMemo(
+    () => adhocSessions.filter((s) => sessionUnread(s, readOverrides[s.id])),
+    [adhocSessions, readOverrides],
+  );
+
   const handleRowClick = (s: SessionInfo) => {
     const isFtsHit = query.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
     setComposing(false);
@@ -251,6 +264,18 @@ export function HistoryView() {
     const id = setTimeout(() => setStartTimedOut(true), START_TIMEOUT_MS);
     return () => clearTimeout(id);
   }, [pending]);
+
+  // Dwell-to-read: staying on a selected session for 2s marks it read. Clicking
+  // away (or unmounting) before the timer fires cancels it, so a quick glance
+  // doesn't clear the unread dot. Re-keyed on the selected id, not its activity,
+  // so a still-streaming session can flip back to unread and get re-read on a
+  // later visit — matching "new message after last read → unread".
+  useEffect(() => {
+    if (!selected) return;
+    const target = selected;
+    const id = setTimeout(() => markRead(target), 2000);
+    return () => clearTimeout(id);
+  }, [selected?.id, markRead]);
 
   return (
     <div className={styles.page}>
@@ -306,6 +331,16 @@ export function HistoryView() {
               <span className={styles.active_toggle_dot} />
               {t("history.only_active", "仅活跃")}
               <span>{activeCount}</span>
+            </button>
+            <button
+              type="button"
+              className={styles.mark_all_read}
+              disabled={unreadSessions.length === 0}
+              onClick={() => markManyRead(unreadSessions)}
+              title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
+            >
+              <CheckCheck size={13} strokeWidth={1.8} />
+              {t("history.mark_all_read", "全部已读")}
             </button>
           </div>
           <div
@@ -376,6 +411,13 @@ export function HistoryView() {
                       <span
                         className={styles.row_bar}
                         style={{ background: rowBarColor(s)! }}
+                      />
+                    )}
+                    {sessionUnread(s, readOverrides[s.id]) && (
+                      <span
+                        className={styles.unread_dot}
+                        title={t("history.unread", "未读 — 有新消息")}
+                        aria-label={t("history.unread", "未读 — 有新消息")}
                       />
                     )}
                     <span className={styles.row_body}>
