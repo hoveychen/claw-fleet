@@ -12,7 +12,12 @@ import type {
 } from "../types";
 import { ShieldCheck } from "lucide-react";
 import { EmptyState } from "./EmptyState";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 import styles from "./AuditView.module.css";
+
+/** The audit detail pane sits on the right, so it grows as the cursor moves left. */
+const AUDIT_RAIL = { min: 280, max: 720, initial: 380, side: "right" } as const;
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 
 // ── Risk level helpers ──────────────────────────────────────────────────────
@@ -93,6 +98,11 @@ function EventsTab() {
   const { setViewMode } = useUIStore();
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["audit"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
+  const {
+    width: railWidth,
+    isDragging: railDragging,
+    onMouseDown: onRailMouseDown,
+  } = useResizableWidth("audit-rail-width", AUDIT_RAIL);
   const { isRead, markAsRead, getEventKey, setCriticalEvents, markAllCriticalAsRead, unreadCriticalCount } =
     useAuditStore();
 
@@ -255,7 +265,8 @@ function EventsTab() {
           <CollapsedSidebarRail side="right" onExpand={() => setSecondarySidebar("audit", false)} />
         )}
         {selectedEvent && !collapsed && (
-          <main className={styles.detail_pane}>
+          <main className={styles.detail_pane} style={{ width: railWidth }}>
+            <ResizeHandle side="right" active={railDragging} onMouseDown={onRailMouseDown} />
             <div className={styles.detail_header}>
               <div className={styles.detail_title}>
                 <span className={`${styles.risk_badge} ${styles[RISK_CLASS[selectedEvent.riskLevel]]}`}>
@@ -307,6 +318,11 @@ function RulesTab({ lang }: { lang: string }) {
   const { t } = useTranslation();
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["audit"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
+  const {
+    width: railWidth,
+    isDragging: railDragging,
+    onMouseDown: onRailMouseDown,
+  } = useResizableWidth("audit-rail-width", AUDIT_RAIL);
   const [rules, setRules] = useState<AuditRuleInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRule, setSelectedRule] = useState<AuditRuleInfo | null>(null);
@@ -471,7 +487,8 @@ function RulesTab({ lang }: { lang: string }) {
           <CollapsedSidebarRail side="right" onExpand={() => setSecondarySidebar("audit", false)} />
         )}
         {selectedRule && !collapsed && (
-          <main className={styles.detail_pane}>
+          <main className={styles.detail_pane} style={{ width: railWidth }}>
+            <ResizeHandle side="right" active={railDragging} onMouseDown={onRailMouseDown} />
             <div className={styles.detail_header}>
               <div className={styles.detail_title}>
                 <span className={`${styles.risk_badge} ${styles[RISK_CLASS[selectedRule.level]]}`}>

@@ -10,8 +10,9 @@
 }
 
 .rail {
+  position: relative; /* anchors the ResizeHandle */
   flex-shrink: 0;
-  width: 300px;
+  width: 300px; /* start value; overridden inline by useResizableWidth */
   display: flex;
   flex-direction: column;
   height: 100%;

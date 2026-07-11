@@ -1,0 +1,33 @@
+.handle {
+  position: absolute;
+  top: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+  transition: background 0.15s;
+}
+
+.handle_right_edge {
+  right: -3px;
+}
+
+.handle_left_edge {
+  left: -3px;
+}
+
+/* Floating panels clip their overflow, so pull the handle inside the pane
+   to keep the full hit-area usable. */
+:global([data-platform]) .handle_right_edge {
+  right: 0;
+}
+
+:global([data-platform]) .handle_left_edge {
+  left: 0;
+}
+
+.handle:hover,
+.handle_active {
+  background: var(--color-accent);
+  opacity: 0.5;
+}
