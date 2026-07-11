@@ -4,6 +4,8 @@ import { useTranslation } from "react-i18next";
 
 import { FilePreview, FileTree } from "./ExplorerPane";
 import type { ExplorerEntry, ExplorerFileContent } from "./ExplorerPane";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 
@@ -21,6 +23,11 @@ export function ScratchpadView({
 }) {
   const { t } = useTranslation();
   const [activeFile, setActiveFile] = useState<ExplorerEntry | null>(null);
+  const {
+    width: treeWidth,
+    isDragging: treeDragging,
+    onMouseDown: onTreeMouseDown,
+  } = useResizableWidth("scratchpad-tree-width", { min: 140, max: 480, initial: 220 });
 
   const loadDir = useCallback(
     async (relPath: string): Promise<ExplorerEntry[] | null> => {
@@ -45,9 +52,11 @@ export function ScratchpadView({
 
   return (
     <div className={skillStyles.detail_split}>
-      <aside className={skillStyles.tree_pane}>
+      <aside className={skillStyles.tree_pane} style={{ width: treeWidth }}>
         <div className={skillStyles.tree_label}>{t("detail.scratchpad_tree_label")}</div>
         <FileTree loadDir={loadDir} activeFile={activeFile} onPick={setActiveFile} />
+
+        <ResizeHandle active={treeDragging} onMouseDown={onTreeMouseDown} />
       </aside>
 
       <div className={styles.detail_body}>
