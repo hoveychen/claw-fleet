@@ -10,6 +10,7 @@ import {
   type ChatComposerStagedAttachment,
 } from "./ChatComposer";
 import { SessionOptionPills } from "./SessionOptionPills";
+import { useComposerDraft } from "../composerDraft";
 import styles from "./ResumeComposer.module.css";
 
 function basename(p: string): string {
@@ -33,11 +34,16 @@ export function ResumeComposer({
   onResumed: () => void;
 }) {
   const { t } = useTranslation();
-  const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("");
-  const [effort, setEffort] = useState("");
-  const [permissionMode, setPermissionMode] = useState("");
-  const [attachments, setAttachments] = useState<ChatComposerAttachment[]>([]);
+  // Draft (prompt / options / attachments) is lifted into a store keyed by the
+  // session id, so switching to another session and back — or the resume dock
+  // unmounting — no longer wipes an in-progress follow-up. Each session keeps
+  // its own draft slot.
+  const { draft, patch, clear } = useComposerDraft(sessionId);
+  const { prompt, model, effort, permissionMode, attachments } = draft;
+  const setPrompt = (v: string) => patch({ prompt: v });
+  const setModel = (v: string) => patch({ model: v });
+  const setEffort = (v: string) => patch({ effort: v });
+  const setPermissionMode = (v: string) => patch({ permissionMode: v });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const composerRef = useRef<ChatComposerHandle | null>(null);
@@ -47,9 +53,8 @@ export function ResumeComposer({
   }, []);
 
   const addAttachmentEntry = (entry: ChatComposerAttachment) => {
-    setAttachments((prev) =>
-      prev.some((a) => a.path === entry.path) ? prev : [...prev, entry],
-    );
+    if (attachments.some((a) => a.path === entry.path)) return;
+    patch({ attachments: [...attachments, entry] });
   };
 
   const handleAddAttachment = (s: ChatComposerStagedAttachment) => {
@@ -64,11 +69,9 @@ export function ResumeComposer({
   };
 
   const handleRemoveAttachment = (path: string) => {
-    setAttachments((prev) => {
-      const removed = prev.find((a) => a.path === path);
-      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
-      return prev.filter((a) => a.path !== path);
-    });
+    const removed = attachments.find((a) => a.path === path);
+    if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl);
+    patch({ attachments: attachments.filter((a) => a.path !== path) });
   };
 
   const pickFiles = async () => {
@@ -104,6 +107,7 @@ export function ResumeComposer({
         effort: effort || null,
         permissionMode: permissionMode || null,
       });
+      clear();
       onResumed();
     } catch (e) {
       setError(String((e as { message?: string })?.message ?? e));
