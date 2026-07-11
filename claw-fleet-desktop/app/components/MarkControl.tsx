@@ -16,8 +16,10 @@ import styles from "./HistoryView.module.css";
 export function MarkControl({ session }: { session: SessionInfo }) {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
-  // Optimistic override so the icon reacts on click; the scanner re-enriches
-  // `userMark` within a few seconds and converges. `undefined` = no override.
+  // Optimistic override so the icon reacts on the click rather than on the
+  // round-trip; `set_session_mark` re-stamps `userMark` and emits
+  // `sessions-updated`, so the store converges right behind it. `undefined` =
+  // no override.
   const [override, setOverride] = useState<boolean | undefined>(undefined);
   const isDone = override !== undefined ? override : session.userMark === "done";
 
