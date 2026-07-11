@@ -252,6 +252,7 @@ function WorkspaceExplorer({ workspace, name }: { workspace: string; name: strin
       <div className={skillStyles.detail_split}>
         <aside className={skillStyles.tree_pane}>
           <div className={skillStyles.tree_label}>{t("files.tree_label")}</div>
+          {roots === null && <p className={skillStyles.tree_empty}>{t("files.loading")}</p>}
           {rootsError && <p className={skillStyles.tree_empty}>{rootsError}</p>}
           {activeRoot && (
             <FileTree loadDir={loadDir} activeFile={activeFile} onPick={setActiveFile} />
