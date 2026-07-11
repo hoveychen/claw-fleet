@@ -301,10 +301,7 @@ fn spawn_resume_with_path(
     // Stream the token-level thinking to stdout so it can be teed to a
     // live-thinking sidecar (same rationale as `session_launch::spawn_new_session`;
     // stdout was otherwise discarded, the JSONL transcript is unaffected).
-    args.push("--output-format".to_string());
-    args.push("stream-json".to_string());
-    args.push("--verbose".to_string());
-    args.push("--include-partial-messages".to_string());
+    args.extend(crate::session_launch::live_thinking_stream_args());
     args.extend(override_args.iter().cloned());
     // Route native permission prompts to Fleet's Decision Panel instead of
     // headless auto-deny (no-op when the fleet MCP server isn't injected).
@@ -363,6 +360,7 @@ mod tests {
             last_outcome: None,
             rate_limit: rl,
             todos: None,
+            background_tasks: Vec::new(),
             task_plan: None, handoff: None, user_mark: None, last_read_ms: None,            compact_count: 0,
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
