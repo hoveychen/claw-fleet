@@ -186,14 +186,15 @@
 
 /* ── Workspace command runner (ProcPanel) ─────────────────────────────────── */
 
+/* The 命令 tab fills the detail pane; the launcher stays pinned at the top and
+ * the proc list scrolls under it. */
 .proc_panel {
-  flex-shrink: 0;
-  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.25));
-  padding: 8px 16px 12px;
+  flex: 1;
+  min-height: 0;
+  padding: 12px 24px 16px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: 45%;
   overflow-y: auto;
 }
 
@@ -201,22 +202,6 @@
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.proc_title {
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-secondary, #999);
-}
-
-.proc_count {
-  font-size: 10px;
-  padding: 0 6px;
-  border-radius: 999px;
-  background: rgba(128, 128, 128, 0.18);
-  color: var(--text-secondary, #999);
 }
 
 .proc_spacer {
