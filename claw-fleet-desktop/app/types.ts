@@ -51,6 +51,33 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
   );
 }
 
+/** Statuses that mean a turn is genuinely in flight. Note `waitingInput` is
+ *  deliberately absent: for the headless `claude -p` sessions Fleet spawns it
+ *  means the turn ended (stop_reason=end_turn) and the process is normally
+ *  gone — liveness is decided by `procAlive`, not by this set. */
+const IN_FLIGHT_STATUSES = new Set<SessionStatus>([
+  "thinking",
+  "executing",
+  "streaming",
+  "processing",
+  "active",
+  "delegating",
+]);
+
+/**
+ * Whether the detail view may offer the resume composer: a Fleet-launched main
+ * session whose process is no longer running, so `claude --resume` spawns a
+ * fresh turn rather than racing a live one.
+ */
+export function canResumeSession(s: SessionInfo): boolean {
+  return (
+    !s.isSubagent &&
+    isFleetOwnedEntrypoint(s.entrypoint) &&
+    !s.procAlive &&
+    !IN_FLIGHT_STATUSES.has(s.status)
+  );
+}
+
 /**
  * Whether a session counts as *unread*: it has newer activity than the last
  * time it was read. `overrideReadMs` is the optimistic client-side read stamp
@@ -98,6 +125,11 @@ export interface SessionInfo {
   thinkingLevel: string | null;
   pid: number | null;
   pidPrecise: boolean;
+  /** True when a live CLI process carries this exact session id in its argv
+   *  (`--session-id` / `--resume`). Unlike `status`, this is definitive for
+   *  Fleet-spawned sessions: `waitingInput` covers both "turn ended, process
+   *  gone" and "process alive, parked on a decision card". */
+  procAlive: boolean;
   lastSkill: string | null;
   contextPercent: number | null;
   agentSource: "claude-code" | "cursor" | "openclaw" | "codex";
