@@ -1685,7 +1685,7 @@
   },
   "history": {
     "title": "启动台",
-    "search_placeholder": "搜索标题、提示词、全文…",
+    "search_placeholder": "搜索标题、计划、全文…",
     "empty": "还没有会话，点右上角“新会话”发起一个",
     "no_match": "没有匹配的会话",
     "untitled": "（无标题）",
