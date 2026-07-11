@@ -1433,6 +1433,9 @@ impl StatsAcc {
     }
 }
 
+/// The batch-free original, kept as the oracle [`SessionAcc`]'s tests compare
+/// against — the scan path itself now folds incrementally and no longer calls it.
+#[cfg(test)]
 fn compute_session_stats(lines: &[&str]) -> SessionStats {
     let mut acc = StatsAcc::new();
     acc.push_lines(lines);
@@ -1996,6 +1999,9 @@ fn extract_last_skill(last_lines: &[Value]) -> Option<String> {
 /// the Claude CLI from `CLAUDE_CODE_ENTRYPOINT` at spawn time). First record
 /// only, so later `--resume` runs — which stamp their own entrypoint on the
 /// records they append — don't reclassify the session.
+/// Kept as the oracle `SessionAcc`'s entrypoint tests compare against; the scan
+/// path folds it forward instead of re-scanning the file.
+#[cfg(test)]
 fn extract_entrypoint(all_lines: &[&str]) -> Option<String> {
     all_lines
         .iter()
