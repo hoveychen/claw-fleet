@@ -26,6 +26,8 @@ import { ProcPanel } from "./ProcPanel";
 import { ProcTerminal } from "./ProcTerminal";
 import { FilePreview, FileTree } from "./ExplorerPane";
 import type { ExplorerEntry, ExplorerFileContent, RevealRequest } from "./ExplorerPane";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
@@ -80,6 +82,11 @@ export function FilesView() {
   const { t } = useTranslation();
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["files"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
+  const {
+    width: railWidth,
+    isDragging: railDragging,
+    onMouseDown: onRailMouseDown,
+  } = useResizableWidth("files-rail-width", { min: 200, max: 640, initial: 340 });
   const sessions = useSessionsStore((s) => s.sessions);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const procs = useProcStore((s) => s.procs);
@@ -131,7 +138,7 @@ export function FilesView() {
         {collapsed ? (
           <CollapsedSidebarRail onExpand={() => setSecondarySidebar("files", false)} />
         ) : (
-        <aside className={styles.list_pane}>
+        <aside className={styles.list_pane} style={{ width: railWidth }}>
           {workspaces.length === 0 && (
             <EmptyState
               icon={<FolderOpen size={28} strokeWidth={1.5} />}
@@ -161,6 +168,8 @@ export function FilesView() {
               </button>
             ))}
           </div>
+
+          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
         </aside>
         )}
 

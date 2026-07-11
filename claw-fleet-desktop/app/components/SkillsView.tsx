@@ -6,6 +6,8 @@ import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { useConnectionStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 
@@ -92,6 +94,11 @@ export function SkillsView() {
   const { t } = useTranslation();
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["skills"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
+  const {
+    width: railWidth,
+    isDragging: railDragging,
+    onMouseDown: onRailMouseDown,
+  } = useResizableWidth("skills-rail-width", { min: 200, max: 640, initial: 340 });
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -148,7 +155,7 @@ export function SkillsView() {
         {collapsed ? (
           <CollapsedSidebarRail onExpand={() => setSecondarySidebar("skills", false)} />
         ) : (
-        <aside className={styles.list_pane}>
+        <aside className={styles.list_pane} style={{ width: railWidth }}>
           {!loaded && <p className={styles.empty}>{t("skills.loading")}</p>}
           {loaded && filtered.length === 0 && (
             <EmptyState
@@ -167,6 +174,8 @@ export function SkillsView() {
               />
             ))}
           </div>
+
+          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
         </aside>
         )}
 

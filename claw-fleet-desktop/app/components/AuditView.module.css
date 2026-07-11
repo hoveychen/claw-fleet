@@ -236,7 +236,8 @@
 }
 
 .detail_pane {
-  width: 380px;
+  position: relative; /* anchors the ResizeHandle */
+  width: 380px; /* start value; overridden inline by useResizableWidth */
   flex-shrink: 0;
   border-left: 1px solid var(--color-border);
   display: flex;

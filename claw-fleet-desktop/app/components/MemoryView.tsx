@@ -8,6 +8,8 @@ import { EmptyState } from "./EmptyState";
 import { useAutoFlip } from "./useAutoFlip";
 import { useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
+import { useResizableWidth } from "../hooks/useResizableWidth";
+import { ResizeHandle } from "./ResizeHandle";
 import styles from "./MemoryView.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -110,6 +112,11 @@ export function MemoryView() {
   const { t } = useTranslation();
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["memory"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
+  const {
+    width: railWidth,
+    isDragging: railDragging,
+    onMouseDown: onRailMouseDown,
+  } = useResizableWidth("memory-rail-width", { min: 200, max: 640, initial: 340 });
   const [memories, setMemories] = useState<WorkspaceMemory[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -251,7 +258,7 @@ export function MemoryView() {
         {collapsed ? (
           <CollapsedSidebarRail onExpand={() => setSecondarySidebar("memory", false)} />
         ) : (
-        <aside className={styles.list_pane}>
+        <aside className={styles.list_pane} style={{ width: railWidth }}>
           {!loaded && <p className={styles.empty}>{t("memory.loading")}</p>}
           {loaded && filtered.length === 0 && (
             <EmptyState
@@ -342,6 +349,8 @@ export function MemoryView() {
               </div>
             );
           })}
+
+          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
         </aside>
         )}
 
