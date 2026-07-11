@@ -6,7 +6,7 @@ import { FolderOpen, GitBranch } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
-import { useProcStore, useSessionsStore, useUIStore } from "../store";
+import { runningProcCounts, useProcStore, useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { ProcPanel } from "./ProcPanel";
 import { ProcTerminal } from "./ProcTerminal";
@@ -66,7 +66,11 @@ export function FilesView() {
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
   const sessions = useSessionsStore((s) => s.sessions);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
+  const procs = useProcStore((s) => s.procs);
   const [selected, setSelected] = useState<string | null>(null);
+
+  // Running workspace-command count per workspace → card badges.
+  const runningCounts = useMemo(() => runningProcCounts(procs), [procs]);
 
   // Poll the workspace-proc registry while the 文件 page is open — drives
   // both the per-workspace badges and the ProcPanel lists.
@@ -123,6 +127,14 @@ export function FilesView() {
                   <div className={styles.card_title}>{ws.name}</div>
                   <div className={styles.card_hook}>{ws.path}</div>
                 </div>
+                {(runningCounts.get(ws.path) ?? 0) > 0 && (
+                  <span
+                    className={fileStyles.ws_badge}
+                    title={t("files.proc_running")}
+                  >
+                    {runningCounts.get(ws.path)}
+                  </span>
+                )}
               </button>
             ))}
           </div>
