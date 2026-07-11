@@ -2,10 +2,19 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { FolderOpen, GitBranch } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  FileDiff,
+  FolderOpen,
+  GitBranch,
+  Upload,
+} from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import styles from "./MemoryView.module.css";
@@ -35,6 +44,21 @@ type ExplorerFileContent =
   | { kind: "text"; content: string; truncated: boolean; sizeBytes: number }
   | { kind: "image"; base64: string; mime: string; sizeBytes: number }
   | { kind: "binary"; sizeBytes: number };
+
+// mirror claw-fleet-core/src/git_ops.rs
+interface GitStatus {
+  isGit: boolean;
+  branch: string | null;
+  upstream: string | null;
+  ahead: number | null;
+  behind: number | null;
+  dirtyCount: number;
+}
+
+interface GitOpResult {
+  ok: boolean;
+  output: string;
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -292,6 +316,10 @@ function WorkspaceExplorer({ workspace, name }: { workspace: string; name: strin
         </div>
       )}
 
+      {activeRoot && (
+        <GitStatusBar key={activeRoot.path} workspace={workspace} root={activeRoot.path} />
+      )}
+
       <div className={skillStyles.detail_split}>
         <aside className={skillStyles.tree_pane}>
           <div className={skillStyles.tree_label}>{t("files.tree_label")}</div>
@@ -312,6 +340,139 @@ function WorkspaceExplorer({ workspace, name }: { workspace: string; name: strin
         </div>
       </div>
     </>
+  );
+}
+
+// ── Source-control status bar for the active root ────────────────────────────
+
+function GitStatusBar({ workspace, root }: { workspace: string; root: string }) {
+  const { t } = useTranslation();
+  const [status, setStatus] = useState<GitStatus | null>(null);
+  const [busy, setBusy] = useState<null | "push" | "pull">(null);
+  const [confirm, setConfirm] = useState<null | "push" | "pull">(null);
+  const [opMsg, setOpMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const refresh = useCallback(() => {
+    invoke<GitStatus>("git_status", { workspace, root })
+      .then(setStatus)
+      .catch(() => setStatus(null));
+  }, [workspace, root]);
+
+  useEffect(() => {
+    setOpMsg(null);
+    refresh();
+  }, [refresh]);
+
+  const runOp = useCallback(
+    async (op: "push" | "pull") => {
+      setConfirm(null);
+      setBusy(op);
+      setOpMsg(null);
+      try {
+        const res = await invoke<GitOpResult>(op === "push" ? "git_push" : "git_pull", {
+          workspace,
+          root,
+        });
+        setOpMsg({
+          ok: res.ok,
+          text: res.output || (res.ok ? t("files.scm.op_ok") : t("files.scm.op_failed")),
+        });
+        refresh();
+      } catch (e) {
+        setOpMsg({ ok: false, text: String(e) });
+      } finally {
+        setBusy(null);
+      }
+    },
+    [workspace, root, refresh, t],
+  );
+
+  // Nothing to show for non-git roots (plain directories).
+  if (!status || !status.isGit) return null;
+
+  const ahead = status.ahead ?? 0;
+  const behind = status.behind ?? 0;
+  const dirty = status.dirtyCount;
+  const clean = ahead === 0 && behind === 0 && dirty === 0;
+
+  const confirmMsg =
+    confirm === "push"
+      ? t("files.scm.push_confirm", {
+          branch: status.branch ?? "HEAD",
+          upstream: status.upstream ?? t("files.scm.default_remote"),
+        })
+      : t("files.scm.pull_confirm", { branch: status.branch ?? "HEAD" });
+
+  return (
+    <div className={fileStyles.scm_bar}>
+      <div className={fileStyles.scm_chips}>
+        {status.upstream == null ? (
+          <span className={fileStyles.scm_muted}>{t("files.scm.no_upstream")}</span>
+        ) : clean ? (
+          <span className={fileStyles.scm_synced}>
+            <Check size={12} strokeWidth={2} />
+            {t("files.scm.synced")}
+          </span>
+        ) : null}
+        {ahead > 0 && (
+          <span className={`${fileStyles.scm_chip} ${fileStyles.scm_chip_ahead}`}>
+            <ArrowUp size={12} strokeWidth={2} />
+            {t("files.scm.ahead", { n: ahead })}
+          </span>
+        )}
+        {behind > 0 && (
+          <span className={`${fileStyles.scm_chip} ${fileStyles.scm_chip_behind}`}>
+            <ArrowDown size={12} strokeWidth={2} />
+            {t("files.scm.behind", { n: behind })}
+          </span>
+        )}
+        {dirty > 0 && (
+          <span className={`${fileStyles.scm_chip} ${fileStyles.scm_chip_dirty}`}>
+            <FileDiff size={12} strokeWidth={2} />
+            {t("files.scm.dirty", { n: dirty })}
+          </span>
+        )}
+      </div>
+
+      <div className={fileStyles.scm_spacer} />
+
+      <div className={fileStyles.scm_actions}>
+        <button
+          className={fileStyles.scm_btn}
+          disabled={busy !== null}
+          onClick={() => setConfirm("pull")}
+          title={t("files.scm.pull")}
+        >
+          <ArrowDown size={12} strokeWidth={1.5} />
+          {busy === "pull" ? t("files.scm.pulling") : t("files.scm.pull")}
+        </button>
+        <button
+          className={fileStyles.scm_btn}
+          disabled={busy !== null}
+          onClick={() => setConfirm("push")}
+          title={t("files.scm.push")}
+        >
+          <Upload size={12} strokeWidth={1.5} />
+          {busy === "push" ? t("files.scm.pushing") : t("files.scm.push")}
+        </button>
+      </div>
+
+      {opMsg && (
+        <div
+          className={`${fileStyles.scm_msg} ${opMsg.ok ? fileStyles.scm_msg_ok : fileStyles.scm_msg_err}`}
+        >
+          {opMsg.text}
+        </div>
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          message={confirmMsg}
+          onConfirm={() => void runOp(confirm)}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+    </div>
   );
 }
 

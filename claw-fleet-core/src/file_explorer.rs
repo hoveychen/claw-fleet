@@ -215,6 +215,18 @@ pub fn read_file(
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
+/// Validate `workspace` is known and `root` is one of its browsable roots,
+/// returning the canonical root path. Shared with the `git_ops`
+/// source-control surface so it inherits the exact same access checks.
+pub(crate) fn resolve_validated_root(
+    workspace: &str,
+    root: &str,
+    known_workspaces: &[String],
+) -> Result<PathBuf, String> {
+    let ws = validate_workspace(workspace, known_workspaces)?;
+    resolve_root(&ws, root)
+}
+
 fn validate_workspace(workspace: &str, known_workspaces: &[String]) -> Result<PathBuf, String> {
     let ws = fs::canonicalize(workspace).map_err(|e| format!("workspace: {e}"))?;
     let known = known_workspaces

@@ -22,6 +22,7 @@ pub mod elicitation;
 pub mod feishu;
 pub mod file_explorer;
 pub mod foxy;
+pub mod git_ops;
 pub mod guard;
 pub mod handoff;
 pub mod hooks;
