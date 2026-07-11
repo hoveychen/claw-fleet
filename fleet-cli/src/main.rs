@@ -2613,12 +2613,44 @@ fn cmd_plan_approval() {
 /// `fleet session idle` — Stop-hook entrypoint. Marks the current session idle
 /// so the supervisor's tick flips the kanban card from Running → Pending.
 ///
+/// Also the background-task guard (see [`claw_fleet_core::bg_guard`]): when a
+/// *headless* session tries to end a turn with background work still running,
+/// this exits 2, which Claude Code reads as "don't stop" and feeds the stderr
+/// text back to the agent as its next instruction. That keeps the CLI process —
+/// and therefore the background shells, which a `-p` run kills ~5s after its
+/// final result — alive until the agent collects the results in the foreground.
+///
 /// Silently exits 0 if FLEET_SESSION_ID is unset (e.g. user has global Fleet
 /// hooks installed but ran claude outside the supervisor) — never blocks the hook.
 fn cmd_session_idle() {
+    // Hooks receive their payload as JSON on stdin. Guard against a terminal:
+    // a hand-run `fleet session idle` has no piped stdin and would otherwise
+    // block on a read that never EOFs (the Stop hook's budget is 5s).
+    let stop_payload = {
+        use std::io::{IsTerminal, Read};
+        let mut buf = String::new();
+        if !std::io::stdin().is_terminal() {
+            let _ = std::io::stdin().read_to_string(&mut buf);
+        }
+        claw_fleet_core::bg_guard::parse_stop_payload(&buf)
+    };
+
     let Some(sid) = read_fleet_session_id() else {
         return;
     };
+
+    // Refuse the stop *before* marking idle or firing the relay: the turn isn't
+    // actually over. Marking it idle would flip the kanban card to Pending while
+    // the agent keeps working, and consuming the handoff here would hand a
+    // successor work this session is about to resume.
+    if let Some(payload) = &stop_payload {
+        let headless = claw_fleet_core::session::is_headless_session(&sid);
+        if let Some(reason) = claw_fleet_core::bg_guard::block_reason(payload, headless) {
+            eprintln!("{reason}");
+            std::process::exit(2);
+        }
+    }
+
     if let Err(e) = claw_fleet_core::idle::mark_idle(&sid) {
         eprintln!("fleet session idle: {e}");
     }
