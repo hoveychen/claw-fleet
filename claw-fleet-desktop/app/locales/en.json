@@ -1705,9 +1705,10 @@
     "mark_f_done": "Done",
     "select_hint": "Select a session on the left to view its detail"
   },
-  "view_files": "Files",
+  "view_files": "Repos",
   "files": {
-    "panel_title": "Files",
+    "panel_title": "Repos",
+    "tab_files": "Files",
     "no_workspaces_title": "No workspaces yet",
     "no_workspaces_subtitle": "Project directories appear here once sessions are running.",
     "select_workspace": "Select a workspace to browse its files.",
@@ -1726,6 +1727,7 @@
     "proc_starting": "Starting",
     "proc_exited": "Exited ({{code}})",
     "proc_exited_unknown": "Exited",
+    "proc_rerun": "Re-run",
     "proc_kill": "Stop",
     "proc_force_kill": "Force kill",
     "proc_clear": "Clear",
@@ -1752,7 +1754,7 @@
     }
   },
   "paths": {
-    "open_in_files": "Open in Files",
+    "open_in_files": "Open in Repos",
     "reveal_in_finder": "Reveal in Finder",
     "reveal_in_explorer": "Show in File Explorer",
     "open_hint": "Open {{path}}",

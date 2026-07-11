@@ -336,7 +336,7 @@ export function SessionList() {
             onClick={() => navTo("files")}
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_files", "文件")}</span>
+            <span className={styles.nav_label}>{t("view_files", "仓库")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "memory" ? styles.nav_active : ""}`}
