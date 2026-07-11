@@ -275,11 +275,8 @@ export function SessionDetail({
   // entrypoint tag) that are not currently running — spawns
   // `claude --resume <sid> -p <追问>` detached via the generic resume chain.
   // The form itself (prompt + attachments + model/effort/permission overrides)
-  // lives in ResumeComposer, sharing the new-session composer surface.
-  const [showResume, setShowResume] = useState(false);
-  useEffect(() => {
-    setShowResume(false);
-  }, [liveSession?.id]);
+  // lives in ResumeComposer, docked at the bottom of the 对话 tab whenever the
+  // session is resumable — no separate "恢复会话" toggle to click.
   const canResume =
     !!liveSession &&
     !liveSession.isSubagent &&
@@ -475,28 +472,12 @@ export function SessionDetail({
                   <span className={styles.tag_main}>◈ {t("main")}</span>
                 )}
               </div>
-              {canResume && (
-                <button
-                  className={`${styles.resume_btn} ${showResume ? styles.resume_btn_active : ""}`}
-                  onClick={() => setShowResume((v) => !v)}
-                  title={t("history.resume", "恢复会话")}
-                >
-                  ↻ {t("history.resume", "恢复会话")}
-                </button>
-              )}
               {!inline && (
                 <button className={styles.close_btn} onClick={close} title={t("common.close") || "Close"}>
                   ✕
                 </button>
               )}
             </div>
-            {canResume && showResume && liveSession && (
-              <ResumeComposer
-                sessionId={liveSession.id}
-                workspacePath={liveSession.workspacePath}
-                onResumed={() => setShowResume(false)}
-              />
-            )}
             {liveSession.aiTitle && (
               <div className={styles.ai_title}>{liveSession.aiTitle}</div>
             )}
@@ -737,6 +718,19 @@ export function SessionDetail({
                 <button className={styles.follow_bar_btn} onClick={scrollToBottom}>
                   ↓ {t("detail.scroll_to_latest")}
                 </button>
+              )}
+
+              {/* Resume composer, docked at the bottom of the conversation. Shown
+                  inline whenever the session is resumable — resuming flips the
+                  status to active, canResume goes false, and this unmounts. */}
+              {canResume && liveSession && (
+                <div className={styles.resume_dock}>
+                  <ResumeComposer
+                    sessionId={liveSession.id}
+                    workspacePath={liveSession.workspacePath}
+                    onResumed={() => {}}
+                  />
+                </div>
               )}
             </>
           )}
