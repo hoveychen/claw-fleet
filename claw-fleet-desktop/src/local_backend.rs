@@ -1397,6 +1397,12 @@ fn maybe_fire_auto_resume(
         return;
     }
 
+    // Read the latest usage snapshot off disk once for this tick (no network
+    // call) so `should_auto_resume` can fire early when the account's limit has
+    // already recovered — a window reset or a foxy-switcher account swap — ahead
+    // of the hinted `resets_at`. `None` (no snapshot yet) simply means we fall
+    // back to the hint-time gate.
+    let usage = claw_fleet_core::account::latest_usage_snapshot();
     let candidates: Vec<(String, String)> = {
         let sess = sessions.lock().unwrap();
         let mut fire_map = last_fire.lock().unwrap();
@@ -1408,6 +1414,7 @@ fn maybe_fire_auto_resume(
             &sess,
             &config,
             now,
+            usage.as_ref(),
             // Skip a session that's still debounced OR backed off after
             // repeated failures.
             |id| {
