@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { CheckCheck, Clock, FolderGit2, History, List, Plus, Search } from "lucide-react";
 import { useReadStore, useSessionsStore, useUIStore } from "../store";
@@ -123,6 +130,126 @@ function renderSnippet(snippet: string): ReactNode[] {
 }
 
 /**
+ * Compare two SessionInfo by value. The scanner re-emits the whole list every
+ * couple of seconds and each entry is a fresh JSON deserialisation, so object
+ * identity always differs even when nothing changed — a reference check would
+ * make SessionRow's memo useless.
+ *
+ * Deliberately keyed off the object's own keys rather than a hand-maintained
+ * field list: a new SessionInfo field is then covered automatically, instead of
+ * silently freezing a row that a forgotten list entry would have updated.
+ * Scalars compare with `===`; the few nested fields (handoff, taskPlan, todos)
+ * fall back to a structural compare — they are small.
+ */
+export function sessionEq(a: SessionInfo, b: SessionInfo): boolean {
+  if (a === b) return true;
+  const keys = Object.keys(a) as (keyof SessionInfo)[];
+  if (keys.length !== Object.keys(b).length) return false;
+  for (const k of keys) {
+    const va = a[k];
+    const vb = b[k];
+    if (va === vb) continue;
+    if (va && vb && typeof va === "object" && typeof vb === "object") {
+      if (JSON.stringify(va) !== JSON.stringify(vb)) return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+type SessionRowProps = {
+  session: SessionInfo;
+  snippet: string | undefined;
+  isSelected: boolean;
+  unread: boolean;
+  /** Bumped every 30s by the parent so relative times keep advancing. Without
+   *  it the memo would freeze "已运行 3 分钟" at whatever it said on mount. */
+  nowTick: number;
+  onClick: (s: SessionInfo) => void;
+};
+
+const SessionRow = memo(function SessionRow({
+  session: s,
+  snippet,
+  isSelected,
+  unread,
+  onClick,
+}: SessionRowProps) {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.row_wrap}>
+      <button
+        type="button"
+        className={`${styles.row} ${isSelected ? styles.row_active : ""}`}
+        onClick={() => onClick(s)}
+        title={s.lastMessagePreview ?? undefined}
+      >
+        {rowBarColor(s) && (
+          <span className={styles.row_bar} style={{ background: rowBarColor(s)! }} />
+        )}
+        {unread && (
+          <span
+            className={styles.unread_dot}
+            title={t("history.unread", "未读 — 有新消息")}
+            aria-label={t("history.unread", "未读 — 有新消息")}
+          />
+        )}
+        <span className={styles.row_body}>
+          <span className={styles.row_title}>
+            {s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
+          </span>
+          <span className={styles.row_meta}>
+            <span className={styles.row_project} title={s.workspacePath}>
+              <FolderGit2 size={10} strokeWidth={1.6} />
+              {s.workspaceName}
+            </span>
+            {s.handoff && (
+              <span
+                className={styles.row_handoff}
+                title={t("card.tip_handoff", {
+                  hop: s.handoff.hop,
+                  len: s.handoff.chainLen,
+                })}
+              >
+                🔗 {s.handoff.hop}/{s.handoff.chainLen}
+              </span>
+            )}
+            {LIVE_STATUSES.has(s.status) && (
+              <span
+                className={styles.row_runtime}
+                style={{ color: rowBarColor(s) ?? undefined }}
+                title={new Date(s.createdAtMs).toLocaleString()}
+              >
+                <Clock size={10} strokeWidth={1.6} />
+                {formatRunning(s.createdAtMs, t)}
+              </span>
+            )}
+            <span className={styles.row_time}>{timeAgo(s.lastActivityMs, t)}</span>
+          </span>
+          {snippet && <span className={styles.row_snippet}>{renderSnippet(snippet)}</span>}
+        </span>
+      </button>
+      <span className={styles.row_actions}>
+        {showsControl(s) && (
+          <span className={styles.stop_slot}>
+            <StopControl session={s} />
+          </span>
+        )}
+        <MarkControl session={s} />
+      </span>
+    </div>
+  );
+},
+(prev, next) =>
+  prev.isSelected === next.isSelected &&
+  prev.unread === next.unread &&
+  prev.snippet === next.snippet &&
+  prev.nowTick === next.nowTick &&
+  prev.onClick === next.onClick &&
+  sessionEq(prev.session, next.session));
+
+/**
  * History page: sessions launched via the "新会话" button, as a master-detail
  * view — left rail lists the sessions (text search + workspace filter),
  * clicking a row renders that session's SessionDetail inline on the right.
@@ -138,7 +265,11 @@ export function HistoryView() {
   const { t } = useTranslation();
   const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["history"]);
   const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const { sessions, scanReady } = useSessionsStore();
+  // Subscribe per-field: the store also carries speedHistory/costHistory, which
+  // grow on every scan tick. Destructuring the whole slice would re-render the
+  // launchpad on that churn even when the session list itself is unchanged.
+  const sessions = useSessionsStore((s) => s.sessions);
+  const scanReady = useSessionsStore((s) => s.scanReady);
   // Read/unread axis — optimistic overrides hide the dot before the next scan
   // re-stamps `lastReadMs`; see useReadStore.
   const readOverrides = useReadStore((s) => s.overrides);
@@ -151,7 +282,7 @@ export function HistoryView() {
   // "已运行" durations keep counting even when no scan lands (a waiting-input
   // session can sit idle for minutes). 30s granularity matches the minute-level
   // display without churning the list.
-  const [, setNowTick] = useState(0);
+  const [nowTick, setNowTick] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
     return () => clearInterval(id);
@@ -241,14 +372,19 @@ export function HistoryView() {
     [adhocSessions, readOverrides],
   );
 
-  const handleRowClick = (s: SessionInfo) => {
-    const isFtsHit = query.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
-    setComposing(false);
-    setPending(null);
-    setStartTimedOut(false);
-    setSelected(s);
-    setDetailQuery(isFtsHit ? query.trim() : null);
-  };
+  // Stable identity: SessionRow is memoised, and a fresh closure each render
+  // would defeat it for every row.
+  const handleRowClick = useCallback(
+    (s: SessionInfo) => {
+      const isFtsHit = query.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
+      setComposing(false);
+      setPending(null);
+      setStartTimedOut(false);
+      setSelected(s);
+      setDetailQuery(isFtsHit ? query.trim() : null);
+    },
+    [query, ftsMatchPaths],
+  );
 
   // "+新会话" → swap the detail column to the inline compose form.
   const handleNewSession = () => {
@@ -424,78 +560,19 @@ export function HistoryView() {
                 : t("history.no_match", "没有匹配的会话")}
             </div>
           ) : (
-            rows.map((s) => {
-              const snippet =
-                query.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined;
-              return (
-                <div key={s.jsonlPath} className={styles.row_wrap}>
-                  <button
-                    type="button"
-                    className={`${styles.row} ${selected?.id === s.id ? styles.row_active : ""}`}
-                    onClick={() => handleRowClick(s)}
-                    title={s.lastMessagePreview ?? undefined}
-                  >
-                    {rowBarColor(s) && (
-                      <span
-                        className={styles.row_bar}
-                        style={{ background: rowBarColor(s)! }}
-                      />
-                    )}
-                    {sessionUnread(s, readOverrides[s.id]) && (
-                      <span
-                        className={styles.unread_dot}
-                        title={t("history.unread", "未读 — 有新消息")}
-                        aria-label={t("history.unread", "未读 — 有新消息")}
-                      />
-                    )}
-                    <span className={styles.row_body}>
-                      <span className={styles.row_title}>
-                        {s.aiTitle ?? s.slug ?? s.lastMessagePreview ?? t("history.untitled", "（无标题）")}
-                      </span>
-                      <span className={styles.row_meta}>
-                        <span className={styles.row_project} title={s.workspacePath}>
-                          <FolderGit2 size={10} strokeWidth={1.6} />
-                          {s.workspaceName}
-                        </span>
-                        {s.handoff && (
-                          <span
-                            className={styles.row_handoff}
-                            title={t("card.tip_handoff", {
-                              hop: s.handoff.hop,
-                              len: s.handoff.chainLen,
-                            })}
-                          >
-                            🔗 {s.handoff.hop}/{s.handoff.chainLen}
-                          </span>
-                        )}
-                        {LIVE_STATUSES.has(s.status) && (
-                          <span
-                            className={styles.row_runtime}
-                            style={{ color: rowBarColor(s) ?? undefined }}
-                            title={new Date(s.createdAtMs).toLocaleString()}
-                          >
-                            <Clock size={10} strokeWidth={1.6} />
-                            {formatRunning(s.createdAtMs, t)}
-                          </span>
-                        )}
-                        <span className={styles.row_time}>{timeAgo(s.lastActivityMs, t)}</span>
-                      </span>
-                      {snippet && (
-                        <span className={styles.row_snippet}>{renderSnippet(snippet)}</span>
-                      )}
-                    </span>
-                  </button>
-                  <span className={styles.row_actions}>
-                    {showsControl(s) && (
-                      <span className={styles.stop_slot}>
-                        <StopControl session={s} />
-                      </span>
-                    )}
-                    <MarkControl session={s} />
-                  </span>
-                </div>
-              );
-            })
+            rows.map((s) => (
+              <SessionRow
+                key={s.jsonlPath}
+                session={s}
+                snippet={
+                  query.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined
+                }
+                isSelected={selected?.id === s.id}
+                unread={sessionUnread(s, readOverrides[s.id])}
+                nowTick={nowTick}
+                onClick={handleRowClick}
+              />
+            ))
           )}
         </div>
       </div>

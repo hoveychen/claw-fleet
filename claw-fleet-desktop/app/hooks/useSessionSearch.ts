@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { SearchHit } from "../types";
 
 /**
@@ -38,12 +38,20 @@ export function useSessionSearch(filter: string) {
     return () => clearTimeout(timerRef.current);
   }, [filter]);
 
+  // Memoised on `searchHits` because HistoryView's row filter/sort useMemo
+  // lists these in its dependency array. Rebuilding them every render would
+  // hand it a fresh reference each time and silently defeat that memo, making
+  // the launchpad re-filter and re-sort the whole session list on every render.
   /** Set of jsonlPaths that matched FTS, for quick lookup. */
-  const ftsMatchPaths = new Set(searchHits.map((h) => h.jsonlPath));
+  const ftsMatchPaths = useMemo(
+    () => new Set(searchHits.map((h) => h.jsonlPath)),
+    [searchHits],
+  );
 
   /** Map from jsonlPath to best snippet for display. */
-  const snippetByPath = new Map(
-    searchHits.map((h) => [h.jsonlPath, h.snippet]),
+  const snippetByPath = useMemo(
+    () => new Map(searchHits.map((h) => [h.jsonlPath, h.snippet])),
+    [searchHits],
   );
 
   return { searchHits, searching, ftsMatchPaths, snippetByPath };
