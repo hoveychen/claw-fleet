@@ -34,9 +34,13 @@ import {
   closeTab as closeTabState,
   closeTabsToRight as closeTabsToRightState,
   openTab as openTabState,
+  parsePersistedTabs,
+  pruneMissingTabs,
   reorderTabs as reorderTabIds,
+  TABS_STORAGE_KEY,
   type TabState,
 } from "../sessionTabs";
+import { getItem, setItem } from "../storage";
 import { StopControl, canControl } from "./StopControl";
 import { MarkControl } from "./MarkControl";
 import styles from "./HistoryView.module.css";
@@ -317,8 +321,15 @@ export function HistoryView() {
   // snapshots, and resolve them against the live scan on every render — a tab
   // that has been open for ten minutes must show the session's current title
   // and status, not the ones it wore when it was opened.
-  const [tabIds, setTabIds] = useState<string[]>([]);
-  const [activeId, setActiveId] = useState<string | null>(null);
+  //
+  // Restored from the previous run. The lazy initialiser matters: `initStorage`
+  // is awaited before React renders, so reading at first render sees a warm
+  // cache, while a module-level read would run at import time and see nothing.
+  const [restored] = useState(() =>
+    parsePersistedTabs(getItem(TABS_STORAGE_KEY)),
+  );
+  const [tabIds, setTabIds] = useState<string[]>(restored.tabIds);
+  const [activeId, setActiveId] = useState<string | null>(restored.activeId);
   // Per-tab search highlight (the FTS query that matched that session), keyed
   // by session id — each tab was opened by its own click and carries its own.
   const [queryById, setQueryById] = useState<Record<string, string | null>>({});
@@ -418,6 +429,28 @@ export function HistoryView() {
   // mounted underneath (hidden + paused) so cancelling out of the composer puts
   // the user back on the tab they left, exactly where they left it.
   const overlaid = pending != null || composing;
+
+  // Persist the strip so it comes back on the next launch. The per-tab search
+  // highlight is deliberately NOT persisted — a term you searched for last week
+  // has no business highlighting a transcript on a cold start.
+  useEffect(() => {
+    setItem(TABS_STORAGE_KEY, JSON.stringify({ tabIds, activeId }));
+  }, [tabIds, activeId]);
+
+  // Restored ids can name sessions that have since been deleted. They already
+  // render as nothing (they don't resolve against the scan), but left in the
+  // list they'd persist forever and grow. Prune once, against the first scan
+  // that lands — before it, `sessions` is empty and pruning would close
+  // everything.
+  const prunedRef = useRef(false);
+  useEffect(() => {
+    if (!scanReady || prunedRef.current) return;
+    prunedRef.current = true;
+    const next = pruneMissingTabs({ tabIds, activeId }, (id) => sessionById.has(id));
+    if (next.tabIds.length === tabIds.length) return;
+    setTabIds(next.tabIds);
+    setActiveId(next.activeId);
+  }, [scanReady, sessionById, tabIds, activeId]);
 
   // Clicking a tab also dismisses whatever overlay was covering the column, so
   // the strip doubles as the way back out of the composer.

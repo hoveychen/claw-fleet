@@ -45,6 +45,10 @@ const ALL_KEYS = [
   "elicitation-enabled",
   "onboarding-seen-features",
   "usage-auto-refresh",
+  // The 启动台 detail column's open tabs: {tabIds, activeId}. Restored on boot
+  // and pruned against the first scan, so ids of sessions that have since been
+  // deleted drop out instead of accumulating forever.
+  "launchpad-tabs",
 ] as const;
 
 // ── Onboarding feature registry ─────────────────────────────────────────────

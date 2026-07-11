@@ -53,6 +53,53 @@ export function closeTabsToRight(state: TabState, id: string): TabState {
   return { tabIds, activeId };
 }
 
+/** Storage key for the persisted strip. Also listed in storage.ts's ALL_KEYS —
+ *  a key missing from that whitelist writes fine but reads back empty. */
+export const TABS_STORAGE_KEY = "launchpad-tabs";
+
+const EMPTY: TabState = { tabIds: [], activeId: null };
+
+/**
+ * Parse the strip persisted from a previous run. Hostile to its own input on
+ * purpose: a corrupt or half-written blob must degrade to "no tabs open", never
+ * throw — an unparseable payload otherwise takes the whole 启动台 down with it.
+ * `activeId` is also re-anchored, so a payload claiming focus on a tab that
+ * isn't in the list falls back to the first one rather than focusing nothing.
+ */
+export function parsePersistedTabs(raw: string | null): TabState {
+  if (!raw) return EMPTY;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return EMPTY;
+  }
+  if (typeof parsed !== "object" || parsed === null) return EMPTY;
+  const { tabIds, activeId } = parsed as Record<string, unknown>;
+  if (!Array.isArray(tabIds)) return EMPTY;
+  const ids = tabIds.filter((id): id is string => typeof id === "string");
+  if (ids.length === 0) return EMPTY;
+  const active = typeof activeId === "string" && ids.includes(activeId)
+    ? activeId
+    : ids[0];
+  return { tabIds: ids, activeId: active };
+}
+
+/** Drop tabs whose session no longer exists, re-anchoring focus if it was one
+ *  of them. Run once the first scan lands, against the ids it actually saw. */
+export function pruneMissingTabs(
+  state: TabState,
+  exists: (id: string) => boolean,
+): TabState {
+  const tabIds = state.tabIds.filter(exists);
+  if (tabIds.length === state.tabIds.length) return state;
+  const activeId =
+    state.activeId && tabIds.includes(state.activeId)
+      ? state.activeId
+      : tabIds[0] ?? null;
+  return { tabIds, activeId };
+}
+
 /** Move `fromId` into `toId`'s slot, shifting the rest along. */
 export function reorderTabs(
   tabIds: string[],

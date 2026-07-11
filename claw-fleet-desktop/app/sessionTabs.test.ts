@@ -4,6 +4,8 @@ import {
   closeTab,
   closeTabsToRight,
   openTab,
+  parsePersistedTabs,
+  pruneMissingTabs,
   reorderTabs,
   type TabState,
 } from "./sessionTabs";
@@ -75,6 +77,65 @@ describe("closeTabsToRight", () => {
     expect(closeTabsToRight(state(["a", "b", "c", "d"], "d"), "b")).toEqual(
       state(["a", "b"], "b"),
     );
+  });
+});
+
+describe("parsePersistedTabs", () => {
+  it("round-trips a strip written by a previous run", () => {
+    const raw = JSON.stringify(state(["a", "b"], "b"));
+    expect(parsePersistedTabs(raw)).toEqual(state(["a", "b"], "b"));
+  });
+
+  it("degrades to an empty strip instead of throwing on junk", () => {
+    // A corrupt payload must not be able to take the 启动台 down with it.
+    expect(parsePersistedTabs(null)).toEqual(state([], null));
+    expect(parsePersistedTabs("not json{{")).toEqual(state([], null));
+    expect(parsePersistedTabs("null")).toEqual(state([], null));
+    expect(parsePersistedTabs('"a string"')).toEqual(state([], null));
+    expect(parsePersistedTabs("{}")).toEqual(state([], null));
+    expect(parsePersistedTabs('{"tabIds":"nope"}')).toEqual(state([], null));
+  });
+
+  it("drops non-string ids", () => {
+    expect(parsePersistedTabs('{"tabIds":["a",7,null,"b"],"activeId":"b"}')).toEqual(
+      state(["a", "b"], "b"),
+    );
+  });
+
+  it("re-anchors focus when the persisted activeId isn't in the list", () => {
+    expect(parsePersistedTabs('{"tabIds":["a","b"],"activeId":"gone"}')).toEqual(
+      state(["a", "b"], "a"),
+    );
+    expect(parsePersistedTabs('{"tabIds":["a","b"]}')).toEqual(
+      state(["a", "b"], "a"),
+    );
+  });
+});
+
+describe("pruneMissingTabs", () => {
+  const alive = (ids: string[]) => (id: string) => ids.includes(id);
+
+  it("drops tabs whose session is gone from the scan", () => {
+    expect(pruneMissingTabs(state(["a", "b", "c"], "a"), alive(["a", "c"]))).toEqual(
+      state(["a", "c"], "a"),
+    );
+  });
+
+  it("re-anchors focus when the focused session is the one that vanished", () => {
+    expect(pruneMissingTabs(state(["a", "b"], "b"), alive(["a"]))).toEqual(
+      state(["a"], "a"),
+    );
+  });
+
+  it("clears focus when every session is gone", () => {
+    expect(pruneMissingTabs(state(["a", "b"], "a"), alive([]))).toEqual(
+      state([], null),
+    );
+  });
+
+  it("returns the same object when nothing is missing", () => {
+    const before = state(["a", "b"], "a");
+    expect(pruneMissingTabs(before, alive(["a", "b"]))).toBe(before);
   });
 });
 
