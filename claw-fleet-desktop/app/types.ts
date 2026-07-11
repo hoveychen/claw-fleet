@@ -11,8 +11,9 @@ export type SessionStatus =
   | "idle"
   | "rateLimited";
 
-/** The human's manual review mark. Unmarked (undefined) is the implicit third
- *  state — "new / needs review". */
+/** The human's manual pending/done toggle. A binary axis: unmarked (undefined)
+ *  reads as "pending", `"done"` is explicit. Orthogonal to the read/unread axis
+ *  (see `lastReadMs` / `sessionUnread`). */
 export type SessionMark = "pending" | "done";
 
 export type RateLimitType =
@@ -48,6 +49,21 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null): boolean {
   return (
     entrypoint === NEW_SESSION_ENTRYPOINT || entrypoint === HANDOFF_ENTRYPOINT
   );
+}
+
+/**
+ * Whether a session counts as *unread*: it has newer activity than the last
+ * time it was read. `overrideReadMs` is the optimistic client-side read stamp
+ * (from `useReadStore`) that covers the window between a dwell-read and the next
+ * backend scan re-stamping `lastReadMs`. Never-read sessions (both stamps
+ * absent → 0) are unread as long as they have any activity.
+ */
+export function sessionUnread(
+  s: SessionInfo,
+  overrideReadMs?: number,
+): boolean {
+  const lastRead = Math.max(s.lastReadMs ?? 0, overrideReadMs ?? 0);
+  return s.lastActivityMs > lastRead;
 }
 
 export interface SessionInfo {
@@ -93,9 +109,14 @@ export interface SessionInfo {
   taskPlan?: TaskPlanSummary | null;
   /** Relay-chain position when this session took part in a handoff (`fleet handoff`); absent otherwise. */
   handoff?: SessionHandoffInfo | null;
-  /** Human's manual review mark. Absent/undefined = unmarked ("new / needs review"),
-   *  the third bucket alongside the two persisted values. Orthogonal to `status`. */
+  /** Human's manual pending/done toggle. Absent/undefined reads as "pending";
+   *  `"done"` is the explicit finished state. Orthogonal to both `status` and
+   *  the read/unread axis (`lastReadMs`). */
   userMark?: SessionMark | null;
+  /** Epoch-ms of the last time the human read this session, or absent if never
+   *  read. A session is *unread* when `lastActivityMs > (lastReadMs ?? 0)` — see
+   *  `sessionUnread`. Orthogonal to `userMark`. */
+  lastReadMs?: number | null;
   /** Number of times this session was context-compacted (auto or manual /compact). */
   compactCount?: number;
   /** Sum of context sizes (in tokens) right before each compaction. */
