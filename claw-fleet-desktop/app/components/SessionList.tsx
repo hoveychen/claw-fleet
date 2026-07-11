@@ -276,7 +276,7 @@ export function SessionList() {
             onClick={() => navTo("history")}
           >
             <span className={styles.nav_icon}><Rocket size={14} strokeWidth={1.5} /></span>
-            <span className={styles.nav_label}>{t("view_history", "启动台")}</span>
+            <span className={styles.nav_label}>{t("view_history", "任务")}</span>
             {unreadLaunchpadCount > 0 && (
               <span className={styles.nav_badge}>{unreadLaunchpadCount}</span>
             )}
