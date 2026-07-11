@@ -1106,6 +1106,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   addElicitationAttachment: async (id, question, sourcePath, displayName, fromClipboard, preview) => {
     const resolvedPath = await invoke<string>("upload_elicitation_attachment", {
       sourcePath,
+      fromClipboard,
     });
     set((s) => ({
       decisions: s.decisions.map((d) => {
@@ -1271,6 +1272,7 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   addFleetAskAttachment: async (id, question, sourcePath, displayName, fromClipboard, preview) => {
     const resolvedPath = await invoke<string>("upload_elicitation_attachment", {
       sourcePath,
+      fromClipboard,
     });
     set((s) => ({
       decisions: s.decisions.map((d) => {
