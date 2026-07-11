@@ -14,6 +14,7 @@ import type {
 } from "../types";
 import { History } from "lucide-react";
 import { EmptyState } from "./EmptyState";
+import { AttachmentRow } from "./blocks/AttachmentRow";
 import { decisionAssetUrl } from "../decisionAssets";
 import styles from "./DecisionHistory.module.css";
 
@@ -306,14 +307,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                 </div>
               );
             })}
-            {paths.length > 0 && (
-              <div className={styles.option_desc}>
-                {t("decision_history.fleet_ask_attachments", {
-                  defaultValue: "Attachments: {{paths}}",
-                  paths: paths.join(", "),
-                })}
-              </div>
-            )}
+            <AttachmentRow paths={paths} />
           </div>
         );
       })}

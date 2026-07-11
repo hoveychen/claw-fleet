@@ -1386,12 +1386,13 @@ fn apply_mcp_injector(state: tauri::State<AppState>) -> Result<(), String> {
 fn upload_elicitation_attachment(
     state: tauri::State<AppState>,
     source_path: String,
+    from_clipboard: bool,
 ) -> Result<String, String> {
     state
         .backend
         .read()
         .unwrap()
-        .upload_attachment(std::path::Path::new(&source_path))
+        .upload_attachment(std::path::Path::new(&source_path), from_clipboard)
 }
 
 /// Writes clipboard/drag-drop bytes to the OS temp dir and returns the absolute
@@ -3353,6 +3354,45 @@ pub fn run() {
                     let state = app.state::<AppState>();
                     let backend = state.backend.read().unwrap();
                     backend.get_decision_asset(&id, &qidx, &rel)
+                };
+                let response = match result {
+                    Ok(f) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", f.mime)
+                        .header("Access-Control-Allow-Origin", "*")
+                        .body(f.bytes)
+                        .unwrap(),
+                    Err(e) => tauri::http::Response::builder()
+                        .status(404)
+                        .header("Content-Type", "text/plain")
+                        .body(e.into_bytes())
+                        .unwrap(),
+                };
+                responder.respond(response);
+            });
+        })
+        // Serves user-direction attachments (composer pastes, decision-panel
+        // picks) into the webview so history can render them as thumbnails:
+        // fleet-attachment://localhost/<key>/<name>
+        // Same Backend-routed shape as fleet-decision:// above, so a remote
+        // session proxies the bytes off the probe host — which is where the
+        // agent, and therefore the stored attachment, actually lives.
+        .register_asynchronous_uri_scheme_protocol("fleet-attachment", move |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            std::thread::spawn(move || {
+                let dec = |s: &str| {
+                    percent_encoding::percent_decode_str(s)
+                        .decode_utf8_lossy()
+                        .to_string()
+                };
+                let path = request.uri().path().trim_start_matches('/').to_string();
+                let mut segs = path.splitn(2, '/');
+                let key = dec(segs.next().unwrap_or(""));
+                let name = dec(segs.next().unwrap_or(""));
+                let result = {
+                    let state = app.state::<AppState>();
+                    let backend = state.backend.read().unwrap();
+                    backend.get_user_attachment(&key, &name)
                 };
                 let response = match result {
                     Ok(f) => tauri::http::Response::builder()

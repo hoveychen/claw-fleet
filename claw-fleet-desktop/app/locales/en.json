@@ -288,7 +288,6 @@
     "feedback": "Feedback: {{text}}",
     "has_image": "(includes pasted image)",
     "fleet_ask_html_marker": "[HTML preview was shown]",
-    "fleet_ask_attachments": "Attachments: {{paths}}",
     "empty": "No decisions or prompts yet for this session."
   },
   "audit": {
@@ -1198,6 +1197,7 @@
     "decision_answered_other": "Answered",
     "decision_unanswered": "Unanswered",
     "user_image": "Attached image",
+    "attachments": "Attachments",
     "result_image": "Image returned by the tool",
     "result_expand": "Show {{count}} more characters",
     "result_collapse": "Collapse",
