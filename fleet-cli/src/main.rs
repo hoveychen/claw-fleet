@@ -2776,7 +2776,14 @@ fn cmd_handoff(
             std::process::exit(1);
         }
     }
-    let ws = cwd.to_string_lossy().to_string();
+    let shell_cwd = cwd.to_string_lossy().to_string();
+    // Spawn the successor where the *session* runs, not where the agent's shell
+    // happens to stand. Under the Rule-3 worktree workflow the Bash cwd sits in
+    // `<repo>/.worktrees/<task>` for most of a session — and that worktree is
+    // removed when the plan merges, which would delete the successor's own cwd
+    // and hide it from the session scan. The transcript's `cwd` is authoritative;
+    // fall back to the shell cwd only when there is no transcript to read.
+    let ws = claw_fleet_core::session::resolve_session_cwd(&sid).unwrap_or_else(|| shell_cwd.clone());
     // The successor continues this session's work, so it must continue on this
     // session's model and effort rather than the CLI default. The model is only
     // discoverable from the transcript (Claude Code exports no model env var);
@@ -2788,6 +2795,7 @@ fn cmd_handoff(
     match claw_fleet_core::handoff::register(
         &sid,
         &ws,
+        Some(&shell_cwd),
         note,
         plan,
         next,

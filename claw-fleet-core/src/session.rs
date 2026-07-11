@@ -1513,6 +1513,30 @@ pub fn find_session_jsonl(session_id: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// The directory Claude Code itself was launched in for this session, read from
+/// its transcript.
+///
+/// This is NOT the agent's shell cwd: the Bash tool's cwd persists across calls,
+/// so an agent following the Rule-3 worktree workflow spends most of a session
+/// `cd`-ed into `<repo>/.worktrees/<task>`. Anything that must reproduce *the
+/// session's* workspace (spawning a successor, resolving its project dir) has to
+/// read it from the transcript rather than trust `current_dir()`.
+pub fn resolve_session_cwd(session_id: &str) -> Option<String> {
+    session_cwd_from_jsonl(&find_session_jsonl(session_id)?)
+}
+
+fn session_cwd_from_jsonl(path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    raw.lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .find_map(|v| {
+            v.get("cwd")
+                .and_then(|c| c.as_str())
+                .filter(|s| !s.trim().is_empty())
+                .map(str::to_string)
+        })
+}
+
 /// The `model` field of `~/.claude/settings.json`, e.g. `opus[1m]`. This is the
 /// CLI's default when a session is launched without `--model`.
 fn configured_model_spec() -> Option<String> {
