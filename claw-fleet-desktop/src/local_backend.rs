@@ -3188,6 +3188,7 @@ mod tests {
             thinking_level: None,
             pid: None,
             pid_precise: false,
+            proc_alive: false,
             last_skill: None,
             context_percent: None,
             agent_source: source.into(),
