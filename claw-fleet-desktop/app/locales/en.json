@@ -1675,7 +1675,7 @@
   },
   "history": {
     "title": "Launchpad",
-    "search_placeholder": "Search title, prompt, full text…",
+    "search_placeholder": "Search title, plan, full text…",
     "empty": "No sessions yet — hit New Session in the top-right to launch one",
     "no_match": "No matching sessions",
     "untitled": "(untitled)",
