@@ -393,6 +393,202 @@ fn due_loops_in(dir: &Path, now: u64) -> Vec<LoopRecord> {
         .collect()
 }
 
+// ── iteration spawn + timer ────────────────────────────────────────────────────
+
+/// `CLAUDE_CODE_ENTRYPOINT` for loop iterations, so the scanner and transcript
+/// readers can tell an auto-spawned iteration from a user-initiated session.
+pub const LOOP_ENTRYPOINT: &str = "claw-fleet-loop";
+
+/// The prompt each iteration runs: the user's prompt, plus a short footer naming
+/// the loop and how to stop it, so the agent isn't confused about why it woke up
+/// and has the off switch in hand.
+pub fn compose_iteration_prompt(rec: &LoopRecord) -> String {
+    let mut out = String::new();
+    out.push_str(&rec.prompt);
+    out.push_str("\n\n---\n");
+    out.push_str(&format!(
+        "（这是 Fleet 循环 `{}` 的第 {} 次迭代，每 {} 触发一次。\
+         Fleet 会在 {} 后自动拉起下一次，你不需要注册任何 cron 或 wakeup——\
+         那些在 headless 会话里不会触发。要停止这个循环用 `fleet loop stop {}`。）",
+        rec.id,
+        rec.iterations_done,
+        humanize_secs(rec.interval_secs),
+        humanize_secs(rec.interval_secs),
+        rec.id,
+    ));
+    out
+}
+
+fn humanize_secs(secs: u64) -> String {
+    if secs % 86400 == 0 {
+        format!("{}d", secs / 86400)
+    } else if secs % 3600 == 0 {
+        format!("{}h", secs / 3600)
+    } else if secs % 60 == 0 {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
+/// Signature of the session spawner, matching
+/// [`crate::session_launch::spawn_new_session_with_entrypoint`] — injected so the
+/// fire path is testable without launching a real `claude`.
+type SpawnFn<'a> = dyn Fn(
+        &str,
+        &str,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+        &str,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String>
+    + 'a;
+
+/// Fire one iteration: claim the slot, spawn the iteration session, and record
+/// which session it produced. Returns the claimed record (carrying the *next*
+/// due time and generation) so the caller can sleep until the next fire.
+///
+/// A spawn failure after a successful claim is deliberately swallowed to a logged
+/// error rather than un-claiming: re-claiming would risk a double-fire, and a
+/// loop that skips one broken iteration and continues is safer than one that
+/// wedges or doubles. The claimed record's advanced schedule stands either way.
+pub fn fire_once(id: &str, generation: u64) -> Result<LoopRecord, ClaimError> {
+    let dir = loops_dir().ok_or(ClaimError::Gone)?;
+    fire_once_in(&dir, id, generation, now_ms(), &move |ws, prompt, model, effort, perm, ep| {
+        crate::session_launch::spawn_new_session_with_entrypoint(ws, prompt, model, effort, perm, ep)
+    })
+}
+
+fn fire_once_in(
+    dir: &Path,
+    id: &str,
+    generation: u64,
+    now: u64,
+    spawn: &SpawnFn<'_>,
+) -> Result<LoopRecord, ClaimError> {
+    let claimed = claim_fire_in(dir, id, generation, now)?;
+    let prompt = compose_iteration_prompt(&claimed);
+    match spawn(
+        &claimed.workspace_path,
+        &prompt,
+        claimed.model.as_deref(),
+        claimed.effort.as_deref(),
+        None,
+        LOOP_ENTRYPOINT,
+    ) {
+        Ok(resp) => {
+            if let Some(sid) = resp.session_id {
+                // The record may have been retired (final iteration) — only stamp
+                // if it's still around.
+                if get_in(dir, id).is_some() {
+                    record_iteration_session_in(dir, id, &sid);
+                }
+                crate::log_debug(&format!(
+                    "loop {id}: fired iteration {} -> session {sid}",
+                    claimed.iterations_done
+                ));
+            }
+        }
+        Err(e) => {
+            crate::log_debug(&format!(
+                "loop {id}: iteration {} spawn failed: {e} (schedule already advanced, will retry next interval)",
+                claimed.iterations_done
+            ));
+        }
+    }
+    Ok(claimed)
+}
+
+/// Longest a timer sleeps in one go before re-checking the record. Caps how
+/// long a timer lingers after `fleet loop stop` deletes the record (it notices
+/// on the next wake and exits), and bounds clock-drift error from one long sleep
+/// spanning a laptop suspend.
+const POLL_CAP: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// The blocking timer loop — the body of `fleet loop fire <id> <gen>`. Sleeps
+/// until the loop is due, fires one iteration, then continues with the new
+/// generation the fire produced. Returns when the loop is stopped, exhausted, or
+/// superseded by another timer (stale generation). Never re-arms via a new
+/// process: a single detached timer drives every iteration by looping here.
+///
+/// Thin by design — every branch delegates to the unit-tested [`claim_fire`] /
+/// [`fire_once`] beneath it; only the real `sleep` lives here.
+pub fn run_timer_blocking(id: &str, mut generation: u64) {
+    loop {
+        let Some(rec) = get(id) else {
+            crate::log_debug(&format!("loop {id}: record gone, timer exiting"));
+            return;
+        };
+        if rec.generation != generation {
+            crate::log_debug(&format!(
+                "loop {id}: timer superseded (held gen {generation}, record at {}), exiting",
+                rec.generation
+            ));
+            return;
+        }
+        if !rec.is_live(now_ms()) {
+            crate::log_debug(&format!("loop {id}: exhausted/expired, timer exiting"));
+            let _ = stop(id);
+            return;
+        }
+        let wait = rec.due_in_ms(now_ms());
+        if wait > 0 {
+            let nap = POLL_CAP.min(std::time::Duration::from_millis(wait));
+            std::thread::sleep(nap);
+            continue;
+        }
+        match fire_once(id, generation) {
+            Ok(claimed) => generation = claimed.generation,
+            Err(ClaimError::NotDue { .. }) => continue,
+            Err(e) => {
+                crate::log_debug(&format!("loop {id}: timer stopping ({e})"));
+                return;
+            }
+        }
+    }
+}
+
+/// Spawn a detached timer process (`fleet loop fire <id> <gen>`) that sleeps
+/// until the loop is due, fires it, and repeats. Idempotent-safe: arming twice
+/// just means two timers race for the same fire and `generation` lets exactly
+/// one win (see module docs). Used by `fleet loop create` and the reconcile
+/// sweep; a running timer re-arms itself in-process and does not call this.
+pub fn arm_timer(rec: &LoopRecord) -> Result<u32, String> {
+    let fleet = crate::hooks::resolve_fleet_binary()
+        .ok_or("cannot find fleet binary to arm loop timer")?;
+    arm_timer_with(&fleet, rec)
+}
+
+fn arm_timer_with(fleet_bin: &str, rec: &LoopRecord) -> Result<u32, String> {
+    let mut cmd = std::process::Command::new(fleet_bin);
+    cmd.arg("loop")
+        .arg("fire")
+        .arg(&rec.id)
+        .arg(rec.generation.to_string())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    // Detach into its own session so quitting the desktop app / fleet serve does
+    // not take the timer down — same contract as the handoff relay and proc host.
+    #[cfg(unix)]
+    unsafe {
+        use std::os::unix::process::CommandExt;
+        cmd.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn loop timer: {e}"))?;
+    let pid = child.id();
+    // Reap the direct child handle; the timer keeps running detached.
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(pid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -580,6 +776,118 @@ mod tests {
         let due = due_loops_in(d.path(), 400_000);
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, "soon");
+    }
+
+    use std::cell::RefCell;
+
+    /// What the injected spawner saw, so a test can assert the iteration was
+    /// launched with the right workspace / prompt / model.
+    #[derive(Default, Clone)]
+    struct SpawnCall {
+        workspace: String,
+        prompt: String,
+        model: Option<String>,
+        entrypoint: String,
+    }
+
+    fn ok_spawner<'a>(
+        calls: &'a RefCell<Vec<SpawnCall>>,
+        sid: &'a str,
+    ) -> impl Fn(&str, &str, Option<&str>, Option<&str>, Option<&str>, &str)
+        -> Result<crate::session_launch::SpawnSessionResponse, String> + 'a {
+        move |ws, prompt, model, _effort, _perm, ep| {
+            calls.borrow_mut().push(SpawnCall {
+                workspace: ws.to_string(),
+                prompt: prompt.to_string(),
+                model: model.map(str::to_string),
+                entrypoint: ep.to_string(),
+            });
+            Ok(crate::session_launch::SpawnSessionResponse {
+                pid: 1,
+                session_id: Some(sid.to_string()),
+            })
+        }
+    }
+
+    #[test]
+    fn fire_once_claims_spawns_and_records_the_session() {
+        let d = dir();
+        create_in(
+            d.path(), "/ws", "check the deploy", 300, None,
+            Some("claude-fable-5"), Some("high"), None, "l1", 0,
+        )
+        .unwrap();
+
+        let calls = RefCell::new(Vec::new());
+        let claimed =
+            fire_once_in(d.path(), "l1", 0, 300_000, &ok_spawner(&calls, "iter-sid-1")).unwrap();
+
+        assert_eq!(claimed.iterations_done, 1);
+        assert_eq!(claimed.generation, 1);
+
+        let calls = calls.into_inner();
+        assert_eq!(calls.len(), 1, "exactly one iteration spawned");
+        assert_eq!(calls[0].workspace, "/ws");
+        assert_eq!(calls[0].entrypoint, LOOP_ENTRYPOINT);
+        assert_eq!(calls[0].model.as_deref(), Some("claude-fable-5"));
+        // prompt carries the user's text plus the stop-hint footer
+        assert!(calls[0].prompt.contains("check the deploy"));
+        assert!(calls[0].prompt.contains("fleet loop stop l1"));
+
+        // the produced session id is recorded on the loop
+        assert_eq!(get_in(d.path(), "l1").unwrap().last_session_id.as_deref(), Some("iter-sid-1"));
+    }
+
+    /// The claim happens before the spawn; if two timers race, the second's
+    /// claim is refused and it must NOT spawn a session.
+    #[test]
+    fn a_stale_timer_fires_nothing() {
+        let d = dir();
+        make(d.path(), "l1", 0);
+        let calls = RefCell::new(Vec::new());
+        // first timer fires
+        fire_once_in(d.path(), "l1", 0, 300_000, &ok_spawner(&calls, "s1")).unwrap();
+        // second timer, still holding gen 0, must be refused with no spawn
+        let err = fire_once_in(d.path(), "l1", 0, 300_000, &ok_spawner(&calls, "s2")).unwrap_err();
+        assert_eq!(err, ClaimError::StaleGeneration { expected: 0, found: 1 });
+        assert_eq!(calls.into_inner().len(), 1, "the stale timer must not spawn");
+    }
+
+    /// A spawn failure must not un-claim (that would risk a double-fire) — the
+    /// schedule stays advanced and the loop lives on for the next interval.
+    #[test]
+    fn a_spawn_failure_still_advances_the_schedule() {
+        let d = dir();
+        make(d.path(), "l1", 0);
+        let failing = |_ws: &str, _p: &str, _m: Option<&str>, _e: Option<&str>, _pm: Option<&str>, _ep: &str|
+            -> Result<crate::session_launch::SpawnSessionResponse, String> { Err("boom".into()) };
+        let claimed = fire_once_in(d.path(), "l1", 0, 300_000, &failing).unwrap();
+        assert_eq!(claimed.iterations_done, 1);
+        // record persisted with advanced generation, still live for next time
+        let on_disk = get_in(d.path(), "l1").unwrap();
+        assert_eq!(on_disk.generation, 1);
+        assert_eq!(on_disk.iterations_done, 1);
+    }
+
+    #[test]
+    fn iteration_prompt_names_the_loop_and_the_off_switch() {
+        let d = dir();
+        let mut rec = make(d.path(), "abc123", 0);
+        rec.iterations_done = 3;
+        let p = compose_iteration_prompt(&rec);
+        assert!(p.contains("check the deploy"));
+        assert!(p.contains("abc123"));
+        assert!(p.contains("第 3 次"));
+        assert!(p.contains("5m"));
+        assert!(p.contains("fleet loop stop abc123"));
+    }
+
+    #[test]
+    fn humanize_reads_intervals_back() {
+        assert_eq!(humanize_secs(300), "5m");
+        assert_eq!(humanize_secs(7200), "2h");
+        assert_eq!(humanize_secs(86400), "1d");
+        assert_eq!(humanize_secs(90), "90s");
     }
 
     /// The loop must run on the model of the session that created it.
