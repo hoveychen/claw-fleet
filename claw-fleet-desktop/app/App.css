@@ -272,20 +272,29 @@ input, button {
 }
 
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */
-/* WebView2 (Windows) paints the main document scrollbar on the <html>
-   element. `::-webkit-scrollbar` is a pseudo of the *scrollable* element,
-   so the html-level scrollbar needs the pseudo attached directly to
-   `html` (no descendant space) — otherwise Win11 paints its chunky
-   default. Belt-and-braces with the standard Scrollbars Module too. */
-html.tauri-host {
+/* Windows only. WebView2 paints Win11's chunky default scrollbar, so we
+   override it app-wide. `::-webkit-scrollbar` is a pseudo of the *scrollable*
+   element, so the html-level document scrollbar needs the pseudo attached
+   directly to `html` (no descendant space); the descendant selector then
+   covers every inner scroll container. Belt-and-braces with the standard
+   Scrollbars Module too.
+
+   These MUST stay scoped to `.os-windows`. On macOS, matching an element with
+   `::-webkit-scrollbar` opts it out of the native *overlay* scrollbar — the
+   translucent bar that floats over content, takes no layout width, and fades
+   out at rest under a trackpad — and into a classic always-present gutter. An
+   unscoped rule here did exactly that to every list in the app (see
+   DecisionPanel.module.css, where a few containers opt in *deliberately* to
+   keep a "more below" cue). macOS gets the OS behaviour; Windows gets this. */
+html.os-windows {
   scrollbar-width: thin;
   scrollbar-color: var(--scrollbar-thumb) transparent;
 }
-html.tauri-host::-webkit-scrollbar,
-::-webkit-scrollbar { width: 6px; height: 6px; }
-html.tauri-host::-webkit-scrollbar-track,
-::-webkit-scrollbar-track { background: transparent; }
-html.tauri-host::-webkit-scrollbar-thumb,
-::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
-html.tauri-host::-webkit-scrollbar-thumb:hover,
-::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
+html.os-windows::-webkit-scrollbar,
+.os-windows ::-webkit-scrollbar { width: 6px; height: 6px; }
+html.os-windows::-webkit-scrollbar-track,
+.os-windows ::-webkit-scrollbar-track { background: transparent; }
+html.os-windows::-webkit-scrollbar-thumb,
+.os-windows ::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+html.os-windows::-webkit-scrollbar-thumb:hover,
+.os-windows ::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb-hover); }
