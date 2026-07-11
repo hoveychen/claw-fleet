@@ -223,6 +223,12 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         questions,
     };
 
+    // Give every `html` preview the height-reporting script before it is staged
+    // anywhere, so the card's sandboxed iframe can size itself to the content
+    // instead of clipping it into a fixed-height box. Must precede
+    // `ingest_images`, which copies `q.html` verbatim into the served index.html.
+    crate::mcp_ipc::inject_autoheight(&mut req);
+
     // Copy any referenced images into Fleet's persistent decision-asset store
     // and blank their local paths, so the card can load them through the
     // `fleet-decision://` protocol instead of base64-inlined `html`.
