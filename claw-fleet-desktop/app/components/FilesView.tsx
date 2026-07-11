@@ -9,6 +9,7 @@ import {
   FileDiff,
   FolderOpen,
   GitBranch,
+  RefreshCw,
   Upload,
 } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
@@ -437,6 +438,18 @@ function GitStatusBar({ workspace, root }: { workspace: string; root: string }) 
       <div className={fileStyles.scm_spacer} />
 
       <div className={fileStyles.scm_actions}>
+        <button
+          className={fileStyles.scm_btn}
+          disabled={busy !== null}
+          onClick={() => {
+            setOpMsg(null);
+            refresh();
+          }}
+          title={t("files.scm.refresh")}
+          aria-label={t("files.scm.refresh")}
+        >
+          <RefreshCw size={12} strokeWidth={1.5} />
+        </button>
         <button
           className={fileStyles.scm_btn}
           disabled={busy !== null}
