@@ -2662,6 +2662,16 @@ fn cmd_session_idle() {
         Ok(None) => {}
         Err(e) => eprintln!("fleet session idle: handoff relay failed: {e}"),
     }
+
+    // Loop reconcile: re-arm timers for any agent loop left stranded (its
+    // detached timer died on a reboot / kill). Cheap, idempotent, duplicate-safe
+    // via the loop's generation. Piggy-backs on the Stop hook rather than a
+    // daemon so a loop resumes the next time any session yields, with the desktop
+    // app closed — same rationale as the handoff relay above.
+    let rearmed = claw_fleet_core::agent_loop::reconcile();
+    if !rearmed.is_empty() {
+        println!("loop: re-armed {} stranded timer(s): {}", rearmed.len(), rearmed.join(", "));
+    }
 }
 
 /// `fleet session resume` — UserPromptSubmit-hook entrypoint. Clears the idle

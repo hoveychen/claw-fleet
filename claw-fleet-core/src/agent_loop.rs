@@ -559,6 +559,51 @@ pub fn arm_timer(rec: &LoopRecord) -> Result<u32, String> {
     arm_timer_with(&fleet, rec)
 }
 
+/// A loop overdue by more than this is treated as stranded — its detached timer
+/// died (machine reboot, `kill -9`) and no process is left to fire it. Must be
+/// comfortably larger than [`POLL_CAP`] so a healthy timer merely mid-nap is
+/// never mistaken for dead. Overdue-ness is the liveness signal: a live timer
+/// fires a loop the instant it comes due, so a loop can only *stay* overdue if
+/// nothing is watching it. This is why no pid needs tracking.
+const STRANDED_GRACE_MS: u64 = 3 * 30_000; // 3 × POLL_CAP
+
+/// Re-arm timers for loops that have been left stranded (their detached timer
+/// process died). Cheap and idempotent — safe to call from any periodic hook.
+/// Returns the ids it re-armed. The freshly-armed timer fires the overdue loop
+/// on its first wake; `generation` guards the unlikely case where the old timer
+/// is somehow still alive (both race, exactly one wins).
+pub fn reconcile() -> Vec<String> {
+    let Some(dir) = loops_dir() else {
+        return Vec::new();
+    };
+    let fleet = match crate::hooks::resolve_fleet_binary() {
+        Some(f) => f,
+        None => return Vec::new(),
+    };
+    reconcile_in(&dir, now_ms(), &mut |rec| {
+        let _ = arm_timer_with(&fleet, rec);
+    })
+}
+
+fn reconcile_in(
+    dir: &Path,
+    now: u64,
+    arm: &mut dyn FnMut(&LoopRecord),
+) -> Vec<String> {
+    let mut rearmed = Vec::new();
+    for rec in list_in(dir) {
+        if !rec.is_live(now) {
+            continue;
+        }
+        // Overdue past the grace window ⇒ no live timer is driving it.
+        if now.saturating_sub(rec.next_fire_at) > STRANDED_GRACE_MS {
+            arm(&rec);
+            rearmed.push(rec.id.clone());
+        }
+    }
+    rearmed
+}
+
 fn arm_timer_with(fleet_bin: &str, rec: &LoopRecord) -> Result<u32, String> {
     let mut cmd = std::process::Command::new(fleet_bin);
     cmd.arg("loop")
@@ -880,6 +925,43 @@ mod tests {
         assert!(p.contains("第 3 次"));
         assert!(p.contains("5m"));
         assert!(p.contains("fleet loop stop abc123"));
+    }
+
+    #[test]
+    fn reconcile_rearms_only_stranded_loops() {
+        let d = dir();
+        // "healthy": due in the future — a timer is presumably driving it
+        create_in(d.path(), "/ws", "p", 300, None, None, None, None, "healthy", 1_000_000).unwrap();
+        // "napping": due, but only just — inside the grace window, timer likely mid-nap
+        let mut napping = make(d.path(), "napping", 0);
+        napping.next_fire_at = 1_000_000 - 10_000; // 10s overdue < grace
+        write_record(d.path(), &napping).unwrap();
+        // "stranded": overdue well past the grace window — its timer is dead
+        let mut stranded = make(d.path(), "stranded", 0);
+        stranded.next_fire_at = 1_000_000 - STRANDED_GRACE_MS - 5_000;
+        write_record(d.path(), &stranded).unwrap();
+
+        let mut armed = Vec::new();
+        let rearmed = reconcile_in(d.path(), 1_000_000, &mut |r| armed.push(r.id.clone()));
+
+        assert_eq!(rearmed, vec!["stranded"], "only the stranded loop is re-armed");
+        assert_eq!(armed, vec!["stranded"]);
+    }
+
+    #[test]
+    fn reconcile_ignores_exhausted_and_expired() {
+        let d = dir();
+        // exhausted: max 1 iteration, already done — overdue but must not re-arm
+        let mut done =
+            create_in(d.path(), "/ws", "p", 60, Some(1), None, None, None, "done", 0).unwrap();
+        done.iterations_done = 1;
+        done.next_fire_at = 0; // very overdue
+        write_record(d.path(), &done).unwrap();
+
+        let mut armed = Vec::new();
+        let rearmed = reconcile_in(d.path(), 10_000_000, &mut |r| armed.push(r.id.clone()));
+        assert!(rearmed.is_empty(), "exhausted loop must not be resurrected");
+        assert!(armed.is_empty());
     }
 
     #[test]
