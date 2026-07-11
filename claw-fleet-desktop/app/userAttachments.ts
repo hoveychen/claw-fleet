@@ -82,3 +82,35 @@ export function attachmentName(path: string): string {
   const parts = path.split("/");
   return parts[parts.length - 1] || path;
 }
+
+/**
+ * The composers append attachments to the prompt as a trailing block:
+ *
+ *   \n\nContext files:\n- /abs/one.png\n- /abs/two.pdf
+ *
+ * Claude Code stores that verbatim in the transcript, so it is all history has
+ * to work with. Peel it back off the user's actual message: the paths become
+ * attachment chips, and the prose is shown without a wall of absolute paths
+ * stapled to the end of it.
+ *
+ * Matching is anchored to the exact shape we emit, so a user who merely *types*
+ * the words "Context files:" mid-sentence is left alone.
+ */
+const CONTEXT_FILES_RE = /\n\nContext files:\n((?:- .+(?:\n|$))+)$/;
+
+export interface SplitContextFiles {
+  /** The message with the trailing block removed. */
+  body: string;
+  /** Absolute paths named by the block, in order. */
+  paths: string[];
+}
+
+export function splitContextFiles(text: string): SplitContextFiles {
+  const m = text.match(CONTEXT_FILES_RE);
+  if (!m) return { body: text, paths: [] };
+  const paths = m[1]
+    .split("\n")
+    .map((line) => line.replace(/^- /, "").trim())
+    .filter(Boolean);
+  return { body: text.slice(0, m.index), paths };
+}

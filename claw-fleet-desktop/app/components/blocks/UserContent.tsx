@@ -1,6 +1,8 @@
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ContentBlock, ImageBlock } from "../../types";
+import { splitContextFiles } from "../../userAttachments";
+import { AttachmentRow } from "./AttachmentRow";
 import { ImageThumb } from "./ImageThumb";
 import styles from "./UserContent.module.css";
 
@@ -61,7 +63,7 @@ export function UserContent({ content, renderText }: Props) {
   if (typeof content === "string") {
     const cmd = parseSlashCommand(content);
     if (cmd) return <SlashCommand name={cmd.name} args={cmd.args} />;
-    return <div className={styles.text}>{renderText(content, 0)}</div>;
+    return <UserText text={content} index={0} renderText={renderText} />;
   }
   if (!Array.isArray(content)) return null;
 
@@ -81,13 +83,32 @@ export function UserContent({ content, renderText }: Props) {
       parts.push(<SlashCommand key={i} name={cmd.name} args={cmd.args} />);
       return;
     }
-    if (!text.trim()) return;
-    parts.push(
-      <div key={i} className={styles.text}>
-        {renderText(text, i)}
-      </div>,
-    );
+    parts.push(<UserText key={i} text={text} index={i} renderText={renderText} />);
   });
 
   return parts.length > 0 ? <>{parts}</> : null;
+}
+
+/**
+ * One text run of a user turn, with the composer's trailing `Context files:`
+ * block lifted out of the prose and rendered as attachments instead of as a
+ * paragraph of absolute paths.
+ */
+function UserText({
+  text,
+  index,
+  renderText,
+}: {
+  text: string;
+  index: number;
+  renderText: Props["renderText"];
+}) {
+  const { body, paths } = splitContextFiles(text);
+  if (!body.trim() && paths.length === 0) return null;
+  return (
+    <>
+      {body.trim() && <div className={styles.text}>{renderText(body, index)}</div>}
+      <AttachmentRow paths={paths} />
+    </>
+  );
 }

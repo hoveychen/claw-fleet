@@ -285,7 +285,6 @@
     "feedback": "反馈：{{text}}",
     "has_image": "（含粘贴的截图）",
     "fleet_ask_html_marker": "［显示过 HTML 预览］",
-    "fleet_ask_attachments": "附件：{{paths}}",
     "empty": "本次会话还没有决策或提示。"
   },
   "audit": {
@@ -1208,6 +1207,7 @@
     "decision_answered_other": "已回答",
     "decision_unanswered": "未回答",
     "user_image": "附带的图片",
+    "attachments": "附件",
     "result_image": "工具返回的图片",
     "result_expand": "展开剩余 {{count}} 个字符",
     "result_collapse": "收起",

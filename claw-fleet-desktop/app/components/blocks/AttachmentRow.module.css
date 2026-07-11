@@ -1,0 +1,46 @@
+/* Attachments on a user turn: image thumbnails inline, everything else as a
+   filename chip. Wraps so a handful of screenshots don't force a scrollbar. */
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 7px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-bg-subtle, rgba(127, 127, 127, 0.08));
+  font-size: 12px;
+  color: var(--color-text-muted, #888);
+}
+
+.chip_icon {
+  flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.chip_name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The row is self-evident visually; the label is for screen readers only. */
+.sr_only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
