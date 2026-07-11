@@ -130,76 +130,79 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --heatmap-3: #30a14e;
   --heatmap-4: #216e39;
 
-  /* Linear-inspired cool neutrals (light) */
-  --color-bg: #ffffff;
+  /* Linear-inspired cool neutrals (light).
+     Page bg is a soft off-white so white cards/inputs read as raised
+     surfaces instead of vanishing into the page; grays sit at ≥5.5:1
+     on white (dim) / ≥9:1 (secondary) for readability. */
+  --color-bg: #f6f7f9;
   --color-bg-sidebar: var(--color-bg);
-  --color-bg-secondary: #f4f5f8;
-  --color-bg-tertiary: #fafbfc;
-  --color-bg-card: #fafbfc;
+  --color-bg-secondary: #eceef2;
+  --color-bg-tertiary: #f1f2f5;
+  --color-bg-card: #ffffff;
   --color-bg-card-hover: #f4f5f8;
-  --color-bg-card-selected: #ebecef;
+  --color-bg-card-selected: #e6e9ee;
   --color-bg-hover: var(--color-bg-card-hover);
-  --color-bg-tool: #f7f8fa;
-  --color-bg-tool-hover: #f0f1f4;
-  --color-bg-user: #eef2ff;
+  --color-bg-tool: #f1f2f5;
+  --color-bg-tool-hover: #e9ebef;
+  --color-bg-user: #e7edfd;
   --color-bg-input: #ffffff;
   --color-bg-modal: #ffffff;
   --color-bg-modal-overlay: rgba(15, 17, 21, 0.4);
 
-  --color-text: #0e0f11;
-  --color-text-secondary: #6b7280;
-  --color-text-dim: #9ca3af;
+  --color-text: #101113;
+  --color-text-secondary: #3f4650;
+  --color-text-dim: #5f6672;
   --color-text-muted: var(--color-text-dim);
-  --color-border: rgba(0, 0, 0, 0.07);
-  --color-border-soft: rgba(0, 0, 0, 0.05);
-  --color-border-strong: rgba(0, 0, 0, 0.14);
+  --color-border: rgba(9, 12, 20, 0.11);
+  --color-border-soft: rgba(9, 12, 20, 0.07);
+  --color-border-strong: rgba(9, 12, 20, 0.22);
 
-  --shadow-card: 0 1px 2px rgba(15, 17, 21, 0.06);
-  --shadow-card-hover: 0 2px 6px rgba(15, 17, 21, 0.1);
+  --shadow-card: 0 1px 2px rgba(15, 17, 21, 0.08);
+  --shadow-card-hover: 0 2px 6px rgba(15, 17, 21, 0.14);
 
-  --color-accent: #d97757;
-  --color-accent-bright: #e8916f;
-  --color-accent-tool: #2563eb;
-  --color-accent-hover: #b54a32;
-  --color-accent-rgb: 217, 119, 87;
-  --color-accent-soft: rgba(217, 119, 87, 0.14);
+  --color-accent: #c65f3e;
+  --color-accent-bright: #b34a2c;
+  --color-accent-tool: #1d4ed8;
+  --color-accent-hover: #a2431f;
+  --color-accent-rgb: 198, 95, 62;
+  --color-accent-soft: rgba(198, 95, 62, 0.14);
 
-  /* Status badge colors — light */
-  --badge-thinking-bg: #f3e8ff;    --badge-thinking-fg: #7c3aed;
-  --badge-executing-bg: #cffafe;   --badge-executing-fg: #0891b2;
-  --badge-streaming-bg: #dcfce7;   --badge-streaming-fg: #16a34a;
-  --badge-processing-bg: #ecfccb;  --badge-processing-fg: #65a30d;
-  --badge-waiting-bg: #fef9c3;     --badge-waiting-fg: #ca8a04;
-  --badge-active-bg: #dbeafe;      --badge-active-fg: #2563eb;
-  --badge-delegating-bg: #f3e8ff;  --badge-delegating-fg: #9333ea;
+  /* Status badge colors — light (fg darkened one shade for contrast on the pale bgs) */
+  --badge-thinking-bg: #f3e8ff;    --badge-thinking-fg: #6d28d9;
+  --badge-executing-bg: #cffafe;   --badge-executing-fg: #0e7490;
+  --badge-streaming-bg: #dcfce7;   --badge-streaming-fg: #15803d;
+  --badge-processing-bg: #ecfccb;  --badge-processing-fg: #4d7c0f;
+  --badge-waiting-bg: #fef9c3;     --badge-waiting-fg: #854d0e;
+  --badge-active-bg: #dbeafe;      --badge-active-fg: #1d4ed8;
+  --badge-delegating-bg: #f3e8ff;  --badge-delegating-fg: #7e22ce;
 
   /* Tag colors — light */
   --tag-main-bg: #dbeafe;   --tag-main-fg: #1d4ed8;
   --tag-sub-bg: #f3e8ff;    --tag-sub-fg: #7e22ce;
-  --tag-skill-bg: #fff0e6;  --tag-skill-fg: #c2410c;
+  --tag-skill-bg: #fee9d9;  --tag-skill-fg: #b3400a;
 
   /* Token speed */
-  --color-speed: #16a34a;
+  --color-speed: #15803d;
 
   /* Thinking block — light */
-  --thinking-border: #d0c8f0;
+  --thinking-border: #c8bde8;
   --thinking-toggle-bg: #f5f0ff;
   --thinking-toggle-bg-hover: #ede5ff;
-  --thinking-label: #7c3aed;
+  --thinking-label: #6d28d9;
   --thinking-content-bg: #faf8ff;
 
   /* Tool groups — light */
-  --tool-group-border: #bbf7d0;
+  --tool-group-border: #a7dfbc;
   --tool-group-bg: #f0fdf4;
   --tool-group-bg-hover: #e8faf0;
-  --tool-group-label: #15803d;
+  --tool-group-label: #166534;
 
   /* Status / semantic colors — light */
-  --color-success: #16a34a;
+  --color-success: #15803d;
   --color-status-active: var(--color-success);
-  --color-warning: #d97706;
+  --color-warning: #b45309;
   --color-error-bg: #fee2e2;
-  --color-error-fg: #dc2626;
+  --color-error-fg: #b91c1c;
   --color-error: var(--color-error-fg);
   --color-status-error: var(--color-error-fg);
   --color-error-result-bg: #fff5f5;
@@ -218,8 +221,8 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --mascot-screen-bg: #d5d5d5;
   --mascot-screen-fill: #e5e5e5;
 
-  --scrollbar-thumb: rgba(15, 17, 21, 0.18);
-  --scrollbar-thumb-hover: rgba(15, 17, 21, 0.3);
+  --scrollbar-thumb: rgba(15, 17, 21, 0.25);
+  --scrollbar-thumb-hover: rgba(15, 17, 21, 0.4);
 
   color-scheme: light;
 }
