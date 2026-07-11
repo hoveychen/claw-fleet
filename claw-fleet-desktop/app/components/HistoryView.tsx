@@ -54,19 +54,20 @@ const LIVE_STATUSES = new Set([
   "waitingInput", "active", "delegating",
 ]);
 
-/** Segments for the manual-review filter. "all" shows everything; the other
- *  three map to the three mark buckets (unmarked is "new"). */
-type MarkFilter = "all" | "new" | "pending" | "done";
+/** Segments for the pending/done filter. "all" shows everything; the other two
+ *  map to the binary mark buckets (unmarked collapses to "pending"). The
+ *  read/unread axis is deliberately NOT filterable — only pending/done is. */
+type MarkFilter = "all" | "pending" | "done";
 const MARK_SEGMENTS: { key: MarkFilter; dot?: string }[] = [
   { key: "all" },
-  { key: "new", dot: "#e0574a" },
-  { key: "pending", dot: "#4a90e0" },
+  { key: "pending", dot: "#d0a85a" },
   { key: "done" },
 ];
 
-/** Which review bucket a session falls in — unmarked collapses to "new". */
-function markBucket(s: SessionInfo): "new" | "pending" | "done" {
-  return s.userMark ?? "new";
+/** Which bucket a session falls in — `done` is explicit, everything else is
+ *  pending. */
+function markBucket(s: SessionInfo): "pending" | "done" {
+  return s.userMark === "done" ? "done" : "pending";
 }
 
 function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
@@ -187,7 +188,6 @@ export function HistoryView() {
       });
     const counts: Record<MarkFilter, number> = {
       all: preMark.length,
-      new: 0,
       pending: 0,
       done: 0,
     };
@@ -352,11 +352,9 @@ export function HistoryView() {
               const label =
                 seg.key === "all"
                   ? t("history.mark_f_all", "全部")
-                  : seg.key === "new"
-                    ? t("history.mark_f_new", "待 review")
-                    : seg.key === "pending"
-                      ? t("history.mark_f_pending", "进行中")
-                      : t("history.mark_f_done", "已完成");
+                  : seg.key === "pending"
+                    ? t("history.mark_f_pending", "进行中")
+                    : t("history.mark_f_done", "已完成");
               return (
                 <button
                   key={seg.key}
