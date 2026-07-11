@@ -1720,6 +1720,7 @@
       "pull": "Pull",
       "pushing": "Pushing…",
       "pulling": "Pulling…",
+      "refresh": "Refresh status",
       "push_confirm": "Push {{branch}} to {{upstream}}?",
       "pull_confirm": "Pull (fast-forward) into {{branch}}?",
       "default_remote": "remote",
