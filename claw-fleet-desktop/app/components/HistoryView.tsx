@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { CheckCheck, FolderGit2, History, List, Plus, Search } from "lucide-react";
+import { CheckCheck, Clock, FolderGit2, History, List, Plus, Search } from "lucide-react";
 import { useReadStore, useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
@@ -78,6 +78,18 @@ function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => s
   return t("d_ago", { n: Math.floor(diff / 86_400_000) });
 }
 
+/** Elapsed run time = now − session start (createdAtMs). Shown only for live
+ *  rows (busy or waiting-input), where "how long has this been going" is the
+ *  useful signal. Same single-unit shape as timeAgo, but counts up from start
+ *  instead of down from last activity. */
+function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
+  const diff = Math.max(0, Date.now() - ms);
+  if (diff < 60_000) return t("ran_s", { n: Math.floor(diff / 1_000) });
+  if (diff < 3_600_000) return t("ran_m", { n: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("ran_h", { n: Math.floor(diff / 3_600_000) });
+  return t("ran_d", { n: Math.floor(diff / 86_400_000) });
+}
+
 /** Left accent-bar colour for run status: green = agent still live, amber =
  *  waiting for input. Ended sessions get no bar (null) — the bar is a positive
  *  "this one's doing something" signal, not another dot on every row. Distinct
@@ -135,6 +147,15 @@ export function HistoryView() {
 
   const [query, setQuery] = useState("");
   const [workspaceFilter, setWorkspaceFilter] = useState("all");
+  // Re-render on a slow tick so the relative "last updated" and the live
+  // "已运行" durations keep counting even when no scan lands (a waiting-input
+  // session can sit idle for minutes). 30s granularity matches the minute-level
+  // display without churning the list.
+  const [, setNowTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setNowTick((n) => n + 1), 30_000);
+    return () => clearInterval(id);
+  }, []);
   // Narrow the rail to sessions whose agent is still live — same status set that
   // colours the row dot green/amber.
   const [activeOnly, setActiveOnly] = useState(false);
@@ -436,6 +457,16 @@ export function HistoryView() {
                             })}
                           >
                             🔗 {s.handoff.hop}/{s.handoff.chainLen}
+                          </span>
+                        )}
+                        {LIVE_STATUSES.has(s.status) && (
+                          <span
+                            className={styles.row_runtime}
+                            style={{ color: rowBarColor(s) ?? undefined }}
+                            title={new Date(s.createdAtMs).toLocaleString()}
+                          >
+                            <Clock size={10} strokeWidth={1.6} />
+                            {formatRunning(s.createdAtMs, t)}
                           </span>
                         )}
                         <span className={styles.row_time}>{timeAgo(s.lastActivityMs, t)}</span>
