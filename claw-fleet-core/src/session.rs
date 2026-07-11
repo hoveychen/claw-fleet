@@ -2020,6 +2020,32 @@ struct SubagentMeta {
     thinking_level: Option<String>,
 }
 
+/// How long a session whose workspace directory has been removed stays visible
+/// after its last activity. Long enough to cover a session that outlives its own
+/// worktree (Rule 3 has the agent delete it when the plan merges, while the
+/// session keeps running and may still be holding an unanswered decision card);
+/// short enough that transcripts of long-dead worktrees don't clutter the list
+/// with cards whose Resume can never work.
+const MISSING_WS_KEEP_MS: u64 = 24 * 60 * 60 * 1000;
+
+/// Was `path` (a transcript file, or a subagent dir) touched inside the keep
+/// window? Unreadable metadata counts as stale — the old behaviour was to hide
+/// these outright.
+fn touched_within_keep_window(path: &Path) -> bool {
+    let Ok(modified) = fs::metadata(path).and_then(|m| m.modified()) else {
+        return false;
+    };
+    let modified_ms = modified
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    now_ms.saturating_sub(modified_ms) <= MISSING_WS_KEEP_MS
+}
+
 pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionInfo> {
     let mut sessions = Vec::new();
     let ide_sessions = scan_ide_sessions(claude_dir);
@@ -2074,17 +2100,24 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
             .cloned()
             .unwrap_or_else(|| decode_workspace_path(&encoded));
 
-        // Hide sessions whose workspace directory no longer exists — e.g. a git
+        // Sessions whose workspace directory no longer exists — e.g. a git
         // worktree that was removed. Their transcripts linger under
         // ~/.claude/projects/<encoded>/ and would otherwise show as permanently
         // RateLimited cards with a Resume button that can never work (`claude
         // --resume` bails the moment it sees the cwd is gone). Skip TCC-protected
         // paths: we can't stat them without triggering a macOS permission dialog,
         // so we never hide those (decode already left them naively decoded).
+        //
+        // Hiding them *unconditionally* was too blunt: the Rule-3 worktree
+        // workflow has an agent remove its own worktree when the plan merges, so
+        // a session that is still alive — still holding an unanswered decision
+        // card — can lose its cwd mid-flight. Such a session would vanish from
+        // the scan, and with it the workspace label and session-history panel of
+        // its pending card. So keep the recently active ones (see
+        // `MISSING_WS_KEEP_MS`) and hide only the stale zombies this filter was
+        // written for.
         let ws_path = Path::new(&workspace_path);
-        if !crate::tcc::is_tcc_protected(ws_path) && !ws_path.is_dir() {
-            continue;
-        }
+        let workspace_missing = !crate::tcc::is_tcc_protected(ws_path) && !ws_path.is_dir();
 
         let ws_name = workspace_name(&workspace_path);
         let ide_name = ide.map(|s| s.ide_name.clone());
@@ -2104,6 +2137,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
 
         for entry in entries.flatten() {
             let path = entry.path();
+
+            // Workspace gone: keep only transcripts still being written to.
+            if workspace_missing && !touched_within_keep_window(&path) {
+                continue;
+            }
 
             // Main session JSONL files
             if path.is_file() && path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
@@ -4110,12 +4148,18 @@ mod tests {
         assert_eq!(holders[0].start_time_secs, real);
     }
 
-    /// Regression: sessions whose workspace directory no longer exists (e.g. a
-    /// deleted git worktree) must be filtered out of the scan, while sessions
-    /// whose workspace still exists stay visible.
+    /// Regression: a session whose workspace directory no longer exists (e.g. a
+    /// deleted git worktree) and which has been idle past the keep window must
+    /// be filtered out of the scan — its Resume can never work. Sessions whose
+    /// workspace still exists stay visible regardless of age.
+    ///
+    /// A *recently active* session whose workspace vanished is the other half of
+    /// this contract and stays visible; see
+    /// `scan_keeps_recently_active_sessions_whose_workspace_was_removed`.
     #[test]
     fn scan_hides_sessions_whose_workspace_was_deleted() {
         use std::path::Path;
+        use std::time::{Duration, SystemTime};
         let tmp = tempfile::tempdir().unwrap();
 
         let claude_dir = tmp.path().join("claude_home");
@@ -4124,14 +4168,23 @@ mod tests {
 
         // A minimal but parseable session JSONL written `now` (well within the
         // 7-day freshness window parse_session_info requires).
-        let write_session = |proj_dir: &Path, id: &str| {
+        let write_session = |proj_dir: &Path, id: &str, modified: Option<SystemTime>| {
             fs::create_dir_all(proj_dir).unwrap();
             let line = json!({
                 "type": "user",
                 "message": {"role": "user", "content": "hi"},
                 "timestamp": "2026-06-14T00:00:00.000Z"
             });
-            fs::write(proj_dir.join(format!("{id}.jsonl")), format!("{line}\n")).unwrap();
+            let path = proj_dir.join(format!("{id}.jsonl"));
+            fs::write(&path, format!("{line}\n")).unwrap();
+            if let Some(t) = modified {
+                fs::File::options()
+                    .write(true)
+                    .open(&path)
+                    .unwrap()
+                    .set_modified(t)
+                    .unwrap();
+            }
         };
 
         // Workspace that still exists on disk → its session must survive.
@@ -4139,13 +4192,17 @@ mod tests {
         fs::create_dir_all(&live_ws).unwrap();
         let live_encoded = live_ws.to_string_lossy().replace('/', "-");
         let live_id = "11111111-1111-1111-1111-111111111111";
-        write_session(&projects.join(&live_encoded), live_id);
+        write_session(&projects.join(&live_encoded), live_id, None);
 
-        // Workspace that was deleted (never created) → its session must be hidden.
+        // Workspace deleted (never created) and long idle → session must be hidden.
         let gone_ws = tmp.path().join("deleted-worktree");
         let gone_encoded = gone_ws.to_string_lossy().replace('/', "-");
         let gone_id = "22222222-2222-2222-2222-222222222222";
-        write_session(&projects.join(&gone_encoded), gone_id);
+        write_session(
+            &projects.join(&gone_encoded),
+            gone_id,
+            Some(SystemTime::now() - Duration::from_secs(30 * 24 * 3600)),
+        );
 
         let cache = ScanCache::new();
         let sessions = scan_claude_sessions(&claude_dir, &cache);
@@ -4157,7 +4214,7 @@ mod tests {
         );
         assert!(
             !ids.contains(&gone_id),
-            "session whose workspace was deleted must be filtered out: {ids:?}"
+            "long-idle session whose workspace was deleted must be filtered out: {ids:?}"
         );
     }
 
@@ -4207,6 +4264,82 @@ mod tests {
             ids.contains(&us_id),
             "session in an existing workspace with an underscore in its name \
              must remain visible: {ids:?}"
+        );
+    }
+
+    /// Regression: sessions whose workspace directory is gone used to be hidden
+    /// unconditionally. But Rule 3 has the agent `git worktree remove` its own
+    /// checkout when the plan merges, and the handoff relay used to spawn
+    /// successors inside that worktree — so a *live* session, still holding an
+    /// unanswered decision card, would lose its cwd and disappear from the scan.
+    /// Its card then lost the workspace label and the session-history panel
+    /// (both resolve the session by id against this list).
+    ///
+    /// Keep the recently active ones; keep hiding the stale zombies the filter
+    /// was written for (their Resume can never work).
+    #[test]
+    fn scan_keeps_recently_active_sessions_whose_workspace_was_removed() {
+        use std::path::Path;
+        use std::time::{Duration, SystemTime};
+        let tmp = tempfile::tempdir().unwrap();
+
+        let claude_dir = tmp.path().join("claude_home");
+        let projects = claude_dir.join("projects");
+        fs::create_dir_all(&projects).unwrap();
+
+        let claude_encode = |p: &Path| -> String {
+            p.to_string_lossy()
+                .chars()
+                .map(|c| if c == '/' || c == '.' || c == '_' { '-' } else { c })
+                .collect()
+        };
+
+        // A workspace that no longer exists — a merged-and-removed worktree.
+        let gone_ws = tmp.path().join("goneworktree");
+        let gone_dir = projects.join(claude_encode(&gone_ws));
+        fs::create_dir_all(&gone_dir).unwrap();
+
+        let write_session = |dir: &Path, id: &str, modified: SystemTime| {
+            let line = json!({
+                "type": "user",
+                "message": {"role": "user", "content": "hi"},
+                "timestamp": "2026-07-11T00:00:00.000Z"
+            });
+            let path = dir.join(format!("{id}.jsonl"));
+            fs::write(&path, format!("{line}\n")).unwrap();
+            fs::File::options()
+                .write(true)
+                .open(&path)
+                .unwrap()
+                .set_modified(modified)
+                .unwrap();
+        };
+
+        // Still being written to — the session outlived its worktree.
+        let live_id = "44444444-4444-4444-4444-444444444444";
+        write_session(&gone_dir, live_id, SystemTime::now());
+
+        // Long dead: a transcript of a worktree removed weeks ago.
+        let zombie_id = "55555555-5555-5555-5555-555555555555";
+        write_session(
+            &gone_dir,
+            zombie_id,
+            SystemTime::now() - Duration::from_secs(30 * 24 * 3600),
+        );
+
+        let cache = ScanCache::new();
+        let sessions = scan_claude_sessions(&claude_dir, &cache);
+        let ids: Vec<&str> = sessions.iter().map(|s| s.id.as_str()).collect();
+
+        assert!(
+            ids.contains(&live_id),
+            "a session still active after its worktree was removed must stay \
+             visible — its pending decision card resolves workspace + history \
+             through this list: {ids:?}"
+        );
+        assert!(
+            !ids.contains(&zombie_id),
+            "a long-dead transcript of a removed worktree must stay hidden: {ids:?}"
         );
     }
 }
