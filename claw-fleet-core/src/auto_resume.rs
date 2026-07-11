@@ -52,6 +52,60 @@ impl AutoResumeConfig {
 /// 21:10 / 21:12 on 2026-04-25.
 pub const RESET_GRACE: chrono::Duration = chrono::Duration::seconds(60);
 
+/// Utilization (0–1 fraction) below which a limit's window is treated as
+/// "usable again". A rate-limited account pins the relevant metric right up
+/// near 1.0; once the window resets — or foxy-switcher swaps in a fresh
+/// account — it drops well below this. Set conservatively high so a metric
+/// still sitting at 0.97 doesn't get mistaken for recovered and burn a 429.
+pub const RECOVERED_UTILIZATION: f64 = 0.95;
+
+/// Which sampled usage metric reflects a given rate-limit type. `None` for
+/// limit types that don't map to exactly one sampled metric — those fall back
+/// to the hint-time gate alone (there's no single utilization number to read).
+fn metric_for_limit(limit_type: crate::rate_limit_parser::RateLimitType) -> Option<&'static str> {
+    use crate::rate_limit_parser::RateLimitType::*;
+    match limit_type {
+        SessionLimit => Some("five_hour"),
+        // Opus limit is a weekly cap; the 7-day metric is the closest signal.
+        WeeklyLimit | OpusLimit => Some("seven_day"),
+        SonnetLimit => Some("seven_day_sonnet"),
+        // Generic / overage / unknown have no dedicated metric — hint gate only.
+        UsageLimit | OutOfExtraUsage | Unknown => None,
+    }
+}
+
+/// Whether the account limit behind a rate-limit has actually come back,
+/// judged purely from the latest cached usage snapshot — **no network call**
+/// (the snapshot is read off disk by [`crate::account::latest_usage_snapshot`]).
+///
+/// Returns `true` only when BOTH hold:
+/// - the snapshot post-dates the rate-limit error (`snap.ts > error_timestamp`).
+///   A snapshot older than the error reflects the *pre-limit* past, so its low
+///   utilization says nothing about recovery — this guard is what makes a
+///   cache-only, no-extra-request check safe even when the sampler is stale.
+/// - the metric matching this limit type has dropped below
+///   [`RECOVERED_UTILIZATION`].
+///
+/// This covers both a plain window reset and a foxy-switcher account swap:
+/// either way the *live* account's utilization for that metric is now low.
+pub fn limit_recovered(
+    rl: &crate::session::RateLimitState,
+    snapshot: Option<&crate::account::UsageHistoryPoint>,
+) -> bool {
+    let Some(snap) = snapshot else { return false };
+    let Some(metric) = metric_for_limit(rl.limit_type) else { return false };
+    if snap.ts <= rl.error_timestamp.timestamp_millis() {
+        return false;
+    }
+    let util = match metric {
+        "five_hour" => snap.five_hour,
+        "seven_day" => snap.seven_day,
+        "seven_day_sonnet" => snap.seven_day_sonnet,
+        _ => None,
+    };
+    matches!(util, Some(u) if u < RECOVERED_UTILIZATION)
+}
+
 /// Decide whether a rate-limited session is eligible for auto-resume *right now*.
 ///
 /// Returns `true` only when ALL of:
@@ -62,14 +116,24 @@ pub const RESET_GRACE: chrono::Duration = chrono::Duration::seconds(60);
 /// - the session's `agent_source == "claude-code"` (only claude-code transcripts
 ///   are loadable by `claude --resume`)
 /// - the session is in `RateLimited` state with a `rate_limit` payload
-/// - `now >= resets_at + RESET_GRACE` (the wait has elapsed plus a grace
-///   window so we don't race the reset boundary)
+/// - EITHER `now >= resets_at + RESET_GRACE` (the hint wait has elapsed plus a
+///   grace window so we don't race the reset boundary) OR [`limit_recovered`]
+///   reports the account's live utilization for this limit has already dropped
+///   below [`RECOVERED_UTILIZATION`] (a window reset or a foxy-switcher account
+///   swap made capacity available ahead of the hinted `resets_at`)
 /// - `resets_at - error_timestamp <= max_wait_hours` (the configured window
-///   was short enough that unattended resume is safe)
+///   was short enough that unattended resume is safe). This outer safety valve
+///   applies to BOTH the hint-elapsed and limit-recovered paths — it encodes
+///   the user's "don't auto-resume jobs that were meant to wait longer than N
+///   hours" intent, which an early recovery doesn't override.
+///
+/// `usage` is the latest cached usage snapshot (pass `None` to gate on the hint
+/// time alone); it is read cache-only by the caller, never fetched here.
 pub fn should_auto_resume(
     session: &crate::session::SessionInfo,
     config: &AutoResumeConfig,
     now: chrono::DateTime<chrono::Utc>,
+    usage: Option<&crate::account::UsageHistoryPoint>,
 ) -> bool {
     if !config.enabled {
         return false;
@@ -98,7 +162,8 @@ pub fn should_auto_resume(
         return false;
     }
     let Some(rl) = session.rate_limit.as_ref() else { return false };
-    if now < rl.resets_at + RESET_GRACE {
+    let hint_elapsed = now >= rl.resets_at + RESET_GRACE;
+    if !hint_elapsed && !limit_recovered(rl, usage) {
         return false;
     }
     let wait = rl.resets_at - rl.error_timestamp;
@@ -119,16 +184,20 @@ pub fn should_auto_resume(
 /// `skip(id)` returns true for sessions that should be passed over this tick
 /// (e.g. still within the debounce window, or backed off after repeated
 /// failures). Results preserve session-list order and never exceed `slots`.
+///
+/// `usage` is the latest cached usage snapshot, read once by the caller and
+/// shared across every session's [`should_auto_resume`] check this tick.
 pub fn select_resume_candidates(
     sessions: &[crate::session::SessionInfo],
     config: &AutoResumeConfig,
     now: chrono::DateTime<chrono::Utc>,
+    usage: Option<&crate::account::UsageHistoryPoint>,
     skip: impl Fn(&str) -> bool,
     slots: usize,
 ) -> Vec<(String, String)> {
     sessions
         .iter()
-        .filter(|s| should_auto_resume(s, config, now))
+        .filter(|s| should_auto_resume(s, config, now, usage))
         .filter(|s| !skip(&s.id))
         .take(slots)
         .map(|s| (s.id.clone(), s.workspace_path.clone()))
@@ -387,7 +456,71 @@ mod tests {
             SessionStatus::RateLimited,
             Some(mk_rl(-2, 5)),
         );
-        assert!(should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    fn usage(ts_ms: i64, five_hour: Option<f64>) -> crate::account::UsageHistoryPoint {
+        crate::account::UsageHistoryPoint { ts: ts_ms, five_hour, ..Default::default() }
+    }
+
+    #[test]
+    fn limit_recovered_true_when_fresh_snapshot_below_threshold() {
+        // error was ~4h ago (resets 1h out, 5h window); snapshot taken now with
+        // five_hour utilization well below the 0.95 recovered threshold.
+        let rl = mk_rl(60, 5);
+        let snap = usage(Utc::now().timestamp_millis(), Some(0.10));
+        assert!(limit_recovered(&rl, Some(&snap)));
+    }
+
+    #[test]
+    fn limit_recovered_false_when_snapshot_predates_error() {
+        // A snapshot older than the rate-limit error reflects the pre-limit past,
+        // so its low utilization must NOT be read as recovery — this is the guard
+        // that keeps the cache-only check safe against a stale sampler.
+        let rl = mk_rl(60, 5);
+        let stale_ts = rl.error_timestamp.timestamp_millis() - 1;
+        let snap = usage(stale_ts, Some(0.10));
+        assert!(!limit_recovered(&rl, Some(&snap)));
+    }
+
+    #[test]
+    fn limit_recovered_false_when_metric_still_high() {
+        let rl = mk_rl(60, 5);
+        let snap = usage(Utc::now().timestamp_millis(), Some(0.97));
+        assert!(!limit_recovered(&rl, Some(&snap)));
+    }
+
+    #[test]
+    fn limit_recovered_false_for_limit_type_without_metric() {
+        // UsageLimit maps to no single sampled metric — the utilization gate is
+        // inapplicable, so it always falls back to the hint-time gate.
+        let mut rl = mk_rl(60, 5);
+        rl.limit_type = RateLimitType::UsageLimit;
+        let snap = usage(Utc::now().timestamp_millis(), Some(0.05));
+        assert!(!limit_recovered(&rl, Some(&snap)));
+    }
+
+    #[test]
+    fn eligible_via_recovery_before_hint_elapsed() {
+        // Hint says reset is still 60 min away, so the hint gate blocks. But the
+        // live account's five_hour metric has dropped to 0.1 — a window reset or
+        // foxy account swap — so the recovery path makes it eligible now.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(60, 5)));
+        let snap = usage(Utc::now().timestamp_millis(), Some(0.10));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None)); // hint gate alone: blocked
+        assert!(should_auto_resume(&s, &cfg, Utc::now(), Some(&snap))); // recovery: eligible
+    }
+
+    #[test]
+    fn recovery_still_bounded_by_max_wait() {
+        // Even with the account fully recovered, a job whose original wait
+        // exceeds max_wait_hours stays blocked — the safety valve applies to the
+        // recovery path too, not just the hint path.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(60, 24)));
+        let snap = usage(Utc::now().timestamp_millis(), Some(0.05));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), Some(&snap)));
     }
 
     #[test]
@@ -395,7 +528,7 @@ mod tests {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         // reset is 10 minutes away
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(10, 5)));
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
@@ -403,14 +536,14 @@ mod tests {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         // reset was 1 min ago, but the original wait was 24h (weekly limit) — skip.
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-1, 24)));
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
     fn blocked_when_disabled() {
         let cfg = AutoResumeConfig { enabled: false, max_wait_hours: 12 };
         let s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-1, 5)));
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
@@ -423,7 +556,7 @@ mod tests {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
         s.ide_name = Some("Visual Studio Code".into());
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
@@ -433,7 +566,7 @@ mod tests {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
         s.agent_source = "cursor".into();
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     fn mk_eligible_with_id(id: &str) -> SessionInfo {
@@ -450,7 +583,7 @@ mod tests {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let sessions: Vec<SessionInfo> =
             (0..5).map(|i| mk_eligible_with_id(&format!("s{i}"))).collect();
-        let picked = select_resume_candidates(&sessions, &cfg, Utc::now(), |_| false, 2);
+        let picked = select_resume_candidates(&sessions, &cfg, Utc::now(), None, |_| false, 2);
         assert_eq!(picked.len(), 2, "must not exceed available slots");
         assert_eq!(picked[0].0, "s0");
         assert_eq!(picked[1].0, "s1");
@@ -460,7 +593,7 @@ mod tests {
     fn select_zero_slots_fires_nothing() {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let sessions = vec![mk_eligible_with_id("s0")];
-        let picked = select_resume_candidates(&sessions, &cfg, Utc::now(), |_| false, 0);
+        let picked = select_resume_candidates(&sessions, &cfg, Utc::now(), None, |_| false, 0);
         assert!(picked.is_empty(), "no slots → fire nothing");
     }
 
@@ -471,7 +604,7 @@ mod tests {
             (0..3).map(|i| mk_eligible_with_id(&format!("s{i}"))).collect();
         // Skip s1 (e.g. debounced / backed off) → only s0, s2 within 5 slots.
         let picked =
-            select_resume_candidates(&sessions, &cfg, Utc::now(), |id| id == "s1", 5);
+            select_resume_candidates(&sessions, &cfg, Utc::now(), None, |id| id == "s1", 5);
         let ids: Vec<&str> = picked.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["s0", "s2"]);
     }
@@ -514,21 +647,21 @@ mod tests {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
         s.is_subagent = true;
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
     fn blocked_when_status_not_rate_limited() {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let s = mk_session(SessionStatus::Idle, Some(mk_rl(-1, 5)));
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
     fn blocked_when_no_rate_limit_payload() {
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let s = mk_session(SessionStatus::RateLimited, None);
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
@@ -548,7 +681,7 @@ mod tests {
             error_timestamp,
         };
         let s = mk_session(SessionStatus::RateLimited, Some(rl));
-        assert!(!should_auto_resume(&s, &cfg, Utc::now()));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[cfg(unix)]
