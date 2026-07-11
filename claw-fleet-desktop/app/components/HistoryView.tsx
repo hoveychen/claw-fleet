@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -21,12 +22,25 @@ import {
 import { useReadStore, useSessionsStore, useUIStore, type MarkFilter } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
-import { isFleetOwnedEntrypoint, sessionUnread } from "../types";
+import { LIVE_STATUSES, isFleetOwnedEntrypoint, rowBarColor, sessionUnread } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
+import { SessionTabs } from "./SessionTabs";
+import {
+  closeOtherTabs as closeOtherTabsState,
+  closeTab as closeTabState,
+  closeTabsToRight as closeTabsToRightState,
+  openTab as openTabState,
+  parsePersistedTabs,
+  pruneMissingTabs,
+  reorderTabs as reorderTabIds,
+  TABS_STORAGE_KEY,
+  type TabState,
+} from "../sessionTabs";
+import { getItem, setItem } from "../storage";
 import { StopControl, canControl } from "./StopControl";
 import { MarkControl } from "./MarkControl";
 import styles from "./HistoryView.module.css";
@@ -68,11 +82,6 @@ function matchSpawnedSession(
     .sort((a, b) => b.createdAtMs - a.createdAtMs)[0];
 }
 
-const LIVE_STATUSES = new Set([
-  "thinking", "executing", "streaming", "processing",
-  "waitingInput", "active", "delegating",
-]);
-
 /** Segments for the pending/done filter. "all" shows everything; the other two
  *  map to the binary mark buckets (unmarked collapses to "pending"). The
  *  read/unread axis is deliberately NOT filterable — only pending/done is.
@@ -110,16 +119,6 @@ function formatRunning(ms: number, t: (k: string, opts?: Record<string, unknown>
   if (diff < 3_600_000) return t("ran_m", { n: Math.floor(diff / 60_000) });
   if (diff < 86_400_000) return t("ran_h", { n: Math.floor(diff / 3_600_000) });
   return t("ran_d", { n: Math.floor(diff / 86_400_000) });
-}
-
-/** Run-status colour: green = agent still live, amber = waiting for input.
- *  Ended sessions get nothing (null) — this is a positive "this one's doing
- *  something" signal, not another mark on every row. Drives both the left dot
- *  and the runtime label, which are two views of the same fact. */
-function rowBarColor(s: SessionInfo): string | null {
-  if (!LIVE_STATUSES.has(s.status)) return null;
-  if (s.status === "waitingInput") return "#d0a85a";
-  return "#5ac88c";
 }
 
 /** Rows keep their control while there is a live process to aim it at; once the
@@ -177,6 +176,9 @@ type SessionRowProps = {
   session: SessionInfo;
   snippet: string | undefined;
   isSelected: boolean;
+  /** Open in a tab, but not the tab currently on screen. Weaker half of the
+   *  same axis as `isSelected` — never both at once. */
+  isOpen: boolean;
   unread: boolean;
   /** Bumped every 30s by the parent so relative times keep advancing. Without
    *  it the memo would freeze the elapsed "3 分钟" at whatever it said on mount. */
@@ -188,6 +190,7 @@ const SessionRow = memo(function SessionRow({
   session: s,
   snippet,
   isSelected,
+  isOpen,
   unread,
   onClick,
 }: SessionRowProps) {
@@ -197,7 +200,7 @@ const SessionRow = memo(function SessionRow({
     <div className={styles.row_wrap}>
       <button
         type="button"
-        className={`${styles.row} ${isSelected ? styles.row_active : ""} ${unread ? styles.row_unread : ""}`}
+        className={`${styles.row} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""} ${unread ? styles.row_unread : ""}`}
         onClick={() => onClick(s)}
         title={s.lastMessagePreview ?? undefined}
         aria-label={unread ? t("history.unread", "未读 — 有新消息") : undefined}
@@ -262,6 +265,7 @@ const SessionRow = memo(function SessionRow({
 },
 (prev, next) =>
   prev.isSelected === next.isSelected &&
+  prev.isOpen === next.isOpen &&
   prev.unread === next.unread &&
   prev.snippet === next.snippet &&
   prev.nowTick === next.nowTick &&
@@ -325,12 +329,28 @@ export function HistoryView() {
   const setMarkFilter = useUIStore((s) => s.setHistoryMarkFilter);
   // Inline detail column selection — local to the page, deliberately NOT the
   // global useDetailStore (that one drives the drawer overlaying every view).
-  const [selected, setSelected] = useState<SessionInfo | null>(null);
-  const [detailQuery, setDetailQuery] = useState<string | null>(null);
+  //
+  // The column is an IDE-style tab strip: `tabIds` is the open tabs left→right
+  // and `activeId` is the one on screen. We keep *ids*, not SessionInfo
+  // snapshots, and resolve them against the live scan on every render — a tab
+  // that has been open for ten minutes must show the session's current title
+  // and status, not the ones it wore when it was opened.
+  //
+  // Restored from the previous run. The lazy initialiser matters: `initStorage`
+  // is awaited before React renders, so reading at first render sees a warm
+  // cache, while a module-level read would run at import time and see nothing.
+  const [restored] = useState(() =>
+    parsePersistedTabs(getItem(TABS_STORAGE_KEY)),
+  );
+  const [tabIds, setTabIds] = useState<string[]>(restored.tabIds);
+  const [activeId, setActiveId] = useState<string | null>(restored.activeId);
+  // Per-tab search highlight (the FTS query that matched that session), keyed
+  // by session id — each tab was opened by its own click and carries its own.
+  const [queryById, setQueryById] = useState<Record<string, string | null>>({});
   // Detail-column modes are mutually exclusive, in precedence order:
   //   pending  → "starting…" spinner while we wait for the scanner
   //   composing→ the inline new-session form
-  //   selected → an existing session's SessionDetail
+  //   tabs     → the open sessions' SessionDetail panes
   //   (none)   → the empty-state hint
   const [composing, setComposing] = useState(false);
   const [pending, setPending] = useState<PendingSpawn | null>(null);
@@ -414,23 +434,119 @@ export function HistoryView() {
     [adhocSessions, readOverrides],
   );
 
+  // Open tabs, resolved against the live scan. An id whose session has vanished
+  // from the scan resolves to nothing and simply drops out of the strip; we
+  // deliberately do NOT prune `tabIds` for it, so a session that blips out of a
+  // scan cycle comes back to its tab rather than being silently closed.
+  const sessionById = useMemo(
+    () => new Map(sessions.map((s) => [s.id, s])),
+    [sessions],
+  );
+  const tabs = useMemo(
+    () =>
+      tabIds
+        .map((id) => sessionById.get(id))
+        .filter((s): s is SessionInfo => s != null),
+    [tabIds, sessionById],
+  );
+
+  // Compose / pending own the whole column while they're up. The tab panes stay
+  // mounted underneath (hidden + paused) so cancelling out of the composer puts
+  // the user back on the tab they left, exactly where they left it.
+  const overlaid = pending != null || composing;
+
+  // Persist the strip so it comes back on the next launch. The per-tab search
+  // highlight is deliberately NOT persisted — a term you searched for last week
+  // has no business highlighting a transcript on a cold start.
+  useEffect(() => {
+    setItem(TABS_STORAGE_KEY, JSON.stringify({ tabIds, activeId }));
+  }, [tabIds, activeId]);
+
+  // Restored ids can name sessions that have since been deleted. They already
+  // render as nothing (they don't resolve against the scan), but left in the
+  // list they'd persist forever and grow. Prune once, against the first scan
+  // that lands — before it, `sessions` is empty and pruning would close
+  // everything.
+  const prunedRef = useRef(false);
+  useEffect(() => {
+    if (!scanReady || prunedRef.current) return;
+    prunedRef.current = true;
+    const next = pruneMissingTabs({ tabIds, activeId }, (id) => sessionById.has(id));
+    if (next.tabIds.length === tabIds.length) return;
+    setTabIds(next.tabIds);
+    setActiveId(next.activeId);
+  }, [scanReady, sessionById, tabIds, activeId]);
+
+  // Clicking a tab also dismisses whatever overlay was covering the column, so
+  // the strip doubles as the way back out of the composer.
+  const activateTab = useCallback((id: string) => {
+    setComposing(false);
+    setPending(null);
+    setStartTimedOut(false);
+    setActiveId(id);
+  }, []);
+
+  // The close/reorder rules (chiefly: where focus lands after a close) live in
+  // `sessionTabs.ts` as pure reducers so they can be unit-tested.
+  const applyTabs = useCallback(
+    (fn: (state: TabState) => TabState) => {
+      const next = fn({ tabIds, activeId });
+      setTabIds(next.tabIds);
+      setActiveId(next.activeId);
+      // Drop highlights for tabs that are no longer open.
+      setQueryById((prev) =>
+        Object.fromEntries(
+          Object.entries(prev).filter(([id]) => next.tabIds.includes(id)),
+        ),
+      );
+    },
+    [tabIds, activeId],
+  );
+
+  const openTab = useCallback(
+    (s: SessionInfo, highlight: string | null) => {
+      setComposing(false);
+      setPending(null);
+      setStartTimedOut(false);
+      applyTabs((st) => openTabState(st, s.id));
+      setQueryById((prev) => ({ ...prev, [s.id]: highlight }));
+    },
+    [applyTabs],
+  );
+
   // Stable identity: SessionRow is memoised, and a fresh closure each render
   // would defeat it for every row.
   const handleRowClick = useCallback(
     (s: SessionInfo) => {
       const isFtsHit = query.trim().length >= 2 && ftsMatchPaths.has(s.jsonlPath);
-      setComposing(false);
-      setPending(null);
-      setStartTimedOut(false);
-      setSelected(s);
-      setDetailQuery(isFtsHit ? query.trim() : null);
+      openTab(s, isFtsHit ? query.trim() : null);
     },
-    [query, ftsMatchPaths],
+    [query, ftsMatchPaths, openTab],
   );
 
-  // "+新会话" → swap the detail column to the inline compose form.
+  const closeTab = useCallback(
+    (id: string) => applyTabs((s) => closeTabState(s, id)),
+    [applyTabs],
+  );
+  const closeOtherTabs = useCallback(
+    (id: string) => applyTabs((s) => closeOtherTabsState(s, id)),
+    [applyTabs],
+  );
+  const closeTabsToRight = useCallback(
+    (id: string) => applyTabs((s) => closeTabsToRightState(s, id)),
+    [applyTabs],
+  );
+  const closeAllTabs = useCallback(
+    () => applyTabs(() => ({ tabIds: [], activeId: null })),
+    [applyTabs],
+  );
+  const reorderTabs = useCallback((fromId: string, toId: string) => {
+    setTabIds((prev) => reorderTabIds(prev, fromId, toId));
+  }, []);
+
+  // "+新会话" → swap the detail column to the inline compose form. Open tabs are
+  // left untouched (and merely hidden) — composing is a detour, not a close.
   const handleNewSession = () => {
-    setSelected(null);
     setPending(null);
     setStartTimedOut(false);
     setComposing(true);
@@ -454,12 +570,10 @@ export function HistoryView() {
     if (!pending) return;
     const match = matchSpawnedSession(adhocSessions, pending);
     if (match) {
-      setSelected(match);
-      setDetailQuery(null);
-      setPending(null);
-      setStartTimedOut(false);
+      // A freshly spawned session gets its own tab, same as any other open.
+      openTab(match, null);
     }
-  }, [adhocSessions, pending]);
+  }, [adhocSessions, pending, openTab]);
 
   // Surface an escape hatch if the spawn takes unusually long to show up.
   useEffect(() => {
@@ -471,17 +585,31 @@ export function HistoryView() {
     return () => clearTimeout(id);
   }, [pending]);
 
-  // Dwell-to-read: staying on a selected session for 2s marks it read. Clicking
-  // away (or unmounting) before the timer fires cancels it, so a quick glance
-  // doesn't clear the unread dot. Re-keyed on the selected id, not its activity,
+  // Dwell-to-read: staying on a session for 2s marks it read. Clicking away (or
+  // unmounting) before the timer fires cancels it, so a quick glance doesn't
+  // clear the unread dot. Re-keyed on the *active* tab's id, not its activity,
   // so a still-streaming session can flip back to unread and get re-read on a
   // later visit — matching "new message after last read → unread".
+  //
+  // Following `activeId` (not merely "is open") is what stops background tabs
+  // from marking themselves read: a session you have parked in a tab but are
+  // not looking at is, correctly, still unread.
+  const activeSession = useMemo(
+    () => tabs.find((s) => s.id === activeId) ?? null,
+    [tabs, activeId],
+  );
+  // Read at fire time so the timer isn't re-armed by every scan that refreshes
+  // the session object, which would keep pushing the 2s dwell out.
+  const activeSessionRef = useRef(activeSession);
+  activeSessionRef.current = activeSession;
   useEffect(() => {
-    if (!selected) return;
-    const target = selected;
-    const id = setTimeout(() => markRead(target), 2000);
+    if (!activeId || overlaid) return;
+    const id = setTimeout(() => {
+      const target = activeSessionRef.current;
+      if (target) markRead(target);
+    }, 2000);
     return () => clearTimeout(id);
-  }, [selected?.id, markRead]);
+  }, [activeId, overlaid, markRead]);
 
   return (
     <div className={styles.page}>
@@ -603,7 +731,8 @@ export function HistoryView() {
                 snippet={
                   query.trim().length >= 2 ? snippetByPath.get(s.jsonlPath) : undefined
                 }
-                isSelected={selected?.id === s.id}
+                isSelected={activeId === s.id}
+                isOpen={activeId !== s.id && tabIds.includes(s.id)}
                 unread={sessionUnread(s, readOverrides[s.id])}
                 nowTick={nowTick}
                 onClick={handleRowClick}
@@ -617,40 +746,76 @@ export function HistoryView() {
       )}
 
       <div className={styles.detail}>
-        {pending ? (
-          <div className={styles.detail_starting}>
-            {startTimedOut ? (
-              <>
-                <span className={styles.starting_text}>
-                  {t("new_session.start_timeout", "启动较慢，可再等等，或从左侧列表里查看")}
-                </span>
-                <button
-                  type="button"
-                  className={styles.starting_dismiss}
-                  onClick={() => setPending(null)}
-                >
-                  {t("cancel")}
-                </button>
-              </>
-            ) : (
-              <>
-                <span className={styles.starting_spinner} />
-                <span className={styles.starting_text}>
-                  {t("new_session.starting", "正在启动会话…")}
-                </span>
-              </>
-            )}
-          </div>
-        ) : composing ? (
-          <NewSessionForm onCreated={handleCreated} onCancel={() => setComposing(false)} />
-        ) : selected ? (
-          <SessionDetail inline sessionInfo={selected} searchQuery={detailQuery} />
-        ) : (
-          <div className={styles.detail_empty}>
-            <History size={28} strokeWidth={1.2} />
-            <span>{t("history.select_hint", "从左侧选择一个会话查看详情")}</span>
-          </div>
-        )}
+        {/* No tab reads as active while the composer or the spawn spinner owns
+            the column — the highlighted tab would be pointing at content that
+            isn't on screen. */}
+        <SessionTabs
+          tabs={tabs}
+          activeId={overlaid ? null : activeId}
+          onActivate={activateTab}
+          onClose={closeTab}
+          onCloseOthers={closeOtherTabs}
+          onCloseRight={closeTabsToRight}
+          onCloseAll={closeAllTabs}
+          onReorder={reorderTabs}
+        />
+
+        <div className={styles.detail_body}>
+          {/* Every open tab stays mounted; only the active one is displayed.
+              Unmounting the others would throw away the messages, scroll
+              position and view-tab that make a tab worth keeping open. The
+              hidden ones are `paused`, so they cost no polling. */}
+          {tabs.map((tab) => {
+            const visible = !overlaid && tab.id === activeId;
+            return (
+              <div
+                key={tab.id}
+                className={styles.pane}
+                style={{ display: visible ? "flex" : "none" }}
+              >
+                <SessionDetail
+                  inline
+                  sessionInfo={tab}
+                  searchQuery={queryById[tab.id] ?? null}
+                  paused={!visible}
+                />
+              </div>
+            );
+          })}
+
+          {pending ? (
+            <div className={styles.detail_starting}>
+              {startTimedOut ? (
+                <>
+                  <span className={styles.starting_text}>
+                    {t("new_session.start_timeout", "启动较慢，可再等等，或从左侧列表里查看")}
+                  </span>
+                  <button
+                    type="button"
+                    className={styles.starting_dismiss}
+                    onClick={() => setPending(null)}
+                  >
+                    {t("cancel")}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className={styles.starting_spinner} />
+                  <span className={styles.starting_text}>
+                    {t("new_session.starting", "正在启动会话…")}
+                  </span>
+                </>
+              )}
+            </div>
+          ) : composing ? (
+            <NewSessionForm onCreated={handleCreated} onCancel={() => setComposing(false)} />
+          ) : tabs.length === 0 ? (
+            <div className={styles.detail_empty}>
+              <History size={28} strokeWidth={1.2} />
+              <span>{t("history.select_hint", "从左侧选择一个会话查看详情")}</span>
+            </div>
+          ) : null}
+        </div>
       </div>
     </div>
   );
