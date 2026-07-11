@@ -1730,6 +1730,7 @@
       "pull": "拉取",
       "pushing": "推送中…",
       "pulling": "拉取中…",
+      "refresh": "刷新状态",
       "push_confirm": "确认把 {{branch}} 推送到 {{upstream}}？",
       "pull_confirm": "确认拉取（fast-forward）到 {{branch}}？",
       "default_remote": "远端",
