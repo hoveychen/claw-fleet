@@ -2440,6 +2440,55 @@ pub fn scan_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionIn
     sessions
 }
 
+/// Minimal `SessionInfo` for tests. Lives here (rather than being re-spelled as
+/// a 40-field literal in each module's test mod) so the enricher suites can
+/// build one cheaply.
+#[cfg(test)]
+pub(crate) fn test_session(id: &str) -> SessionInfo {
+    SessionInfo {
+        id: id.into(),
+        workspace_path: "/ws".into(),
+        workspace_name: "ws".into(),
+        ide_name: None,
+        entrypoint: None,
+        is_subagent: false,
+        parent_session_id: None,
+        agent_type: None,
+        agent_description: None,
+        slug: None,
+        ai_title: None,
+        status: SessionStatus::Idle,
+        token_speed: 0.0,
+        agent_token_speed: 0.0,
+        total_output_tokens: 0,
+        total_cost_usd: 0.0,
+        agent_total_cost_usd: 0.0,
+        cost_speed_usd_per_min: 0.0,
+        last_message_preview: None,
+        last_activity_ms: 0,
+        created_at_ms: 0,
+        jsonl_path: format!("/tmp/{id}.jsonl"),
+        model: None,
+        thinking_level: None,
+        pid: None,
+        pid_precise: false,
+        last_skill: None,
+        context_percent: None,
+        agent_source: "claude-code".into(),
+        last_outcome: None,
+        rate_limit: None,
+        todos: None,
+        task_plan: None,
+        handoff: None,
+        user_mark: None,
+        last_read_ms: None,
+        compact_count: 0,
+        compact_pre_tokens: 0,
+        compact_post_tokens: 0,
+        compact_cost_usd: 0.0,
+    }
+}
+
 /// Stamp the scan-time state that lives outside the jsonl — relay position,
 /// manual mark, read state. Every path that hands sessions to the frontend must
 /// go through this, including the incremental rescan: a source's sessions come
