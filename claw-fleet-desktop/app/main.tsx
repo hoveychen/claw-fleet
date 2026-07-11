@@ -1,24 +1,12 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { stampHostClasses } from "./hostClass";
 
 const params = new URLSearchParams(window.location.search);
 const isMockMode = params.has("mock") || import.meta.env.VITE_MOCK === "true";
 const forceLite = params.has("lite");
 
-// Tag the document root with host classes so CSS / JSX can fork between
-// macOS (titleBarStyle: Overlay — OS keeps traffic lights) and Windows
-// (decorations: false — we draw the whole title bar). Mock mode skips
-// `tauri-host` so a plain browser preview keeps default chrome.
-{
-  const cls = document.documentElement.classList;
-  const hasTauri =
-    typeof window !== "undefined" &&
-    ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
-  if (hasTauri) cls.add("tauri-host");
-  const ua = typeof navigator !== "undefined" ? navigator.userAgent : "";
-  if (/Windows/i.test(ua)) cls.add("os-windows");
-  else if (/Macintosh|Mac OS X/i.test(ua)) cls.add("os-macos");
-}
+stampHostClasses();
 
 async function boot() {
   // In mock mode, install the Tauri API fakes BEFORE anything else loads.
