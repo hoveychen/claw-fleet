@@ -1995,6 +1995,36 @@ fn read_explorer_file(
         .read_explorer_file(&workspace, &root, &rel_path)
 }
 
+// ── Session scratchpad ──────────────────────────────────────────────────────────
+
+#[tauri::command]
+fn list_scratchpad_dir(
+    workspace: String,
+    session_id: String,
+    rel_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::file_explorer::ExplorerEntry>, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .list_scratchpad_dir(&workspace, &session_id, &rel_path)
+}
+
+#[tauri::command]
+fn read_scratchpad_file(
+    workspace: String,
+    session_id: String,
+    rel_path: String,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::file_explorer::ExplorerFileContent, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .read_scratchpad_file(&workspace, &session_id, &rel_path)
+}
+
 // ── Source control ──────────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -3784,6 +3814,8 @@ pub fn run() {
             git_pull,
             list_explorer_dir,
             read_explorer_file,
+            list_scratchpad_dir,
+            read_scratchpad_file,
             list_skills,
             get_skill_content,
             list_skill_files,
