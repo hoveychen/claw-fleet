@@ -9,6 +9,7 @@ import { CopyButton } from "./CopyButton";
 import { useProcStore, useSessionsStore, useUIStore } from "../store";
 import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { ProcPanel } from "./ProcPanel";
+import { ProcTerminal } from "./ProcTerminal";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
@@ -322,7 +323,11 @@ function WorkspaceExplorer({ workspace, name }: { workspace: string; name: strin
         </div>
       </div>
 
-      <ProcPanel workspace={workspace} name={name} />
+      <ProcPanel
+        workspace={workspace}
+        name={name}
+        renderTerminal={(p) => <ProcTerminal proc={p} />}
+      />
     </>
   );
 }
