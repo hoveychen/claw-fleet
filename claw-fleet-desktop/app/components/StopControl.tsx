@@ -14,6 +14,10 @@ const TURN_IN_FLIGHT = new Set<SessionStatus>([
   "streaming",
   "processing",
   "delegating",
+  // A wedged tool-use batch: the turn is in flight but deadlocked. SIGINT is
+  // exactly the fix — it completes the batch with an interrupt result and
+  // leaves the transcript resumable (same mechanics as any interrupt).
+  "stuck",
 ]);
 
 export type StopMode = "interrupt" | "stop" | "spent";
@@ -78,7 +82,9 @@ export function StopControl({ session }: { session: SessionInfo }) {
 
   const title =
     mode === "interrupt"
-      ? t("interrupt_session")
+      ? session.status === "stuck"
+        ? t("unstick_session")
+        : t("interrupt_session")
       : mode === "spent"
         ? t("stop_spent")
         : session.pidPrecise
