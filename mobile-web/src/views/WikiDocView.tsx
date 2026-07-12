@@ -5,6 +5,7 @@
 
 import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { ChevronLeft } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { dateLocale, t } from "../i18n";
@@ -166,7 +167,8 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
     <div className={styles.page}>
       <header className={styles.header}>
         <button className={styles.backButton} onClick={onBack}>
-          ‹ {t("返回")}
+          <ChevronLeft size={18} />
+          {t("返回")}
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>{doc.title || doc.slug}</div>

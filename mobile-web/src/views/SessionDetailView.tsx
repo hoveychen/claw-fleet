@@ -4,9 +4,11 @@
 // sidecar method while the session is working.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { dateLocale, t } from "../i18n";
+import { CopyButton } from "./CopyButton";
 import type { RelayClient } from "../relay";
 import type {
   ContentBlock,
@@ -190,13 +192,20 @@ const MessageRow = memo(function MessageRow({
     return (
       <div className={styles.userRow}>
         <div className={styles.userBubble}>{text}</div>
-        <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+        <div className={styles.rowTime}>
+          <CopyButton text={text} />
+          {fmtTime(msg.timestamp)}
+        </div>
       </div>
     );
   }
   // assistant: thinking / text / tool_use blocks in order
   const blocks = blocksOf(msg);
   if (blocks.length === 0) return null;
+  const assistantText = blocks
+    .filter((b) => b.type === "text" && b.text?.trim())
+    .map((b) => b.text)
+    .join("\n\n");
   return (
     <div className={styles.assistantRow}>
       {blocks.map((b, j) => {
@@ -206,7 +215,9 @@ const MessageRow = memo(function MessageRow({
           return (
             <div key={j} className={styles.thinkingBlock} data-open={open}>
               <button className={styles.thinkingToggle} onClick={() => onToggleThinking(key)}>
-                ✳ {t("思考")} {open ? "▾" : "▸"}
+                <Sparkles size={13} />
+                {t("思考")}
+                {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </button>
               {open && <div className={styles.thinkingBody}>{b.thinking}</div>}
             </div>
@@ -226,7 +237,10 @@ const MessageRow = memo(function MessageRow({
         }
         return null;
       })}
-      <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+      <div className={styles.rowTime}>
+        {assistantText && <CopyButton text={assistantText} />}
+        {fmtTime(msg.timestamp)}
+      </div>
     </div>
   );
 });
@@ -383,7 +397,8 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
     <div className={styles.page}>
       <header className={styles.header}>
         <button className={styles.backButton} onClick={onBack}>
-          ‹ {t("返回")}
+          <ChevronLeft size={18} />
+          {t("返回")}
         </button>
         <div className={styles.headerText}>
           <div className={styles.headerTitle}>{session.aiTitle || session.slug || t("会话")}</div>
@@ -458,7 +473,9 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
         {liveThinking && (
           <div className={styles.liveThinking}>
             <div className={styles.liveThinkingHead}>
-              <span className={styles.livePulse} />✳ {t("正在思考…")}
+              <span className={styles.livePulse} />
+              <Sparkles size={13} />
+              {t("正在思考…")}
             </div>
             <div className={styles.liveThinkingBody}>{liveThinking.thinking}</div>
           </div>

@@ -158,8 +158,9 @@
 }
 
 .docChevron {
+  display: inline-flex;
+  align-items: center;
   flex-shrink: 0;
   color: var(--color-text-dim);
-  font-size: 20px;
   line-height: 1;
 }

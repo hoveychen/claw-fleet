@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { CheckCircle2, Circle, Clock, Folder, Plus, Search, Share2, Square } from "lucide-react";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
@@ -73,44 +74,6 @@ function renderSnippet(snippet: string): ReactNode[] {
     return [<mark key={i}>{chunk.slice(0, end)}</mark>, chunk.slice(end + "</mark>".length)];
   });
 }
-
-// ── Inline icons (mobile-web has no lucide dep; match the desktop glyphs) ─────
-const IconSearch = () => (
-  <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-    <circle cx="7" cy="7" r="4.5" />
-    <line x1="10.5" y1="10.5" x2="14" y2="14" />
-  </svg>
-);
-const IconFolder = () => (
-  <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
-    <path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3L7.5 4H13a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 13 14H3a1.5 1.5 0 0 1-1.5-1.5V4Z" />
-  </svg>
-);
-const IconClock = () => (
-  <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-    <circle cx="8" cy="8" r="6" />
-    <path d="M8 4.5V8l2.5 1.5" />
-  </svg>
-);
-const IconRelay = () => (
-  <svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="3.5" cy="3.5" r="2" />
-    <circle cx="12.5" cy="12.5" r="2" />
-    <circle cx="12.5" cy="3.5" r="2" />
-    <path d="M5.5 3.5h5M3.5 5.5v4.5a2 2 0 0 0 2 2h5" />
-  </svg>
-);
-const IconCircle = () => (
-  <svg viewBox="0 0 16 16" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.8">
-    <circle cx="8" cy="8" r="6.2" />
-  </svg>
-);
-const IconCheckCircle = () => (
-  <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    <circle cx="8" cy="8" r="6.2" />
-    <path d="M5.3 8.1l1.9 1.9 3.6-3.9" />
-  </svg>
-);
 
 interface Props {
   sessions: SessionInfo[];
@@ -264,7 +227,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
       <div className={styles.filterBar}>
         <div className={styles.searchWrap}>
           <span className={styles.searchIcon}>
-            <IconSearch />
+            <Search size={14} />
           </span>
           <input
             className={styles.search}
@@ -298,7 +261,8 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
             <span className={styles.activeCount}>{activeCount}</span>
           </button>
           <button className={styles.newSession} onClick={onNewSession}>
-            {t("＋ 新会话")}
+            <Plus size={14} />
+            {t("新会话")}
           </button>
           {unreadCount > 0 && (
             <button
@@ -320,8 +284,8 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
               title={segLabels[key]}
             >
               {key === "all" && <span>{segLabels.all}</span>}
-              {key === "pending" && <IconCircle />}
-              {key === "done" && <IconCheckCircle />}
+              {key === "pending" && <Circle size={15} />}
+              {key === "done" && <CheckCircle2 size={16} />}
               <span className={styles.segmentCount}>{counts[key]}</span>
             </button>
           ))}
@@ -349,18 +313,18 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
               </div>
               <div className={styles.metaRow}>
                 <span className={styles.project}>
-                  <IconFolder />
+                  <Folder size={11} />
                   {s.workspaceName}
                 </span>
                 {s.handoff && (
                   <span className={styles.handoff}>
-                    <IconRelay />
+                    <Share2 size={11} />
                     {s.handoff.hop}/{s.handoff.chainLen}
                   </span>
                 )}
                 {live && (
                   <span className={styles.runtime} data-tone={tone ?? undefined}>
-                    <IconClock />
+                    <Clock size={11} />
                     {formatRunning(s.createdAtMs)}
                   </span>
                 )}
@@ -378,7 +342,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
                   aria-pressed={isDone}
                   title={isDone ? t("已完成 — 点击改回进行中") : t("进行中 — 点击标为已完成")}
                 >
-                  {isDone ? <IconCheckCircle /> : <IconCircle />}
+                  {isDone ? <CheckCircle2 size={16} /> : <Circle size={15} />}
                 </button>
                 <span className={styles.opsSpacer} />
                 {canControl(s) && mode !== "spent" && (
@@ -388,7 +352,14 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
                     disabled={busyOp === s.id}
                     onClick={() => void handleStop(s)}
                   >
-                    {busyOp === s.id ? "…" : `◼ ${mode === "interrupt" ? t("中断") : t("停止")}`}
+                    {busyOp === s.id ? (
+                      "…"
+                    ) : (
+                      <>
+                        <Square size={12} />
+                        {mode === "interrupt" ? t("中断") : t("停止")}
+                      </>
+                    )}
                   </button>
                 )}
               </div>

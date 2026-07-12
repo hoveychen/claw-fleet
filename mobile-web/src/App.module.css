@@ -111,7 +111,8 @@
 }
 
 .tabIcon {
-  font-size: 19px;
+  display: inline-flex;
+  align-items: center;
   line-height: 1;
 }
 
