@@ -5,17 +5,9 @@
 // 页面里要先引导用户 A2HS。
 
 import { RelayClient, relayHttpBase } from "./relay";
+import { classifyPush, type PushState } from "./push-classify";
 
-export type PushState =
-  | "unsupported"
-  | "ios-needs-a2hs"
-  | "prompt"
-  | "granted"
-  | "denied";
-
-function isIos(): boolean {
-  return /iphone|ipad|ipod/i.test(navigator.userAgent);
-}
+export type { PushState } from "./push-classify";
 
 function isStandalone(): boolean {
   return (
@@ -25,17 +17,13 @@ function isStandalone(): boolean {
 }
 
 export function pushState(): PushState {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
-    return isIos() && !isStandalone() ? "ios-needs-a2hs" : "unsupported";
-  }
-  switch (Notification.permission) {
-    case "granted":
-      return "granted";
-    case "denied":
-      return "denied";
-    default:
-      return "prompt";
-  }
+  return classifyPush({
+    hasServiceWorker: "serviceWorker" in navigator,
+    hasPushManager: "PushManager" in window,
+    permission: typeof Notification !== "undefined" ? Notification.permission : "denied",
+    ua: navigator.userAgent,
+    standalone: isStandalone(),
+  });
 }
 
 function urlBase64ToUint8Array(base64: string): Uint8Array {
@@ -48,7 +36,12 @@ function urlBase64ToUint8Array(base64: string): Uint8Array {
 /** Subscribe and register on the relay. Returns the resulting PushState. */
 export async function enablePush(client: RelayClient): Promise<PushState> {
   const state = pushState();
-  if (state === "unsupported" || state === "ios-needs-a2hs" || state === "denied") {
+  if (
+    state === "unsupported" ||
+    state === "unsupported-harmony" ||
+    state === "ios-needs-a2hs" ||
+    state === "denied"
+  ) {
     return state;
   }
   const permission = await Notification.requestPermission();
