@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Inbox, ListChecks, Settings } from "lucide-react";
 import styles from "./App.module.css";
 import { enablePush, pushState, resyncPush, type PushState } from "./push";
 import { deviceLabel } from "./deviceLabel";
@@ -287,7 +288,7 @@ export function App() {
           aria-label={t("设置")}
           onClick={() => setShowSettings(true)}
         >
-          ⚙
+          <Settings size={18} />
         </button>
       </header>
 
@@ -364,7 +365,9 @@ export function App() {
           data-active={tab === "decisions"}
           onClick={() => setTab("decisions")}
         >
-          <span className={styles.tabIcon}>◈</span>
+          <span className={styles.tabIcon}>
+            <Inbox size={20} />
+          </span>
           {t("决策")}
           {decisions.length > 0 && <span className={styles.badge}>{decisions.length}</span>}
         </button>
@@ -373,7 +376,9 @@ export function App() {
           data-active={tab === "tasks"}
           onClick={() => setTab("tasks")}
         >
-          <span className={styles.tabIcon}>≣</span>
+          <span className={styles.tabIcon}>
+            <ListChecks size={20} />
+          </span>
           {t("任务")}
         </button>
       </nav>
