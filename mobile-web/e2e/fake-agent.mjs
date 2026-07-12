@@ -155,6 +155,48 @@ const guardDecision = {
   },
 };
 
+// ── Wiki fixtures (wiki_list / wiki_file) ────────────────────────────────────
+const wikiDocs = [
+  {
+    slug: "arch/overview",
+    title: "架构总览",
+    kind: "markdown",
+    entry: "overview.md",
+    workspacePath: "/fake/ws-alpha",
+    workspaceName: "ws-alpha",
+    createdMs: now - 86_400_000,
+    updatedMs: now - 3_600_000,
+    currentVersion: "20260712-100000",
+    versions: [
+      { id: "20260712-100000", publishedMs: now - 3_600_000, sizeBytes: 512, fileCount: 1, sourcePath: "/x/overview.md" },
+      { id: "20260711-090000", publishedMs: now - 90_000_000, sizeBytes: 480, fileCount: 1, sourcePath: "/x/overview.md" },
+    ],
+  },
+  {
+    slug: "perf-report",
+    title: "性能分析报告",
+    kind: "htmlDir",
+    entry: "index.html",
+    workspacePath: "/fake/ws-beta",
+    workspaceName: "ws-beta",
+    createdMs: now - 172_800_000,
+    updatedMs: now - 7_200_000,
+    currentVersion: "20260712-080000",
+    versions: [
+      { id: "20260712-080000", publishedMs: now - 7_200_000, sizeBytes: 2048, fileCount: 2, sourcePath: "/x/report" },
+    ],
+  },
+];
+
+const wikiFiles = {
+  "arch/overview:overview.md":
+    { mime: "text/markdown; charset=utf-8", body: "# 架构总览\n\n这是 **移动端** 知识库渲染测试。\n\n- 列表\n- [[perf-report|跳到性能报告]]\n\n| 模块 | 状态 |\n|---|---|\n| relay | ✅ |\n" },
+  "perf-report:index.html":
+    { mime: "text/html; charset=utf-8", body: `<!doctype html><html><head><link rel="stylesheet" href="app.css"></head><body><h1>性能报告</h1><p class="ok">资源(css)已通过 relay 重写为 blob 加载。</p></body></html>` },
+  "perf-report:app.css":
+    { mime: "text/css; charset=utf-8", body: `body{font-family:-apple-system,sans-serif;padding:16px}.ok{color:#0a7d32;font-weight:600}` },
+};
+
 // ── Request handling ─────────────────────────────────────────────────────────
 function serveRequest(method, params) {
   switch (method) {
@@ -213,6 +255,14 @@ function serveRequest(method, params) {
       }
       queueMicrotask(pushSessions);
       return {};
+    }
+    case "wiki_list":
+      return wikiDocs;
+    case "wiki_file": {
+      const key = `${params.slug}:${params.relpath}`;
+      const file = wikiFiles[key];
+      if (!file) throw new Error(`fake-agent: no wiki file ${key}`);
+      return { mime: file.mime, base64: Buffer.from(file.body, "utf8").toString("base64") };
     }
     default:
       throw new Error(`fake-agent: unhandled method ${method}`);

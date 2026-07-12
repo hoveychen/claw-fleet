@@ -4,7 +4,6 @@ import type { RelayClient } from "../relay";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isSessionUnread } from "../types";
 import { useRelaySearch } from "../useRelaySearch";
-import { NewSessionSheet } from "./Composer";
 import styles from "./TasksView.module.css";
 
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
@@ -118,15 +117,16 @@ interface Props {
   client: RelayClient | null;
   onOpenSession: (session: SessionInfo) => void;
   onMarkRead: (sessions: SessionInfo[]) => void;
+  /** 新会话 sheet 由 App（底部导航中间的按钮）统一持有。 */
+  onNewSession: () => void;
 }
 
-export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props) {
+export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSession }: Props) {
   const [search, setSearch] = useState("");
   const [workspace, setWorkspace] = useState<string>("");
   const [activeOnly, setActiveOnly] = useState(false);
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
   const [busyOp, setBusyOp] = useState<string | null>(null);
-  const [showNewSession, setShowNewSession] = useState(false);
   // Optimistic mark overrides, dropped once the server snapshot catches up.
   const [markOverride, setMarkOverride] = useState<Record<string, SessionMark | null>>({});
 
@@ -297,7 +297,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
             {t("仅活跃")}
             <span className={styles.activeCount}>{activeCount}</span>
           </button>
-          <button className={styles.newSession} onClick={() => setShowNewSession(true)}>
+          <button className={styles.newSession} onClick={onNewSession}>
             {t("＋ 新会话")}
           </button>
           {unreadCount > 0 && (
@@ -397,9 +397,6 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
         })}
       </div>
 
-      {showNewSession && (
-        <NewSessionSheet sessions={sessions} client={client} onClose={() => setShowNewSession(false)} />
-      )}
     </div>
   );
 }

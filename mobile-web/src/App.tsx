@@ -10,6 +10,7 @@ import type {
   PendingDecision,
   PendingSnapshot,
   SessionInfo,
+  WikiDoc,
 } from "./types";
 import {
   clearSecret,
@@ -19,19 +20,21 @@ import {
   persistSecret,
 } from "./secretStore";
 import { useI18n } from "./i18n";
+import { NewSessionSheet } from "./views/Composer";
 import { DecisionsView } from "./views/DecisionsView";
+import { MoreView } from "./views/MoreView";
 import { SessionDetailView } from "./views/SessionDetailView";
-import { SettingsSheet } from "./views/SettingsSheet";
 import { TasksView } from "./views/TasksView";
+import { WikiView } from "./views/WikiView";
+import { WikiDocView } from "./views/WikiDocView";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
 
-type Tab = "decisions" | "tasks";
+type Tab = "decisions" | "tasks" | "wiki" | "more";
 
 export function App() {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
   const { t } = useI18n();
-  const [showSettings, setShowSettings] = useState(false);
   const [secret, setSecret] = useState<string | null>(loadSecretSync);
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
@@ -67,6 +70,8 @@ export function App() {
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   const [push, setPush] = useState<PushState>(pushState);
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
+  const [wikiDoc, setWikiDoc] = useState<WikiDoc | null>(null);
+  const [showNewSession, setShowNewSession] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
 
   const addDecision = useCallback((kind: DecisionKind, request: unknown) => {
@@ -282,13 +287,6 @@ export function App() {
         <span className={styles.connLabel}>
           {!connected ? t("连接中…") : agentOnline ? t("桌面端在线") : t("桌面端离线")}
         </span>
-        <button
-          className={styles.settingsButton}
-          aria-label={t("设置")}
-          onClick={() => setShowSettings(true)}
-        >
-          ⚙
-        </button>
       </header>
 
       {needsA2hsForDurableStorage() && !a2hsDismissed && (
@@ -339,12 +337,22 @@ export function App() {
             onAnswered={(id) => setDecisions((prev) => prev.filter((d) => d.id !== id))}
             onOpenSession={setDetailSessionId}
           />
-        ) : (
+        ) : tab === "tasks" ? (
           <TasksView
             sessions={mergedSessions}
             client={clientRef.current}
             onOpenSession={(s) => setDetailSessionId(s.id)}
             onMarkRead={markRead}
+            onNewSession={() => setShowNewSession(true)}
+          />
+        ) : tab === "wiki" ? (
+          <WikiView client={clientRef.current} onOpenDoc={setWikiDoc} />
+        ) : (
+          <MoreView
+            connected={connected}
+            agentOnline={agentOnline}
+            push={push}
+            onEnablePush={handleEnablePush}
           />
         )}
       </main>
@@ -355,6 +363,23 @@ export function App() {
           client={clientRef.current}
           onBack={() => setDetailSessionId(null)}
           onDwellRead={() => markRead([detailSession])}
+        />
+      )}
+
+      {wikiDoc && (
+        <WikiDocView
+          doc={wikiDoc}
+          client={clientRef.current}
+          onBack={() => setWikiDoc(null)}
+          onOpenDoc={setWikiDoc}
+        />
+      )}
+
+      {showNewSession && (
+        <NewSessionSheet
+          sessions={mergedSessions}
+          client={clientRef.current}
+          onClose={() => setShowNewSession(false)}
         />
       )}
 
@@ -376,9 +401,31 @@ export function App() {
           <span className={styles.tabIcon}>≣</span>
           {t("任务")}
         </button>
+        <button
+          className={styles.centerTab}
+          aria-label={t("新会话")}
+          onClick={() => setShowNewSession(true)}
+        >
+          <span className={styles.centerFab}>＋</span>
+          <span className={styles.centerLabel}>{t("新会话")}</span>
+        </button>
+        <button
+          className={styles.tabButton}
+          data-active={tab === "wiki"}
+          onClick={() => setTab("wiki")}
+        >
+          <span className={styles.tabIcon}>❏</span>
+          {t("知识库")}
+        </button>
+        <button
+          className={styles.tabButton}
+          data-active={tab === "more"}
+          onClick={() => setTab("more")}
+        >
+          <span className={styles.tabIcon}>⋯</span>
+          {t("更多")}
+        </button>
       </nav>
-
-      {showSettings && <SettingsSheet onClose={() => setShowSettings(false)} />}
     </div>
   );
 }

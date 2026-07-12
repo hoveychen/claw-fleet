@@ -1,0 +1,136 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  padding: 0 4px;
+}
+
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  min-height: 46px;
+}
+
+.divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 0 14px;
+}
+
+.rowLabel {
+  font-size: 14px;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.rowValue {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.rowNote {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  padding: 0 14px 12px;
+}
+
+.segment {
+  display: flex;
+  gap: 4px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  padding: 3px;
+}
+
+.segmentButton {
+  padding: 5px 13px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.segmentButton[data-active="true"] {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.connWrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.connDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.connDot[data-state="online"] {
+  background: var(--color-success);
+}
+
+.connDot[data-state="agent-offline"] {
+  background: var(--color-warning);
+}
+
+.connDot[data-state="offline"] {
+  background: var(--color-text-dim);
+}
+
+.connLabel {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.actionButton {
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 7px;
+  padding: 6px 16px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.actionButton:active {
+  background: var(--color-accent-hover);
+}
+
+.dangerRow {
+  width: 100%;
+  text-align: left;
+  padding: 13px 14px;
+  font-size: 14px;
+  color: var(--color-error);
+}
+
+.dangerRow:active {
+  background: var(--color-bg-card-hover);
+}
