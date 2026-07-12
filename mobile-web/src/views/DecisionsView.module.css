@@ -354,6 +354,25 @@
   font-size: 13px;
 }
 
+/* Tap-to-retry surface for a failed asset (timeout on a slow link, or a
+   missing asset) — replaces the old silent, forever-spinning placeholder. */
+.assetError {
+  width: 100%;
+  padding: 16px 12px;
+  margin-top: 8px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-danger, #c0392b);
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  cursor: pointer;
+}
+
+.assetError:active {
+  opacity: 0.7;
+}
+
 /* ── v2: guard analysis / always-allow / plan editing / question tools ── */
 
 .analysis {
