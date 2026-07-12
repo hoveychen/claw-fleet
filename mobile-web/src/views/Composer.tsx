@@ -2,7 +2,7 @@
 // through the relay's `upload_attachment` (bytes → desktop's user-attachments
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDraft } from "../draft";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
@@ -72,9 +72,32 @@ export async function uploadAttachmentFiles(
   return out;
 }
 
-function useAttachments(client: RelayClient | null) {
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
+// draftKey 让已选附件的 chip 列表跟着表单文本一起持久化——意外关闭 sheet / 切会话
+// 回来后附件不用重挑。存的是已上传到 relay 的路径；万一桌面端清过 user-attachments
+// 存储，恢复的路径会失效，但 chip 可手动删除，故不额外做存在性校验。
+function useAttachments(client: RelayClient | null, draftKey: string) {
+  const [attachments, setAttachments, clearAttachments] = useDraft<Attachment[]>(draftKey, []);
   const [uploading, setUploading] = useState(false);
+
+  // 从草稿恢复的附件路径可能已在桌面端被清掉。挂载后（client 就绪时）校验一次，
+  // 剔除失效的 chip，避免恢复的 `Context files:` 指向不存在的文件。校验失败（离线等）
+  // 保持原样、不误删。只在初次恢复时跑一次——新上传的文件必然存在，无需再验。
+  const validatedRef = useRef(false);
+  useEffect(() => {
+    if (validatedRef.current || !client || attachments.length === 0) return;
+    validatedRef.current = true;
+    void (async () => {
+      try {
+        const { existing } = await client.request<{ existing: string[] }>("attachments_exist", {
+          paths: attachments.map((a) => a.path),
+        });
+        const keep = new Set(existing);
+        setAttachments((prev) => prev.filter((a) => keep.has(a.path)));
+      } catch {
+        // 保持原样，不误删。
+      }
+    })();
+  }, [client, attachments, setAttachments]);
 
   const addFiles = useCallback(
     async (files: FileList | null) => {
@@ -95,16 +118,17 @@ function useAttachments(client: RelayClient | null) {
         setUploading(false);
       }
     },
-    [client],
+    [client, setAttachments],
   );
 
-  const remove = useCallback((path: string) => {
-    setAttachments((prev) => prev.filter((a) => a.path !== path));
-  }, []);
+  const remove = useCallback(
+    (path: string) => {
+      setAttachments((prev) => prev.filter((a) => a.path !== path));
+    },
+    [setAttachments],
+  );
 
-  const reset = useCallback(() => setAttachments([]), []);
-
-  return { attachments, uploading, addFiles, remove, reset };
+  return { attachments, uploading, addFiles, remove, reset: clearAttachments };
 }
 
 function withContextFiles(prompt: string, attachments: Attachment[]): string {
@@ -220,6 +244,7 @@ interface NewSessionProps {
  *  sheet / 切标签 / iOS 杀 PWA 后回来原样恢复；只有创建成功才清空。附件不入草稿——
  *  它们是已上传到 relay 的产物，重开时重新挑选即可。 */
 const NEW_SESSION_DRAFT_KEY = "new-session";
+const NEW_SESSION_ATTACH_KEY = "new-session:attachments";
 
 const NEW_SESSION_DEFAULT = {
   workspace: "",
@@ -238,7 +263,10 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
   const [draft, setDraft, clearDraft] = useDraft(NEW_SESSION_DRAFT_KEY, NEW_SESSION_DEFAULT);
   const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
   const [busy, setBusy] = useState(false);
-  const { attachments, uploading, addFiles, remove } = useAttachments(client);
+  const { attachments, uploading, addFiles, remove, reset } = useAttachments(
+    client,
+    NEW_SESSION_ATTACH_KEY,
+  );
 
   const { customWorkspace, prompt, model, effort, permissionMode } = draft;
   // 持久化的 workspace 可能已失效（那个 workspace 不在最近列表里了），
@@ -264,6 +292,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
         ...(permissionMode ? { permissionMode } : {}),
       });
       clearDraft();
+      reset();
       onClose();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : t("创建会话失败"));
@@ -345,7 +374,10 @@ export function ResumeComposer({ session, client }: ResumeProps) {
   const [permissionMode, setPermissionMode] = useState("");
   const [busy, setBusy] = useState(false);
   const [sent, setSent] = useState(false);
-  const { attachments, uploading, addFiles, remove, reset } = useAttachments(client);
+  const { attachments, uploading, addFiles, remove, reset } = useAttachments(
+    client,
+    `resume:${session.id}:attachments`,
+  );
 
   const submit = async () => {
     if (!client || busy || uploading) return;

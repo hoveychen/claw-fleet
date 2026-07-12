@@ -34,6 +34,15 @@ describe("draft store", () => {
     expect(loadDraft("resume:abc", "", store)).toBe("继续做那个");
   });
 
+  it("数组草稿 round-trip（附件 chip 列表），不与 fallback 合并", () => {
+    const atts = [
+      { name: "a.png", path: "/store/a.png" },
+      { name: "b.pdf", path: "/store/b.pdf" },
+    ];
+    saveDraft("new-session:attachments", atts, store);
+    expect(loadDraft("new-session:attachments", [], store)).toEqual(atts);
+  });
+
   it("没存过时返回 fallback", () => {
     expect(loadDraft("missing", { prompt: "默认" }, store)).toEqual({ prompt: "默认" });
   });
