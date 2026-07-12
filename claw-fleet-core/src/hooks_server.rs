@@ -176,6 +176,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         std::thread::spawn(move || {
             let sources_bg = build_sources();
             let mut prev_sessions_json = String::new();
+            let mut prev_mobile_clients: usize = 0;
             let mut prev_alert_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_guard_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
             let mut prev_elicit_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
@@ -201,11 +202,21 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 // Broadcast session updates
                 let sessions = scan_all_sources(&sources_bg);
                 let json = serde_json::to_string(&sessions).unwrap_or_default();
-                if json != prev_sessions_json {
+                let sessions_changed = json != prev_sessions_json;
+                if sessions_changed {
                     sse_bg.broadcast("sessions-updated", &json);
+                }
+                // Publish to mobile on change, and also when a new mobile
+                // client just came online (it needs an initial snapshot even
+                // if nothing changed since the last one).
+                let mobile_clients = crate::mobile_relay::client_count();
+                if sessions_changed || mobile_clients > prev_mobile_clients {
                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
                         crate::mobile_relay::publish_sessions(&v);
                     }
+                }
+                prev_mobile_clients = mobile_clients;
+                if sessions_changed {
                     prev_sessions_json = json;
                 }
 

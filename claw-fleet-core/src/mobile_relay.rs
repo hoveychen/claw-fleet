@@ -163,6 +163,11 @@ pub fn is_connected() -> bool {
     CONNECTED.load(Ordering::SeqCst)
 }
 
+/// Number of mobile clients currently online on the channel.
+pub fn client_count() -> usize {
+    CLIENTS.load(Ordering::SeqCst)
+}
+
 /// Short single-line preview for a push notification body.
 pub fn notify_preview(text: &str) -> String {
     let first_line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
