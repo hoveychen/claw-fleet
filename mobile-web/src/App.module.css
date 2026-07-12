@@ -47,6 +47,24 @@
   color: var(--color-text-secondary);
 }
 
+.usage {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.usageCost {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.usageTokens {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
 .pushBanner {
   display: flex;
   align-items: center;

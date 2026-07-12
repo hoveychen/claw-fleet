@@ -25,6 +25,7 @@ import { SessionToolbar } from "./SessionToolbar";
 import { HistoryView } from "./HistoryView";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
+import { TodayUsageBadge } from "./TodayUsageBadge";
 import { UsagePanel } from "./UsagePanel";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useResizableWidth } from "../hooks/useResizableWidth";
@@ -355,6 +356,7 @@ export function SessionList() {
         {/* Scrollable sidebar content — charts + usage hidden for the
             task-focused views (projects / tasks) to keep that rail clean. */}
         <div className={styles.sidebar_content}>
+          <TodayUsageBadge collapsed={sidebarCollapsed} />
           <LiveStats collapsed={sidebarCollapsed} />
           <UsagePanel collapsed={sidebarCollapsed} />
 

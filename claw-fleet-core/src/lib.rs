@@ -89,6 +89,7 @@ pub mod session_todos;
 pub mod skill_history;
 pub mod skills;
 pub mod tcc;
+pub mod today_usage;
 pub mod token_analysis;
 pub mod user_attachments;
 pub mod wiki;

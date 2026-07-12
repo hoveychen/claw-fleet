@@ -1872,6 +1872,11 @@ impl Backend for LocalBackend {
             .collect()
     }
 
+    fn today_usage(&self) -> crate::today_usage::TodayUsage {
+        let sessions = self.sessions.lock().unwrap().clone();
+        crate::today_usage::today_usage(&sessions)
+    }
+
     fn check_setup(&self) -> crate::backend::SetupStatus {
         let (cli_installed, cli_path) = crate::check_cli_installed();
         let claude_dir_exists = crate::session::real_home_dir()
