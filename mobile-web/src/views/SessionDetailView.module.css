@@ -19,10 +19,13 @@
 }
 
 .backButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   border: none;
   background: none;
   color: var(--color-accent);
-  font-size: 16px;
+  font-size: 15px;
   padding: 4px 8px 4px 0;
   flex-shrink: 0;
 }
@@ -163,6 +166,9 @@
 }
 
 .rowTime {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-size: 10px;
   color: var(--color-text-dim);
 }
@@ -258,6 +264,9 @@
 }
 
 .thinkingToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: none;
   background: none;
   color: var(--color-text-dim);
