@@ -1,10 +1,12 @@
-// 知识库 tab：列出桌面端 `fleet wiki publish` 归档的所有文档，按虚拟目录
-// （slug 里的 `/`）分组，支持标题/slug 搜索。点开进 WikiDocView 全屏阅读。
+// 知识库 tab：列出桌面端 `fleet wiki publish` 归档的所有文档。空搜索时按 slug
+// 虚拟目录分组；输入 ≥2 字走 relay 全文检索（wiki_search，命中正文并给 snippet）。
+// 顶部可按 workspace 筛选。点开进 WikiDocView 全屏阅读。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { WikiDoc } from "../types";
+import { useWikiSearch } from "../useWikiSearch";
 import { listWikiDocs } from "../wiki";
 import styles from "./WikiView.module.css";
 
@@ -35,6 +37,7 @@ export function WikiView({ client, onOpenDoc }: Props) {
   const [docs, setDocs] = useState<WikiDoc[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [workspace, setWorkspace] = useState(""); // "" = 全部
 
   const refresh = useCallback(async () => {
     if (!client) return;
@@ -52,28 +55,65 @@ export function WikiView({ client, onOpenDoc }: Props) {
     void refresh();
   }, [refresh]);
 
+  const { searching, matchSlugs, snippetBySlug } = useWikiSearch(client, query);
+  const searchActive = query.trim().length >= 2;
+
+  const docBySlug = useMemo(() => new Map((docs ?? []).map((d) => [d.slug, d])), [docs]);
+
+  // Workspace options come from the loaded docs.
+  const workspaces = useMemo(() => {
+    const names = new Set<string>();
+    for (const d of docs ?? []) names.add(d.workspaceName);
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [docs]);
+
+  const matchesWorkspace = useCallback(
+    (d: WikiDoc) => !workspace || d.workspaceName === workspace,
+    [workspace],
+  );
+
+  // Empty/short query → grouped-by-folder browse view.
   const groups = useMemo(() => {
-    if (!docs) return [];
-    const q = query.trim().toLowerCase();
-    const filtered = q
-      ? docs.filter(
-          (d) =>
-            d.title.toLowerCase().includes(q) ||
-            d.slug.toLowerCase().includes(q) ||
-            d.workspaceName.toLowerCase().includes(q),
-        )
-      : docs;
+    if (!docs || searchActive) return [];
     const byFolder = new Map<string, WikiDoc[]>();
-    for (const d of filtered) {
+    for (const d of docs) {
+      if (!matchesWorkspace(d)) continue;
       const key = folderOf(d.slug);
       const arr = byFolder.get(key);
       if (arr) arr.push(d);
       else byFolder.set(key, [d]);
     }
     return [...byFolder.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  }, [docs, query]);
+  }, [docs, searchActive, matchesWorkspace]);
+
+  // Active query → flat relay-search results (resolved to docs, workspace-filtered).
+  const results = useMemo(() => {
+    if (!searchActive) return [];
+    return matchSlugs
+      .map((slug) => docBySlug.get(slug))
+      .filter((d): d is WikiDoc => !!d && matchesWorkspace(d));
+  }, [searchActive, matchSlugs, docBySlug, matchesWorkspace]);
 
   const total = docs?.length ?? 0;
+
+  const renderDoc = (doc: WikiDoc, snippet?: string) => (
+    <button key={doc.slug} className={styles.doc} onClick={() => onOpenDoc(doc)}>
+      <span className={styles.docBadge} data-kind={doc.kind}>
+        {KIND_BADGE[doc.kind]}
+      </span>
+      <span className={styles.docBody}>
+        <span className={styles.docTitle}>{doc.title || leafOf(doc.slug)}</span>
+        {snippet ? (
+          <span className={styles.docSnippet}>{snippet}</span>
+        ) : (
+          <span className={styles.docMeta}>
+            {doc.workspaceName} · {fmtDate(doc.updatedMs)}
+          </span>
+        )}
+      </span>
+      <span className={styles.docChevron}>›</span>
+    </button>
+  );
 
   return (
     <div className={styles.view}>
@@ -85,12 +125,28 @@ export function WikiView({ client, onOpenDoc }: Props) {
         </button>
       </div>
 
-      <input
-        className={styles.search}
-        placeholder={t("搜索标题 / slug…")}
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-      />
+      <div className={styles.filters}>
+        <input
+          className={styles.search}
+          placeholder={t("搜索标题 / 正文…")}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        {workspaces.length > 1 && (
+          <select
+            className={styles.wsSelect}
+            value={workspace}
+            onChange={(e) => setWorkspace(e.target.value)}
+          >
+            <option value="">{t("全部项目")}</option>
+            {workspaces.map((w) => (
+              <option key={w} value={w}>
+                {w}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
 
       {error && <div className={styles.hint}>{t("知识库加载失败：{0}", error)}</div>}
       {!error && docs === null && <div className={styles.hint}>{t("加载中…")}</div>}
@@ -99,29 +155,37 @@ export function WikiView({ client, onOpenDoc }: Props) {
           {t("还没有归档的文档。桌面端 agent 用 fleet wiki publish 发布后会出现在这里。")}
         </div>
       )}
-      {!error && docs !== null && total > 0 && groups.length === 0 && (
-        <div className={styles.hint}>{t("没有匹配「{0}」的文档。", query)}</div>
+
+      {/* 搜索态 */}
+      {!error && searchActive && (
+        <>
+          {searching && <div className={styles.hint}>{t("搜索中…")}</div>}
+          {!searching && results.length === 0 && (
+            <div className={styles.hint}>{t("没有匹配「{0}」的文档。", query)}</div>
+          )}
+          {results.length > 0 && (
+            <div className={styles.group}>
+              {results.map((doc) => renderDoc(doc, snippetBySlug.get(doc.slug) || undefined))}
+            </div>
+          )}
+        </>
       )}
 
-      {groups.map(([folder, items]) => (
-        <div key={folder || "__root__"} className={styles.group}>
-          <div className={styles.groupLabel}>{folder || t("未归类")}</div>
-          {items.map((doc) => (
-            <button key={doc.slug} className={styles.doc} onClick={() => onOpenDoc(doc)}>
-              <span className={styles.docBadge} data-kind={doc.kind}>
-                {KIND_BADGE[doc.kind]}
-              </span>
-              <span className={styles.docBody}>
-                <span className={styles.docTitle}>{doc.title || leafOf(doc.slug)}</span>
-                <span className={styles.docMeta}>
-                  {doc.workspaceName} · {fmtDate(doc.updatedMs)}
-                </span>
-              </span>
-              <span className={styles.docChevron}>›</span>
-            </button>
-          ))}
-        </div>
-      ))}
+      {/* 浏览态 */}
+      {!error &&
+        !searchActive &&
+        docs !== null &&
+        total > 0 &&
+        (groups.length === 0 ? (
+          <div className={styles.hint}>{t("该项目下没有文档。")}</div>
+        ) : (
+          groups.map(([folder, items]) => (
+            <div key={folder || "__root__"} className={styles.group}>
+              <div className={styles.groupLabel}>{folder || t("未归类")}</div>
+              {items.map((doc) => renderDoc(doc))}
+            </div>
+          ))
+        ))}
     </div>
   );
 }
