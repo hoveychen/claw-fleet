@@ -444,3 +444,51 @@ export type DecisionHistoryRecord =
   | PlanApprovalHistoryRecord
   | UserPromptHistoryRecord
   | FleetAskHistoryRecord;
+
+// ── Wiki knowledge base (mirrors claw-fleet-core/src/wiki.rs) ─────────────────
+
+export interface WikiVersion {
+  id: string;
+  publishedMs: number;
+  sizeBytes: number;
+  fileCount: number;
+  sourcePath: string;
+}
+
+export interface WikiDoc {
+  slug: string;
+  title: string;
+  /** "html" (single file) | "htmlDir" | "markdown". */
+  kind: "html" | "htmlDir" | "markdown";
+  /** Entry file path relative to the version dir, e.g. "index.html". */
+  entry: string;
+  workspacePath: string;
+  workspaceName: string;
+  createdMs: number;
+  updatedMs: number;
+  currentVersion: string;
+  /** Newest first. */
+  versions: WikiVersion[];
+}
+
+/** One wiki file, base64-framed by the `wiki_file` relay method. */
+export interface WikiFilePayload {
+  mime: string;
+  base64: string;
+}
+
+/** One full-text search hit from `wiki_search`. */
+export interface WikiSearchHit {
+  slug: string;
+  /** "meta" (title/slug/workspace) or "content" (entry-file body). */
+  field: "meta" | "content";
+  /** Plain-text excerpt around the match; empty for meta-only hits. */
+  snippet: string;
+}
+
+/** A downloadable doc export, base64-framed by the `wiki_export` method. */
+export interface WikiExportPayload {
+  filename: string;
+  mime: string;
+  base64: string;
+}

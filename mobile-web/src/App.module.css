@@ -47,15 +47,6 @@
   color: var(--color-text-secondary);
 }
 
-.settingsButton {
-  margin-left: 4px;
-  display: inline-flex;
-  align-items: center;
-  color: var(--color-text-secondary);
-  padding: 2px 4px;
-  line-height: 1;
-}
-
 .pushBanner {
   display: flex;
   align-items: center;
@@ -94,6 +85,7 @@
   left: 0;
   right: 0;
   display: flex;
+  align-items: stretch;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-glass);
   backdrop-filter: blur(12px);
@@ -101,13 +93,15 @@
 }
 
 .tabButton {
+  position: relative;
   flex: 1;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  padding: 13px 0;
-  font-size: 14px;
+  gap: 3px;
+  padding: 7px 0 6px;
+  font-size: 10.5px;
   color: var(--color-text-dim);
   font-weight: 500;
 }
@@ -119,20 +113,65 @@
 .tabIcon {
   display: inline-flex;
   align-items: center;
+  line-height: 1;
+}
+
+/* 中间「新会话」：iPhone 风格凸起圆形动作按钮，浮在导航栏之上。 */
+.centerTab {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+  padding: 0 0 6px;
+  font-size: 10.5px;
+  color: var(--color-accent);
+  font-weight: 600;
+}
+
+.centerFab {
+  position: absolute;
+  top: -18px;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 26px;
+  font-weight: 300;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.28);
+}
+
+.centerTab:active .centerFab {
+  background: var(--color-accent-hover);
+}
+
+.centerLabel {
+  margin-top: 30px;
 }
 
 .badge {
+  position: absolute;
+  top: 3px;
+  left: 50%;
+  margin-left: 4px;
   background: var(--color-accent);
   color: #fff;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   border-radius: 999px;
-  min-width: 18px;
-  height: 18px;
+  min-width: 16px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 0 5px;
+  padding: 0 4px;
 }
 
 .gate {
