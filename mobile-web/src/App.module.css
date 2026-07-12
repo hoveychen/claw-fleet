@@ -1,0 +1,169 @@
+.app {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(10px + var(--safe-top)) 16px 10px;
+  border-bottom: 1px solid var(--color-border);
+  position: sticky;
+  top: 0;
+  background: rgba(8, 9, 10, 0.92);
+  backdrop-filter: blur(12px);
+  z-index: 10;
+}
+
+.title {
+  font-weight: 700;
+  font-size: 17px;
+  letter-spacing: 0.02em;
+  margin-right: auto;
+}
+
+.connDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.connDot[data-state="online"] {
+  background: var(--color-success);
+}
+
+.connDot[data-state="agent-offline"] {
+  background: var(--color-warning);
+}
+
+.connDot[data-state="offline"] {
+  background: var(--color-text-dim);
+}
+
+.connLabel {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.pushBanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-card);
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+.pushButton {
+  flex-shrink: 0;
+  background: var(--color-accent);
+  color: #fff;
+  border-radius: 7px;
+  padding: 6px 14px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.pushButton:active {
+  background: var(--color-accent-hover);
+}
+
+.main {
+  flex: 1;
+  padding: 12px 12px calc(70px + var(--safe-bottom));
+}
+
+.tabs {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  border-top: 1px solid var(--color-border);
+  background: rgba(8, 9, 10, 0.92);
+  backdrop-filter: blur(12px);
+  padding-bottom: var(--safe-bottom);
+}
+
+.tabButton {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 13px 0;
+  font-size: 14px;
+  color: var(--color-text-dim);
+  font-weight: 500;
+}
+
+.tabButton[data-active="true"] {
+  color: var(--color-accent);
+}
+
+.tabIcon {
+  font-size: 15px;
+}
+
+.badge {
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 999px;
+  min-width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+}
+
+.gate {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 32px;
+  gap: 8px;
+}
+
+.gate h1 {
+  font-size: 20px;
+  margin: 8px 0 0;
+}
+
+.gate p {
+  color: var(--color-text-secondary);
+  max-width: 300px;
+  font-size: 14px;
+}
+
+.gateLogo {
+  width: 64px;
+  height: 64px;
+  border-radius: 15px;
+  background: var(--color-accent);
+  color: #fff;
+  font-size: 38px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.gateButton {
+  margin-top: 12px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  padding: 8px 18px;
+  color: var(--color-text-secondary);
+}
