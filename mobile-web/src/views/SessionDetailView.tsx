@@ -71,6 +71,27 @@ function fmtTime(timestamp?: string): string {
   return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
 }
 
+interface TailDelta {
+  lines: RawMessage[];
+  newOffset: number;
+}
+
+/** Append freshly-tailed lines, dropping any whose uuid we already hold —
+ *  the bootstrap window and the first delta can overlap by a few lines. */
+function appendUnique(prev: RawMessage[], lines: RawMessage[]): RawMessage[] {
+  const recent = new Set(
+    prev
+      .slice(-50)
+      .map((m) => (m as { uuid?: string }).uuid)
+      .filter(Boolean),
+  );
+  const fresh = lines.filter((m) => {
+    const u = (m as { uuid?: string }).uuid;
+    return !u || !recent.has(u);
+  });
+  return fresh.length > 0 ? [...prev, ...fresh] : prev;
+}
+
 function userText(msg: RawMessage): string {
   const parts: string[] = [];
   for (const b of blocksOf(msg)) {
@@ -123,20 +144,62 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
   const stickToBottom = useRef(true);
   const working = WORKING.includes(session.status);
 
-  // ── Message tail polling (only while the 消息 tab is showing) ─────────
+  // ── Message polling (only while the 消息 tab is showing) ──────────────
+  //
+  // Incremental model: bootstrap = locate the file end (`tail_delta` without
+  // offset) + one full `tail` for the initial window; steady state = poll
+  // `tail_delta` from the last offset and append only new lines. A desktop
+  // that predates `tail_delta` fails the bootstrap probe once and we fall
+  // back to the v2 full-tail poll.
+  const offsetRef = useRef<number | null>(null);
+  const legacyRef = useRef(false);
   useEffect(() => {
     if (!client || tab !== "messages") return;
     let cancelled = false;
     let timer = 0;
+
+    const fullTail = async () => {
+      const rows = await client.request<RawMessage[]>("tail", {
+        path: session.jsonlPath,
+        n: tailN,
+      });
+      if (!cancelled) {
+        setMessages(rows);
+        setLoadError(null);
+      }
+    };
+
+    const bootstrap = async () => {
+      try {
+        const loc = await client.request<TailDelta>("tail_delta", { path: session.jsonlPath });
+        offsetRef.current = loc.newOffset;
+      } catch {
+        legacyRef.current = true; // old desktop — keep full polling
+      }
+      await fullTail();
+    };
+
     const poll = async () => {
       try {
-        const rows = await client.request<RawMessage[]>("tail", {
-          path: session.jsonlPath,
-          n: tailN,
-        });
-        if (!cancelled) {
-          setMessages(rows);
-          setLoadError(null);
+        if (legacyRef.current) {
+          await fullTail();
+        } else if (offsetRef.current == null) {
+          await bootstrap();
+        } else {
+          const d = await client.request<TailDelta>("tail_delta", {
+            path: session.jsonlPath,
+            offset: offsetRef.current,
+          });
+          if (!cancelled) {
+            if (d.newOffset < offsetRef.current) {
+              offsetRef.current = null; // rotated/truncated → re-bootstrap
+            } else {
+              offsetRef.current = d.newOffset;
+              if (d.lines.length > 0) {
+                setMessages((prev) => appendUnique(prev ?? [], d.lines));
+              }
+            }
+          }
         }
       } catch (e) {
         if (!cancelled && messages === null) {
@@ -145,6 +208,8 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
       }
       if (!cancelled) timer = window.setTimeout(poll, TAIL_POLL_MS);
     };
+
+    offsetRef.current = null; // path / window size changed → re-bootstrap
     void poll();
     return () => {
       cancelled = true;
