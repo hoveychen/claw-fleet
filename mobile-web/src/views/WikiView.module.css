@@ -32,10 +32,26 @@
   line-height: 1;
 }
 
-.search {
+.searchWrap {
+  position: relative;
   flex: 1;
   min-width: 0;
-  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 11px;
+  display: inline-flex;
+  color: var(--color-text-dim);
+  pointer-events: none;
+}
+
+.search {
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px 9px 34px;
   border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-bg-input);
