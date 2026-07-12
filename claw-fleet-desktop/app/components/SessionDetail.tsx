@@ -26,6 +26,7 @@ import { TokenSpendPanel } from "./TokenSpendPanel";
 import { WorkflowDag } from "./blocks/WorkflowDag";
 import { useWorkflowTrees } from "../hooks/useWorkflowTrees";
 import { isWorkflowAgent } from "../workflowAgent";
+import { bgTaskIcon, bgTaskDataType } from "../bgTaskKinds";
 import styles from "./SessionDetail.module.css";
 
 const ACTIVE_STATUSES = new Set([
@@ -190,6 +191,7 @@ export function SessionDetail({
     | "tokens"
     | "workflow"
     | "tasks"
+    | "bgtasks"
     | "scratchpad";
   const [viewTab, setViewTab] = useState<ViewTab>("messages");
   const [decisionRecords, setDecisionRecords] = useState<DecisionHistoryRecord[]>([]);
@@ -418,11 +420,20 @@ export function SessionDetail({
   }, [workspacePath, sessionId]);
   const hasScratchpad = scratchpadCount > 0;
 
+  // Background tasks the session was still waiting on when it last ended a turn
+  // (shells, monitors, subagents — see `bg_guard`). Only populated while the
+  // session's latest hook event is that Stop and within the 5-min freshness
+  // window, so the tab naturally appears only when there's something to show.
+  const bgTasks = liveSession?.backgroundTasks ?? [];
+  const hasBgTasks = bgTasks.length > 0;
+
   // Switching to a session without a scratchpad would otherwise strand the view
-  // on a tab whose button no longer renders.
+  // on a tab whose button no longer renders. Same for the background-tasks tab,
+  // whose array empties as soon as the session takes another turn.
   useEffect(() => {
     if (viewTab === "scratchpad" && !hasScratchpad) setViewTab("messages");
-  }, [viewTab, hasScratchpad]);
+    if (viewTab === "bgtasks" && !hasBgTasks) setViewTab("messages");
+  }, [viewTab, hasScratchpad, hasBgTasks]);
 
   const pickTab = useCallback((tab: ViewTab) => {
     setViewTab(tab);
@@ -651,6 +662,14 @@ export function SessionDetail({
                 {t("detail.tab_tasks")}
               </button>
             )}
+            {hasBgTasks && (
+              <button
+                className={`${styles.view_tab} ${viewTab === "bgtasks" ? styles.view_tab_active : ""}`}
+                onClick={() => pickTab("bgtasks")}
+              >
+                {t("detail.tab_bgtasks")} ({bgTasks.length})
+              </button>
+            )}
             {hasScratchpad && (
               <button
                 className={`${styles.view_tab} ${viewTab === "scratchpad" ? styles.view_tab_active : ""}`}
@@ -749,6 +768,68 @@ export function SessionDetail({
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {viewTab === "bgtasks" && (
+            <div className={styles.bgtasks_panel}>
+              {bgTasks.map((bt) => {
+                const icon = bgTaskIcon(bt.type);
+                const dataType = bgTaskDataType(bt.type);
+                const label = bt.description || bt.command || bt.id;
+                // A subagent task correlates to its own scanned session
+                // (`agent-<id>`, see session.rs / openAgentSession). When that
+                // session is present we read its *live* status and let the row
+                // open it — far more accurate than the last-Stop snapshot,
+                // which for a subagent can be minutes stale.
+                const linked =
+                  bt.type === "subagent"
+                    ? sessions.find((s) => s.id === `agent-${bt.id}`)
+                    : undefined;
+                if (linked) {
+                  return (
+                    <button
+                      key={bt.id}
+                      className={styles.bgtask_item_link}
+                      onClick={() => openAgentSession(bt.id)}
+                      title={t("detail.bgtask_open_hint")}
+                    >
+                      <span className={styles.bgtask_icon} aria-hidden>{icon}</span>
+                      <span className={styles.tab_dot} data-status={linked.status} />
+                      <span className={styles.bgtask_type} data-bgtype={dataType}>
+                        {linked.agentType ?? bt.type}
+                      </span>
+                      <span className={styles.bgtask_desc}>
+                        {linked.aiTitle || label}
+                      </span>
+                    </button>
+                  );
+                }
+                // Shell / monitor, or a subagent whose session hasn't surfaced
+                // (or already aged out): no live source, so this row reflects
+                // the *last Stop* only — flag it as such rather than imply it's
+                // current.
+                return (
+                  <div key={bt.id} className={styles.bgtask_item}>
+                    <span className={styles.bgtask_icon} aria-hidden>{icon}</span>
+                    <span className={styles.bgtask_type} data-bgtype={dataType}>
+                      {bt.type}
+                    </span>
+                    <span className={styles.bgtask_desc}>{label}</span>
+                    <span
+                      className={styles.bgtask_stale}
+                      title={
+                        liveSession.lastActivityMs
+                          ? new Date(liveSession.lastActivityMs).toLocaleString()
+                          : undefined
+                      }
+                    >
+                      {t("detail.bgtask_as_of_stop")}
+                    </span>
+                  </div>
+                );
+              })}
+              <div className={styles.bgtasks_note}>{t("detail.bgtasks_note")}</div>
             </div>
           )}
 
