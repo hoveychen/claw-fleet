@@ -378,6 +378,17 @@ export interface WorkflowTree {
 }
 
 /** `token_breakdown` reply — only the totals the mobile UI shows. */
+/** Today's cumulative token/cost counter (header widget).
+ *  Mirrors `claw_fleet_core::today_usage::TodayUsage`. */
+export interface TodayUsage {
+  date: string;
+  outputTokens: number;
+  costUsd: number;
+  agentCostUsd: number;
+  fleetCostUsd: number;
+  sessionCount: number;
+}
+
 export interface TokenBreakdown {
   totalsUsage?: {
     inputTokens?: number;
