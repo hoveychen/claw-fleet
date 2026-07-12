@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { getLang, t } from "../i18n";
+import { useResolvedTheme } from "../theme";
 import type { RelayClient } from "../relay";
 import type {
   CommandLeaf,
@@ -40,7 +42,7 @@ export function DecisionsView({ decisions, client, agentOnline, workspaceOf, onA
   if (decisions.length === 0) {
     return (
       <div className={styles.empty}>
-        {agentOnline ? "没有待处理的决策 🎉" : "桌面端离线，暂时收不到新决策"}
+        {agentOnline ? t("没有待处理的决策 🎉") : t("桌面端离线，暂时收不到新决策")}
       </div>
     );
   }
@@ -87,7 +89,7 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered }: CardProps) 
     <div className={styles.card}>
       <div className={styles.cardHead}>
         <span className={styles.kindChip} data-kind={decision.kind}>
-          {KIND_LABEL[decision.kind] ?? decision.kind}
+          {t(KIND_LABEL[decision.kind] ?? decision.kind)}
         </span>
         <span className={styles.workspace}>{workspace}</span>
       </div>
@@ -211,7 +213,7 @@ function GuardAnalysis({
       try {
         const { analysis } = await client.request<{ analysis: string }>(
           "guard_analyze",
-          { command: request.command, context, lang: "zh" },
+          { command: request.command, context, lang: getLang() },
           40_000, // the desktop-side LLM call itself may take up to 30s
         );
         if (!cancelled) setState(analysis);
@@ -227,9 +229,9 @@ function GuardAnalysis({
   if (state === "unavailable") return null;
   return (
     <div className={styles.analysis}>
-      <div className={styles.analysisHead}>AI 风险分析</div>
+      <div className={styles.analysisHead}>{t("AI 风险分析")}</div>
       {state === "loading" ? (
-        <div className={styles.analysisLoading}>分析中…</div>
+        <div className={styles.analysisLoading}>{t("分析中…")}</div>
       ) : (
         <div className={styles.markdown}>
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{state}</ReactMarkdown>
@@ -275,7 +277,7 @@ function GuardCard({
       {showReason && (
         <textarea
           className={styles.reasonInput}
-          placeholder="拒绝理由（可选，会转告给 AI）"
+          placeholder={t("拒绝理由（可选，会转告给 AI）")}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           rows={2}
@@ -285,7 +287,7 @@ function GuardCard({
         <div className={styles.prefixMenu}>
           {allowPrefixes.map((p) => (
             <button key={p} className={styles.prefixItem} onClick={() => alwaysAllow(p)}>
-              总是允许 <code>{p}</code>
+              {t("总是允许")} <code>{p}</code>
             </button>
           ))}
         </div>
@@ -301,7 +303,7 @@ function GuardCard({
             submit({ allow: false, reason: reason || undefined });
           }}
         >
-          {showReason ? "确认拒绝" : "拒绝"}
+          {showReason ? t("确认拒绝") : t("拒绝")}
         </button>
         {allowPrefixes.length > 0 && (
           <button
@@ -311,11 +313,11 @@ function GuardCard({
               else setPrefixMenuOpen((v) => !v);
             }}
           >
-            {allowPrefixes.length === 1 ? `总是允许 ${allowPrefixes[0]}` : "总是允许…"}
+            {allowPrefixes.length === 1 ? t("总是允许 {0}", allowPrefixes[0]) : t("总是允许…")}
           </button>
         )}
         <button className={styles.primaryButton} onClick={() => submit({ allow: true })}>
-          允许
+          {t("允许")}
         </button>
       </div>
     </div>
@@ -343,13 +345,14 @@ function PermissionCard({
   return (
     <div>
       <div className={styles.toolName}>
-        工具：<code>{request.toolName}</code>
+        {t("工具：")}
+        <code>{request.toolName}</code>
       </div>
       {input && input !== "null" && <pre className={styles.command}>{truncate(input, 800)}</pre>}
       {showReason && (
         <textarea
           className={styles.reasonInput}
-          placeholder="拒绝理由（可选）"
+          placeholder={t("拒绝理由（可选）")}
           value={reason}
           onChange={(e) => setReason(e.target.value)}
           rows={2}
@@ -366,10 +369,10 @@ function PermissionCard({
             submit({ allow: false, reason: reason || undefined });
           }}
         >
-          {showReason ? "确认拒绝" : "拒绝"}
+          {showReason ? t("确认拒绝") : t("拒绝")}
         </button>
         <button className={styles.primaryButton} onClick={() => submit({ allow: true })}>
-          允许
+          {t("允许")}
         </button>
       </div>
     </div>
@@ -408,18 +411,18 @@ function PlanCard({
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           {long && (
             <button className={styles.expandButton} onClick={() => setExpanded((v) => !v)}>
-              {expanded ? "收起" : "展开完整计划"}
+              {expanded ? t("收起") : t("展开完整计划")}
             </button>
           )}
         </div>
       )}
       <button className={styles.editToggle} onClick={() => setEditing((v) => !v)}>
-        {editing ? "退出编辑" : "✎ 编辑计划"}
+        {editing ? t("退出编辑") : t("✎ 编辑计划")}
       </button>
       {rejecting && (
         <textarea
           className={styles.reasonInput}
-          placeholder="驳回意见（会转告给 AI 修改计划）"
+          placeholder={t("驳回意见（会转告给 AI 修改计划）")}
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           rows={3}
@@ -436,7 +439,7 @@ function PlanCard({
             submit({ decision: "reject", feedback: feedback || undefined });
           }}
         >
-          {rejecting ? "确认驳回" : "驳回"}
+          {rejecting ? t("确认驳回") : t("驳回")}
         </button>
         <button
           className={styles.primaryButton}
@@ -448,7 +451,7 @@ function PlanCard({
             )
           }
         >
-          {edited ? "批准已编辑版" : "批准"}
+          {edited ? t("批准已编辑版") : t("批准")}
         </button>
       </div>
     </div>
@@ -533,7 +536,7 @@ function QuestionsCard({
         return { ...prev, [question]: next };
       });
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : "附件上传失败");
+      window.alert(e instanceof Error ? e.message : t("附件上传失败"));
     } finally {
       setUploadingQ(null);
     }
@@ -554,7 +557,7 @@ function QuestionsCard({
       if (customText) parts.push(customText);
       const hasOptions = (q.options?.length ?? 0) > 0;
       if (hasOptions && parts.length === 0) {
-        setError(`「${q.header || truncate(q.question, 20)}」还没有作答`);
+        setError(t("「{0}」还没有作答", q.header || truncate(q.question, 20)));
         return;
       }
       let answer = parts.join(", ");
@@ -574,7 +577,7 @@ function QuestionsCard({
       for (const f of q.formFields ?? []) {
         const v = form[f.name] ?? "";
         if (f.required && !v.trim()) {
-          setError(`「${f.label}」是必填项`);
+          setError(t("「{0}」是必填项", f.label));
           return;
         }
         answers[f.name] = v;
@@ -648,13 +651,13 @@ function QuestionsCard({
                   {(selections[q.question] ?? []).includes(OTHER) ? "✓" : ""}
                 </span>
                 <span className={styles.optionBody}>
-                  <span className={styles.optionLabel}>其他…</span>
+                  <span className={styles.optionLabel}>{t("其他…")}</span>
                 </span>
               </button>
               {(selections[q.question] ?? []).includes(OTHER) && (
                 <textarea
                   className={styles.reasonInput}
-                  placeholder="自定义回答"
+                  placeholder={t("自定义回答")}
                   value={custom[q.question] ?? ""}
                   onChange={(e) => setCustom((p) => ({ ...p, [q.question]: e.target.value }))}
                   rows={2}
@@ -667,7 +670,7 @@ function QuestionsCard({
                     data-active={multiOverride[q.question] === true}
                     onClick={() => flipMultiOverride(q)}
                   >
-                    {multiOverride[q.question] ? "已改为多选" : "改为多选"}
+                    {multiOverride[q.question] ? t("已改为多选") : t("改为多选")}
                   </button>
                 )}
                 <QuestionAttachRow
@@ -698,10 +701,10 @@ function QuestionsCard({
       {error && <div className={styles.error}>{error}</div>}
       <div className={styles.actions}>
         <button className={styles.ghostButton} onClick={() => doSubmit(true)}>
-          {isFleetAsk ? "取消" : "拒绝回答"}
+          {isFleetAsk ? t("取消") : t("拒绝回答")}
         </button>
         <button className={styles.primaryButton} onClick={() => doSubmit(false)}>
-          提交
+          {t("提交")}
         </button>
       </div>
     </div>
@@ -738,14 +741,14 @@ function QuestionAttachRow({
         disabled={uploading}
         onClick={() => inputRef.current?.click()}
       >
-        {uploading ? "上传中…" : "＋ 附件"}
+        {uploading ? t("上传中…") : t("＋ 附件")}
       </button>
       <input
         ref={inputRef}
         type="file"
         multiple
         hidden
-        aria-label={`为「${question}」添加附件`}
+        aria-label={t("为「{0}」添加附件", question)}
         onChange={(e) => {
           onPick(e.target.files);
           e.target.value = "";
@@ -788,7 +791,7 @@ function FormFieldControl({
         <div className={styles.field}>
           {label}
           <select value={value} onChange={(e) => onChange(e.target.value)}>
-            <option value="">请选择…</option>
+            <option value="">{t("请选择…")}</option>
             {(field.options ?? []).map((o) => (
               <option key={o} value={o}>
                 {o}
@@ -914,6 +917,7 @@ function HtmlPreview({
 }) {
   const names = useMemo(() => (images ?? []).map((i) => i.name), [images]);
   const uris = useAssets(names, requestId, qidx, client);
+  const theme = useResolvedTheme();
   const resolved = useMemo(() => {
     let out = html;
     for (const [name, uri] of Object.entries(uris)) {
@@ -921,12 +925,15 @@ function HtmlPreview({
     }
     return out;
   }, [html, uris]);
+  // srcDoc can't read the parent's CSS variables — bake the theme colors in.
+  const frameColors =
+    theme === "light" ? "color:#1f2023;background:#fbfaf7" : "color:#e6e6e6;background:#101113";
   return (
     <iframe
       className={styles.htmlPreview}
       sandbox=""
-      srcDoc={`<style>body{margin:8px;font-family:-apple-system,sans-serif;color:#e6e6e6;background:#101113;font-size:14px}img{max-width:100%}</style>${resolved}`}
-      title="预览"
+      srcDoc={`<style>body{margin:8px;font-family:-apple-system,sans-serif;${frameColors};font-size:14px}img{max-width:100%}</style>${resolved}`}
+      title={t("预览")}
     />
   );
 }
@@ -951,7 +958,7 @@ function ImageGallery({
           {uris[img.name] ? (
             <img src={uris[img.name]} alt={img.caption ?? img.name} />
           ) : (
-            <div className={styles.imgLoading}>加载图片…</div>
+            <div className={styles.imgLoading}>{t("加载图片…")}</div>
           )}
           {img.caption && <figcaption>{img.caption}</figcaption>}
         </figure>

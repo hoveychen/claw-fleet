@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type {
   DecisionHistoryRecord,
@@ -54,7 +55,7 @@ function fmtDateTime(ts?: string | null): string {
   if (!ts) return "";
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString("zh-CN", {
+  return d.toLocaleString(dateLocale(), {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -101,9 +102,9 @@ export function DecisionHistoryTab({
   });
   const [open, setOpen] = useState<Set<string>>(new Set());
 
-  if (data === "loading") return <Hint>加载决策历史…</Hint>;
-  if (data === "error") return <Hint>加载失败（桌面端可能离线）</Hint>;
-  if (data.length === 0) return <Hint>该会话没有决策记录</Hint>;
+  if (data === "loading") return <Hint>{t("加载决策历史…")}</Hint>;
+  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (data.length === 0) return <Hint>{t("该会话没有决策记录")}</Hint>;
 
   const toggle = (id: string) =>
     setOpen((prev) => {
@@ -121,10 +122,10 @@ export function DecisionHistoryTab({
         return (
           <div key={`${r.kind}:${r.id}`} className={styles.record} onClick={() => toggle(r.id)}>
             <div className={styles.recordHead}>
-              <span className={styles.kindChip}>{KIND_LABEL[r.kind] ?? r.kind}</span>
+              <span className={styles.kindChip}>{t(KIND_LABEL[r.kind] ?? r.kind)}</span>
               {r.kind !== "user-prompt" && (
                 <span className={styles.outcomeChip} data-tone={outcomeTone(r.outcome)}>
-                  {OUTCOME_LABEL[r.outcome] ?? r.outcome}
+                  {t(OUTCOME_LABEL[r.outcome] ?? r.outcome)}
                 </span>
               )}
               <span className={styles.recordTime}>{fmtDateTime(time)}</span>
@@ -133,7 +134,7 @@ export function DecisionHistoryTab({
               {r.kind === "user-prompt" && (
                 <>
                   {r.text}
-                  {r.hasImage && <span className={styles.dimNote}>（含图片）</span>}
+                  {r.hasImage && <span className={styles.dimNote}>{t("（含图片）")}</span>}
                 </>
               )}
               {r.kind === "elicitation" && (r.questions[0]?.question ?? "")}
@@ -158,7 +159,7 @@ export function DecisionHistoryTab({
                       ))}
                       {picked?.other && (
                         <div className={styles.qaOption} data-picked="true">
-                          其他：{picked.label}
+                          {t("其他：{0}", picked.label)}
                         </div>
                       )}
                     </div>
@@ -170,13 +171,13 @@ export function DecisionHistoryTab({
               <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
                 {r.editedPlan && (
                   <div className={styles.qaBlock}>
-                    <div className={styles.qaQuestion}>用户编辑后的计划</div>
+                    <div className={styles.qaQuestion}>{t("用户编辑后的计划")}</div>
                     <div className={styles.preWrap}>{r.editedPlan}</div>
                   </div>
                 )}
                 {r.feedback && (
                   <div className={styles.qaBlock}>
-                    <div className={styles.qaQuestion}>驳回意见</div>
+                    <div className={styles.qaQuestion}>{t("驳回意见")}</div>
                     <div className={styles.preWrap}>{r.feedback}</div>
                   </div>
                 )}
@@ -185,7 +186,7 @@ export function DecisionHistoryTab({
             {expanded && r.kind === "fleet-ask" && (
               <div className={styles.recordBody} onClick={(e) => e.stopPropagation()}>
                 {r.questions.some((q) => q.html) && (
-                  <div className={styles.dimNote}>[当时展示过 HTML 预览]</div>
+                  <div className={styles.dimNote}>{t("[当时展示过 HTML 预览]")}</div>
                 )}
                 {Object.entries(r.answers).map(([k, v]) => (
                   <div key={k} className={styles.qaBlock}>
@@ -216,9 +217,9 @@ export function TaskPlansTab({
     sessionId: session.id,
   });
 
-  if (data === "loading") return <Hint>加载计划中…</Hint>;
-  if (data === "error") return <Hint>加载失败（桌面端可能离线）</Hint>;
-  if (data.length === 0) return <Hint>该会话没有 TASKS.md 计划</Hint>;
+  if (data === "loading") return <Hint>{t("加载计划中…")}</Hint>;
+  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (data.length === 0) return <Hint>{t("该会话没有 TASKS.md 计划")}</Hint>;
 
   const current = session.taskPlan?.currentTask;
   return (
@@ -264,15 +265,15 @@ export function TokenTab({
     projectRoot: session.workspacePath,
   });
 
-  if (data === "loading") return <Hint>分析 token 用量…</Hint>;
-  if (data === "error") return <Hint>分析失败（桌面端可能离线）</Hint>;
+  if (data === "loading") return <Hint>{t("分析 token 用量…")}</Hint>;
+  if (data === "error") return <Hint>{t("分析失败（桌面端可能离线）")}</Hint>;
 
   const u = data.totalsUsage ?? {};
   const rows: Array<[string, string]> = [
-    ["输入 tokens", fmtTokens(u.inputTokens)],
-    ["输出 tokens", fmtTokens(u.outputTokens)],
-    ["缓存写入", fmtTokens(u.cacheCreationTokens)],
-    ["缓存读取", fmtTokens(u.cacheReadTokens)],
+    [t("输入 tokens"), fmtTokens(u.inputTokens)],
+    [t("输出 tokens"), fmtTokens(u.outputTokens)],
+    [t("缓存写入"), fmtTokens(u.cacheCreationTokens)],
+    [t("缓存读取"), fmtTokens(u.cacheReadTokens)],
   ];
   return (
     <div className={styles.stack}>
@@ -286,9 +287,11 @@ export function TokenTab({
       </div>
       {data.totalsEstimatedCostUsd != null && (
         <div className={styles.costLine}>
-          估算成本 <strong>${data.totalsEstimatedCostUsd.toFixed(2)}</strong>
+          {t("估算成本")} <strong>${data.totalsEstimatedCostUsd.toFixed(2)}</strong>
           {(data.subagents?.length ?? 0) > 0 && (
-            <span className={styles.dimNote}>（含 {data.subagents!.length} 个子 agent）</span>
+            <span className={styles.dimNote}>
+              {t("（含 {0} 个子 agent）", data.subagents!.length)}
+            </span>
           )}
         </div>
       )}
@@ -316,20 +319,20 @@ export function WorkflowTab({
     path: session.jsonlPath,
   });
 
-  if (data === "loading") return <Hint>加载 workflow…</Hint>;
-  if (data === "error") return <Hint>加载失败（桌面端可能离线）</Hint>;
-  if (data.length === 0) return <Hint>该会话没有 workflow 运行</Hint>;
+  if (data === "loading") return <Hint>{t("加载 workflow…")}</Hint>;
+  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (data.length === 0) return <Hint>{t("该会话没有 workflow 运行")}</Hint>;
 
   return (
     <div className={styles.stack}>
-      {data.map((t) => (
-        <div key={t.runId} className={styles.planCard}>
-          <div className={styles.planTitle}>{t.name || t.runId}</div>
-          {t.description && <div className={styles.dimNote}>{t.description}</div>}
-          {t.agents.map((a, i) => (
+      {data.map((tree) => (
+        <div key={tree.runId} className={styles.planCard}>
+          <div className={styles.planTitle}>{tree.name || tree.runId}</div>
+          {tree.description && <div className={styles.dimNote}>{tree.description}</div>}
+          {tree.agents.map((a, i) => (
             <div key={a.agentId ?? i} className={styles.wfAgent}>
               <span className={styles.wfStatus} data-status={a.status}>
-                {AGENT_STATUS_LABEL[a.status ?? ""] ?? a.status ?? "?"}
+                {t(AGENT_STATUS_LABEL[a.status ?? ""] ?? a.status ?? "?")}
               </span>
               <span className={styles.wfLabel}>{a.label || a.prompt || a.agentId}</span>
             </div>
@@ -353,9 +356,9 @@ export function HandoffTab({
     sessionId: session.id,
   });
 
-  if (data === "loading") return <Hint>加载接力链…</Hint>;
-  if (data === "error") return <Hint>加载失败（桌面端可能离线）</Hint>;
-  if (!data) return <Hint>该会话不在任何接力链上</Hint>;
+  if (data === "loading") return <Hint>{t("加载接力链…")}</Hint>;
+  if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
+  if (!data) return <Hint>{t("该会话不在任何接力链上")}</Hint>;
 
   const hops: string[] = [];
   for (const l of data.links) {
@@ -366,15 +369,15 @@ export function HandoffTab({
   return (
     <div className={styles.stack}>
       <div className={styles.dimNote}>
-        接力 {hops.length} 棒
-        {hops.includes(session.id) && ` · 当前第 ${hops.indexOf(session.id) + 1} 棒`}
+        {t("接力 {0} 棒", hops.length)}
+        {hops.includes(session.id) && ` · ${t("当前第 {0} 棒", hops.indexOf(session.id) + 1)}`}
       </div>
       {data.links.map((l, i) => (
         <div key={i} className={styles.planCard}>
           <div className={styles.hopHead}>
-            <span className={styles.hopBadge}>第 {i + 1} → {i + 2} 棒</span>
+            <span className={styles.hopBadge}>{t("第 {0} → {1} 棒", i + 1, i + 2)}</span>
             <span className={styles.recordTime}>
-              {new Date(l.handedAt).toLocaleString("zh-CN", {
+              {new Date(l.handedAt).toLocaleString(dateLocale(), {
                 month: "2-digit",
                 day: "2-digit",
                 hour: "2-digit",
@@ -384,8 +387,8 @@ export function HandoffTab({
           </div>
           {(l.planId || l.nextTask) && (
             <div className={styles.dimNote}>
-              {l.planId && `计划 ${l.planId}`}
-              {l.nextTask && ` · 下一步 ${l.nextTask}`}
+              {l.planId && t("计划 {0}", l.planId)}
+              {l.nextTask && ` · ${t("下一步 {0}", l.nextTask)}`}
             </div>
           )}
           <div className={styles.markdown}>
