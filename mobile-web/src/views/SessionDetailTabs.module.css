@@ -16,6 +16,7 @@
 .dimNote {
   color: var(--color-text-dim);
   font-size: 11.5px;
+  overflow-wrap: anywhere;
 }
 
 .preWrap {
@@ -141,6 +142,8 @@
 .planTitle {
   font-size: 13px;
   font-weight: 600;
+  /* runId / plan 标题可能是无空格长串(如 workflow runId)，避免撑破卡片。 */
+  overflow-wrap: anywhere;
 }
 
 .planItem {
@@ -150,6 +153,13 @@
   font-size: 12.5px;
   line-height: 1.45;
   color: var(--color-text-secondary);
+  /* overflow-wrap 可继承到文字 span；P 任务文本常含长路径。 */
+  overflow-wrap: anywhere;
+}
+
+/* 文字 span(checkbox 之后的最后一个子项)是 flex 子项，需 min-width:0 才能收缩断行。 */
+.planItem > span:last-child {
+  min-width: 0;
 }
 
 .planItem[data-done="true"] {
