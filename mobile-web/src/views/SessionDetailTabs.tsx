@@ -366,7 +366,8 @@ export function HandoffTab({
   return (
     <div className={styles.stack}>
       <div className={styles.dimNote}>
-        接力 {hops.length} 棒 · 当前第 {hops.indexOf(session.id) + 1} 棒
+        接力 {hops.length} 棒
+        {hops.includes(session.id) && ` · 当前第 ${hops.indexOf(session.id) + 1} 棒`}
       </div>
       {data.links.map((l, i) => (
         <div key={i} className={styles.planCard}>
