@@ -26,6 +26,7 @@ fn status_color(status: &SessionStatus) -> &'static str {
         SessionStatus::Active => "\x1b[36m",
         SessionStatus::Idle => "\x1b[2m",
         SessionStatus::RateLimited => "\x1b[31m",
+        SessionStatus::Stuck => "\x1b[91m",
     }
 }
 
@@ -81,6 +82,7 @@ fn format_status(status: &SessionStatus) -> &'static str {
         SessionStatus::Active => "Active",
         SessionStatus::Idle => "Idle",
         SessionStatus::RateLimited => "RateLimit",
+        SessionStatus::Stuck => "Stuck",
     }
 }
 
