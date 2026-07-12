@@ -6,6 +6,16 @@
 import { t } from "./i18n";
 import type { DecisionKind, SessionInfo } from "./types";
 
+/** Self-description this phone announces to the desktop so it appears in the
+ *  desktop 「移动端」 device list. Provided lazily so `pushSubscribed` reflects
+ *  the state at each heartbeat, not just at construction. */
+export interface DeviceInfo {
+  clientId: string;
+  label: string;
+  platform: string;
+  pushSubscribed: boolean;
+}
+
 export interface RelayHandlers {
   /** WS-level connectivity (this phone ↔ relay). */
   onStatus?: (connected: boolean) => void;
@@ -28,11 +38,16 @@ function relayWsUrl(): string {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
+/** How often the phone re-announces itself. The desktop drops a device ~40s
+ *  after its last hello, so this must stay comfortably under that. */
+const HELLO_INTERVAL_MS = 15_000;
 
 export class RelayClient {
   private ws: WebSocket | null = null;
   private secret: string;
   private handlers: RelayHandlers;
+  private deviceInfo?: () => DeviceInfo;
+  private helloTimer: number | null = null;
   private reqSeq = 0;
   private pending = new Map<
     string,
@@ -42,9 +57,10 @@ export class RelayClient {
   private closed = false;
   private authed = false;
 
-  constructor(secret: string, handlers: RelayHandlers) {
+  constructor(secret: string, handlers: RelayHandlers, deviceInfo?: () => DeviceInfo) {
     this.secret = secret;
     this.handlers = handlers;
+    this.deviceInfo = deviceInfo;
   }
 
   connect() {
@@ -54,8 +70,36 @@ export class RelayClient {
 
   close() {
     this.closed = true;
+    this.sayGoodbye();
+    this.stopHello();
     this.ws?.close();
     this.ws = null;
+  }
+
+  /** Best-effort "I'm leaving" so the desktop drops this device without waiting
+   *  out the stale timeout. Fire from `pagehide`/`beforeunload` too — mobile
+   *  browsers may never run cleanup, hence the desktop-side timeout backstop. */
+  sayGoodbye() {
+    const info = this.deviceInfo?.();
+    if (info) this.sendPayload({ event: "client_bye", clientId: info.clientId });
+  }
+
+  private startHello() {
+    this.sendHello();
+    this.stopHello();
+    this.helloTimer = window.setInterval(() => this.sendHello(), HELLO_INTERVAL_MS);
+  }
+
+  private stopHello() {
+    if (this.helloTimer !== null) {
+      window.clearInterval(this.helloTimer);
+      this.helloTimer = null;
+    }
+  }
+
+  private sendHello() {
+    const info = this.deviceInfo?.();
+    if (info) this.sendPayload({ event: "client_hello", ...info });
   }
 
   get isAuthed(): boolean {
@@ -82,6 +126,7 @@ export class RelayClient {
     ws.onclose = () => {
       const wasAuthed = this.authed;
       this.authed = false;
+      this.stopHello();
       this.handlers.onStatus?.(false);
       this.failPending(t("连接已断开"));
       if (this.closed) return;
@@ -101,6 +146,7 @@ export class RelayClient {
         this.reconnectDelay = 1000;
         this.handlers.onStatus?.(true);
         this.handlers.onAgentOnline?.(Boolean(frame.agent_online));
+        this.startHello();
         break;
       case "agent_status":
         this.handlers.onAgentOnline?.(Boolean(frame.online));
