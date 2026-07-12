@@ -1,0 +1,70 @@
+.section {
+  padding: 12px 14px 8px;
+}
+
+.section_title {
+  margin: 0 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-dim);
+}
+
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.cost {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--color-text);
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.tokens {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Collapsed rail mode ─────────────────────────────────────────────────── */
+
+.badge_collapsed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 4px;
+  margin: 6px 8px 0;
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  user-select: none;
+  cursor: default;
+}
+
+.badge_collapsed .cost {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.tile_label {
+  font-size: 9px;
+  color: var(--color-text-dim);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global([data-platform="macos"]) .badge_collapsed {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+:global([data-platform="macos"][data-theme="light"]) .badge_collapsed {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: rgba(0, 0, 0, 0.08);
+}

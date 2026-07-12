@@ -413,6 +413,9 @@
   "live": {
     "section_title": "Live"
   },
+  "today_usage": {
+    "title": "Today"
+  },
   "chart": {
     "title": "Token speed",
     "unit": "tok/s",
