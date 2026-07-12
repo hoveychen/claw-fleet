@@ -152,6 +152,7 @@ impl LocalBackend {
         };
         let _ = self.app.emit("sessions-updated", &snapshot);
         crate::update_tray(&self.app, &snapshot);
+        publish_mobile_sessions(&snapshot);
     }
 
     pub fn new(
@@ -213,6 +214,10 @@ impl LocalBackend {
         // exist (no-op otherwise). Idempotent. card.action.trigger arrives over
         // this outbound socket, so no public webhook/tunnel is needed.
         claw_fleet_core::feishu::ensure_ws_client();
+        // Same topology for the mobile relay channel (outbound WS to
+        // fleet-relay); no-op unless enabled with a secret in
+        // ~/.fleet/mobile-relay.json.
+        claw_fleet_core::mobile_relay::ensure_ws_client();
         step!("zombie recovery done");
 
 
@@ -285,6 +290,7 @@ impl LocalBackend {
                 let _ = app_bg.emit("sessions-updated", &initial);
                 let _ = app_bg.emit("scan-ready", true);
                 crate::update_tray(&app_bg, &initial);
+                publish_mobile_sessions(&initial);
 
                 // Send to indexer thread (non-blocking).
                 let _ = idx_tx.send(sessions_to_index_request(&initial));
@@ -677,6 +683,12 @@ impl LocalBackend {
                                 ));
                                 let _ = app_guard.emit("guard-request", &req);
                                 send_guard_card(&req);
+                                publish_mobile_decision(
+                                    "guard",
+                                    &req,
+                                    format!("{} · 命令待审批", notify_workspace(&req.workspace_name)),
+                                    notify_preview(&req.command_summary),
+                                );
                             }
                         }
                     }
@@ -685,6 +697,7 @@ impl LocalBackend {
                     // timed out / cleaned up by `fleet guard`).
                     for id in known.iter().filter(|id| !pending.contains(*id)) {
                         let _ = app_guard.emit("guard-dismissed", id.clone());
+                        claw_fleet_core::mobile_relay::publish_decision_resolved("guard", id);
                     }
                     known.retain(|id| pending.contains(id));
                 }
@@ -730,11 +743,20 @@ impl LocalBackend {
                                 ));
                                 let _ = app_elicit.emit("elicitation-request", &req);
                                 send_elicitation_card(&req);
+                                publish_mobile_decision(
+                                    "elicitation",
+                                    &req,
+                                    format!("{} · 有问题请示", notify_workspace(&req.workspace_name)),
+                                    notify_preview(
+                                        req.questions.first().map(|q| q.question.as_str()).unwrap_or(""),
+                                    ),
+                                );
                             }
                         }
                     }
                     for id in known.iter().filter(|id| !pending.contains(*id)) {
                         let _ = app_elicit.emit("elicitation-dismissed", id.clone());
+                        claw_fleet_core::mobile_relay::publish_decision_resolved("elicitation", id);
                     }
                     known.retain(|id| pending.contains(id));
                 }
@@ -784,11 +806,25 @@ impl LocalBackend {
                                     req.questions.len()
                                 ));
                                 let _ = app_ask.emit("fleet-ask-request", &req);
+                                publish_mobile_decision(
+                                    "fleet-ask",
+                                    &req,
+                                    format!("{} · 决策卡待处理", notify_workspace(&req.workspace_name)),
+                                    notify_preview(
+                                        req.ai_title.as_deref().unwrap_or_else(|| {
+                                            req.questions
+                                                .first()
+                                                .map(|q| q.question.as_str())
+                                                .unwrap_or("")
+                                        }),
+                                    ),
+                                );
                             }
                         }
                     }
                     for id in known.iter().filter(|id| !pending.contains(*id)) {
                         let _ = app_ask.emit("fleet-ask-dismissed", id.clone());
+                        claw_fleet_core::mobile_relay::publish_decision_resolved("fleet-ask", id);
                     }
                     known.retain(|id| pending.contains(id));
                 }
@@ -889,11 +925,18 @@ impl LocalBackend {
                                     id, req.tool_name
                                 ));
                                 let _ = app_pp.emit("permission-prompt-request", &req);
+                                publish_mobile_decision(
+                                    "permission-prompt",
+                                    &req,
+                                    format!("{} · 权限请求", notify_workspace(&req.workspace_name)),
+                                    notify_preview(&req.tool_name),
+                                );
                             }
                         }
                     }
                     for id in known.iter().filter(|id| !pending.contains(*id)) {
                         let _ = app_pp.emit("permission-prompt-dismissed", id.clone());
+                        claw_fleet_core::mobile_relay::publish_decision_resolved("permission-prompt", id);
                     }
                     known.retain(|id| pending.contains(id));
                 }
@@ -939,11 +982,18 @@ impl LocalBackend {
                                 ));
                                 let _ = app_plan.emit("plan-approval-request", &req);
                                 send_plan_card(&req);
+                                publish_mobile_decision(
+                                    "plan-approval",
+                                    &req,
+                                    format!("{} · 计划待审批", notify_workspace(&req.workspace_name)),
+                                    notify_preview(req.ai_title.as_deref().unwrap_or("ExitPlanMode 计划审批")),
+                                );
                             }
                         }
                     }
                     for id in known.iter().filter(|id| !pending.contains(*id)) {
                         let _ = app_plan.emit("plan-approval-dismissed", id.clone());
+                        claw_fleet_core::mobile_relay::publish_decision_resolved("plan-approval", id);
                     }
                     known.retain(|id| pending.contains(id));
                 }
@@ -1004,6 +1054,33 @@ fn sessions_to_index_request(sessions: &[SessionInfo]) -> IndexRequest {
 // mapping and the card stays in its un-resolved state.  Acceptable for
 // now — proper resolution on out-of-order events is tracked for the
 // webhook slice.
+
+/// Mirror a sessions snapshot onto the mobile relay channel. The relay side
+/// additionally throttles (≥2s between pushes) and skips when no mobile
+/// client is online; the `is_connected` gate here just avoids serializing
+/// the whole list when the channel is down.
+fn publish_mobile_sessions(sessions: &[claw_fleet_core::session::SessionInfo]) {
+    if !claw_fleet_core::mobile_relay::is_connected() {
+        return;
+    }
+    if let Ok(v) = serde_json::to_value(sessions) {
+        claw_fleet_core::mobile_relay::publish_sessions(&v);
+    }
+}
+
+/// Mirror a new pending decision onto the mobile relay channel, alongside the
+/// Tauri emit and the Feishu card. Serialization is skipped entirely while
+/// the relay is disconnected.
+fn publish_mobile_decision<T: serde::Serialize>(kind: &str, req: &T, title: String, body: String) {
+    if !claw_fleet_core::mobile_relay::is_connected() {
+        return;
+    }
+    if let Ok(v) = serde_json::to_value(req) {
+        claw_fleet_core::mobile_relay::publish_decision_created(kind, v, &title, &body);
+    }
+}
+
+use claw_fleet_core::mobile_relay::{notify_preview, notify_workspace};
 
 fn send_guard_card(req: &claw_fleet_core::guard::GuardRequest) {
     let req = req.clone();
@@ -1171,6 +1248,7 @@ fn rescan_and_emit(
     *sessions.lock().unwrap() = s.clone();
     let _ = app.emit("sessions-updated", &s);
     crate::update_tray(app, &s);
+    publish_mobile_sessions(&s);
 }
 
 /// Build the session list an incremental rescan should produce: keep the
@@ -1255,6 +1333,7 @@ fn incremental_rescan_and_emit(
     *sessions.lock().unwrap() = s.clone();
     let _ = app.emit("sessions-updated", &s);
     crate::update_tray(app, &s);
+    publish_mobile_sessions(&s);
 }
 
 /// Returns true when `path` is a `.md` file residing inside a `memory/`
@@ -2843,6 +2922,35 @@ impl Backend for LocalBackend {
         creds: claw_fleet_core::feishu::StoredCreds,
     ) -> Result<(), String> {
         claw_fleet_core::feishu::set_stored_creds(creds)
+    }
+
+    fn get_mobile_relay_config(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        Ok(claw_fleet_core::mobile_relay::load_config())
+    }
+
+    fn set_mobile_relay_config(
+        &self,
+        cfg: claw_fleet_core::mobile_relay::MobileRelayConfig,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        claw_fleet_core::mobile_relay::set_config_normalized(cfg)
+    }
+
+    fn rotate_mobile_relay_secret(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        claw_fleet_core::mobile_relay::rotate_secret()
+    }
+
+    fn mobile_relay_status(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayStatus, String> {
+        Ok(claw_fleet_core::mobile_relay::status())
+    }
+
+    fn mobile_relay_qr_svg(&self) -> Result<String, String> {
+        claw_fleet_core::mobile_relay::qr_svg()
     }
 }
 

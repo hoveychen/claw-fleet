@@ -1,0 +1,32 @@
+[package]
+name = "fleet-relay"
+version = "0.1.0"
+edition = "2021"
+description = "Generic WebSocket pairing relay with Web Push — pairs an agent (e.g. Fleet desktop) with clients (e.g. mobile web) over a shared-secret channel and forwards opaque JSON frames"
+
+# Dependency notes (workspace otherwise uses tiny_http, which is synchronous and
+# cannot serve WebSockets):
+#   axum + tower-http  — async HTTP/WS server + static file serving for the mobile web bundle
+#   web-push           — RFC 8291 http-ece encryption + VAPID signing (not realistic to hand-roll)
+#   p256               — generate/derive the VAPID ES256 keypair (public key exposed at /vapid)
+#   sha2               — channel id = SHA-256(secret); the relay never stores raw secrets
+[dependencies]
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["fs"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "signal"] }
+serde = { version = "1", features = ["derive"] }
+futures-util = { version = "0.3", default-features = false }
+serde_json = "1"
+sha2 = "0.10"
+# hyper-client (native-tls) over the default isahc-client: isahc drags in libcurl,
+# which is worse to ship in the container image than libssl.
+web-push = { version = "0.11", default-features = false, features = ["hyper-client"] }
+p256 = { version = "0.13", features = ["arithmetic"] }
+base64 = "0.22"
+rand = "0.8"
+log = "0.4"
+env_logger = "0.11"
+
+[dev-dependencies]
+tempfile = "3"
+tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect"] }
