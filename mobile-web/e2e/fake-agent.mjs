@@ -264,46 +264,6 @@ function serveRequest(method, params) {
       if (!file) throw new Error(`fake-agent: no wiki file ${key}`);
       return { mime: file.mime, base64: Buffer.from(file.body, "utf8").toString("base64") };
     }
-    case "wiki_search": {
-      const q = String(params.query ?? "").trim().toLowerCase();
-      if (q.length < 2) return [];
-      const hits = [];
-      for (const d of wikiDocs) {
-        const meta = `${d.title} ${d.slug} ${d.workspaceName}`.toLowerCase();
-        if (meta.includes(q)) {
-          hits.push({ slug: d.slug, field: "meta", snippet: "" });
-          continue;
-        }
-        const body = (wikiFiles[`${d.slug}:${d.entry}`]?.body ?? "").toLowerCase();
-        const pos = body.indexOf(q);
-        if (pos >= 0) {
-          const raw = wikiFiles[`${d.slug}:${d.entry}`].body;
-          const snippet = raw.slice(Math.max(0, pos - 20), pos + 40).replace(/\s+/g, " ").trim();
-          hits.push({ slug: d.slug, field: "content", snippet: `…${snippet}…` });
-        }
-      }
-      return hits;
-    }
-    case "wiki_export": {
-      const d = wikiDocs.find((x) => x.slug === params.slug);
-      if (!d) throw new Error(`fake-agent: no wiki doc ${params.slug}`);
-      const base = d.slug.split("/").pop();
-      if (d.kind === "markdown" || d.kind === "html") {
-        const file = wikiFiles[`${d.slug}:${d.entry}`];
-        const ext = d.kind === "markdown" ? "md" : "html";
-        return {
-          filename: `${base}.${ext}`,
-          mime: file.mime,
-          base64: Buffer.from(file.body, "utf8").toString("base64"),
-        };
-      }
-      // htmlDir → a tiny stand-in zip payload (magic bytes suffice for the test).
-      return {
-        filename: `${base}.zip`,
-        mime: "application/zip",
-        base64: Buffer.from([0x50, 0x4b, 0x03, 0x04, 0, 0]).toString("base64"),
-      };
-    }
     default:
       throw new Error(`fake-agent: unhandled method ${method}`);
   }
