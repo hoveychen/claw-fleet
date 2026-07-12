@@ -863,6 +863,37 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                 "base64": base64::engine::general_purpose::STANDARD.encode(&file.bytes),
             }))
         }
+        // Full-text search over every published doc's metadata + entry body
+        // (mirrors the desktop's `search_wiki_docs`). Returns WikiSearchHit rows
+        // (slug / field=meta|content / snippet). The <2-char guard matches the
+        // session_search arm so a single keystroke doesn't scan every doc.
+        "wiki_search" => {
+            let query = params.get("query").and_then(Value::as_str).unwrap_or("");
+            if query.trim().len() < 2 {
+                return Ok(Value::Array(Vec::new()));
+            }
+            serde_json::to_value(crate::wiki::search_docs(query)).map_err(|e| e.to_string())
+        }
+        // Export one doc as a downloadable artifact (single file for
+        // markdown/html, a store-only zip of the whole version dir for htmlDir),
+        // base64-framed. 64 MiB cap — a doc version can hold up to 100 MiB, but
+        // a single export frame stays bounded.
+        "wiki_export" => {
+            use base64::Engine as _;
+            let slug = params.get("slug").and_then(Value::as_str).ok_or("missing slug")?;
+            let version =
+                params.get("version").and_then(Value::as_str).unwrap_or("current");
+            let export = crate::wiki::export_doc(slug, version)?;
+            const MAX_WIKI_EXPORT_BYTES: usize = 64 * 1024 * 1024;
+            if export.bytes.len() > MAX_WIKI_EXPORT_BYTES {
+                return Err(format!("wiki export too large: {} bytes", export.bytes.len()));
+            }
+            Ok(json!({
+                "filename": export.filename,
+                "mime": export.mime,
+                "base64": base64::engine::general_purpose::STANDARD.encode(&export.bytes),
+            }))
+        }
         // ── Write methods ────────────────────────────────────────────────
         // All of these run inside `spawn_blocking` (see ws_connect_once), so
         // process spawns / kills / file writes never block the ws runtime.
@@ -1505,6 +1536,59 @@ mod tests {
             }))
             .expect("reply");
             assert_eq!(reply["ok"], false, "traversal must be rejected");
+        });
+    }
+
+    #[test]
+    fn request_wiki_search_matches_body_and_guards_short_query() {
+        with_temp_home(|| {
+            let src = crate::session::real_home_dir().unwrap().join("wiki-src");
+            fs::create_dir_all(&src).unwrap();
+            let file = src.join("note.md");
+            fs::write(&file, "# 标题\n\n独特关键词 xyzzy 在正文里").unwrap();
+            let doc =
+                crate::wiki::publish(&file, None, None, std::path::Path::new("/ws/demo")).unwrap();
+
+            // A body-only term (not in title/slug) is found with a content snippet.
+            let data = request_ok("wiki_search", json!({"query": "xyzzy"}));
+            let hits = data.as_array().expect("array");
+            assert_eq!(hits.len(), 1);
+            assert_eq!(hits[0]["slug"], doc.slug);
+            assert_eq!(hits[0]["field"], "content");
+            assert!(hits[0]["snippet"].as_str().unwrap().contains("xyzzy"));
+
+            // <2-char queries short-circuit to an empty list (no scan).
+            let data = request_ok("wiki_search", json!({"query": "x"}));
+            assert_eq!(data.as_array().unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn request_wiki_export_frames_markdown_and_zips_htmldir() {
+        with_temp_home(|| {
+            // markdown doc → single-file export, filename from the slug basename.
+            let src = crate::session::real_home_dir().unwrap().join("wiki-src");
+            fs::create_dir_all(&src).unwrap();
+            let file = src.join("guide.md");
+            fs::write(&file, "# 指南\n\n正文").unwrap();
+            let md = crate::wiki::publish(&file, None, None, std::path::Path::new("/ws/demo"))
+                .unwrap();
+            let data = request_ok("wiki_export", json!({"slug": md.slug}));
+            assert_eq!(data["filename"], "guide.md");
+            assert!(data["mime"].as_str().unwrap().contains("markdown"));
+            assert!(String::from_utf8(decode_b64(&data)).unwrap().contains("正文"));
+
+            // htmlDir doc → a zip (PK\x03\x04 magic), filename ends in .zip.
+            let dir = crate::session::real_home_dir().unwrap().join("site");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("index.html"), "<h1>hi</h1>").unwrap();
+            let hd = crate::wiki::publish(&dir, None, None, std::path::Path::new("/ws/demo"))
+                .unwrap();
+            let data = request_ok("wiki_export", json!({"slug": hd.slug}));
+            assert!(data["filename"].as_str().unwrap().ends_with(".zip"));
+            assert_eq!(data["mime"], "application/zip");
+            let bytes = decode_b64(&data);
+            assert_eq!(&bytes[0..4], b"PK\x03\x04", "zip magic");
         });
     }
 
