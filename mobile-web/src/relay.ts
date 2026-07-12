@@ -38,6 +38,14 @@ function relayWsUrl(): string {
 }
 
 const REQUEST_TIMEOUT_MS = 15_000;
+/** Control messages (snapshots, tails, marks) are small and 15s is plenty.
+ *  Asset/upload requests move MB-scale base64 across a possibly-slow mobile
+ *  link, so the default would spuriously abort on weak connections — the
+ *  pending entry is dropped, the late reply discarded, and the card's <img>
+ *  strands forever with no error (see decisionAsset.test.ts / the e2e repro).
+ *  These give the payload a realistic window instead. */
+export const ASSET_REQUEST_TIMEOUT_MS = 60_000;
+export const UPLOAD_REQUEST_TIMEOUT_MS = 120_000;
 /** How often the phone re-announces itself. The desktop drops a device ~40s
  *  after its last hello, so this must stay comfortably under that. */
 const HELLO_INTERVAL_MS = 15_000;
