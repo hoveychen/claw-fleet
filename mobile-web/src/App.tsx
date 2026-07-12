@@ -10,6 +10,7 @@ import type {
   SessionInfo,
 } from "./types";
 import { DecisionsView } from "./views/DecisionsView";
+import { SessionDetailView } from "./views/SessionDetailView";
 import { TasksView } from "./views/TasksView";
 
 const SECRET_KEY = "fleet-relay-secret";
@@ -36,6 +37,7 @@ export function App() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   const [push, setPush] = useState<PushState>(pushState);
+  const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
   const clientRef = useRef<RelayClient | null>(null);
 
   const addDecision = useCallback((kind: DecisionKind, request: unknown) => {
@@ -118,6 +120,13 @@ export function App() {
     return (sessionId: string) => map.get(sessionId);
   }, [sessions]);
 
+  // The detail page re-derives its session from the live snapshot so status /
+  // plan chips stay fresh while it is open.
+  const detailSession = useMemo(
+    () => (detailSessionId ? sessions.find((s) => s.id === detailSessionId) ?? null : null),
+    [sessions, detailSessionId],
+  );
+
   if (!secret) {
     return (
       <div className={styles.gate}>
@@ -187,9 +196,17 @@ export function App() {
             onAnswered={(id) => setDecisions((prev) => prev.filter((d) => d.id !== id))}
           />
         ) : (
-          <TasksView sessions={sessions} client={clientRef.current} />
+          <TasksView sessions={sessions} onOpenSession={(s) => setDetailSessionId(s.id)} />
         )}
       </main>
+
+      {detailSession && (
+        <SessionDetailView
+          session={detailSession}
+          client={clientRef.current}
+          onBack={() => setDetailSessionId(null)}
+        />
+      )}
 
       <nav className={styles.tabs}>
         <button
