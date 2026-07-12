@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import type { RelayClient } from "../relay";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isSessionUnread } from "../types";
+import { NewSessionSheet } from "./Composer";
 import styles from "./TasksView.module.css";
 
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
@@ -61,6 +62,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
   const [activeOnly, setActiveOnly] = useState(false);
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
   const [busyOp, setBusyOp] = useState<string | null>(null);
+  const [showNewSession, setShowNewSession] = useState(false);
   // Optimistic mark overrides, dropped once the server snapshot catches up.
   const [markOverride, setMarkOverride] = useState<Record<string, SessionMark | null>>({});
 
@@ -195,6 +197,9 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
           >
             仅活跃
           </button>
+          <button className={styles.newSession} onClick={() => setShowNewSession(true)}>
+            ＋ 新会话
+          </button>
           {unreadCount > 0 && (
             <button className={styles.readAll} onClick={() => onMarkRead(visible.filter(isSessionUnread))}>
               全部已读 ({unreadCount})
@@ -298,6 +303,14 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
           );
         })}
       </div>
+
+      {showNewSession && (
+        <NewSessionSheet
+          sessions={sessions}
+          client={client}
+          onClose={() => setShowNewSession(false)}
+        />
+      )}
     </div>
   );
 }

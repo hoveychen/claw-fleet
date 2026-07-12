@@ -193,6 +193,8 @@ export interface SessionInfo {
   userMark?: SessionMark | null;
   /** Unread = lastActivityMs > (lastReadMs ?? 0). */
   lastReadMs?: number | null;
+  /** True when the session's agent process is still alive. */
+  procAlive?: boolean;
 }
 
 /** Sessions Fleet spawned itself ("新会话" / handoff relay) — the only ones
@@ -204,6 +206,26 @@ export function isFleetOwnedEntrypoint(entrypoint: string | null | undefined): b
 
 export function isSessionUnread(s: SessionInfo): boolean {
   return s.lastActivityMs > (s.lastReadMs ?? 0);
+}
+
+const IN_FLIGHT: SessionStatus[] = [
+  "thinking",
+  "executing",
+  "streaming",
+  "processing",
+  "active",
+  "delegating",
+];
+
+/** Resumable = a Fleet-owned headless session whose process has ended and
+ *  whose turn is not in flight (mirrors the desktop's canResumeSession). */
+export function canResumeSession(s: SessionInfo): boolean {
+  return (
+    !s.isSubagent &&
+    isFleetOwnedEntrypoint(s.entrypoint) &&
+    !s.procAlive &&
+    !IN_FLIGHT.includes(s.status)
+  );
 }
 
 export interface TaskItem {

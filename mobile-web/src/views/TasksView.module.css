@@ -58,6 +58,16 @@
   background: var(--color-accent-soft);
 }
 
+.newSession {
+  border: 1px solid var(--color-accent);
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  flex-shrink: 0;
+}
+
 .readAll {
   border: none;
   background: none;
