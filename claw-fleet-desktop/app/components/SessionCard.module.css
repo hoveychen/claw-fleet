@@ -456,13 +456,23 @@
 .compact_chip { color: var(--color-text-dim); }
 .time { color: var(--color-text-dim); }
 
-/* Reveal-on-hover wrapper for StopControl. The control owns its own CSS module,
-   so `.card:hover .btn` could never reach it — the class name is hashed per
-   module. The slot is ours, so we style that instead. */
+/* Wrapper for StopControl. The control owns its own CSS module, so
+   `.card:hover .btn` could never reach it — the class name is hashed per
+   module. The slot is ours, so we style that instead.
+
+   The slot is only rendered for active sessions (SessionCard gates it on
+   `isActive`), so it stays persistently visible-but-dim rather than fully
+   hidden-until-hover. Two reasons: (1) interrupting a running agent is a
+   primary action — you shouldn't have to hunt for it behind a hover; (2) a
+   pure `.card:hover` reveal gets stuck in wry/WebKit, because active cards
+   reflow every second (live tok/s, cost, ctx%) and the engine never recomputes
+   `:hover` without a fresh pointer event — so the icon lingered after the
+   cursor left. A control with no 0→1 appear/disappear transition can't get
+   stuck. Hover/selection/focus just brightens it to full. */
 .stop_slot {
   display: inline-flex;
   flex-shrink: 0;
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity 0.15s;
 }
 
