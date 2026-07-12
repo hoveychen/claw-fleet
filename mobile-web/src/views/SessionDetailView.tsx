@@ -93,10 +93,25 @@ interface Props {
   session: SessionInfo;
   client: RelayClient | null;
   onBack: () => void;
+  /** Fired after a 2s dwell — marks the session read (same as the desktop). */
+  onDwellRead?: () => void;
 }
 
-export function SessionDetailView({ session, client, onBack }: Props) {
+export function SessionDetailView({ session, client, onBack, onDwellRead }: Props) {
   const [tab, setTab] = useState<DetailTab>("messages");
+  const dwellFired = useRef(false);
+
+  useEffect(() => {
+    dwellFired.current = false;
+    const timer = window.setTimeout(() => {
+      if (!dwellFired.current) {
+        dwellFired.current = true;
+        onDwellRead?.();
+      }
+    }, 2000);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id]);
   const [messages, setMessages] = useState<RawMessage[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tailN, setTailN] = useState(TAIL_INITIAL);

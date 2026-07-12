@@ -166,6 +166,8 @@ export interface TaskPlanSummary {
   currentTask?: string | null;
 }
 
+export type SessionMark = "pending" | "done";
+
 export interface SessionInfo {
   id: string;
   workspacePath: string;
@@ -184,6 +186,24 @@ export interface SessionInfo {
   totalCostUsd?: number;
   todos?: TodoSummary | null;
   taskPlan?: TaskPlanSummary | null;
+  pid?: number | null;
+  /** False when several agent processes share the cwd and the pid is a guess. */
+  pidPrecise?: boolean;
+  entrypoint?: string | null;
+  userMark?: SessionMark | null;
+  /** Unread = lastActivityMs > (lastReadMs ?? 0). */
+  lastReadMs?: number | null;
+}
+
+/** Sessions Fleet spawned itself ("新会话" / handoff relay) — the only ones
+ *  where SIGINT means "abort the tool call" instead of "quit". Mirrors
+ *  claw-fleet-desktop/app/types.ts. */
+export function isFleetOwnedEntrypoint(entrypoint: string | null | undefined): boolean {
+  return entrypoint === "claw-fleet-newsession" || entrypoint === "claw-fleet-handoff";
+}
+
+export function isSessionUnread(s: SessionInfo): boolean {
+  return s.lastActivityMs > (s.lastReadMs ?? 0);
 }
 
 export interface TaskItem {
