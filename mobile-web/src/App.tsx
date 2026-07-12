@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BookOpen, Inbox, ListChecks, MoreHorizontal, Plus } from "lucide-react";
 import styles from "./App.module.css";
 import { enablePush, pushState, resyncPush, type PushState } from "./push";
 import { deviceLabel } from "./deviceLabel";
@@ -387,7 +388,9 @@ export function App() {
           data-active={tab === "decisions"}
           onClick={() => setTab("decisions")}
         >
-          <span className={styles.tabIcon}>◈</span>
+          <span className={styles.tabIcon}>
+            <Inbox size={20} />
+          </span>
           {t("决策")}
           {decisions.length > 0 && <span className={styles.badge}>{decisions.length}</span>}
         </button>
@@ -396,7 +399,9 @@ export function App() {
           data-active={tab === "tasks"}
           onClick={() => setTab("tasks")}
         >
-          <span className={styles.tabIcon}>≣</span>
+          <span className={styles.tabIcon}>
+            <ListChecks size={20} />
+          </span>
           {t("任务")}
         </button>
         <button
@@ -404,7 +409,9 @@ export function App() {
           aria-label={t("新会话")}
           onClick={() => setShowNewSession(true)}
         >
-          <span className={styles.centerFab}>＋</span>
+          <span className={styles.centerFab}>
+            <Plus size={24} />
+          </span>
           <span className={styles.centerLabel}>{t("新会话")}</span>
         </button>
         <button
@@ -412,7 +419,9 @@ export function App() {
           data-active={tab === "wiki"}
           onClick={() => setTab("wiki")}
         >
-          <span className={styles.tabIcon}>❏</span>
+          <span className={styles.tabIcon}>
+            <BookOpen size={20} />
+          </span>
           {t("知识库")}
         </button>
         <button
@@ -420,7 +429,9 @@ export function App() {
           data-active={tab === "more"}
           onClick={() => setTab("more")}
         >
-          <span className={styles.tabIcon}>⋯</span>
+          <span className={styles.tabIcon}>
+            <MoreHorizontal size={20} />
+          </span>
           {t("更多")}
         </button>
       </nav>

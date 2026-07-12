@@ -3,6 +3,7 @@
 // first open via its relay method and renders a compact mobile layout.
 
 import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { dateLocale, t } from "../i18n";
@@ -233,7 +234,7 @@ export function TaskPlansTab({
             );
             return (
               <div key={j} className={styles.planItem} data-done={item.done} data-current={isCurrent}>
-                <span className={styles.checkbox}>{item.done ? "✓" : ""}</span>
+                <span className={styles.checkbox}>{item.done ? <Check size={11} /> : ""}</span>
                 <span>{item.text}</span>
               </div>
             );
