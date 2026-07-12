@@ -3,7 +3,8 @@
 // first open via its relay method and renders a compact mobile layout.
 
 import { useEffect, useState } from "react";
-import { Check } from "lucide-react";
+import { Check, CheckCircle2, ListTodo, Waypoints, Workflow } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { dateLocale, t } from "../i18n";
@@ -105,7 +106,8 @@ export function DecisionHistoryTab({
 
   if (data === "loading") return <Hint>{t("加载决策历史…")}</Hint>;
   if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
-  if (data.length === 0) return <Hint>{t("该会话没有决策记录")}</Hint>;
+  if (data.length === 0)
+    return <EmptyState compact icon={CheckCircle2} title={t("该会话没有决策记录")} />;
 
   const toggle = (id: string) =>
     setOpen((prev) => {
@@ -220,7 +222,8 @@ export function TaskPlansTab({
 
   if (data === "loading") return <Hint>{t("加载计划中…")}</Hint>;
   if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
-  if (data.length === 0) return <Hint>{t("该会话没有 TASKS.md 计划")}</Hint>;
+  if (data.length === 0)
+    return <EmptyState compact icon={ListTodo} title={t("该会话没有 TASKS.md 计划")} />;
 
   const current = session.taskPlan?.currentTask;
   return (
@@ -322,7 +325,8 @@ export function WorkflowTab({
 
   if (data === "loading") return <Hint>{t("加载 workflow…")}</Hint>;
   if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
-  if (data.length === 0) return <Hint>{t("该会话没有 workflow 运行")}</Hint>;
+  if (data.length === 0)
+    return <EmptyState compact icon={Workflow} title={t("该会话没有 workflow 运行")} />;
 
   return (
     <div className={styles.stack}>
@@ -359,7 +363,7 @@ export function HandoffTab({
 
   if (data === "loading") return <Hint>{t("加载接力链…")}</Hint>;
   if (data === "error") return <Hint>{t("加载失败（桌面端可能离线）")}</Hint>;
-  if (!data) return <Hint>{t("该会话不在任何接力链上")}</Hint>;
+  if (!data) return <EmptyState compact icon={Waypoints} title={t("该会话不在任何接力链上")} />;
 
   const hops: string[] = [];
   for (const l of data.links) {

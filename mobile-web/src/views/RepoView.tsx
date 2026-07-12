@@ -4,6 +4,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, FolderGit2 } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { RepoSummary } from "../types";
@@ -55,9 +56,11 @@ export function RepoView({ client, onBack, onOpenRepo }: Props) {
         {error && <div className={styles.hint}>{t("仓库加载失败：{0}", error)}</div>}
         {!error && repos === null && <div className={styles.hint}>{t("加载中…")}</div>}
         {!error && repos !== null && total === 0 && (
-          <div className={styles.hint}>
-            {t("没有发现 git 仓库。仓库来自桌面端各会话的工作目录。")}
-          </div>
+          <EmptyState
+            icon={FolderGit2}
+            title={t("没有发现 git 仓库")}
+            description={t("仓库来自桌面端各会话的工作目录，有会话在 git 仓库里工作时会出现在这里。")}
+          />
         )}
 
         {!error &&

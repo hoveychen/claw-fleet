@@ -1,0 +1,81 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+  padding: 56px 24px;
+  animation: emptyFadeIn 0.28s ease both;
+}
+
+.root[data-compact] {
+  padding: 32px 20px;
+  gap: 9px;
+}
+
+/* Soft circular chip behind the icon — the GitHub blankslate "glyph" cue,
+ * tinted to the Fleet palette rather than a flat gray. */
+.iconChip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  color: var(--color-text-secondary);
+  background: radial-gradient(
+    circle at 50% 38%,
+    var(--color-bg-card-hover),
+    var(--color-bg-card)
+  );
+  border: 1px solid var(--color-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.03),
+    0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+.root[data-compact] .iconChip {
+  width: 44px;
+  height: 44px;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.35;
+}
+
+.root[data-compact] .title {
+  font-size: 14px;
+}
+
+.description {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.55;
+  max-width: 280px;
+  /* honour \n in copy that spells out a two-part hint */
+  white-space: pre-line;
+}
+
+.action {
+  margin-top: 4px;
+}
+
+@keyframes emptyFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root {
+    animation: none;
+  }
+}
