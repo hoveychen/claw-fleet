@@ -35,6 +35,14 @@ pub struct SpawnSessionRequest {
     /// `acceptEdits`.
     #[serde(default)]
     pub permission_mode: Option<String>,
+    /// Optional caller-pre-assigned session id (a UUID). When present and valid
+    /// it is threaded straight into `--session-id`, so a caller that lost the
+    /// reply frame (e.g. the mobile relay over a flaky WS) can still recognise
+    /// the spawned session by this exact id in a later `sessions` snapshot —
+    /// the JSONL stem the scanner discovers equals this id. `None`/empty mints a
+    /// fresh id server-side (the pre-idempotent behaviour).
+    #[serde(default)]
+    pub session_id: Option<String>,
 }
 
 /// `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions launched by the "新会话"
@@ -384,6 +392,46 @@ pub fn spawn_new_session(
     )
 }
 
+/// Resolve the `--session-id` for a new spawn: reuse a caller-provided UUID, or
+/// mint a fresh one. A provided id is validated as a real UUID so a malformed or
+/// injected value can never reach the process argv; empty/whitespace is treated
+/// as absent. This is the seam that makes [`spawn_new_session_with_id`]
+/// idempotent from the caller's point of view — the caller picks the id up front
+/// and can correlate the running session by it even if the spawn reply is lost.
+pub fn resolve_new_session_id(provided: Option<&str>) -> Result<String, String> {
+    match provided.map(str::trim) {
+        Some(s) if !s.is_empty() => {
+            uuid::Uuid::parse_str(s).map_err(|_| format!("invalid session_id: {s}"))?;
+            Ok(s.to_string())
+        }
+        _ => Ok(uuid::Uuid::new_v4().to_string()),
+    }
+}
+
+/// [`spawn_new_session`] but with a caller-pre-assigned `session_id` (a UUID).
+/// Used by the mobile relay's `spawn_session` for end-to-end idempotent
+/// confirmation: the phone generates the id, so even when the WS reply frame is
+/// dropped it can still confirm success by finding this exact id in a later
+/// `sessions` snapshot. `session_id == None`/empty mints one server-side.
+pub fn spawn_new_session_with_id(
+    workspace_path: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<SpawnSessionResponse, String> {
+    spawn_new_session_impl(
+        workspace_path,
+        prompt,
+        model,
+        effort,
+        permission_mode,
+        session_id,
+        NEW_SESSION_ENTRYPOINT,
+    )
+}
+
 /// [`spawn_new_session`] with an explicit `CLAUDE_CODE_ENTRYPOINT` stamp, so
 /// programmatic launchers (e.g. the handoff relay) stay distinguishable from
 /// the "新会话" button in transcripts and the history panel.
@@ -395,6 +443,26 @@ pub fn spawn_new_session_with_entrypoint(
     permission_mode: Option<&str>,
     entrypoint: &str,
 ) -> Result<SpawnSessionResponse, String> {
+    spawn_new_session_impl(
+        workspace_path,
+        prompt,
+        model,
+        effort,
+        permission_mode,
+        None,
+        entrypoint,
+    )
+}
+
+fn spawn_new_session_impl(
+    workspace_path: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
+    session_id: Option<&str>,
+    entrypoint: &str,
+) -> Result<SpawnSessionResponse, String> {
     let prompt = prompt.trim();
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
@@ -403,6 +471,9 @@ pub fn spawn_new_session_with_entrypoint(
     // the frontend gets a stable error regardless of the host environment.
     let mut override_args = Vec::new();
     push_session_override_args(&mut override_args, model, effort, permission_mode)?;
+    // Resolve the session id before any CLI/filesystem work so a malformed
+    // caller-provided id fails fast and identically on every host.
+    let session_id = resolve_new_session_id(session_id)?;
     let (found, claude_path) = crate::check_cli_installed();
     if !found {
         return Err("Claude CLI not found on PATH".to_string());
@@ -411,7 +482,6 @@ pub fn spawn_new_session_with_entrypoint(
     let stderr_log = crate::session::get_fleet_dir()
         .map(|d| d.join("new_session_stderr.log"))
         .ok_or_else(|| "no fleet dir".to_string())?;
-    let session_id = uuid::Uuid::new_v4().to_string();
     let mut args = vec![
         "-p".to_string(),
         prompt.to_string(),
@@ -487,6 +557,36 @@ mod tests {
             err.contains("invalid permission mode 'yolo'"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn resolve_new_session_id_reuses_valid_uuid() {
+        // The caller-provided id (mobile idempotent confirm) must be threaded
+        // through verbatim so the phone can match it in a later snapshot.
+        let id = "3f8c1e2a-4b5d-6e7f-8a9b-0c1d2e3f4a5b";
+        assert_eq!(super::resolve_new_session_id(Some(id)).unwrap(), id);
+        // Surrounding whitespace is trimmed, not rejected.
+        let padded = format!("  {id}  ");
+        assert_eq!(super::resolve_new_session_id(Some(&padded)).unwrap(), id);
+    }
+
+    #[test]
+    fn resolve_new_session_id_mints_when_absent() {
+        // None or empty/whitespace → a fresh, valid UUID (pre-idempotent path).
+        for provided in [None, Some(""), Some("   ")] {
+            let id = super::resolve_new_session_id(provided).unwrap();
+            assert!(
+                uuid::Uuid::parse_str(&id).is_ok(),
+                "minted id is not a uuid: {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_new_session_id_rejects_malformed() {
+        // A non-uuid must never reach the process argv (`--session-id <x>`).
+        let err = super::resolve_new_session_id(Some("not-a-uuid; rm -rf /")).unwrap_err();
+        assert!(err.contains("invalid session_id"), "unexpected error: {err}");
     }
 
     #[cfg(unix)]

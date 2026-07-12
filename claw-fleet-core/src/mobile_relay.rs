@@ -843,12 +843,17 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             let req: crate::session_launch::SpawnSessionRequest =
                 serde_json::from_value(params.clone())
                     .map_err(|e| format!("bad spawn_session params: {e}"))?;
-            let resp = crate::session_launch::spawn_new_session(
+            // Thread the phone-provided session id through so a dropped reply
+            // frame is still recoverable: the phone confirms success by finding
+            // this exact id in a later `sessions` snapshot (relay delivery is
+            // best-effort — see registry::forward).
+            let resp = crate::session_launch::spawn_new_session_with_id(
                 &req.workspace_path,
                 &req.prompt,
                 req.model.as_deref(),
                 req.effort.as_deref(),
                 req.permission_mode.as_deref(),
+                req.session_id.as_deref(),
             )?;
             serde_json::to_value(resp).map_err(|e| e.to_string())
         }
