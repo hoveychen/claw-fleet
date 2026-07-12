@@ -7,23 +7,7 @@ import type { RateLimitState, SessionInfo, SessionStatus } from "../types";
 import { HandoffChainRow } from "./HandoffChainRow";
 import { StopControl, canControl } from "./StopControl";
 import styles from "./SessionCard.module.css";
-
-// ── Background-task kind → icon / label / colour ───────────────────────────────
-// The Stop hook reports each outstanding background task's `type` (see
-// `bg_guard::BackgroundTask`). We surface a distinct icon and i18n label per kind
-// so a session waiting on a monitor reads differently from one waiting on a
-// shell. `dataType` drives the label colour via a `[data-bgtype]` CSS rule.
-const BG_TASK_KINDS: Record<
-  string,
-  { icon: string; labelKey: string; dataType: string }
-> = {
-  monitor: { icon: "👁️", labelKey: "card.bg_monitor", dataType: "monitor" },
-  shell: { icon: "⏳", labelKey: "card.bg_shell", dataType: "shell" },
-  subagent: { icon: "🤖", labelKey: "card.bg_subagent", dataType: "subagent" },
-  workflow: { icon: "⚙", labelKey: "card.bg_workflow", dataType: "workflow" },
-  // Mixed kinds (or an unknown type) — stay generic rather than mislabel.
-  mixed: { icon: "⏳", labelKey: "card.bg_tasks", dataType: "mixed" },
-};
+import { BG_TASK_KINDS } from "../bgTaskKinds";
 
 // ── Rate-limit countdown ──────────────────────────────────────────────────────
 
