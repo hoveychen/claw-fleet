@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronRight, Eye, Paperclip, Pencil, X } from "lucide-react";
+import {
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  CloudOff,
+  Eye,
+  Paperclip,
+  Pencil,
+  X,
+} from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { fetchDecisionAsset } from "../decisionAsset";
@@ -70,10 +81,18 @@ export function DecisionsView({
   const active = sorted[activeIndex];
 
   if (decisions.length === 0) {
-    return (
-      <div className={styles.empty}>
-        {agentOnline ? t("没有待处理的决策 🎉") : t("桌面端离线，暂时收不到新决策")}
-      </div>
+    return agentOnline ? (
+      <EmptyState
+        icon={CheckCircle2}
+        title={t("没有待处理的决策")}
+        description={t("所有决策卡都已作答，收工。有新决策时会自动出现在这里。")}
+      />
+    ) : (
+      <EmptyState
+        icon={CloudOff}
+        title={t("桌面端离线")}
+        description={t("暂时收不到新决策，等桌面端重新上线就会同步过来。")}
+      />
     );
   }
 

@@ -1,5 +1,17 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
-import { CheckCircle2, Circle, Clock, Folder, Plus, Search, Share2, Square } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  Clock,
+  Folder,
+  Inbox,
+  Plus,
+  Search,
+  SearchX,
+  Share2,
+  Square,
+} from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
@@ -213,7 +225,13 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
   );
 
   if (all.length === 0) {
-    return <div className={styles.empty}>{t("暂无会话（等待桌面端推送快照…）")}</div>;
+    return (
+      <EmptyState
+        icon={Inbox}
+        title={t("还没有会话")}
+        description={t("等待桌面端推送快照。桌面端各会话上线后会出现在这里。")}
+      />
+    );
   }
 
   const segLabels: Record<MarkFilter, string> = {
@@ -292,7 +310,9 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
         </div>
       </div>
 
-      {visible.length === 0 && <div className={styles.empty}>{t("没有匹配的会话")}</div>}
+      {visible.length === 0 && (
+        <EmptyState compact icon={SearchX} title={t("没有匹配的会话")} />
+      )}
 
       <div className={styles.list}>
         {visible.map((s) => {

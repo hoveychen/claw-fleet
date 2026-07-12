@@ -3,7 +3,8 @@
 // 顶部可按 workspace 筛选。点开进 WikiDocView 全屏阅读。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight, Search } from "lucide-react";
+import { BookOpen, ChevronRight, FileQuestion, Search, SearchX } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { WikiDoc } from "../types";
@@ -160,9 +161,11 @@ export function WikiView({ client, onOpenDoc }: Props) {
       {error && <div className={styles.hint}>{t("知识库加载失败：{0}", error)}</div>}
       {!error && docs === null && <div className={styles.hint}>{t("加载中…")}</div>}
       {!error && docs !== null && total === 0 && (
-        <div className={styles.hint}>
-          {t("还没有归档的文档。桌面端 agent 用 fleet wiki publish 发布后会出现在这里。")}
-        </div>
+        <EmptyState
+          icon={BookOpen}
+          title={t("还没有归档的文档")}
+          description={t("桌面端 agent 用 fleet wiki publish 发布后，文档会出现在这里。")}
+        />
       )}
 
       {/* 搜索态 */}
@@ -170,7 +173,7 @@ export function WikiView({ client, onOpenDoc }: Props) {
         <>
           {searching && <div className={styles.hint}>{t("搜索中…")}</div>}
           {!searching && results.length === 0 && (
-            <div className={styles.hint}>{t("没有匹配「{0}」的文档。", query)}</div>
+            <EmptyState compact icon={SearchX} title={t("没有匹配「{0}」的文档。", query)} />
           )}
           {results.length > 0 && (
             <div className={styles.group}>
@@ -186,7 +189,7 @@ export function WikiView({ client, onOpenDoc }: Props) {
         docs !== null &&
         total > 0 &&
         (groups.length === 0 ? (
-          <div className={styles.hint}>{t("该项目下没有文档。")}</div>
+          <EmptyState compact icon={FileQuestion} title={t("该项目下没有文档。")} />
         ) : (
           groups.map(([folder, items]) => (
             <div key={folder || "__root__"} className={styles.group}>
