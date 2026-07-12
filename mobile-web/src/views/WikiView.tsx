@@ -3,6 +3,7 @@
 // 顶部可按 workspace 筛选。点开进 WikiDocView 全屏阅读。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ChevronRight } from "lucide-react";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { WikiDoc } from "../types";
@@ -111,7 +112,9 @@ export function WikiView({ client, onOpenDoc }: Props) {
           </span>
         )}
       </span>
-      <span className={styles.docChevron}>›</span>
+      <span className={styles.docChevron}>
+        <ChevronRight size={18} />
+      </span>
     </button>
   );
 
