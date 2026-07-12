@@ -1,0 +1,19 @@
+.copyBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  padding: 2px;
+  border-radius: 6px;
+  line-height: 1;
+}
+
+.copyBtn:active {
+  background: var(--color-bg-secondary);
+}
+
+.failed {
+  color: var(--color-error);
+}
