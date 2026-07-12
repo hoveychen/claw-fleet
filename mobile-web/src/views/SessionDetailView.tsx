@@ -14,6 +14,13 @@ import type {
   SessionInfo,
   SessionStatus,
 } from "../types";
+import {
+  DecisionHistoryTab,
+  HandoffTab,
+  TaskPlansTab,
+  TokenTab,
+  WorkflowTab,
+} from "./SessionDetailTabs";
 import styles from "./SessionDetailView.module.css";
 
 const TAIL_POLL_MS = 2500;
@@ -71,6 +78,17 @@ function userText(msg: RawMessage): string {
   return parts.join("\n\n").trim();
 }
 
+type DetailTab = "messages" | "decisions" | "plans" | "token" | "workflow" | "handoff";
+
+const TABS: Array<[DetailTab, string]> = [
+  ["messages", "消息"],
+  ["decisions", "决策"],
+  ["plans", "计划"],
+  ["token", "Token"],
+  ["workflow", "Workflow"],
+  ["handoff", "接力"],
+];
+
 interface Props {
   session: SessionInfo;
   client: RelayClient | null;
@@ -78,6 +96,7 @@ interface Props {
 }
 
 export function SessionDetailView({ session, client, onBack }: Props) {
+  const [tab, setTab] = useState<DetailTab>("messages");
   const [messages, setMessages] = useState<RawMessage[] | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [tailN, setTailN] = useState(TAIL_INITIAL);
@@ -87,9 +106,9 @@ export function SessionDetailView({ session, client, onBack }: Props) {
   const stickToBottom = useRef(true);
   const working = WORKING.includes(session.status);
 
-  // ── Message tail polling ──────────────────────────────────────────────
+  // ── Message tail polling (only while the 消息 tab is showing) ─────────
   useEffect(() => {
-    if (!client) return;
+    if (!client || tab !== "messages") return;
     let cancelled = false;
     let timer = 0;
     const poll = async () => {
@@ -115,11 +134,11 @@ export function SessionDetailView({ session, client, onBack }: Props) {
       window.clearTimeout(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [client, session.jsonlPath, tailN]);
+  }, [client, session.jsonlPath, tailN, tab]);
 
   // ── Live thinking polling (only while the turn looks in progress) ─────
   useEffect(() => {
-    if (!client || !working) {
+    if (!client || !working || tab !== "messages") {
       setLiveThinking(null);
       return;
     }
@@ -141,7 +160,7 @@ export function SessionDetailView({ session, client, onBack }: Props) {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [client, session.id, working]);
+  }, [client, session.id, working, tab]);
 
   // ── Auto-scroll: stick to bottom unless the user scrolled up ──────────
   const onScroll = useCallback(() => {
@@ -180,6 +199,46 @@ export function SessionDetailView({ session, client, onBack }: Props) {
         <span className={styles.statusDot} data-working={working} />
       </header>
 
+      <nav className={styles.tabBar}>
+        {TABS.map(([key, label]) => (
+          <button
+            key={key}
+            className={styles.tabButton}
+            data-active={tab === key}
+            onClick={() => setTab(key)}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "decisions" && (
+        <div className={styles.tabScroll}>
+          <DecisionHistoryTab session={session} client={client} />
+        </div>
+      )}
+      {tab === "plans" && (
+        <div className={styles.tabScroll}>
+          <TaskPlansTab session={session} client={client} />
+        </div>
+      )}
+      {tab === "token" && (
+        <div className={styles.tabScroll}>
+          <TokenTab session={session} client={client} />
+        </div>
+      )}
+      {tab === "workflow" && (
+        <div className={styles.tabScroll}>
+          <WorkflowTab session={session} client={client} />
+        </div>
+      )}
+      {tab === "handoff" && (
+        <div className={styles.tabScroll}>
+          <HandoffTab session={session} client={client} />
+        </div>
+      )}
+
+      {tab === "messages" && (
       <div className={styles.scroll} ref={scrollRef} onScroll={onScroll}>
         {messages === null && !loadError && <div className={styles.hint}>加载消息中…</div>}
         {loadError && <div className={styles.hint}>消息加载失败：{loadError}</div>}
@@ -264,6 +323,7 @@ export function SessionDetailView({ session, client, onBack }: Props) {
           <div className={styles.hint}>暂无可显示的消息</div>
         )}
       </div>
+      )}
     </div>
   );
 }
