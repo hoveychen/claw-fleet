@@ -37,12 +37,17 @@ RUN sed -i 's/^members = .*/members = ["fleet-relay"]/' Cargo.toml \
 
 # ── runtime ──────────────────────────────────────────────────────────────────
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 && rm -rf /var/lib/apt/lists/* \
+# gosu drops privilege from root to `relay` in the entrypoint after fixing the
+# data-volume ownership (see docker-entrypoint.sh).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates libssl3 gosu && rm -rf /var/lib/apt/lists/* \
     && useradd -u 10001 -m relay
 COPY --from=build /src/target/release/fleet-relay /usr/local/bin/fleet-relay
 COPY --from=web /src/mobile-web/dist /srv/static
+COPY fleet-relay/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 ENV RELAY_STATIC_DIR=/srv/static RELAY_DATA_DIR=/data RELAY_PORT=8080
 RUN mkdir -p /data && chown relay /data
-USER relay
+# NOTE: no `USER relay` here — the container starts as root so the entrypoint can
+# chown a root-owned mounted volume, then drops to `relay` via gosu itself.
 EXPOSE 8080
-ENTRYPOINT ["fleet-relay"]
+ENTRYPOINT ["docker-entrypoint.sh"]
