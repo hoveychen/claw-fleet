@@ -1,0 +1,278 @@
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+
+.hint {
+  text-align: center;
+  color: var(--color-text-dim);
+  padding: 32px 16px;
+  font-size: 13px;
+}
+
+.dimNote {
+  color: var(--color-text-dim);
+  font-size: 11.5px;
+}
+
+.preWrap {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* ── 决策历史 ── */
+
+.record {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.recordHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.kindChip {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+
+.outcomeChip {
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-secondary);
+  flex-shrink: 0;
+}
+
+.outcomeChip[data-tone="good"] {
+  color: var(--color-success);
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.outcomeChip[data-tone="bad"] {
+  color: var(--color-error);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.recordTime {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+.recordSummary {
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.recordSummary[data-expanded="false"] {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.recordBody {
+  margin-top: 8px;
+  border-top: 1px solid var(--color-border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qaBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.qaQuestion {
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.qaOption {
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  color: var(--color-text-dim);
+}
+
+.qaOption[data-picked="true"] {
+  border-color: var(--color-accent);
+  color: var(--color-text);
+  background: var(--color-accent-soft);
+}
+
+/* ── 计划 / 通用卡片 ── */
+
+.planCard {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.planTitle {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.planItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--color-text-secondary);
+}
+
+.planItem[data-done="true"] {
+  color: var(--color-text-dim);
+  text-decoration: line-through;
+}
+
+.planItem[data-current="true"] {
+  color: var(--color-accent);
+}
+
+.checkbox {
+  width: 15px;
+  height: 15px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 4px;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--color-success);
+  margin-top: 1px;
+}
+
+/* ── Token ── */
+
+.statGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.statTile {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 12px;
+  text-align: center;
+}
+
+.statValue {
+  font-size: 18px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.statLabel {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  margin-top: 2px;
+}
+
+.costLine {
+  text-align: center;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+
+/* ── Workflow ── */
+
+.wfAgent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.wfStatus {
+  font-size: 10px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+.wfStatus[data-status="done"] {
+  color: var(--color-success);
+  border-color: rgba(74, 222, 128, 0.35);
+}
+
+.wfStatus[data-status="running"] {
+  color: var(--color-accent);
+  border-color: rgba(217, 119, 87, 0.4);
+}
+
+.wfStatus[data-status="error"] {
+  color: var(--color-error);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.wfLabel {
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Handoff ── */
+
+.hopHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hopBadge {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.markdown {
+  font-size: 12.5px;
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.markdown :global(p) {
+  margin: 0 0 6px;
+}
+
+.markdown :global(p:last-child) {
+  margin-bottom: 0;
+}
