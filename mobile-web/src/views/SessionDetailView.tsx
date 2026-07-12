@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type {
   ContentBlock,
@@ -68,14 +69,35 @@ function fmtTime(timestamp?: string): string {
   if (!timestamp) return "";
   const d = new Date(timestamp);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
+}
+
+interface TailDelta {
+  lines: RawMessage[];
+  newOffset: number;
+}
+
+/** Append freshly-tailed lines, dropping any whose uuid we already hold —
+ *  the bootstrap window and the first delta can overlap by a few lines. */
+function appendUnique(prev: RawMessage[], lines: RawMessage[]): RawMessage[] {
+  const recent = new Set(
+    prev
+      .slice(-50)
+      .map((m) => (m as { uuid?: string }).uuid)
+      .filter(Boolean),
+  );
+  const fresh = lines.filter((m) => {
+    const u = (m as { uuid?: string }).uuid;
+    return !u || !recent.has(u);
+  });
+  return fresh.length > 0 ? [...prev, ...fresh] : prev;
 }
 
 function userText(msg: RawMessage): string {
   const parts: string[] = [];
   for (const b of blocksOf(msg)) {
     if (b.type === "text" && b.text) parts.push(b.text);
-    else if (b.type === "image") parts.push("[图片]");
+    else if (b.type === "image") parts.push(t("[图片]"));
   }
   return parts.join("\n\n").trim();
 }
@@ -123,28 +145,72 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
   const stickToBottom = useRef(true);
   const working = WORKING.includes(session.status);
 
-  // ── Message tail polling (only while the 消息 tab is showing) ─────────
+  // ── Message polling (only while the 消息 tab is showing) ──────────────
+  //
+  // Incremental model: bootstrap = locate the file end (`tail_delta` without
+  // offset) + one full `tail` for the initial window; steady state = poll
+  // `tail_delta` from the last offset and append only new lines. A desktop
+  // that predates `tail_delta` fails the bootstrap probe once and we fall
+  // back to the v2 full-tail poll.
+  const offsetRef = useRef<number | null>(null);
+  const legacyRef = useRef(false);
   useEffect(() => {
     if (!client || tab !== "messages") return;
     let cancelled = false;
     let timer = 0;
+
+    const fullTail = async () => {
+      const rows = await client.request<RawMessage[]>("tail", {
+        path: session.jsonlPath,
+        n: tailN,
+      });
+      if (!cancelled) {
+        setMessages(rows);
+        setLoadError(null);
+      }
+    };
+
+    const bootstrap = async () => {
+      try {
+        const loc = await client.request<TailDelta>("tail_delta", { path: session.jsonlPath });
+        offsetRef.current = loc.newOffset;
+      } catch {
+        legacyRef.current = true; // old desktop — keep full polling
+      }
+      await fullTail();
+    };
+
     const poll = async () => {
       try {
-        const rows = await client.request<RawMessage[]>("tail", {
-          path: session.jsonlPath,
-          n: tailN,
-        });
-        if (!cancelled) {
-          setMessages(rows);
-          setLoadError(null);
+        if (legacyRef.current) {
+          await fullTail();
+        } else if (offsetRef.current == null) {
+          await bootstrap();
+        } else {
+          const d = await client.request<TailDelta>("tail_delta", {
+            path: session.jsonlPath,
+            offset: offsetRef.current,
+          });
+          if (!cancelled) {
+            if (d.newOffset < offsetRef.current) {
+              offsetRef.current = null; // rotated/truncated → re-bootstrap
+            } else {
+              offsetRef.current = d.newOffset;
+              if (d.lines.length > 0) {
+                setMessages((prev) => appendUnique(prev ?? [], d.lines));
+              }
+            }
+          }
         }
       } catch (e) {
         if (!cancelled && messages === null) {
-          setLoadError(e instanceof Error ? e.message : "加载失败");
+          setLoadError(e instanceof Error ? e.message : t("加载失败"));
         }
       }
       if (!cancelled) timer = window.setTimeout(poll, TAIL_POLL_MS);
     };
+
+    offsetRef.current = null; // path / window size changed → re-bootstrap
     void poll();
     return () => {
       cancelled = true;
@@ -207,10 +273,10 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
     <div className={styles.page}>
       <header className={styles.header}>
         <button className={styles.backButton} onClick={onBack}>
-          ‹ 返回
+          ‹ {t("返回")}
         </button>
         <div className={styles.headerText}>
-          <div className={styles.headerTitle}>{session.aiTitle || session.slug || "会话"}</div>
+          <div className={styles.headerTitle}>{session.aiTitle || session.slug || t("会话")}</div>
           <div className={styles.headerSub}>{session.workspaceName}</div>
         </div>
         <span className={styles.statusDot} data-working={working} />
@@ -224,7 +290,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
             data-active={tab === key}
             onClick={() => setTab(key)}
           >
-            {label}
+            {t(label)}
           </button>
         ))}
       </nav>
@@ -257,8 +323,8 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
 
       {tab === "messages" && (
       <div className={styles.scroll} ref={scrollRef} onScroll={onScroll}>
-        {messages === null && !loadError && <div className={styles.hint}>加载消息中…</div>}
-        {loadError && <div className={styles.hint}>消息加载失败：{loadError}</div>}
+        {messages === null && !loadError && <div className={styles.hint}>{t("加载消息中…")}</div>}
+        {loadError && <div className={styles.hint}>{t("消息加载失败：{0}", loadError)}</div>}
         {messages !== null && (messages.length >= tailN || tailN > TAIL_INITIAL) && (
           <button
             className={styles.loadMore}
@@ -267,7 +333,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
               setTailN((n) => n + TAIL_STEP);
             }}
           >
-            加载更早的消息
+            {t("加载更早的消息")}
           </button>
         )}
         {mainRows.map((msg, i) => {
@@ -293,7 +359,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
                   return (
                     <div key={j} className={styles.thinkingBlock} data-open={open}>
                       <button className={styles.thinkingToggle} onClick={() => toggleThinking(key)}>
-                        ✳ 思考 {open ? "▾" : "▸"}
+                        ✳ {t("思考")} {open ? "▾" : "▸"}
                       </button>
                       {open && <div className={styles.thinkingBody}>{b.thinking}</div>}
                     </div>
@@ -331,13 +397,13 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
         {liveThinking && (
           <div className={styles.liveThinking}>
             <div className={styles.liveThinkingHead}>
-              <span className={styles.livePulse} />✳ 正在思考…
+              <span className={styles.livePulse} />✳ {t("正在思考…")}
             </div>
             <div className={styles.liveThinkingBody}>{liveThinking.thinking}</div>
           </div>
         )}
         {messages !== null && mainRows.length === 0 && !liveThinking && (
-          <div className={styles.hint}>暂无可显示的消息</div>
+          <div className={styles.hint}>{t("暂无可显示的消息")}</div>
         )}
       </div>
       )}

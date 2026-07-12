@@ -9,27 +9,54 @@ import type {
   PendingSnapshot,
   SessionInfo,
 } from "./types";
+import {
+  clearSecret,
+  loadSecretFromIdb,
+  loadSecretSync,
+  needsA2hsForDurableStorage,
+  persistSecret,
+} from "./secretStore";
+import { useI18n } from "./i18n";
 import { DecisionsView } from "./views/DecisionsView";
 import { SessionDetailView } from "./views/SessionDetailView";
+import { SettingsSheet } from "./views/SettingsSheet";
 import { TasksView } from "./views/TasksView";
 
-const SECRET_KEY = "fleet-relay-secret";
-
-/** Take the secret out of `#k=…`, persist it, and scrub it from the URL. */
-function resolveSecret(): string | null {
-  const match = window.location.hash.match(/[#&]k=([A-Za-z0-9_-]+)/);
-  if (match) {
-    localStorage.setItem(SECRET_KEY, match[1]);
-    history.replaceState(null, "", window.location.pathname);
-    return match[1];
-  }
-  return localStorage.getItem(SECRET_KEY);
-}
+const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
 
 type Tab = "decisions" | "tasks";
 
 export function App() {
-  const [secret] = useState<string | null>(resolveSecret);
+  // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
+  const { t } = useI18n();
+  const [showSettings, setShowSettings] = useState(false);
+  const [secret, setSecret] = useState<string | null>(loadSecretSync);
+  // null = still probing IndexedDB; only after that fails do we show the gate.
+  const [idbProbed, setIdbProbed] = useState(false);
+  const [a2hsDismissed, setA2hsDismissed] = useState(
+    () => localStorage.getItem(A2HS_DISMISSED_KEY) === "1",
+  );
+
+  // localStorage wiped (iOS 7-day eviction, cache clear) but the IDB copy may
+  // have survived — re-hydrate before declaring the pairing lost.
+  useEffect(() => {
+    if (secret) {
+      setIdbProbed(true);
+      return;
+    }
+    let cancelled = false;
+    loadSecretFromIdb().then((s) => {
+      if (cancelled) return;
+      if (s) {
+        persistSecret(s);
+        setSecret(s);
+      }
+      setIdbProbed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret]);
   const [tab, setTab] = useState<Tab>("decisions");
   const [connected, setConnected] = useState(false);
   const [agentOnline, setAgentOnline] = useState(false);
@@ -197,8 +224,12 @@ export function App() {
     return (
       <div className={styles.gate}>
         <div className={styles.gateLogo}>F</div>
-        <h1>Fleet 移动端</h1>
-        <p>请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。</p>
+        <h1>{t("Fleet 移动端")}</h1>
+        <p>
+          {idbProbed
+            ? t("请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。")
+            : t("正在恢复配对…")}
+        </p>
       </div>
     );
   }
@@ -207,16 +238,16 @@ export function App() {
     return (
       <div className={styles.gate}>
         <div className={styles.gateLogo}>F</div>
-        <h1>配对失败</h1>
-        <p>{authError}。密钥可能已被重置，请回到桌面端重新扫码。</p>
+        <h1>{t("配对失败")}</h1>
+        <p>{t("{0}。密钥可能已被重置，请回到桌面端重新扫码。", authError)}</p>
         <button
           className={styles.gateButton}
           onClick={() => {
-            localStorage.removeItem(SECRET_KEY);
+            clearSecret();
             location.reload();
           }}
         >
-          清除本机密钥
+          {t("清除本机密钥")}
         </button>
       </div>
     );
@@ -231,21 +262,47 @@ export function App() {
           data-state={!connected ? "offline" : agentOnline ? "online" : "agent-offline"}
         />
         <span className={styles.connLabel}>
-          {!connected ? "连接中…" : agentOnline ? "桌面端在线" : "桌面端离线"}
+          {!connected ? t("连接中…") : agentOnline ? t("桌面端在线") : t("桌面端离线")}
         </span>
+        <button
+          className={styles.settingsButton}
+          aria-label={t("设置")}
+          onClick={() => setShowSettings(true)}
+        >
+          ⚙
+        </button>
       </header>
+
+      {needsA2hsForDurableStorage() && !a2hsDismissed && (
+        <div className={styles.pushBanner}>
+          <span>
+            {t(
+              "用 Safari 分享菜单「添加到主屏幕」后从主屏幕打开——否则 7 天不访问，iOS 会清掉本机配对，需重新扫码。",
+            )}
+          </span>
+          <button
+            className={styles.pushButton}
+            onClick={() => {
+              localStorage.setItem(A2HS_DISMISSED_KEY, "1");
+              setA2hsDismissed(true);
+            }}
+          >
+            {t("知道了")}
+          </button>
+        </div>
+      )}
 
       {push !== "granted" && push !== "unsupported" && (
         <div className={styles.pushBanner}>
           {push === "ios-needs-a2hs" ? (
-            <span>要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。</span>
+            <span>{t("要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。")}</span>
           ) : push === "denied" ? (
-            <span>通知权限已被拒绝，请在系统设置中为本站点重新开启。</span>
+            <span>{t("通知权限已被拒绝，请在系统设置中为本站点重新开启。")}</span>
           ) : (
             <>
-              <span>开启通知，第一时间收到新决策卡。</span>
+              <span>{t("开启通知，第一时间收到新决策卡。")}</span>
               <button className={styles.pushButton} onClick={handleEnablePush}>
-                开启
+                {t("开启")}
               </button>
             </>
           )}
@@ -288,7 +345,7 @@ export function App() {
           onClick={() => setTab("decisions")}
         >
           <span className={styles.tabIcon}>◈</span>
-          决策
+          {t("决策")}
           {decisions.length > 0 && <span className={styles.badge}>{decisions.length}</span>}
         </button>
         <button
@@ -297,9 +354,11 @@ export function App() {
           onClick={() => setTab("tasks")}
         >
           <span className={styles.tabIcon}>≣</span>
-          任务
+          {t("任务")}
         </button>
       </nav>
+
+      {showSettings && <SettingsSheet onClose={() => setShowSettings(false)} />}
     </div>
   );
 }
