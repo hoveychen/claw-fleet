@@ -278,6 +278,10 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "userMark",
     "lastReadMs",
     "procAlive",
+    // Relay-chain position (hop/chainLen) — the mobile task row shows the same
+    // handoff chip the desktop launchpad row does. Small object; enrich sets it
+    // only for sessions on a chain, so it's absent (skipped) for the rest.
+    "handoff",
 ];
 
 /// Most-recently-active sessions kept in the mobile snapshot.
@@ -702,6 +706,21 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             )
             .ok_or("LLM analysis timed out or failed")?;
             Ok(json!({ "analysis": analysis }))
+        }
+        // Full-text search over the local session index — the mobile task list
+        // wires this to the same FTS the desktop launchpad uses (search_sessions
+        // Tauri command → SearchIndex::search). Returns SearchHit rows
+        // (sessionId / jsonlPath / snippet with <mark> markers / rank); the
+        // client resolves them against its own sessions snapshot by jsonlPath.
+        "session_search" => {
+            let query = params.get("query").and_then(Value::as_str).unwrap_or("");
+            let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
+            if query.trim().len() < 2 {
+                return Ok(Value::Array(Vec::new()));
+            }
+            let index = crate::search_index::SearchIndex::open()?;
+            let hits = index.search(query, limit)?;
+            serde_json::to_value(hits).map_err(|e| e.to_string())
         }
         // ── Write methods ────────────────────────────────────────────────
         // All of these run inside `spawn_blocking` (see ws_connect_once), so
@@ -1417,6 +1436,38 @@ mod tests {
             // Omitting `mark` clears the record.
             request_ok("session_mark", json!({"sessionId": "s1", "workspacePath": "/ws"}));
             assert_eq!(crate::session_mark::read("s1"), None);
+        });
+    }
+
+    #[test]
+    fn request_session_search_finds_indexed_content() {
+        with_temp_home(|| {
+            // Index a transcript into the on-disk FTS db under the temp home
+            // (SearchIndex::open resolves to <temp>/.fleet/fleet-search.db).
+            let path = write_jsonl(
+                "searchable.jsonl",
+                &[
+                    json!({"type": "ai-title", "aiTitle": "peculiar zebra migration"}),
+                    json!({"type": "user", "message": {"content": "hello world"}}),
+                ],
+            );
+            let index = crate::search_index::SearchIndex::open().unwrap();
+            index.index_session(&path, "sess-search").unwrap();
+
+            // A hit is returned as a SearchHit row keyed by jsonlPath.
+            let data = request_ok(
+                "session_search",
+                json!({"query": "peculiar zebra", "limit": 10}),
+            );
+            let hits = data.as_array().expect("hits array");
+            assert_eq!(hits.len(), 1, "distinctive phrase should match one session");
+            assert_eq!(hits[0]["sessionId"], "sess-search");
+            assert_eq!(hits[0]["jsonlPath"], path);
+
+            // Queries shorter than 2 chars short-circuit to an empty list
+            // (the client-side substring filter handles those).
+            let short = request_ok("session_search", json!({"query": "z"}));
+            assert_eq!(short.as_array().expect("array").len(), 0);
         });
     }
 
