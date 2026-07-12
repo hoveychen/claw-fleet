@@ -18,6 +18,7 @@ use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::search_index::SearchHit;
 use crate::session::SessionInfo;
 use crate::skill_history::SkillInvocation;
+use crate::today_usage::TodayUsage;
 use crate::skills::{SkillFileEntry, SkillItem};
 
 // ── Shared types ─────────────────────────────────────────────────────────────
@@ -404,6 +405,10 @@ pub trait Backend: Send + Sync {
     fn source_usage(&self, source: &str) -> SourceDataFuture;
     /// Fetch usage summaries for all detected sources (for tray menu display).
     fn usage_summaries(&self) -> Vec<SourceUsageSummary>;
+    /// Today's cumulative token/cost counter (desktop nav-bar / mobile header).
+    /// Sums live per-session totals for sessions created today plus Fleet's own
+    /// LLM spend today. See [`crate::today_usage`].
+    fn today_usage(&self) -> TodayUsage;
     fn check_setup(&self) -> SetupStatus;
     /// Start tailing a session file for new lines.
     /// Returns the initial byte offset (file size at call time).

@@ -497,6 +497,10 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get("/usage_summaries").unwrap_or_default()
     }
 
+    fn today_usage(&self) -> crate::today_usage::TodayUsage {
+        self.probe.get("/today_usage").unwrap_or_default()
+    }
+
     fn start_watch(&self, path: String) -> Result<u64, String> {
         let file_size = self.probe.get_value(&format!("/file_size?path={}", encode_path(&path)))
             .ok()

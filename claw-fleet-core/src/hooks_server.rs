@@ -739,6 +739,15 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
+            "/today_usage" => {
+                let sessions = scan_all_sources(&sources);
+                let usage = crate::today_usage::today_usage(&sessions);
+                let body = serde_json::to_string(&usage).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
             "/session_decisions" => {
                 let raw_id = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
                 let session_id = percent_decode_str(raw_id).decode_utf8_lossy().to_string();
