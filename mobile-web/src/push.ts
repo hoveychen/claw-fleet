@@ -57,7 +57,9 @@ export async function enablePush(client: RelayClient): Promise<PushState> {
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(publicKey) as BufferSource,
     }));
-  client.pushSubscribe(subscription.toJSON());
+  // Tag the platform so the relay can route Web Push vs HarmonyOS Push Kit
+  // subscriptions on the same channel (relay defaults absent platform to web).
+  client.pushSubscribe({ ...subscription.toJSON(), platform: "web" });
   return "granted";
 }
 
@@ -67,7 +69,7 @@ export async function resyncPush(client: RelayClient): Promise<void> {
   try {
     const registration = await navigator.serviceWorker.ready;
     const subscription = await registration.pushManager.getSubscription();
-    if (subscription) client.pushSubscribe(subscription.toJSON());
+    if (subscription) client.pushSubscribe({ ...subscription.toJSON(), platform: "web" });
   } catch {
     // best-effort
   }

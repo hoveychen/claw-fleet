@@ -25,7 +25,7 @@ async fn spawn_server() -> String {
     .unwrap();
     // keep the tempdir alive for the process lifetime; tests are short-lived
     std::mem::forget(dir);
-    let state = Arc::new(AppState { registry: Registry::default(), push });
+    let state = Arc::new(AppState { registry: Registry::default(), push, harmony: None });
     let app = build_api(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();

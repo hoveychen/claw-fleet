@@ -21,6 +21,7 @@ use web_push::{
 };
 
 use crate::frames::PushPayload;
+use crate::harmony_push::HarmonyPush;
 
 pub struct Push {
     /// Raw 32-byte private scalar, base64url no-pad (what VapidSignatureBuilder eats).
@@ -87,8 +88,29 @@ impl Push {
         }
     }
 
-    /// Register a browser PushSubscription for the channel (dedup by endpoint).
+    /// Register a subscription for the channel. Two client kinds share one
+    /// store: a browser Web Push subscription (`endpoint` + `keys`, deduped by
+    /// endpoint) and a HarmonyOS Push Kit registration
+    /// (`platform:"harmony"` + `token`, deduped by token). A subscription with
+    /// no explicit `platform` is treated as Web Push for backward compat.
     pub fn subscribe(&self, channel: &str, subscription: Value) -> Result<(), String> {
+        if subscription.get("platform").and_then(Value::as_str) == Some("harmony") {
+            let token = subscription
+                .get("token")
+                .and_then(Value::as_str)
+                .ok_or("harmony subscription has no token")?
+                .to_string();
+            let _g = self.file_lock.lock().unwrap();
+            let mut subs = self.load_subs(channel);
+            subs.retain(|s| {
+                !(s.get("platform").and_then(Value::as_str) == Some("harmony")
+                    && s.get("token").and_then(Value::as_str) == Some(token.as_str()))
+            });
+            subs.push(subscription);
+            self.save_subs(channel, &subs);
+            return Ok(());
+        }
+
         let endpoint = subscription
             .get("endpoint")
             .and_then(Value::as_str)
@@ -111,6 +133,11 @@ impl Push {
         Ok(())
     }
 
+    /// True if the subscription is a HarmonyOS Push Kit registration.
+    fn is_harmony(sub: &Value) -> bool {
+        sub.get("platform").and_then(Value::as_str) == Some("harmony")
+    }
+
     pub fn subscription_count(&self, channel: &str) -> usize {
         let _g = self.file_lock.lock().unwrap();
         self.load_subs(channel).len()
@@ -118,7 +145,12 @@ impl Push {
 
     /// Push `payload` to every subscription of the channel. Subscriptions the
     /// push service reports as gone (unsubscribed / expired) are pruned.
-    pub async fn notify(&self, channel: &str, payload: &PushPayload<'_>) {
+    pub async fn notify(
+        &self,
+        channel: &str,
+        payload: &PushPayload<'_>,
+        harmony: Option<&HarmonyPush>,
+    ) {
         let subs = {
             let _g = self.file_lock.lock().unwrap();
             self.load_subs(channel)
@@ -126,18 +158,33 @@ impl Push {
         if subs.is_empty() {
             return;
         }
-        let body = match serde_json::to_vec(payload) {
-            Ok(b) => b,
-            Err(_) => return,
-        };
+        // Web Push body is JSON; harmony uses the typed payload directly. A
+        // failed encode only disables the web leg, not the harmony one.
+        let web_body = serde_json::to_vec(payload).ok();
         let client = HyperWebPushClient::new();
         let mut dead: Vec<String> = Vec::new();
         for sub in &subs {
+            if Self::is_harmony(sub) {
+                // Push Kit path. No-op when the channel is disabled (creds
+                // absent → harmony is None). Dead-token pruning needs Push
+                // Kit's specific failure codes, only observable with real
+                // creds — deferred to P6; the skeleton just logs.
+                let (Some(hp), Some(token)) =
+                    (harmony, sub.get("token").and_then(Value::as_str))
+                else {
+                    continue;
+                };
+                if let Err(e) = hp.send(token, payload).await {
+                    log::warn!("harmony push failed on channel {channel}: {e}");
+                }
+                continue;
+            }
+            let Some(body) = web_body.as_deref() else { continue };
             let info: SubscriptionInfo = match serde_json::from_value(sub.clone()) {
                 Ok(i) => i,
                 Err(_) => continue,
             };
-            match self.send_one(&client, &info, &body).await {
+            match self.send_one(&client, &info, body).await {
                 Ok(()) => {}
                 Err(WebPushError::EndpointNotValid(_) | WebPushError::EndpointNotFound(_)) => {
                     dead.push(info.endpoint.clone());
@@ -151,6 +198,12 @@ impl Push {
             let _g = self.file_lock.lock().unwrap();
             let mut subs = self.load_subs(channel);
             subs.retain(|s| {
+                // Never drop harmony subs here — they have no endpoint and the
+                // `unwrap_or(false)` below would otherwise evict them all the
+                // moment any web endpoint dies.
+                if Self::is_harmony(s) {
+                    return true;
+                }
                 s.get("endpoint")
                     .and_then(Value::as_str)
                     .map(|e| !dead.iter().any(|d| d == e))
@@ -192,6 +245,10 @@ mod tests {
         })
     }
 
+    fn mk_harmony(token: &str) -> Value {
+        json!({ "platform": "harmony", "token": token })
+    }
+
     #[test]
     fn generated_key_roundtrips_and_derives_public() {
         let dir = tempfile::tempdir().unwrap();
@@ -222,5 +279,31 @@ mod tests {
         let push = mk_push(dir.path());
         assert!(push.subscribe("ch", json!({"keys": {}})).is_err());
         assert!(push.subscribe("ch", json!({"endpoint": "https://x"})).is_err());
+    }
+
+    #[test]
+    fn subscribe_accepts_harmony_and_dedups_by_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        push.subscribe("ch", mk_harmony("TK-A")).unwrap();
+        push.subscribe("ch", mk_harmony("TK-B")).unwrap();
+        push.subscribe("ch", mk_harmony("TK-A")).unwrap(); // duplicate token
+        assert_eq!(push.subscription_count("ch"), 2);
+    }
+
+    #[test]
+    fn harmony_and_web_coexist_on_same_channel() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        push.subscribe("ch", mk_sub("https://push/a")).unwrap();
+        push.subscribe("ch", mk_harmony("TK-A")).unwrap();
+        assert_eq!(push.subscription_count("ch"), 2);
+    }
+
+    #[test]
+    fn subscribe_rejects_harmony_without_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let push = mk_push(dir.path());
+        assert!(push.subscribe("ch", json!({ "platform": "harmony" })).is_err());
     }
 }
