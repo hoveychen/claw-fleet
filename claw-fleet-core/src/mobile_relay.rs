@@ -703,6 +703,33 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             .ok_or("LLM analysis timed out or failed")?;
             Ok(json!({ "analysis": analysis }))
         }
+        // Wiki knowledge base: every published doc, newest-updated first
+        // (mirrors the desktop's `list_wiki_docs` Tauri command).
+        "wiki_list" => {
+            serde_json::to_value(crate::wiki::list_docs()).map_err(|e| e.to_string())
+        }
+        // One file — entry or asset — from a wiki doc version, base64-framed so
+        // the mobile client can decode markdown/html text or blob-serve assets
+        // (imgs/css/js) referenced by an htmlDir doc. `version` defaults to the
+        // current one. The 16 MiB per-file cap keeps a single frame bounded even
+        // though a whole doc can reach 100 MiB.
+        "wiki_file" => {
+            use base64::Engine as _;
+            let slug = params.get("slug").and_then(Value::as_str).ok_or("missing slug")?;
+            let version =
+                params.get("version").and_then(Value::as_str).unwrap_or("current");
+            let relpath =
+                params.get("relpath").and_then(Value::as_str).ok_or("missing relpath")?;
+            let file = crate::wiki::get_file(slug, version, relpath)?;
+            const MAX_WIKI_FILE_BYTES: usize = 16 * 1024 * 1024;
+            if file.bytes.len() > MAX_WIKI_FILE_BYTES {
+                return Err(format!("wiki file too large: {} bytes", file.bytes.len()));
+            }
+            Ok(json!({
+                "mime": file.mime,
+                "base64": base64::engine::general_purpose::STANDARD.encode(&file.bytes),
+            }))
+        }
         // ── Write methods ────────────────────────────────────────────────
         // All of these run inside `spawn_blocking` (see ws_connect_once), so
         // process spawns / kills / file writes never block the ws runtime.
@@ -1254,6 +1281,69 @@ mod tests {
             // n larger than the file returns everything.
             let data = request_ok("tail", json!({"path": path, "n": 99}));
             assert_eq!(data.as_array().unwrap().len(), 3);
+        });
+    }
+
+    /// base64-decode a `wiki_file` reply's payload back to bytes.
+    fn decode_b64(data: &Value) -> Vec<u8> {
+        use base64::Engine as _;
+        base64::engine::general_purpose::STANDARD
+            .decode(data["base64"].as_str().expect("base64 string"))
+            .expect("valid base64")
+    }
+
+    #[test]
+    fn request_wiki_list_and_markdown_file() {
+        with_temp_home(|| {
+            // Publish a markdown doc into the temp-home wiki root.
+            let src = crate::session::real_home_dir().unwrap().join("wiki-src");
+            fs::create_dir_all(&src).unwrap();
+            let file = src.join("note.md");
+            fs::write(&file, "# 标题\n\n正文内容 body").unwrap();
+            let doc =
+                crate::wiki::publish(&file, None, None, std::path::Path::new("/ws/demo")).unwrap();
+
+            // wiki_list surfaces it.
+            let data = request_ok("wiki_list", Value::Null);
+            let docs = data.as_array().expect("array");
+            assert!(docs.iter().any(|d| d["slug"] == doc.slug), "listed docs miss the publish");
+
+            // wiki_file returns the entry, base64-framed; decode back to text.
+            let data =
+                request_ok("wiki_file", json!({"slug": doc.slug, "relpath": doc.entry}));
+            let text = String::from_utf8(decode_b64(&data)).unwrap();
+            assert!(text.contains("正文内容"), "entry text not round-tripped: {text}");
+            assert!(data["mime"].as_str().unwrap().contains("markdown"));
+        });
+    }
+
+    #[test]
+    fn request_wiki_file_serves_asset_and_blocks_traversal() {
+        with_temp_home(|| {
+            // htmlDir doc: index.html plus a css asset in a subdir.
+            let root = crate::session::real_home_dir().unwrap().join("wiki-site");
+            fs::create_dir_all(root.join("assets")).unwrap();
+            fs::write(root.join("index.html"), "<link href=\"assets/app.css\">").unwrap();
+            fs::write(root.join("assets/app.css"), "body{color:red}").unwrap();
+            let doc =
+                crate::wiki::publish(&root, None, None, std::path::Path::new("/ws/demo")).unwrap();
+            assert_eq!(doc.kind, "htmlDir");
+
+            // A referenced asset is served with its own mime.
+            let data = request_ok(
+                "wiki_file",
+                json!({"slug": doc.slug, "relpath": "assets/app.css"}),
+            );
+            assert_eq!(String::from_utf8(decode_b64(&data)).unwrap(), "body{color:red}");
+            assert!(data["mime"].as_str().unwrap().contains("css"));
+
+            // Path traversal is rejected (get_file's canonicalize guard).
+            let reply = handle_client_payload(&json!({
+                "event": "req", "req_id": "r", "method": "wiki_file",
+                "params": {"slug": doc.slug, "relpath": "../../../etc/passwd"}
+            }))
+            .expect("reply");
+            assert_eq!(reply["ok"], false, "traversal must be rejected");
         });
     }
 
