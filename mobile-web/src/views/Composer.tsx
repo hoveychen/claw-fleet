@@ -3,6 +3,7 @@
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
 import { useCallback, useRef, useState } from "react";
+import { useDraft } from "../draft";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { SessionInfo } from "../types";
@@ -215,19 +216,38 @@ interface NewSessionProps {
   onClose: () => void;
 }
 
+/** 新会话表单的未提交草稿 key。全局唯一（同时只有一个新会话 sheet），意外关闭
+ *  sheet / 切标签 / iOS 杀 PWA 后回来原样恢复；只有创建成功才清空。附件不入草稿——
+ *  它们是已上传到 relay 的产物，重开时重新挑选即可。 */
+const NEW_SESSION_DRAFT_KEY = "new-session";
+
+const NEW_SESSION_DEFAULT = {
+  workspace: "",
+  customWorkspace: "",
+  prompt: "",
+  model: "",
+  effort: "",
+  // acceptEdits by default: headless -p sessions in default mode can't approve
+  // file edits (same default as the desktop launcher).
+  permissionMode: "acceptEdits",
+};
+
 export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) {
   const recents = [...new Map(sessions.map((s) => [s.workspacePath, s.workspaceName])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
-  const [workspace, setWorkspace] = useState(recents[0]?.[0] ?? "");
-  const [customWorkspace, setCustomWorkspace] = useState("");
-  const [prompt, setPrompt] = useState("");
-  // acceptEdits by default: headless -p sessions in default mode can't approve
-  // file edits (same default as the desktop launcher).
-  const [model, setModel] = useState("");
-  const [effort, setEffort] = useState("");
-  const [permissionMode, setPermissionMode] = useState("acceptEdits");
+  const [draft, setDraft, clearDraft] = useDraft(NEW_SESSION_DRAFT_KEY, NEW_SESSION_DEFAULT);
+  const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
   const [busy, setBusy] = useState(false);
   const { attachments, uploading, addFiles, remove } = useAttachments(client);
+
+  const { customWorkspace, prompt, model, effort, permissionMode } = draft;
+  // 持久化的 workspace 可能已失效（那个 workspace 不在最近列表里了），
+  // 落不到有效选项时退回列表首项，避免 <select> 显示空白。
+  const workspacePaths = new Set(recents.map((r) => r[0]));
+  const workspace =
+    draft.workspace === "__custom__" || workspacePaths.has(draft.workspace)
+      ? draft.workspace
+      : (recents[0]?.[0] ?? "");
 
   const effectiveWorkspace = workspace === "__custom__" ? customWorkspace.trim() : workspace;
   const canSubmit = Boolean(client && effectiveWorkspace && prompt.trim() && !busy && !uploading);
@@ -243,6 +263,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
         ...(effort ? { effort } : {}),
         ...(permissionMode ? { permissionMode } : {}),
       });
+      clearDraft();
       onClose();
     } catch (e) {
       window.alert(e instanceof Error ? e.message : t("创建会话失败"));
@@ -263,7 +284,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
         <select
           className={styles.workspaceSelect}
           value={workspace}
-          onChange={(e) => setWorkspace(e.target.value)}
+          onChange={(e) => patch({ workspace: e.target.value })}
         >
           {recents.map(([path, name]) => (
             <option key={path} value={path}>
@@ -277,7 +298,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
             className={styles.customPath}
             placeholder="/path/to/workspace"
             value={customWorkspace}
-            onChange={(e) => setCustomWorkspace(e.target.value)}
+            onChange={(e) => patch({ customWorkspace: e.target.value })}
           />
         )}
         <textarea
@@ -285,7 +306,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           placeholder={t("要让 agent 做什么？")}
           rows={5}
           value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
+          onChange={(e) => patch({ prompt: e.target.value })}
         />
         <AttachmentRow
           attachments={attachments}
@@ -298,11 +319,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           effort={effort}
           permissionMode={permissionMode}
           permissionDefaultLabel="默认权限"
-          onChange={(p) => {
-            if (p.model !== undefined) setModel(p.model);
-            if (p.effort !== undefined) setEffort(p.effort);
-            if (p.permissionMode !== undefined) setPermissionMode(p.permissionMode);
-          }}
+          onChange={(p) => patch(p)}
         />
         <button className={styles.submit} disabled={!canSubmit} onClick={() => void submit()}>
           {busy ? t("创建中…") : t("创建会话")}
@@ -320,7 +337,9 @@ interface ResumeProps {
 }
 
 export function ResumeComposer({ session, client }: ResumeProps) {
-  const [prompt, setPrompt] = useState("");
+  // 每个会话各自的续写草稿，按 sessionId 分 key——切到别的会话再回来，
+  // 各自的半截输入互不覆盖；发送成功后清空。
+  const [prompt, setPrompt, clearPrompt] = useDraft(`resume:${session.id}`, "");
   const [model, setModel] = useState("");
   const [effort, setEffort] = useState("");
   const [permissionMode, setPermissionMode] = useState("");
@@ -341,7 +360,7 @@ export function ResumeComposer({ session, client }: ResumeProps) {
         ...(effort ? { effort } : {}),
         ...(permissionMode ? { permissionMode } : {}),
       });
-      setPrompt("");
+      clearPrompt();
       reset();
       setSent(true);
       window.setTimeout(() => setSent(false), 3000);
