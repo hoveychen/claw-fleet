@@ -98,7 +98,7 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
                     tag: tag.as_deref(),
                     url: url.as_deref(),
                 };
-                state.push.notify(&channel, &payload).await;
+                state.push.notify(&channel, &payload, state.harmony.as_ref()).await;
             }
             InFrame::PushSubscribe { subscription } if role == Role::Client => {
                 if let Err(e) = state.push.subscribe(&channel, subscription) {
