@@ -89,13 +89,47 @@ const DICT: Record<string, string> = {
   决策: "Decisions",
   任务: "Tasks",
 
-  // ── 设置 sheet ──
+  // ── 设置 / 更多 tab ──
   设置: "Settings",
   语言: "Language",
   主题: "Theme",
   跟随系统: "System",
   亮色: "Light",
   暗色: "Dark",
+  知识库: "Wiki",
+  更多: "More",
+  连接与通知: "Connection & notifications",
+  桌面端: "Desktop",
+  通知: "Notifications",
+  已开启: "On",
+  已拒绝: "Denied",
+  不支持: "Unsupported",
+  需添加到主屏幕: "Add to Home Screen",
+  配对: "Pairing",
+  "重新配对 / 清除密钥": "Re-pair / clear secret",
+  "清除本机配对密钥？需回到桌面端重新扫码才能再连接。":
+    "Clear the local pairing secret? You'll need to re-scan on the desktop to reconnect.",
+  关于: "About",
+
+  // ── 知识库 ──
+  刷新: "Refresh",
+  "搜索标题 / slug…": "Search title / slug…",
+  "搜索标题 / 正文…": "Search title / content…",
+  全部项目: "All projects",
+  "搜索中…": "Searching…",
+  "该项目下没有文档。": "No docs in this project.",
+  "导出 / 分享": "Export / share",
+  "导出失败：{0}": "Export failed: {0}",
+  "加载中…": "Loading…",
+  "渲染中…（正在拉取页面资源）": "Rendering… (fetching page assets)",
+  最新: "Latest",
+  未归类: "Ungrouped",
+  "知识库加载失败：{0}": "Failed to load wiki: {0}",
+  "加载失败：{0}": "Load failed: {0}",
+  "还没有归档的文档。桌面端 agent 用 fleet wiki publish 发布后会出现在这里。":
+    "No archived docs yet. They'll show up here once a desktop agent publishes with fleet wiki publish.",
+  "没有匹配「{0}」的文档。": "No docs match \"{0}\".",
+  "知识库里没有找到「{0}」": "\"{0}\" was not found in the wiki",
 
   // ── TasksView ──
   工作中: "Working",
