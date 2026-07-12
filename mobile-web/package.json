@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "lucide-react": "^1.16.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
