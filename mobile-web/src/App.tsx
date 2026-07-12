@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import styles from "./App.module.css";
 import { enablePush, pushState, resyncPush, type PushState } from "./push";
+import { deviceLabel } from "./deviceLabel";
+import { getClientId } from "./clientId";
 import { RelayClient } from "./relay";
 import type {
   DecisionKind,
@@ -111,23 +113,39 @@ export function App() {
 
   useEffect(() => {
     if (!secret) return;
-    const client = new RelayClient(secret, {
-      onStatus: setConnected,
-      onAgentOnline: (online) => {
-        setAgentOnline(online);
-        if (online && clientRef.current) {
-          void refreshPending(clientRef.current);
-        }
+    const client = new RelayClient(
+      secret,
+      {
+        onStatus: setConnected,
+        onAgentOnline: (online) => {
+          setAgentOnline(online);
+          if (online && clientRef.current) {
+            void refreshPending(clientRef.current);
+          }
+        },
+        onDecisionCreated: addDecision,
+        onDecisionResolved: removeDecision,
+        onSessions: setSessions,
+        onAuthError: (message) => setAuthError(message),
       },
-      onDecisionCreated: addDecision,
-      onDecisionResolved: removeDecision,
-      onSessions: setSessions,
-      onAuthError: (message) => setAuthError(message),
-    });
+      // Announced on every heartbeat so `pushSubscribed` stays current — read
+      // live rather than captured at construction.
+      () => {
+        const { label, platform } = deviceLabel(navigator.userAgent);
+        return { clientId: getClientId(), label, platform, pushSubscribed: pushState() === "granted" };
+      },
+    );
     clientRef.current = client;
     client.connect();
     void resyncPush(client);
-    return () => client.close();
+    // Mobile browsers may never run React cleanup on tab close — tell the
+    // desktop we're leaving on pagehide too (desktop timeout is the backstop).
+    const onPageHide = () => client.sayGoodbye();
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      window.removeEventListener("pagehide", onPageHide);
+      client.close();
+    };
   }, [secret, addDecision, removeDecision, refreshPending]);
 
   // Re-sync when the PWA returns to the foreground (mobile browsers freeze
