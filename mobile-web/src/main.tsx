@@ -2,9 +2,11 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initTheme } from "./theme";
+import { lockZoom } from "./lockZoom";
 import "./index.css";
 
 initTheme();
+lockZoom();
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
