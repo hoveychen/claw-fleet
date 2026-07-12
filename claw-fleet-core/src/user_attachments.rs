@@ -26,6 +26,28 @@ pub fn user_attachments_dir() -> Option<PathBuf> {
     crate::session::real_home_dir().map(|h| h.join(".fleet").join("user-attachments"))
 }
 
+/// Whether `path` points at a file that still lives inside the user-attachments
+/// store. The mobile composer persists attachment chips across reloads and calls
+/// this to prune ones whose backing file has since been cleared.
+///
+/// Deliberately NOT a general filesystem-existence oracle: the path is
+/// canonicalized (resolving `..`/symlinks, failing when it doesn't exist) and
+/// must resolve to a file under the canonicalized store root, so a client can
+/// only ever confirm files it legitimately uploaded — never probe arbitrary
+/// paths on the host.
+pub fn exists_in_store(path: &Path) -> bool {
+    let Some(base) = user_attachments_dir() else {
+        return false;
+    };
+    let Ok(base) = base.canonicalize() else {
+        return false; // store dir absent ⇒ nothing can exist in it
+    };
+    let Ok(canon) = path.canonicalize() else {
+        return false; // missing path ⇒ canonicalize fails
+    };
+    canon.starts_with(&base) && canon.is_file()
+}
+
 /// Reject anything that isn't a bare filename (path separators, `..`, absolute).
 fn valid_name(name: &str) -> bool {
     !name.is_empty()
@@ -223,6 +245,37 @@ mod tests {
         // Oversize is refused rather than silently truncated.
         let huge = vec![0u8; (crate::backend::MAX_ATTACHMENT_BYTES + 1) as usize];
         assert!(ingest_bytes(&huge, "big.bin").is_err());
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn exists_in_store_confirms_only_present_in_store_files() {
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = fresh_tmp_dir("exists");
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized via fleet_home_lock
+        unsafe { std::env::set_var("FLEET_HOME", &tmp) };
+
+        // An uploaded file is confirmed…
+        let stored = ingest_bytes(b"present", "here.png").unwrap();
+        assert!(exists_in_store(&stored));
+
+        // …a same-shaped path with no backing file is not…
+        let ghost = stored.parent().unwrap().parent().unwrap().join("deadbeef").join("gone.png");
+        assert!(!exists_in_store(&ghost));
+
+        // …and an out-of-store path is never confirmed, even if it exists on disk.
+        let outside = tmp.join("outside.txt");
+        std::fs::write(&outside, b"x").unwrap();
+        assert!(!exists_in_store(&outside));
 
         unsafe {
             match prev {
