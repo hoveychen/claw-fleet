@@ -209,6 +209,9 @@ impl Backend for NullBackend {
     fn usage_summaries(&self) -> Vec<SourceUsageSummary> {
         vec![]
     }
+    fn today_usage(&self) -> crate::today_usage::TodayUsage {
+        crate::today_usage::TodayUsage::default()
+    }
     fn check_setup(&self) -> SetupStatus {
         SetupStatus {
             cli_installed: false,

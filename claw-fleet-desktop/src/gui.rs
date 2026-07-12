@@ -924,6 +924,11 @@ fn list_sessions(state: tauri::State<AppState>) -> Vec<SessionInfo> {
 }
 
 #[tauri::command]
+fn today_usage(state: tauri::State<AppState>) -> claw_fleet_core::today_usage::TodayUsage {
+    state.backend.read().unwrap().today_usage()
+}
+
+#[tauri::command]
 fn search_sessions(
     query: String,
     limit: Option<usize>,
@@ -3775,6 +3780,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             list_sessions,
+            today_usage,
             search_sessions,
             get_messages,
             get_messages_tail,

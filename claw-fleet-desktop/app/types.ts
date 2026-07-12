@@ -117,6 +117,23 @@ export function sessionUnread(
   return s.lastActivityMs > lastRead;
 }
 
+/** Today's cumulative token/cost counter (nav-bar / mobile header widget).
+ *  Mirrors `claw_fleet_core::today_usage::TodayUsage`. */
+export interface TodayUsage {
+  /** YYYY-MM-DD, user's local timezone. */
+  date: string;
+  /** Output tokens: agent sessions created today + Fleet's own LLM calls. */
+  outputTokens: number;
+  /** Total USD cost = agentCostUsd + fleetCostUsd. */
+  costUsd: number;
+  /** Cost from agent (Claude Code) sessions created today. */
+  agentCostUsd: number;
+  /** Cost from Fleet's own LLM calls today. */
+  fleetCostUsd: number;
+  /** Number of top-level sessions created today that contributed. */
+  sessionCount: number;
+}
+
 export interface SessionInfo {
   id: string;
   workspacePath: string;
