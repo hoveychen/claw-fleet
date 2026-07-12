@@ -405,6 +405,19 @@
   color: var(--color-warning, #d29922);
 }
 
+/* Colour the label by task kind — monitors read as "watching" (accent blue),
+   shells/mixed keep the default warning amber, agents/workflows get their own
+   hue so a glance tells them apart. */
+.bgtask_label[data-bgtype="monitor"] {
+  color: var(--color-accent, #58a6ff);
+}
+.bgtask_label[data-bgtype="subagent"] {
+  color: var(--color-info, #a371f7);
+}
+.bgtask_label[data-bgtype="workflow"] {
+  color: var(--color-teal, #39c5cf);
+}
+
 .bgtask_desc {
   flex: 1 1 auto;
   min-width: 0;
