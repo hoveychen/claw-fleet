@@ -923,6 +923,100 @@ fn is_last_meaningful_an_interrupt(last_lines: &[Value]) -> bool {
     })
 }
 
+/// Minutes-scale floor below which an unresolved tool batch is NOT treated as
+/// stuck. Must be far longer than any real single tool round-trip (a WebFetch,
+/// a Bash build, a WebSearch) so a merely-slow tool never trips it; it exists to
+/// catch a batch that has been frozen for many minutes with a live process
+/// behind it. Also longer than a typical subagent run to blunt the `Agent`
+/// false-positive noted on [`has_pending_noninteractive_tool_batch`].
+pub const STUCK_TOOL_BATCH_FLOOR_SECS: f64 = 1200.0; // 20 minutes
+
+/// Tools that legitimately keep a turn open indefinitely while blocked on the
+/// user — a decision card or a permission prompt. An unresolved `tool_use` for
+/// one of these is a normal wait, never a deadlock, so it must NOT count toward
+/// stuck detection.
+fn is_interactive_wait_tool(name: &str) -> bool {
+    name == "AskUserQuestion"
+        || name == "ExitPlanMode"
+        || name.ends_with("__ask") // mcp__fleet__fleet__ask
+        || name.contains("permission") // mcp__fleet__fleet__permission_prompt
+}
+
+/// Detects a turn wedged mid tool-batch: the most recent assistant message that
+/// issued `tool_use` blocks has at least one block whose `tool_use_id` never
+/// received a matching `tool_result` in the records that follow it, AND that
+/// unresolved block is a *non-interactive* tool.
+///
+/// This is the signal the plain status machine lacks. [`determine_status`] only
+/// inspects the last user/assistant record's type + age, so a batch left one
+/// result short — one tool hung and never wrote its `tool_result` (e.g. a
+/// `WebFetch` whose timeout never fired) — reads as an ordinary quiet session.
+/// The Anthropic Messages API requires every `tool_use_id` in a batch to have a
+/// `tool_result` before the model is re-invoked, so such a session is deadlocked
+/// inside the turn: the model never resumes and there is nothing to wake.
+///
+/// Pure over `last_lines`; the `proc_alive` + age-floor gate lives at the call
+/// site ([`apply_pid_liveness`]).
+///
+/// Caveat: a legitimately long-running subagent (an `Agent` tool_use) also
+/// presents as an unresolved batch while it runs. [`STUCK_TOOL_BATCH_FLOOR_SECS`]
+/// (minutes, far longer than any real tool round-trip) is what keeps that from
+/// flagging in the common case.
+fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> bool {
+    let msg_blocks = |v: &Value| -> Option<Vec<Value>> {
+        v.get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+            .cloned()
+    };
+
+    // Index of the last assistant message carrying >=1 tool_use block.
+    let Some(asst_idx) = last_lines.iter().rposition(|v| {
+        v.get("type").and_then(|t| t.as_str()) == Some("assistant")
+            && msg_blocks(v).is_some_and(|blocks| {
+                blocks
+                    .iter()
+                    .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+            })
+    }) else {
+        return false;
+    };
+
+    // (tool_use_id, tool_name) issued by that assistant message.
+    let issued: Vec<(String, String)> = msg_blocks(&last_lines[asst_idx])
+        .unwrap_or_default()
+        .iter()
+        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+        .filter_map(|b| {
+            let id = b.get("id").and_then(|i| i.as_str())?.to_string();
+            let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            Some((id, name))
+        })
+        .collect();
+    if issued.is_empty() {
+        return false;
+    }
+
+    // tool_use_ids resolved by any tool_result in the records AFTER the batch.
+    let mut resolved: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for v in &last_lines[asst_idx + 1..] {
+        if let Some(blocks) = msg_blocks(v) {
+            for b in &blocks {
+                if b.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                    if let Some(id) = b.get("tool_use_id").and_then(|i| i.as_str()) {
+                        resolved.insert(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Stuck iff some issued tool_use is unresolved AND non-interactive.
+    issued
+        .iter()
+        .any(|(id, name)| !resolved.contains(id) && !is_interactive_wait_tool(name))
+}
+
 fn determine_status(
     last_lines: &[Value],
     file_age_secs: f64,
@@ -3310,6 +3404,100 @@ mod tests {
     /// `determine_status` directly with distinct values.
     fn ds(lines: &[Value], age: f64, hook: Option<&HookState>) -> SessionStatus {
         determine_status(lines, age, age, hook)
+    }
+
+    // ── stuck tool-batch detection ───────────────────────────────────────────
+
+    fn tool_use_block_id(name: &str, id: &str) -> Value {
+        json!({"type": "tool_use", "name": name, "id": id, "input": {}})
+    }
+
+    fn tool_result_msg(id: &str) -> Value {
+        json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": id, "content": "ok"}]
+            }
+        })
+    }
+
+    #[test]
+    fn stuck_batch_all_resolved_is_false() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![tool_use_block_id("WebFetch", "t1"), tool_use_block_id("WebFetch", "t2")],
+                None,
+            ),
+            tool_result_msg("t1"),
+            tool_result_msg("t2"),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_missing_noninteractive_result_is_true() {
+        // Mirrors the real incident: Agent + 2 WebFetch issued, one WebFetch
+        // never returns its tool_result.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![
+                    tool_use_block_id("Agent", "agent1"),
+                    tool_use_block_id("WebFetch", "wf_hung"),
+                    tool_use_block_id("WebFetch", "wf_ok"),
+                ],
+                None,
+            ),
+            tool_result_msg("wf_ok"),
+            tool_result_msg("agent1"),
+        ];
+        assert!(has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_only_askuserquestion_pending_is_false() {
+        // A parked decision card is a legitimate user-wait, not a deadlock.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![tool_use_block_id("AskUserQuestion", "ask1")], None),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_only_permission_prompt_pending_is_false() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![tool_use_block_id("mcp__fleet__fleet__permission_prompt", "perm1")],
+                None,
+            ),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_no_tool_use_is_false() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![text_block("just talking")], Some("end_turn")),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_uses_latest_batch_only() {
+        // An earlier fully-resolved batch must not mask a later stuck one, and a
+        // later fully-resolved batch must clear an earlier stuck-looking one.
+        let earlier_stuck_later_ok = vec![
+            assistant_msg(vec![tool_use_block_id("WebFetch", "old_hung")], None),
+            // no result for old_hung, but a NEW batch supersedes it, fully resolved
+            assistant_msg(vec![tool_use_block_id("Bash", "new1")], None),
+            tool_result_msg("new1"),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&earlier_stuck_later_ok));
     }
 
     #[test]
