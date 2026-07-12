@@ -546,14 +546,19 @@ function QuestionsCard({
     }
     const answers: Record<string, string> = {};
     for (const q of request.questions) {
+      const hasOptions = (q.options?.length ?? 0) > 0;
       const picked = (selections[q.question] ?? []).filter((l) => l !== OTHER);
-      const customText = (selections[q.question] ?? []).includes(OTHER)
-        ? (custom[q.question] ?? "").trim()
-        : "";
+      // Option-less questions expose the free-text box directly (no "其他…"
+      // toggle), mirroring the desktop's always-present composer.
+      const customActive = !hasOptions || (selections[q.question] ?? []).includes(OTHER);
+      const customText = customActive ? (custom[q.question] ?? "").trim() : "";
       const parts = [...picked];
       if (customText) parts.push(customText);
-      const hasOptions = (q.options?.length ?? 0) > 0;
-      if (hasOptions && parts.length === 0) {
+      const atts0 = attachments[q.question] ?? [];
+      const hasForm = (q.formFields?.length ?? 0) > 0;
+      // Desktop gates submit on option / custom text / attachment (form-only
+      // questions are covered by the required-field pass below).
+      if (parts.length === 0 && atts0.length === 0 && !hasForm) {
         setError(`「${q.header || truncate(q.question, 20)}」还没有作答`);
         return;
       }
@@ -634,7 +639,7 @@ function QuestionsCard({
               </div>
             );
           })}
-          {(q.options?.length ?? 0) > 0 && (
+          {(q.options?.length ?? 0) > 0 ? (
             <>
               <button
                 className={styles.option}
@@ -660,31 +665,42 @@ function QuestionsCard({
                   rows={2}
                 />
               )}
-              <div className={styles.questionTools}>
-                {!q.multiSelect && (
-                  <button
-                    className={styles.toolToggle}
-                    data-active={multiOverride[q.question] === true}
-                    onClick={() => flipMultiOverride(q)}
-                  >
-                    {multiOverride[q.question] ? "已改为多选" : "改为多选"}
-                  </button>
-                )}
-                <QuestionAttachRow
-                  question={q.question}
-                  attachments={attachments[q.question] ?? []}
-                  uploading={uploadingQ === q.question}
-                  onPick={(files) => void addQuestionFiles(q.question, files)}
-                  onRemove={(path) =>
-                    setAttachments((prev) => ({
-                      ...prev,
-                      [q.question]: (prev[q.question] ?? []).filter((a) => a.path !== path),
-                    }))
-                  }
-                />
-              </div>
             </>
+          ) : (
+            // No options: the free-text box is the answer surface itself,
+            // like the desktop's always-rendered composer (form-only cards
+            // may leave it empty; required fields gate submit instead).
+            <textarea
+              className={styles.reasonInput}
+              placeholder="自由回答…"
+              value={custom[q.question] ?? ""}
+              onChange={(e) => setCustom((p) => ({ ...p, [q.question]: e.target.value }))}
+              rows={2}
+            />
           )}
+          <div className={styles.questionTools}>
+            {(q.options?.length ?? 0) > 0 && !q.multiSelect && (
+              <button
+                className={styles.toolToggle}
+                data-active={multiOverride[q.question] === true}
+                onClick={() => flipMultiOverride(q)}
+              >
+                {multiOverride[q.question] ? "已改为多选" : "改为多选"}
+              </button>
+            )}
+            <QuestionAttachRow
+              question={q.question}
+              attachments={attachments[q.question] ?? []}
+              uploading={uploadingQ === q.question}
+              onPick={(files) => void addQuestionFiles(q.question, files)}
+              onRemove={(path) =>
+                setAttachments((prev) => ({
+                  ...prev,
+                  [q.question]: (prev[q.question] ?? []).filter((a) => a.path !== path),
+                }))
+              }
+            />
+          </div>
           {(q.formFields ?? []).map((f) => (
             <FormFieldControl
               key={f.name}
