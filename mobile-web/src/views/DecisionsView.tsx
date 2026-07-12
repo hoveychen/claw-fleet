@@ -48,6 +48,24 @@ export function DecisionsView({
   onAnswered,
   onOpenSession,
 }: Props) {
+  // One focused card at a time + a queue bar, mirroring the desktop panel's
+  // active-card/tab model. When the active card resolves, focus falls to the
+  // card at the same queue position (desktop's "next after removed").
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const lastIndexRef = useRef(0);
+
+  const sorted = useMemo(
+    () => [...decisions].sort((a, b) => a.arrivedAt - b.arrivedAt),
+    [decisions],
+  );
+  const foundIndex = sorted.findIndex((d) => d.id === activeId);
+  const activeIndex =
+    foundIndex >= 0 ? foundIndex : Math.min(lastIndexRef.current, sorted.length - 1);
+  useEffect(() => {
+    if (foundIndex >= 0) lastIndexRef.current = foundIndex;
+  }, [foundIndex]);
+  const active = sorted[activeIndex];
+
   if (decisions.length === 0) {
     return (
       <div className={styles.empty}>
@@ -55,19 +73,44 @@ export function DecisionsView({
       </div>
     );
   }
-  const sorted = [...decisions].sort((a, b) => a.arrivedAt - b.arrivedAt);
+
   return (
     <div className={styles.list}>
-      {sorted.map((d) => (
+      {sorted.length > 1 && (
+        <div className={styles.queueBar}>
+          {sorted.map((d, i) => {
+            const s = workspaceOf(d.request.sessionId);
+            const ws = d.request.workspaceName || s?.workspaceName || "Fleet";
+            return (
+              <button
+                key={d.id}
+                className={styles.queueChip}
+                data-active={i === activeIndex}
+                data-kind={d.kind}
+                onClick={() => setActiveId(d.id)}
+              >
+                <span className={styles.queueKind}>{KIND_LABEL[d.kind] ?? d.kind}</span>
+                <span className={styles.queueWs}>{ws}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {active && (
         <DecisionCard
-          key={d.id}
-          decision={d}
+          key={active.id}
+          decision={active}
           client={client}
           workspaceOf={workspaceOf}
           onAnswered={onAnswered}
           onOpenSession={onOpenSession}
         />
-      ))}
+      )}
+      {sorted.length > 1 && (
+        <div className={styles.queueHint}>
+          第 {activeIndex + 1} / {sorted.length} 张 · 处理完自动跳到下一张
+        </div>
+      )}
     </div>
   );
 }
