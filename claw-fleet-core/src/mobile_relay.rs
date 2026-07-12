@@ -11,11 +11,14 @@
 //!   agent → client: `decision_created{kind,request}` / `decision_resolved{kind,id}`
 //!                   / `sessions{sessions}` / `reply{req_id,ok,data}`
 //!   client → agent: `answer{kind,id,...}` / `req{req_id,method,params}`
+//!                   / `client_hello{clientId,label,platform,pushSubscribed}` (presence)
+//!                   / `client_bye{clientId}`
 //!
 //! Answers are written back through the same channel-agnostic
 //! `write_response()` files the desktop panel and Feishu use, so the waiting
 //! hook/MCP subprocess unblocks without any session-side changes.
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
@@ -159,6 +162,26 @@ pub struct MobileRelayStatus {
     pub clients: usize,
     pub relay_url: String,
     pub secret_set: bool,
+    /// Currently-connected mobile clients that announced themselves via
+    /// `client_hello`. Best-effort: pruned on a heartbeat timeout (the relay
+    /// only reports a client *count*, never which client left). `#[serde(default)]`
+    /// keeps a RemoteBackend probe against an older `fleet serve` deserializable.
+    #[serde(default)]
+    pub devices: Vec<MobileClientInfo>,
+}
+
+/// One connected mobile client, as reported by its periodic `client_hello`.
+/// The web app cannot read a real device name, so `label`/`platform` are an
+/// honest UA-derived best guess (see mobile-web `deviceLabel.ts`).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileClientInfo {
+    pub client_id: String,
+    pub label: String,
+    pub platform: String,
+    pub push_subscribed: bool,
+    pub connected_at_ms: u64,
+    pub last_seen_ms: u64,
 }
 
 /// Cheap connectivity probe so callers can skip serialization work while the
@@ -196,7 +219,88 @@ pub fn status() -> MobileRelayStatus {
         clients: CLIENTS.load(Ordering::SeqCst),
         relay_url: cfg.relay_url,
         secret_set: !cfg.secret.is_empty(),
+        devices: live_devices(),
     }
+}
+
+// ── Connected-client registry ─────────────────────────────────────────────────
+//
+// The relay only reports a client *count* (`presence{clients}`) and never says
+// which connection dropped, so we can't get per-device presence from the
+// transport. Instead each mobile client periodically announces itself via a
+// `client_hello` business frame; we keep the latest report per `clientId` and
+// treat a client as gone once its `last_seen_ms` is older than
+// `CLIENT_STALE_MS` (a multiple of the client's ~15s heartbeat).
+
+/// Drop a client this long after its last `client_hello` (heartbeat is ~15s).
+const CLIENT_STALE_MS: u64 = 40_000;
+
+static CLIENTS_REGISTRY: Mutex<Option<HashMap<String, MobileClientInfo>>> = Mutex::new(None);
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Record (or refresh) a client from its `client_hello` payload. First sighting
+/// stamps `connected_at_ms`; later ones only bump `last_seen_ms` and metadata.
+fn upsert_client(payload: &Value) {
+    let Some(client_id) = payload.get("clientId").and_then(Value::as_str).filter(|s| !s.is_empty())
+    else {
+        return;
+    };
+    let now = now_ms();
+    let label = payload.get("label").and_then(Value::as_str).unwrap_or("").to_string();
+    let platform = payload.get("platform").and_then(Value::as_str).unwrap_or("").to_string();
+    let push_subscribed =
+        payload.get("pushSubscribed").and_then(Value::as_bool).unwrap_or(false);
+    let mut guard = CLIENTS_REGISTRY.lock().unwrap();
+    let map = guard.get_or_insert_with(HashMap::new);
+    let entry = map.entry(client_id.to_string()).or_insert_with(|| MobileClientInfo {
+        client_id: client_id.to_string(),
+        label: label.clone(),
+        platform: platform.clone(),
+        push_subscribed,
+        connected_at_ms: now,
+        last_seen_ms: now,
+    });
+    entry.label = label;
+    entry.platform = platform;
+    entry.push_subscribed = push_subscribed;
+    entry.last_seen_ms = now;
+}
+
+/// Forget a client that said goodbye (best-effort — mobile `pagehide` is
+/// unreliable, so `CLIENT_STALE_MS` pruning is the real backstop).
+fn remove_client(payload: &Value) {
+    let Some(client_id) = payload.get("clientId").and_then(Value::as_str) else {
+        return;
+    };
+    if let Some(map) = CLIENTS_REGISTRY.lock().unwrap().as_mut() {
+        map.remove(client_id);
+    }
+}
+
+/// Forget every client (relay reported zero clients, or we reconnected).
+fn clear_clients() {
+    if let Some(map) = CLIENTS_REGISTRY.lock().unwrap().as_mut() {
+        map.clear();
+    }
+}
+
+/// Prune stale entries and return the live devices, most-recently-seen first.
+fn live_devices() -> Vec<MobileClientInfo> {
+    let now = now_ms();
+    let mut guard = CLIENTS_REGISTRY.lock().unwrap();
+    let Some(map) = guard.as_mut() else {
+        return Vec::new();
+    };
+    map.retain(|_, info| now.saturating_sub(info.last_seen_ms) <= CLIENT_STALE_MS);
+    let mut list: Vec<MobileClientInfo> = map.values().cloned().collect();
+    list.sort_by(|a, b| b.last_seen_ms.cmp(&a.last_seen_ms));
+    list
 }
 
 // ── Outbound publishing ──────────────────────────────────────────────────────
@@ -379,6 +483,16 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
             None
         }
         Some("req") => Some(handle_request(payload)),
+        // Presence announcements — kept in a local registry surfaced via
+        // `status().devices`; no reply needed.
+        Some("client_hello") => {
+            upsert_client(payload);
+            None
+        }
+        Some("client_bye") => {
+            remove_client(payload);
+            None
+        }
         other => {
             crate::log_debug(&format!("[mobile-relay] unknown client event: {other:?}"));
             None
@@ -912,8 +1026,9 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                         if let Some(n) = frame.get("clients").and_then(Value::as_u64) {
                             CLIENTS.store(n as usize, Ordering::SeqCst);
                         }
-                        // Fresh channel — whatever we pushed before may never
-                        // have reached anyone.
+                        // Fresh socket — drop any stale device registry; clients
+                        // re-announce themselves on their next heartbeat.
+                        clear_clients();
                         SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
                         crate::log_debug("[mobile-relay] connected");
                     }
@@ -925,6 +1040,11 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                             // even when nothing changed for existing clients.
                             if n as usize > prev {
                                 SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
+                            }
+                            // Everyone's gone: forget the device list immediately
+                            // rather than waiting out the stale timeout.
+                            if n == 0 {
+                                clear_clients();
                             }
                         }
                     }
@@ -1785,5 +1905,65 @@ mod tests {
         let frame: Value = serde_json::from_str(&build_notify_frame("t", "b", "guard:g1")).unwrap();
         assert_eq!(frame["type"], "notify");
         assert_eq!(frame["tag"], "guard:g1");
+    }
+
+    fn hello(client_id: &str, label: &str, push: bool) -> Value {
+        json!({
+            "event": "client_hello",
+            "clientId": client_id,
+            "label": label,
+            "platform": "ios",
+            "pushSubscribed": push,
+        })
+    }
+
+    // One combined test: CLIENTS_REGISTRY is a process-global static, so
+    // splitting into several `#[test]`s would race them against each other.
+    #[test]
+    fn client_registry_lifecycle() {
+        clear_clients();
+
+        // A hello registers a device; a repeat with the same id dedups and
+        // refreshes metadata rather than adding a second entry.
+        handle_client_payload(&hello("a", "iPhone · Safari", false));
+        handle_client_payload(&hello("b", "Android · Chrome", true));
+        handle_client_payload(&hello("a", "iPhone · Safari", true));
+        let devices = live_devices();
+        assert_eq!(devices.len(), 2, "same clientId must not duplicate");
+        let a = devices.iter().find(|d| d.client_id == "a").unwrap();
+        assert!(a.push_subscribed, "second hello refreshed pushSubscribed");
+        assert!(a.connected_at_ms <= a.last_seen_ms, "connected_at is the earliest sighting");
+
+        // A hello without a clientId is ignored.
+        handle_client_payload(&json!({ "event": "client_hello", "label": "x" }));
+        assert_eq!(live_devices().len(), 2);
+
+        // Stale entries (older than CLIENT_STALE_MS) are pruned on read.
+        {
+            let mut guard = CLIENTS_REGISTRY.lock().unwrap();
+            let map = guard.as_mut().unwrap();
+            map.get_mut("b").unwrap().last_seen_ms = now_ms().saturating_sub(CLIENT_STALE_MS + 5_000);
+        }
+        let devices = live_devices();
+        assert_eq!(devices.len(), 1, "stale device pruned");
+        assert_eq!(devices[0].client_id, "a");
+
+        // A bye removes immediately; clear wipes everything.
+        handle_client_payload(&json!({ "event": "client_bye", "clientId": "a" }));
+        assert!(live_devices().is_empty(), "bye removed the last device");
+        handle_client_payload(&hello("c", "HarmonyOS · ArkWeb", false));
+        clear_clients();
+        assert!(live_devices().is_empty(), "clear wiped the registry");
+    }
+
+    #[test]
+    fn status_devices_field_defaults_when_absent() {
+        // A RemoteBackend probing an older `fleet serve` gets JSON with no
+        // `devices` key — it must still deserialize (serde default = empty).
+        let old: MobileRelayStatus = serde_json::from_str(
+            r#"{"enabled":true,"connected":true,"clients":1,"relayUrl":"x","secretSet":true}"#,
+        )
+        .expect("must deserialize without a devices field");
+        assert!(old.devices.is_empty());
     }
 }
