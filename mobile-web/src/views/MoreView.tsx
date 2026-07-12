@@ -1,6 +1,7 @@
 // 「更多」tab：把原来散在 header 齿轮 / 顶部横幅里的设置项收纳到一处——
 // 语言 / 主题、桌面端连接状态、通知开关、重新配对、关于/版本。
 
+import { ChevronRight, FolderGit2 } from "lucide-react";
 import { useI18n, type Lang } from "../i18n";
 import type { PushState } from "../push";
 import { clearSecret } from "../secretStore";
@@ -17,9 +18,10 @@ interface Props {
   agentOnline: boolean;
   push: PushState;
   onEnablePush: () => void;
+  onOpenRepo: () => void;
 }
 
-export function MoreView({ connected, agentOnline, push, onEnablePush }: Props) {
+export function MoreView({ connected, agentOnline, push, onEnablePush, onOpenRepo }: Props) {
   const { lang, setLang, t } = useI18n();
   const { setting, setTheme } = useTheme();
 
@@ -38,6 +40,23 @@ export function MoreView({ connected, agentOnline, push, onEnablePush }: Props) 
 
   return (
     <div className={styles.view}>
+      {/* ── 工具 ── */}
+      <div className={styles.section}>
+        <div className={styles.sectionLabel}>{t("工具")}</div>
+        <div className={styles.card}>
+          <button className={styles.navRow} onClick={onOpenRepo}>
+            <span className={styles.navIcon}>
+              <FolderGit2 size={18} />
+            </span>
+            <span className={styles.navText}>
+              <span className={styles.navLabel}>{t("仓库")}</span>
+              <span className={styles.navSub}>{t("查看未合并 worktree 与未推提交")}</span>
+            </span>
+            <ChevronRight size={18} className={styles.navChevron} />
+          </button>
+        </div>
+      </div>
+
       {/* ── 设置 ── */}
       <div className={styles.section}>
         <div className={styles.sectionLabel}>{t("设置")}</div>

@@ -134,3 +134,49 @@
 .dangerRow:active {
   background: var(--color-bg-card-hover);
 }
+
+.navRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  text-align: left;
+  padding: 12px 14px;
+  min-height: 46px;
+}
+
+.navRow:active {
+  background: var(--color-bg-card-hover);
+}
+
+.navIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--color-accent);
+}
+
+.navText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.navLabel {
+  font-size: 14px;
+  color: var(--color-text);
+}
+
+.navSub {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.navChevron {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}

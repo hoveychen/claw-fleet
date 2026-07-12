@@ -628,6 +628,17 @@ fn handle_request(payload: &Value) -> Value {
     }
 }
 
+/// Workspace paths of every session the backend knows about — the access
+/// envelope the git/repo entry points validate against (same list the
+/// `/git_status` HTTP endpoint builds).
+fn known_workspaces() -> Vec<String> {
+    crate::agent_source::build_sources()
+        .iter()
+        .flat_map(|s| s.scan_sessions())
+        .map(|s| s.workspace_path)
+        .collect()
+}
+
 fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
     match method {
         // Same aggregation as `LocalBackend::list_pending_decisions`, minus
@@ -1020,6 +1031,35 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                     .map_err(|e| format!("bad session_read params: {e}"))?;
             crate::session_read::mark_read(&req.items)?;
             Ok(json!({ "ok": true }))
+        }
+        // ── Repository "仓库" surface ─────────────────────────────────────
+        // A loose-ends view over every git repo reachable from a known session
+        // workspace: worktrees with commits not merged back into main, and the
+        // main branch ahead of its upstream (unpushed). Access envelope matches
+        // the read-only file explorer — `known` is the same session-workspace
+        // list `/git_status` builds. push/pull run real `git` here (network),
+        // which is fine: this whole handler runs inside `spawn_blocking`.
+        "repo_list" => {
+            let known = known_workspaces();
+            serde_json::to_value(crate::git_ops::list_repos(&known)).map_err(|e| e.to_string())
+        }
+        "repo_detail" => {
+            let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+            let known = known_workspaces();
+            serde_json::to_value(crate::git_ops::repo_detail(root, &known))
+                .map_err(|e| e.to_string())
+        }
+        "repo_push" => {
+            let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+            let known = known_workspaces();
+            serde_json::to_value(crate::git_ops::repo_push(root, &known))
+                .map_err(|e| e.to_string())
+        }
+        "repo_pull" => {
+            let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+            let known = known_workspaces();
+            serde_json::to_value(crate::git_ops::repo_pull(root, &known))
+                .map_err(|e| e.to_string())
         }
         other => Err(format!("unknown method: {other}")),
     }

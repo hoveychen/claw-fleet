@@ -10,6 +10,7 @@ import type {
   DecisionRequest,
   PendingDecision,
   PendingSnapshot,
+  RepoSummary,
   SessionInfo,
   WikiDoc,
 } from "./types";
@@ -24,6 +25,8 @@ import { useI18n } from "./i18n";
 import { NewSessionSheet } from "./views/Composer";
 import { DecisionsView } from "./views/DecisionsView";
 import { MoreView } from "./views/MoreView";
+import { RepoView } from "./views/RepoView";
+import { RepoDetailView } from "./views/RepoDetailView";
 import { SessionDetailView } from "./views/SessionDetailView";
 import { TasksView } from "./views/TasksView";
 import { WikiView } from "./views/WikiView";
@@ -72,6 +75,8 @@ export function App() {
   const [push, setPush] = useState<PushState>(pushState);
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
   const [wikiDoc, setWikiDoc] = useState<WikiDoc | null>(null);
+  const [showRepo, setShowRepo] = useState(false);
+  const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
   const [showNewSession, setShowNewSession] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
 
@@ -352,6 +357,7 @@ export function App() {
             agentOnline={agentOnline}
             push={push}
             onEnablePush={handleEnablePush}
+            onOpenRepo={() => setShowRepo(true)}
           />
         )}
       </main>
@@ -371,6 +377,22 @@ export function App() {
           client={clientRef.current}
           onBack={() => setWikiDoc(null)}
           onOpenDoc={setWikiDoc}
+        />
+      )}
+
+      {showRepo && (
+        <RepoView
+          client={clientRef.current}
+          onBack={() => setShowRepo(false)}
+          onOpenRepo={setRepoDetail}
+        />
+      )}
+
+      {repoDetail && (
+        <RepoDetailView
+          repo={repoDetail}
+          client={clientRef.current}
+          onBack={() => setRepoDetail(null)}
         />
       )}
 
