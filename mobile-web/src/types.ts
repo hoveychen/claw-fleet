@@ -4,6 +4,28 @@
 
 // ── Decision requests ────────────────────────────────────────────────────────
 
+/** Structured shell AST shipped in GuardRequest (claw-fleet-core/src/cmd_ast.rs).
+ *  CommandLeaf has no serde rename_all — fields stay snake_case on the wire. */
+export type CmdConnector = "and" | "or" | "pipe" | "semi";
+
+export interface NestedScript {
+  kind: string;
+  raw: string;
+  view: CommandView;
+}
+
+export interface CommandLeaf {
+  argv: string[];
+  nested?: NestedScript | null;
+  triggering?: boolean;
+  already_allowed?: boolean;
+}
+
+export interface CommandView {
+  leaves: CommandLeaf[];
+  connectors: CmdConnector[];
+}
+
 export interface GuardRequest {
   id: string;
   sessionId: string;
@@ -14,6 +36,7 @@ export interface GuardRequest {
   commandSummary: string;
   riskTags: string[];
   timestamp: string;
+  structuredCommand?: CommandView | null;
 }
 
 export interface ElicitationOption {
@@ -166,6 +189,8 @@ export interface TaskPlanSummary {
   currentTask?: string | null;
 }
 
+export type SessionMark = "pending" | "done";
+
 export interface SessionInfo {
   id: string;
   workspacePath: string;
@@ -184,6 +209,46 @@ export interface SessionInfo {
   totalCostUsd?: number;
   todos?: TodoSummary | null;
   taskPlan?: TaskPlanSummary | null;
+  pid?: number | null;
+  /** False when several agent processes share the cwd and the pid is a guess. */
+  pidPrecise?: boolean;
+  entrypoint?: string | null;
+  userMark?: SessionMark | null;
+  /** Unread = lastActivityMs > (lastReadMs ?? 0). */
+  lastReadMs?: number | null;
+  /** True when the session's agent process is still alive. */
+  procAlive?: boolean;
+}
+
+/** Sessions Fleet spawned itself ("新会话" / handoff relay) — the only ones
+ *  where SIGINT means "abort the tool call" instead of "quit". Mirrors
+ *  claw-fleet-desktop/app/types.ts. */
+export function isFleetOwnedEntrypoint(entrypoint: string | null | undefined): boolean {
+  return entrypoint === "claw-fleet-newsession" || entrypoint === "claw-fleet-handoff";
+}
+
+export function isSessionUnread(s: SessionInfo): boolean {
+  return s.lastActivityMs > (s.lastReadMs ?? 0);
+}
+
+const IN_FLIGHT: SessionStatus[] = [
+  "thinking",
+  "executing",
+  "streaming",
+  "processing",
+  "active",
+  "delegating",
+];
+
+/** Resumable = a Fleet-owned headless session whose process has ended and
+ *  whose turn is not in flight (mirrors the desktop's canResumeSession). */
+export function canResumeSession(s: SessionInfo): boolean {
+  return (
+    !s.isSubagent &&
+    isFleetOwnedEntrypoint(s.entrypoint) &&
+    !s.procAlive &&
+    !IN_FLIGHT.includes(s.status)
+  );
 }
 
 export interface TaskItem {
@@ -197,3 +262,143 @@ export interface TaskPlanDetail {
   source?: string | null;
   items: TaskItem[];
 }
+
+// ── Session detail (v2) ──────────────────────────────────────────────────────
+
+/** One transcript jsonl record, loosely typed — we only look at a few fields. */
+export interface ContentBlock {
+  type: string;
+  text?: string;
+  thinking?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  content?: unknown;
+}
+
+export interface RawMessage {
+  type?: string;
+  timestamp?: string;
+  isSidechain?: boolean;
+  isCompactSummary?: boolean;
+  message?: {
+    role?: string;
+    content?: string | ContentBlock[];
+  };
+}
+
+/** `live_thinking` reply (null when no live sidecar). */
+export interface LiveThinking {
+  sessionId: string;
+  thinking: string;
+  streaming: boolean;
+  updatedSecsAgo: number;
+}
+
+/** `handoff_chain` reply (null when the session is on no chain). */
+export interface HandoffLink {
+  fromSessionId: string;
+  toSessionId: string;
+  note: string;
+  planId?: string | null;
+  nextTask?: string | null;
+  handedAt: number;
+}
+
+export interface HandoffChain {
+  chainId: string;
+  workspacePath: string;
+  planId?: string | null;
+  links: HandoffLink[];
+}
+
+/** `skill_history` reply items. */
+export interface SkillInvocation {
+  skill: string;
+  args?: string | null;
+  timestamp: string;
+  isSubagent: boolean;
+}
+
+/** `workflow_trees` reply items (loosely typed — display only). */
+export interface WorkflowAgentInfo {
+  agentId?: string;
+  label?: string | null;
+  status?: string;
+  prompt?: string | null;
+  agentType?: string | null;
+}
+
+export interface WorkflowTree {
+  runId: string;
+  name?: string | null;
+  description?: string | null;
+  agents: WorkflowAgentInfo[];
+}
+
+/** `token_breakdown` reply — only the totals the mobile UI shows. */
+export interface TokenBreakdown {
+  totalsUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+  };
+  totalsEstimatedCostUsd?: number | null;
+  main?: unknown;
+  subagents?: unknown[];
+}
+
+/** `session_decisions` reply items — serde `#[serde(tag = "kind")]` envelope
+ *  over the four record variants (claw-fleet-core/src/decision_history.rs). */
+export interface SelectedOption {
+  label: string;
+  description?: string;
+  other?: boolean;
+}
+
+interface DecisionRecordBase {
+  id: string;
+  sessionId: string;
+  workspaceName?: string;
+  aiTitle?: string | null;
+  requestedAt?: string;
+  resolvedAt?: string;
+}
+
+export interface ElicitationHistoryRecord extends DecisionRecordBase {
+  kind: "elicitation";
+  outcome: "answered" | "declined" | "heartbeat-lost" | "timeout";
+  questions: ElicitationQuestion[];
+  answers: Record<string, SelectedOption>;
+}
+
+export interface PlanApprovalHistoryRecord extends DecisionRecordBase {
+  kind: "plan-approval";
+  outcome: "approved" | "approved-with-edits" | "rejected" | "heartbeat-lost" | "timeout";
+  planContent: string;
+  planFilePath?: string | null;
+  editedPlan?: string | null;
+  feedback?: string | null;
+}
+
+export interface UserPromptHistoryRecord {
+  kind: "user-prompt";
+  id: string;
+  sessionId: string;
+  text: string;
+  hasImage?: boolean;
+  sentAt: string;
+}
+
+export interface FleetAskHistoryRecord extends DecisionRecordBase {
+  kind: "fleet-ask";
+  outcome: "answered" | "cancelled" | "heartbeat-lost" | "timeout";
+  questions: FleetAskQuestion[];
+  answers: Record<string, string>;
+}
+
+export type DecisionHistoryRecord =
+  | ElicitationHistoryRecord
+  | PlanApprovalHistoryRecord
+  | UserPromptHistoryRecord
+  | FleetAskHistoryRecord;

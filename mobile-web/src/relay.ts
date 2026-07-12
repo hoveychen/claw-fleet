@@ -165,14 +165,15 @@ export class RelayClient {
     return this.sendPayload({ event: "answer", kind, id, ...fields });
   }
 
-  /** Data request to the agent (pending_snapshot / task_plans / …). */
-  request<T>(method: string, params?: Record<string, unknown>): Promise<T> {
+  /** Data request to the agent (pending_snapshot / task_plans / …).
+   *  `timeoutMs` overrides the default for slow methods (LLM analysis). */
+  request<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
     const reqId = `r${++this.reqSeq}`;
     return new Promise<T>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
         reject(new Error("请求超时（桌面端可能离线）"));
-      }, REQUEST_TIMEOUT_MS);
+      }, timeoutMs ?? REQUEST_TIMEOUT_MS);
       this.pending.set(reqId, {
         resolve: resolve as (v: unknown) => void,
         reject,
