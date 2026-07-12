@@ -323,13 +323,18 @@
 
 /* The stop button is secondary: hidden until the row is hovered/focused so the
    resting row stays quiet. Its slot keeps its layout box while hidden, so the
-   always-visible pending/done toggle (last child) doesn't shift when it fades in. */
+   always-visible pending/done toggle (last child) doesn't shift when it fades in.
+
+   Reveal is driven by the `.hovered` class (JS onMouseEnter/onMouseLeave in
+   SessionRow), NOT the `:hover` pseudo-class, which gets stuck on in wry/WebKit
+   when a row reflows without a fresh pointer event. See SessionCard for the
+   full rationale. */
 .stop_slot {
   opacity: 0;
   transition: opacity 0.15s;
 }
 
-.row_wrap:hover .stop_slot,
+.row_wrap.hovered .stop_slot,
 .stop_slot:focus-within {
   opacity: 1;
 }

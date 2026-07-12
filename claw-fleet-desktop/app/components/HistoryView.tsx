@@ -196,8 +196,25 @@ const SessionRow = memo(function SessionRow({
 }: SessionRowProps) {
   const { t } = useTranslation();
   const runColor = rowBarColor(s);
+  // Reveal-on-hover for the stop button is driven by this JS state, not CSS
+  // `:hover`: wry/WebKit fails to recompute `:hover` when a row reflows without a
+  // fresh pointer event, so a CSS-only reveal could stick on after the cursor
+  // left. State set only by real enter/leave events can't latch across
+  // re-renders; `window blur` clears it if the pointer is yanked out of the
+  // window without a mouseleave. (Same fix as SessionCard.)
+  const [hovered, setHovered] = useState(false);
+  useEffect(() => {
+    if (!hovered) return;
+    const clear = () => setHovered(false);
+    window.addEventListener("blur", clear);
+    return () => window.removeEventListener("blur", clear);
+  }, [hovered]);
   return (
-    <div className={styles.row_wrap}>
+    <div
+      className={`${styles.row_wrap} ${hovered ? styles.hovered : ""}`}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+    >
       <button
         type="button"
         className={`${styles.row} ${isSelected ? styles.row_active : isOpen ? styles.row_open : ""} ${unread ? styles.row_unread : ""}`}
