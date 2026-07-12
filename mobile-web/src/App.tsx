@@ -99,15 +99,48 @@ export function App() {
 
   // Re-sync when the PWA returns to the foreground (mobile browsers freeze
   // sockets aggressively; the reconnect fires but the snapshot may be stale).
+  // Also recompute the push state: Notification.permission can change while we
+  // were backgrounded (Boss toggled it in system/browser settings), and the
+  // banner reads pushState() only at mount — without this it stays stale, e.g.
+  // still showing "已拒绝" after the site was re-allowed.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "visible" && clientRef.current?.isAuthed) {
-        void refreshPending(clientRef.current);
-      }
+      if (document.visibilityState !== "visible") return;
+      setPush(pushState());
+      if (clientRef.current?.isAuthed) void refreshPending(clientRef.current);
     };
+    const onFocus = () => setPush(pushState());
     document.addEventListener("visibilitychange", onVisible);
-    return () => document.removeEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    // The Permissions API fires 'change' the instant the setting flips, even
+    // without a focus/visibility bounce. Best-effort: older Safari lacks it.
+    let perm: PermissionStatus | undefined;
+    navigator.permissions
+      ?.query({ name: "notifications" as PermissionName })
+      .then((status) => {
+        perm = status;
+        status.addEventListener("change", onFocus);
+      })
+      .catch(() => {
+        /* Permissions API / "notifications" name unsupported; focus+visibility cover it */
+      });
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+      perm?.removeEventListener("change", onFocus);
+    };
   }, [refreshPending]);
+
+  // When permission lands on "granted" (fresh grant, or re-allowed in settings
+  // after a denial), make sure a live subscription actually exists on the
+  // relay — otherwise the banner just vanishes while no push is wired.
+  // enablePush is idempotent: it reuses an existing subscription and only
+  // creates one when missing, and requestPermission() no-ops once granted.
+  useEffect(() => {
+    if (push === "granted" && clientRef.current) {
+      void enablePush(clientRef.current);
+    }
+  }, [push]);
 
   const handleEnablePush = useCallback(async () => {
     if (!clientRef.current) return;
