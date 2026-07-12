@@ -879,6 +879,31 @@ pub trait Backend: Send + Sync {
     fn set_feishu_creds(&self, _creds: crate::feishu::StoredCreds) -> Result<(), String> {
         Err("feishu integration not configured".into())
     }
+
+    // ── Mobile relay (移动端 mobile web channel) ────────────────────────────
+    fn get_mobile_relay_config(&self) -> Result<crate::mobile_relay::MobileRelayConfig, String> {
+        Ok(crate::mobile_relay::MobileRelayConfig::default())
+    }
+    /// Persist the config; an enabled config with an empty secret keeps the
+    /// existing one or generates it (see `mobile_relay::set_config_normalized`),
+    /// so the frontend never round-trips the secret. Returns the stored config.
+    fn set_mobile_relay_config(
+        &self,
+        _cfg: crate::mobile_relay::MobileRelayConfig,
+    ) -> Result<crate::mobile_relay::MobileRelayConfig, String> {
+        Err("mobile relay not configured".into())
+    }
+    /// Rotate the pairing secret — invalidates the previous QR code.
+    fn rotate_mobile_relay_secret(&self) -> Result<crate::mobile_relay::MobileRelayConfig, String> {
+        Err("mobile relay not configured".into())
+    }
+    fn mobile_relay_status(&self) -> Result<crate::mobile_relay::MobileRelayStatus, String> {
+        Err("mobile relay not configured".into())
+    }
+    /// SVG QR code of the pairing URL (`<relay>/#k=<secret>`).
+    fn mobile_relay_qr_svg(&self) -> Result<String, String> {
+        Err("mobile relay not configured".into())
+    }
 }
 
 /// Upper bound on a single attachment payload. Enforced by both the uploader
