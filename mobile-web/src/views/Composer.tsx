@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useDraft } from "../draft";
 import { t } from "../i18n";
-import type { RelayClient } from "../relay";
+import { UPLOAD_REQUEST_TIMEOUT_MS, type RelayClient } from "../relay";
 import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import styles from "./Composer.module.css";
@@ -64,10 +64,11 @@ export async function uploadAttachmentFiles(
       reader.onerror = () => reject(reader.error);
       reader.readAsDataURL(file);
     });
-    const { path } = await client.request<{ path: string }>("upload_attachment", {
-      name: file.name,
-      base64: b64,
-    });
+    const { path } = await client.request<{ path: string }>(
+      "upload_attachment",
+      { name: file.name, base64: b64 },
+      UPLOAD_REQUEST_TIMEOUT_MS,
+    );
     out.push({ name: file.name, path });
   }
   return out;

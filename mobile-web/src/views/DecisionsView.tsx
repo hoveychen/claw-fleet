@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { fetchDecisionAsset } from "../decisionAsset";
 import { getLang, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type {
@@ -1250,11 +1251,6 @@ function FormFieldControl({
 
 // ── fleet-ask html / images ──────────────────────────────────────────────────
 
-interface AssetReply {
-  mime: string;
-  base64: string;
-}
-
 function useAssets(
   names: string[],
   requestId: string,
@@ -1266,8 +1262,7 @@ function useAssets(
     if (!client) return;
     let cancelled = false;
     for (const name of names) {
-      client
-        .request<AssetReply>("decision_asset", { id: requestId, qidx: `q${qidx}`, rel: name })
+      fetchDecisionAsset(client, requestId, qidx, name)
         .then((a) => {
           if (!cancelled) {
             setUris((p) => ({ ...p, [name]: `data:${a.mime};base64,${a.base64}` }));
