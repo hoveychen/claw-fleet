@@ -507,6 +507,91 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             skill_history::sort_by_timestamp(&mut out);
             serde_json::to_value(out).map_err(|e| e.to_string())
         }
+        // ── Write methods ────────────────────────────────────────────────
+        // All of these run inside `spawn_blocking` (see ws_connect_once), so
+        // process spawns / kills / file writes never block the ws runtime.
+        "spawn_session" => {
+            let req: crate::session_launch::SpawnSessionRequest =
+                serde_json::from_value(params.clone())
+                    .map_err(|e| format!("bad spawn_session params: {e}"))?;
+            let resp = crate::session_launch::spawn_new_session(
+                &req.workspace_path,
+                &req.prompt,
+                req.model.as_deref(),
+                req.effort.as_deref(),
+                req.permission_mode.as_deref(),
+            )?;
+            serde_json::to_value(resp).map_err(|e| e.to_string())
+        }
+        "resume_session" => {
+            let req: crate::auto_resume::ResumeSessionRequest =
+                serde_json::from_value(params.clone())
+                    .map_err(|e| format!("bad resume_session params: {e}"))?;
+            crate::auto_resume::spawn_resume_prompt(
+                &req.session_id,
+                &req.workspace_path,
+                req.prompt.as_deref().unwrap_or("continue"),
+                req.model.as_deref(),
+                req.effort.as_deref(),
+                req.permission_mode.as_deref(),
+            )?;
+            Ok(json!({ "ok": true }))
+        }
+        // pid 0 would signal the desktop's own process group — reject before
+        // it ever reaches kill() (same guard as the `/interrupt` endpoint).
+        "interrupt" => {
+            let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
+            if pid == 0 {
+                return Err("missing or invalid pid".into());
+            }
+            crate::session::interrupt_pid_impl(pid)?;
+            Ok(json!({ "ok": true }))
+        }
+        "stop" => {
+            let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
+            if pid == 0 {
+                return Err("missing or invalid pid".into());
+            }
+            let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
+            #[cfg(unix)]
+            {
+                // Probe first so a stale pid errors; then take the whole tree,
+                // or the agent's tool children outlive it.
+                if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+                    return Err(std::io::Error::last_os_error().to_string());
+                }
+                crate::session::kill_pid_tree(pid, force)?;
+                Ok(json!({ "ok": true }))
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = force;
+                Err("stop is not supported on this platform".into())
+            }
+        }
+        "stop_workspace" => {
+            let path = params
+                .get("workspacePath")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .ok_or("missing workspacePath")?;
+            crate::session::kill_workspace_impl(path)?;
+            Ok(json!({ "ok": true }))
+        }
+        "session_mark" => {
+            let req: crate::session_mark::SetSessionMarkRequest =
+                serde_json::from_value(params.clone())
+                    .map_err(|e| format!("bad session_mark params: {e}"))?;
+            crate::session_mark::set_mark(&req.session_id, &req.workspace_path, req.mark)?;
+            Ok(json!({ "ok": true }))
+        }
+        "session_read" => {
+            let req: crate::session_read::MarkSessionsReadRequest =
+                serde_json::from_value(params.clone())
+                    .map_err(|e| format!("bad session_read params: {e}"))?;
+            crate::session_read::mark_read(&req.items)?;
+            Ok(json!({ "ok": true }))
+        }
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -1029,6 +1114,152 @@ mod tests {
             assert_eq!(items[0]["skill"], "code-review");
             assert_eq!(items[0]["args"], "--fix");
             assert_eq!(items[0]["isSubagent"], false);
+        });
+    }
+
+    /// Issue a `req` payload and return the full reply (ok or error).
+    fn request_raw(method: &str, params: Value) -> Value {
+        handle_client_payload(&json!({
+            "event": "req", "req_id": "r", "method": method, "params": params
+        }))
+        .unwrap_or_else(|| panic!("{method} must produce a reply"))
+    }
+
+    #[test]
+    fn request_session_mark_sets_and_clears() {
+        with_temp_home(|| {
+            let data = request_ok(
+                "session_mark",
+                json!({"sessionId": "s1", "workspacePath": "/ws", "mark": "pending"}),
+            );
+            assert_eq!(data["ok"], true);
+            assert_eq!(crate::session_mark::read("s1"), Some(crate::session_mark::SessionMark::Pending));
+
+            request_ok(
+                "session_mark",
+                json!({"sessionId": "s1", "workspacePath": "/ws", "mark": "done"}),
+            );
+            assert_eq!(crate::session_mark::read("s1"), Some(crate::session_mark::SessionMark::Done));
+
+            // Omitting `mark` clears the record.
+            request_ok("session_mark", json!({"sessionId": "s1", "workspacePath": "/ws"}));
+            assert_eq!(crate::session_mark::read("s1"), None);
+        });
+    }
+
+    #[test]
+    fn request_session_read_stamps_records() {
+        with_temp_home(|| {
+            let data = request_ok(
+                "session_read",
+                json!({"items": [
+                    {"sessionId": "s1", "workspacePath": "/ws"},
+                    {"sessionId": "s2", "workspacePath": "/ws"},
+                ]}),
+            );
+            assert_eq!(data["ok"], true);
+            let dir = crate::session::real_home_dir()
+                .unwrap()
+                .join(".fleet")
+                .join("session-read");
+            assert!(dir.join("s1.json").is_file());
+            assert!(dir.join("s2.json").is_file());
+        });
+    }
+
+    #[test]
+    fn request_interrupt_and_stop_reject_bad_pid() {
+        with_temp_home(|| {
+            // pid 0 would signal the caller's own process group — must be
+            // rejected in the relay layer before reaching kill().
+            for method in ["interrupt", "stop"] {
+                let reply = request_raw(method, json!({"pid": 0}));
+                assert_eq!(reply["ok"], false, "{method} must reject pid 0");
+                assert!(
+                    reply["error"].as_str().unwrap().contains("pid"),
+                    "{method} error must mention pid: {}",
+                    reply["error"]
+                );
+                let reply = request_raw(method, json!({}));
+                assert_eq!(reply["ok"], false, "{method} must reject missing pid");
+            }
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn request_stop_kills_spawned_process() {
+        with_temp_home(|| {
+            let mut child = std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn sleep");
+            let pid = child.id();
+            let data = request_ok("stop", json!({"pid": pid, "force": true}));
+            assert_eq!(data["ok"], true);
+            // The tree kill is synchronous, but give the OS a beat to deliver.
+            let mut waited = 0u64;
+            loop {
+                match child.try_wait().expect("try_wait") {
+                    Some(_) => break,
+                    None if waited >= 5000 => panic!("sleep child survived stop"),
+                    None => {
+                        std::thread::sleep(Duration::from_millis(50));
+                        waited += 50;
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn request_stop_workspace_requires_path() {
+        with_temp_home(|| {
+            let reply = request_raw("stop_workspace", json!({}));
+            assert_eq!(reply["ok"], false);
+            assert!(
+                reply["error"].as_str().unwrap().contains("workspacePath"),
+                "error must mention workspacePath: {}",
+                reply["error"]
+            );
+        });
+    }
+
+    #[test]
+    fn request_spawn_session_validates_before_spawning() {
+        with_temp_home(|| {
+            // Empty prompt fails validation before any CLI/filesystem access.
+            let reply = request_raw(
+                "spawn_session",
+                json!({"workspacePath": "/ws", "prompt": "   "}),
+            );
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("prompt"));
+
+            let reply = request_raw("spawn_session", json!({"prompt": "hi"}));
+            assert_eq!(reply["ok"], false, "missing workspacePath must fail");
+
+            let reply = request_raw(
+                "spawn_session",
+                json!({"workspacePath": "/ws", "prompt": "hi", "permissionMode": "yolo"}),
+            );
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("permission mode"));
+        });
+    }
+
+    #[test]
+    fn request_resume_session_validates_before_spawning() {
+        with_temp_home(|| {
+            let reply = request_raw("resume_session", json!({"workspacePath": "/ws"}));
+            assert_eq!(reply["ok"], false, "missing sessionId must fail");
+
+            let reply = request_raw(
+                "resume_session",
+                json!({"sessionId": "s1", "workspacePath": "/ws", "permissionMode": "yolo"}),
+            );
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("permission mode"));
         });
     }
 
