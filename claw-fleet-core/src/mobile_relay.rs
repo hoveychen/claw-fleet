@@ -801,6 +801,23 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             let stored = crate::user_attachments::ingest_bytes(&bytes, name)?;
             Ok(json!({ "path": stored.to_string_lossy() }))
         }
+        // Given a list of previously-uploaded attachment paths, return the
+        // subset still present in the user-attachments store. The mobile
+        // composer persists attachment chips across reloads and uses this to
+        // drop ones whose backing file has been cleared, so a restored draft
+        // never carries a `Context files:` path that no longer resolves.
+        "attachments_exist" => {
+            let paths = params.get("paths").and_then(Value::as_array).ok_or("missing paths")?;
+            let existing: Vec<String> = paths
+                .iter()
+                .filter_map(Value::as_str)
+                .filter(|p| {
+                    crate::user_attachments::exists_in_store(std::path::Path::new(p))
+                })
+                .map(str::to_string)
+                .collect();
+            Ok(json!({ "existing": existing }))
+        }
         "session_read" => {
             let req: crate::session_read::MarkSessionsReadRequest =
                 serde_json::from_value(params.clone())
@@ -1563,6 +1580,41 @@ mod tests {
                 json!({"name": "screenshot.png", "base64": b64}),
             );
             assert_eq!(again["path"], data["path"]);
+        });
+    }
+
+    #[test]
+    fn request_attachments_exist_returns_only_present_paths() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(b"real bytes");
+            let uploaded = request_ok("upload_attachment", json!({"name": "a.png", "base64": b64}));
+            let real = uploaded["path"].as_str().unwrap().to_string();
+            let store_root = crate::user_attachments::user_attachments_dir().unwrap();
+            let ghost = store_root.join("deadbeef").join("gone.png");
+
+            let data = request_ok(
+                "attachments_exist",
+                json!({"paths": [real, ghost.to_string_lossy(), "/etc/passwd"]}),
+            );
+            let existing: Vec<String> = data["existing"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|v| v.as_str().unwrap().to_string())
+                .collect();
+            // Only the genuinely-present in-store file survives; the cleared one
+            // and the out-of-store probe are dropped.
+            assert_eq!(existing.len(), 1);
+            assert!(existing[0].ends_with("a.png"));
+        });
+    }
+
+    #[test]
+    fn request_attachments_exist_requires_paths_array() {
+        with_temp_home(|| {
+            let reply = request_raw("attachments_exist", json!({}));
+            assert_eq!(reply["ok"], false, "missing paths must fail");
         });
     }
 
