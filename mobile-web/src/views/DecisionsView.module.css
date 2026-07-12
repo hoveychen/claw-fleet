@@ -496,3 +496,27 @@
   line-height: 1;
   padding: 0 2px;
 }
+
+/* ── a2ui placeholder ── */
+
+.a2uiNotice {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
+.a2uiTexts {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+  color: var(--color-text-dim);
+}
+
+.a2uiTexts li {
+  margin-bottom: 2px;
+}

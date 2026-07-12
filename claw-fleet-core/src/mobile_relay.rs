@@ -368,6 +368,21 @@ fn handle_answer(payload: &Value) -> Result<(), String> {
                 feedback: str_field("feedback"),
             })
         }
+        "a2ui-render" => {
+            let action_context: std::collections::BTreeMap<String, String> = payload
+                .get("actionContext")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|e| format!("bad actionContext: {e}"))?
+                .unwrap_or_default();
+            crate::mcp_a2ui_ipc::write_response(&crate::mcp_a2ui_ipc::A2uiRenderResponse {
+                id,
+                action_name: str_field("actionName"),
+                action_context,
+                cancelled: payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false),
+            })
+        }
         "permission-prompt" => {
             let allow = payload.get("allow").and_then(Value::as_bool).ok_or("missing allow")?;
             crate::permission_prompt_ipc::write_response(
@@ -427,6 +442,9 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                             .and_then(|r| serde_json::to_value(r).ok())
                     },
                 ),
+                "a2uiRender": read_all(crate::mcp_a2ui_ipc::list_pending_requests(), &|id| {
+                    crate::mcp_a2ui_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+                }),
             }))
         }
         "task_plans" => {
@@ -981,6 +999,54 @@ mod tests {
             }));
             let v = read_json(&dir.join("pp1.response.json"));
             assert_eq!(v["decision"], "allow");
+        });
+    }
+
+    #[test]
+    fn answer_a2ui_render_writes_response_file() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("fleet-render-a2ui");
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "a2ui-render", "id": "a1",
+                "cancelled": false, "actionName": "submit",
+                "actionContext": { "score": "7" }
+            }));
+            let v = read_json(&dir.join("a1.response.json"));
+            assert_eq!(v["cancelled"], false);
+            assert_eq!(v["actionName"], "submit");
+            assert_eq!(v["actionContext"]["score"], "7");
+
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "a2ui-render", "id": "a2",
+                "cancelled": true
+            }));
+            let v = read_json(&dir.join("a2.response.json"));
+            assert_eq!(v["cancelled"], true);
+            assert!(v.get("actionName").is_none());
+        });
+    }
+
+    #[test]
+    fn pending_snapshot_includes_a2ui_render() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("fleet-render-a2ui");
+            fs::write(
+                dir.join("a9.json"),
+                serde_json::to_string(&json!({
+                    "id": "a9", "sessionId": "s1", "workspaceName": "demo",
+                    "timestamp": "2026-07-12T10:00:00Z",
+                    "messageTree": { "surfaceUpdate": { "surfaceId": "x" } }
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let reply = handle_client_payload(&json!({
+                "event": "req", "req_id": "r2", "method": "pending_snapshot"
+            }))
+            .expect("pending_snapshot must produce a reply");
+            let list = reply["data"]["a2uiRender"].as_array().expect("a2uiRender list");
+            assert_eq!(list.len(), 1);
+            assert_eq!(list[0]["id"], "a9");
         });
     }
 
