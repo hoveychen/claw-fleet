@@ -3,7 +3,7 @@
 // relay method (no watcher push over the relay); live thinking polls its own
 // sidecar method while the session is working.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { dateLocale, t } from "../i18n";
@@ -120,6 +120,116 @@ interface Props {
   /** Fired after a 2s dwell — marks the session read (same as the desktop). */
   onDwellRead?: () => void;
 }
+
+/** ReactMarkdown + remarkGfm parse is heavy; mounting a few hundred of them
+ *  synchronously froze the mobile webview when a long session opened. Since the
+ *  view auto-scrolls to the bottom, only the last screenful is on screen — so
+ *  off-screen rows render as cheap plain text and upgrade to real markdown once
+ *  they scroll within 400px of the viewport. Once upgraded, they stay upgraded. */
+function LazyMarkdown({ text }: { text: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [rich, setRich] = useState(false);
+  useEffect(() => {
+    if (rich) return;
+    const el = ref.current;
+    if (!el) return;
+    // No IntersectionObserver (very old webview) → upgrade immediately.
+    if (typeof IntersectionObserver === "undefined") {
+      setRich(true);
+      return;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setRich(true);
+      },
+      { rootMargin: "400px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [rich]);
+  return (
+    <div ref={ref} className={styles.markdown}>
+      {rich ? (
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            a: ({ children }) => <span className={styles.mdLink}>{children}</span>,
+          }}
+        >
+          {text}
+        </ReactMarkdown>
+      ) : (
+        <div className={styles.mdPlaceholder}>{text}</div>
+      )}
+    </div>
+  );
+}
+
+interface MessageRowProps {
+  msg: RawMessage;
+  index: number;
+  /** Set of open thinking-block keys (index*1000+blockIndex). Reference is
+   *  stable across the 2.5s tail poll, so `memo` skips untouched rows then;
+   *  it only changes on a user toggle, when re-rendering every row is fine. */
+  expandedThinking: Set<number>;
+  onToggleThinking: (key: number) => void;
+}
+
+/** One conversation row. Memoized so appending new tailed lines every 2.5s
+ *  doesn't re-render (and re-parse the markdown of) the rows already on screen —
+ *  the long-session jank the desktop never hit because it doesn't poll. */
+const MessageRow = memo(function MessageRow({
+  msg,
+  index,
+  expandedThinking,
+  onToggleThinking,
+}: MessageRowProps) {
+  if (msg.type === "user") {
+    const text = userText(msg);
+    if (!text) return null;
+    return (
+      <div className={styles.userRow}>
+        <div className={styles.userBubble}>{text}</div>
+        <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+      </div>
+    );
+  }
+  // assistant: thinking / text / tool_use blocks in order
+  const blocks = blocksOf(msg);
+  if (blocks.length === 0) return null;
+  return (
+    <div className={styles.assistantRow}>
+      {blocks.map((b, j) => {
+        if (b.type === "thinking" && b.thinking?.trim()) {
+          const key = index * 1000 + j;
+          const open = expandedThinking.has(key);
+          return (
+            <div key={j} className={styles.thinkingBlock} data-open={open}>
+              <button className={styles.thinkingToggle} onClick={() => onToggleThinking(key)}>
+                ✳ {t("思考")} {open ? "▾" : "▸"}
+              </button>
+              {open && <div className={styles.thinkingBody}>{b.thinking}</div>}
+            </div>
+          );
+        }
+        if (b.type === "text" && b.text?.trim()) {
+          return <LazyMarkdown key={j} text={b.text} />;
+        }
+        if (b.type === "tool_use") {
+          const summary = toolSummary(b);
+          return (
+            <div key={j} className={styles.toolChip}>
+              <span className={styles.toolName}>{b.name}</span>
+              {summary && <span className={styles.toolSummary}>{summary}</span>}
+            </div>
+          );
+        }
+        return null;
+      })}
+      <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+    </div>
+  );
+});
 
 export function SessionDetailView({ session, client, onBack, onDwellRead }: Props) {
   const [tab, setTab] = useState<DetailTab>("messages");
@@ -266,8 +376,8 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
     });
   }, []);
 
-  const rows = (messages ?? []).filter(isRenderableRow);
-  const mainRows = rows.filter((m) => !m.isSidechain);
+  const rows = useMemo(() => (messages ?? []).filter(isRenderableRow), [messages]);
+  const mainRows = useMemo(() => rows.filter((m) => !m.isSidechain), [rows]);
 
   return (
     <div className={styles.page}>
@@ -336,64 +446,15 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
             {t("加载更早的消息")}
           </button>
         )}
-        {mainRows.map((msg, i) => {
-          if (msg.type === "user") {
-            const text = userText(msg);
-            if (!text) return null;
-            return (
-              <div key={i} className={styles.userRow}>
-                <div className={styles.userBubble}>{text}</div>
-                <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
-              </div>
-            );
-          }
-          // assistant: thinking / text / tool_use blocks in order
-          const blocks = blocksOf(msg);
-          if (blocks.length === 0) return null;
-          return (
-            <div key={i} className={styles.assistantRow}>
-              {blocks.map((b, j) => {
-                if (b.type === "thinking" && b.thinking?.trim()) {
-                  const key = i * 1000 + j;
-                  const open = expandedThinking.has(key);
-                  return (
-                    <div key={j} className={styles.thinkingBlock} data-open={open}>
-                      <button className={styles.thinkingToggle} onClick={() => toggleThinking(key)}>
-                        ✳ {t("思考")} {open ? "▾" : "▸"}
-                      </button>
-                      {open && <div className={styles.thinkingBody}>{b.thinking}</div>}
-                    </div>
-                  );
-                }
-                if (b.type === "text" && b.text?.trim()) {
-                  return (
-                    <div key={j} className={styles.markdown}>
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          a: ({ children }) => <span className={styles.mdLink}>{children}</span>,
-                        }}
-                      >
-                        {b.text}
-                      </ReactMarkdown>
-                    </div>
-                  );
-                }
-                if (b.type === "tool_use") {
-                  const summary = toolSummary(b);
-                  return (
-                    <div key={j} className={styles.toolChip}>
-                      <span className={styles.toolName}>{b.name}</span>
-                      {summary && <span className={styles.toolSummary}>{summary}</span>}
-                    </div>
-                  );
-                }
-                return null;
-              })}
-              <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
-            </div>
-          );
-        })}
+        {mainRows.map((msg, i) => (
+          <MessageRow
+            key={i}
+            msg={msg}
+            index={i}
+            expandedThinking={expandedThinking}
+            onToggleThinking={toggleThinking}
+          />
+        ))}
         {liveThinking && (
           <div className={styles.liveThinking}>
             <div className={styles.liveThinkingHead}>

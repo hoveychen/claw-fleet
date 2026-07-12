@@ -218,6 +218,15 @@
   text-decoration: underline;
 }
 
+/* Transient plain-text stand-in shown for off-screen rows until LazyMarkdown
+ * upgrades them to real markdown. pre-wrap keeps line breaks so the row's
+ * height barely shifts on upgrade, avoiding scroll jumps. */
+.mdPlaceholder {
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
 .toolChip {
   display: inline-flex;
   align-items: center;
