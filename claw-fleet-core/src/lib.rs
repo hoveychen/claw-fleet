@@ -44,6 +44,7 @@ pub mod mcp_ipc;
 pub mod mcp_a2ui_ipc;
 pub mod mcp_server;
 pub mod memory;
+pub mod mobile_relay;
 pub mod model_cost;
 pub mod openclaw_source;
 pub mod pattern_update;
