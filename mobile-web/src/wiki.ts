@@ -5,7 +5,7 @@
 // iframe — every relative asset reference (img/css/js/font) is fetched over the
 // relay and rewritten to a blob: URL so the doc looks the same as on desktop.
 
-import type { RelayClient } from "./relay";
+import { ASSET_REQUEST_TIMEOUT_MS, type RelayClient } from "./relay";
 import type { WikiDoc, WikiExportPayload, WikiFilePayload, WikiSearchHit } from "./types";
 
 export type {
@@ -154,11 +154,11 @@ export async function fetchWikiFile(
   version: string,
   relpath: string,
 ): Promise<{ mime: string; bytes: Uint8Array }> {
-  const { mime, base64 } = await client.request<WikiFilePayload>("wiki_file", {
-    slug,
-    version,
-    relpath,
-  });
+  const { mime, base64 } = await client.request<WikiFilePayload>(
+    "wiki_file",
+    { slug, version, relpath },
+    ASSET_REQUEST_TIMEOUT_MS,
+  );
   return { mime, bytes: base64ToBytes(base64) };
 }
 
