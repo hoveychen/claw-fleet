@@ -2842,6 +2842,9 @@ impl Backend for LocalBackend {
     }
 
     fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {
+        // Mirror into the process-wide slot so the mobile relay's
+        // `guard_analyze` follows the same provider choice.
+        crate::llm_provider::set_shared_config(config.clone());
         *self.llm_config.lock().unwrap() = config;
         Ok(())
     }

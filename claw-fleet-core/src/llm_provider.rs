@@ -52,6 +52,21 @@ impl Default for LlmConfig {
     }
 }
 
+/// Process-wide current config, for callers with no handle on the owning
+/// state (the mobile relay's `guard_analyze`). The desktop backend and the
+/// `fleet serve` `/llm/config` handler mirror their updates here; readers fall
+/// back to `LlmConfig::default()` until the first update — the same effective
+/// behavior both hosts already have at boot.
+static SHARED_CONFIG: std::sync::Mutex<Option<LlmConfig>> = std::sync::Mutex::new(None);
+
+pub fn set_shared_config(cfg: LlmConfig) {
+    *SHARED_CONFIG.lock().unwrap() = Some(cfg);
+}
+
+pub fn shared_config() -> LlmConfig {
+    SHARED_CONFIG.lock().unwrap().clone().unwrap_or_default()
+}
+
 // ── Trait ─────────────────────────────────────────────────────────────────────
 
 /// Real token + cost numbers as reported by the underlying provider.

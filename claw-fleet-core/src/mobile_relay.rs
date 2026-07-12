@@ -306,6 +306,21 @@ fn handle_answer(payload: &Value) -> Result<(), String> {
     match kind {
         "guard" => {
             let allow = payload.get("allow").and_then(Value::as_bool).ok_or("missing allow")?;
+            // "Always allow": persist the rule BEFORE writing the response file
+            // so a subsequent `fleet guard` for the same prefix already sees it
+            // (same order as the desktop panel and `/guard/respond`). Only
+            // honoured on allow — "Block + always allow" would be nonsensical.
+            if allow {
+                if let Some(rule) = payload
+                    .get("alwaysAllow")
+                    .cloned()
+                    .and_then(|v| serde_json::from_value::<crate::guard::GuardAlwaysAllow>(v).ok())
+                {
+                    if !rule.prefix.trim().is_empty() {
+                        crate::audit::add_guard_allow_rule(rule.prefix, rule.source_tag);
+                    }
+                }
+            }
             crate::guard::write_response(&crate::guard::GuardResponse {
                 id,
                 decision: if allow {
@@ -510,6 +525,37 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             }
             skill_history::sort_by_timestamp(&mut out);
             serde_json::to_value(out).map_err(|e| e.to_string())
+        }
+        // LLM risk analysis for a guard card (mirrors `/guard/analyze` and the
+        // desktop's `analyze_guard_command`). Synchronous up to 30s — fine, we
+        // run inside `spawn_blocking` so other frames keep flowing.
+        "guard_analyze" => {
+            let command =
+                params.get("command").and_then(Value::as_str).ok_or("missing command")?;
+            let context = params.get("context").and_then(Value::as_str).unwrap_or("");
+            let lang = params.get("lang").and_then(Value::as_str).unwrap_or("zh");
+            let risk_tags = crate::audit::classify_bash_command_pub(command)
+                .map(|(_, tags)| tags)
+                .unwrap_or_default();
+            let prompt = crate::guard::build_analysis_prompt(command, &risk_tags, context, lang);
+            let cfg = crate::llm_provider::shared_config();
+            if cfg.provider == "none" {
+                return Err("LLM provider is disabled".into());
+            }
+            let provider = crate::llm_provider::resolve_provider(&cfg.provider)
+                .ok_or("LLM provider not available")?;
+            if !provider.is_available() {
+                return Err(format!("{} CLI not found", provider.display_name()));
+            }
+            let analysis = crate::llm_usage::complete_accounted(
+                provider.as_ref(),
+                &prompt,
+                &cfg.fast_model,
+                Duration::from_secs(30),
+                crate::llm_usage::SCENARIO_GUARD_COMMAND,
+            )
+            .ok_or("LLM analysis timed out or failed")?;
+            Ok(json!({ "analysis": analysis }))
         }
         // ── Write methods ────────────────────────────────────────────────
         // All of these run inside `spawn_blocking` (see ws_connect_once), so
@@ -1358,6 +1404,64 @@ mod tests {
             let reply = request_raw("upload_attachment", json!({"name": "big.bin", "base64": b64}));
             assert_eq!(reply["ok"], false);
             assert!(reply["error"].as_str().unwrap().contains("too large"));
+        });
+    }
+
+    #[test]
+    fn answer_guard_always_allow_persists_rule() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("guard");
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "guard", "id": "g10",
+                "allow": true,
+                "alwaysAllow": { "prefix": "git push", "sourceTag": "eval-exec" }
+            }));
+            let v = read_json(&dir.join("g10.response.json"));
+            assert_eq!(v["decision"], "allow");
+            let rules = crate::audit::list_guard_allow_rules();
+            assert!(
+                rules.iter().any(|r| r.prefix == "git push"),
+                "always-allow rule must be persisted: {rules:?}"
+            );
+
+            // Block + alwaysAllow is nonsensical — must NOT persist a rule.
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "guard", "id": "g11",
+                "allow": false,
+                "alwaysAllow": { "prefix": "rm -rf" }
+            }));
+            let v = read_json(&dir.join("g11.response.json"));
+            assert_eq!(v["decision"], "block");
+            let rules = crate::audit::list_guard_allow_rules();
+            assert!(
+                !rules.iter().any(|r| r.prefix == "rm -rf"),
+                "block must not persist an allow rule: {rules:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn request_guard_analyze_respects_disabled_provider() {
+        with_temp_home(|| {
+            let prev = crate::llm_provider::shared_config();
+            crate::llm_provider::set_shared_config(crate::llm_provider::LlmConfig {
+                provider: "none".into(),
+                ..Default::default()
+            });
+            let reply = request_raw(
+                "guard_analyze",
+                json!({"command": "rm -rf /tmp/x", "context": "", "lang": "zh"}),
+            );
+            crate::llm_provider::set_shared_config(prev);
+            assert_eq!(reply["ok"], false);
+            assert!(
+                reply["error"].as_str().unwrap().contains("disabled"),
+                "must surface the disabled provider: {}",
+                reply["error"]
+            );
+
+            let reply = request_raw("guard_analyze", json!({}));
+            assert_eq!(reply["ok"], false, "missing command must fail");
         });
     }
 
