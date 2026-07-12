@@ -114,17 +114,44 @@ export function App() {
     setPush(await enablePush(clientRef.current));
   }, []);
 
+  // Optimistic read stamps: the server re-derives lastReadMs on its next scan,
+  // so until that push arrives we overlay the local click/dwell time.
+  const [localReadMs, setLocalReadMs] = useState<Record<string, number>>({});
+  const markRead = useCallback((items: SessionInfo[]) => {
+    if (items.length === 0) return;
+    clientRef.current
+      ?.request("session_read", {
+        items: items.map((s) => ({ sessionId: s.id, workspacePath: s.workspacePath })),
+      })
+      .catch(() => {});
+    const now = Date.now();
+    setLocalReadMs((prev) => {
+      const next = { ...prev };
+      for (const s of items) next[s.id] = now;
+      return next;
+    });
+  }, []);
+
+  const mergedSessions = useMemo(
+    () =>
+      sessions.map((s) => {
+        const local = localReadMs[s.id];
+        return local && local > (s.lastReadMs ?? 0) ? { ...s, lastReadMs: local } : s;
+      }),
+    [sessions, localReadMs],
+  );
+
   const workspaceOf = useMemo(() => {
     const map = new Map<string, SessionInfo>();
-    for (const s of sessions) map.set(s.id, s);
+    for (const s of mergedSessions) map.set(s.id, s);
     return (sessionId: string) => map.get(sessionId);
-  }, [sessions]);
+  }, [mergedSessions]);
 
   // The detail page re-derives its session from the live snapshot so status /
   // plan chips stay fresh while it is open.
   const detailSession = useMemo(
-    () => (detailSessionId ? sessions.find((s) => s.id === detailSessionId) ?? null : null),
-    [sessions, detailSessionId],
+    () => (detailSessionId ? mergedSessions.find((s) => s.id === detailSessionId) ?? null : null),
+    [mergedSessions, detailSessionId],
   );
 
   if (!secret) {
@@ -196,7 +223,12 @@ export function App() {
             onAnswered={(id) => setDecisions((prev) => prev.filter((d) => d.id !== id))}
           />
         ) : (
-          <TasksView sessions={sessions} onOpenSession={(s) => setDetailSessionId(s.id)} />
+          <TasksView
+            sessions={mergedSessions}
+            client={clientRef.current}
+            onOpenSession={(s) => setDetailSessionId(s.id)}
+            onMarkRead={markRead}
+          />
         )}
       </main>
 
@@ -205,6 +237,7 @@ export function App() {
           session={detailSession}
           client={clientRef.current}
           onBack={() => setDetailSessionId(null)}
+          onDwellRead={() => markRead([detailSession])}
         />
       )}
 
