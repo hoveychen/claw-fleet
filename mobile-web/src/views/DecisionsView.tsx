@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, ChevronDown, ChevronRight, Eye, Paperclip, Pencil, X } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { getLang, t } from "../i18n";
@@ -153,7 +154,8 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession
             onClick={() => onOpenSession(session.id)}
             aria-label={t("查看会话详情")}
           >
-            {t("会话")} ›
+            {t("会话")}
+            <ChevronRight size={13} />
           </button>
         )}
       </div>
@@ -496,7 +498,14 @@ function PlanCard({
           })
         }
       >
-        {editing ? t("放弃编辑") : t("✎ 编辑计划")}
+        {editing ? (
+          t("放弃编辑")
+        ) : (
+          <>
+            <Pencil size={13} />
+            {t("编辑计划")}
+          </>
+        )}
       </button>
       {rejecting && (
         <textarea
@@ -697,7 +706,17 @@ function PrecedingNarration({
   return (
     <div className={styles.preceding}>
       <button className={styles.precedingToggle} onClick={() => setExpanded((v) => !v)}>
-        {expanded ? t("▾ 收起提问前的说明") : t("▸ Agent 干活时还说了 {0} 段话", chunks.length)}
+        {expanded ? (
+          <>
+            <ChevronDown size={14} />
+            {t("收起提问前的说明")}
+          </>
+        ) : (
+          <>
+            <ChevronRight size={14} />
+            {t("Agent 干活时还说了 {0} 段话", chunks.length)}
+          </>
+        )}
       </button>
       {expanded && (
         <div className={styles.precedingBody}>
@@ -951,7 +970,7 @@ function QuestionsCard({
                     onClick={() => toggle(q, o.label)}
                   >
                     <span className={styles.optionMark} data-multi={effectiveMulti}>
-                      {selected ? "✓" : ""}
+                      {selected && <Check size={12} />}
                     </span>
                     <span className={styles.optionBody}>
                       <span className={styles.optionLabel}>{o.label}</span>
@@ -968,7 +987,7 @@ function QuestionsCard({
                         }
                         aria-label={t("预览此选项")}
                       >
-                        👁
+                        <Eye size={14} />
                       </button>
                     )}
                     <button
@@ -976,7 +995,7 @@ function QuestionsCard({
                       onClick={() => editToOther(q, o)}
                       aria-label={t("编辑此选项（复制到「其他」）")}
                     >
-                      ✎
+                      <Pencil size={14} />
                     </button>
                   </div>
                 </div>
@@ -999,7 +1018,7 @@ function QuestionsCard({
                   className={styles.optionMark}
                   data-multi={q.multiSelect || multiOverride[q.question] === true}
                 >
-                  {(selections[q.question] ?? []).includes(OTHER) ? "✓" : ""}
+                  {(selections[q.question] ?? []).includes(OTHER) && <Check size={12} />}
                 </span>
                 <span className={styles.optionBody}>
                   <span className={styles.optionLabel}>{t("其他…")}</span>
@@ -1113,7 +1132,7 @@ function QuestionAttachRow({
         <span key={a.path} className={styles.attachChip}>
           {a.name}
           <button className={styles.attachRemove} onClick={() => onRemove(a.path)}>
-            ×
+            <X size={12} />
           </button>
         </span>
       ))}
@@ -1122,7 +1141,14 @@ function QuestionAttachRow({
         disabled={uploading}
         onClick={() => inputRef.current?.click()}
       >
-        {uploading ? t("上传中…") : t("＋ 附件")}
+        {uploading ? (
+          t("上传中…")
+        ) : (
+          <>
+            <Paperclip size={13} />
+            {t("附件")}
+          </>
+        )}
       </button>
       <input
         ref={inputRef}
@@ -1207,7 +1233,7 @@ function FormFieldControl({
             onClick={() => onChange(value === "true" ? "false" : "true")}
           >
             <span className={styles.optionMark} data-multi={true}>
-              {value === "true" ? "✓" : ""}
+              {value === "true" && <Check size={12} />}
             </span>
             {field.label}
           </button>

@@ -31,10 +31,11 @@
 }
 
 .close {
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: none;
   color: var(--color-text-dim);
-  font-size: 22px;
   line-height: 1;
   padding: 0 4px;
 }
