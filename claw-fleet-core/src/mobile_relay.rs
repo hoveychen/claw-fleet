@@ -116,6 +116,12 @@ pub struct MobileRelayStatus {
     pub secret_set: bool,
 }
 
+/// Cheap connectivity probe so callers can skip serialization work while the
+/// relay is down.
+pub fn is_connected() -> bool {
+    CONNECTED.load(Ordering::SeqCst)
+}
+
 pub fn status() -> MobileRelayStatus {
     let cfg = load_config();
     MobileRelayStatus {
@@ -217,13 +223,168 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
     }
 }
 
-fn handle_answer(_payload: &Value) -> Result<(), String> {
-    Err("not implemented".into())
+/// Route a mobile answer into the same `write_response()` files the desktop
+/// panel and Feishu write — the waiting hook/MCP subprocess polls these and
+/// unblocks (see `feishu.rs::handle_card_action` for the sibling path).
+fn handle_answer(payload: &Value) -> Result<(), String> {
+    let kind = payload.get("kind").and_then(Value::as_str).ok_or("missing kind")?;
+    let id = payload
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or("missing id")?
+        .to_string();
+    let str_field = |key: &str| -> Option<String> {
+        payload.get(key).and_then(Value::as_str).map(str::to_string).filter(|s| !s.is_empty())
+    };
+    match kind {
+        "guard" => {
+            let allow = payload.get("allow").and_then(Value::as_bool).ok_or("missing allow")?;
+            crate::guard::write_response(&crate::guard::GuardResponse {
+                id,
+                decision: if allow {
+                    crate::guard::GuardDecision::Allow
+                } else {
+                    crate::guard::GuardDecision::Block
+                },
+                reason: str_field("reason"),
+            })
+        }
+        "elicitation" => {
+            let answers: std::collections::HashMap<String, String> = payload
+                .get("answers")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|e| format!("bad answers: {e}"))?
+                .unwrap_or_default();
+            crate::elicitation::write_response(&crate::elicitation::ElicitationResponse {
+                id,
+                declined: payload.get("declined").and_then(Value::as_bool).unwrap_or(false),
+                answers,
+            })
+        }
+        "fleet-ask" => {
+            let answers: std::collections::BTreeMap<String, String> = payload
+                .get("answers")
+                .cloned()
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|e| format!("bad answers: {e}"))?
+                .unwrap_or_default();
+            crate::mcp_ipc::write_response(&crate::mcp_ipc::FleetAskResponse {
+                id,
+                answers,
+                cancelled: payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false),
+            })
+        }
+        "plan-approval" => {
+            let decision = str_field("decision").ok_or("missing decision")?;
+            crate::plan_approval::write_response(&crate::plan_approval::PlanApprovalResponse {
+                id,
+                decision,
+                edited_plan: str_field("editedPlan"),
+                feedback: str_field("feedback"),
+            })
+        }
+        "permission-prompt" => {
+            let allow = payload.get("allow").and_then(Value::as_bool).ok_or("missing allow")?;
+            crate::permission_prompt_ipc::write_response(
+                &crate::permission_prompt_ipc::PermissionPromptResponse {
+                    id,
+                    decision: if allow {
+                        crate::permission_prompt_ipc::PermissionPromptDecision::Allow
+                    } else {
+                        crate::permission_prompt_ipc::PermissionPromptDecision::Deny
+                    },
+                    reason: str_field("reason"),
+                },
+            )
+        }
+        other => Err(format!("unknown decision kind: {other}")),
+    }
 }
 
+/// Serve a data request from a mobile client. Always returns a `reply`
+/// payload carrying the same `req_id` so the client can match it up.
 fn handle_request(payload: &Value) -> Value {
     let req_id = payload.get("req_id").cloned().unwrap_or(Value::Null);
-    json!({ "event": "reply", "req_id": req_id, "ok": false, "error": "not implemented" })
+    let method = payload.get("method").and_then(Value::as_str).unwrap_or("");
+    let params = payload.get("params").cloned().unwrap_or(Value::Null);
+    match serve_request(method, &params) {
+        Ok(data) => json!({ "event": "reply", "req_id": req_id, "ok": true, "data": data }),
+        Err(e) => json!({ "event": "reply", "req_id": req_id, "ok": false, "error": e }),
+    }
+}
+
+fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
+    match method {
+        // Same aggregation as `LocalBackend::list_pending_decisions`, minus
+        // the session-cache display enrichment — the mobile client resolves
+        // workspace/title labels from its own `sessions` snapshot.
+        "pending_snapshot" => {
+            let read_all = |ids: Vec<String>, read: &dyn Fn(&str) -> Option<Value>| -> Vec<Value> {
+                ids.iter().filter_map(|id| read(id)).collect()
+            };
+            Ok(json!({
+                "guard": read_all(crate::guard::list_pending_requests(), &|id| {
+                    crate::guard::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+                }),
+                "elicitation": read_all(crate::elicitation::list_pending_requests(), &|id| {
+                    crate::elicitation::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+                }),
+                "fleetAsk": read_all(crate::mcp_ipc::list_pending_requests(), &|id| {
+                    crate::mcp_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+                }),
+                "planApproval": read_all(crate::plan_approval::list_pending_requests(), &|id| {
+                    crate::plan_approval::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+                }),
+                "permissionPrompt": read_all(
+                    crate::permission_prompt_ipc::list_pending_requests(),
+                    &|id| {
+                        crate::permission_prompt_ipc::read_request(id)
+                            .and_then(|r| serde_json::to_value(r).ok())
+                    },
+                ),
+            }))
+        }
+        "task_plans" => {
+            let workspace = params
+                .get("workspacePath")
+                .and_then(Value::as_str)
+                .ok_or("missing workspacePath")?;
+            let session_id = params.get("sessionId").and_then(Value::as_str);
+            let plans =
+                crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace), session_id);
+            serde_json::to_value(plans).map_err(|e| e.to_string())
+        }
+        "session_decisions" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or("missing sessionId")?;
+            let jsonl = params.get("jsonlPath").and_then(Value::as_str).map(std::path::Path::new);
+            let records =
+                crate::decision_history::list_session_records_with_jsonl(session_id, jsonl);
+            serde_json::to_value(records).map_err(|e| e.to_string())
+        }
+        "decision_asset" => {
+            use base64::Engine as _;
+            let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+            let qidx = params.get("qidx").and_then(Value::as_str).ok_or("missing qidx")?;
+            let rel = params.get("rel").and_then(Value::as_str).ok_or("missing rel")?;
+            let asset = crate::mcp_ipc::read_decision_asset(id, qidx, rel)?;
+            const MAX_ASSET_BYTES: usize = 2 * 1024 * 1024;
+            if asset.bytes.len() > MAX_ASSET_BYTES {
+                return Err(format!("asset too large: {} bytes", asset.bytes.len()));
+            }
+            Ok(json!({
+                "mime": asset.mime,
+                "base64": base64::engine::general_purpose::STANDARD.encode(&asset.bytes),
+            }))
+        }
+        other => Err(format!("unknown method: {other}")),
+    }
 }
 
 // ── WebSocket client (mirrors feishu.rs's ensure_ws_client/ws_run_loop) ─────
@@ -453,6 +614,122 @@ mod tests {
         assert_eq!(ws_url("https://relay.example.com"), "wss://relay.example.com/ws");
         assert_eq!(ws_url("https://relay.example.com/"), "wss://relay.example.com/ws");
         assert_eq!(ws_url("http://127.0.0.1:18080"), "ws://127.0.0.1:18080/ws");
+    }
+
+    fn fleet_subdir(name: &str) -> PathBuf {
+        let d = crate::session::get_fleet_dir().unwrap().join(name);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn read_json(p: &std::path::Path) -> Value {
+        let raw = fs::read_to_string(p)
+            .unwrap_or_else(|e| panic!("expected response file at {}: {e}", p.display()));
+        serde_json::from_str(&raw).unwrap()
+    }
+
+    #[test]
+    fn answer_guard_writes_response_file() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("guard");
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "guard", "id": "g1",
+                "allow": false, "reason": "危险命令"
+            }));
+            let v = read_json(&dir.join("g1.response.json"));
+            assert_eq!(v["decision"], "block");
+            assert_eq!(v["reason"], "危险命令");
+
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "guard", "id": "g2", "allow": true
+            }));
+            let v = read_json(&dir.join("g2.response.json"));
+            assert_eq!(v["decision"], "allow");
+        });
+    }
+
+    #[test]
+    fn answer_elicitation_writes_response_file() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("elicitation");
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "elicitation", "id": "e1",
+                "declined": false,
+                "answers": { "选哪个？": "方案 A" }
+            }));
+            let v = read_json(&dir.join("e1.response.json"));
+            assert_eq!(v["declined"], false);
+            assert_eq!(v["answers"]["选哪个？"], "方案 A");
+        });
+    }
+
+    #[test]
+    fn answer_fleet_ask_writes_response_file() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("fleet-ask");
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "fleet-ask", "id": "f1",
+                "cancelled": false,
+                "answers": { "q": "opt", "field_a": "42" }
+            }));
+            let v = read_json(&dir.join("f1.response.json"));
+            assert_eq!(v["cancelled"], false);
+            assert_eq!(v["answers"]["field_a"], "42");
+        });
+    }
+
+    #[test]
+    fn answer_plan_approval_writes_response_file() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("plan-approval");
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "plan-approval", "id": "p1",
+                "decision": "reject", "feedback": "改一下再来"
+            }));
+            let v = read_json(&dir.join("p1.response.json"));
+            assert_eq!(v["decision"], "reject");
+            assert_eq!(v["feedback"], "改一下再来");
+        });
+    }
+
+    #[test]
+    fn answer_permission_prompt_writes_response_file() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("permission-prompt");
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "permission-prompt", "id": "pp1",
+                "allow": true
+            }));
+            let v = read_json(&dir.join("pp1.response.json"));
+            assert_eq!(v["decision"], "allow");
+        });
+    }
+
+    #[test]
+    fn request_pending_snapshot_returns_reply() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("guard");
+            fs::write(
+                dir.join("g9.json"),
+                serde_json::to_string(&json!({
+                    "id": "g9", "sessionId": "s1", "workspaceName": "demo",
+                    "toolName": "Bash", "command": "rm -rf /tmp/x",
+                    "commandSummary": "rm", "riskTags": [], "timestamp": "2026-07-12T10:00:00Z"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+            let reply = handle_client_payload(&json!({
+                "event": "req", "req_id": "r1", "method": "pending_snapshot"
+            }))
+            .expect("pending_snapshot must produce a reply");
+            assert_eq!(reply["event"], "reply");
+            assert_eq!(reply["req_id"], "r1");
+            assert_eq!(reply["ok"], true);
+            let guards = reply["data"]["guard"].as_array().expect("guard list");
+            assert_eq!(guards.len(), 1);
+            assert_eq!(guards[0]["id"], "g9");
+        });
     }
 
     #[test]
