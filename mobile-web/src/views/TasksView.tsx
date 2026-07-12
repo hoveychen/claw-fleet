@@ -5,7 +5,6 @@ import {
   Clock,
   Folder,
   Inbox,
-  Plus,
   Search,
   SearchX,
   Share2,
@@ -92,11 +91,10 @@ interface Props {
   client: RelayClient | null;
   onOpenSession: (session: SessionInfo) => void;
   onMarkRead: (sessions: SessionInfo[]) => void;
-  /** 新会话 sheet 由 App（底部导航中间的按钮）统一持有。 */
-  onNewSession: () => void;
 }
 
-export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSession }: Props) {
+// 新会话入口由 App 底部导航中间的凸起按钮统一持有，任务页内不再重复放置。
+export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props) {
   const [search, setSearch] = useState("");
   const [workspace, setWorkspace] = useState<string>("");
   const [activeOnly, setActiveOnly] = useState(false);
@@ -277,10 +275,6 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead, onNewSe
             <span className={styles.activeDot} />
             {t("仅活跃")}
             <span className={styles.activeCount}>{activeCount}</span>
-          </button>
-          <button className={styles.newSession} onClick={onNewSession}>
-            <Plus size={14} />
-            {t("新会话")}
           </button>
           {unreadCount > 0 && (
             <button
