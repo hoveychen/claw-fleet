@@ -424,6 +424,7 @@ mod tests {
             pid: None,
             pid_precise: false,
             proc_alive: false,
+            pending_tool_batch: false,
             last_skill: None,
             context_percent: None,
             agent_source: "claude-code".into(),

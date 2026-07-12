@@ -903,6 +903,7 @@ fn build_session_from_sqlite(
         pid_precise,
         // Codex sessions are never Fleet-spawned, so no argv carries their id.
         proc_alive: false,
+        pending_tool_batch: false,
         last_skill: None,
         context_percent,
         agent_source: "codex".to_string(),
@@ -1182,6 +1183,7 @@ fn parse_codex_session(
         pid_precise,
         // Codex sessions are never Fleet-spawned, so no argv carries their id.
         proc_alive: false,
+        pending_tool_batch: false,
         last_skill: None,
         context_percent,
         agent_source: "codex".to_string(),

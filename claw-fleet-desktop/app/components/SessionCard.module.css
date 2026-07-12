@@ -154,6 +154,9 @@
 .badge_delegating  { color: var(--badge-delegating-fg); }
 .badge_idle        { color: var(--color-text-dim); }
 .badge_rateLimited { color: #b91c1c; }
+/* Wedged mid tool-batch. Orange-red keeps it distinct from the darker
+   rate-limit red — a different failure that needs a different action (⎋). */
+.badge_stuck       { color: #ea580c; font-weight: 600; }
 
 .rate_limit_countdown {
   display: inline-flex;

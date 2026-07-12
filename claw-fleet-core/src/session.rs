@@ -41,6 +41,10 @@ pub enum SessionStatus {
     Idle,         // no recent activity
     RateLimited,  // last assistant message was isApiErrorMessage + error=rate_limit;
                   // details (resets_at, limit_type) live on SessionInfo.rate_limit
+    Stuck,        // Fleet-spawned, process alive, but wedged mid tool-use batch:
+                  // a non-interactive tool_use has been missing its tool_result
+                  // for minutes (STUCK_TOOL_BATCH_FLOOR_SECS). The turn is
+                  // deadlocked — SIGINT (interrupt_pid) unblocks it, resumable.
 }
 
 /// Populated when `SessionStatus::RateLimited`. Carries the information needed
@@ -111,6 +115,13 @@ pub struct SessionInfo {
     /// alive, parked on a decision card" (resuming would race a live turn).
     #[serde(default)]
     pub proc_alive: bool,
+    /// True when the most recent assistant tool_use batch has a non-interactive
+    /// tool whose `tool_result` never arrived (see
+    /// [`has_pending_noninteractive_tool_batch`]). Computed at parse time and
+    /// carried across cache hits; `apply_pid_liveness` combines it with
+    /// `proc_alive` + an age floor to promote the status to `Stuck`.
+    #[serde(default)]
+    pub pending_tool_batch: bool,
     pub last_skill: Option<String>,
     /// Approximate context-window utilisation (0.0 – 1.0) derived from the
     /// last finalized assistant message's usage fields.  `None` when no
@@ -921,6 +932,100 @@ fn is_last_meaningful_an_interrupt(last_lines: &[Value]) -> bool {
                     | Some("[Request interrupted by user for tool use]")
             )
     })
+}
+
+/// Minutes-scale floor below which an unresolved tool batch is NOT treated as
+/// stuck. Must be far longer than any real single tool round-trip (a WebFetch,
+/// a Bash build, a WebSearch) so a merely-slow tool never trips it; it exists to
+/// catch a batch that has been frozen for many minutes with a live process
+/// behind it. Also longer than a typical subagent run to blunt the `Agent`
+/// false-positive noted on [`has_pending_noninteractive_tool_batch`].
+pub const STUCK_TOOL_BATCH_FLOOR_SECS: f64 = 1200.0; // 20 minutes
+
+/// Tools that legitimately keep a turn open indefinitely while blocked on the
+/// user — a decision card or a permission prompt. An unresolved `tool_use` for
+/// one of these is a normal wait, never a deadlock, so it must NOT count toward
+/// stuck detection.
+fn is_interactive_wait_tool(name: &str) -> bool {
+    name == "AskUserQuestion"
+        || name == "ExitPlanMode"
+        || name.ends_with("__ask") // mcp__fleet__fleet__ask
+        || name.contains("permission") // mcp__fleet__fleet__permission_prompt
+}
+
+/// Detects a turn wedged mid tool-batch: the most recent assistant message that
+/// issued `tool_use` blocks has at least one block whose `tool_use_id` never
+/// received a matching `tool_result` in the records that follow it, AND that
+/// unresolved block is a *non-interactive* tool.
+///
+/// This is the signal the plain status machine lacks. [`determine_status`] only
+/// inspects the last user/assistant record's type + age, so a batch left one
+/// result short — one tool hung and never wrote its `tool_result` (e.g. a
+/// `WebFetch` whose timeout never fired) — reads as an ordinary quiet session.
+/// The Anthropic Messages API requires every `tool_use_id` in a batch to have a
+/// `tool_result` before the model is re-invoked, so such a session is deadlocked
+/// inside the turn: the model never resumes and there is nothing to wake.
+///
+/// Pure over `last_lines`; the `proc_alive` + age-floor gate lives at the call
+/// site ([`apply_pid_liveness`]).
+///
+/// Caveat: a legitimately long-running subagent (an `Agent` tool_use) also
+/// presents as an unresolved batch while it runs. [`STUCK_TOOL_BATCH_FLOOR_SECS`]
+/// (minutes, far longer than any real tool round-trip) is what keeps that from
+/// flagging in the common case.
+fn has_pending_noninteractive_tool_batch(last_lines: &[Value]) -> bool {
+    let msg_blocks = |v: &Value| -> Option<Vec<Value>> {
+        v.get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_array())
+            .cloned()
+    };
+
+    // Index of the last assistant message carrying >=1 tool_use block.
+    let Some(asst_idx) = last_lines.iter().rposition(|v| {
+        v.get("type").and_then(|t| t.as_str()) == Some("assistant")
+            && msg_blocks(v).is_some_and(|blocks| {
+                blocks
+                    .iter()
+                    .any(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+            })
+    }) else {
+        return false;
+    };
+
+    // (tool_use_id, tool_name) issued by that assistant message.
+    let issued: Vec<(String, String)> = msg_blocks(&last_lines[asst_idx])
+        .unwrap_or_default()
+        .iter()
+        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("tool_use"))
+        .filter_map(|b| {
+            let id = b.get("id").and_then(|i| i.as_str())?.to_string();
+            let name = b.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+            Some((id, name))
+        })
+        .collect();
+    if issued.is_empty() {
+        return false;
+    }
+
+    // tool_use_ids resolved by any tool_result in the records AFTER the batch.
+    let mut resolved: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for v in &last_lines[asst_idx + 1..] {
+        if let Some(blocks) = msg_blocks(v) {
+            for b in &blocks {
+                if b.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                    if let Some(id) = b.get("tool_use_id").and_then(|i| i.as_str()) {
+                        resolved.insert(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Stuck iff some issued tool_use is unresolved AND non-interactive.
+    issued
+        .iter()
+        .any(|(id, name)| !resolved.contains(id) && !is_interactive_wait_tool(name))
 }
 
 fn determine_status(
@@ -2165,6 +2270,9 @@ pub fn parse_session_info(
     } else {
         determine_status(&last_n, file_age_secs, content_age_secs, hook_state)
     };
+    // Raw (age-unaware) signal for stuck detection; the age floor + proc_alive
+    // gate is applied later in `apply_pid_liveness`.
+    let pending_tool_batch = has_pending_noninteractive_tool_batch(&last_n);
     let stats = acc.stats();
     let context_percent = acc
         .context_usage()
@@ -2224,6 +2332,7 @@ pub fn parse_session_info(
         // Stamped by `apply_pid_liveness` right after this returns — the parse
         // itself has no view of the process table.
         proc_alive: false,
+        pending_tool_batch,
         context_percent,
         last_skill,
         agent_source: "claude-code".to_string(),
@@ -2376,6 +2485,7 @@ pub fn apply_pid_liveness(
     info: &mut SessionInfo,
     exact_proc_alive: bool,
     hook_state: Option<&HookState>,
+    age_secs: f64,
 ) {
     // Stamped for every session (subagents included, where it is always false):
     // the UI needs the raw liveness bit, not just the status it feeds into.
@@ -2387,6 +2497,19 @@ pub fn apply_pid_liveness(
         return;
     }
     if exact_proc_alive {
+        // Deadlock guard: a live Fleet-spawned process whose transcript froze
+        // mid tool-batch is wedged inside the turn — the model can't resume
+        // until every tool_use_id has a tool_result, and one never came. Left
+        // alone, the ToolExecuting-hook / Idle-promote logic below would keep
+        // painting it as busy forever (the exact masking that hid a 1.5h hang).
+        // Override to Stuck so the UI can surface a one-click interrupt.
+        if info.pending_tool_batch && age_secs >= STUCK_TOOL_BATCH_FLOOR_SECS {
+            info.status = SessionStatus::Stuck;
+            info.token_speed = 0.0;
+            info.agent_token_speed = 0.0;
+            info.cost_speed_usd_per_min = 0.0;
+            return;
+        }
         if info.status == SessionStatus::Idle {
             info.status = match hook_state {
                 Some(HookState::ToolExecuting) => SessionStatus::Executing,
@@ -2595,7 +2718,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                 // Try session cache first (skip re-reading unchanged files).
                 if let Some((mut info, age)) = check_session_cache(&path, &session_cache_snapshot) {
                     age_out_status(&mut info, age);
-                    apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
+                    apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id), age);
                     info.background_tasks = hook_snapshot
                         .background_tasks
                         .get(&session_id)
@@ -2630,7 +2753,11 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
                         hook_states.get(&session_id),
                         prev_incr,
                     ) {
-                        apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id));
+                        // Cache-miss = the transcript just changed, so it is not
+                        // frozen; pass age 0 so a freshly-written turn is never
+                        // misread as stuck. Stuck only fires on the cache-hit path
+                        // above, where `age` reflects a genuinely quiet file.
+                        apply_pid_liveness(&mut info, exact_proc_alive, hook_states.get(&session_id), 0.0);
                         info.background_tasks = hook_snapshot
                             .background_tasks
                             .get(&session_id)
@@ -2959,6 +3086,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         pid: None,
         pid_precise: false,
         proc_alive: false,
+        pending_tool_batch: false,
         last_skill: None,
         context_percent: None,
         agent_source: "claude-code".into(),
@@ -3265,6 +3393,7 @@ mod tests {
             pid: None,
             pid_precise: false,
             proc_alive: false,
+            pending_tool_batch: false,
             last_skill: None,
             context_percent: None,
             agent_source: "claude-code".into(),
@@ -3310,6 +3439,100 @@ mod tests {
     /// `determine_status` directly with distinct values.
     fn ds(lines: &[Value], age: f64, hook: Option<&HookState>) -> SessionStatus {
         determine_status(lines, age, age, hook)
+    }
+
+    // ── stuck tool-batch detection ───────────────────────────────────────────
+
+    fn tool_use_block_id(name: &str, id: &str) -> Value {
+        json!({"type": "tool_use", "name": name, "id": id, "input": {}})
+    }
+
+    fn tool_result_msg(id: &str) -> Value {
+        json!({
+            "type": "user",
+            "message": {
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": id, "content": "ok"}]
+            }
+        })
+    }
+
+    #[test]
+    fn stuck_batch_all_resolved_is_false() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![tool_use_block_id("WebFetch", "t1"), tool_use_block_id("WebFetch", "t2")],
+                None,
+            ),
+            tool_result_msg("t1"),
+            tool_result_msg("t2"),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_missing_noninteractive_result_is_true() {
+        // Mirrors the real incident: Agent + 2 WebFetch issued, one WebFetch
+        // never returns its tool_result.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![
+                    tool_use_block_id("Agent", "agent1"),
+                    tool_use_block_id("WebFetch", "wf_hung"),
+                    tool_use_block_id("WebFetch", "wf_ok"),
+                ],
+                None,
+            ),
+            tool_result_msg("wf_ok"),
+            tool_result_msg("agent1"),
+        ];
+        assert!(has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_only_askuserquestion_pending_is_false() {
+        // A parked decision card is a legitimate user-wait, not a deadlock.
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![tool_use_block_id("AskUserQuestion", "ask1")], None),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_only_permission_prompt_pending_is_false() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(
+                vec![tool_use_block_id("mcp__fleet__fleet__permission_prompt", "perm1")],
+                None,
+            ),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_no_tool_use_is_false() {
+        let lines = vec![
+            user_msg(),
+            assistant_msg(vec![text_block("just talking")], Some("end_turn")),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&lines));
+    }
+
+    #[test]
+    fn stuck_batch_uses_latest_batch_only() {
+        // An earlier fully-resolved batch must not mask a later stuck one, and a
+        // later fully-resolved batch must clear an earlier stuck-looking one.
+        let earlier_stuck_later_ok = vec![
+            assistant_msg(vec![tool_use_block_id("WebFetch", "old_hung")], None),
+            // no result for old_hung, but a NEW batch supersedes it, fully resolved
+            assistant_msg(vec![tool_use_block_id("Bash", "new1")], None),
+            tool_result_msg("new1"),
+        ];
+        assert!(!has_pending_noninteractive_tool_batch(&earlier_stuck_later_ok));
     }
 
     #[test]
@@ -4466,7 +4689,7 @@ mod tests {
             SessionStatus::Active,
         ] {
             let mut s = make_launchpad_session(status.clone());
-            apply_pid_liveness(&mut s, false, None);
+            apply_pid_liveness(&mut s, false, None, 0.0);
             assert_eq!(s.status, SessionStatus::Idle, "from {status:?}");
             assert_eq!(s.token_speed, 0.0);
         }
@@ -4477,7 +4700,7 @@ mod tests {
         // Normal end-of-turn: the -p process exits, the session waits for a
         // follow-up. That's WaitingInput, not a ghost — leave it alone.
         let mut s = make_launchpad_session(SessionStatus::WaitingInput);
-        apply_pid_liveness(&mut s, false, None);
+        apply_pid_liveness(&mut s, false, None, 0.0);
         assert_eq!(s.status, SessionStatus::WaitingInput);
     }
 
@@ -4488,16 +4711,16 @@ mod tests {
         // card". `proc_alive` is what separates them, so it must be stamped on
         // every session, including ones this function returns early on.
         let mut dead = make_launchpad_session(SessionStatus::WaitingInput);
-        apply_pid_liveness(&mut dead, false, None);
+        apply_pid_liveness(&mut dead, false, None, 0.0);
         assert!(!dead.proc_alive);
 
         let mut alive = make_launchpad_session(SessionStatus::WaitingInput);
-        apply_pid_liveness(&mut alive, true, None);
+        apply_pid_liveness(&mut alive, true, None, 0.0);
         assert!(alive.proc_alive);
 
         let mut sub = make_launchpad_session(SessionStatus::WaitingInput);
         sub.is_subagent = true;
-        apply_pid_liveness(&mut sub, false, None);
+        apply_pid_liveness(&mut sub, false, None, 0.0);
         assert!(!sub.proc_alive);
     }
 
@@ -4506,16 +4729,74 @@ mod tests {
         // Blocked on a decision card for 20 minutes: age heuristics decayed
         // the status to Idle, but the process is provably alive and mid-turn.
         let mut s = make_launchpad_session(SessionStatus::Idle);
-        apply_pid_liveness(&mut s, true, None);
+        apply_pid_liveness(&mut s, true, None, 0.0);
         assert_eq!(s.status, SessionStatus::WaitingInput);
 
         let mut s = make_launchpad_session(SessionStatus::Idle);
-        apply_pid_liveness(&mut s, true, Some(&HookState::ToolExecuting));
+        apply_pid_liveness(&mut s, true, Some(&HookState::ToolExecuting), 0.0);
         assert_eq!(s.status, SessionStatus::Executing);
 
         let mut s = make_launchpad_session(SessionStatus::Idle);
-        apply_pid_liveness(&mut s, true, Some(&HookState::ModelProcessing));
+        apply_pid_liveness(&mut s, true, Some(&HookState::ModelProcessing), 0.0);
         assert_eq!(s.status, SessionStatus::Thinking);
+    }
+
+    #[test]
+    fn pid_liveness_stuck_batch_over_floor_becomes_stuck() {
+        // Live Fleet process, transcript frozen mid-batch past the floor: the
+        // deadlock this whole feature exists to surface. Must win even over the
+        // ToolExecuting hook that would otherwise pin the card to Executing.
+        let mut s = make_launchpad_session(SessionStatus::Executing);
+        s.pending_tool_batch = true;
+        apply_pid_liveness(
+            &mut s,
+            true,
+            Some(&HookState::ToolExecuting),
+            STUCK_TOOL_BATCH_FLOOR_SECS + 1.0,
+        );
+        assert_eq!(s.status, SessionStatus::Stuck);
+        assert_eq!(s.token_speed, 0.0);
+    }
+
+    #[test]
+    fn pid_liveness_stuck_batch_below_floor_stays_normal() {
+        // Same incomplete batch but only briefly quiet — a merely-slow tool, not
+        // a deadlock. Leave the normal promote/keep behaviour intact.
+        let mut s = make_launchpad_session(SessionStatus::Executing);
+        s.pending_tool_batch = true;
+        apply_pid_liveness(
+            &mut s,
+            true,
+            Some(&HookState::ToolExecuting),
+            STUCK_TOOL_BATCH_FLOOR_SECS - 60.0,
+        );
+        assert_ne!(s.status, SessionStatus::Stuck);
+        assert_eq!(s.status, SessionStatus::Executing);
+    }
+
+    #[test]
+    fn pid_liveness_stuck_needs_live_process() {
+        // A dead process is not "stuck" — it's just gone; the working-status
+        // downgrade owns it. Stuck implies a live process worth interrupting.
+        let mut s = make_launchpad_session(SessionStatus::Executing);
+        s.pending_tool_batch = true;
+        apply_pid_liveness(&mut s, false, None, STUCK_TOOL_BATCH_FLOOR_SECS + 1.0);
+        assert_eq!(s.status, SessionStatus::Idle);
+    }
+
+    #[test]
+    fn pid_liveness_stuck_only_for_fleet_spawned() {
+        // Non-launchpad sessions (plain CLI/VS Code) return early — Fleet can't
+        // safely interrupt a process it didn't spawn, so never flag them Stuck.
+        let mut s = make_session(SessionStatus::Executing); // no NEW_SESSION entrypoint
+        s.pending_tool_batch = true;
+        apply_pid_liveness(
+            &mut s,
+            true,
+            Some(&HookState::ToolExecuting),
+            STUCK_TOOL_BATCH_FLOOR_SECS + 1.0,
+        );
+        assert_ne!(s.status, SessionStatus::Stuck);
     }
 
     #[test]
@@ -4523,7 +4804,7 @@ mod tests {
         // A fine-grained status derived from a fresh transcript wins over the
         // coarse pid signal — only decayed-to-Idle gets re-promoted.
         let mut s = make_launchpad_session(SessionStatus::Streaming);
-        apply_pid_liveness(&mut s, true, None);
+        apply_pid_liveness(&mut s, true, None, 0.0);
         assert_eq!(s.status, SessionStatus::Streaming);
     }
 
@@ -4532,12 +4813,12 @@ mod tests {
         // IDE / terminal sessions never carry their id in argv, so process
         // absence proves nothing — the age heuristics stay authoritative.
         let mut s = make_session(SessionStatus::Thinking);
-        apply_pid_liveness(&mut s, false, None);
+        apply_pid_liveness(&mut s, false, None, 0.0);
         assert_eq!(s.status, SessionStatus::Thinking);
 
         let mut s = make_launchpad_session(SessionStatus::Thinking);
         s.is_subagent = true;
-        apply_pid_liveness(&mut s, false, None);
+        apply_pid_liveness(&mut s, false, None, 0.0);
         assert_eq!(s.status, SessionStatus::Thinking);
     }
 
