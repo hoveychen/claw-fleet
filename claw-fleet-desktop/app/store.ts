@@ -45,7 +45,7 @@ export async function openSettingsWindow(): Promise<void> {
 // ── Theme store ───────────────────────────────────────────────────────────────
 
 export type Theme = "dark" | "light" | "system";
-export type ViewMode = "list" | "gallery" | "history" | "audit" | "report" | "memory" | "wiki" | "skills" | "plugins" | "files";
+export type ViewMode = "list" | "gallery" | "history" | "audit" | "report" | "memory" | "wiki" | "skills" | "plugins" | "files" | "mobile";
 export type SessionViewMode = Extract<ViewMode, "list" | "gallery">;
 /** 启动台's segmented mark filter. "all" shows every bucket. */
 export type MarkFilter = "all" | "pending" | "done";

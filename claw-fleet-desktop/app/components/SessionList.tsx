@@ -19,6 +19,7 @@ import { ReportView } from "./report/ReportView";
 import { SkillsView } from "./SkillsView";
 import { FilesView } from "./FilesView";
 import { PluginsView } from "./PluginsView";
+import { MobileView } from "./MobileView";
 import { SessionCard } from "./SessionCard";
 import { SessionToolbar } from "./SessionToolbar";
 import { HistoryView } from "./HistoryView";
@@ -340,6 +341,13 @@ export function SessionList() {
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_plugins")}</span>
           </button>
+          <button
+            className={`${styles.nav_item} ${viewMode === "mobile" ? styles.nav_active : ""}`}
+            onClick={() => navTo("mobile")}
+          >
+            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="1.5" width="8" height="13" rx="1.6"/><line x1="7" y1="12.5" x2="9" y2="12.5"/></svg></span>
+            <span className={styles.nav_label}>{t("view_mobile", "移动端")}</span>
+          </button>
         </nav>
 
         <div className={styles.separator} />
@@ -465,6 +473,8 @@ export function SessionList() {
         <FilesView />
       ) : viewMode === "plugins" ? (
         <PluginsView />
+      ) : viewMode === "mobile" ? (
+        <MobileView />
       ) : (
         <ReportView />
       )}
