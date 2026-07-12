@@ -65,12 +65,17 @@ body {
   font-size: 15px;
   line-height: 1.5;
   overscroll-behavior-y: none;
+  /* 锁双指/双击缩放：Chrome 48+ 起有意忽略 <meta user-scalable=no / maximum-scale>
+     以保留无障碍缩放，唯有 touch-action 不受该豁免。pan-x pan-y 保留纵横滚动，
+     仅排除 pinch-zoom 与 double-tap-zoom。 */
+  touch-action: pan-x pan-y;
 }
 
 #root {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  touch-action: pan-x pan-y;
 }
 
 button {
