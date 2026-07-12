@@ -560,6 +560,44 @@ function QuestionsCard({
     return init;
   });
   const [error, setError] = useState<string | null>(null);
+  // Stepped wizard over 2+ questions, mirroring the desktop panel.
+  const [step, setStep] = useState(0);
+  // `${question} ${label}` → preview expanded before selection.
+  const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
+
+  /** Desktop `hasAnswer`: option / custom text / attachment / form-only,
+   *  with required form fields filled. Gates Next/Submit instead of erroring
+   *  after the fact. */
+  const answeredQuestion = (q: ElicitationQuestion | FleetAskQuestion): boolean => {
+    const hasOptions = (q.options?.length ?? 0) > 0;
+    const sel = selections[q.question] ?? [];
+    const picked = sel.filter((l) => l !== OTHER);
+    const customActive = !hasOptions || sel.includes(OTHER);
+    const customText = customActive ? (custom[q.question] ?? "").trim() : "";
+    const atts = attachments[q.question] ?? [];
+    const fields = (q as FleetAskQuestion).formFields ?? [];
+    const requiredOk = fields.every((f) => !f.required || (form[f.name] ?? "").trim());
+    const answered =
+      picked.length > 0 || customText.length > 0 || atts.length > 0 || fields.length > 0;
+    return answered && requiredOk;
+  };
+
+  /** Desktop's per-option pencil: seed the Other composer with the option's
+   *  text so it can be tweaked instead of retyped. */
+  const editToOther = (q: ElicitationQuestion | FleetAskQuestion, o: { label: string; description?: string }) => {
+    const effectiveMulti = q.multiSelect || multiOverride[q.question] === true;
+    setSelections((prev) => {
+      const cur = prev[q.question] ?? [];
+      if (effectiveMulti) {
+        return cur.includes(OTHER) ? prev : { ...prev, [q.question]: [...cur, OTHER] };
+      }
+      return { ...prev, [q.question]: [OTHER] };
+    });
+    setCustom((p) => ({
+      ...p,
+      [q.question]: o.description ? `${o.label} — ${o.description}` : o.label,
+    }));
+  };
 
   const toggle = (q: ElicitationQuestion | FleetAskQuestion, label: string) => {
     const effectiveMulti = q.multiSelect || multiOverride[q.question] === true;
@@ -658,9 +696,32 @@ function QuestionsCard({
     submit(isFleetAsk ? { cancelled: false, answers } : { declined: false, answers });
   };
 
+  const total = request.questions.length;
+  const multiQ = total > 1;
+  const qi = Math.min(step, total - 1);
+  const allAnswered = request.questions.every(answeredQuestion);
+
   return (
     <div>
-      {request.questions.map((q, qi) => (
+      {multiQ && (
+        <div className={styles.stepBar}>
+          <span className={styles.stepLabel}>
+            第 {qi + 1} / {total} 题
+          </span>
+          <div className={styles.stepDots}>
+            {request.questions.map((qq, i) => (
+              <button
+                key={i}
+                className={styles.stepDot}
+                data-state={i === qi ? "active" : answeredQuestion(qq) ? "done" : "todo"}
+                onClick={() => setStep(i)}
+                aria-label={`第 ${i + 1} 题`}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+      {[request.questions[qi]].map((q) => (
         <div key={qi} className={styles.question}>
           {q.header && <div className={styles.questionHeader}>{q.header}</div>}
           <div className={styles.markdown}>
@@ -686,22 +747,50 @@ function QuestionsCard({
           {(q.options ?? []).map((o) => {
             const selected = (selections[q.question] ?? []).includes(o.label);
             const effectiveMulti = q.multiSelect || multiOverride[q.question] === true;
+            const previewKey = `${q.question} ${o.label}`;
+            // Desktop shows a focused option's preview BEFORE selection (the
+            // point of preview is comparing candidates); no hover on touch,
+            // so an explicit toggle stands in.
+            const previewShown = o.preview ? selected || previewOpen[previewKey] === true : false;
             return (
               <div key={o.label}>
-                <button
-                  className={styles.option}
-                  data-selected={selected}
-                  onClick={() => toggle(q, o.label)}
-                >
-                  <span className={styles.optionMark} data-multi={effectiveMulti}>
-                    {selected ? "✓" : ""}
-                  </span>
-                  <span className={styles.optionBody}>
-                    <span className={styles.optionLabel}>{o.label}</span>
-                    {o.description && <span className={styles.optionDesc}>{o.description}</span>}
-                  </span>
-                </button>
-                {selected && o.preview && (
+                <div className={styles.optionRow}>
+                  <button
+                    className={styles.option}
+                    data-selected={selected}
+                    onClick={() => toggle(q, o.label)}
+                  >
+                    <span className={styles.optionMark} data-multi={effectiveMulti}>
+                      {selected ? "✓" : ""}
+                    </span>
+                    <span className={styles.optionBody}>
+                      <span className={styles.optionLabel}>{o.label}</span>
+                      {o.description && <span className={styles.optionDesc}>{o.description}</span>}
+                    </span>
+                  </button>
+                  <div className={styles.optionSide}>
+                    {o.preview && (
+                      <button
+                        className={styles.optionSideBtn}
+                        data-active={previewShown}
+                        onClick={() =>
+                          setPreviewOpen((p) => ({ ...p, [previewKey]: !previewShown }))
+                        }
+                        aria-label="预览此选项"
+                      >
+                        👁
+                      </button>
+                    )}
+                    <button
+                      className={styles.optionSideBtn}
+                      onClick={() => editToOther(q, o)}
+                      aria-label="编辑此选项（复制到「其他」）"
+                    >
+                      ✎
+                    </button>
+                  </div>
+                </div>
+                {previewShown && o.preview && (
                   <div className={styles.optionPreview}>
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>{o.preview}</ReactMarkdown>
                   </div>
@@ -786,9 +875,28 @@ function QuestionsCard({
         <button className={styles.ghostButton} onClick={() => doSubmit(true)}>
           {isFleetAsk ? "取消" : "拒绝回答"}
         </button>
-        <button className={styles.primaryButton} onClick={() => doSubmit(false)}>
-          提交
-        </button>
+        {multiQ && qi > 0 && (
+          <button className={styles.ghostButton} onClick={() => setStep(qi - 1)}>
+            上一题
+          </button>
+        )}
+        {multiQ && qi < total - 1 ? (
+          <button
+            className={styles.primaryButton}
+            disabled={!answeredQuestion(request.questions[qi])}
+            onClick={() => setStep(qi + 1)}
+          >
+            下一题
+          </button>
+        ) : (
+          <button
+            className={styles.primaryButton}
+            disabled={!allAnswered}
+            onClick={() => doSubmit(false)}
+          >
+            提交
+          </button>
+        )}
       </div>
     </div>
   );
