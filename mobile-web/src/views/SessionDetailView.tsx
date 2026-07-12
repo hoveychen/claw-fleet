@@ -14,6 +14,8 @@ import type {
   SessionInfo,
   SessionStatus,
 } from "../types";
+import { canResumeSession } from "../types";
+import { ResumeComposer } from "./Composer";
 import {
   DecisionHistoryTab,
   HandoffTab,
@@ -338,6 +340,10 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
           <div className={styles.hint}>暂无可显示的消息</div>
         )}
       </div>
+      )}
+
+      {tab === "messages" && canResumeSession(session) && (
+        <ResumeComposer session={session} client={client} />
       )}
     </div>
   );
