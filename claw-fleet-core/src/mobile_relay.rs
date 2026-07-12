@@ -29,6 +29,10 @@ pub const DEFAULT_RELAY_URL: &str = "https://fleet-relay.muveeai.com";
 const CONFIG_FILE_NAME: &str = "mobile-relay.json";
 /// Minimum seconds between two `sessions` snapshots pushed to clients.
 const SESSIONS_THROTTLE: Duration = Duration::from_secs(2);
+/// Raw-byte cap for `upload_attachment`. Base64 inflates ×4/3, so 10 MiB stays
+/// well under the relay's 16 MiB WS frame / 64 MiB message limits (axum
+/// defaults) while covering phone camera photos.
+pub const MAX_UPLOAD_BYTES: u64 = 10 * 1024 * 1024;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -584,6 +588,26 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                     .map_err(|e| format!("bad session_mark params: {e}"))?;
             crate::session_mark::set_mark(&req.session_id, &req.workspace_path, req.mark)?;
             Ok(json!({ "ok": true }))
+        }
+        // Mobile-side attachment bytes → the desktop's content-addressed
+        // user-attachments store. The returned absolute path is what the
+        // client splices into an answer (`@<path>`) or a new-session prompt —
+        // shared by the decision panel and the composer flows.
+        "upload_attachment" => {
+            use base64::Engine as _;
+            let name = params.get("name").and_then(Value::as_str).unwrap_or("attachment.bin");
+            let b64 = params.get("base64").and_then(Value::as_str).ok_or("missing base64")?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| format!("invalid base64: {e}"))?;
+            if bytes.len() as u64 > MAX_UPLOAD_BYTES {
+                return Err(format!(
+                    "attachment too large: {} bytes (max {MAX_UPLOAD_BYTES})",
+                    bytes.len()
+                ));
+            }
+            let stored = crate::user_attachments::ingest_bytes(&bytes, name)?;
+            Ok(json!({ "path": stored.to_string_lossy() }))
         }
         "session_read" => {
             let req: crate::session_read::MarkSessionsReadRequest =
@@ -1260,6 +1284,80 @@ mod tests {
             );
             assert_eq!(reply["ok"], false);
             assert!(reply["error"].as_str().unwrap().contains("permission mode"));
+        });
+    }
+
+    #[test]
+    fn request_upload_attachment_ingests_bytes() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let bytes = b"fake image bytes \xe6\x88\xaa\xe5\x9b\xbe";
+            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+            let data = request_ok(
+                "upload_attachment",
+                json!({"name": "screenshot.png", "base64": b64}),
+            );
+            let path = data["path"].as_str().expect("path string");
+            let stored = std::path::Path::new(path);
+            assert!(stored.is_file(), "attachment must land on disk");
+            assert_eq!(fs::read(stored).unwrap(), bytes);
+            let store_root = crate::user_attachments::user_attachments_dir().unwrap();
+            assert!(
+                stored.starts_with(&store_root),
+                "must live under the user-attachments store: {path}"
+            );
+            assert!(path.ends_with("screenshot.png"));
+
+            // Content-addressed: identical bytes → identical path.
+            let again = request_ok(
+                "upload_attachment",
+                json!({"name": "screenshot.png", "base64": b64}),
+            );
+            assert_eq!(again["path"], data["path"]);
+        });
+    }
+
+    #[test]
+    fn request_upload_attachment_sanitizes_hostile_name() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(b"x");
+            let data = request_ok(
+                "upload_attachment",
+                json!({"name": "../../evil.sh", "base64": b64}),
+            );
+            let path = std::path::PathBuf::from(data["path"].as_str().unwrap());
+            let store_root = crate::user_attachments::user_attachments_dir().unwrap();
+            assert!(
+                path.canonicalize().unwrap().starts_with(store_root.canonicalize().unwrap()),
+                "sanitized path must stay inside the store: {}",
+                path.display()
+            );
+        });
+    }
+
+    #[test]
+    fn request_upload_attachment_rejects_bad_input() {
+        with_temp_home(|| {
+            let reply = request_raw("upload_attachment", json!({"name": "a.png"}));
+            assert_eq!(reply["ok"], false, "missing base64 must fail");
+
+            let reply =
+                request_raw("upload_attachment", json!({"name": "a.png", "base64": "!!!"}));
+            assert_eq!(reply["ok"], false, "invalid base64 must fail");
+            assert!(reply["error"].as_str().unwrap().contains("base64"));
+        });
+    }
+
+    #[test]
+    fn request_upload_attachment_rejects_oversize() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let bytes = vec![0u8; (MAX_UPLOAD_BYTES + 1) as usize];
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let reply = request_raw("upload_attachment", json!({"name": "big.bin", "base64": b64}));
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("too large"));
         });
     }
 
