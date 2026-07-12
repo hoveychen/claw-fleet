@@ -9,7 +9,11 @@ export type SessionStatus =
   | "active"
   | "delegating"
   | "idle"
-  | "rateLimited";
+  | "rateLimited"
+  /** Fleet-spawned, process alive, but wedged mid tool-use batch: a
+   *  non-interactive tool_use has been missing its tool_result for minutes.
+   *  The turn is deadlocked; SIGINT (the ⎋ interrupt button) unblocks it. */
+  | "stuck";
 
 /** The human's manual pending/done toggle. A binary axis: unmarked (undefined)
  *  reads as "pending", `"done"` is explicit. Orthogonal to the read/unread axis
@@ -150,6 +154,10 @@ export interface SessionInfo {
    *  Fleet-spawned sessions: `waitingInput` covers both "turn ended, process
    *  gone" and "process alive, parked on a decision card". */
   procAlive: boolean;
+  /** True when the latest assistant tool_use batch has a non-interactive tool
+   *  whose tool_result never arrived; combined with procAlive + an age floor on
+   *  the backend to derive `status === "stuck"`. UI reads `status`, not this. */
+  pendingToolBatch?: boolean;
   lastSkill: string | null;
   contextPercent: number | null;
   agentSource: "claude-code" | "cursor" | "openclaw" | "codex";

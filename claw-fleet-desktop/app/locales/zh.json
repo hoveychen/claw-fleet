@@ -51,7 +51,8 @@
     "active": "活跃",
     "delegating": "委托中",
     "idle": "空闲",
-    "rateLimited": "速率限制"
+    "rateLimited": "速率限制",
+    "stuck": "卡死"
   },
   "rateLimit": {
     "resetsIn": "{{time}} 后恢复",
@@ -492,6 +493,7 @@
     "path": "路径"
   },
   "interrupt_session": "中断当前工具调用（会话保留，可恢复）",
+  "unstick_session": "解卡：中断卡死的工具调用（会话保留，可恢复）",
   "stop_spent": "会话已结束，没有可停止的进程",
   "stop_session": "停止会话（清除进程树）",
   "stop_session_imprecise": "停止该 workspace 下的所有会话（无法精确匹配 PID —— 该 workspace 有多个 claude 进程）",
