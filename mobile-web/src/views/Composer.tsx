@@ -3,6 +3,7 @@
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
 import { useCallback, useRef, useState } from "react";
+import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { SessionInfo } from "../types";
 import styles from "./Composer.module.css";
@@ -49,7 +50,7 @@ export async function uploadAttachmentFiles(
   const out: Attachment[] = [];
   for (const file of Array.from(files)) {
     if (file.size > MAX_UPLOAD_BYTES) {
-      window.alert(`「${file.name}」超过 10 MB 上限，已跳过`);
+      window.alert(t("「{0}」超过 10 MB 上限，已跳过", file.name));
       continue;
     }
     const b64 = await new Promise<string>((resolve, reject) => {
@@ -88,7 +89,7 @@ function useAttachments(client: RelayClient | null) {
           return next;
         });
       } catch (e) {
-        window.alert(e instanceof Error ? e.message : "附件上传失败");
+        window.alert(e instanceof Error ? e.message : t("附件上传失败"));
       } finally {
         setUploading(false);
       }
@@ -137,7 +138,7 @@ function AttachmentRow({
         disabled={uploading}
         onClick={() => inputRef.current?.click()}
       >
-        {uploading ? "上传中…" : "＋ 附件"}
+        {uploading ? t("上传中…") : t("＋ 附件")}
       </button>
       <input
         ref={inputRef}
@@ -175,7 +176,7 @@ function OptionSelects({
       >
         {MODEL_CHOICES.map(([v, label]) => (
           <option key={v} value={v}>
-            {label}
+            {t(label)}
           </option>
         ))}
       </select>
@@ -186,7 +187,7 @@ function OptionSelects({
       >
         {EFFORT_CHOICES.map(([v, label]) => (
           <option key={v} value={v}>
-            {label}
+            {t(label)}
           </option>
         ))}
       </select>
@@ -195,10 +196,10 @@ function OptionSelects({
         value={permissionMode}
         onChange={(e) => onChange({ permissionMode: e.target.value })}
       >
-        <option value="">{permissionDefaultLabel}</option>
+        <option value="">{t(permissionDefaultLabel)}</option>
         {Object.entries(PERMISSION_LABEL).map(([v, label]) => (
           <option key={v} value={v}>
-            {label}
+            {t(label)}
           </option>
         ))}
       </select>
@@ -244,7 +245,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
       });
       onClose();
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : "创建会话失败");
+      window.alert(e instanceof Error ? e.message : t("创建会话失败"));
     } finally {
       setBusy(false);
     }
@@ -254,7 +255,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
     <div className={styles.sheetBackdrop} onClick={onClose}>
       <div className={styles.sheet} onClick={(e) => e.stopPropagation()}>
         <div className={styles.sheetHead}>
-          <span className={styles.sheetTitle}>新会话</span>
+          <span className={styles.sheetTitle}>{t("新会话")}</span>
           <button className={styles.sheetClose} onClick={onClose}>
             ×
           </button>
@@ -269,7 +270,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
               {name} — {path}
             </option>
           ))}
-          <option value="__custom__">自定义路径…</option>
+          <option value="__custom__">{t("自定义路径…")}</option>
         </select>
         {workspace === "__custom__" && (
           <input
@@ -281,7 +282,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
         )}
         <textarea
           className={styles.promptInput}
-          placeholder="要让 agent 做什么？"
+          placeholder={t("要让 agent 做什么？")}
           rows={5}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
@@ -304,7 +305,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           }}
         />
         <button className={styles.submit} disabled={!canSubmit} onClick={() => void submit()}>
-          {busy ? "创建中…" : "创建会话"}
+          {busy ? t("创建中…") : t("创建会话")}
         </button>
       </div>
     </div>
@@ -345,7 +346,7 @@ export function ResumeComposer({ session, client }: ResumeProps) {
       setSent(true);
       window.setTimeout(() => setSent(false), 3000);
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : "恢复会话失败");
+      window.alert(e instanceof Error ? e.message : t("恢复会话失败"));
     } finally {
       setBusy(false);
     }
@@ -355,7 +356,7 @@ export function ResumeComposer({ session, client }: ResumeProps) {
     <div className={styles.resumeBox}>
       <textarea
         className={styles.promptInput}
-        placeholder="继续这个会话（留空 = continue）…"
+        placeholder={t("继续这个会话（留空 = continue）…")}
         rows={2}
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
@@ -383,7 +384,7 @@ export function ResumeComposer({ session, client }: ResumeProps) {
           disabled={busy || uploading || !client}
           onClick={() => void submit()}
         >
-          {busy ? "发送中…" : sent ? "已发送 ✓" : "继续会话"}
+          {busy ? t("发送中…") : sent ? t("已发送 ✓") : t("继续会话")}
         </button>
       </div>
     </div>

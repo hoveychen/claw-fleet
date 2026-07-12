@@ -17,12 +17,37 @@
   --color-success: #4ade80;
   --color-warning: #fbbf24;
   --color-error: #f87171;
+  --color-bg-glass: rgba(8, 9, 10, 0.92);
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Segoe UI", Roboto, system-ui, sans-serif;
   --font-mono: "SF Mono", "JetBrains Mono", Menlo, monospace;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   color-scheme: dark;
+}
+
+/* 亮色：暖纸底 + 深炭字，对比层级是暗色的反转（卡片比底色更亮），
+   珊瑚 accent 压深一档保证在浅底上的可读性。theme.ts 总是把解析后的
+   light/dark 写进 html[data-theme]，这里不需要媒体查询分支。 */
+:root[data-theme="light"] {
+  --color-bg: #f1efea;
+  --color-bg-secondary: #e7e4dd;
+  --color-bg-card: #fbfaf7;
+  --color-bg-card-hover: #f1eee7;
+  --color-bg-input: #fbfaf7;
+  --color-text: #1f2023;
+  --color-text-secondary: #5d6168;
+  --color-text-dim: #8d9199;
+  --color-border: rgba(32, 28, 18, 0.11);
+  --color-border-strong: rgba(32, 28, 18, 0.22);
+  --color-accent: #c25232;
+  --color-accent-hover: #a94527;
+  --color-accent-soft: rgba(194, 82, 50, 0.13);
+  --color-success: #178042;
+  --color-warning: #9a6a08;
+  --color-error: #cc3340;
+  --color-bg-glass: rgba(241, 239, 234, 0.92);
+  color-scheme: light;
 }
 
 * {

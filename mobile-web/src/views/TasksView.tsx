@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isSessionUnread } from "../types";
@@ -7,26 +8,27 @@ import styles from "./TasksView.module.css";
 
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
 
+// Called at render time so t() picks up the live language.
 function statusMeta(status: SessionStatus): { label: string; tone: string } {
-  if (WORKING.includes(status)) return { label: "工作中", tone: "working" };
+  if (WORKING.includes(status)) return { label: t("工作中"), tone: "working" };
   switch (status) {
     case "waitingInput":
-      return { label: "等待输入", tone: "waiting" };
+      return { label: t("等待输入"), tone: "waiting" };
     case "active":
-      return { label: "活跃", tone: "active" };
+      return { label: t("活跃"), tone: "active" };
     case "rateLimited":
-      return { label: "限流中", tone: "error" };
+      return { label: t("限流中"), tone: "error" };
     default:
-      return { label: "空闲", tone: "idle" };
+      return { label: t("空闲"), tone: "idle" };
   }
 }
 
 function timeAgo(ms: number): string {
   const diff = Date.now() - ms;
-  if (diff < 60_000) return "刚刚";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时前`;
-  return `${Math.floor(diff / 86_400_000)} 天前`;
+  if (diff < 60_000) return t("刚刚");
+  if (diff < 3_600_000) return t("{0} 分钟前", Math.floor(diff / 60_000));
+  if (diff < 86_400_000) return t("{0} 小时前", Math.floor(diff / 3_600_000));
+  return t("{0} 天前", Math.floor(diff / 86_400_000));
 }
 
 type StopMode = "interrupt" | "stop" | "spent";
@@ -48,6 +50,12 @@ function canControl(s: SessionInfo): boolean {
 const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimited"];
 
 type MarkFilter = "all" | "pending" | "done";
+
+/** Same bucketing as the desktop launchpad: an unmarked session still needs
+ *  attention, so it collapses into "pending" — only an explicit done leaves. */
+function markBucket(s: SessionInfo): SessionMark {
+  return s.userMark === "done" ? "done" : "pending";
+}
 
 interface Props {
   sessions: SessionInfo[];
@@ -88,8 +96,8 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
     let pending = 0;
     let done = 0;
     for (const s of all) {
-      if (s.userMark === "pending") pending++;
-      else if (s.userMark === "done") done++;
+      if (markBucket(s) === "done") done++;
+      else pending++;
     }
     return { pending, done };
   }, [all]);
@@ -99,8 +107,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
     return all.filter((s) => {
       if (workspace && s.workspacePath !== workspace) return false;
       if (activeOnly && !LIVE.includes(s.status)) return false;
-      if (markFilter === "pending" && s.userMark !== "pending") return false;
-      if (markFilter === "done" && s.userMark !== "done") return false;
+      if (markFilter !== "all" && markBucket(s) !== markFilter) return false;
       if (q) {
         const hay = `${s.aiTitle ?? ""} ${s.slug ?? ""} ${s.lastMessagePreview ?? ""} ${s.workspaceName}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -143,19 +150,19 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
         if (mode === "interrupt") {
           await client.request("interrupt", { pid: s.pid });
         } else if (s.pidPrecise) {
-          if (!window.confirm(`确定停止「${s.workspaceName}」的这个会话吗？`)) return;
+          if (!window.confirm(t("确定停止「{0}」的这个会话吗？", s.workspaceName))) return;
           await client.request("stop", { pid: s.pid });
         } else {
           if (
             !window.confirm(
-              `无法精确定位进程，将停止「${s.workspaceName}」目录下的所有会话，确定吗？`,
+              t("无法精确定位进程，将停止「{0}」目录下的所有会话，确定吗？", s.workspaceName),
             )
           )
             return;
           await client.request("stop_workspace", { workspacePath: s.workspacePath });
         }
       } catch (e) {
-        window.alert(e instanceof Error ? e.message : "操作失败");
+        window.alert(e instanceof Error ? e.message : t("操作失败"));
       } finally {
         setBusyOp(null);
       }
@@ -164,7 +171,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
   );
 
   if (all.length === 0) {
-    return <div className={styles.empty}>暂无会话（等待桌面端推送快照…）</div>;
+    return <div className={styles.empty}>{t("暂无会话（等待桌面端推送快照…）")}</div>;
   }
 
   return (
@@ -173,7 +180,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
         <input
           className={styles.search}
           type="search"
-          placeholder="搜索标题 / 摘要…"
+          placeholder={t("搜索标题 / 摘要…")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
@@ -183,7 +190,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
             value={workspace}
             onChange={(e) => setWorkspace(e.target.value)}
           >
-            <option value="">全部目录</option>
+            <option value="">{t("全部目录")}</option>
             {workspaces.map(([path, name]) => (
               <option key={path} value={path}>
                 {name}
@@ -195,23 +202,23 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
             data-active={activeOnly}
             onClick={() => setActiveOnly((v) => !v)}
           >
-            仅活跃
+            {t("仅活跃")}
           </button>
           <button className={styles.newSession} onClick={() => setShowNewSession(true)}>
-            ＋ 新会话
+            {t("＋ 新会话")}
           </button>
           {unreadCount > 0 && (
             <button className={styles.readAll} onClick={() => onMarkRead(visible.filter(isSessionUnread))}>
-              全部已读 ({unreadCount})
+              {t("全部已读 ({0})", unreadCount)}
             </button>
           )}
         </div>
         <div className={styles.segment}>
           {(
             [
-              ["all", `全部`],
-              ["pending", `待处理${counts.pending ? ` ${counts.pending}` : ""}`],
-              ["done", `已完成${counts.done ? ` ${counts.done}` : ""}`],
+              ["all", t("全部")],
+              ["pending", `${t("进行中")}${counts.pending ? ` ${counts.pending}` : ""}`],
+              ["done", `${t("已完成")}${counts.done ? ` ${counts.done}` : ""}`],
             ] as Array<[MarkFilter, string]>
           ).map(([key, label]) => (
             <button
@@ -226,7 +233,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
         </div>
       </div>
 
-      {visible.length === 0 && <div className={styles.empty}>没有匹配的会话</div>}
+      {visible.length === 0 && <div className={styles.empty}>{t("没有匹配的会话")}</div>}
 
       <div className={styles.list}>
         {visible.map((s) => {
@@ -254,13 +261,13 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
                 </span>
                 {plan && plan.total > 0 && (
                   <span className={styles.planChip}>
-                    计划 {plan.done}/{plan.total}
+                    {t("计划 {0}/{1}", plan.done, plan.total)}
                     {plan.currentTask ? ` · ${plan.currentTask}` : ""}
                   </span>
                 )}
                 {todos && todoTotal > 0 && (
                   <span className={styles.todoChip}>
-                    待办 {todos.completed}/{todoTotal}
+                    {t("待办 {0}/{1}", todos.completed, todoTotal)}
                   </span>
                 )}
               </div>
@@ -278,14 +285,14 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
                   data-active={s.userMark === "pending"}
                   onClick={() => setMark(s, s.userMark === "pending" ? null : "pending")}
                 >
-                  待处理
+                  {t("待处理")}
                 </button>
                 <button
                   className={styles.markButton}
                   data-active={s.userMark === "done"}
                   onClick={() => setMark(s, s.userMark === "done" ? null : "done")}
                 >
-                  已完成
+                  {t("已完成")}
                 </button>
                 <span className={styles.opsSpacer} />
                 {canControl(s) && mode !== "spent" && (
@@ -295,7 +302,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
                     disabled={busyOp === s.id}
                     onClick={() => void handleStop(s)}
                   >
-                    {busyOp === s.id ? "…" : mode === "interrupt" ? "◼ 中断" : "◼ 停止"}
+                    {busyOp === s.id ? "…" : `◼ ${mode === "interrupt" ? t("中断") : t("停止")}`}
                   </button>
                 )}
               </div>
