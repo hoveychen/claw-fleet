@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useDraft } from "../draft";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
+import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import styles from "./Composer.module.css";
 
@@ -260,6 +261,9 @@ const NEW_SESSION_DEFAULT = {
 export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) {
   const recents = [...new Map(sessions.map((s) => [s.workspacePath, s.workspaceName])).entries()]
     .sort((a, b) => a[1].localeCompare(b[1]));
+  // 供超时后的宽限期确认读取最新快照(prop 每次快照推送都会更新)。
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   const [draft, setDraft, clearDraft] = useDraft(NEW_SESSION_DRAFT_KEY, NEW_SESSION_DEFAULT);
   const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
   const [busy, setBusy] = useState(false);
@@ -282,11 +286,15 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
 
   const submit = async () => {
     if (!client || !canSubmit) return;
+    // 手机端预分配 session_id:桌面会用它作 `claude --session-id`,于是即便
+    // reply 帧丢失,也能凭它在后续快照里认出这个会话。
+    const sessionId = crypto.randomUUID();
     setBusy(true);
     try {
       await client.request("spawn_session", {
         workspacePath: effectiveWorkspace,
         prompt: withContextFiles(prompt.trim(), attachments),
+        sessionId,
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {}),
         ...(permissionMode ? { permissionMode } : {}),
@@ -295,7 +303,17 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
       reset();
       onClose();
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : t("创建会话失败"));
+      // relay 尽力而为投递:切网/息屏/重连会让 reply 帧丢失,而桌面其实已把
+      // 会话 spawn 出来。进宽限期盯快照——出现同 id 的会话即视为成功,消除
+      // 「超时报错但会话已在跑」的假失败;真没出现才报错。
+      const confirmed = await waitForSessionId(sessionId, () => sessionsRef.current);
+      if (confirmed) {
+        clearDraft();
+        reset();
+        onClose();
+      } else {
+        window.alert(e instanceof Error ? e.message : t("创建会话失败"));
+      }
     } finally {
       setBusy(false);
     }
