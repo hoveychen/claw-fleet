@@ -1,0 +1,136 @@
+.view {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-radius: 999px;
+  padding: 1px 8px;
+}
+
+.refresh {
+  margin-left: auto;
+  font-size: 18px;
+  color: var(--color-text-secondary);
+  padding: 2px 6px;
+  line-height: 1;
+}
+
+.search {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-input);
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.hint {
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  padding: 20px 4px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.groupLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  padding: 4px 2px 0;
+}
+
+.doc {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 11px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-bg-card);
+}
+
+.doc:active {
+  background: var(--color-bg-card-hover);
+}
+
+.docBadge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 3px 6px;
+  border-radius: 6px;
+  color: #fff;
+  background: var(--color-text-dim);
+}
+
+.docBadge[data-kind="markdown"] {
+  background: var(--color-accent);
+}
+
+.docBadge[data-kind="html"] {
+  background: var(--color-success);
+}
+
+.docBadge[data-kind="htmlDir"] {
+  background: var(--color-warning);
+}
+
+.docBody {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.docTitle {
+  font-size: 14px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.docMeta {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.docChevron {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  font-size: 20px;
+  line-height: 1;
+}
