@@ -871,11 +871,18 @@ impl LocalBackend {
                                     id
                                 ));
                                 let _ = app_a2ui.emit("a2ui-render-request", &req);
+                                publish_mobile_decision(
+                                    "a2ui-render",
+                                    &req,
+                                    format!("{} · Agent 界面", notify_workspace(&req.workspace_name)),
+                                    notify_preview(req.ai_title.as_deref().unwrap_or("A2UI 自定义界面")),
+                                );
                             }
                         }
                     }
                     for id in known.iter().filter(|id| !pending.contains(*id)) {
                         let _ = app_a2ui.emit("a2ui-render-dismissed", id.clone());
+                        claw_fleet_core::mobile_relay::publish_decision_resolved("a2ui-render", id);
                     }
                     known.retain(|id| pending.contains(id));
                 }
