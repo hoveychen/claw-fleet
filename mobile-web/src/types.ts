@@ -492,3 +492,63 @@ export interface WikiExportPayload {
   mime: string;
   base64: string;
 }
+
+// ── Repository "仓库" surface (git_ops::RepoSummary/RepoDetail/…) ─────────────
+
+/** One repository row from `repo_list`. */
+export interface RepoSummary {
+  /** Canonical main-checkout path; pass back as `root` to the other methods. */
+  root: string;
+  label: string;
+  branch: string | null;
+  upstream: string | null;
+  /** Commits ahead of upstream on the current branch (unpushed); null = no upstream. */
+  unpushed: number | null;
+  behind: number | null;
+  dirtyCount: number;
+  /** Linked worktrees, excluding the main checkout. */
+  worktreeCount: number;
+  /** Worktrees with unmerged commits or uncommitted changes. */
+  pendingWorktrees: number;
+  needsAttention: boolean;
+}
+
+/** One linked worktree's health, from `repo_detail`. */
+export interface WorktreeHealth {
+  path: string;
+  branch: string | null;
+  /** Commits on this branch not merged back into the main checkout. */
+  unmerged: number;
+  dirtyCount: number;
+  lastCommitSummary: string | null;
+  /** Tip-commit author date, unix seconds. */
+  lastCommitTime: number | null;
+}
+
+/** One recent commit on the main checkout's branch, from `repo_detail`. */
+export interface CommitInfo {
+  hash: string;
+  summary: string;
+  author: string;
+  /** Author date, unix seconds. */
+  time: number;
+}
+
+/** Full detail for one repo, from `repo_detail`. */
+export interface RepoDetail {
+  root: string;
+  label: string;
+  branch: string | null;
+  upstream: string | null;
+  unpushed: number | null;
+  behind: number | null;
+  dirtyCount: number;
+  worktrees: WorktreeHealth[];
+  commits: CommitInfo[];
+}
+
+/** Result of `repo_push` / `repo_pull` (git_ops::GitOpResult). */
+export interface GitOpResult {
+  ok: boolean;
+  output: string;
+}
