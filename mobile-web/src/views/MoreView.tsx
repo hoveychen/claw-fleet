@@ -119,6 +119,11 @@ export function MoreView({ connected, agentOnline, push, onEnablePush }: Props) 
               {t("当前浏览器（鸿蒙 ArkWeb）不支持网页通知，请用桌面端 Fleet 接收决策卡提醒。")}
             </div>
           )}
+          {push === "unsupported" && (
+            <div className={styles.rowNote}>
+              {t("当前浏览器不支持网页通知，请用桌面端 Fleet 接收决策卡提醒。")}
+            </div>
+          )}
         </div>
       </div>
 

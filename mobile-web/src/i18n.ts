@@ -84,6 +84,8 @@ const DICT: Record<string, string> = {
     "Notification permission was denied — re-enable it for this site in system settings.",
   "当前浏览器（鸿蒙 ArkWeb）不支持网页通知，请用桌面端 Fleet 接收决策卡提醒。":
     "This browser (HarmonyOS ArkWeb) doesn't support web notifications — use desktop Fleet to receive decision-card alerts.",
+  "当前浏览器不支持网页通知，请用桌面端 Fleet 接收决策卡提醒。":
+    "This browser doesn't support web notifications — use desktop Fleet to receive decision-card alerts.",
   "开启通知，第一时间收到新决策卡。": "Enable notifications to get new decision cards instantly.",
   开启: "Enable",
   决策: "Decisions",
