@@ -4,6 +4,7 @@
 // (bash -c / eval / …) indented recursively.
 
 import { Fragment } from "react";
+import { t } from "../i18n";
 import type { CmdConnector, CommandLeaf, CommandView, NestedScript } from "../types";
 import styles from "./StructuredCommand.module.css";
 
@@ -80,7 +81,7 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
         ))}
         {triggering && (
           <span className={styles.triggerBadge} data-covered={covered}>
-            {covered ? "触发审计 · 已有规则" : "触发审计"}
+            {covered ? t("触发审计 · 已有规则") : t("触发审计")}
           </span>
         )}
       </div>
@@ -92,7 +93,7 @@ function LeafRow({ leaf }: { leaf: CommandLeaf }) {
 function NestedBlock({ nested }: { nested: NestedScript }) {
   return (
     <div className={styles.nested}>
-      <div className={styles.nestedLabel}>{NESTED_LABEL[nested.kind] ?? "内嵌脚本"}</div>
+      <div className={styles.nestedLabel}>{t(NESTED_LABEL[nested.kind] ?? "内嵌脚本")}</div>
       {isOpaqueScript(nested.kind) ? (
         <pre className={styles.script}>{nested.raw}</pre>
       ) : (

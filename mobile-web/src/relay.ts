@@ -3,6 +3,7 @@
 // inside msg.payload (decision_created / decision_resolved / sessions /
 // answer / req / reply) — see claw-fleet-core/src/mobile_relay.rs.
 
+import { t } from "./i18n";
 import type { DecisionKind, SessionInfo } from "./types";
 
 export interface RelayHandlers {
@@ -82,7 +83,7 @@ export class RelayClient {
       const wasAuthed = this.authed;
       this.authed = false;
       this.handlers.onStatus?.(false);
-      this.failPending("连接已断开");
+      this.failPending(t("连接已断开"));
       if (this.closed) return;
       const delay = wasAuthed ? 1000 : this.reconnectDelay;
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
@@ -105,7 +106,7 @@ export class RelayClient {
         this.handlers.onAgentOnline?.(Boolean(frame.online));
         break;
       case "error":
-        this.handlers.onAuthError?.(String(frame.message ?? "认证失败"));
+        this.handlers.onAuthError?.(String(frame.message ?? t("认证失败")));
         break;
       case "msg":
         this.handlePayload((frame.payload ?? {}) as Record<string, unknown>);

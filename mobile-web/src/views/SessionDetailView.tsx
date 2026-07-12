@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type {
   ContentBlock,
@@ -68,7 +69,7 @@ function fmtTime(timestamp?: string): string {
   if (!timestamp) return "";
   const d = new Date(timestamp);
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 }
 
 interface TailDelta {
@@ -96,7 +97,7 @@ function userText(msg: RawMessage): string {
   const parts: string[] = [];
   for (const b of blocksOf(msg)) {
     if (b.type === "text" && b.text) parts.push(b.text);
-    else if (b.type === "image") parts.push("[图片]");
+    else if (b.type === "image") parts.push(t("[图片]"));
   }
   return parts.join("\n\n").trim();
 }
@@ -203,7 +204,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
         }
       } catch (e) {
         if (!cancelled && messages === null) {
-          setLoadError(e instanceof Error ? e.message : "加载失败");
+          setLoadError(e instanceof Error ? e.message : t("加载失败"));
         }
       }
       if (!cancelled) timer = window.setTimeout(poll, TAIL_POLL_MS);
@@ -272,10 +273,10 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
     <div className={styles.page}>
       <header className={styles.header}>
         <button className={styles.backButton} onClick={onBack}>
-          ‹ 返回
+          ‹ {t("返回")}
         </button>
         <div className={styles.headerText}>
-          <div className={styles.headerTitle}>{session.aiTitle || session.slug || "会话"}</div>
+          <div className={styles.headerTitle}>{session.aiTitle || session.slug || t("会话")}</div>
           <div className={styles.headerSub}>{session.workspaceName}</div>
         </div>
         <span className={styles.statusDot} data-working={working} />
@@ -289,7 +290,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
             data-active={tab === key}
             onClick={() => setTab(key)}
           >
-            {label}
+            {t(label)}
           </button>
         ))}
       </nav>
@@ -322,8 +323,8 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
 
       {tab === "messages" && (
       <div className={styles.scroll} ref={scrollRef} onScroll={onScroll}>
-        {messages === null && !loadError && <div className={styles.hint}>加载消息中…</div>}
-        {loadError && <div className={styles.hint}>消息加载失败：{loadError}</div>}
+        {messages === null && !loadError && <div className={styles.hint}>{t("加载消息中…")}</div>}
+        {loadError && <div className={styles.hint}>{t("消息加载失败：{0}", loadError)}</div>}
         {messages !== null && (messages.length >= tailN || tailN > TAIL_INITIAL) && (
           <button
             className={styles.loadMore}
@@ -332,7 +333,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
               setTailN((n) => n + TAIL_STEP);
             }}
           >
-            加载更早的消息
+            {t("加载更早的消息")}
           </button>
         )}
         {mainRows.map((msg, i) => {
@@ -358,7 +359,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
                   return (
                     <div key={j} className={styles.thinkingBlock} data-open={open}>
                       <button className={styles.thinkingToggle} onClick={() => toggleThinking(key)}>
-                        ✳ 思考 {open ? "▾" : "▸"}
+                        ✳ {t("思考")} {open ? "▾" : "▸"}
                       </button>
                       {open && <div className={styles.thinkingBody}>{b.thinking}</div>}
                     </div>
@@ -396,13 +397,13 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
         {liveThinking && (
           <div className={styles.liveThinking}>
             <div className={styles.liveThinkingHead}>
-              <span className={styles.livePulse} />✳ 正在思考…
+              <span className={styles.livePulse} />✳ {t("正在思考…")}
             </div>
             <div className={styles.liveThinkingBody}>{liveThinking.thinking}</div>
           </div>
         )}
         {messages !== null && mainRows.length === 0 && !liveThinking && (
-          <div className={styles.hint}>暂无可显示的消息</div>
+          <div className={styles.hint}>{t("暂无可显示的消息")}</div>
         )}
       </div>
       )}
