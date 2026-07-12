@@ -233,6 +233,29 @@ export interface SessionInfo {
   lastReadMs?: number | null;
   /** True when the session's agent process is still alive. */
   procAlive?: boolean;
+  /** Relay-chain position when this session took part in a handoff
+   *  (`fleet handoff`); absent otherwise. Mirrors the desktop launchpad chip. */
+  handoff?: SessionHandoffInfo | null;
+}
+
+/** Relay-chain position embedded on SessionInfo (drives the 接力 chip).
+ *  Mirrors claw-fleet-desktop/app/types.ts SessionHandoffInfo. */
+export interface SessionHandoffInfo {
+  chainId: string;
+  /** This session's 1-based position on the chain. */
+  hop: number;
+  /** Total sessions currently on the chain. */
+  chainLen: number;
+}
+
+/** One full-text search hit from the `session_search` relay method — mirrors
+ *  the desktop `search_sessions` command's SearchHit. `snippet` carries literal
+ *  `<mark>…</mark>` markers around matches. */
+export interface SearchHit {
+  sessionId: string;
+  jsonlPath: string;
+  snippet: string;
+  rank: number;
 }
 
 /** Sessions Fleet spawned itself ("新会话" / handoff relay) — the only ones
