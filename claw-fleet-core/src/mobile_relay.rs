@@ -250,8 +250,100 @@ pub fn publish_decision_resolved(kind: &str, id: &str) {
     send_raw(build_msg_frame(build_decision_resolved_payload(kind, id)));
 }
 
+/// Fields the mobile client actually reads (mobile-web/src/types.ts
+/// SessionInfo) — everything else is desktop-only weight. A full snapshot of
+/// a long-lived install measured 535 KB; the slim list is what keeps the
+/// 2s push affordable on a phone connection.
+const SNAPSHOT_FIELDS: &[&str] = &[
+    "id",
+    "workspacePath",
+    "workspaceName",
+    "aiTitle",
+    "slug",
+    "status",
+    "isSubagent",
+    "lastMessagePreview",
+    "lastActivityMs",
+    "createdAtMs",
+    "jsonlPath",
+    "model",
+    "agentSource",
+    "contextPercent",
+    "totalCostUsd",
+    "todos",
+    "taskPlan",
+    "pid",
+    "pidPrecise",
+    "entrypoint",
+    "userMark",
+    "lastReadMs",
+    "procAlive",
+];
+
+/// Most-recently-active sessions kept in the mobile snapshot.
+const SNAPSHOT_MAX_SESSIONS: usize = 120;
+/// `lastMessagePreview` cap (chars) — the list row clamps to two lines anyway.
+const SNAPSHOT_PREVIEW_CHARS: usize = 160;
+
+/// Slim a full desktop sessions snapshot down to what the mobile client
+/// renders: drop subagents, keep the most recently active
+/// [`SNAPSHOT_MAX_SESSIONS`], whitelist fields, truncate previews.
+pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
+    let Some(list) = sessions.as_array() else {
+        return Value::Array(Vec::new());
+    };
+    let mut kept: Vec<&Value> = list
+        .iter()
+        .filter(|s| !s.get("isSubagent").and_then(Value::as_bool).unwrap_or(false))
+        .collect();
+    kept.sort_by_key(|s| {
+        std::cmp::Reverse(s.get("lastActivityMs").and_then(Value::as_u64).unwrap_or(0))
+    });
+    kept.truncate(SNAPSHOT_MAX_SESSIONS);
+
+    let slimmed: Vec<Value> = kept
+        .into_iter()
+        .map(|s| {
+            let mut out = serde_json::Map::new();
+            for &key in SNAPSHOT_FIELDS {
+                let Some(v) = s.get(key) else { continue };
+                if v.is_null() {
+                    continue;
+                }
+                if key == "lastMessagePreview" {
+                    if let Some(text) = v.as_str() {
+                        if text.chars().count() > SNAPSHOT_PREVIEW_CHARS {
+                            let cut: String =
+                                text.chars().take(SNAPSHOT_PREVIEW_CHARS).collect();
+                            out.insert(key.to_string(), Value::String(format!("{cut}…")));
+                            continue;
+                        }
+                    }
+                }
+                out.insert(key.to_string(), v.clone());
+            }
+            Value::Object(out)
+        })
+        .collect();
+    Value::Array(slimmed)
+}
+
+/// Hash of the last snapshot actually sent; unchanged data is not re-pushed.
+/// Reset on client presence changes (see `ws_connect_once`) so a phone that
+/// just connected still gets the current state on the next scan tick.
+static SESSIONS_LAST_HASH: AtomicU64 = AtomicU64::new(0);
+
+fn snapshot_hash(v: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    v.to_string().hash(&mut h);
+    // Never collide with the "nothing sent yet" sentinel 0.
+    h.finish() | 1
+}
+
 /// Push a sessions snapshot. Skipped when no client is online (Web Push is
-/// pointless for passive data) and throttled to one per 2s.
+/// pointless for passive data), throttled to one per 2s, slimmed to the
+/// mobile field set, and deduplicated against the last pushed content.
 pub fn publish_sessions(sessions: &Value) {
     if !CONNECTED.load(Ordering::SeqCst) || CLIENTS.load(Ordering::SeqCst) == 0 {
         return;
@@ -265,7 +357,12 @@ pub fn publish_sessions(sessions: &Value) {
         }
         *last = Some(std::time::Instant::now());
     }
-    send_raw(build_msg_frame(json!({ "event": "sessions", "sessions": sessions })));
+    let slim = slim_sessions_snapshot(sessions);
+    let hash = snapshot_hash(&slim);
+    if SESSIONS_LAST_HASH.swap(hash, Ordering::SeqCst) == hash {
+        return; // nothing changed since the last push
+    }
+    send_raw(build_msg_frame(json!({ "event": "sessions", "sessions": slim })));
 }
 
 // ── Inbound: answers and requests from mobile clients ────────────────────────
@@ -766,11 +863,20 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                         if let Some(n) = frame.get("clients").and_then(Value::as_u64) {
                             CLIENTS.store(n as usize, Ordering::SeqCst);
                         }
+                        // Fresh channel — whatever we pushed before may never
+                        // have reached anyone.
+                        SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
                         crate::log_debug("[mobile-relay] connected");
                     }
                     Some("presence") => {
                         if let Some(n) = frame.get("clients").and_then(Value::as_u64) {
-                            CLIENTS.store(n as usize, Ordering::SeqCst);
+                            let prev = CLIENTS.swap(n as usize, Ordering::SeqCst);
+                            // A client just joined: drop the dedup hash so the
+                            // next scan tick pushes the current state to it
+                            // even when nothing changed for existing clients.
+                            if n as usize > prev {
+                                SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
+                            }
                         }
                     }
                     Some("msg") => {
@@ -1463,6 +1569,65 @@ mod tests {
             let reply = request_raw("guard_analyze", json!({}));
             assert_eq!(reply["ok"], false, "missing command must fail");
         });
+    }
+
+    #[test]
+    fn slim_snapshot_filters_and_whitelists() {
+        let sessions = json!([
+            {
+                "id": "old", "isSubagent": false, "lastActivityMs": 100,
+                "workspaceName": "w", "tokenSpeed": 42.0, "rateLimit": {"until": 1},
+                "lastMessagePreview": "短预览", "userMark": "done", "aiTitle": null
+            },
+            {
+                "id": "sub", "isSubagent": true, "lastActivityMs": 300,
+                "workspaceName": "w"
+            },
+            {
+                "id": "new", "isSubagent": false, "lastActivityMs": 200,
+                "workspaceName": "w",
+                "lastMessagePreview": "长".repeat(500)
+            },
+        ]);
+        let slim = slim_sessions_snapshot(&sessions);
+        let list = slim.as_array().expect("array");
+        // Subagent dropped; remainder sorted most-recent first.
+        assert_eq!(list.len(), 2);
+        assert_eq!(list[0]["id"], "new");
+        assert_eq!(list[1]["id"], "old");
+        // Desktop-only fields are gone, whitelisted ones survive, nulls dropped.
+        assert!(list[1].get("tokenSpeed").is_none());
+        assert!(list[1].get("rateLimit").is_none());
+        assert!(list[1].get("aiTitle").is_none());
+        assert_eq!(list[1]["userMark"], "done");
+        assert_eq!(list[1]["lastMessagePreview"], "短预览");
+        // Long previews are truncated with an ellipsis.
+        let preview = list[0]["lastMessagePreview"].as_str().unwrap();
+        assert_eq!(preview.chars().count(), SNAPSHOT_PREVIEW_CHARS + 1);
+        assert!(preview.ends_with('…'));
+    }
+
+    #[test]
+    fn slim_snapshot_caps_session_count() {
+        let many: Vec<Value> = (0..300)
+            .map(|i| json!({"id": format!("s{i}"), "isSubagent": false, "lastActivityMs": i}))
+            .collect();
+        let slim = slim_sessions_snapshot(&Value::Array(many));
+        let list = slim.as_array().unwrap();
+        assert_eq!(list.len(), SNAPSHOT_MAX_SESSIONS);
+        // Kept the MOST recent ones (highest lastActivityMs).
+        assert_eq!(list[0]["id"], "s299");
+        assert_eq!(list.last().unwrap()["id"], format!("s{}", 300 - SNAPSHOT_MAX_SESSIONS));
+    }
+
+    #[test]
+    fn snapshot_hash_dedups_identical_content() {
+        let a = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1}]));
+        let b = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1}]));
+        let c = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 2}]));
+        assert_eq!(snapshot_hash(&a), snapshot_hash(&b));
+        assert_ne!(snapshot_hash(&a), snapshot_hash(&c));
+        assert_ne!(snapshot_hash(&a), 0, "hash must never equal the sentinel");
     }
 
     #[test]
