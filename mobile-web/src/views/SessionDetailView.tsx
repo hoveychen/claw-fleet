@@ -4,7 +4,8 @@
 // sidecar method while the session is working.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Sparkles } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, MessageSquareDashed, Sparkles } from "lucide-react";
+import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { dateLocale, t } from "../i18n";
@@ -481,7 +482,7 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
           </div>
         )}
         {messages !== null && mainRows.length === 0 && !liveThinking && (
-          <div className={styles.hint}>{t("暂无可显示的消息")}</div>
+          <EmptyState compact icon={MessageSquareDashed} title={t("暂无可显示的消息")} />
         )}
       </div>
       )}

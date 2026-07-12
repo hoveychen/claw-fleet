@@ -128,8 +128,9 @@ const DICT: Record<string, string> = {
   未归类: "Ungrouped",
   "知识库加载失败：{0}": "Failed to load wiki: {0}",
   "加载失败：{0}": "Load failed: {0}",
-  "还没有归档的文档。桌面端 agent 用 fleet wiki publish 发布后会出现在这里。":
-    "No archived docs yet. They'll show up here once a desktop agent publishes with fleet wiki publish.",
+  "还没有归档的文档": "No archived docs yet",
+  "桌面端 agent 用 fleet wiki publish 发布后，文档会出现在这里。":
+    "Docs show up here once a desktop agent publishes with fleet wiki publish.",
   "没有匹配「{0}」的文档。": "No docs match \"{0}\".",
   "知识库里没有找到「{0}」": "\"{0}\" was not found in the wiki",
 
@@ -147,7 +148,9 @@ const DICT: Record<string, string> = {
   "无法精确定位进程，将停止「{0}」目录下的所有会话，确定吗？":
     "Cannot pinpoint the process — this stops ALL sessions under \"{0}\". Continue?",
   操作失败: "Operation failed",
-  "暂无会话（等待桌面端推送快照…）": "No sessions yet (waiting for the desktop snapshot…)",
+  "还没有会话": "No sessions yet",
+  "等待桌面端推送快照。桌面端各会话上线后会出现在这里。":
+    "Waiting for the desktop snapshot. Sessions show up here once the desktop pushes them.",
   "搜索标题 / 摘要…": "Search title / summary…",
   "搜索标题、计划、全文…": "Search title, plan, full text…",
   全部目录: "All workspaces",
@@ -250,8 +253,11 @@ const DICT: Record<string, string> = {
   上一题: "Previous",
   下一题: "Next",
   放弃编辑: "Discard edits",
-  "没有待处理的决策 🎉": "No pending decisions 🎉",
-  "桌面端离线，暂时收不到新决策": "Desktop offline — no new decisions for now",
+  "没有待处理的决策": "No pending decisions",
+  "所有决策卡都已作答，收工。有新决策时会自动出现在这里。":
+    "Every decision card is answered — you're all caught up. New ones will appear here automatically.",
+  "暂时收不到新决策，等桌面端重新上线就会同步过来。":
+    "No new decisions for now — they'll sync over once the desktop reconnects.",
   "AI 风险分析": "AI risk analysis",
   "分析中…": "Analyzing…",
   "拒绝理由（可选，会转告给 AI）": "Reason for denying (optional, relayed to the AI)",
@@ -334,8 +340,9 @@ const DICT: Record<string, string> = {
   仓库: "Repositories",
   "查看未合并 worktree 与未推提交": "Unmerged worktrees & unpushed commits",
   "仓库加载失败：{0}": "Failed to load repositories: {0}",
-  "没有发现 git 仓库。仓库来自桌面端各会话的工作目录。":
-    "No git repositories found. Repositories come from your desktop sessions' working directories.",
+  "没有发现 git 仓库": "No git repositories found",
+  "仓库来自桌面端各会话的工作目录，有会话在 git 仓库里工作时会出现在这里。":
+    "Repositories come from your desktop sessions' working directories — they appear here when a session works inside a git repo.",
   "(游离 HEAD)": "(detached HEAD)",
   "未推 {0}": "{0} unpushed",
   "待合并 {0}": "{0} to merge",
