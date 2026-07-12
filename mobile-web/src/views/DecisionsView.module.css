@@ -307,7 +307,9 @@
 /* html preview / gallery */
 .htmlPreview {
   width: 100%;
+  /* Fallback for documents that never post a height; JS overrides inline. */
   height: 220px;
+  min-height: 120px;
   border: 1px solid var(--color-border);
   border-radius: 10px;
   background: var(--color-bg-secondary);

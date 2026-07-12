@@ -915,6 +915,20 @@ function useAssets(
   return uris;
 }
 
+// Height handshake constants — mirror the desktop's decisionFrame.ts. The
+// payload crosses a trust boundary (agent-authored document), so validate and
+// clamp before applying.
+const FRAME_MIN_HEIGHT = 120;
+const FRAME_MAX_HEIGHT = 1400;
+const FRAME_DEAD_BAND = 2;
+
+function parseFrameHeight(data: unknown): number | null {
+  if (!data || typeof data !== "object") return null;
+  const raw = (data as { __fleetAskHeight?: unknown }).__fleetAskHeight;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw <= 0) return null;
+  return Math.min(FRAME_MAX_HEIGHT, Math.max(FRAME_MIN_HEIGHT, Math.ceil(raw)));
+}
+
 function HtmlPreview({
   html,
   images,
@@ -934,14 +948,39 @@ function HtmlPreview({
     let out = html;
     for (const [name, uri] of Object.entries(uris)) {
       out = out.split(`src="${name}"`).join(`src="${uri}"`);
+      out = out.split(`src='${name}'`).join(`src='${uri}'`);
     }
     return out;
   }, [html, uris]);
+
+  // `sandbox="allow-scripts"` without `allow-same-origin` (same as the desktop
+  // AutoHeightFrame): the document keeps an opaque origin — no DOM/storage
+  // access — but can run the height-reporting script that `mcp_ipc` injected
+  // into `q.html` at request time and post `__fleetAskHeight` up.
+  const ref = useRef<HTMLIFrameElement | null>(null);
+  const [height, setHeight] = useState<number | null>(null);
+  useEffect(() => {
+    setHeight(null);
+    const onMessage = (e: MessageEvent) => {
+      // Opaque origins all stringify to "null" — identify our frame by source.
+      if (!ref.current || e.source !== ref.current.contentWindow) return;
+      const h = parseFrameHeight(e.data);
+      if (h === null) return;
+      setHeight((cur) => (cur === null || Math.abs(h - cur) > FRAME_DEAD_BAND ? h : cur));
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [resolved]);
+
   return (
     <iframe
+      ref={ref}
       className={styles.htmlPreview}
-      sandbox=""
-      srcDoc={`<style>body{margin:8px;font-family:-apple-system,sans-serif;color:#e6e6e6;background:#101113;font-size:14px}img{max-width:100%}</style>${resolved}`}
+      sandbox="allow-scripts"
+      srcDoc={resolved}
+      // CSS keeps the legacy 220px fallback for documents that never report
+      // (html stored before the script injection existed).
+      style={height === null ? undefined : { height: `${height}px` }}
       title="预览"
     />
   );
