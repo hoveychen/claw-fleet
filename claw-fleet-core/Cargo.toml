@@ -19,6 +19,9 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 futures = "0.3"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "time", "sync", "net", "io-util", "macros"] }
 uuid = { version = "1", features = ["v4"] }
+# QR code for the mobile-web pairing URL (rendered as SVG in the 「移动端」
+# view). Encoding the QR spec by hand is not realistic; svg-only keeps it light.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 zstd = "0.13"
 # Already in the dependency tree transitively; powers wiki export's
 # store-only zip writer (stdlib has no zip; the full `zip` crate would be a

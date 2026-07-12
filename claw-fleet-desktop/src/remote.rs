@@ -1331,6 +1331,40 @@ impl crate::backend::Backend for RemoteBackend {
     ) -> Result<(), String> {
         self.probe.post_json_ok("/feishu/creds", &creds)
     }
+
+    fn get_mobile_relay_config(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        self.probe.get("/mobile-relay/config")
+    }
+
+    fn set_mobile_relay_config(
+        &self,
+        cfg: claw_fleet_core::mobile_relay::MobileRelayConfig,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        self.probe.post_json("/mobile-relay/config", &cfg)
+    }
+
+    fn rotate_mobile_relay_secret(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        self.probe.post_json("/mobile-relay/rotate", &serde_json::json!({}))
+    }
+
+    fn mobile_relay_status(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayStatus, String> {
+        self.probe.get("/mobile-relay/status")
+    }
+
+    fn mobile_relay_qr_svg(&self) -> Result<String, String> {
+        #[derive(serde::Deserialize)]
+        struct QrEnvelope {
+            svg: String,
+        }
+        let env: QrEnvelope = self.probe.get("/mobile-relay/qr")?;
+        Ok(env.svg)
+    }
 }
 
 // ── Progress event emitted to the frontend during connect ────────────────────

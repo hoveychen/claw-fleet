@@ -1547,6 +1547,40 @@ fn set_feishu_creds(
     state.backend.read().unwrap().set_feishu_creds(creds)
 }
 
+#[tauri::command]
+fn get_mobile_relay_config(
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+    state.backend.read().unwrap().get_mobile_relay_config()
+}
+
+#[tauri::command]
+fn set_mobile_relay_config(
+    state: tauri::State<AppState>,
+    cfg: claw_fleet_core::mobile_relay::MobileRelayConfig,
+) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+    state.backend.read().unwrap().set_mobile_relay_config(cfg)
+}
+
+#[tauri::command]
+fn rotate_mobile_relay_secret(
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+    state.backend.read().unwrap().rotate_mobile_relay_secret()
+}
+
+#[tauri::command]
+fn mobile_relay_status(
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::mobile_relay::MobileRelayStatus, String> {
+    state.backend.read().unwrap().mobile_relay_status()
+}
+
+#[tauri::command]
+fn mobile_relay_qr_svg(state: tauri::State<AppState>) -> Result<String, String> {
+    state.backend.read().unwrap().mobile_relay_qr_svg()
+}
+
 /// Read the last non-tool-use assistant message from a session, for guard context.
 #[tauri::command]
 fn get_guard_context(state: tauri::State<AppState>, session_id: String) -> String {
@@ -3878,6 +3912,11 @@ pub fn run() {
             disconnect_feishu,
             get_feishu_creds,
             set_feishu_creds,
+            get_mobile_relay_config,
+            set_mobile_relay_config,
+            rotate_mobile_relay_secret,
+            mobile_relay_status,
+            mobile_relay_qr_svg,
             generate_mascot_quips,
             list_llm_providers,
             get_llm_config,
