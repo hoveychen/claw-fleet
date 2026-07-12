@@ -571,6 +571,37 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                 .ok_or_else(|| format!("no agent source for path: {path}"))?;
             source.get_messages_tail(path, n).map(Value::Array)
         }
+        // Byte-offset incremental tail (mirrors the `/tail` endpoint): the
+        // client polls with its last `newOffset` and receives only the lines
+        // appended since. Omitting `offset` locates the current end without
+        // reading the body — the cheap "start following from here" call.
+        "tail_delta" => {
+            use std::io::{Read as _, Seek as _};
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let sources = crate::agent_source::build_sources();
+            let resolved = crate::agent_source::find_source_for_path(&sources, path)
+                .and_then(|s| s.resolve_file_path(path))
+                .ok_or_else(|| format!("cannot resolve path: {path}"))?;
+            let size = std::fs::metadata(&resolved).map_err(|e| e.to_string())?.len();
+            let offset = params.get("offset").and_then(Value::as_u64);
+            let Some(offset) = offset else {
+                return Ok(json!({ "lines": [], "newOffset": size }));
+            };
+            // Truncated/rotated file (offset past EOF): resync without lines.
+            if offset >= size {
+                return Ok(json!({ "lines": [], "newOffset": size }));
+            }
+            let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
+            file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
+            let mut buf = String::new();
+            file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
+            let lines: Vec<Value> = buf
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+                .filter_map(|l| serde_json::from_str(l).ok())
+                .collect();
+            Ok(json!({ "lines": lines, "newOffset": size }))
+        }
         // Serializes to `null` when there's no live sidecar for this session.
         "live_thinking" => {
             let session_id = params
@@ -1568,6 +1599,50 @@ mod tests {
 
             let reply = request_raw("guard_analyze", json!({}));
             assert_eq!(reply["ok"], false, "missing command must fail");
+        });
+    }
+
+    #[test]
+    fn request_tail_delta_incremental_reads() {
+        with_temp_home(|| {
+            let path = write_jsonl(
+                "delta.jsonl",
+                &[json!({"type":"user","uuid":"u1"}), json!({"type":"assistant","uuid":"a1"})],
+            );
+
+            // No offset → locate the current end without reading the body.
+            let data = request_ok("tail_delta", json!({"path": path}));
+            assert_eq!(data["lines"].as_array().unwrap().len(), 0);
+            let end = data["newOffset"].as_u64().expect("newOffset");
+            assert!(end > 0);
+
+            // offset 0 → everything, newOffset = file size.
+            let data = request_ok("tail_delta", json!({"path": path, "offset": 0}));
+            assert_eq!(data["lines"].as_array().unwrap().len(), 2);
+            assert_eq!(data["newOffset"].as_u64().unwrap(), end);
+
+            // Append one line; polling from `end` returns only the new line.
+            {
+                use std::io::Write as _;
+                let mut f = fs::OpenOptions::new().append(true).open(&path).unwrap();
+                writeln!(f, r#"{{"type":"assistant","uuid":"a2"}}"#).unwrap();
+            }
+            let data = request_ok("tail_delta", json!({"path": path, "offset": end}));
+            let lines = data["lines"].as_array().unwrap();
+            assert_eq!(lines.len(), 1);
+            assert_eq!(lines[0]["uuid"], "a2");
+            let end2 = data["newOffset"].as_u64().unwrap();
+            assert!(end2 > end);
+
+            // Caught up: no new bytes → empty, offset unchanged.
+            let data = request_ok("tail_delta", json!({"path": path, "offset": end2}));
+            assert_eq!(data["lines"].as_array().unwrap().len(), 0);
+            assert_eq!(data["newOffset"].as_u64().unwrap(), end2);
+
+            // Offset beyond the file (truncated/rotated) → resync to real size.
+            let data = request_ok("tail_delta", json!({"path": path, "offset": end2 + 999}));
+            assert_eq!(data["lines"].as_array().unwrap().len(), 0);
+            assert_eq!(data["newOffset"].as_u64().unwrap(), end2);
         });
     }
 
