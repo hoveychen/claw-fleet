@@ -8,6 +8,23 @@ import { HandoffChainRow } from "./HandoffChainRow";
 import { StopControl, canControl } from "./StopControl";
 import styles from "./SessionCard.module.css";
 
+// ── Background-task kind → icon / label / colour ───────────────────────────────
+// The Stop hook reports each outstanding background task's `type` (see
+// `bg_guard::BackgroundTask`). We surface a distinct icon and i18n label per kind
+// so a session waiting on a monitor reads differently from one waiting on a
+// shell. `dataType` drives the label colour via a `[data-bgtype]` CSS rule.
+const BG_TASK_KINDS: Record<
+  string,
+  { icon: string; labelKey: string; dataType: string }
+> = {
+  monitor: { icon: "👁️", labelKey: "card.bg_monitor", dataType: "monitor" },
+  shell: { icon: "⏳", labelKey: "card.bg_shell", dataType: "shell" },
+  subagent: { icon: "🤖", labelKey: "card.bg_subagent", dataType: "subagent" },
+  workflow: { icon: "⚙", labelKey: "card.bg_workflow", dataType: "workflow" },
+  // Mixed kinds (or an unknown type) — stay generic rather than mislabel.
+  mixed: { icon: "⏳", labelKey: "card.bg_tasks", dataType: "mixed" },
+};
+
 // ── Rate-limit countdown ──────────────────────────────────────────────────────
 
 function formatDuration(ms: number): string {
@@ -557,11 +574,18 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
           const tip = tasks
             .map((bt) => `[${bt.type}] ${bt.description || bt.command || bt.id}`)
             .join("\n");
+          // Icon + label follow the task type when the session is waiting on a
+          // single kind (the common case). A monitor reads as 👁️, a shell as ⏳,
+          // etc. Mixed kinds fall back to the generic ⏳ so a "监视中 2" can never
+          // mislabel a monitor+shell pair.
+          const kinds = new Set(tasks.map((bt) => bt.type));
+          const kind = kinds.size === 1 ? [...kinds][0] : "mixed";
+          const meta = BG_TASK_KINDS[kind] ?? BG_TASK_KINDS.mixed;
           return (
             <div className={styles.bgtask_row} title={tip}>
-              <span className={styles.bgtask_icon} aria-hidden>⏳</span>
-              <span className={styles.bgtask_label}>
-                {t("card.bg_tasks", { count: tasks.length })}
+              <span className={styles.bgtask_icon} aria-hidden>{meta.icon}</span>
+              <span className={styles.bgtask_label} data-bgtype={meta.dataType}>
+                {t(meta.labelKey, { count: tasks.length })}
               </span>
               <span className={styles.bgtask_desc}>
                 {tasks[0].description || tasks[0].command || tasks[0].id}
