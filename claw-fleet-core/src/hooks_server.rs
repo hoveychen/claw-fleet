@@ -163,6 +163,11 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
     // self-healing — offline / not-logged-in errors are swallowed and retried.
     crate::account::start_background_sampler(std::time::Duration::from_secs(600));
 
+    // Bring up the mobile relay channel if it's configured — on a probe-only
+    // machine (no desktop app) this serve process is the agent-side publisher
+    // for the mobile web (see the broadcast loop below).
+    crate::mobile_relay::ensure_ws_client();
+
     // ── Background SSE broadcaster thread ──────────────────────────────────
     // Polls for session changes, waiting alerts, guard/elicitation requests
     // and pushes them to connected SSE clients.
@@ -182,7 +187,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             loop {
                 std::thread::sleep(std::time::Duration::from_secs(2));
 
-                if sse_bg.client_count() == 0 {
+                // Mobile relay clients count as consumers too: with no SSE
+                // desktop attached but a phone online, the loop must keep
+                // scanning so decisions still reach the mobile web.
+                if sse_bg.client_count() == 0 && !crate::mobile_relay::is_connected() {
                     continue;
                 }
 
@@ -195,6 +203,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let json = serde_json::to_string(&sessions).unwrap_or_default();
                 if json != prev_sessions_json {
                     sse_bg.broadcast("sessions-updated", &json);
+                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&json) {
+                        crate::mobile_relay::publish_sessions(&v);
+                    }
                     prev_sessions_json = json;
                 }
 
@@ -244,6 +255,17 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("guard-request", &json);
                             }
+                            if let Ok(v) = serde_json::to_value(&req) {
+                                crate::mobile_relay::publish_decision_created(
+                                    "guard",
+                                    v,
+                                    &format!(
+                                        "{} · 命令待审批",
+                                        crate::mobile_relay::notify_workspace(&req.workspace_name)
+                                    ),
+                                    &crate::mobile_relay::notify_preview(&req.command_summary),
+                                );
+                            }
                         }
                     }
                 }
@@ -252,6 +274,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     if let Ok(json) = serde_json::to_string(id) {
                         sse_bg.broadcast("guard-dismissed", &json);
                     }
+                    crate::mobile_relay::publish_decision_resolved("guard", id);
                 }
                 prev_guard_ids.retain(|id| guard_ids.contains(id));
 
@@ -272,6 +295,19 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("elicitation-request", &json);
                             }
+                            if let Ok(v) = serde_json::to_value(&req) {
+                                crate::mobile_relay::publish_decision_created(
+                                    "elicitation",
+                                    v,
+                                    &format!(
+                                        "{} · 有问题请示",
+                                        crate::mobile_relay::notify_workspace(&req.workspace_name)
+                                    ),
+                                    &crate::mobile_relay::notify_preview(
+                                        req.questions.first().map(|q| q.question.as_str()).unwrap_or(""),
+                                    ),
+                                );
+                            }
                         }
                     }
                 }
@@ -280,6 +316,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     if let Ok(json) = serde_json::to_string(id) {
                         sse_bg.broadcast("elicitation-dismissed", &json);
                     }
+                    crate::mobile_relay::publish_decision_resolved("elicitation", id);
                 }
                 prev_elicit_ids.retain(|id| elicit_ids.contains(id));
 
@@ -300,6 +337,19 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("plan-approval-request", &json);
                             }
+                            if let Ok(v) = serde_json::to_value(&req) {
+                                crate::mobile_relay::publish_decision_created(
+                                    "plan-approval",
+                                    v,
+                                    &format!(
+                                        "{} · 计划待审批",
+                                        crate::mobile_relay::notify_workspace(&req.workspace_name)
+                                    ),
+                                    &crate::mobile_relay::notify_preview(
+                                        req.ai_title.as_deref().unwrap_or("ExitPlanMode 计划审批"),
+                                    ),
+                                );
+                            }
                         }
                     }
                 }
@@ -308,6 +358,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     if let Ok(json) = serde_json::to_string(id) {
                         sse_bg.broadcast("plan-approval-dismissed", &json);
                     }
+                    crate::mobile_relay::publish_decision_resolved("plan-approval", id);
                 }
                 prev_plan_approval_ids.retain(|id| plan_approval_ids.contains(id));
 
@@ -328,6 +379,24 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("fleet-ask-request", &json);
                             }
+                            if let Ok(v) = serde_json::to_value(&req) {
+                                crate::mobile_relay::publish_decision_created(
+                                    "fleet-ask",
+                                    v,
+                                    &format!(
+                                        "{} · 决策卡待处理",
+                                        crate::mobile_relay::notify_workspace(&req.workspace_name)
+                                    ),
+                                    &crate::mobile_relay::notify_preview(
+                                        req.ai_title.as_deref().unwrap_or_else(|| {
+                                            req.questions
+                                                .first()
+                                                .map(|q| q.question.as_str())
+                                                .unwrap_or("")
+                                        }),
+                                    ),
+                                );
+                            }
                         }
                     }
                 }
@@ -335,6 +404,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     if let Ok(json) = serde_json::to_string(id) {
                         sse_bg.broadcast("fleet-ask-dismissed", &json);
                     }
+                    crate::mobile_relay::publish_decision_resolved("fleet-ask", id);
                 }
                 prev_fleet_ask_ids.retain(|id| fleet_ask_ids.contains(id));
 
@@ -383,6 +453,17 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                             if let Ok(json) = serde_json::to_string(&req) {
                                 sse_bg.broadcast("permission-prompt-request", &json);
                             }
+                            if let Ok(v) = serde_json::to_value(&req) {
+                                crate::mobile_relay::publish_decision_created(
+                                    "permission-prompt",
+                                    v,
+                                    &format!(
+                                        "{} · 权限请求",
+                                        crate::mobile_relay::notify_workspace(&req.workspace_name)
+                                    ),
+                                    &crate::mobile_relay::notify_preview(&req.tool_name),
+                                );
+                            }
                         }
                     }
                 }
@@ -390,6 +471,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     if let Ok(json) = serde_json::to_string(id) {
                         sse_bg.broadcast("permission-prompt-dismissed", &json);
                     }
+                    crate::mobile_relay::publish_decision_resolved("permission-prompt", id);
                 }
                 prev_permission_prompt_ids.retain(|id| permission_prompt_ids.contains(id));
             }
@@ -3578,6 +3660,68 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         400,
                         serde_json::json!({"error": format!("invalid body: {e}")}).to_string(),
                     ),
+                };
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(status)
+                        .with_header(json_header),
+                );
+            }
+
+            "/mobile-relay/config" if request.method() == &tiny_http::Method::Get => {
+                let cfg = crate::mobile_relay::load_config();
+                let body = serde_json::to_string(&cfg).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/mobile-relay/config" if request.method() == &tiny_http::Method::Post => {
+                let mut body_bytes = Vec::new();
+                let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
+                let parsed: Result<crate::mobile_relay::MobileRelayConfig, _> =
+                    serde_json::from_slice(&body_bytes);
+                let (status, body) = match parsed {
+                    Ok(cfg) => match crate::mobile_relay::set_config_normalized(cfg) {
+                        Ok(stored) => (200, serde_json::to_string(&stored).unwrap_or_default()),
+                        Err(e) => (500, serde_json::json!({"error": e}).to_string()),
+                    },
+                    Err(e) => (
+                        400,
+                        serde_json::json!({"error": format!("invalid body: {e}")}).to_string(),
+                    ),
+                };
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(status)
+                        .with_header(json_header),
+                );
+            }
+
+            "/mobile-relay/rotate" if request.method() == &tiny_http::Method::Post => {
+                let (status, body) = match crate::mobile_relay::rotate_secret() {
+                    Ok(cfg) => (200, serde_json::to_string(&cfg).unwrap_or_default()),
+                    Err(e) => (500, serde_json::json!({"error": e}).to_string()),
+                };
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body)
+                        .with_status_code(status)
+                        .with_header(json_header),
+                );
+            }
+
+            "/mobile-relay/status" => {
+                let status = crate::mobile_relay::status();
+                let body = serde_json::to_string(&status).unwrap_or_default();
+                let _ = request.respond(
+                    tiny_http::Response::from_string(body).with_header(json_header),
+                );
+            }
+
+            "/mobile-relay/qr" => {
+                let (status, body) = match crate::mobile_relay::qr_svg() {
+                    Ok(svg) => (200, serde_json::json!({"svg": svg}).to_string()),
+                    Err(e) => (404, serde_json::json!({"error": e}).to_string()),
                 };
                 let _ = request.respond(
                     tiny_http::Response::from_string(body)

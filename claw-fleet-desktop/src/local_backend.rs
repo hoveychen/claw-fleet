@@ -1080,21 +1080,7 @@ fn publish_mobile_decision<T: serde::Serialize>(kind: &str, req: &T, title: Stri
     }
 }
 
-/// Short single-line preview for a push notification body.
-fn notify_preview(text: &str) -> String {
-    let first_line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-    let mut s: String = first_line.trim().chars().take(80).collect();
-    if first_line.trim().chars().count() > 80 {
-        s.push('…');
-    }
-    s
-}
-
-/// Workspace label for notification titles (falls back when the request
-/// predates session-display resolution).
-fn notify_workspace(workspace_name: &str) -> &str {
-    if workspace_name.is_empty() { "Fleet" } else { workspace_name }
-}
+use claw_fleet_core::mobile_relay::{notify_preview, notify_workspace};
 
 fn send_guard_card(req: &claw_fleet_core::guard::GuardRequest) {
     let req = req.clone();
@@ -2936,6 +2922,35 @@ impl Backend for LocalBackend {
         creds: claw_fleet_core::feishu::StoredCreds,
     ) -> Result<(), String> {
         claw_fleet_core::feishu::set_stored_creds(creds)
+    }
+
+    fn get_mobile_relay_config(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        Ok(claw_fleet_core::mobile_relay::load_config())
+    }
+
+    fn set_mobile_relay_config(
+        &self,
+        cfg: claw_fleet_core::mobile_relay::MobileRelayConfig,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        claw_fleet_core::mobile_relay::set_config_normalized(cfg)
+    }
+
+    fn rotate_mobile_relay_secret(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
+        claw_fleet_core::mobile_relay::rotate_secret()
+    }
+
+    fn mobile_relay_status(
+        &self,
+    ) -> Result<claw_fleet_core::mobile_relay::MobileRelayStatus, String> {
+        Ok(claw_fleet_core::mobile_relay::status())
+    }
+
+    fn mobile_relay_qr_svg(&self) -> Result<String, String> {
+        claw_fleet_core::mobile_relay::qr_svg()
     }
 }
 

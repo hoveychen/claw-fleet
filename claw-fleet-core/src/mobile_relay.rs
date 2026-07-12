@@ -104,6 +104,47 @@ pub fn pairing_url(cfg: &MobileRelayConfig) -> String {
     format!("{}/#k={}", cfg.relay_url.trim_end_matches('/'), cfg.secret)
 }
 
+/// Persist a config coming from the UI. An enabled config with an empty
+/// secret keeps the existing secret (or generates one on first enable) so the
+/// frontend never has to round-trip the secret value.
+pub fn set_config_normalized(mut cfg: MobileRelayConfig) -> Result<MobileRelayConfig, String> {
+    if cfg.relay_url.trim().is_empty() {
+        cfg.relay_url = default_relay_url();
+    }
+    if cfg.secret.is_empty() {
+        let existing = load_config().secret;
+        cfg.secret = if existing.is_empty() { generate_secret() } else { existing };
+    }
+    save_config(&cfg).map_err(|e| format!("save mobile relay config: {e}"))?;
+    Ok(cfg)
+}
+
+/// Rotate the pairing secret — the old QR code stops working as soon as the
+/// WS client reconnects with the new channel.
+pub fn rotate_secret() -> Result<MobileRelayConfig, String> {
+    let mut cfg = load_config();
+    cfg.secret = generate_secret();
+    save_config(&cfg).map_err(|e| format!("save mobile relay config: {e}"))?;
+    Ok(cfg)
+}
+
+/// Render the pairing URL as an SVG QR code for the 「移动端」 view.
+pub fn qr_svg() -> Result<String, String> {
+    let cfg = load_config();
+    if cfg.secret.is_empty() {
+        return Err("mobile relay secret not set".into());
+    }
+    let code = qrcode::QrCode::new(pairing_url(&cfg).as_bytes())
+        .map_err(|e| format!("qr encode: {e}"))?;
+    Ok(code
+        .render::<qrcode::render::svg::Color>()
+        .quiet_zone(true)
+        .min_dimensions(240, 240)
+        .dark_color(qrcode::render::svg::Color("#000000"))
+        .light_color(qrcode::render::svg::Color("#ffffff"))
+        .build())
+}
+
 // ── Status (for the desktop 「移动端」 view) ─────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -120,6 +161,22 @@ pub struct MobileRelayStatus {
 /// relay is down.
 pub fn is_connected() -> bool {
     CONNECTED.load(Ordering::SeqCst)
+}
+
+/// Short single-line preview for a push notification body.
+pub fn notify_preview(text: &str) -> String {
+    let first_line = text.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+    let mut s: String = first_line.trim().chars().take(80).collect();
+    if first_line.trim().chars().count() > 80 {
+        s.push('…');
+    }
+    s
+}
+
+/// Workspace label for notification titles (falls back when the request
+/// predates session-display resolution).
+pub fn notify_workspace(workspace_name: &str) -> &str {
+    if workspace_name.is_empty() { "Fleet" } else { workspace_name }
 }
 
 pub fn status() -> MobileRelayStatus {
