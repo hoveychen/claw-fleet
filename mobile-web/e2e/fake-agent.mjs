@@ -135,6 +135,56 @@ const sessions = [
   },
 ];
 
+// ── Decision-card image fixtures ─────────────────────────────────────────────
+// A small but real PNG (8×8 solid magenta) so a rendered <img> is unmistakable
+// against the "加载图片…" placeholder. Served through `decision_asset`, the same
+// {mime,base64} over-relay shape the desktop uses.
+const MAGENTA_PNG_B64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAYAAADED76LAAAAFElEQVR42mNk+M9Qz0BkYBxVSF+FAP2FA/2m3s1kAAAAAElFTkSuQmCC";
+// Decision-asset store keyed like `~/.fleet/decision-assets/<id>/q<idx>/<name>`.
+// `ASSET_DELAY_MS` simulates a slow uplink — the whole point of this fixture is
+// to exercise the mobile client's fixed request timeout against a large/slow
+// reply, which is what a real phone on a weak connection hits.
+const ASSET_DELAY_MS = Number(process.env.ASSET_DELAY_MS || 0);
+const decisionAssets = {
+  "ask-img|q0|chart.png": { mime: "image/png", base64: MAGENTA_PNG_B64 },
+  "ask-img|q1|shot.png": { mime: "image/png", base64: MAGENTA_PNG_B64 },
+};
+
+// A pending fleet-ask carrying images two ways: q0 via agent html referencing
+// the image relatively, q1 as a bare gallery. Mirrors mcp_ipc::ingest_images
+// output (path blanked, name/caption kept).
+const fleetAskImageDecision = {
+  id: "ask-img",
+  sessionId: "sess-1",
+  workspaceName: "ws-alpha",
+  aiTitle: "修移动端 markBucket bug",
+  timestamp: new Date().toISOString(),
+  questions: [
+    {
+      question: "第一版配色出来了。\n---\n看看这个洋红方块顺不顺眼？",
+      header: "配色",
+      multiSelect: false,
+      html: '<p>预览：</p><img src="chart.png" style="width:64px;height:64px">',
+      images: [{ name: "chart.png", caption: "配色预览" }],
+      options: [
+        { label: "就它了", description: "采用当前配色" },
+        { label: "换一个", description: "再出一版" },
+      ],
+    },
+    {
+      question: "顺便确认下这张截图。\n---\n这是当前布局对吗？",
+      header: "布局",
+      multiSelect: false,
+      images: [{ name: "shot.png", caption: "当前布局截图" }],
+      options: [
+        { label: "对", description: "布局正确" },
+        { label: "不对", description: "布局有问题" },
+      ],
+    },
+  ],
+};
+
 // One pending guard decision so the decisions tab has content.
 const guardDecision = {
   id: "guard-1",
@@ -204,7 +254,7 @@ function serveRequest(method, params) {
       return {
         guard: [guardDecision],
         elicitation: [],
-        fleetAsk: [],
+        fleetAsk: [fleetAskImageDecision],
         planApproval: [],
         permissionPrompt: [],
       };
@@ -256,6 +306,15 @@ function serveRequest(method, params) {
       queueMicrotask(pushSessions);
       return {};
     }
+    case "decision_asset": {
+      // ASSET_FAIL forces an immediate error reply, to exercise the mobile
+      // card's failure/retry UI without waiting out the client timeout.
+      if (process.env.ASSET_FAIL) throw new Error("fake-agent: forced asset failure");
+      const key = `${params.id}|${params.qidx}|${params.rel}`;
+      const asset = decisionAssets[key];
+      if (!asset) throw new Error(`fake-agent: no decision asset ${key}`);
+      return asset;
+    }
     case "wiki_list":
       return wikiDocs;
     case "wiki_file": {
@@ -305,8 +364,15 @@ function connect() {
         } catch (e) {
           reply = { event: "reply", req_id: p.req_id, ok: false, error: String(e.message ?? e) };
         }
-        console.log(`[fake-agent] req ${p.method} -> ${reply.ok ? "ok" : reply.error}`);
-        send({ type: "msg", payload: reply });
+        // Simulate a slow uplink for asset bytes so the mobile client's fixed
+        // request timeout is actually exercised against a delayed reply.
+        const delay = p.method === "decision_asset" ? ASSET_DELAY_MS : 0;
+        console.log(
+          `[fake-agent] req ${p.method} -> ${reply.ok ? "ok" : reply.error}` +
+            (delay ? ` (delayed ${delay}ms)` : ""),
+        );
+        if (delay > 0) setTimeout(() => send({ type: "msg", payload: reply }), delay);
+        else send({ type: "msg", payload: reply });
       } else if (p.event === "answer") {
         console.log(`[fake-agent] answer kind=${p.kind} id=${p.id}`, JSON.stringify(p));
         send({ type: "msg", payload: { event: "decision_resolved", kind: p.kind, id: p.id } });
