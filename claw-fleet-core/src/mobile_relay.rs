@@ -445,6 +445,68 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                 "base64": base64::engine::general_purpose::STANDARD.encode(&asset.bytes),
             }))
         }
+        // Last `n` transcript messages — the mobile SessionDetail polls this
+        // (same model as the desktop HistoryView tab; no watcher push).
+        "tail" => {
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let n = params.get("n").and_then(Value::as_u64).unwrap_or(200) as usize;
+            let sources = crate::agent_source::build_sources();
+            let source = crate::agent_source::find_source_for_path(&sources, path)
+                .ok_or_else(|| format!("no agent source for path: {path}"))?;
+            source.get_messages_tail(path, n).map(Value::Array)
+        }
+        // Serializes to `null` when there's no live sidecar for this session.
+        "live_thinking" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or("missing sessionId")?;
+            serde_json::to_value(crate::live_thinking::read_live_thinking(session_id))
+                .map_err(|e| e.to_string())
+        }
+        // `null` when the session isn't on any relay chain.
+        "handoff_chain" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or("missing sessionId")?;
+            serde_json::to_value(crate::handoff::chain_containing(session_id))
+                .map_err(|e| e.to_string())
+        }
+        "workflow_trees" => {
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let trees =
+                crate::workflow::discover_workflow_trees(std::path::Path::new(path));
+            serde_json::to_value(trees).map_err(|e| e.to_string())
+        }
+        "token_breakdown" => {
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let project_root = params.get("projectRoot").and_then(Value::as_str);
+            let breakdown = crate::token_analysis::aggregate_task(
+                std::path::Path::new(path),
+                project_root.map(std::path::Path::new),
+            )?;
+            serde_json::to_value(breakdown).map_err(|e| e.to_string())
+        }
+        // Main-session invocations plus subagent sidecars, sorted by timestamp
+        // (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
+        "skill_history" => {
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let sources = crate::agent_source::build_sources();
+            let source = crate::agent_source::find_source_for_path(&sources, path)
+                .ok_or_else(|| format!("no agent source for path: {path}"))?;
+            use crate::skill_history;
+            let main_msgs = source.get_messages(path)?;
+            let mut out = skill_history::extract_from_messages(&main_msgs, false);
+            for sub in skill_history::subagent_jsonl_paths(std::path::Path::new(path)) {
+                let sub_str = sub.to_string_lossy().to_string();
+                // Best-effort: a broken subagent file shouldn't lose the rest.
+                let Ok(msgs) = source.get_messages(&sub_str) else { continue };
+                out.extend(skill_history::extract_from_messages(&msgs, true));
+            }
+            skill_history::sort_by_timestamp(&mut out);
+            serde_json::to_value(out).map_err(|e| e.to_string())
+        }
         other => Err(format!("unknown method: {other}")),
     }
 }
@@ -791,6 +853,182 @@ mod tests {
             let guards = reply["data"]["guard"].as_array().expect("guard list");
             assert_eq!(guards.len(), 1);
             assert_eq!(guards[0]["id"], "g9");
+        });
+    }
+
+    /// Issue a `req` payload and unwrap the ok reply's `data`.
+    fn request_ok(method: &str, params: Value) -> Value {
+        let reply = handle_client_payload(&json!({
+            "event": "req", "req_id": "r", "method": method, "params": params
+        }))
+        .unwrap_or_else(|| panic!("{method} must produce a reply"));
+        assert_eq!(reply["ok"], true, "{method} failed: {}", reply["error"]);
+        reply["data"].clone()
+    }
+
+    /// Write a jsonl transcript under the temp FLEET_HOME and return its path.
+    fn write_jsonl(name: &str, lines: &[Value]) -> String {
+        let dir = crate::session::real_home_dir().unwrap().join("transcripts");
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        let body: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        fs::write(&p, body).unwrap();
+        p.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn request_tail_returns_last_n_messages() {
+        with_temp_home(|| {
+            let path = write_jsonl(
+                "t1.jsonl",
+                &[
+                    json!({"type":"user","message":{"content":"one"}}),
+                    json!({"type":"assistant","message":{"content":"two"}}),
+                    json!({"type":"user","message":{"content":"three"}}),
+                ],
+            );
+            let data = request_ok("tail", json!({"path": path, "n": 2}));
+            let msgs = data.as_array().expect("array");
+            assert_eq!(msgs.len(), 2);
+            assert_eq!(msgs[0]["message"]["content"], "two");
+            assert_eq!(msgs[1]["message"]["content"], "three");
+
+            // n larger than the file returns everything.
+            let data = request_ok("tail", json!({"path": path, "n": 99}));
+            assert_eq!(data.as_array().unwrap().len(), 3);
+        });
+    }
+
+    #[test]
+    fn request_live_thinking_reads_fresh_sidecar() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("live-thinking");
+            fs::write(
+                dir.join("pid-1.jsonl"),
+                concat!(
+                    r#"{"type":"system","session_id":"abc"}"#, "\n",
+                    r#"{"type":"stream_event","event":{"type":"message_start"},"session_id":"abc"}"#, "\n",
+                    r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}},"session_id":"abc"}"#, "\n",
+                    r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"深思熟虑"}},"session_id":"abc"}"#, "\n",
+                ),
+            )
+            .unwrap();
+            let data = request_ok("live_thinking", json!({"sessionId": "abc"}));
+            assert_eq!(data["sessionId"], "abc");
+            assert_eq!(data["thinking"], "深思熟虑");
+
+            // Unknown session → null, not an error.
+            let data = request_ok("live_thinking", json!({"sessionId": "nope"}));
+            assert!(data.is_null());
+        });
+    }
+
+    #[test]
+    fn request_handoff_chain_finds_chain() {
+        with_temp_home(|| {
+            let dir = crate::session::real_home_dir()
+                .unwrap()
+                .join(".fleet")
+                .join("handoffs")
+                .join("chain");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("c1.json"),
+                json!({
+                    "chainId": "c1",
+                    "workspacePath": "/ws",
+                    "links": [{
+                        "fromSessionId": "s1", "toSessionId": "s2",
+                        "note": "交接", "handedAt": 1
+                    }]
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let data = request_ok("handoff_chain", json!({"sessionId": "s2"}));
+            assert_eq!(data["chainId"], "c1");
+            assert_eq!(data["links"][0]["fromSessionId"], "s1");
+
+            let data = request_ok("handoff_chain", json!({"sessionId": "unknown"}));
+            assert!(data.is_null());
+        });
+    }
+
+    #[test]
+    fn request_workflow_trees_reads_journal() {
+        with_temp_home(|| {
+            let path = write_jsonl("wf-main.jsonl", &[json!({"type":"user"})]);
+            // Session dir = jsonl path minus extension; workflows live under
+            // <session-dir>/subagents/workflows/wf_*/journal.jsonl.
+            let wf_dir = crate::session::real_home_dir()
+                .unwrap()
+                .join("transcripts")
+                .join("wf-main")
+                .join("subagents")
+                .join("workflows")
+                .join("wf_r1");
+            fs::create_dir_all(&wf_dir).unwrap();
+            fs::write(
+                wf_dir.join("journal.jsonl"),
+                r#"{"type":"started","key":"v2:aaa","agentId":"agentA"}"#,
+            )
+            .unwrap();
+            let data = request_ok("workflow_trees", json!({"path": path}));
+            let trees = data.as_array().expect("array");
+            assert_eq!(trees.len(), 1);
+            assert_eq!(trees[0]["runId"], "wf_r1");
+            assert_eq!(trees[0]["agents"].as_array().unwrap().len(), 1);
+
+            // A session with no workflow dir yields an empty list.
+            let bare = write_jsonl("bare.jsonl", &[json!({"type":"user"})]);
+            let data = request_ok("workflow_trees", json!({"path": bare}));
+            assert_eq!(data.as_array().unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn request_token_breakdown_aggregates_usage() {
+        with_temp_home(|| {
+            let path = write_jsonl(
+                "tok.jsonl",
+                &[
+                    json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}),
+                    json!({"type":"assistant","message":{
+                        "model":"claude-opus-4-7",
+                        "stop_reason":"end_turn",
+                        "content":[{"type":"text","text":"hello"}],
+                        "usage":{"input_tokens":1,"output_tokens":10,
+                                 "cache_creation_input_tokens":15000,"cache_read_input_tokens":0}
+                    }}),
+                ],
+            );
+            let data = request_ok("token_breakdown", json!({"path": path}));
+            assert_eq!(data["totalsUsage"]["outputTokens"], 10);
+            assert!(data["main"].is_object());
+            assert_eq!(data["subagents"].as_array().unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn request_skill_history_extracts_invocations() {
+        with_temp_home(|| {
+            let path = write_jsonl(
+                "sk.jsonl",
+                &[json!({
+                    "type": "assistant",
+                    "timestamp": "2026-07-12T10:00:00Z",
+                    "message": {"content": [{
+                        "type": "tool_use", "name": "Skill",
+                        "input": {"skill": "code-review", "args": "--fix"}
+                    }]}
+                })],
+            );
+            let data = request_ok("skill_history", json!({"path": path}));
+            let items = data.as_array().expect("array");
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0]["skill"], "code-review");
+            assert_eq!(items[0]["args"], "--fix");
+            assert_eq!(items[0]["isSubagent"], false);
         });
     }
 
