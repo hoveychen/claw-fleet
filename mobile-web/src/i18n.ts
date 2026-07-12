@@ -114,6 +114,10 @@ const DICT: Record<string, string> = {
   // ── 知识库 ──
   刷新: "Refresh",
   "搜索标题 / slug…": "Search title / slug…",
+  "搜索标题 / 正文…": "Search title / content…",
+  全部项目: "All projects",
+  "搜索中…": "Searching…",
+  "该项目下没有文档。": "No docs in this project.",
   "加载中…": "Loading…",
   "渲染中…（正在拉取页面资源）": "Rendering… (fetching page assets)",
   最新: "Latest",
