@@ -10,12 +10,26 @@
   gap: 8px;
 }
 
+.searchWrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.searchIcon {
+  position: absolute;
+  left: 11px;
+  display: inline-flex;
+  color: var(--color-text-dim);
+  pointer-events: none;
+}
+
 .search {
   width: 100%;
   background: var(--color-bg-input);
   border: 1px solid var(--color-border);
   border-radius: 10px;
-  padding: 8px 12px;
+  padding: 8px 12px 8px 32px;
   color: var(--color-text);
   font-size: 13px;
   outline: none;
@@ -23,6 +37,23 @@
 
 .search:focus {
   border-color: var(--color-border-strong);
+}
+
+.searchSpinner {
+  position: absolute;
+  right: 11px;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .filterRow {
@@ -43,6 +74,9 @@
 }
 
 .filterToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   border: 1px solid var(--color-border);
   background: var(--color-bg-card);
   color: var(--color-text-dim);
@@ -56,6 +90,23 @@
   border-color: var(--color-accent);
   color: var(--color-accent);
   background: var(--color-accent-soft);
+}
+
+.activeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  flex-shrink: 0;
+}
+
+.activeCount {
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.filterToggle[data-active="true"] .activeCount {
+  color: var(--color-accent);
 }
 
 .newSession {
@@ -88,6 +139,10 @@
 
 .segmentButton {
   flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
   border: none;
   background: none;
   color: var(--color-text-dim);
@@ -98,6 +153,20 @@
 
 .segmentButton[data-active="true"] {
   background: var(--color-bg-card);
+  color: var(--color-text);
+}
+
+.segmentButton[data-active="true"] svg {
+  color: var(--color-accent);
+}
+
+.segmentCount {
+  font-size: 11.5px;
+  color: var(--color-text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.segmentButton[data-active="true"] .segmentCount {
   color: var(--color-text);
 }
 
@@ -118,19 +187,22 @@
   border-top: 1px solid var(--color-border);
 }
 
-.markButton {
-  border: 1px solid var(--color-border);
+/* Single circle→check toggle, mirroring the desktop launchpad MarkControl.
+   Unmarked reads as pending (hollow circle); done is the filled check. */
+.markToggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: none;
   background: none;
   color: var(--color-text-dim);
-  border-radius: 999px;
-  padding: 3px 12px;
-  font-size: 11.5px;
+  border-radius: 50%;
 }
 
-.markButton[data-active="true"] {
-  border-color: var(--color-accent);
-  color: var(--color-accent);
-  background: var(--color-accent-soft);
+.markToggle[data-done="true"] {
+  color: var(--color-success);
 }
 
 .opsSpacer {
@@ -215,12 +287,14 @@
   }
 }
 
-.workspace {
+.title {
   font-weight: 600;
   font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
+  min-width: 0;
 }
 
 .time {
@@ -230,14 +304,52 @@
   font-size: 12px;
 }
 
-.aiTitle {
-  margin-top: 4px;
-  font-size: 13.5px;
-  color: var(--color-text);
+/* Meta line under the title — project (folder), handoff chip, live runtime.
+   Mirrors the desktop launchpad row's meta line. */
+.project,
+.handoff,
+.runtime {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11.5px;
+  color: var(--color-text-dim);
+  min-width: 0;
+}
+
+.project {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime[data-tone="working"] {
+  color: var(--color-accent);
+}
+
+.runtime[data-tone="waiting"] {
+  color: var(--color-warning);
+}
+
+.snippet {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.snippet mark {
+  background: var(--color-accent-soft);
+  color: var(--color-accent);
+  border-radius: 3px;
+  padding: 0 1px;
 }
 
 .preview {
-  margin-top: 3px;
+  margin-top: 6px;
   font-size: 12.5px;
   color: var(--color-text-secondary);
   display: -webkit-box;
