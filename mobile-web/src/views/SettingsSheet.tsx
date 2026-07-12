@@ -1,6 +1,7 @@
 // 设置 sheet：语言（中/EN）与主题（跟随系统/亮/暗），即时生效并持久到
 // localStorage。语言选项用各自母语展示，不随 UI 语言翻译。
 
+import { X } from "lucide-react";
 import { useI18n, type Lang } from "../i18n";
 import { useTheme, type ThemeSetting } from "../theme";
 import styles from "./SettingsSheet.module.css";
@@ -25,8 +26,8 @@ export function SettingsSheet({ onClose }: { onClose: () => void }) {
       <div className={styles.sheet} onClick={(e) => e.stopPropagation()}>
         <div className={styles.head}>
           <span className={styles.title}>{t("设置")}</span>
-          <button className={styles.close} onClick={onClose}>
-            ×
+          <button className={styles.close} onClick={onClose} aria-label={t("关闭")}>
+            <X size={18} />
           </button>
         </div>
         <div className={styles.row}>

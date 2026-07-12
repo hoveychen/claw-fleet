@@ -413,6 +413,9 @@
 }
 
 .editToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: none;
   background: none;
   color: var(--color-accent);
@@ -451,6 +454,9 @@
 }
 
 .toolToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px dashed var(--color-border-strong);
   background: none;
   color: var(--color-text-dim);
@@ -489,10 +495,11 @@
 }
 
 .attachRemove {
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: none;
   color: var(--color-text-dim);
-  font-size: 14px;
   line-height: 1;
   padding: 0 2px;
 }
@@ -581,12 +588,14 @@
 }
 
 .optionSideBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
   border-radius: 8px;
   padding: 4px 7px;
-  font-size: 13px;
   line-height: 1;
 }
 
@@ -602,6 +611,9 @@
 /* ── v2.2: preceding narration + session link ── */
 
 .sessionLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
   margin-left: auto;
   flex-shrink: 0;
   border: 1px solid var(--color-border);
@@ -618,6 +630,9 @@
 }
 
 .precedingToggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   width: 100%;
   text-align: left;
   border: 1px dashed var(--color-border);
