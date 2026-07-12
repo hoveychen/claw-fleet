@@ -4,6 +4,28 @@
 
 // ── Decision requests ────────────────────────────────────────────────────────
 
+/** Structured shell AST shipped in GuardRequest (claw-fleet-core/src/cmd_ast.rs).
+ *  CommandLeaf has no serde rename_all — fields stay snake_case on the wire. */
+export type CmdConnector = "and" | "or" | "pipe" | "semi";
+
+export interface NestedScript {
+  kind: string;
+  raw: string;
+  view: CommandView;
+}
+
+export interface CommandLeaf {
+  argv: string[];
+  nested?: NestedScript | null;
+  triggering?: boolean;
+  already_allowed?: boolean;
+}
+
+export interface CommandView {
+  leaves: CommandLeaf[];
+  connectors: CmdConnector[];
+}
+
 export interface GuardRequest {
   id: string;
   sessionId: string;
@@ -14,6 +36,7 @@ export interface GuardRequest {
   commandSummary: string;
   riskTags: string[];
   timestamp: string;
+  structuredCommand?: CommandView | null;
 }
 
 export interface ElicitationOption {

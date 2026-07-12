@@ -34,9 +34,40 @@ const PERMISSION_LABEL: Record<string, string> = {
 /** 10 MiB — mirrors MAX_UPLOAD_BYTES on the relay side. */
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
-interface Attachment {
+export interface Attachment {
   name: string;
   path: string;
+}
+
+/** Push files through the relay's `upload_attachment` (bytes → the desktop's
+ *  user-attachments store) and return the persistent paths. Oversize files
+ *  are skipped with an alert; a failed upload aborts the rest. */
+export async function uploadAttachmentFiles(
+  client: RelayClient,
+  files: FileList,
+): Promise<Attachment[]> {
+  const out: Attachment[] = [];
+  for (const file of Array.from(files)) {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      window.alert(`「${file.name}」超过 10 MB 上限，已跳过`);
+      continue;
+    }
+    const b64 = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const url = String(reader.result ?? "");
+        resolve(url.slice(url.indexOf(",") + 1));
+      };
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    });
+    const { path } = await client.request<{ path: string }>("upload_attachment", {
+      name: file.name,
+      base64: b64,
+    });
+    out.push({ name: file.name, path });
+  }
+  return out;
 }
 
 function useAttachments(client: RelayClient | null) {
@@ -48,28 +79,14 @@ function useAttachments(client: RelayClient | null) {
       if (!client || !files || files.length === 0) return;
       setUploading(true);
       try {
-        for (const file of Array.from(files)) {
-          if (file.size > MAX_UPLOAD_BYTES) {
-            window.alert(`「${file.name}」超过 10 MB 上限，已跳过`);
-            continue;
+        const uploaded = await uploadAttachmentFiles(client, files);
+        setAttachments((prev) => {
+          const next = [...prev];
+          for (const a of uploaded) {
+            if (!next.some((x) => x.path === a.path)) next.push(a);
           }
-          const b64 = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => {
-              const url = String(reader.result ?? "");
-              resolve(url.slice(url.indexOf(",") + 1));
-            };
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(file);
-          });
-          const { path } = await client.request<{ path: string }>("upload_attachment", {
-            name: file.name,
-            base64: b64,
-          });
-          setAttachments((prev) =>
-            prev.some((a) => a.path === path) ? prev : [...prev, { name: file.name, path }],
-          );
-        }
+          return next;
+        });
       } catch (e) {
         window.alert(e instanceof Error ? e.message : "附件上传失败");
       } finally {
