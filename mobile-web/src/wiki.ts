@@ -145,25 +145,42 @@ export async function fetchWikiText(
 export interface WikiHtmlBundle {
   /** Rewritten entry HTML to drop into an iframe `srcdoc`. */
   srcdoc: string;
-  /** Free every blob URL created for this bundle. Call on unmount. */
+  /** No-op — data: URIs need no cleanup. Kept for call-site stability. */
   revoke: () => void;
 }
 
+/** `data:` URI for a fetched asset. We deliberately use data: — NOT blob: —
+ *  because the render iframe is fully sandboxed (`allow-scripts` only, no
+ *  `allow-same-origin`, so a doc's own JS can't reach the parent's pairing
+ *  secret). A sandboxed opaque-origin frame is blocked from loading a parent-
+ *  origin blob: URL ("Not allowed to load local resource"), whereas data: URIs
+ *  load fine. Charset params in the mime are stripped so the data: mediatype
+ *  stays well-formed. */
+function toDataUri(mime: string, bytes: Uint8Array): string {
+  const mediatype = mime.split(";")[0].trim() || "application/octet-stream";
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return `data:${mediatype};base64,${btoa(bin)}`;
+}
+
+function textToDataUri(mime: string, text: string): string {
+  return toDataUri(mime, new TextEncoder().encode(text));
+}
+
 /** Fetch an HTML/htmlDir doc's entry and every asset it (transitively) refers
- *  to, blob-ifying assets and rewriting references so the whole thing renders
- *  offline-from-relay inside a sandboxed iframe. Recurses through text assets
- *  (css/js/svg) so `html → css → font/img` chains resolve; cycles break by
- *  leaving the ref as-is. */
+ *  to, inlining assets as data: URIs and rewriting references so the whole
+ *  thing renders offline-from-relay inside a sandboxed iframe. Recurses through
+ *  text assets (css/js/svg) so `html → css → font/img` chains resolve; cycles
+ *  break by leaving the ref as-is. */
 export async function buildWikiHtml(
   client: RelayClient,
   doc: WikiDoc,
   version: string,
 ): Promise<WikiHtmlBundle> {
-  const created: string[] = [];
-  const cache = new Map<string, string>(); // relpath → blob URL
+  const cache = new Map<string, string>(); // relpath → data: URI
   const visiting = new Set<string>();
 
-  // Returns a blob URL for a version-relative asset path, recursing into text
+  // Returns a data: URI for a version-relative asset path, recursing into text
   // assets so their inner refs resolve first.
   const blobify = async (relpath: string): Promise<string | null> => {
     if (cache.has(relpath)) return cache.get(relpath)!;
@@ -171,18 +188,16 @@ export async function buildWikiHtml(
     visiting.add(relpath);
     try {
       const { mime, bytes } = await fetchWikiFile(client, doc.slug, version, relpath);
-      let blob: Blob;
+      let uri: string;
       if (looksTextual(mime)) {
         const kind = /html/i.test(mime) ? "html" : "css";
         const rewritten = await rewriteText(new TextDecoder().decode(bytes), relpath, kind);
-        blob = new Blob([rewritten], { type: mime });
+        uri = textToDataUri(mime, rewritten);
       } else {
-        blob = new Blob([bytes as BlobPart], { type: mime });
+        uri = toDataUri(mime, bytes);
       }
-      const url = URL.createObjectURL(blob);
-      created.push(url);
-      cache.set(relpath, url);
-      return url;
+      cache.set(relpath, uri);
+      return uri;
     } catch {
       return null; // missing/oversize asset — leave the ref, don't abort the doc
     } finally {
@@ -209,10 +224,5 @@ export async function buildWikiHtml(
 
   const entryText = await fetchWikiText(client, doc.slug, version, doc.entry);
   const srcdoc = await rewriteText(entryText, doc.entry, "html");
-  return {
-    srcdoc,
-    revoke: () => {
-      for (const url of created) URL.revokeObjectURL(url);
-    },
-  };
+  return { srcdoc, revoke: () => {} };
 }

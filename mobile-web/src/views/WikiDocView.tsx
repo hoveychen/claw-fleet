@@ -5,7 +5,7 @@
 
 import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
@@ -162,7 +162,15 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
             <div className={styles.hint}>{t("加载中…")}</div>
           ) : (
             <div className={styles.markdown}>
-              <ReactMarkdown remarkPlugins={[remarkGfm]} components={mdComponents}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                components={mdComponents}
+                // Preserve our `wiki:` scheme (default sanitizer would strip it
+                // to ""); everything else keeps react-markdown's safety pass.
+                urlTransform={(url) =>
+                  url.startsWith("wiki:") ? url : defaultUrlTransform(url)
+                }
+              >
                 {expandWikiMentions(markdown ?? "")}
               </ReactMarkdown>
             </div>
