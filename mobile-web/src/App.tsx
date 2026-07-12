@@ -9,27 +9,49 @@ import type {
   PendingSnapshot,
   SessionInfo,
 } from "./types";
+import {
+  clearSecret,
+  loadSecretFromIdb,
+  loadSecretSync,
+  needsA2hsForDurableStorage,
+  persistSecret,
+} from "./secretStore";
 import { DecisionsView } from "./views/DecisionsView";
 import { SessionDetailView } from "./views/SessionDetailView";
 import { TasksView } from "./views/TasksView";
 
-const SECRET_KEY = "fleet-relay-secret";
-
-/** Take the secret out of `#k=…`, persist it, and scrub it from the URL. */
-function resolveSecret(): string | null {
-  const match = window.location.hash.match(/[#&]k=([A-Za-z0-9_-]+)/);
-  if (match) {
-    localStorage.setItem(SECRET_KEY, match[1]);
-    history.replaceState(null, "", window.location.pathname);
-    return match[1];
-  }
-  return localStorage.getItem(SECRET_KEY);
-}
+const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
 
 type Tab = "decisions" | "tasks";
 
 export function App() {
-  const [secret] = useState<string | null>(resolveSecret);
+  const [secret, setSecret] = useState<string | null>(loadSecretSync);
+  // null = still probing IndexedDB; only after that fails do we show the gate.
+  const [idbProbed, setIdbProbed] = useState(false);
+  const [a2hsDismissed, setA2hsDismissed] = useState(
+    () => localStorage.getItem(A2HS_DISMISSED_KEY) === "1",
+  );
+
+  // localStorage wiped (iOS 7-day eviction, cache clear) but the IDB copy may
+  // have survived — re-hydrate before declaring the pairing lost.
+  useEffect(() => {
+    if (secret) {
+      setIdbProbed(true);
+      return;
+    }
+    let cancelled = false;
+    loadSecretFromIdb().then((s) => {
+      if (cancelled) return;
+      if (s) {
+        persistSecret(s);
+        setSecret(s);
+      }
+      setIdbProbed(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [secret]);
   const [tab, setTab] = useState<Tab>("decisions");
   const [connected, setConnected] = useState(false);
   const [agentOnline, setAgentOnline] = useState(false);
@@ -159,7 +181,11 @@ export function App() {
       <div className={styles.gate}>
         <div className={styles.gateLogo}>F</div>
         <h1>Fleet 移动端</h1>
-        <p>请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。</p>
+        <p>
+          {idbProbed
+            ? "请在桌面端 Fleet 的「移动端」板块扫码打开本页面（链接里带配对密钥）。"
+            : "正在恢复配对…"}
+        </p>
       </div>
     );
   }
@@ -173,7 +199,7 @@ export function App() {
         <button
           className={styles.gateButton}
           onClick={() => {
-            localStorage.removeItem(SECRET_KEY);
+            clearSecret();
             location.reload();
           }}
         >
@@ -195,6 +221,24 @@ export function App() {
           {!connected ? "连接中…" : agentOnline ? "桌面端在线" : "桌面端离线"}
         </span>
       </header>
+
+      {needsA2hsForDurableStorage() && !a2hsDismissed && (
+        <div className={styles.pushBanner}>
+          <span>
+            用 Safari 分享菜单「添加到主屏幕」后从主屏幕打开——否则 7
+            天不访问，iOS 会清掉本机配对，需重新扫码。
+          </span>
+          <button
+            className={styles.pushButton}
+            onClick={() => {
+              localStorage.setItem(A2HS_DISMISSED_KEY, "1");
+              setA2hsDismissed(true);
+            }}
+          >
+            知道了
+          </button>
+        </div>
+      )}
 
       {push !== "granted" && push !== "unsupported" && (
         <div className={styles.pushBanner}>
