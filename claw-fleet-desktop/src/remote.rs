@@ -345,6 +345,10 @@ impl crate::backend::Backend for RemoteBackend {
             model,
             effort,
             permission_mode,
+            // Desktop-as-remote-backend spawns over request/response HTTP (not
+            // the lossy relay broadcast), so it has no need to pre-assign the id
+            // and keeps letting the server mint one.
+            session_id: None,
         };
         // `session_id` deserializes to None when the probe is an older build
         // that only returns `pid`; the frontend then falls back to novelty
