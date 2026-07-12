@@ -9,12 +9,43 @@ interface MobileRelayConfig {
   secret: string;
 }
 
+interface MobileClientInfo {
+  clientId: string;
+  label: string;
+  platform: string;
+  pushSubscribed: boolean;
+  connectedAtMs: number;
+  lastSeenMs: number;
+}
+
 interface MobileRelayStatus {
   enabled: boolean;
   connected: boolean;
   clients: number;
   relayUrl: string;
   secretSet: boolean;
+  devices?: MobileClientInfo[];
+}
+
+/** Emoji per platform key from mobile-web deviceLabel.ts — avoids shipping icon
+ *  assets for a small list. */
+const PLATFORM_ICON: Record<string, string> = {
+  ios: "📱",
+  android: "🤖",
+  harmony: "🌐",
+  windows: "🪟",
+  macos: "💻",
+  linux: "🐧",
+  unknown: "❓",
+};
+
+/** Same single-unit shape as HistoryView's timeAgo, reusing its i18n keys. */
+function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return t("just_now");
+  if (diff < 3_600_000) return t("m_ago", { n: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("h_ago", { n: Math.floor(diff / 3_600_000) });
+  return t("d_ago", { n: Math.floor(diff / 86_400_000) });
 }
 
 /** 「移动端」板块 — 启用 mobile relay 通道并展示配对 QR code。 */
@@ -153,6 +184,33 @@ export function MobileView() {
                 </span>
               )}
             </div>
+
+            {status?.connected && (status?.devices?.length ?? 0) > 0 && (
+              <div className={styles.devices}>
+                <div className={styles.devicesTitle}>
+                  {t("mobile_devices_title", "已接入设备")}
+                </div>
+                {status!.devices!.map((d) => (
+                  <div key={d.clientId} className={styles.device}>
+                    <span className={styles.deviceIcon}>
+                      {PLATFORM_ICON[d.platform] ?? PLATFORM_ICON.unknown}
+                    </span>
+                    <span className={styles.deviceLabel}>{d.label || d.platform}</span>
+                    <span
+                      className={styles.devicePush}
+                      data-on={d.pushSubscribed ? "yes" : "no"}
+                    >
+                      {d.pushSubscribed
+                        ? t("mobile_device_push_on", "已开通知")
+                        : t("mobile_device_push_off", "未开通知")}
+                    </span>
+                    <span className={styles.deviceSince}>
+                      {t("mobile_device_since", "接入于")} {timeAgo(d.connectedAtMs, t)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             {qrSvg ? (
               <div className={styles.qrWrap}>
