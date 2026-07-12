@@ -347,7 +347,6 @@ export function App() {
             client={clientRef.current}
             onOpenSession={(s) => setDetailSessionId(s.id)}
             onMarkRead={markRead}
-            onNewSession={() => setShowNewSession(true)}
           />
         ) : tab === "wiki" ? (
           <WikiView client={clientRef.current} onOpenDoc={setWikiDoc} />
