@@ -62,6 +62,7 @@ export function App() {
         ["fleet-ask", snap.fleetAsk],
         ["plan-approval", snap.planApproval],
         ["permission-prompt", snap.permissionPrompt],
+        ["a2ui-render", snap.a2uiRender],
       ];
       const fresh: PendingDecision[] = [];
       for (const [kind, list] of kinds) {

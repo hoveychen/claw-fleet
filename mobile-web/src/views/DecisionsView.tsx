@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { RelayClient } from "../relay";
 import type {
+  A2uiRenderRequest,
   CommandLeaf,
   ElicitationQuestion,
   FleetAskFormField,
@@ -26,6 +27,7 @@ const KIND_LABEL: Record<string, string> = {
   "fleet-ask": "决策卡",
   "plan-approval": "计划审批",
   "permission-prompt": "权限请求",
+  "a2ui-render": "Agent 界面",
 };
 
 interface Props {
@@ -100,6 +102,9 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered }: CardProps) 
       )}
       {decision.kind === "plan-approval" && (
         <PlanCard request={req as PlanApprovalRequest} submit={submit} />
+      )}
+      {decision.kind === "a2ui-render" && (
+        <A2uiCard request={req as A2uiRenderRequest} submit={submit} />
       )}
       {(decision.kind === "elicitation" || decision.kind === "fleet-ask") && (
         <QuestionsCard
@@ -449,6 +454,71 @@ function PlanCard({
           }
         >
           {edited ? "批准已编辑版" : "批准"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ── a2ui-render ──────────────────────────────────────────────────────────────
+
+/** Best-effort text scrape of an A2UI message tree, so the placeholder card
+ *  can hint at what the surface asks instead of showing an opaque blob. */
+function extractA2uiTexts(tree: unknown, out: string[] = []): string[] {
+  if (out.length >= 8 || tree === null || typeof tree !== "object") return out;
+  if (Array.isArray(tree)) {
+    for (const item of tree) extractA2uiTexts(item, out);
+    return out;
+  }
+  for (const [key, value] of Object.entries(tree as Record<string, unknown>)) {
+    if (out.length >= 8) break;
+    if (typeof value === "string") {
+      if ((key === "text" || key === "label" || key === "title") && value.trim()) {
+        out.push(value.trim());
+      }
+    } else {
+      extractA2uiTexts(value, out);
+    }
+  }
+  return out;
+}
+
+/** fleet__render_a2ui placeholder: the mobile client cannot render the A2UI
+ *  surface (no @a2ui runtime), but it must never swallow the decision — show
+ *  what we can and let Boss cancel so the agent isn't left waiting blind. */
+function A2uiCard({
+  request,
+  submit,
+}: {
+  request: A2uiRenderRequest;
+  submit: (f: Record<string, unknown>) => void;
+}) {
+  const [cancelling, setCancelling] = useState(false);
+  const texts = useMemo(() => extractA2uiTexts(request.messageTree), [request.messageTree]);
+  return (
+    <div>
+      <div className={styles.a2uiNotice}>
+        Agent 发来一张自定义界面（A2UI）。移动端暂不支持渲染，请在桌面端处理这张卡。
+      </div>
+      {texts.length > 0 && (
+        <ul className={styles.a2uiTexts}>
+          {texts.map((t, i) => (
+            <li key={i}>{truncate(t, 120)}</li>
+          ))}
+        </ul>
+      )}
+      <div className={styles.actions}>
+        <button
+          className={styles.dangerButton}
+          onClick={() => {
+            if (!cancelling) {
+              setCancelling(true);
+              return;
+            }
+            submit({ cancelled: true, actionContext: {} });
+          }}
+        >
+          {cancelling ? "确认取消这张卡" : "取消（告知 agent）"}
         </button>
       </div>
     </div>

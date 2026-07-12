@@ -131,19 +131,33 @@ export interface PermissionPromptRequest {
   toolUseId?: string | null;
 }
 
+/** fleet__render_a2ui request (claw-fleet-core/src/mcp_a2ui_ipc.rs). The
+ *  message tree is opaque to the mobile client — it renders a placeholder
+ *  card (desktop renders the real surface via @a2ui/react). */
+export interface A2uiRenderRequest {
+  id: string;
+  sessionId: string;
+  workspaceName: string;
+  aiTitle?: string | null;
+  timestamp: string;
+  messageTree: unknown;
+}
+
 export type DecisionKind =
   | "guard"
   | "elicitation"
   | "fleet-ask"
   | "plan-approval"
-  | "permission-prompt";
+  | "permission-prompt"
+  | "a2ui-render";
 
 export type DecisionRequest =
   | GuardRequest
   | ElicitationRequest
   | FleetAskRequest
   | PlanApprovalRequest
-  | PermissionPromptRequest;
+  | PermissionPromptRequest
+  | A2uiRenderRequest;
 
 export interface PendingDecision {
   kind: DecisionKind;
@@ -159,6 +173,7 @@ export interface PendingSnapshot {
   fleetAsk?: FleetAskRequest[];
   planApproval?: PlanApprovalRequest[];
   permissionPrompt?: PermissionPromptRequest[];
+  a2uiRender?: A2uiRenderRequest[];
 }
 
 // ── Sessions / tasks ─────────────────────────────────────────────────────────
