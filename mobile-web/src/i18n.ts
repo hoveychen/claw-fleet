@@ -70,6 +70,9 @@ const DICT: Record<string, string> = {
   "连接中…": "Connecting…",
   连接已断开: "Connection lost",
   认证失败: "Authentication failed",
+  请求失败: "Request failed",
+  "请求超时（桌面端可能离线）": "Request timed out (desktop may be offline)",
+  "尚未连接 relay": "Not connected to the relay yet",
   桌面端在线: "Desktop online",
   桌面端离线: "Desktop offline",
   "用 Safari 分享菜单「添加到主屏幕」后从主屏幕打开——否则 7 天不访问，iOS 会清掉本机配对，需重新扫码。":

@@ -142,7 +142,7 @@ export class RelayClient {
         if (payload.ok) {
           entry.resolve(payload.data);
         } else {
-          entry.reject(new Error(String(payload.error ?? "请求失败")));
+          entry.reject(new Error(String(payload.error ?? t("请求失败"))));
         }
         break;
       }
@@ -173,7 +173,7 @@ export class RelayClient {
     return new Promise<T>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
-        reject(new Error("请求超时（桌面端可能离线）"));
+        reject(new Error(t("请求超时（桌面端可能离线）")));
       }, timeoutMs ?? REQUEST_TIMEOUT_MS);
       this.pending.set(reqId, {
         resolve: resolve as (v: unknown) => void,
@@ -183,7 +183,7 @@ export class RelayClient {
       if (!this.sendPayload({ event: "req", req_id: reqId, method, params: params ?? {} })) {
         this.pending.delete(reqId);
         window.clearTimeout(timer);
-        reject(new Error("尚未连接 relay"));
+        reject(new Error(t("尚未连接 relay")));
       }
     });
   }
