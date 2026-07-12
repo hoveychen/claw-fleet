@@ -1251,31 +1251,62 @@ function FormFieldControl({
 
 // ── fleet-ask html / images ──────────────────────────────────────────────────
 
+type AssetState =
+  | { status: "loading" }
+  | { status: "ok"; uri: string }
+  | { status: "error" };
+
+interface AssetsResult {
+  states: Record<string, AssetState>;
+  /** Re-fetch one asset by name — wired to the card's tap-to-retry affordance
+   *  so a transient timeout (slow phone link) isn't a dead end. */
+  retry: (name: string) => void;
+}
+
 function useAssets(
   names: string[],
   requestId: string,
   qidx: number,
   client: RelayClient | null,
-): Record<string, string> {
-  const [uris, setUris] = useState<Record<string, string>>({});
+): AssetsResult {
+  const [states, setStates] = useState<Record<string, AssetState>>({});
+  // A late resolve after the card unmounts is harmless but noisy; gate on it.
+  const mounted = useRef(true);
   useEffect(() => {
-    if (!client) return;
-    let cancelled = false;
-    for (const name of names) {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const load = useCallback(
+    (name: string) => {
+      if (!client) return;
+      setStates((p) => ({ ...p, [name]: { status: "loading" } }));
       fetchDecisionAsset(client, requestId, qidx, name)
         .then((a) => {
-          if (!cancelled) {
-            setUris((p) => ({ ...p, [name]: `data:${a.mime};base64,${a.base64}` }));
+          if (mounted.current) {
+            setStates((p) => ({
+              ...p,
+              [name]: { status: "ok", uri: `data:${a.mime};base64,${a.base64}` },
+            }));
           }
         })
-        .catch(() => {});
-    }
-    return () => {
-      cancelled = true;
-    };
+        .catch(() => {
+          // Previously swallowed silently → the <img> spun forever on a slow
+          // link (timeout) or a missing asset. Surface it so the card can retry.
+          if (mounted.current) setStates((p) => ({ ...p, [name]: { status: "error" } }));
+        });
+    },
+    [client, requestId, qidx],
+  );
+
+  useEffect(() => {
+    for (const name of names) load(name);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [requestId, qidx, client, names.join("|")]);
-  return uris;
+
+  return { states, retry: load };
 }
 
 // Height handshake constants — mirror the desktop's decisionFrame.ts. The
@@ -1306,15 +1337,21 @@ function HtmlPreview({
   client: RelayClient | null;
 }) {
   const names = useMemo(() => (images ?? []).map((i) => i.name), [images]);
-  const uris = useAssets(names, requestId, qidx, client);
+  const { states, retry } = useAssets(names, requestId, qidx, client);
   const resolved = useMemo(() => {
     let out = html;
-    for (const [name, uri] of Object.entries(uris)) {
-      out = out.split(`src="${name}"`).join(`src="${uri}"`);
-      out = out.split(`src='${name}'`).join(`src='${uri}'`);
+    for (const name of names) {
+      const st = states[name];
+      if (st?.status !== "ok") continue;
+      out = out.split(`src="${name}"`).join(`src="${st.uri}"`);
+      out = out.split(`src='${name}'`).join(`src='${st.uri}'`);
     }
     return out;
-  }, [html, uris]);
+  }, [html, names, states]);
+  const failed = useMemo(
+    () => names.filter((n) => states[n]?.status === "error"),
+    [names, states],
+  );
 
   // `sandbox="allow-scripts"` without `allow-same-origin` (same as the desktop
   // AutoHeightFrame): the document keeps an opaque origin — no DOM/storage
@@ -1336,16 +1373,27 @@ function HtmlPreview({
   }, [resolved]);
 
   return (
-    <iframe
-      ref={ref}
-      className={styles.htmlPreview}
-      sandbox="allow-scripts"
-      srcDoc={resolved}
-      // CSS keeps the legacy 220px fallback for documents that never report
-      // (html stored before the script injection existed).
-      style={height === null ? undefined : { height: `${height}px` }}
-      title={t("预览")}
-    />
+    <>
+      <iframe
+        ref={ref}
+        className={styles.htmlPreview}
+        sandbox="allow-scripts"
+        srcDoc={resolved}
+        // CSS keeps the legacy 220px fallback for documents that never report
+        // (html stored before the script injection existed).
+        style={height === null ? undefined : { height: `${height}px` }}
+        title={t("预览")}
+      />
+      {failed.length > 0 && (
+        <button
+          type="button"
+          className={styles.assetError}
+          onClick={() => failed.forEach(retry)}
+        >
+          {t("{0} 张图片加载失败，点按重试", String(failed.length))}
+        </button>
+      )}
+    </>
   );
 }
 
@@ -1361,19 +1409,30 @@ function ImageGallery({
   client: RelayClient | null;
 }) {
   const names = useMemo(() => images.map((i) => i.name), [images]);
-  const uris = useAssets(names, requestId, qidx, client);
+  const { states, retry } = useAssets(names, requestId, qidx, client);
   return (
     <div className={styles.gallery}>
-      {images.map((img) => (
-        <figure key={img.name}>
-          {uris[img.name] ? (
-            <img src={uris[img.name]} alt={img.caption ?? img.name} />
-          ) : (
-            <div className={styles.imgLoading}>{t("加载图片…")}</div>
-          )}
-          {img.caption && <figcaption>{img.caption}</figcaption>}
-        </figure>
-      ))}
+      {images.map((img) => {
+        const st = states[img.name];
+        return (
+          <figure key={img.name}>
+            {st?.status === "ok" ? (
+              <img src={st.uri} alt={img.caption ?? img.name} />
+            ) : st?.status === "error" ? (
+              <button
+                type="button"
+                className={styles.assetError}
+                onClick={() => retry(img.name)}
+              >
+                {t("图片加载失败，点按重试")}
+              </button>
+            ) : (
+              <div className={styles.imgLoading}>{t("加载图片…")}</div>
+            )}
+            {img.caption && <figcaption>{img.caption}</figcaption>}
+          </figure>
+        );
+      })}
     </div>
   );
 }

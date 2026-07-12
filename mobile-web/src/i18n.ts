@@ -286,6 +286,8 @@ const DICT: Record<string, string> = {
   "请选择…": "Select…",
   预览: "Preview",
   "加载图片…": "Loading image…",
+  "图片加载失败，点按重试": "Image failed to load — tap to retry",
+  "{0} 张图片加载失败，点按重试": "{0} image(s) failed to load — tap to retry",
 
   // ── Composer ──
   默认模型: "Default model",
