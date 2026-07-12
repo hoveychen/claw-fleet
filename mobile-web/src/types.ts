@@ -197,3 +197,143 @@ export interface TaskPlanDetail {
   source?: string | null;
   items: TaskItem[];
 }
+
+// ── Session detail (v2) ──────────────────────────────────────────────────────
+
+/** One transcript jsonl record, loosely typed — we only look at a few fields. */
+export interface ContentBlock {
+  type: string;
+  text?: string;
+  thinking?: string;
+  name?: string;
+  input?: Record<string, unknown>;
+  content?: unknown;
+}
+
+export interface RawMessage {
+  type?: string;
+  timestamp?: string;
+  isSidechain?: boolean;
+  isCompactSummary?: boolean;
+  message?: {
+    role?: string;
+    content?: string | ContentBlock[];
+  };
+}
+
+/** `live_thinking` reply (null when no live sidecar). */
+export interface LiveThinking {
+  sessionId: string;
+  thinking: string;
+  streaming: boolean;
+  updatedSecsAgo: number;
+}
+
+/** `handoff_chain` reply (null when the session is on no chain). */
+export interface HandoffLink {
+  fromSessionId: string;
+  toSessionId: string;
+  note: string;
+  planId?: string | null;
+  nextTask?: string | null;
+  handedAt: number;
+}
+
+export interface HandoffChain {
+  chainId: string;
+  workspacePath: string;
+  planId?: string | null;
+  links: HandoffLink[];
+}
+
+/** `skill_history` reply items. */
+export interface SkillInvocation {
+  skill: string;
+  args?: string | null;
+  timestamp: string;
+  isSubagent: boolean;
+}
+
+/** `workflow_trees` reply items (loosely typed — display only). */
+export interface WorkflowAgentInfo {
+  agentId?: string;
+  label?: string | null;
+  status?: string;
+  prompt?: string | null;
+  agentType?: string | null;
+}
+
+export interface WorkflowTree {
+  runId: string;
+  name?: string | null;
+  description?: string | null;
+  agents: WorkflowAgentInfo[];
+}
+
+/** `token_breakdown` reply — only the totals the mobile UI shows. */
+export interface TokenBreakdown {
+  totalsUsage?: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheCreationTokens?: number;
+    cacheReadTokens?: number;
+  };
+  totalsEstimatedCostUsd?: number | null;
+  main?: unknown;
+  subagents?: unknown[];
+}
+
+/** `session_decisions` reply items — serde `#[serde(tag = "kind")]` envelope
+ *  over the four record variants (claw-fleet-core/src/decision_history.rs). */
+export interface SelectedOption {
+  label: string;
+  description?: string;
+  other?: boolean;
+}
+
+interface DecisionRecordBase {
+  id: string;
+  sessionId: string;
+  workspaceName?: string;
+  aiTitle?: string | null;
+  requestedAt?: string;
+  resolvedAt?: string;
+}
+
+export interface ElicitationHistoryRecord extends DecisionRecordBase {
+  kind: "elicitation";
+  outcome: "answered" | "declined" | "heartbeat-lost" | "timeout";
+  questions: ElicitationQuestion[];
+  answers: Record<string, SelectedOption>;
+}
+
+export interface PlanApprovalHistoryRecord extends DecisionRecordBase {
+  kind: "plan-approval";
+  outcome: "approved" | "approved-with-edits" | "rejected" | "heartbeat-lost" | "timeout";
+  planContent: string;
+  planFilePath?: string | null;
+  editedPlan?: string | null;
+  feedback?: string | null;
+}
+
+export interface UserPromptHistoryRecord {
+  kind: "user-prompt";
+  id: string;
+  sessionId: string;
+  text: string;
+  hasImage?: boolean;
+  sentAt: string;
+}
+
+export interface FleetAskHistoryRecord extends DecisionRecordBase {
+  kind: "fleet-ask";
+  outcome: "answered" | "cancelled" | "heartbeat-lost" | "timeout";
+  questions: FleetAskQuestion[];
+  answers: Record<string, string>;
+}
+
+export type DecisionHistoryRecord =
+  | ElicitationHistoryRecord
+  | PlanApprovalHistoryRecord
+  | UserPromptHistoryRecord
+  | FleetAskHistoryRecord;

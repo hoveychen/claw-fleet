@@ -1,6 +1,4 @@
-import { useCallback, useState } from "react";
-import type { RelayClient } from "../relay";
-import type { SessionInfo, SessionStatus, TaskPlanDetail } from "../types";
+import type { SessionInfo, SessionStatus } from "../types";
 import styles from "./TasksView.module.css";
 
 const WORKING: SessionStatus[] = ["thinking", "executing", "streaming", "processing", "delegating"];
@@ -29,34 +27,13 @@ function timeAgo(ms: number): string {
 
 interface Props {
   sessions: SessionInfo[];
-  client: RelayClient | null;
+  onOpenSession: (session: SessionInfo) => void;
 }
 
-export function TasksView({ sessions, client }: Props) {
-  const [expanded, setExpanded] = useState<string | null>(null);
-  const [plans, setPlans] = useState<Record<string, TaskPlanDetail[] | "loading" | "error">>({});
-
+export function TasksView({ sessions, onOpenSession }: Props) {
   const visible = sessions
     .filter((s) => !s.isSubagent)
     .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
-
-  const toggle = useCallback(
-    (session: SessionInfo) => {
-      const next = expanded === session.id ? null : session.id;
-      setExpanded(next);
-      if (next && client && plans[session.id] === undefined) {
-        setPlans((p) => ({ ...p, [session.id]: "loading" }));
-        client
-          .request<TaskPlanDetail[]>("task_plans", {
-            workspacePath: session.workspacePath,
-            sessionId: session.id,
-          })
-          .then((detail) => setPlans((p) => ({ ...p, [session.id]: detail })))
-          .catch(() => setPlans((p) => ({ ...p, [session.id]: "error" })));
-      }
-    },
-    [expanded, client, plans],
-  );
 
   if (visible.length === 0) {
     return <div className={styles.empty}>暂无会话（等待桌面端推送快照…）</div>;
@@ -69,9 +46,8 @@ export function TasksView({ sessions, client }: Props) {
         const plan = s.taskPlan;
         const todos = s.todos;
         const todoTotal = todos ? todos.completed + todos.inProgress + todos.pending : 0;
-        const detail = plans[s.id];
         return (
-          <div key={s.id} className={styles.card} onClick={() => toggle(s)}>
+          <div key={s.id} className={styles.card} onClick={() => onOpenSession(s)}>
             <div className={styles.cardHead}>
               <span className={styles.statusDot} data-tone={meta.tone} />
               <span className={styles.workspace}>{s.workspaceName}</span>
@@ -103,29 +79,6 @@ export function TasksView({ sessions, client }: Props) {
                   className={styles.progressFill}
                   style={{ width: `${Math.round((plan.done / plan.total) * 100)}%` }}
                 />
-              </div>
-            )}
-            {expanded === s.id && (
-              <div className={styles.detail} onClick={(e) => e.stopPropagation()}>
-                {detail === "loading" && <div className={styles.detailHint}>加载计划中…</div>}
-                {detail === "error" && (
-                  <div className={styles.detailHint}>计划加载失败（桌面端可能离线）</div>
-                )}
-                {Array.isArray(detail) && detail.length === 0 && (
-                  <div className={styles.detailHint}>该会话没有 TASKS.md 计划</div>
-                )}
-                {Array.isArray(detail) &&
-                  detail.map((p, i) => (
-                    <div key={p.id ?? i} className={styles.plan}>
-                      {p.title && <div className={styles.planTitle}>{p.title}</div>}
-                      {p.items.map((item, j) => (
-                        <div key={j} className={styles.planItem} data-done={item.done}>
-                          <span className={styles.checkbox}>{item.done ? "✓" : ""}</span>
-                          <span>{item.text}</span>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
               </div>
             )}
           </div>
