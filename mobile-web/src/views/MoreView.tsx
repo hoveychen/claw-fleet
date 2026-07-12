@@ -114,6 +114,11 @@ export function MoreView({ connected, agentOnline, push, onEnablePush }: Props) 
               {t("要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。")}
             </div>
           )}
+          {push === "unsupported-harmony" && (
+            <div className={styles.rowNote}>
+              {t("当前浏览器（鸿蒙 ArkWeb）不支持网页通知，请用桌面端 Fleet 接收决策卡提醒。")}
+            </div>
+          )}
         </div>
       </div>
 
