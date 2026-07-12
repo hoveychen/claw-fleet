@@ -3473,6 +3473,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<LlmConfig>(&body_bytes) {
                     Ok(new_cfg) => {
+                        // Mirror into the process-wide slot so the mobile
+                        // relay's `guard_analyze` follows the same provider.
+                        crate::llm_provider::set_shared_config(new_cfg.clone());
                         *llm_config.lock().unwrap() = new_cfg;
                         let _ = request.respond(
                             tiny_http::Response::from_string("{}").with_header(json_header),

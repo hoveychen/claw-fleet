@@ -345,3 +345,152 @@
   border-radius: 10px;
   font-size: 13px;
 }
+
+/* ── v2: guard analysis / always-allow / plan editing / question tools ── */
+
+.analysis {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin: 8px 0;
+}
+
+.analysisHead {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-accent);
+  margin-bottom: 4px;
+}
+
+.analysisLoading {
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+.prefixMenu {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.prefixItem {
+  text-align: left;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+}
+
+.prefixItem code {
+  color: var(--color-accent);
+}
+
+.planPath {
+  font-size: 11px;
+  color: var(--color-text-dim);
+  font-family: ui-monospace, monospace;
+  margin-bottom: 6px;
+  word-break: break-all;
+}
+
+.planEditor {
+  width: 100%;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  padding: 9px 10px;
+  color: var(--color-text);
+  font-size: 12.5px;
+  line-height: 1.5;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+
+.editToggle {
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.optionPreview {
+  margin: 4px 0 8px 26px;
+  border-left: 2px solid var(--color-border-strong);
+  padding: 4px 0 4px 10px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  word-break: break-word;
+}
+
+.optionPreview p {
+  margin: 0 0 6px;
+}
+
+.optionPreview pre {
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  padding: 6px;
+  overflow-x: auto;
+  font-size: 11px;
+}
+
+.questionTools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.toolToggle {
+  border: 1px dashed var(--color-border-strong);
+  background: none;
+  color: var(--color-text-dim);
+  border-radius: 999px;
+  padding: 3px 12px;
+  font-size: 11.5px;
+}
+
+.toolToggle[data-active="true"] {
+  border-style: solid;
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.attachRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.attachChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  padding: 3px 6px 3px 10px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  max-width: 60vw;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachRemove {
+  border: none;
+  background: none;
+  color: var(--color-text-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+}

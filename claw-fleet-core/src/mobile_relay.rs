@@ -29,6 +29,10 @@ pub const DEFAULT_RELAY_URL: &str = "https://fleet-relay.muveeai.com";
 const CONFIG_FILE_NAME: &str = "mobile-relay.json";
 /// Minimum seconds between two `sessions` snapshots pushed to clients.
 const SESSIONS_THROTTLE: Duration = Duration::from_secs(2);
+/// Raw-byte cap for `upload_attachment`. Base64 inflates ×4/3, so 10 MiB stays
+/// well under the relay's 16 MiB WS frame / 64 MiB message limits (axum
+/// defaults) while covering phone camera photos.
+pub const MAX_UPLOAD_BYTES: u64 = 10 * 1024 * 1024;
 
 // ── Config ───────────────────────────────────────────────────────────────────
 
@@ -302,6 +306,21 @@ fn handle_answer(payload: &Value) -> Result<(), String> {
     match kind {
         "guard" => {
             let allow = payload.get("allow").and_then(Value::as_bool).ok_or("missing allow")?;
+            // "Always allow": persist the rule BEFORE writing the response file
+            // so a subsequent `fleet guard` for the same prefix already sees it
+            // (same order as the desktop panel and `/guard/respond`). Only
+            // honoured on allow — "Block + always allow" would be nonsensical.
+            if allow {
+                if let Some(rule) = payload
+                    .get("alwaysAllow")
+                    .cloned()
+                    .and_then(|v| serde_json::from_value::<crate::guard::GuardAlwaysAllow>(v).ok())
+                {
+                    if !rule.prefix.trim().is_empty() {
+                        crate::audit::add_guard_allow_rule(rule.prefix, rule.source_tag);
+                    }
+                }
+            }
             crate::guard::write_response(&crate::guard::GuardResponse {
                 id,
                 decision: if allow {
@@ -444,6 +463,204 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                 "mime": asset.mime,
                 "base64": base64::engine::general_purpose::STANDARD.encode(&asset.bytes),
             }))
+        }
+        // Last `n` transcript messages — the mobile SessionDetail polls this
+        // (same model as the desktop HistoryView tab; no watcher push).
+        "tail" => {
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let n = params.get("n").and_then(Value::as_u64).unwrap_or(200) as usize;
+            let sources = crate::agent_source::build_sources();
+            let source = crate::agent_source::find_source_for_path(&sources, path)
+                .ok_or_else(|| format!("no agent source for path: {path}"))?;
+            source.get_messages_tail(path, n).map(Value::Array)
+        }
+        // Serializes to `null` when there's no live sidecar for this session.
+        "live_thinking" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or("missing sessionId")?;
+            serde_json::to_value(crate::live_thinking::read_live_thinking(session_id))
+                .map_err(|e| e.to_string())
+        }
+        // `null` when the session isn't on any relay chain.
+        "handoff_chain" => {
+            let session_id = params
+                .get("sessionId")
+                .and_then(Value::as_str)
+                .ok_or("missing sessionId")?;
+            serde_json::to_value(crate::handoff::chain_containing(session_id))
+                .map_err(|e| e.to_string())
+        }
+        "workflow_trees" => {
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let trees =
+                crate::workflow::discover_workflow_trees(std::path::Path::new(path));
+            serde_json::to_value(trees).map_err(|e| e.to_string())
+        }
+        "token_breakdown" => {
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let project_root = params.get("projectRoot").and_then(Value::as_str);
+            let breakdown = crate::token_analysis::aggregate_task(
+                std::path::Path::new(path),
+                project_root.map(std::path::Path::new),
+            )?;
+            serde_json::to_value(breakdown).map_err(|e| e.to_string())
+        }
+        // Main-session invocations plus subagent sidecars, sorted by timestamp
+        // (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
+        "skill_history" => {
+            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+            let sources = crate::agent_source::build_sources();
+            let source = crate::agent_source::find_source_for_path(&sources, path)
+                .ok_or_else(|| format!("no agent source for path: {path}"))?;
+            use crate::skill_history;
+            let main_msgs = source.get_messages(path)?;
+            let mut out = skill_history::extract_from_messages(&main_msgs, false);
+            for sub in skill_history::subagent_jsonl_paths(std::path::Path::new(path)) {
+                let sub_str = sub.to_string_lossy().to_string();
+                // Best-effort: a broken subagent file shouldn't lose the rest.
+                let Ok(msgs) = source.get_messages(&sub_str) else { continue };
+                out.extend(skill_history::extract_from_messages(&msgs, true));
+            }
+            skill_history::sort_by_timestamp(&mut out);
+            serde_json::to_value(out).map_err(|e| e.to_string())
+        }
+        // LLM risk analysis for a guard card (mirrors `/guard/analyze` and the
+        // desktop's `analyze_guard_command`). Synchronous up to 30s — fine, we
+        // run inside `spawn_blocking` so other frames keep flowing.
+        "guard_analyze" => {
+            let command =
+                params.get("command").and_then(Value::as_str).ok_or("missing command")?;
+            let context = params.get("context").and_then(Value::as_str).unwrap_or("");
+            let lang = params.get("lang").and_then(Value::as_str).unwrap_or("zh");
+            let risk_tags = crate::audit::classify_bash_command_pub(command)
+                .map(|(_, tags)| tags)
+                .unwrap_or_default();
+            let prompt = crate::guard::build_analysis_prompt(command, &risk_tags, context, lang);
+            let cfg = crate::llm_provider::shared_config();
+            if cfg.provider == "none" {
+                return Err("LLM provider is disabled".into());
+            }
+            let provider = crate::llm_provider::resolve_provider(&cfg.provider)
+                .ok_or("LLM provider not available")?;
+            if !provider.is_available() {
+                return Err(format!("{} CLI not found", provider.display_name()));
+            }
+            let analysis = crate::llm_usage::complete_accounted(
+                provider.as_ref(),
+                &prompt,
+                &cfg.fast_model,
+                Duration::from_secs(30),
+                crate::llm_usage::SCENARIO_GUARD_COMMAND,
+            )
+            .ok_or("LLM analysis timed out or failed")?;
+            Ok(json!({ "analysis": analysis }))
+        }
+        // ── Write methods ────────────────────────────────────────────────
+        // All of these run inside `spawn_blocking` (see ws_connect_once), so
+        // process spawns / kills / file writes never block the ws runtime.
+        "spawn_session" => {
+            let req: crate::session_launch::SpawnSessionRequest =
+                serde_json::from_value(params.clone())
+                    .map_err(|e| format!("bad spawn_session params: {e}"))?;
+            let resp = crate::session_launch::spawn_new_session(
+                &req.workspace_path,
+                &req.prompt,
+                req.model.as_deref(),
+                req.effort.as_deref(),
+                req.permission_mode.as_deref(),
+            )?;
+            serde_json::to_value(resp).map_err(|e| e.to_string())
+        }
+        "resume_session" => {
+            let req: crate::auto_resume::ResumeSessionRequest =
+                serde_json::from_value(params.clone())
+                    .map_err(|e| format!("bad resume_session params: {e}"))?;
+            crate::auto_resume::spawn_resume_prompt(
+                &req.session_id,
+                &req.workspace_path,
+                req.prompt.as_deref().unwrap_or("continue"),
+                req.model.as_deref(),
+                req.effort.as_deref(),
+                req.permission_mode.as_deref(),
+            )?;
+            Ok(json!({ "ok": true }))
+        }
+        // pid 0 would signal the desktop's own process group — reject before
+        // it ever reaches kill() (same guard as the `/interrupt` endpoint).
+        "interrupt" => {
+            let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
+            if pid == 0 {
+                return Err("missing or invalid pid".into());
+            }
+            crate::session::interrupt_pid_impl(pid)?;
+            Ok(json!({ "ok": true }))
+        }
+        "stop" => {
+            let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
+            if pid == 0 {
+                return Err("missing or invalid pid".into());
+            }
+            let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
+            #[cfg(unix)]
+            {
+                // Probe first so a stale pid errors; then take the whole tree,
+                // or the agent's tool children outlive it.
+                if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+                    return Err(std::io::Error::last_os_error().to_string());
+                }
+                crate::session::kill_pid_tree(pid, force)?;
+                Ok(json!({ "ok": true }))
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = force;
+                Err("stop is not supported on this platform".into())
+            }
+        }
+        "stop_workspace" => {
+            let path = params
+                .get("workspacePath")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .ok_or("missing workspacePath")?;
+            crate::session::kill_workspace_impl(path)?;
+            Ok(json!({ "ok": true }))
+        }
+        "session_mark" => {
+            let req: crate::session_mark::SetSessionMarkRequest =
+                serde_json::from_value(params.clone())
+                    .map_err(|e| format!("bad session_mark params: {e}"))?;
+            crate::session_mark::set_mark(&req.session_id, &req.workspace_path, req.mark)?;
+            Ok(json!({ "ok": true }))
+        }
+        // Mobile-side attachment bytes → the desktop's content-addressed
+        // user-attachments store. The returned absolute path is what the
+        // client splices into an answer (`@<path>`) or a new-session prompt —
+        // shared by the decision panel and the composer flows.
+        "upload_attachment" => {
+            use base64::Engine as _;
+            let name = params.get("name").and_then(Value::as_str).unwrap_or("attachment.bin");
+            let b64 = params.get("base64").and_then(Value::as_str).ok_or("missing base64")?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(b64)
+                .map_err(|e| format!("invalid base64: {e}"))?;
+            if bytes.len() as u64 > MAX_UPLOAD_BYTES {
+                return Err(format!(
+                    "attachment too large: {} bytes (max {MAX_UPLOAD_BYTES})",
+                    bytes.len()
+                ));
+            }
+            let stored = crate::user_attachments::ingest_bytes(&bytes, name)?;
+            Ok(json!({ "path": stored.to_string_lossy() }))
+        }
+        "session_read" => {
+            let req: crate::session_read::MarkSessionsReadRequest =
+                serde_json::from_value(params.clone())
+                    .map_err(|e| format!("bad session_read params: {e}"))?;
+            crate::session_read::mark_read(&req.items)?;
+            Ok(json!({ "ok": true }))
         }
         other => Err(format!("unknown method: {other}")),
     }
@@ -791,6 +1008,460 @@ mod tests {
             let guards = reply["data"]["guard"].as_array().expect("guard list");
             assert_eq!(guards.len(), 1);
             assert_eq!(guards[0]["id"], "g9");
+        });
+    }
+
+    /// Issue a `req` payload and unwrap the ok reply's `data`.
+    fn request_ok(method: &str, params: Value) -> Value {
+        let reply = handle_client_payload(&json!({
+            "event": "req", "req_id": "r", "method": method, "params": params
+        }))
+        .unwrap_or_else(|| panic!("{method} must produce a reply"));
+        assert_eq!(reply["ok"], true, "{method} failed: {}", reply["error"]);
+        reply["data"].clone()
+    }
+
+    /// Write a jsonl transcript under the temp FLEET_HOME and return its path.
+    fn write_jsonl(name: &str, lines: &[Value]) -> String {
+        let dir = crate::session::real_home_dir().unwrap().join("transcripts");
+        fs::create_dir_all(&dir).unwrap();
+        let p = dir.join(name);
+        let body: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        fs::write(&p, body).unwrap();
+        p.to_string_lossy().to_string()
+    }
+
+    #[test]
+    fn request_tail_returns_last_n_messages() {
+        with_temp_home(|| {
+            let path = write_jsonl(
+                "t1.jsonl",
+                &[
+                    json!({"type":"user","message":{"content":"one"}}),
+                    json!({"type":"assistant","message":{"content":"two"}}),
+                    json!({"type":"user","message":{"content":"three"}}),
+                ],
+            );
+            let data = request_ok("tail", json!({"path": path, "n": 2}));
+            let msgs = data.as_array().expect("array");
+            assert_eq!(msgs.len(), 2);
+            assert_eq!(msgs[0]["message"]["content"], "two");
+            assert_eq!(msgs[1]["message"]["content"], "three");
+
+            // n larger than the file returns everything.
+            let data = request_ok("tail", json!({"path": path, "n": 99}));
+            assert_eq!(data.as_array().unwrap().len(), 3);
+        });
+    }
+
+    #[test]
+    fn request_live_thinking_reads_fresh_sidecar() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("live-thinking");
+            fs::write(
+                dir.join("pid-1.jsonl"),
+                concat!(
+                    r#"{"type":"system","session_id":"abc"}"#, "\n",
+                    r#"{"type":"stream_event","event":{"type":"message_start"},"session_id":"abc"}"#, "\n",
+                    r#"{"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}},"session_id":"abc"}"#, "\n",
+                    r#"{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"深思熟虑"}},"session_id":"abc"}"#, "\n",
+                ),
+            )
+            .unwrap();
+            let data = request_ok("live_thinking", json!({"sessionId": "abc"}));
+            assert_eq!(data["sessionId"], "abc");
+            assert_eq!(data["thinking"], "深思熟虑");
+
+            // Unknown session → null, not an error.
+            let data = request_ok("live_thinking", json!({"sessionId": "nope"}));
+            assert!(data.is_null());
+        });
+    }
+
+    #[test]
+    fn request_handoff_chain_finds_chain() {
+        with_temp_home(|| {
+            let dir = crate::session::real_home_dir()
+                .unwrap()
+                .join(".fleet")
+                .join("handoffs")
+                .join("chain");
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(
+                dir.join("c1.json"),
+                json!({
+                    "chainId": "c1",
+                    "workspacePath": "/ws",
+                    "links": [{
+                        "fromSessionId": "s1", "toSessionId": "s2",
+                        "note": "交接", "handedAt": 1
+                    }]
+                })
+                .to_string(),
+            )
+            .unwrap();
+            let data = request_ok("handoff_chain", json!({"sessionId": "s2"}));
+            assert_eq!(data["chainId"], "c1");
+            assert_eq!(data["links"][0]["fromSessionId"], "s1");
+
+            let data = request_ok("handoff_chain", json!({"sessionId": "unknown"}));
+            assert!(data.is_null());
+        });
+    }
+
+    #[test]
+    fn request_workflow_trees_reads_journal() {
+        with_temp_home(|| {
+            let path = write_jsonl("wf-main.jsonl", &[json!({"type":"user"})]);
+            // Session dir = jsonl path minus extension; workflows live under
+            // <session-dir>/subagents/workflows/wf_*/journal.jsonl.
+            let wf_dir = crate::session::real_home_dir()
+                .unwrap()
+                .join("transcripts")
+                .join("wf-main")
+                .join("subagents")
+                .join("workflows")
+                .join("wf_r1");
+            fs::create_dir_all(&wf_dir).unwrap();
+            fs::write(
+                wf_dir.join("journal.jsonl"),
+                r#"{"type":"started","key":"v2:aaa","agentId":"agentA"}"#,
+            )
+            .unwrap();
+            let data = request_ok("workflow_trees", json!({"path": path}));
+            let trees = data.as_array().expect("array");
+            assert_eq!(trees.len(), 1);
+            assert_eq!(trees[0]["runId"], "wf_r1");
+            assert_eq!(trees[0]["agents"].as_array().unwrap().len(), 1);
+
+            // A session with no workflow dir yields an empty list.
+            let bare = write_jsonl("bare.jsonl", &[json!({"type":"user"})]);
+            let data = request_ok("workflow_trees", json!({"path": bare}));
+            assert_eq!(data.as_array().unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn request_token_breakdown_aggregates_usage() {
+        with_temp_home(|| {
+            let path = write_jsonl(
+                "tok.jsonl",
+                &[
+                    json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"hi"}]}}),
+                    json!({"type":"assistant","message":{
+                        "model":"claude-opus-4-7",
+                        "stop_reason":"end_turn",
+                        "content":[{"type":"text","text":"hello"}],
+                        "usage":{"input_tokens":1,"output_tokens":10,
+                                 "cache_creation_input_tokens":15000,"cache_read_input_tokens":0}
+                    }}),
+                ],
+            );
+            let data = request_ok("token_breakdown", json!({"path": path}));
+            assert_eq!(data["totalsUsage"]["outputTokens"], 10);
+            assert!(data["main"].is_object());
+            assert_eq!(data["subagents"].as_array().unwrap().len(), 0);
+        });
+    }
+
+    #[test]
+    fn request_skill_history_extracts_invocations() {
+        with_temp_home(|| {
+            let path = write_jsonl(
+                "sk.jsonl",
+                &[json!({
+                    "type": "assistant",
+                    "timestamp": "2026-07-12T10:00:00Z",
+                    "message": {"content": [{
+                        "type": "tool_use", "name": "Skill",
+                        "input": {"skill": "code-review", "args": "--fix"}
+                    }]}
+                })],
+            );
+            let data = request_ok("skill_history", json!({"path": path}));
+            let items = data.as_array().expect("array");
+            assert_eq!(items.len(), 1);
+            assert_eq!(items[0]["skill"], "code-review");
+            assert_eq!(items[0]["args"], "--fix");
+            assert_eq!(items[0]["isSubagent"], false);
+        });
+    }
+
+    /// Issue a `req` payload and return the full reply (ok or error).
+    fn request_raw(method: &str, params: Value) -> Value {
+        handle_client_payload(&json!({
+            "event": "req", "req_id": "r", "method": method, "params": params
+        }))
+        .unwrap_or_else(|| panic!("{method} must produce a reply"))
+    }
+
+    #[test]
+    fn request_session_mark_sets_and_clears() {
+        with_temp_home(|| {
+            let data = request_ok(
+                "session_mark",
+                json!({"sessionId": "s1", "workspacePath": "/ws", "mark": "pending"}),
+            );
+            assert_eq!(data["ok"], true);
+            assert_eq!(crate::session_mark::read("s1"), Some(crate::session_mark::SessionMark::Pending));
+
+            request_ok(
+                "session_mark",
+                json!({"sessionId": "s1", "workspacePath": "/ws", "mark": "done"}),
+            );
+            assert_eq!(crate::session_mark::read("s1"), Some(crate::session_mark::SessionMark::Done));
+
+            // Omitting `mark` clears the record.
+            request_ok("session_mark", json!({"sessionId": "s1", "workspacePath": "/ws"}));
+            assert_eq!(crate::session_mark::read("s1"), None);
+        });
+    }
+
+    #[test]
+    fn request_session_read_stamps_records() {
+        with_temp_home(|| {
+            let data = request_ok(
+                "session_read",
+                json!({"items": [
+                    {"sessionId": "s1", "workspacePath": "/ws"},
+                    {"sessionId": "s2", "workspacePath": "/ws"},
+                ]}),
+            );
+            assert_eq!(data["ok"], true);
+            let dir = crate::session::real_home_dir()
+                .unwrap()
+                .join(".fleet")
+                .join("session-read");
+            assert!(dir.join("s1.json").is_file());
+            assert!(dir.join("s2.json").is_file());
+        });
+    }
+
+    #[test]
+    fn request_interrupt_and_stop_reject_bad_pid() {
+        with_temp_home(|| {
+            // pid 0 would signal the caller's own process group — must be
+            // rejected in the relay layer before reaching kill().
+            for method in ["interrupt", "stop"] {
+                let reply = request_raw(method, json!({"pid": 0}));
+                assert_eq!(reply["ok"], false, "{method} must reject pid 0");
+                assert!(
+                    reply["error"].as_str().unwrap().contains("pid"),
+                    "{method} error must mention pid: {}",
+                    reply["error"]
+                );
+                let reply = request_raw(method, json!({}));
+                assert_eq!(reply["ok"], false, "{method} must reject missing pid");
+            }
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn request_stop_kills_spawned_process() {
+        with_temp_home(|| {
+            let mut child = std::process::Command::new("sleep")
+                .arg("30")
+                .spawn()
+                .expect("spawn sleep");
+            let pid = child.id();
+            let data = request_ok("stop", json!({"pid": pid, "force": true}));
+            assert_eq!(data["ok"], true);
+            // The tree kill is synchronous, but give the OS a beat to deliver.
+            let mut waited = 0u64;
+            loop {
+                match child.try_wait().expect("try_wait") {
+                    Some(_) => break,
+                    None if waited >= 5000 => panic!("sleep child survived stop"),
+                    None => {
+                        std::thread::sleep(Duration::from_millis(50));
+                        waited += 50;
+                    }
+                }
+            }
+        });
+    }
+
+    #[test]
+    fn request_stop_workspace_requires_path() {
+        with_temp_home(|| {
+            let reply = request_raw("stop_workspace", json!({}));
+            assert_eq!(reply["ok"], false);
+            assert!(
+                reply["error"].as_str().unwrap().contains("workspacePath"),
+                "error must mention workspacePath: {}",
+                reply["error"]
+            );
+        });
+    }
+
+    #[test]
+    fn request_spawn_session_validates_before_spawning() {
+        with_temp_home(|| {
+            // Empty prompt fails validation before any CLI/filesystem access.
+            let reply = request_raw(
+                "spawn_session",
+                json!({"workspacePath": "/ws", "prompt": "   "}),
+            );
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("prompt"));
+
+            let reply = request_raw("spawn_session", json!({"prompt": "hi"}));
+            assert_eq!(reply["ok"], false, "missing workspacePath must fail");
+
+            let reply = request_raw(
+                "spawn_session",
+                json!({"workspacePath": "/ws", "prompt": "hi", "permissionMode": "yolo"}),
+            );
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("permission mode"));
+        });
+    }
+
+    #[test]
+    fn request_resume_session_validates_before_spawning() {
+        with_temp_home(|| {
+            let reply = request_raw("resume_session", json!({"workspacePath": "/ws"}));
+            assert_eq!(reply["ok"], false, "missing sessionId must fail");
+
+            let reply = request_raw(
+                "resume_session",
+                json!({"sessionId": "s1", "workspacePath": "/ws", "permissionMode": "yolo"}),
+            );
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("permission mode"));
+        });
+    }
+
+    #[test]
+    fn request_upload_attachment_ingests_bytes() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let bytes = b"fake image bytes \xe6\x88\xaa\xe5\x9b\xbe";
+            let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+            let data = request_ok(
+                "upload_attachment",
+                json!({"name": "screenshot.png", "base64": b64}),
+            );
+            let path = data["path"].as_str().expect("path string");
+            let stored = std::path::Path::new(path);
+            assert!(stored.is_file(), "attachment must land on disk");
+            assert_eq!(fs::read(stored).unwrap(), bytes);
+            let store_root = crate::user_attachments::user_attachments_dir().unwrap();
+            assert!(
+                stored.starts_with(&store_root),
+                "must live under the user-attachments store: {path}"
+            );
+            assert!(path.ends_with("screenshot.png"));
+
+            // Content-addressed: identical bytes → identical path.
+            let again = request_ok(
+                "upload_attachment",
+                json!({"name": "screenshot.png", "base64": b64}),
+            );
+            assert_eq!(again["path"], data["path"]);
+        });
+    }
+
+    #[test]
+    fn request_upload_attachment_sanitizes_hostile_name() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let b64 = base64::engine::general_purpose::STANDARD.encode(b"x");
+            let data = request_ok(
+                "upload_attachment",
+                json!({"name": "../../evil.sh", "base64": b64}),
+            );
+            let path = std::path::PathBuf::from(data["path"].as_str().unwrap());
+            let store_root = crate::user_attachments::user_attachments_dir().unwrap();
+            assert!(
+                path.canonicalize().unwrap().starts_with(store_root.canonicalize().unwrap()),
+                "sanitized path must stay inside the store: {}",
+                path.display()
+            );
+        });
+    }
+
+    #[test]
+    fn request_upload_attachment_rejects_bad_input() {
+        with_temp_home(|| {
+            let reply = request_raw("upload_attachment", json!({"name": "a.png"}));
+            assert_eq!(reply["ok"], false, "missing base64 must fail");
+
+            let reply =
+                request_raw("upload_attachment", json!({"name": "a.png", "base64": "!!!"}));
+            assert_eq!(reply["ok"], false, "invalid base64 must fail");
+            assert!(reply["error"].as_str().unwrap().contains("base64"));
+        });
+    }
+
+    #[test]
+    fn request_upload_attachment_rejects_oversize() {
+        use base64::Engine as _;
+        with_temp_home(|| {
+            let bytes = vec![0u8; (MAX_UPLOAD_BYTES + 1) as usize];
+            let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let reply = request_raw("upload_attachment", json!({"name": "big.bin", "base64": b64}));
+            assert_eq!(reply["ok"], false);
+            assert!(reply["error"].as_str().unwrap().contains("too large"));
+        });
+    }
+
+    #[test]
+    fn answer_guard_always_allow_persists_rule() {
+        with_temp_home(|| {
+            let dir = fleet_subdir("guard");
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "guard", "id": "g10",
+                "allow": true,
+                "alwaysAllow": { "prefix": "git push", "sourceTag": "eval-exec" }
+            }));
+            let v = read_json(&dir.join("g10.response.json"));
+            assert_eq!(v["decision"], "allow");
+            let rules = crate::audit::list_guard_allow_rules();
+            assert!(
+                rules.iter().any(|r| r.prefix == "git push"),
+                "always-allow rule must be persisted: {rules:?}"
+            );
+
+            // Block + alwaysAllow is nonsensical — must NOT persist a rule.
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "guard", "id": "g11",
+                "allow": false,
+                "alwaysAllow": { "prefix": "rm -rf" }
+            }));
+            let v = read_json(&dir.join("g11.response.json"));
+            assert_eq!(v["decision"], "block");
+            let rules = crate::audit::list_guard_allow_rules();
+            assert!(
+                !rules.iter().any(|r| r.prefix == "rm -rf"),
+                "block must not persist an allow rule: {rules:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn request_guard_analyze_respects_disabled_provider() {
+        with_temp_home(|| {
+            let prev = crate::llm_provider::shared_config();
+            crate::llm_provider::set_shared_config(crate::llm_provider::LlmConfig {
+                provider: "none".into(),
+                ..Default::default()
+            });
+            let reply = request_raw(
+                "guard_analyze",
+                json!({"command": "rm -rf /tmp/x", "context": "", "lang": "zh"}),
+            );
+            crate::llm_provider::set_shared_config(prev);
+            assert_eq!(reply["ok"], false);
+            assert!(
+                reply["error"].as_str().unwrap().contains("disabled"),
+                "must surface the disabled provider: {}",
+                reply["error"]
+            );
+
+            let reply = request_raw("guard_analyze", json!({}));
+            assert_eq!(reply["ok"], false, "missing command must fail");
         });
     }
 

@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { RelayClient } from "../relay";
 import type {
+  CommandLeaf,
   ElicitationQuestion,
   FleetAskFormField,
   FleetAskQuestion,
@@ -11,9 +12,13 @@ import type {
   PendingDecision,
   PermissionPromptRequest,
   PlanApprovalRequest,
+  RawMessage,
   SessionInfo,
 } from "../types";
+import type { Attachment } from "./Composer";
+import { uploadAttachmentFiles } from "./Composer";
 import styles from "./DecisionsView.module.css";
+import { StructuredCommand } from "./StructuredCommand";
 
 const KIND_LABEL: Record<string, string> = {
   guard: "命令审批",
@@ -87,7 +92,9 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered }: CardProps) 
         <span className={styles.workspace}>{workspace}</span>
       </div>
       {aiTitle && <div className={styles.aiTitle}>{aiTitle}</div>}
-      {decision.kind === "guard" && <GuardCard request={req as GuardRequest} submit={submit} />}
+      {decision.kind === "guard" && (
+        <GuardCard request={req as GuardRequest} client={client} session={session} submit={submit} />
+      )}
       {decision.kind === "permission-prompt" && (
         <PermissionCard request={req as PermissionPromptRequest} submit={submit} />
       )}
@@ -108,12 +115,153 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered }: CardProps) 
 
 // ── guard ────────────────────────────────────────────────────────────────────
 
-function GuardCard({ request, submit }: { request: GuardRequest; submit: (f: Record<string, unknown>) => void }) {
+function looksLikeSubcommand(tok: string): boolean {
+  return /^[a-z][a-z0-9_-]*$/.test(tok);
+}
+
+/** `argv[0]` plus the first bare-word subcommand (git push / npm test),
+ *  skipping flags and paths — same heuristic as the desktop panel. */
+function computeLeafAllowPrefix(argv: string[]): string {
+  const head = argv[0];
+  if (!head) return "";
+  const sub = argv.slice(1).find((t) => looksLikeSubcommand(t));
+  return sub ? `${head} ${sub}` : head;
+}
+
+/** One prefix per AST leaf that fired the audit and isn't already covered;
+ *  legacy payloads (no triggering flags) fall back to every leaf, and a
+ *  missing AST falls back to the raw command's first line. */
+function computeGuardAllowPrefixes(req: GuardRequest): string[] {
+  const view = req.structuredCommand;
+  if (view && view.leaves.length > 0) {
+    const anyTriggering = view.leaves.some((leaf: CommandLeaf) => leaf.triggering === true);
+    const eligible = anyTriggering
+      ? view.leaves.filter((leaf) => leaf.triggering === true && leaf.already_allowed !== true)
+      : view.leaves;
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const leaf of eligible) {
+      const p = computeLeafAllowPrefix(leaf.argv);
+      if (p && !seen.has(p)) {
+        seen.add(p);
+        out.push(p);
+      }
+    }
+    if (out.length > 0) return out;
+    if (anyTriggering) return []; // all triggering leaves already covered
+  }
+  const firstLine = req.command.split("\n")[0]?.trim() ?? "";
+  const fallback = firstLine
+    ? computeLeafAllowPrefix(firstLine.split(/\s+/).filter((t) => t.length > 0))
+    : "";
+  return fallback ? [fallback] : [];
+}
+
+/** Walk the transcript tail backwards for the last assistant prose — the same
+ *  context the desktop's get_guard_context feeds the LLM analysis. */
+function lastAssistantText(rows: RawMessage[]): string {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const msg = rows[i];
+    if (msg.type !== "assistant" || msg.isSidechain) continue;
+    const content = msg.message?.content;
+    if (typeof content === "string") {
+      if (content.trim()) return content.trim();
+      continue;
+    }
+    if (!Array.isArray(content)) continue;
+    const text = content
+      .filter((b) => b.type === "text" && b.text?.trim())
+      .map((b) => b.text)
+      .join("\n\n");
+    if (text) return text;
+  }
+  return "";
+}
+
+/** Auto-triggered LLM risk analysis for a guard card. */
+function GuardAnalysis({
+  request,
+  client,
+  session,
+}: {
+  request: GuardRequest;
+  client: RelayClient | null;
+  session: SessionInfo | undefined;
+}) {
+  const [state, setState] = useState<"loading" | "unavailable" | string>("loading");
+  const fired = useRef(false);
+
+  useEffect(() => {
+    if (!client || fired.current) return;
+    fired.current = true;
+    let cancelled = false;
+    (async () => {
+      let context = "";
+      if (session?.jsonlPath) {
+        try {
+          const rows = await client.request<RawMessage[]>("tail", {
+            path: session.jsonlPath,
+            n: 20,
+          });
+          context = lastAssistantText(rows);
+        } catch {
+          // context is best-effort
+        }
+      }
+      try {
+        const { analysis } = await client.request<{ analysis: string }>(
+          "guard_analyze",
+          { command: request.command, context, lang: "zh" },
+          40_000, // the desktop-side LLM call itself may take up to 30s
+        );
+        if (!cancelled) setState(analysis);
+      } catch {
+        if (!cancelled) setState("unavailable");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [client, request.command, request.id, session?.jsonlPath]);
+
+  if (state === "unavailable") return null;
+  return (
+    <div className={styles.analysis}>
+      <div className={styles.analysisHead}>AI 风险分析</div>
+      {state === "loading" ? (
+        <div className={styles.analysisLoading}>分析中…</div>
+      ) : (
+        <div className={styles.markdown}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{state}</ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GuardCard({
+  request,
+  client,
+  session,
+  submit,
+}: {
+  request: GuardRequest;
+  client: RelayClient | null;
+  session: SessionInfo | undefined;
+  submit: (f: Record<string, unknown>) => void;
+}) {
   const [reason, setReason] = useState("");
   const [showReason, setShowReason] = useState(false);
+  const [prefixMenuOpen, setPrefixMenuOpen] = useState(false);
+  const allowPrefixes = useMemo(() => computeGuardAllowPrefixes(request), [request]);
+  const sourceTag = request.riskTags[0] ?? null;
+
+  const alwaysAllow = (prefix: string) =>
+    submit({ allow: true, alwaysAllow: { prefix, sourceTag } });
+
   return (
     <div>
-      <pre className={styles.command}>{request.command}</pre>
+      <StructuredCommand command={request.command} view={request.structuredCommand} />
       {request.riskTags.length > 0 && (
         <div className={styles.chipRow}>
           {request.riskTags.map((t) => (
@@ -123,6 +271,7 @@ function GuardCard({ request, submit }: { request: GuardRequest; submit: (f: Rec
           ))}
         </div>
       )}
+      <GuardAnalysis request={request} client={client} session={session} />
       {showReason && (
         <textarea
           className={styles.reasonInput}
@@ -131,6 +280,15 @@ function GuardCard({ request, submit }: { request: GuardRequest; submit: (f: Rec
           onChange={(e) => setReason(e.target.value)}
           rows={2}
         />
+      )}
+      {prefixMenuOpen && allowPrefixes.length > 1 && (
+        <div className={styles.prefixMenu}>
+          {allowPrefixes.map((p) => (
+            <button key={p} className={styles.prefixItem} onClick={() => alwaysAllow(p)}>
+              总是允许 <code>{p}</code>
+            </button>
+          ))}
+        </div>
       )}
       <div className={styles.actions}>
         <button
@@ -145,6 +303,17 @@ function GuardCard({ request, submit }: { request: GuardRequest; submit: (f: Rec
         >
           {showReason ? "确认拒绝" : "拒绝"}
         </button>
+        {allowPrefixes.length > 0 && (
+          <button
+            className={styles.ghostButton}
+            onClick={() => {
+              if (allowPrefixes.length === 1) alwaysAllow(allowPrefixes[0]);
+              else setPrefixMenuOpen((v) => !v);
+            }}
+          >
+            {allowPrefixes.length === 1 ? `总是允许 ${allowPrefixes[0]}` : "总是允许…"}
+          </button>
+        )}
         <button className={styles.primaryButton} onClick={() => submit({ allow: true })}>
           允许
         </button>
@@ -219,18 +388,34 @@ function PlanCard({
   const [expanded, setExpanded] = useState(false);
   const [rejecting, setRejecting] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [editedPlan, setEditedPlan] = useState(request.planContent);
   const long = request.planContent.length > 600;
   const content = expanded || !long ? request.planContent : request.planContent.slice(0, 600);
+  const edited = editing && editedPlan.trim() !== request.planContent.trim();
   return (
     <div>
-      <div className={styles.markdown}>
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-        {long && (
-          <button className={styles.expandButton} onClick={() => setExpanded((v) => !v)}>
-            {expanded ? "收起" : "展开完整计划"}
-          </button>
-        )}
-      </div>
+      {request.planFilePath && <div className={styles.planPath}>{request.planFilePath}</div>}
+      {editing ? (
+        <textarea
+          className={styles.planEditor}
+          value={editedPlan}
+          onChange={(e) => setEditedPlan(e.target.value)}
+          rows={12}
+        />
+      ) : (
+        <div className={styles.markdown}>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          {long && (
+            <button className={styles.expandButton} onClick={() => setExpanded((v) => !v)}>
+              {expanded ? "收起" : "展开完整计划"}
+            </button>
+          )}
+        </div>
+      )}
+      <button className={styles.editToggle} onClick={() => setEditing((v) => !v)}>
+        {editing ? "退出编辑" : "✎ 编辑计划"}
+      </button>
       {rejecting && (
         <textarea
           className={styles.reasonInput}
@@ -253,8 +438,17 @@ function PlanCard({
         >
           {rejecting ? "确认驳回" : "驳回"}
         </button>
-        <button className={styles.primaryButton} onClick={() => submit({ decision: "approve" })}>
-          批准
+        <button
+          className={styles.primaryButton}
+          onClick={() =>
+            submit(
+              edited
+                ? { decision: "approve", editedPlan }
+                : { decision: "approve" },
+            )
+          }
+        >
+          {edited ? "批准已编辑版" : "批准"}
         </button>
       </div>
     </div>
@@ -279,6 +473,11 @@ function QuestionsCard({
   // question text → selected labels (OTHER = custom text active)
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
+  // question text → user flipped a single-select into multi-select
+  const [multiOverride, setMultiOverride] = useState<Record<string, boolean>>({});
+  // question text → uploaded attachments appended to the answer as @path
+  const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
+  const [uploadingQ, setUploadingQ] = useState<string | null>(null);
   const [form, setForm] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     for (const q of request.questions) {
@@ -293,9 +492,10 @@ function QuestionsCard({
   const [error, setError] = useState<string | null>(null);
 
   const toggle = (q: ElicitationQuestion | FleetAskQuestion, label: string) => {
+    const effectiveMulti = q.multiSelect || multiOverride[q.question] === true;
     setSelections((prev) => {
       const cur = prev[q.question] ?? [];
-      if (q.multiSelect) {
+      if (effectiveMulti) {
         return {
           ...prev,
           [q.question]: cur.includes(label) ? cur.filter((l) => l !== label) : [...cur, label],
@@ -303,6 +503,40 @@ function QuestionsCard({
       }
       return { ...prev, [q.question]: cur.includes(label) ? [] : [label] };
     });
+  };
+
+  const flipMultiOverride = (q: ElicitationQuestion | FleetAskQuestion) => {
+    setMultiOverride((prev) => {
+      const next = !prev[q.question];
+      if (!next) {
+        // Back to single-select: trim selections to at most one.
+        setSelections((sel) => {
+          const cur = sel[q.question] ?? [];
+          return cur.length > 1 ? { ...sel, [q.question]: [cur[0]] } : sel;
+        });
+      }
+      return { ...prev, [q.question]: next };
+    });
+  };
+
+  const addQuestionFiles = async (question: string, files: FileList | null) => {
+    if (!client || !files || files.length === 0) return;
+    setUploadingQ(question);
+    try {
+      const uploaded = await uploadAttachmentFiles(client, files);
+      setAttachments((prev) => {
+        const cur = prev[question] ?? [];
+        const next = [...cur];
+        for (const a of uploaded) {
+          if (!next.some((x) => x.path === a.path)) next.push(a);
+        }
+        return { ...prev, [question]: next };
+      });
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : "附件上传失败");
+    } finally {
+      setUploadingQ(null);
+    }
   };
 
   const doSubmit = (declined: boolean) => {
@@ -323,7 +557,18 @@ function QuestionsCard({
         setError(`「${q.header || truncate(q.question, 20)}」还没有作答`);
         return;
       }
-      if (parts.length > 0) answers[q.question] = parts.join(", ");
+      let answer = parts.join(", ");
+      // Same marker string the desktop appends when the user flipped a
+      // single-select question into multi-select.
+      if (answer && multiOverride[q.question] === true && !q.multiSelect) {
+        answer = `${answer} [用户将此题从单选改为多选 / user switched this question from single-select to multi-select]`;
+      }
+      const atts = attachments[q.question] ?? [];
+      if (atts.length > 0) {
+        const mentions = atts.map((a) => `@${a.path}`).join(" ");
+        answer = answer ? `${answer} ${mentions}` : mentions;
+      }
+      if (answer) answers[q.question] = answer;
     }
     for (const q of request.questions) {
       for (const f of q.formFields ?? []) {
@@ -365,21 +610,28 @@ function QuestionsCard({
           ) : null}
           {(q.options ?? []).map((o) => {
             const selected = (selections[q.question] ?? []).includes(o.label);
+            const effectiveMulti = q.multiSelect || multiOverride[q.question] === true;
             return (
-              <button
-                key={o.label}
-                className={styles.option}
-                data-selected={selected}
-                onClick={() => toggle(q, o.label)}
-              >
-                <span className={styles.optionMark} data-multi={q.multiSelect}>
-                  {selected ? "✓" : ""}
-                </span>
-                <span className={styles.optionBody}>
-                  <span className={styles.optionLabel}>{o.label}</span>
-                  {o.description && <span className={styles.optionDesc}>{o.description}</span>}
-                </span>
-              </button>
+              <div key={o.label}>
+                <button
+                  className={styles.option}
+                  data-selected={selected}
+                  onClick={() => toggle(q, o.label)}
+                >
+                  <span className={styles.optionMark} data-multi={effectiveMulti}>
+                    {selected ? "✓" : ""}
+                  </span>
+                  <span className={styles.optionBody}>
+                    <span className={styles.optionLabel}>{o.label}</span>
+                    {o.description && <span className={styles.optionDesc}>{o.description}</span>}
+                  </span>
+                </button>
+                {selected && o.preview && (
+                  <div className={styles.optionPreview}>
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{o.preview}</ReactMarkdown>
+                  </div>
+                )}
+              </div>
             );
           })}
           {(q.options?.length ?? 0) > 0 && (
@@ -389,7 +641,10 @@ function QuestionsCard({
                 data-selected={(selections[q.question] ?? []).includes(OTHER)}
                 onClick={() => toggle(q, OTHER)}
               >
-                <span className={styles.optionMark} data-multi={q.multiSelect}>
+                <span
+                  className={styles.optionMark}
+                  data-multi={q.multiSelect || multiOverride[q.question] === true}
+                >
                   {(selections[q.question] ?? []).includes(OTHER) ? "✓" : ""}
                 </span>
                 <span className={styles.optionBody}>
@@ -405,6 +660,29 @@ function QuestionsCard({
                   rows={2}
                 />
               )}
+              <div className={styles.questionTools}>
+                {!q.multiSelect && (
+                  <button
+                    className={styles.toolToggle}
+                    data-active={multiOverride[q.question] === true}
+                    onClick={() => flipMultiOverride(q)}
+                  >
+                    {multiOverride[q.question] ? "已改为多选" : "改为多选"}
+                  </button>
+                )}
+                <QuestionAttachRow
+                  question={q.question}
+                  attachments={attachments[q.question] ?? []}
+                  uploading={uploadingQ === q.question}
+                  onPick={(files) => void addQuestionFiles(q.question, files)}
+                  onRemove={(path) =>
+                    setAttachments((prev) => ({
+                      ...prev,
+                      [q.question]: (prev[q.question] ?? []).filter((a) => a.path !== path),
+                    }))
+                  }
+                />
+              </div>
             </>
           )}
           {(q.formFields ?? []).map((f) => (
@@ -426,6 +704,53 @@ function QuestionsCard({
           提交
         </button>
       </div>
+    </div>
+  );
+}
+
+/** Per-question attachment chips + picker (answers gain `@path` mentions). */
+function QuestionAttachRow({
+  question,
+  attachments,
+  uploading,
+  onPick,
+  onRemove,
+}: {
+  question: string;
+  attachments: Attachment[];
+  uploading: boolean;
+  onPick: (files: FileList | null) => void;
+  onRemove: (path: string) => void;
+}) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  return (
+    <div className={styles.attachRow}>
+      {attachments.map((a) => (
+        <span key={a.path} className={styles.attachChip}>
+          {a.name}
+          <button className={styles.attachRemove} onClick={() => onRemove(a.path)}>
+            ×
+          </button>
+        </span>
+      ))}
+      <button
+        className={styles.toolToggle}
+        disabled={uploading}
+        onClick={() => inputRef.current?.click()}
+      >
+        {uploading ? "上传中…" : "＋ 附件"}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        multiple
+        hidden
+        aria-label={`为「${question}」添加附件`}
+        onChange={(e) => {
+          onPick(e.target.files);
+          e.target.value = "";
+        }}
+      />
     </div>
   );
 }
