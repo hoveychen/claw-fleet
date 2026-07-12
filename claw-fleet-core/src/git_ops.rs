@@ -11,7 +11,7 @@
 //! workspace must be one the backend already knows about. This keeps the same
 //! access envelope as the read-only explorer.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use serde::{Deserialize, Serialize};
@@ -69,25 +69,36 @@ pub fn git_status(
         return Ok(GitStatus::not_git());
     };
 
-    let mut status = GitStatus::not_git();
-    status.is_git = true;
+    let (branch, upstream, ahead, behind) = head_tracking(&repo);
+    Ok(GitStatus {
+        is_git: true,
+        branch,
+        upstream,
+        ahead,
+        behind,
+        dirty_count: dirty_count(&repo),
+    })
+}
 
-    // Branch + upstream ahead/behind. A detached HEAD or an unborn branch
-    // (fresh repo, no commits) simply leaves branch/ahead/behind as None.
+/// Branch shorthand + upstream tracking ref + ahead/behind counts for a repo's
+/// current HEAD. A detached HEAD or an unborn branch (fresh repo, no commits)
+/// leaves everything as `None`; ahead/behind are `None` without an upstream.
+fn head_tracking(
+    repo: &git2::Repository,
+) -> (Option<String>, Option<String>, Option<usize>, Option<usize>) {
+    let (mut branch, mut upstream, mut ahead, mut behind) = (None, None, None, None);
     if let Ok(head) = repo.head() {
         if head.is_branch() {
             let shorthand = head.shorthand().map(str::to_string);
-            status.branch = shorthand.clone();
+            branch = shorthand.clone();
             if let (Some(name), Some(local_oid)) = (shorthand, head.target()) {
                 if let Ok(local_branch) = repo.find_branch(&name, git2::BranchType::Local) {
                     if let Ok(up) = local_branch.upstream() {
-                        status.upstream = up.name().ok().flatten().map(str::to_string);
+                        upstream = up.name().ok().flatten().map(str::to_string);
                         if let Some(up_oid) = up.get().target() {
-                            if let Ok((ahead, behind)) =
-                                repo.graph_ahead_behind(local_oid, up_oid)
-                            {
-                                status.ahead = Some(ahead);
-                                status.behind = Some(behind);
+                            if let Ok((a, b)) = repo.graph_ahead_behind(local_oid, up_oid) {
+                                ahead = Some(a);
+                                behind = Some(b);
                             }
                         }
                     }
@@ -95,23 +106,26 @@ pub fn git_status(
             }
         }
     }
+    (branch, upstream, ahead, behind)
+}
 
-    // Dirty working tree: everything that is neither clean nor gitignored.
+/// Working-tree entries that are neither clean nor gitignored.
+fn dirty_count(repo: &git2::Repository) -> usize {
     let mut opts = git2::StatusOptions::new();
     opts.include_untracked(true)
         .recurse_untracked_dirs(true)
         .include_ignored(false);
-    if let Ok(statuses) = repo.statuses(Some(&mut opts)) {
-        status.dirty_count = statuses
-            .iter()
-            .filter(|e| {
-                let s = e.status();
-                !s.is_empty() && !s.contains(git2::Status::IGNORED)
-            })
-            .count();
-    }
-
-    Ok(status)
+    repo.statuses(Some(&mut opts))
+        .map(|statuses| {
+            statuses
+                .iter()
+                .filter(|e| {
+                    let s = e.status();
+                    !s.is_empty() && !s.contains(git2::Status::IGNORED)
+                })
+                .count()
+        })
+        .unwrap_or(0)
 }
 
 /// `git push` in the root's working directory.
@@ -156,6 +170,279 @@ fn run_git_in(root: &Path, args: &[&str]) -> Result<GitOpResult, String> {
         ok: out.status.success(),
         output: text.trim().to_string(),
     })
+}
+
+// ── Repository overview (mobile "仓库" surface) ──────────────────────────────
+//
+// A "loose ends" view over every git repo reachable from a known session
+// workspace: which linked worktrees still hold commits not merged back into the
+// main checkout (forgotten merges) and whether the main branch is ahead of its
+// upstream (forgotten pushes). Unlike the per-root status bar above, this
+// enumerates the repos itself and dedups worktree checkouts back to their main
+// so the same repository never appears twice.
+
+/// One repository row in the list view.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSummary {
+    /// Canonical path of the main checkout — pass back as `root` to the other
+    /// repo entry points.
+    pub root: String,
+    /// Directory name of the main checkout.
+    pub label: String,
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    /// Commits on the current branch not yet pushed to upstream — the "forgot
+    /// to push" count. `None` when the branch has no upstream.
+    pub unpushed: Option<usize>,
+    pub behind: Option<usize>,
+    /// Uncommitted entries in the main checkout.
+    pub dirty_count: usize,
+    /// Linked worktrees, excluding the main checkout.
+    pub worktree_count: usize,
+    /// Worktrees carrying unmerged commits or uncommitted changes — the "forgot
+    /// to merge" count surfaced as a badge.
+    pub pending_worktrees: usize,
+    /// True when anything above is a loose end worth the user's attention.
+    pub needs_attention: bool,
+}
+
+/// Health of one linked git worktree.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorktreeHealth {
+    pub path: String,
+    pub branch: Option<String>,
+    /// Commits on this worktree's branch not reachable from the main checkout's
+    /// HEAD — i.e. work not yet merged back.
+    pub unmerged: usize,
+    /// Uncommitted entries in this worktree.
+    pub dirty_count: usize,
+    pub last_commit_summary: Option<String>,
+    /// Author date of the tip commit, unix seconds.
+    pub last_commit_time: Option<i64>,
+}
+
+/// One recent commit on the main checkout's current branch.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitInfo {
+    /// Short (8-char) hash.
+    pub hash: String,
+    pub summary: String,
+    pub author: String,
+    /// Author date, unix seconds.
+    pub time: i64,
+}
+
+/// Full detail for one repo: its main-branch push state, every linked worktree,
+/// and a slice of recent commits.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoDetail {
+    pub root: String,
+    pub label: String,
+    pub branch: Option<String>,
+    pub upstream: Option<String>,
+    pub unpushed: Option<usize>,
+    pub behind: Option<usize>,
+    pub dirty_count: usize,
+    pub worktrees: Vec<WorktreeHealth>,
+    pub commits: Vec<CommitInfo>,
+}
+
+/// Every git repo reachable from a known session workspace, deduped, with a
+/// loose-ends health summary. Non-git workspaces are skipped; worktree
+/// checkouts collapse onto their main checkout so each repo appears once.
+/// Needs-attention repos sort first, then alphabetically by label.
+pub fn list_repos(known_workspaces: &[String]) -> Vec<RepoSummary> {
+    let mut out = Vec::new();
+    for root in known_repo_roots(known_workspaces) {
+        let Ok(repo) = git2::Repository::open(&root) else {
+            continue;
+        };
+        let (branch, upstream, unpushed, behind) = head_tracking(&repo);
+        let main_head = repo.head().ok().and_then(|h| h.target());
+        let worktrees = worktree_healths(&repo, main_head);
+        let dc = dirty_count(&repo);
+        let pending = worktrees
+            .iter()
+            .filter(|w| w.unmerged > 0 || w.dirty_count > 0)
+            .count();
+        let needs_attention = unpushed.unwrap_or(0) > 0 || dc > 0 || pending > 0;
+        out.push(RepoSummary {
+            label: repo_label(&root),
+            root: root.to_string_lossy().to_string(),
+            branch,
+            upstream,
+            unpushed,
+            behind,
+            dirty_count: dc,
+            worktree_count: worktrees.len(),
+            pending_worktrees: pending,
+            needs_attention,
+        });
+    }
+    out.sort_by(|a, b| {
+        b.needs_attention
+            .cmp(&a.needs_attention)
+            .then_with(|| a.label.cmp(&b.label))
+    });
+    out
+}
+
+/// Full detail for one repo. `root` must be a repository reachable from a known
+/// workspace (the same access envelope as `list_repos`).
+pub fn repo_detail(root: &str, known_workspaces: &[String]) -> Result<RepoDetail, String> {
+    let root = validate_repo_root(root, known_workspaces)?;
+    let repo = git2::Repository::open(&root).map_err(|e| format!("open repo: {e}"))?;
+    let (branch, upstream, unpushed, behind) = head_tracking(&repo);
+    let main_head = repo.head().ok().and_then(|h| h.target());
+    Ok(RepoDetail {
+        label: repo_label(&root),
+        root: root.to_string_lossy().to_string(),
+        branch,
+        upstream,
+        unpushed,
+        behind,
+        dirty_count: dirty_count(&repo),
+        worktrees: worktree_healths(&repo, main_head),
+        commits: recent_commits(&repo, 30),
+    })
+}
+
+/// `git push` on a repo's main checkout (pushes the current branch to its
+/// upstream). `root` is validated against the same envelope as `repo_detail`.
+pub fn repo_push(root: &str, known_workspaces: &[String]) -> Result<GitOpResult, String> {
+    let root = validate_repo_root(root, known_workspaces)?;
+    run_git_in(&root, &["push"])
+}
+
+/// `git pull --ff-only` on a repo's main checkout — fast-forward-only so a pull
+/// that would need a merge fails loudly instead of creating a merge commit.
+pub fn repo_pull(root: &str, known_workspaces: &[String]) -> Result<GitOpResult, String> {
+    let root = validate_repo_root(root, known_workspaces)?;
+    run_git_in(&root, &["pull", "--ff-only"])
+}
+
+fn repo_label(root: &Path) -> String {
+    root.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("repo")
+        .to_string()
+}
+
+/// The canonical main-checkout path of the repo containing `path`. `None` when
+/// `path` is not inside a git repository. A linked worktree collapses onto its
+/// main checkout: git2 reports a worktree's `path()` as
+/// `<main>/.git/worktrees/<name>`, so the main checkout is three parents up.
+fn main_checkout(path: &Path) -> Option<PathBuf> {
+    let repo = git2::Repository::open(path).ok()?;
+    let workdir = if repo.is_worktree() {
+        repo.path().ancestors().nth(3).map(Path::to_path_buf)
+    } else {
+        repo.workdir().map(Path::to_path_buf)
+    }?;
+    std::fs::canonicalize(workdir).ok()
+}
+
+/// Canonical main-checkout paths of every git repo reachable from a known
+/// workspace, deduped. This is the access envelope for the repo surface:
+/// exactly the repositories the read-only explorer could already reach.
+fn known_repo_roots(known_workspaces: &[String]) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for ws in known_workspaces {
+        if let Some(main) = main_checkout(Path::new(ws)) {
+            if !roots.contains(&main) {
+                roots.push(main);
+            }
+        }
+    }
+    roots
+}
+
+fn validate_repo_root(root: &str, known_workspaces: &[String]) -> Result<PathBuf, String> {
+    let rc = std::fs::canonicalize(root).map_err(|e| format!("root: {e}"))?;
+    if known_repo_roots(known_workspaces).into_iter().any(|r| r == rc) {
+        Ok(rc)
+    } else {
+        Err("root is not a known repository".into())
+    }
+}
+
+/// Health of every linked worktree of `main_repo`. `main_head` is the main
+/// checkout's HEAD oid, against which each worktree's unmerged-commit count is
+/// measured. Pruned/stale worktree dirs are skipped. Sorted by path.
+fn worktree_healths(
+    main_repo: &git2::Repository,
+    main_head: Option<git2::Oid>,
+) -> Vec<WorktreeHealth> {
+    let mut out = Vec::new();
+    let Ok(names) = main_repo.worktrees() else {
+        return out;
+    };
+    for name in names.iter().flatten() {
+        let Ok(wt) = main_repo.find_worktree(name) else {
+            continue;
+        };
+        let path = wt.path().to_path_buf();
+        if !path.is_dir() {
+            continue; // pruned / stale worktree
+        }
+        let Ok(wt_repo) = git2::Repository::open(&path) else {
+            continue;
+        };
+        let head = wt_repo.head().ok();
+        let branch = head.as_ref().and_then(|h| h.shorthand().map(str::to_string));
+        let wt_oid = head.as_ref().and_then(git2::Reference::target);
+        // Worktrees share the main repo's object database, so the worktree tip
+        // is resolvable from `main_repo`. ahead = commits in the worktree
+        // branch not reachable from main HEAD = not yet merged back.
+        let unmerged = match (wt_oid, main_head) {
+            (Some(w), Some(m)) => main_repo
+                .graph_ahead_behind(w, m)
+                .map(|(ahead, _)| ahead)
+                .unwrap_or(0),
+            _ => 0,
+        };
+        let tip = wt_oid.and_then(|o| wt_repo.find_commit(o).ok());
+        let (last_commit_summary, last_commit_time) = match tip {
+            Some(c) => (c.summary().map(str::to_string), Some(c.time().seconds())),
+            None => (None, None),
+        };
+        out.push(WorktreeHealth {
+            path: path.to_string_lossy().to_string(),
+            branch,
+            unmerged,
+            dirty_count: dirty_count(&wt_repo),
+            last_commit_summary,
+            last_commit_time,
+        });
+    }
+    out.sort_by(|a, b| a.path.cmp(&b.path));
+    out
+}
+
+/// Up to `limit` most-recent commits reachable from HEAD, newest first.
+fn recent_commits(repo: &git2::Repository, limit: usize) -> Vec<CommitInfo> {
+    let mut out = Vec::new();
+    let Ok(mut walk) = repo.revwalk() else {
+        return out;
+    };
+    if walk.push_head().is_err() {
+        return out; // unborn branch / empty repo
+    }
+    for oid in walk.flatten().take(limit) {
+        if let Ok(c) = repo.find_commit(oid) {
+            out.push(CommitInfo {
+                hash: oid.to_string().chars().take(8).collect(),
+                summary: c.summary().unwrap_or("").to_string(),
+                author: c.author().name().unwrap_or("").to_string(),
+                time: c.time().seconds(),
+            });
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -319,5 +606,102 @@ mod tests {
         let w = ws.to_str().unwrap();
         let err = git_status(w, w, &[]).unwrap_err();
         assert!(err.contains("not a known session workspace"), "got: {err}");
+    }
+
+    // ── Repository overview ─────────────────────────────────────────────────
+
+    #[test]
+    fn list_repos_skips_non_git_and_clean_repo_needs_no_attention() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        // A plain (non-git) workspace contributes no repo.
+        let plain = tmp.path().join("plain");
+        fs::create_dir_all(&plain).unwrap();
+        assert!(list_repos(&[plain.to_string_lossy().to_string()]).is_empty());
+
+        // A clean git repo with no worktrees and no upstream is a repo, but
+        // needs no attention.
+        let ws = tmp.path().join("ws");
+        init_repo(&ws);
+        let repos = list_repos(&known(&ws));
+        assert_eq!(repos.len(), 1);
+        assert_eq!(repos[0].branch.as_deref(), Some("main"));
+        assert_eq!(repos[0].worktree_count, 0);
+        assert_eq!(repos[0].pending_worktrees, 0);
+        assert!(!repos[0].needs_attention, "clean repo: {:?}", repos[0]);
+    }
+
+    #[test]
+    fn list_repos_flags_unmerged_worktree_and_dedups_to_main() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        init_repo(&ws);
+        // A worktree on a fresh branch with one extra commit not on main.
+        let wt = tmp.path().join("wt-feature");
+        git(&ws, &["worktree", "add", "-b", "prd/feature", wt.to_str().unwrap()]);
+        fs::write(wt.join("f.txt"), "f\n").unwrap();
+        git(&wt, &["add", "-A"]);
+        git(&wt, &["commit", "-q", "-m", "feature work"]);
+
+        // `known` names BOTH the main checkout and the worktree; they must
+        // collapse onto a single repo entry.
+        let known = vec![
+            ws.to_string_lossy().to_string(),
+            wt.to_string_lossy().to_string(),
+        ];
+        let repos = list_repos(&known);
+        assert_eq!(repos.len(), 1, "worktree dedups to its main: {repos:?}");
+        let r = &repos[0];
+        assert_eq!(r.worktree_count, 1);
+        assert_eq!(r.pending_worktrees, 1, "unmerged worktree flagged: {r:?}");
+        assert!(r.needs_attention);
+
+        let detail = repo_detail(&r.root, &known).unwrap();
+        assert_eq!(detail.worktrees.len(), 1);
+        assert_eq!(detail.worktrees[0].branch.as_deref(), Some("prd/feature"));
+        assert_eq!(detail.worktrees[0].unmerged, 1, "one commit not in main");
+        assert_eq!(detail.worktrees[0].dirty_count, 0);
+        assert!(detail.worktrees[0].last_commit_summary.is_some());
+        assert!(!detail.commits.is_empty(), "recent commits populated");
+    }
+
+    #[test]
+    fn list_repos_flags_unpushed_main_branch() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let remote = tmp.path().join("remote.git");
+        fs::create_dir_all(&remote).unwrap();
+        git(&remote, &["init", "-q", "--bare"]);
+        let ws = tmp.path().join("ws");
+        init_repo(&ws);
+        git(&ws, &["remote", "add", "origin", remote.to_str().unwrap()]);
+        git(&ws, &["push", "-q", "-u", "origin", "main"]);
+
+        // Right after the initial push: in sync, no attention needed.
+        let repos = list_repos(&known(&ws));
+        assert_eq!(repos[0].unpushed, Some(0));
+        assert!(!repos[0].needs_attention);
+
+        // One local commit → unpushed by 1 (forgot to push).
+        fs::write(ws.join("b.txt"), "b\n").unwrap();
+        git(&ws, &["add", "-A"]);
+        git(&ws, &["commit", "-q", "-m", "second"]);
+        let repos = list_repos(&known(&ws));
+        assert_eq!(repos[0].unpushed, Some(1), "repo: {:?}", repos[0]);
+        assert!(repos[0].needs_attention);
+        assert_eq!(repos[0].pending_worktrees, 0);
+    }
+
+    #[test]
+    fn repo_detail_and_ops_reject_unknown_root() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let ws = tmp.path().join("ws");
+        init_repo(&ws);
+        let w = ws.to_str().unwrap();
+        for err in [
+            repo_detail(w, &[]).unwrap_err(),
+            repo_push(w, &[]).unwrap_err(),
+            repo_pull(w, &[]).unwrap_err(),
+        ] {
+            assert!(err.contains("not a known repository"), "got: {err}");
+        }
     }
 }
