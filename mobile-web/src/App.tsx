@@ -12,6 +12,7 @@ import type {
   PendingSnapshot,
   RepoSummary,
   SessionInfo,
+  TodayUsage,
   WikiDoc,
 } from "./types";
 import {
@@ -33,6 +34,13 @@ import { WikiView } from "./views/WikiView";
 import { WikiDocView } from "./views/WikiDocView";
 
 const A2HS_DISMISSED_KEY = "fleet-a2hs-dismissed";
+
+/** Compact token count: 1.2M / 34.5K / 780. */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
+  return `${n}`;
+}
 
 type Tab = "decisions" | "tasks" | "wiki" | "more";
 
@@ -71,6 +79,7 @@ export function App() {
   const [agentOnline, setAgentOnline] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  const [todayUsage, setTodayUsage] = useState<TodayUsage | null>(null);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   const [push, setPush] = useState<PushState>(pushState);
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
@@ -158,6 +167,32 @@ export function App() {
       client.close();
     };
   }, [secret, addDecision, removeDecision, refreshPending]);
+
+  // Today's cumulative token/cost counter in the header. Polls while the desktop
+  // is online; the desktop computes the figure (agent sessions created today +
+  // Fleet's own LLM spend) so mobile just displays the single number.
+  useEffect(() => {
+    if (!agentOnline) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      const client = clientRef.current;
+      if (client?.isAuthed) {
+        try {
+          const u = await client.request<TodayUsage>("today_usage");
+          if (!cancelled) setTodayUsage(u);
+        } catch {
+          /* transient — keep the last value */
+        }
+      }
+      if (!cancelled) timer = window.setTimeout(poll, 20_000);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [agentOnline]);
 
   // Re-sync when the PWA returns to the foreground (mobile browsers freeze
   // sockets aggressively; the reconnect fires but the snapshot may be stale).
@@ -286,6 +321,15 @@ export function App() {
     <div className={styles.app}>
       <header className={styles.header}>
         <span className={styles.title}>Fleet</span>
+        {todayUsage && (
+          <span
+            className={styles.usage}
+            title={`${t("今日累计")} $${todayUsage.costUsd.toFixed(2)} · ${fmtTokens(todayUsage.outputTokens)} tok`}
+          >
+            <span className={styles.usageCost}>${todayUsage.costUsd.toFixed(2)}</span>
+            <span className={styles.usageTokens}>{fmtTokens(todayUsage.outputTokens)}</span>
+          </span>
+        )}
         <span
           className={styles.connDot}
           data-state={!connected ? "offline" : agentOnline ? "online" : "agent-offline"}

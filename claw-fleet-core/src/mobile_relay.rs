@@ -782,6 +782,14 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             )?;
             serde_json::to_value(breakdown).map_err(|e| e.to_string())
         }
+        // Today's cumulative token/cost counter for the mobile header (mirrors
+        // `LocalBackend::today_usage` / `/today_usage`).
+        "today_usage" => {
+            let sources = crate::agent_source::build_sources();
+            let sessions = crate::session::scan_all_sources(&sources);
+            let usage = crate::today_usage::today_usage(&sessions);
+            serde_json::to_value(usage).map_err(|e| e.to_string())
+        }
         // Main-session invocations plus subagent sidecars, sorted by timestamp
         // (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
         "skill_history" => {
