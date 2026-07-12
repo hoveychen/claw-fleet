@@ -5,6 +5,7 @@ import type { RelayClient } from "../relay";
 import type {
   A2uiRenderRequest,
   CommandLeaf,
+  ContentBlock,
   ElicitationQuestion,
   FleetAskFormField,
   FleetAskQuestion,
@@ -36,9 +37,17 @@ interface Props {
   agentOnline: boolean;
   workspaceOf: (sessionId: string) => SessionInfo | undefined;
   onAnswered: (id: string) => void;
+  onOpenSession: (sessionId: string) => void;
 }
 
-export function DecisionsView({ decisions, client, agentOnline, workspaceOf, onAnswered }: Props) {
+export function DecisionsView({
+  decisions,
+  client,
+  agentOnline,
+  workspaceOf,
+  onAnswered,
+  onOpenSession,
+}: Props) {
   if (decisions.length === 0) {
     return (
       <div className={styles.empty}>
@@ -56,6 +65,7 @@ export function DecisionsView({ decisions, client, agentOnline, workspaceOf, onA
           client={client}
           workspaceOf={workspaceOf}
           onAnswered={onAnswered}
+          onOpenSession={onOpenSession}
         />
       ))}
     </div>
@@ -67,9 +77,10 @@ interface CardProps {
   client: RelayClient | null;
   workspaceOf: (sessionId: string) => SessionInfo | undefined;
   onAnswered: (id: string) => void;
+  onOpenSession: (sessionId: string) => void;
 }
 
-function DecisionCard({ decision, client, workspaceOf, onAnswered }: CardProps) {
+function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession }: CardProps) {
   const req = decision.request;
   const session = workspaceOf(req.sessionId);
   const workspace = req.workspaceName || session?.workspaceName || "Fleet";
@@ -92,6 +103,15 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered }: CardProps) 
           {KIND_LABEL[decision.kind] ?? decision.kind}
         </span>
         <span className={styles.workspace}>{workspace}</span>
+        {session && (
+          <button
+            className={styles.sessionLink}
+            onClick={() => onOpenSession(session.id)}
+            aria-label="查看会话详情"
+          >
+            会话 ›
+          </button>
+        )}
       </div>
       {aiTitle && <div className={styles.aiTitle}>{aiTitle}</div>}
       {decision.kind === "guard" && (
@@ -111,6 +131,7 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered }: CardProps) 
           request={req as FleetAskRequest}
           isFleetAsk={decision.kind === "fleet-ask"}
           client={client}
+          session={session}
           submit={submit}
         />
       )}
@@ -216,7 +237,12 @@ function GuardAnalysis({
       try {
         const { analysis } = await client.request<{ analysis: string }>(
           "guard_analyze",
-          { command: request.command, context, lang: "zh" },
+          {
+            command: request.command,
+            context,
+            // Follow the device locale (desktop follows its own UI language).
+            lang: navigator.language.toLowerCase().startsWith("zh") ? "zh" : "en",
+          },
           40_000, // the desktop-side LLM call itself may take up to 30s
         );
         if (!cancelled) setState(analysis);
@@ -350,7 +376,7 @@ function PermissionCard({
       <div className={styles.toolName}>
         工具：<code>{request.toolName}</code>
       </div>
-      {input && input !== "null" && <pre className={styles.command}>{truncate(input, 800)}</pre>}
+      {input && input !== "null" && <pre className={styles.command}>{truncate(input, 6000)}</pre>}
       {showReason && (
         <textarea
           className={styles.reasonInput}
@@ -418,8 +444,18 @@ function PlanCard({
           )}
         </div>
       )}
-      <button className={styles.editToggle} onClick={() => setEditing((v) => !v)}>
-        {editing ? "退出编辑" : "✎ 编辑计划"}
+      <button
+        className={styles.editToggle}
+        onClick={() =>
+          setEditing((v) => {
+            // Leaving edit mode discards the draft (desktop "Cancel edit"
+            // semantics) — otherwise a stale draft looks kept but never sends.
+            if (v) setEditedPlan(request.planContent);
+            return !v;
+          })
+        }
+      >
+        {editing ? "放弃编辑" : "✎ 编辑计划"}
       </button>
       {rejecting && (
         <textarea
@@ -525,6 +561,116 @@ function A2uiCard({
   );
 }
 
+// ── preceding agent narration ────────────────────────────────────────────────
+// Port of the desktop's usePrecedingAgentMessages slicing: the agent's plain
+// prose since the user's last real input, shown collapsed above the question.
+
+const NARRATION_TAIL = 200;
+const NARRATION_MAX_CHUNKS = 40;
+
+function isAskToolName(name: string): boolean {
+  return (
+    name === "AskUserQuestion" ||
+    name === "ExitPlanMode" ||
+    name === "mcp__fleet__fleet__render_a2ui" ||
+    name.includes("fleet__ask")
+  );
+}
+
+function blocksOf(msg: RawMessage): ContentBlock[] {
+  const content = msg.message?.content;
+  return Array.isArray(content) ? content : [];
+}
+
+function assistantProse(msg: RawMessage): string {
+  if (msg.type !== "assistant" || !msg.message) return "";
+  const content = msg.message.content;
+  if (typeof content === "string") return content.trim();
+  return blocksOf(msg)
+    .filter((b) => b.type === "text" && b.text)
+    .map((b) => b.text)
+    .join("\n")
+    .trim();
+}
+
+/** Agent narration since the user's last input (typed prompt or an answer to
+ *  an ask-family tool; plain Bash/Read tool_results do NOT end the span). */
+function slicePrecedingMessages(messages: RawMessage[]): { key: string; text: string }[] {
+  const toolNameById = new Map<string, string>();
+  for (const m of messages) {
+    for (const b of blocksOf(m)) {
+      if (b.type === "tool_use" && b.id && b.name) toolNameById.set(b.id, b.name);
+    }
+  }
+  const isUserInput = (msg: RawMessage): boolean => {
+    if (msg.type !== "user" || !msg.message) return false;
+    const content = msg.message.content;
+    if (typeof content === "string") return content.trim().length > 0;
+    const blocks = blocksOf(msg);
+    if (blocks.some((b) => b.type === "text" && b.text?.trim())) return true;
+    return blocks.some((b) => {
+      if (b.type !== "tool_result" || !b.tool_use_id) return false;
+      const name = toolNameById.get(b.tool_use_id);
+      return !!name && isAskToolName(name);
+    });
+  };
+  let boundary = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (isUserInput(messages[i])) {
+      boundary = i;
+      break;
+    }
+  }
+  const out: { key: string; text: string }[] = [];
+  for (const [i, m] of messages.slice(boundary + 1).entries()) {
+    const text = assistantProse(m);
+    if (text) out.push({ key: m.uuid ?? String(i), text });
+  }
+  return out.length > NARRATION_MAX_CHUNKS ? out.slice(out.length - NARRATION_MAX_CHUNKS) : out;
+}
+
+function PrecedingNarration({
+  session,
+  client,
+}: {
+  session: SessionInfo | undefined;
+  client: RelayClient | null;
+}) {
+  const [chunks, setChunks] = useState<{ key: string; text: string }[]>([]);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    if (!client || !session?.jsonlPath) return;
+    let cancelled = false;
+    client
+      .request<RawMessage[]>("tail", { path: session.jsonlPath, n: NARRATION_TAIL })
+      .then((rows) => {
+        if (!cancelled) setChunks(slicePrecedingMessages(rows));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [client, session?.jsonlPath]);
+
+  if (chunks.length === 0) return null;
+  return (
+    <div className={styles.preceding}>
+      <button className={styles.precedingToggle} onClick={() => setExpanded((v) => !v)}>
+        {expanded ? "▾ 收起提问前的说明" : `▸ Agent 干活时还说了 ${chunks.length} 段话`}
+      </button>
+      {expanded && (
+        <div className={styles.precedingBody}>
+          {chunks.map((c) => (
+            <div key={c.key} className={styles.markdown}>
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.text}</ReactMarkdown>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── elicitation / fleet-ask ──────────────────────────────────────────────────
 
 const OTHER = "__other__";
@@ -533,11 +679,13 @@ function QuestionsCard({
   request,
   isFleetAsk,
   client,
+  session,
   submit,
 }: {
   request: FleetAskRequest;
   isFleetAsk: boolean;
   client: RelayClient | null;
+  session: SessionInfo | undefined;
   submit: (f: Record<string, unknown>) => void;
 }) {
   // question text → selected labels (OTHER = custom text active)
@@ -703,6 +851,7 @@ function QuestionsCard({
 
   return (
     <div>
+      <PrecedingNarration session={session} client={client} />
       {multiQ && (
         <div className={styles.stepBar}>
           <span className={styles.stepLabel}>

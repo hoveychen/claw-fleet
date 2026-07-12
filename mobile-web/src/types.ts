@@ -288,10 +288,14 @@ export interface ContentBlock {
   name?: string;
   input?: Record<string, unknown>;
   content?: unknown;
+  /** tool_use block id / tool_result back-reference (preceding-narration slicing). */
+  id?: string;
+  tool_use_id?: string;
 }
 
 export interface RawMessage {
   type?: string;
+  uuid?: string;
   timestamp?: string;
   isSidechain?: boolean;
   isCompactSummary?: boolean;

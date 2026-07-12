@@ -71,7 +71,12 @@ export function App() {
         }
       }
       // Snapshot is authoritative: replaces the list (dismissals included).
-      setDecisions(fresh);
+      // Keep the original arrival stamp for ids we already had, so refreshes
+      // don't reshuffle the card order.
+      setDecisions((prev) => {
+        const seen = new Map(prev.map((d) => [d.id, d.arrivedAt]));
+        return fresh.map((d) => ({ ...d, arrivedAt: seen.get(d.id) ?? d.arrivedAt }));
+      });
     } catch {
       // agent offline — live events will catch us up later
     }
@@ -222,6 +227,7 @@ export function App() {
             agentOnline={agentOnline}
             workspaceOf={workspaceOf}
             onAnswered={(id) => setDecisions((prev) => prev.filter((d) => d.id !== id))}
+            onOpenSession={setDetailSessionId}
           />
         ) : (
           <TasksView
