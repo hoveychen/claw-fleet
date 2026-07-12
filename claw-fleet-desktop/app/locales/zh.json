@@ -423,6 +423,9 @@
   "live": {
     "section_title": "实时"
   },
+  "today_usage": {
+    "title": "今日累计"
+  },
   "chart": {
     "title": "Token 速度",
     "unit": "tok/s",
