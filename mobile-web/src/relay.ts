@@ -49,6 +49,11 @@ export class RelayClient {
   private deviceInfo?: () => DeviceInfo;
   private helloTimer: number | null = null;
   private reqSeq = 0;
+  // Per-instance prefix so req_ids never collide across devices sharing a
+  // channel: the relay broadcasts every reply to all clients (registry.rs
+  // forward), so a bare counter (r1, r2…) would let one phone's reply match
+  // another's identically-numbered pending. See relay.test.ts.
+  private reqPrefix = crypto.randomUUID();
   private pending = new Map<
     string,
     { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: number }
@@ -215,7 +220,7 @@ export class RelayClient {
   /** Data request to the agent (pending_snapshot / task_plans / …).
    *  `timeoutMs` overrides the default for slow methods (LLM analysis). */
   request<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
-    const reqId = `r${++this.reqSeq}`;
+    const reqId = `${this.reqPrefix}-${++this.reqSeq}`;
     return new Promise<T>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
