@@ -49,6 +49,12 @@ const LIVE: SessionStatus[] = [...WORKING, "waitingInput", "active", "rateLimite
 
 type MarkFilter = "all" | "pending" | "done";
 
+/** Same bucketing as the desktop launchpad: an unmarked session still needs
+ *  attention, so it collapses into "pending" — only an explicit done leaves. */
+function markBucket(s: SessionInfo): SessionMark {
+  return s.userMark === "done" ? "done" : "pending";
+}
+
 interface Props {
   sessions: SessionInfo[];
   client: RelayClient | null;
@@ -88,8 +94,8 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
     let pending = 0;
     let done = 0;
     for (const s of all) {
-      if (s.userMark === "pending") pending++;
-      else if (s.userMark === "done") done++;
+      if (markBucket(s) === "done") done++;
+      else pending++;
     }
     return { pending, done };
   }, [all]);
@@ -99,8 +105,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
     return all.filter((s) => {
       if (workspace && s.workspacePath !== workspace) return false;
       if (activeOnly && !LIVE.includes(s.status)) return false;
-      if (markFilter === "pending" && s.userMark !== "pending") return false;
-      if (markFilter === "done" && s.userMark !== "done") return false;
+      if (markFilter !== "all" && markBucket(s) !== markFilter) return false;
       if (q) {
         const hay = `${s.aiTitle ?? ""} ${s.slug ?? ""} ${s.lastMessagePreview ?? ""} ${s.workspaceName}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -210,7 +215,7 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
           {(
             [
               ["all", `全部`],
-              ["pending", `待处理${counts.pending ? ` ${counts.pending}` : ""}`],
+              ["pending", `进行中${counts.pending ? ` ${counts.pending}` : ""}`],
               ["done", `已完成${counts.done ? ` ${counts.done}` : ""}`],
             ] as Array<[MarkFilter, string]>
           ).map(([key, label]) => (
