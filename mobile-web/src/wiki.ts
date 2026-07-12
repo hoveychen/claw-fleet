@@ -6,9 +6,15 @@
 // relay and rewritten to a blob: URL so the doc looks the same as on desktop.
 
 import type { RelayClient } from "./relay";
-import type { WikiDoc, WikiFilePayload } from "./types";
+import type { WikiDoc, WikiExportPayload, WikiFilePayload, WikiSearchHit } from "./types";
 
-export type { WikiDoc, WikiVersion, WikiFilePayload } from "./types";
+export type {
+  WikiDoc,
+  WikiVersion,
+  WikiFilePayload,
+  WikiSearchHit,
+  WikiExportPayload,
+} from "./types";
 
 // ── Pure path / reference helpers (unit-tested in wiki.test.ts) ───────────────
 
@@ -114,6 +120,31 @@ function base64ToBytes(b64: string): Uint8Array {
 
 export async function listWikiDocs(client: RelayClient): Promise<WikiDoc[]> {
   return client.request<WikiDoc[]>("wiki_list");
+}
+
+/** Full-text search over doc metadata + entry body. The relay short-circuits
+ *  queries under 2 chars to an empty list, mirrored here so we don't round-trip
+ *  a single keystroke. */
+export async function searchWikiDocs(
+  client: RelayClient,
+  query: string,
+): Promise<WikiSearchHit[]> {
+  if (query.trim().length < 2) return [];
+  return client.request<WikiSearchHit[]>("wiki_search", { query });
+}
+
+/** Export one doc (single file for markdown/html, a zip for htmlDir) as bytes
+ *  plus its suggested download filename. */
+export async function exportWikiDoc(
+  client: RelayClient,
+  slug: string,
+  version: string,
+): Promise<{ filename: string; mime: string; bytes: Uint8Array }> {
+  const { filename, mime, base64 } = await client.request<WikiExportPayload>("wiki_export", {
+    slug,
+    version,
+  });
+  return { filename, mime, bytes: base64ToBytes(base64) };
 }
 
 /** Raw bytes + mime for one file (entry or asset) in a doc version. */

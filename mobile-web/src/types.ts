@@ -476,3 +476,19 @@ export interface WikiFilePayload {
   mime: string;
   base64: string;
 }
+
+/** One full-text search hit from `wiki_search`. */
+export interface WikiSearchHit {
+  slug: string;
+  /** "meta" (title/slug/workspace) or "content" (entry-file body). */
+  field: "meta" | "content";
+  /** Plain-text excerpt around the match; empty for meta-only hits. */
+  snippet: string;
+}
+
+/** A downloadable doc export, base64-framed by the `wiki_export` method. */
+export interface WikiExportPayload {
+  filename: string;
+  mime: string;
+  base64: string;
+}
