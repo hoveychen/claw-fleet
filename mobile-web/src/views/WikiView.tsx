@@ -3,7 +3,7 @@
 // 顶部可按 workspace 筛选。点开进 WikiDocView 全屏阅读。
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Search } from "lucide-react";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { WikiDoc } from "../types";
@@ -129,12 +129,18 @@ export function WikiView({ client, onOpenDoc }: Props) {
       </div>
 
       <div className={styles.filters}>
-        <input
-          className={styles.search}
-          placeholder={t("搜索标题 / 正文…")}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+        <div className={styles.searchWrap}>
+          <span className={styles.searchIcon}>
+            <Search size={14} />
+          </span>
+          <input
+            className={styles.search}
+            type="search"
+            placeholder={t("搜索标题 / 正文…")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
         {workspaces.length > 1 && (
           <select
             className={styles.wsSelect}
