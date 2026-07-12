@@ -12,6 +12,7 @@
 //!   * RELAY_STATIC_DIR holds the mobile web bundle (served at /)
 
 mod frames;
+mod harmony_push;
 mod push;
 mod registry;
 mod ws;
@@ -26,12 +27,15 @@ use axum::routing::get;
 use axum::{Json, Router};
 use tower_http::services::{ServeDir, ServeFile};
 
+use harmony_push::HarmonyPush;
 use push::Push;
 use registry::Registry;
 
 pub struct AppState {
     pub registry: Registry,
     pub push: Push,
+    /// HarmonyOS Push Kit channel; `None` unless RELAY_HARMONY_* creds are set.
+    pub harmony: Option<HarmonyPush>,
 }
 
 fn env_or(name: &str, default: &str) -> String {
@@ -77,7 +81,16 @@ async fn main() {
     let push = Push::new(vapid_key, subject, &data_dir).expect("init web push");
     log::info!("VAPID public key: {}", push.public_b64);
 
-    let state = Arc::new(AppState { registry: Registry::default(), push });
+    let harmony = HarmonyPush::from_env();
+    match &harmony {
+        Some(_) => log::info!("HarmonyOS Push Kit channel enabled (RELAY_HARMONY_* set)"),
+        None => log::info!(
+            "HarmonyOS Push Kit channel disabled — set RELAY_HARMONY_CLIENT_ID / \
+             RELAY_HARMONY_CLIENT_SECRET / RELAY_HARMONY_PROJECT_ID to enable"
+        ),
+    }
+
+    let state = Arc::new(AppState { registry: Registry::default(), push, harmony });
 
     let index = static_dir.join("index.html");
     let static_service = ServeDir::new(&static_dir).not_found_service(ServeFile::new(index));
