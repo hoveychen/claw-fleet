@@ -3,6 +3,7 @@
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Paperclip, Send, X } from "lucide-react";
 import { useDraft } from "../draft";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
@@ -154,7 +155,7 @@ function AttachmentRow({
         <span key={a.path} className={styles.attachChip}>
           {a.name}
           <button className={styles.attachRemove} onClick={() => onRemove(a.path)}>
-            ×
+            <X size={12} />
           </button>
         </span>
       ))}
@@ -163,7 +164,14 @@ function AttachmentRow({
         disabled={uploading}
         onClick={() => inputRef.current?.click()}
       >
-        {uploading ? t("上传中…") : t("＋ 附件")}
+        {uploading ? (
+          t("上传中…")
+        ) : (
+          <>
+            <Paperclip size={13} />
+            {t("附件")}
+          </>
+        )}
       </button>
       <input
         ref={inputRef}
@@ -306,8 +314,8 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
       <div className={styles.sheet} onClick={(e) => e.stopPropagation()}>
         <div className={styles.sheetHead}>
           <span className={styles.sheetTitle}>{t("新会话")}</span>
-          <button className={styles.sheetClose} onClick={onClose}>
-            ×
+          <button className={styles.sheetClose} onClick={onClose} aria-label={t("关闭")}>
+            <X size={18} />
           </button>
         </div>
         <select
@@ -351,7 +359,14 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           onChange={(p) => patch(p)}
         />
         <button className={styles.submit} disabled={!canSubmit} onClick={() => void submit()}>
-          {busy ? t("创建中…") : t("创建会话")}
+          {busy ? (
+            t("创建中…")
+          ) : (
+            <>
+              <Send size={15} />
+              {t("创建会话")}
+            </>
+          )}
         </button>
       </div>
     </div>
@@ -435,7 +450,19 @@ export function ResumeComposer({ session, client }: ResumeProps) {
           disabled={busy || uploading || !client}
           onClick={() => void submit()}
         >
-          {busy ? t("发送中…") : sent ? t("已发送 ✓") : t("继续会话")}
+          {busy ? (
+            t("发送中…")
+          ) : sent ? (
+            <>
+              <Check size={15} />
+              {t("已发送")}
+            </>
+          ) : (
+            <>
+              <Send size={15} />
+              {t("继续会话")}
+            </>
+          )}
         </button>
       </div>
     </div>

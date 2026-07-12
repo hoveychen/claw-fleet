@@ -33,10 +33,11 @@
 }
 
 .sheetClose {
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: none;
   color: var(--color-text-dim);
-  font-size: 22px;
   line-height: 1;
   padding: 0 4px;
 }
@@ -94,15 +95,19 @@
 }
 
 .attachRemove {
+  display: inline-flex;
+  align-items: center;
   border: none;
   background: none;
   color: var(--color-text-dim);
-  font-size: 14px;
   line-height: 1;
   padding: 0 2px;
 }
 
 .attachAdd {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   border: 1px dashed var(--color-border-strong);
   background: none;
   color: var(--color-text-dim);
@@ -128,6 +133,10 @@
 }
 
 .submit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   width: 100%;
   border: none;
   background: var(--color-accent);
