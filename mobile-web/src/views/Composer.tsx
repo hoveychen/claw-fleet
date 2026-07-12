@@ -2,7 +2,7 @@
 // through the relay's `upload_attachment` (bytes → desktop's user-attachments
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDraft } from "../draft";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
@@ -78,6 +78,26 @@ export async function uploadAttachmentFiles(
 function useAttachments(client: RelayClient | null, draftKey: string) {
   const [attachments, setAttachments, clearAttachments] = useDraft<Attachment[]>(draftKey, []);
   const [uploading, setUploading] = useState(false);
+
+  // 从草稿恢复的附件路径可能已在桌面端被清掉。挂载后（client 就绪时）校验一次，
+  // 剔除失效的 chip，避免恢复的 `Context files:` 指向不存在的文件。校验失败（离线等）
+  // 保持原样、不误删。只在初次恢复时跑一次——新上传的文件必然存在，无需再验。
+  const validatedRef = useRef(false);
+  useEffect(() => {
+    if (validatedRef.current || !client || attachments.length === 0) return;
+    validatedRef.current = true;
+    void (async () => {
+      try {
+        const { existing } = await client.request<{ existing: string[] }>("attachments_exist", {
+          paths: attachments.map((a) => a.path),
+        });
+        const keep = new Set(existing);
+        setAttachments((prev) => prev.filter((a) => keep.has(a.path)));
+      } catch {
+        // 保持原样，不误删。
+      }
+    })();
+  }, [client, attachments, setAttachments]);
 
   const addFiles = useCallback(
     async (files: FileList | null) => {
