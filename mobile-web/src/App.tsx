@@ -296,6 +296,8 @@ export function App() {
         <div className={styles.pushBanner}>
           {push === "ios-needs-a2hs" ? (
             <span>{t("要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。")}</span>
+          ) : push === "unsupported-harmony" ? (
+            <span>{t("当前浏览器（鸿蒙 ArkWeb）不支持网页通知，请用桌面端 Fleet 接收决策卡提醒。")}</span>
           ) : push === "denied" ? (
             <span>{t("通知权限已被拒绝，请在系统设置中为本站点重新开启。")}</span>
           ) : (
