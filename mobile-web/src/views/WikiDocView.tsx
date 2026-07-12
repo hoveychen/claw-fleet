@@ -1,7 +1,7 @@
 // 全屏 wiki 阅读页。markdown 用 react-markdown 内联渲染（拦截 <a> 点击：外链
 // 新标签打开、`[[slug]]` 站内跳转、相对链接不放行以免整个 PWA 被导航走）；
-// html / htmlDir 文档经 buildWikiHtml 把相对资源重写成 blob URL 后塞进沙箱
-// iframe，保真渲染桌面端归档的报告 / demo。
+// html / htmlDir 文档经 buildWikiHtml 把相对资源重写成 data: URI 后塞进沙箱
+// iframe，保真渲染桌面端归档的报告 / demo。顶栏可导出/分享当前文档。
 
 import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useState } from "react";
@@ -10,7 +10,7 @@ import remarkGfm from "remark-gfm";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { WikiDoc } from "../types";
-import { buildWikiHtml, fetchWikiText, listWikiDocs } from "../wiki";
+import { buildWikiHtml, exportWikiDoc, fetchWikiText, listWikiDocs } from "../wiki";
 import styles from "./WikiDocView.module.css";
 
 interface Props {
@@ -36,6 +36,7 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
   const [markdown, setMarkdown] = useState<string | null>(null);
   const [srcdoc, setSrcdoc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [exporting, setExporting] = useState(false);
 
   // Reset the version selector whenever a different doc is opened.
   useEffect(() => setVersion(doc.currentVersion), [doc.slug, doc.currentVersion]);
@@ -86,6 +87,40 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
       else window.alert(t("知识库里没有找到「{0}」", slug));
     } catch {
       /* offline — ignore */
+    }
+  };
+
+  // Export the current version: prefer the native share sheet (a File the OS
+  // can save / AirDrop / send), fall back to a plain <a download> when Web
+  // Share with files isn't available (desktop browsers, older WebViews).
+  const handleExport = async () => {
+    if (!client || exporting) return;
+    setExporting(true);
+    try {
+      const { filename, mime, bytes } = await exportWikiDoc(client, doc.slug, version);
+      const file = new File([bytes as BlobPart], filename, { type: mime });
+      const nav = navigator as Navigator & {
+        canShare?: (data: { files: File[] }) => boolean;
+      };
+      if (typeof navigator.share === "function" && nav.canShare?.({ files: [file] })) {
+        await navigator.share({ files: [file], title: doc.title || doc.slug });
+      } else {
+        const url = URL.createObjectURL(file);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      // AbortError = user dismissed the share sheet; don't nag.
+      if (!(e instanceof DOMException && e.name === "AbortError")) {
+        window.alert(t("导出失败：{0}", e instanceof Error ? e.message : String(e)));
+      }
+    } finally {
+      setExporting(false);
     }
   };
 
@@ -152,6 +187,15 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
             ))}
           </select>
         )}
+        <button
+          className={styles.exportButton}
+          onClick={() => void handleExport()}
+          disabled={exporting || !client}
+          aria-label={t("导出 / 分享")}
+          title={t("导出 / 分享")}
+        >
+          {exporting ? "…" : "⤴"}
+        </button>
       </header>
 
       <div className={styles.body}>

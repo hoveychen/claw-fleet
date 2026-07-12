@@ -59,6 +59,18 @@
   max-width: 120px;
 }
 
+.exportButton {
+  flex-shrink: 0;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--color-accent);
+  padding: 4px 6px;
+}
+
+.exportButton:disabled {
+  color: var(--color-text-dim);
+}
+
 .body {
   flex: 1;
   min-height: 0;
