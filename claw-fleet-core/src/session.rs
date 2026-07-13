@@ -2132,7 +2132,21 @@ fn reconcile_model_spec(transcript_model: &str, configured: Option<&str>) -> Str
 /// The `--model` spec a session is running, suitable for relaunching a
 /// successor on the same model. `None` when the transcript is missing or holds
 /// no assistant turn to read a model from.
+///
+/// Two sources, in order of authority:
+///
+/// 1. **What Fleet launched it with** ([`crate::launch_spec`]), when Fleet
+///    launched it. This is a record, not a reconstruction — the `--model` string
+///    verbatim, bracketed suffix and all.
+/// 2. **Reconstruction from the transcript**, for everyone else: the resolved id
+///    it recorded, with any suffix re-applied from the CLI's configured default
+///    (see [`reconcile_model_spec`]). Lossy by construction — a session launched
+///    with an explicit `--model opus[1m]` against a differently-defaulted
+///    `settings.json` leaves no trace of the suffix anywhere.
 pub fn resolve_session_model_spec(session_id: &str) -> Option<String> {
+    if let Some(recorded) = crate::launch_spec::model_of(session_id) {
+        return Some(recorded);
+    }
     let path = find_session_jsonl(session_id)?;
     let raw = fs::read_to_string(path).ok()?;
     let lines: Vec<Value> = raw
@@ -4556,6 +4570,70 @@ mod tests {
             reconcile_model_spec("claude-opus-4-8", Some("claude-opus-4-8[1m]")),
             "claude-opus-4-8[1m]"
         );
+    }
+
+    /// The case `reconcile_model_spec` cannot solve, and doesn't have to: a
+    /// session Fleet launched with an explicit `--model claude-opus-4-8[1m]`
+    /// while `settings.json` defaults to a *different family*. The transcript
+    /// records the bare `claude-opus-4-8`, and there is no suffix anywhere to
+    /// reconcile against — reconstruction alone would silently relaunch this
+    /// session on the 200K model and lose 800K of context window.
+    ///
+    /// Fleet doesn't have to reconstruct it: it chose the flag, so it wrote the
+    /// flag down. The recorded launch spec outranks the transcript.
+    #[test]
+    fn explicit_launch_model_beats_the_transcript_reconstruction() {
+        let _lock = fleet_home_lock();
+        let home = std::env::temp_dir().join(format!(
+            "fleet-launch-model-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let projects = home.join(".claude").join("projects").join("p");
+        fs::create_dir_all(&projects).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialized on the process-wide FLEET_HOME lock.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+
+        // Settings default to another family, so there is no suffix to re-apply.
+        fs::write(
+            home.join(".claude").join("settings.json"),
+            r#"{"model":"claude-fable-5"}"#,
+        )
+        .unwrap();
+        // The transcript, as Claude Code writes it: resolved id, no suffix.
+        fs::write(
+            projects.join("sess-1m.jsonl"),
+            "{\"type\":\"user\",\"cwd\":\"/ws\"}\n\
+             {\"type\":\"assistant\",\"message\":{\"model\":\"claude-opus-4-8\",\"content\":[]}}\n",
+        )
+        .unwrap();
+
+        // Without the launch note, all we can recover is the lossy bare id.
+        assert_eq!(
+            resolve_session_model_spec("sess-1m").as_deref(),
+            Some("claude-opus-4-8"),
+            "sanity: reconstruction alone cannot see the suffix"
+        );
+
+        // With it, the session comes back exactly as it was launched.
+        crate::launch_spec::record("sess-1m", Some("claude-opus-4-8[1m]"), Some("high"));
+        assert_eq!(
+            resolve_session_model_spec("sess-1m").as_deref(),
+            Some("claude-opus-4-8[1m]"),
+            "a session Fleet launched must be relaunched on the model Fleet gave it"
+        );
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[test]
