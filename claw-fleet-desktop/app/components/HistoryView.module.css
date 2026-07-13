@@ -438,7 +438,7 @@
 }
 
 :global([data-theme="light"]) .row_unread {
-  background: rgba(9, 12, 20, 0.04);
+  background: rgba(32, 28, 18, 0.04);
 }
 
 .row_body {
