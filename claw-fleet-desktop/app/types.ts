@@ -749,6 +749,12 @@ export interface ElicitationRequest {
   aiTitle?: string | null;
   questions: ElicitationQuestion[];
   timestamp: string;
+  /**
+   * The wait timed out: the turn that asked was interrupted and the question is
+   * parked in Fleet until it gets an answer. Answering resumes the session with
+   * the reply attached, rather than unblocking a producer that is long gone.
+   */
+  parked?: boolean;
 }
 
 /** A file/image the user attached to a decision-panel answer. */
@@ -860,6 +866,12 @@ export interface FleetAskRequest {
   aiTitle?: string | null;
   questions: FleetAskQuestion[];
   timestamp: string;
+  /**
+   * The wait timed out: the turn that asked was interrupted and the question is
+   * parked in Fleet until it gets an answer. Answering resumes the session with
+   * the reply attached, rather than unblocking a producer that is long gone.
+   */
+  parked?: boolean;
 }
 
 /** Agent is asking via the `fleet__ask` MCP tool. */
@@ -903,6 +915,12 @@ export interface PlanApprovalRequest {
   planContent: string;
   planFilePath?: string | null;
   timestamp: string;
+  /**
+   * The wait timed out: the turn that asked was interrupted and the question is
+   * parked in Fleet until it gets an answer. Answering resumes the session with
+   * the reply attached, rather than unblocking a producer that is long gone.
+   */
+  parked?: boolean;
 }
 
 /** Agent is asking the user to approve/reject an ExitPlanMode plan. */
@@ -1023,6 +1041,12 @@ export interface A2uiRenderRequest {
   /** Opaque A2UI agent→client message tree (`@a2ui/web_core/v0_9` shape). */
   messageTree: unknown;
   timestamp: string;
+  /**
+   * The wait timed out: the turn that asked was interrupted and the question is
+   * parked in Fleet until it gets an answer. Answering resumes the session with
+   * the reply attached, rather than unblocking a producer that is long gone.
+   */
+  parked?: boolean;
 }
 
 // ── fleet__permission_prompt (headless native-permission bridge) ────────

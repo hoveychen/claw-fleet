@@ -2314,6 +2314,15 @@ fn cmd_elicitation() {
         .clone()
         .unwrap_or_else(|| "unknown".to_string());
 
+    // This session already has a question parked and waiting for the user (an
+    // earlier card timed out). Asking again is exactly what the stop notice
+    // told the agent not to do — repeat the notice instead of queueing a second
+    // card behind the first.
+    if claw_fleet_core::parked::has_parked_for_session(&session_id) {
+        println!("{}", deny_hook_output(claw_fleet_core::parked::STOP_NOTICE));
+        return;
+    }
+
     let request_id = guard::new_request_id();
 
     let req = ElicitationRequest {
@@ -2323,6 +2332,7 @@ fn cmd_elicitation() {
         ai_title: None,
         questions,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
     };
 
     if let Err(e) = elicitation::write_request(&req) {
@@ -2418,7 +2428,7 @@ fn cmd_elicitation() {
         }
         None => {
             claw_fleet_core::log_debug(&format!(
-                "[elicitation hook] timed out after {:.1}s waiting for user response (request {}); returning deny",
+                "[elicitation hook] timed out after {:.1}s waiting for user response (request {})",
                 start.elapsed().as_secs_f32(),
                 request_id,
             ));
@@ -2432,17 +2442,39 @@ fn cmd_elicitation() {
                 eprintln!("decision_history append (timeout): {e}");
             }
             elicitation::cleanup(&request_id);
-            // Timeout — deny so Claude Code falls back.
-            let out = serde_json::json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "Fleet: no response from Fleet app (timeout)"
-                }
-            });
-            println!("{}", out);
+            // Fleet-owned session: keep the question alive as a parked card and
+            // SIGINT the turn that asked it, so the agent can't answer its own
+            // question. The CLI may well be gone before this deny is read — the
+            // parked card, already on disk, is what carries the state forward.
+            if claw_fleet_core::parked::park_and_stop(
+                &request_id,
+                claw_fleet_core::parked::ParkedKind::Elicitation,
+                &req.session_id,
+                &req,
+            ) {
+                println!("{}", deny_hook_output(claw_fleet_core::parked::STOP_NOTICE));
+                return;
+            }
+            // Everyone else: deny, and Claude Code falls back to its native UI.
+            println!(
+                "{}",
+                deny_hook_output("Fleet: no response from Fleet app (timeout)")
+            );
         }
     }
+}
+
+/// A `PreToolUse` deny verdict — the shape Claude Code reads off a hook's
+/// stdout to block the tool call and hand `reason` to the model.
+fn deny_hook_output(reason: &str) -> String {
+    serde_json::json!({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason
+        }
+    })
+    .to_string()
 }
 
 // ── MCP server (stdio JSON-RPC; exposes `fleet__ask`) ──────────────────
@@ -2519,6 +2551,13 @@ fn cmd_plan_approval() {
         .clone()
         .unwrap_or_else(|| "unknown".to_string());
 
+    // A parked question from an earlier timeout is still waiting for the user;
+    // don't stack a plan card behind it (see the elicitation hook's guard).
+    if claw_fleet_core::parked::has_parked_for_session(&session_id) {
+        println!("{}", deny_hook_output(claw_fleet_core::parked::STOP_NOTICE));
+        return;
+    }
+
     let request_id = guard::new_request_id();
 
     let req = PlanApprovalRequest {
@@ -2529,6 +2568,7 @@ fn cmd_plan_approval() {
         plan_content,
         plan_file_path,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
     };
 
     if let Err(e) = plan_approval::write_request(&req) {
@@ -2633,7 +2673,7 @@ fn cmd_plan_approval() {
         }
         None => {
             claw_fleet_core::log_debug(&format!(
-                "[plan-approval hook] timed out after {:.1}s waiting for user response (request {}); returning deny",
+                "[plan-approval hook] timed out after {:.1}s waiting for user response (request {})",
                 start.elapsed().as_secs_f32(),
                 request_id,
             ));
@@ -2647,14 +2687,22 @@ fn cmd_plan_approval() {
                 eprintln!("decision_history append (timeout): {e}");
             }
             plan_approval::cleanup(&request_id);
-            let out = serde_json::json!({
-                "hookSpecificOutput": {
-                    "hookEventName": "PreToolUse",
-                    "permissionDecision": "deny",
-                    "permissionDecisionReason": "Fleet: no response from Fleet app (timeout)"
-                }
-            });
-            println!("{}", out);
+            // Fleet-owned session: the plan stays on the Decision Panel as a
+            // parked card and this turn is cut short, rather than the agent
+            // taking a timeout-deny as licence to start executing the plan.
+            if claw_fleet_core::parked::park_and_stop(
+                &request_id,
+                claw_fleet_core::parked::ParkedKind::PlanApproval,
+                &req.session_id,
+                &req,
+            ) {
+                println!("{}", deny_hook_output(claw_fleet_core::parked::STOP_NOTICE));
+                return;
+            }
+            println!(
+                "{}",
+                deny_hook_output("Fleet: no response from Fleet app (timeout)")
+            );
         }
     }
 }

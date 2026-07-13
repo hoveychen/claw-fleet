@@ -1827,5 +1827,11 @@
     "empty": "No subdirectories here",
     "truncated": "Too many subdirectories — showing the first 500",
     "loading": "Loading…"
+  },
+  "parked": {
+    "badge": "Timed out — session paused",
+    "hint": "No answer arrived in time, so Fleet stopped this turn and kept the question. Answering resumes the session with your reply attached.",
+    "submit": "Answer & wake the session",
+    "discard": "Discard"
   }
 }

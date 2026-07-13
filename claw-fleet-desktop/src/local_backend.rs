@@ -726,6 +726,9 @@ impl LocalBackend {
             let running_elicit = running.clone();
             std::thread::spawn(move || {
                 let mut known: HashSet<String> = HashSet::new();
+                // Ids we've already told the UI are parked, so the flip is
+                // announced once rather than on every 500ms tick.
+                let mut newly_parked: HashSet<String> = HashSet::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(500));
                     if !running_elicit.load(Ordering::SeqCst) {
@@ -740,9 +743,28 @@ impl LocalBackend {
                             continue;
                         }
                     };
+                    // Parking deletes the request file, so without this union the
+                    // dismissal step below would read the card as resolved and yank it
+                    // off screen — precisely what parking exists to avoid. The card is
+                    // still pending; it just lives in the parked store now.
+                    let parked_ids = claw_fleet_core::parked::ids_of(
+                        claw_fleet_core::parked::ParkedKind::Elicitation,
+                    );
+                    let mut pending = pending;
+                    pending.extend(parked_ids.iter().cloned());
+                    for id in &parked_ids {
+                        // Announce the moment a card the UI already shows becomes
+                        // parked, so it can badge itself — `known` alone can't carry
+                        // that, it only tracks existence.
+                        if known.contains(id) && newly_parked.insert(id.clone()) {
+                            let _ = app_elicit.emit("decision-parked", id.clone());
+                        }
+                    }
                     for id in &pending {
                         if known.insert(id.clone()) {
-                            if let Some(mut req) = crate::elicitation::read_request(id) {
+                            if let Some(mut req) = crate::elicitation::read_request(id).or_else(|| {
+                                claw_fleet_core::parked::request_of::<crate::elicitation::ElicitationRequest>(id)
+                            }) {
                                 let (ws, ai) =
                                     resolve_session_display(&sess_elicit, &req.session_id);
                                 if req.workspace_name.is_empty() {
@@ -790,6 +812,9 @@ impl LocalBackend {
             let running_ask = running.clone();
             std::thread::spawn(move || {
                 let mut known: HashSet<String> = HashSet::new();
+                // Ids we've already told the UI are parked, so the flip is
+                // announced once rather than on every 500ms tick.
+                let mut newly_parked: HashSet<String> = HashSet::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(500));
                     if !running_ask.load(Ordering::SeqCst) {
@@ -804,9 +829,28 @@ impl LocalBackend {
                             continue;
                         }
                     };
+                    // Parking deletes the request file, so without this union the
+                    // dismissal step below would read the card as resolved and yank it
+                    // off screen — precisely what parking exists to avoid. The card is
+                    // still pending; it just lives in the parked store now.
+                    let parked_ids = claw_fleet_core::parked::ids_of(
+                        claw_fleet_core::parked::ParkedKind::FleetAsk,
+                    );
+                    let mut pending = pending;
+                    pending.extend(parked_ids.iter().cloned());
+                    for id in &parked_ids {
+                        // Announce the moment a card the UI already shows becomes
+                        // parked, so it can badge itself — `known` alone can't carry
+                        // that, it only tracks existence.
+                        if known.contains(id) && newly_parked.insert(id.clone()) {
+                            let _ = app_ask.emit("decision-parked", id.clone());
+                        }
+                    }
                     for id in &pending {
                         if known.insert(id.clone()) {
-                            if let Some(mut req) = claw_fleet_core::mcp_ipc::read_request(id) {
+                            if let Some(mut req) = claw_fleet_core::mcp_ipc::read_request(id).or_else(|| {
+                                claw_fleet_core::parked::request_of::<claw_fleet_core::mcp_ipc::FleetAskRequest>(id)
+                            }) {
                                 let (ws, ai) =
                                     resolve_session_display(&sess_ask, &req.session_id);
                                 if req.workspace_name.is_empty() {
@@ -856,6 +900,9 @@ impl LocalBackend {
             let running_a2ui = running.clone();
             std::thread::spawn(move || {
                 let mut known: HashSet<String> = HashSet::new();
+                // Ids we've already told the UI are parked, so the flip is
+                // announced once rather than on every 500ms tick.
+                let mut newly_parked: HashSet<String> = HashSet::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(500));
                     if !running_a2ui.load(Ordering::SeqCst) {
@@ -870,9 +917,28 @@ impl LocalBackend {
                             continue;
                         }
                     };
+                    // Parking deletes the request file, so without this union the
+                    // dismissal step below would read the card as resolved and yank it
+                    // off screen — precisely what parking exists to avoid. The card is
+                    // still pending; it just lives in the parked store now.
+                    let parked_ids = claw_fleet_core::parked::ids_of(
+                        claw_fleet_core::parked::ParkedKind::A2uiRender,
+                    );
+                    let mut pending = pending;
+                    pending.extend(parked_ids.iter().cloned());
+                    for id in &parked_ids {
+                        // Announce the moment a card the UI already shows becomes
+                        // parked, so it can badge itself — `known` alone can't carry
+                        // that, it only tracks existence.
+                        if known.contains(id) && newly_parked.insert(id.clone()) {
+                            let _ = app_a2ui.emit("decision-parked", id.clone());
+                        }
+                    }
                     for id in &pending {
                         if known.insert(id.clone()) {
-                            if let Some(mut req) = claw_fleet_core::mcp_a2ui_ipc::read_request(id) {
+                            if let Some(mut req) = claw_fleet_core::mcp_a2ui_ipc::read_request(id).or_else(|| {
+                                claw_fleet_core::parked::request_of::<claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest>(id)
+                            }) {
                                 let (ws, ai) =
                                     resolve_session_display(&sess_a2ui, &req.session_id);
                                 if req.workspace_name.is_empty() {
@@ -972,6 +1038,9 @@ impl LocalBackend {
             let running_plan = running.clone();
             std::thread::spawn(move || {
                 let mut known: HashSet<String> = HashSet::new();
+                // Ids we've already told the UI are parked, so the flip is
+                // announced once rather than on every 500ms tick.
+                let mut newly_parked: HashSet<String> = HashSet::new();
                 loop {
                     std::thread::sleep(Duration::from_millis(500));
                     if !running_plan.load(Ordering::SeqCst) {
@@ -986,9 +1055,28 @@ impl LocalBackend {
                             continue;
                         }
                     };
+                    // Parking deletes the request file, so without this union the
+                    // dismissal step below would read the card as resolved and yank it
+                    // off screen — precisely what parking exists to avoid. The card is
+                    // still pending; it just lives in the parked store now.
+                    let parked_ids = claw_fleet_core::parked::ids_of(
+                        claw_fleet_core::parked::ParkedKind::PlanApproval,
+                    );
+                    let mut pending = pending;
+                    pending.extend(parked_ids.iter().cloned());
+                    for id in &parked_ids {
+                        // Announce the moment a card the UI already shows becomes
+                        // parked, so it can badge itself — `known` alone can't carry
+                        // that, it only tracks existence.
+                        if known.contains(id) && newly_parked.insert(id.clone()) {
+                            let _ = app_plan.emit("decision-parked", id.clone());
+                        }
+                    }
                     for id in &pending {
                         if known.insert(id.clone()) {
-                            if let Some(mut req) = crate::plan_approval::read_request(id) {
+                            if let Some(mut req) = crate::plan_approval::read_request(id).or_else(|| {
+                                claw_fleet_core::parked::request_of::<crate::plan_approval::PlanApprovalRequest>(id)
+                            }) {
                                 let (ws, ai) =
                                     resolve_session_display(&sess_plan, &req.session_id);
                                 if req.workspace_name.is_empty() {
@@ -1457,6 +1545,18 @@ pub fn resume_session_impl(
         effort,
         permission_mode,
     )
+}
+
+/// Route a Decision Card response through the parked store: `Some` when this id
+/// was a timed-out card (the response wakes the session up, or drops the card),
+/// `None` when it is still live and the caller should write its response file.
+fn parked_resolve(
+    id: &str,
+    resp: &impl serde::Serialize,
+    dismissed: bool,
+) -> Option<Result<(), String>> {
+    let payload = serde_json::to_value(resp).ok()?;
+    claw_fleet_core::parked::try_resolve(id, &payload, dismissed)
 }
 
 /// Max number of `claude --resume` auto-resume processes alive at once. Each
@@ -2402,7 +2502,14 @@ impl Backend for LocalBackend {
             declined,
             answers,
         };
-        let result = crate::elicitation::write_response(&resp);
+        // A parked card has no producer left polling for a response file: the
+        // hook that asked timed out and its turn was interrupted. Resolving it
+        // resumes the session with the answer instead (or, if the user declined,
+        // just drops the question).
+        let result = match parked_resolve(id, &resp, declined) {
+            Some(r) => r,
+            None => crate::elicitation::write_response(&resp),
+        };
         resolve_feishu_card(id, resolved);
         result
     }
@@ -2418,7 +2525,10 @@ impl Backend for LocalBackend {
             answers,
             cancelled,
         };
-        claw_fleet_core::mcp_ipc::write_response(&resp)
+        match parked_resolve(id, &resp, cancelled) {
+            Some(r) => r,
+            None => claw_fleet_core::mcp_ipc::write_response(&resp),
+        }
     }
 
     fn respond_to_permission_prompt(
@@ -2452,7 +2562,10 @@ impl Backend for LocalBackend {
             action_context,
             cancelled,
         };
-        claw_fleet_core::mcp_a2ui_ipc::write_response(&resp)
+        match parked_resolve(id, &resp, cancelled) {
+            Some(r) => r,
+            None => claw_fleet_core::mcp_a2ui_ipc::write_response(&resp),
+        }
     }
 
     fn apply_mcp_injector(&self, fleet_path: &str) -> Result<(), String> {
@@ -2488,6 +2601,7 @@ impl Backend for LocalBackend {
     }
 
     fn list_pending_decisions(&self) -> claw_fleet_core::backend::PendingDecisions {
+        use claw_fleet_core::parked::{self, ParkedKind};
         let mut pending = claw_fleet_core::backend::PendingDecisions {
             guard: crate::guard::list_pending_requests()
                 .iter()
@@ -2496,18 +2610,26 @@ impl Backend for LocalBackend {
             elicitation: crate::elicitation::list_pending_requests()
                 .iter()
                 .filter_map(|id| crate::elicitation::read_request(id))
+                // Cards whose wait timed out live in the parked store, not in the
+                // channel's request dir — the producer that was blocking on them
+                // is long gone. They keep showing up here, flagged `parked`,
+                // until the user actually resolves them.
+                .chain(parked::list_requests(ParkedKind::Elicitation))
                 .collect(),
             fleet_ask: claw_fleet_core::mcp_ipc::list_pending_requests()
                 .iter()
                 .filter_map(|id| claw_fleet_core::mcp_ipc::read_request(id))
+                .chain(parked::list_requests(ParkedKind::FleetAsk))
                 .collect(),
             a2ui_render: claw_fleet_core::mcp_a2ui_ipc::list_pending_requests()
                 .iter()
                 .filter_map(|id| claw_fleet_core::mcp_a2ui_ipc::read_request(id))
+                .chain(parked::list_requests(ParkedKind::A2uiRender))
                 .collect(),
             plan_approval: crate::plan_approval::list_pending_requests()
                 .iter()
                 .filter_map(|id| crate::plan_approval::read_request(id))
+                .chain(parked::list_requests(ParkedKind::PlanApproval))
                 .collect(),
             permission_prompt: claw_fleet_core::permission_prompt_ipc::list_pending_requests()
                 .iter()
@@ -2540,7 +2662,12 @@ impl Backend for LocalBackend {
             edited_plan,
             feedback,
         };
-        let result = crate::plan_approval::write_response(&resp);
+        // `dismissed: false` — a rejection is an answer the agent has to be woken
+        // up to hear ("老板拒绝了，理由是…"), not a card the user waved away.
+        let result = match parked_resolve(id, &resp, false) {
+            Some(r) => r,
+            None => crate::plan_approval::write_response(&resp),
+        };
         resolve_feishu_card(
             id,
             claw_fleet_core::feishu::resolved_card(

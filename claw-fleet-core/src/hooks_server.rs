@@ -2141,6 +2141,20 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         requests.push(req);
                     }
                 }
+                // Cards whose wait timed out live in the parked store instead of the
+                // channel's request dir — the producer that was blocking on them is
+                // gone. They stay pending here until the user resolves them.
+                for mut req in crate::parked::list_requests::<elicitation::ElicitationRequest>(crate::parked::ParkedKind::Elicitation) {
+                    if let Some(sess) = sessions.iter().find(|s| s.id == req.session_id) {
+                        if req.workspace_name.is_empty() {
+                            req.workspace_name = sess.workspace_name.clone();
+                        }
+                        if req.ai_title.is_none() {
+                            req.ai_title = sess.ai_title.clone();
+                        }
+                    }
+                    requests.push(req);
+                }
                 let body = serde_json::to_string(&requests).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -2695,6 +2709,20 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         requests.push(req);
                     }
                 }
+                // Cards whose wait timed out live in the parked store instead of the
+                // channel's request dir — the producer that was blocking on them is
+                // gone. They stay pending here until the user resolves them.
+                for mut req in crate::parked::list_requests::<plan_approval::PlanApprovalRequest>(crate::parked::ParkedKind::PlanApproval) {
+                    if let Some(sess) = sessions.iter().find(|s| s.id == req.session_id) {
+                        if req.workspace_name.is_empty() {
+                            req.workspace_name = sess.workspace_name.clone();
+                        }
+                        if req.ai_title.is_none() {
+                            req.ai_title = sess.ai_title.clone();
+                        }
+                    }
+                    requests.push(req);
+                }
                 let body = serde_json::to_string(&requests).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -2706,7 +2734,15 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<plan_approval::PlanApprovalResponse>(&body_bytes) {
                     Ok(resp) => {
-                        match plan_approval::write_response(&resp) {
+                        // Parked card: nothing is polling for a response file any
+                        // more, so resolving it resumes the session with the answer
+                        // (or drops the card when the user dismissed it).
+                        let payload = serde_json::to_value(&resp).unwrap_or_default();
+                        let outcome = match crate::parked::try_resolve(&resp.id, &payload, false) {
+                            Some(r) => r,
+                            None => plan_approval::write_response(&resp),
+                        };
+                        match outcome {
                             Ok(()) => {
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(r#"{"ok":true}"#)
@@ -2739,7 +2775,15 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<elicitation::ElicitationResponse>(&body_bytes) {
                     Ok(resp) => {
-                        match elicitation::write_response(&resp) {
+                        // Parked card: nothing is polling for a response file any
+                        // more, so resolving it resumes the session with the answer
+                        // (or drops the card when the user dismissed it).
+                        let payload = serde_json::to_value(&resp).unwrap_or_default();
+                        let outcome = match crate::parked::try_resolve(&resp.id, &payload, resp.declined) {
+                            Some(r) => r,
+                            None => elicitation::write_response(&resp),
+                        };
+                        match outcome {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet elicitation` CLI
                                 // polls for the response and does cleanup itself.
@@ -2786,6 +2830,20 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         requests.push(req);
                     }
                 }
+                // Cards whose wait timed out live in the parked store instead of the
+                // channel's request dir — the producer that was blocking on them is
+                // gone. They stay pending here until the user resolves them.
+                for mut req in crate::parked::list_requests::<crate::mcp_ipc::FleetAskRequest>(crate::parked::ParkedKind::FleetAsk) {
+                    if let Some(sess) = sessions.iter().find(|s| s.id == req.session_id) {
+                        if req.workspace_name.is_empty() {
+                            req.workspace_name = sess.workspace_name.clone();
+                        }
+                        if req.ai_title.is_none() {
+                            req.ai_title = sess.ai_title.clone();
+                        }
+                    }
+                    requests.push(req);
+                }
                 let body = serde_json::to_string(&requests).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -2797,7 +2855,15 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::mcp_ipc::FleetAskResponse>(&body_bytes) {
                     Ok(resp) => {
-                        match crate::mcp_ipc::write_response(&resp) {
+                        // Parked card: nothing is polling for a response file any
+                        // more, so resolving it resumes the session with the answer
+                        // (or drops the card when the user dismissed it).
+                        let payload = serde_json::to_value(&resp).unwrap_or_default();
+                        let outcome = match crate::parked::try_resolve(&resp.id, &payload, resp.cancelled) {
+                            Some(r) => r,
+                            None => crate::mcp_ipc::write_response(&resp),
+                        };
+                        match outcome {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet mcp` server
                                 // polls for the response and does cleanup itself.
@@ -2902,6 +2968,20 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         requests.push(req);
                     }
                 }
+                // Cards whose wait timed out live in the parked store instead of the
+                // channel's request dir — the producer that was blocking on them is
+                // gone. They stay pending here until the user resolves them.
+                for mut req in crate::parked::list_requests::<crate::mcp_a2ui_ipc::A2uiRenderRequest>(crate::parked::ParkedKind::A2uiRender) {
+                    if let Some(sess) = sessions.iter().find(|s| s.id == req.session_id) {
+                        if req.workspace_name.is_empty() {
+                            req.workspace_name = sess.workspace_name.clone();
+                        }
+                        if req.ai_title.is_none() {
+                            req.ai_title = sess.ai_title.clone();
+                        }
+                    }
+                    requests.push(req);
+                }
                 let body = serde_json::to_string(&requests).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
@@ -2913,7 +2993,15 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::mcp_a2ui_ipc::A2uiRenderResponse>(&body_bytes) {
                     Ok(resp) => {
-                        match crate::mcp_a2ui_ipc::write_response(&resp) {
+                        // Parked card: nothing is polling for a response file any
+                        // more, so resolving it resumes the session with the answer
+                        // (or drops the card when the user dismissed it).
+                        let payload = serde_json::to_value(&resp).unwrap_or_default();
+                        let outcome = match crate::parked::try_resolve(&resp.id, &payload, resp.cancelled) {
+                            Some(r) => r,
+                            None => crate::mcp_a2ui_ipc::write_response(&resp),
+                        };
+                        match outcome {
                             Ok(()) => {
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(r#"{"ok":true}"#)
