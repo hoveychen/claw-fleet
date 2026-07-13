@@ -30,23 +30,11 @@ import { UsagePanel } from "./UsagePanel";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
+import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
 const DEFAULT_WIDTH = 280;
-
-/** Views whose page carries a secondary sidebar (二级侧边栏) that can be
- *  collapsed by re-clicking the already-active nav item. Views without one
- *  (sessions / gallery / report) just switch on click. */
-const SECONDARY_SIDEBAR_VIEWS = new Set<ViewMode>([
-  "history",
-  "audit",
-  "memory",
-  "wiki",
-  "skills",
-  "files",
-  "plugins",
-]);
 
 
 export function SessionList() {

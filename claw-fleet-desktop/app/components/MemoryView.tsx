@@ -6,10 +6,7 @@ import { Brain } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
 import { useAutoFlip } from "./useAutoFlip";
-import { useUIStore } from "../store";
-import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
-import { useResizableWidth } from "../hooks/useResizableWidth";
-import { ResizeHandle } from "./ResizeHandle";
+import { PageShell } from "./PageShell";
 import styles from "./MemoryView.module.css";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -110,13 +107,6 @@ function formatTime(iso: string): string {
 
 export function MemoryView() {
   const { t } = useTranslation();
-  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["memory"]);
-  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const {
-    width: railWidth,
-    isDragging: railDragging,
-    onMouseDown: onRailMouseDown,
-  } = useResizableWidth("memory-rail-width", { min: 200, max: 640, initial: 340 });
   const [memories, setMemories] = useState<WorkspaceMemory[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -218,47 +208,38 @@ export function MemoryView() {
   };
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.title_row}>
-          <h1 className={styles.title}>{t("memory.panel_title")}</h1>
-          {loaded && totalFiles > 0 && (
-            <span className={styles.count}>{totalFiles}</span>
-          )}
-        </div>
-        <input
-          className={styles.search}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("memory.search_placeholder")}
-        />
-      </header>
-
-      <div className={styles.filter_bar}>
-        <FilterChip
-          label={t("memory.filter_all")}
-          count={typeCounts.all}
-          active={filterType === "all"}
-          onClick={() => setFilterType("all")}
-        />
-        {TYPE_ORDER.map((type) => (
+    <PageShell
+      view="memory"
+      className={styles.mem_scope}
+      title={t("memory.panel_title")}
+      count={loaded && totalFiles > 0 ? totalFiles : null}
+      search={{
+        value: query,
+        onChange: setQuery,
+        placeholder: t("memory.search_placeholder"),
+      }}
+      subBar={
+        <>
           <FilterChip
-            key={type}
-            label={t(`memory.filter_${type}`)}
-            count={typeCounts[type]}
-            active={filterType === type}
-            typeClass={TYPE_CONFIG[type].cssClass}
-            onClick={() => setFilterType(type)}
+            label={t("memory.filter_all")}
+            count={typeCounts.all}
+            active={filterType === "all"}
+            onClick={() => setFilterType("all")}
           />
-        ))}
-      </div>
-
-      <div className={styles.body}>
-        {collapsed ? (
-          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("memory", false)} />
-        ) : (
-        <aside className={styles.list_pane} style={{ width: railWidth }}>
+          {TYPE_ORDER.map((type) => (
+            <FilterChip
+              key={type}
+              label={t(`memory.filter_${type}`)}
+              count={typeCounts[type]}
+              active={filterType === type}
+              typeClass={TYPE_CONFIG[type].cssClass}
+              onClick={() => setFilterType(type)}
+            />
+          ))}
+        </>
+      }
+      secondary={
+        <div className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("memory.loading")}</p>}
           {loaded && filtered.length === 0 && (
             <EmptyState
@@ -349,36 +330,31 @@ export function MemoryView() {
               </div>
             );
           })}
-
-          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
-        </aside>
-        )}
-
-        <main className={styles.detail_pane}>
-          {selection === null ? (
-            <div className={styles.placeholder}>
-              {loaded && totalFiles > 0
-                ? t("memory.panel_title")
-                : t("memory.no_memories")}
-            </div>
-          ) : selection.kind === "claudeMd" ? (
-            <ClaudeMdDetail
-              workspaceName={selection.workspace.workspaceName}
-              workspacePath={selection.workspace.workspacePath}
-            />
-          ) : (
-            <FileDetail
-              workspace={selection.workspace}
-              file={selection.file}
-              onPromoted={() => {
-                setSelection(null);
-                load();
-              }}
-            />
-          )}
-        </main>
-      </div>
-    </div>
+        </div>
+      }
+    >
+      {selection === null ? (
+        <div className={styles.placeholder}>
+          {loaded && totalFiles > 0
+            ? t("memory.panel_title")
+            : t("memory.no_memories")}
+        </div>
+      ) : selection.kind === "claudeMd" ? (
+        <ClaudeMdDetail
+          workspaceName={selection.workspace.workspaceName}
+          workspacePath={selection.workspace.workspacePath}
+        />
+      ) : (
+        <FileDetail
+          workspace={selection.workspace}
+          file={selection.file}
+          onPromoted={() => {
+            setSelection(null);
+            load();
+          }}
+        />
+      )}
+    </PageShell>
   );
 }
 
