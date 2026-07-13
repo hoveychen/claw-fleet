@@ -401,6 +401,34 @@ where
     discard(id)
 }
 
+/// Deliver a user's answer for card `id`, whichever surface it came from.
+///
+/// **Every consumer must answer a card through this**, not by calling the
+/// channel's `write_response` directly. There are four surfaces that resolve
+/// Decision Cards — the desktop panel (`local_backend`), the probe API
+/// (`hooks_server`, which is what a remote desktop talks to), the phone
+/// (`mobile_relay`) and Feishu — and "is this card parked?" is a property of the
+/// *card*, not of the surface. Leaving each surface to remember the check is how
+/// the phone shipped broken: it filed answers into `<id>.response.json` for a
+/// producer that had already exited, so a parked card answered from a phone
+/// never woke its session and never left the screen.
+///
+/// `write` is the channel's own `write_response`, used only on the live path.
+/// `dismissed` is per-channel: `cancelled` for `fleet__ask` / A2UI, `declined`
+/// for elicitation, and always `false` for plan approval (a rejection is an
+/// answer the agent must be woken up to hear, not a card waved away).
+pub fn deliver<T, W>(id: &str, response: &T, dismissed: bool, write: W) -> Result<(), String>
+where
+    T: Serialize,
+    W: FnOnce(&T) -> Result<(), String>,
+{
+    let payload = serde_json::to_value(response).map_err(|e| format!("serialize response: {e}"))?;
+    match try_resolve(id, &payload, dismissed) {
+        Some(resolved) => resolved,
+        None => write(response),
+    }
+}
+
 /// The seam every `respond_to_*` path goes through, on both backends.
 ///
 /// `None` — this id is a live card; the caller writes its response file as it

@@ -190,6 +190,19 @@ function DecisionCard({ decision, client, workspaceOf, onAnswered, onOpenSession
         )}
       </div>
       {aiTitle && <div className={styles.aiTitle}>{aiTitle}</div>}
+      {/* `in` rather than a field on the union: guard and permission prompts are
+          not parkable (their timeout is a deny, not a pause), so they genuinely
+          have no `parked` — the type says so, and it should keep saying so. */}
+      {"parked" in req && req.parked === true && (
+        <div className={styles.parkedBanner} role="status">
+          <span className={styles.parkedBadge}>{t("已超时 · 会话已暂停")}</span>
+          <span className={styles.parkedHint}>
+            {t(
+              "等待超时，Fleet 已经掐掉那一轮并把问题留了下来。回复后会带着你的答复唤醒会话继续。",
+            )}
+          </span>
+        </div>
+      )}
       {decision.kind === "guard" && (
         <GuardCard request={req as GuardRequest} client={client} session={session} submit={submit} />
       )}
