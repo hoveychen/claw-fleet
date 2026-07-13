@@ -28,7 +28,7 @@ use std::time::Duration;
 use base64::Engine as _;
 use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 pub const DEFAULT_RELAY_URL: &str = "https://fleet-relay.muveeai.com";
 const CONFIG_FILE_NAME: &str = "mobile-relay.json";
@@ -624,6 +624,110 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     Value::Array(slimmed)
 }
 
+// ── Transcript slimming (`tail` / `tail_delta`) ───────────────────────────────
+//
+// Raw transcript records carry far more than the phone renders: embedded
+// screenshots (base64, which gzip can't shrink), whole-file `toolUseResult`
+// bodies, token usage, cwd/sessionId/parentUuid bookkeeping. On one real
+// session that made a single `tail` reply 2.4 MB — 1.7 MB even gzipped — while
+// the client's `RawMessage` doesn't even declare `toolUseResult`, and an
+// `image` block renders as the literal string "[图片]". The phone downloaded
+// megabytes, inflated them, and dropped them on the floor (on a 15s request
+// timeout). Slimming to the rendered field set takes that reply to ~13 KB.
+//
+// These whitelists mirror the mobile client's `RawMessage` / `ContentBlock`
+// (mobile-web/src/types.ts) and `toolSummary` (SessionDetailView.tsx). Keep
+// them in sync: a field the UI starts rendering must be added here, or it will
+// arrive `undefined`.
+
+/// Top-level record fields the mobile `RawMessage` declares. `uuid` is
+/// load-bearing beyond rendering — `appendUnique` dedups tailed lines by it.
+const TAIL_MSG_FIELDS: [&str; 5] =
+    ["type", "uuid", "timestamp", "isSidechain", "isCompactSummary"];
+/// Content-block fields the mobile `ContentBlock` declares and renders.
+const TAIL_BLOCK_FIELDS: [&str; 5] = ["text", "thinking", "name", "id", "tool_use_id"];
+/// The only `tool_use.input` keys the UI reads — `toolSummary` shows exactly one
+/// of these on the tool chip; everything else in `input` is dead weight (a Write
+/// tool's whole file body lives there).
+const TAIL_TOOL_INPUT_FIELDS: [&str; 7] =
+    ["command", "file_path", "pattern", "path", "query", "url", "skill"];
+
+/// Slim one content block to the fields the mobile renders. An `image` block
+/// keeps only its `type` — the client prints "[图片]" and never reads the
+/// base64 `source`, which is both the biggest and the least compressible part
+/// of a transcript.
+fn slim_tail_block(block: &Value) -> Value {
+    let Some(obj) = block.as_object() else {
+        return block.clone();
+    };
+    let mut out = Map::new();
+    if let Some(ty) = obj.get("type") {
+        out.insert("type".into(), ty.clone());
+    }
+    for key in TAIL_BLOCK_FIELDS {
+        if let Some(v) = obj.get(key) {
+            out.insert(key.into(), v.clone());
+        }
+    }
+    if let Some(input) = obj.get("input").and_then(Value::as_object) {
+        let mut slim_input = Map::new();
+        for key in TAIL_TOOL_INPUT_FIELDS {
+            if let Some(v) = input.get(key) {
+                slim_input.insert(key.into(), v.clone());
+            }
+        }
+        if !slim_input.is_empty() {
+            out.insert("input".into(), Value::Object(slim_input));
+        }
+    }
+    Value::Object(out)
+}
+
+/// Slim one transcript record to the mobile `RawMessage` field set. Row count is
+/// preserved (rows the client filters out still ship, just empty-ish): the
+/// client's "load more" gate compares `messages.length` against the requested
+/// `n`, so dropping rows here would silently kill pagination.
+fn slim_tail_message(msg: &Value) -> Value {
+    let Some(obj) = msg.as_object() else {
+        return msg.clone();
+    };
+    let mut out = Map::new();
+    for key in TAIL_MSG_FIELDS {
+        if let Some(v) = obj.get(key) {
+            out.insert(key.into(), v.clone());
+        }
+    }
+    if let Some(message) = obj.get("message").and_then(Value::as_object) {
+        let mut slim_msg = Map::new();
+        if let Some(role) = message.get("role") {
+            slim_msg.insert("role".into(), role.clone());
+        }
+        match message.get("content") {
+            // Block list: slim each block.
+            Some(Value::Array(blocks)) => {
+                slim_msg.insert(
+                    "content".into(),
+                    Value::Array(blocks.iter().map(slim_tail_block).collect()),
+                );
+            }
+            // Plain string content is rendered verbatim.
+            Some(other) => {
+                slim_msg.insert("content".into(), other.clone());
+            }
+            None => {}
+        }
+        out.insert("message".into(), Value::Object(slim_msg));
+    }
+    Value::Object(out)
+}
+
+/// Slim a list of transcript records for the wire. Used by both `tail` and
+/// `tail_delta` — the delta lines are appended to the same list, so slimming
+/// only the initial tail would let one fat record re-inflate the transcript.
+pub fn slim_tail_messages(msgs: Vec<Value>) -> Vec<Value> {
+    msgs.iter().map(slim_tail_message).collect()
+}
+
 /// Hash of the last snapshot actually sent; unchanged data is not re-pushed.
 /// Reset on client presence changes (see `ws_connect_once`) so a phone that
 /// just connected still gets the current state on the next scan tick.
@@ -940,7 +1044,9 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             let sources = crate::agent_source::build_sources();
             let source = crate::agent_source::find_source_for_path(&sources, path)
                 .ok_or_else(|| format!("no agent source for path: {path}"))?;
-            source.get_messages_tail(path, n).map(Value::Array)
+            source
+                .get_messages_tail(path, n)
+                .map(|msgs| Value::Array(slim_tail_messages(msgs)))
         }
         // Byte-offset incremental tail (mirrors the `/tail` endpoint): the
         // client polls with its last `newOffset` and receives only the lines
@@ -971,7 +1077,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                 .filter(|l| !l.trim().is_empty())
                 .filter_map(|l| serde_json::from_str(l).ok())
                 .collect();
-            Ok(json!({ "lines": lines, "newOffset": size }))
+            Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": size }))
         }
         // Serializes to `null` when there's no live sidecar for this session.
         "live_thinking" => {
@@ -1766,6 +1872,101 @@ mod tests {
             // n larger than the file returns everything.
             let data = request_ok("tail", json!({"path": path, "n": 99}));
             assert_eq!(data.as_array().unwrap().len(), 3);
+        });
+    }
+
+    /// A record carrying an embedded screenshot and a whole file's contents —
+    /// the shape that made one real session's `tail` reply 2.4 MB (1.7 MB even
+    /// after gzip, because base64 doesn't compress). The mobile client renders
+    /// none of it: `toolUseResult` isn't in its `RawMessage` at all, and an
+    /// `image` block renders as the literal string "[图片]".
+    fn fat_record() -> Value {
+        let blob = "A".repeat(4096); // stands in for base64 image data
+        json!({
+            "type": "user",
+            "uuid": "u-fat",
+            "timestamp": "2026-07-13T00:00:00Z",
+            "parentUuid": "u-prev",
+            "sessionId": "s-1",
+            "cwd": "/some/very/long/workspace/path",
+            "entrypoint": "cli",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                 "data": blob.clone()}},
+                    {"type": "text", "text": "look at this"},
+                    {"type": "tool_use", "id": "tu1", "name": "Read",
+                     "input": {"file_path": "/a/b.rs", "offset": 1, "limit": 2000,
+                               "junk": blob.clone()}}
+                ],
+                "usage": {"input_tokens": 1, "output_tokens": 2}
+            },
+            "toolUseResult": { "file": { "content": blob.clone() }, "stdout": blob }
+        })
+    }
+
+    /// The `tail` reply must carry only what the mobile `RawMessage` declares.
+    /// Shipping the raw records means the phone downloads megabytes of base64
+    /// it decodes and then throws away — the "task detail takes forever / times
+    /// out" bug (mobile `tail` runs on the default 15s timeout).
+    #[test]
+    fn request_tail_slims_payload_to_rendered_fields() {
+        with_temp_home(|| {
+            let path = write_jsonl("fat.jsonl", &[fat_record()]);
+            let data = request_ok("tail", json!({"path": path, "n": 10}));
+            let msgs = data.as_array().expect("array");
+            assert_eq!(msgs.len(), 1);
+            let m = &msgs[0];
+
+            // Dropped: never referenced by the mobile client.
+            assert!(m.get("toolUseResult").is_none(), "toolUseResult must be stripped");
+            assert!(m.get("cwd").is_none(), "cwd must be stripped");
+            assert!(m.get("sessionId").is_none(), "sessionId must be stripped");
+            assert!(m.get("parentUuid").is_none(), "parentUuid must be stripped");
+            assert!(m["message"].get("usage").is_none(), "usage must be stripped");
+
+            // Kept: the RawMessage field set the UI actually reads.
+            assert_eq!(m["type"], "user");
+            assert_eq!(m["uuid"], "u-fat", "uuid drives appendUnique dedup");
+            assert_eq!(m["timestamp"], "2026-07-13T00:00:00Z");
+            assert_eq!(m["message"]["role"], "user");
+
+            let blocks = m["message"]["content"].as_array().expect("content blocks");
+            assert_eq!(blocks.len(), 3, "block count preserved");
+            // image: type kept (renders as "[图片]"), base64 payload dropped
+            assert_eq!(blocks[0]["type"], "image");
+            assert!(blocks[0].get("source").is_none(), "image base64 must be stripped");
+            // text: kept verbatim
+            assert_eq!(blocks[1]["text"], "look at this");
+            // tool_use: only the fields the tool chip shows
+            assert_eq!(blocks[2]["name"], "Read");
+            assert_eq!(blocks[2]["input"]["file_path"], "/a/b.rs");
+            assert!(blocks[2]["input"].get("junk").is_none(), "unused input must be stripped");
+
+            // The whole point: the fat record collapses to a fraction of its size.
+            let raw = fat_record().to_string().len();
+            let slim = m.to_string().len();
+            assert!(slim * 20 < raw, "slim ({slim}B) must be far smaller than raw ({raw}B)");
+        });
+    }
+
+    /// `tail_delta` feeds the same `RawMessage` list (appendUnique by uuid), so
+    /// it must slim identically — otherwise one new fat record re-inflates the
+    /// transcript the initial `tail` just slimmed.
+    #[test]
+    fn request_tail_delta_slims_payload_too() {
+        with_temp_home(|| {
+            let path = write_jsonl("fat2.jsonl", &[fat_record()]);
+            let data = request_ok("tail_delta", json!({"path": path, "offset": 0}));
+            let lines = data["lines"].as_array().expect("lines");
+            assert_eq!(lines.len(), 1);
+            assert!(lines[0].get("toolUseResult").is_none(), "delta must strip toolUseResult");
+            assert!(
+                lines[0]["message"]["content"][0].get("source").is_none(),
+                "delta must strip image base64"
+            );
+            assert_eq!(lines[0]["uuid"], "u-fat", "uuid preserved for dedup");
         });
     }
 
