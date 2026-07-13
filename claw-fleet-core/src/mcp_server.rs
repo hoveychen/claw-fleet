@@ -203,8 +203,16 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         )));
     }
 
-    let request_id = crate::guard::new_request_id();
+    // Re-entry guard: this session already has a question parked and waiting for
+    // the user. An agent that got here anyway ignored the stop notice from that
+    // one — hand it straight back rather than stacking a second card the user
+    // has to dismiss.
     let session_id = current_session_id();
+    if crate::parked::has_parked_for_session(&session_id) {
+        return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+    }
+
+    let request_id = crate::guard::new_request_id();
     let workspace_name = std::env::var("CLAUDE_PROJECT_DIR")
         .ok()
         .and_then(|p| {
@@ -275,6 +283,18 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
             crate::decision_history::FleetAskOutcome::Timeout,
             std::collections::BTreeMap::new(),
         );
+        // Fleet-owned session: keep the question alive as a parked card and cut
+        // this turn short, instead of handing the agent an error it will "route
+        // around" by pressing on without an answer. `park_and_stop` SIGINTs the
+        // CLI, so control may never come back from this call.
+        if crate::parked::park_and_stop(
+            &request_id,
+            crate::parked::ParkedKind::FleetAsk,
+            &req.session_id,
+            &req,
+        ) {
+            return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+        }
         return Ok(tool_error(format!(
             "No response from Fleet after {}s.",
             timeout.as_secs()
@@ -358,8 +378,13 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
         )));
     }
 
-    let request_id = crate::guard::new_request_id();
+    // Same re-entry guard as fleet__ask: one parked question per session.
     let session_id = current_session_id();
+    if crate::parked::has_parked_for_session(&session_id) {
+        return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+    }
+
+    let request_id = crate::guard::new_request_id();
     let workspace_name = std::env::var("CLAUDE_PROJECT_DIR")
         .ok()
         .and_then(|p| {
@@ -407,6 +432,14 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
     crate::mcp_a2ui_ipc::cleanup(&request_id);
 
     let Some(resp) = response else {
+        if crate::parked::park_and_stop(
+            &request_id,
+            crate::parked::ParkedKind::A2uiRender,
+            &req.session_id,
+            &req,
+        ) {
+            return Ok(tool_error(crate::parked::STOP_NOTICE.to_string()));
+        }
         return Ok(tool_error(format!(
             "No A2UI action from Fleet after {}s.",
             timeout.as_secs()

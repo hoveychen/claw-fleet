@@ -191,6 +191,40 @@ pub fn discard(id: &str) -> Result<(), String> {
     }
 }
 
+/// The whole timeout path, in one call: park the question and stop the turn
+/// that asked it. Returns `false` when the session is not Fleet-owned — the
+/// caller must then fall back to the historical delete-the-request-and-error
+/// behaviour, which is still the only safe thing to do to someone's terminal.
+///
+/// Ordering is load-bearing. The parked file is written *before* the SIGINT,
+/// because the SIGINT takes the caller's own parent (`claude`) down with it:
+/// once the CLI exits, the tool result / hook verdict this function's caller is
+/// about to print has nobody left to read it, and the caller may itself be
+/// swept up if the interrupt escalates to a tree kill. Everything that must
+/// survive has to be on disk by then. [`STOP_NOTICE`] is the belt to that
+/// braces — it only gets read in the case where the signal did not land.
+pub fn park_and_stop(
+    id: &str,
+    kind: ParkedKind,
+    session_id: &str,
+    request: &impl Serialize,
+) -> bool {
+    let Some(workspace) = parkable_workspace(session_id) else {
+        return false;
+    };
+    if let Err(e) = park(id, kind, session_id, &workspace, request) {
+        // Couldn't preserve the question — don't strand the agent behind a card
+        // that isn't there. Fall back to the old path.
+        crate::log_debug(&format!("parked: park {id} failed: {e}; not parking"));
+        return false;
+    }
+    crate::log_debug(&format!(
+        "parked: card {id} ({kind:?}) parked for session {session_id}; interrupting the turn"
+    ));
+    interrupt_session(session_id);
+    true
+}
+
 // ── Interrupting the session ─────────────────────────────────────────────────
 
 /// The pid of the `claude` process running `session_id`, if it is still up.
