@@ -97,6 +97,7 @@ pub mod wiki;
 pub mod wiki_guidance;
 pub mod workflow;
 pub mod workflow_sidecar;
+pub mod workspace_browse;
 
 use std::fs;
 use session::SessionInfo;

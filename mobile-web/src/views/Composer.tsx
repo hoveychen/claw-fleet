@@ -3,14 +3,15 @@
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Paperclip, Send, X } from "lucide-react";
+import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
 import { useDraft } from "../draft";
 import { t } from "../i18n";
-import { UPLOAD_REQUEST_TIMEOUT_MS, type RelayClient } from "../relay";
+import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type RelayClient } from "../relay";
 import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
 import styles from "./Composer.module.css";
+import { DirPicker } from "./DirPicker";
 
 const MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
@@ -282,6 +283,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
   const [draft, setDraft, clearDraft] = useDraft(NEW_SESSION_DRAFT_KEY, NEW_SESSION_DEFAULT);
   const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
   const { attachments, uploading, addFiles, remove, reset } = useAttachments(
     client,
     NEW_SESSION_ATTACH_KEY,
@@ -319,6 +321,13 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
       reset();
       onClose();
     } catch (e) {
+      // 桌面端明确拒绝了(路径不存在、prompt 为空……):它收到了、判断了、说不行,
+      // 会话不可能出现在任何快照里。直接报错——过去这里不加区分地跑完 20 秒
+      // 宽限期,把一个即时的输入错误演成「点了没反应,二十秒后才弹」。
+      if (isDesktopRejection(e)) {
+        window.alert(e.message);
+        return; // finally 会清 busy
+      }
       // relay 尽力而为投递:切网/息屏/重连会让 reply 帧丢失,而桌面其实已把
       // 会话 spawn 出来。进宽限期盯快照——出现同 id 的会话即视为成功,消除
       // 「超时报错但会话已在跑」的假失败;真没出现才报错。
@@ -360,11 +369,34 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           <option value="__custom__">{t("自定义路径…")}</option>
         </select>
         {workspace === "__custom__" && (
-          <input
-            className={styles.customPath}
-            placeholder="/path/to/workspace"
-            value={customWorkspace}
-            onChange={(e) => patch({ customWorkspace: e.target.value })}
+          // 手输仍然保留（粘贴路径最快），但主路径是「浏览…」——手机用户看不见
+          // 桌面上有什么目录，靠盲敲绝对路径本来就是这个入口坏掉的根因之一。
+          <div className={styles.customPathRow}>
+            <input
+              className={styles.customPath}
+              placeholder={t("~/workspace/项目 或点右侧浏览")}
+              value={customWorkspace}
+              onChange={(e) => patch({ customWorkspace: e.target.value })}
+            />
+            <button
+              className={styles.browseBtn}
+              onClick={() => setPicking(true)}
+              disabled={!client}
+            >
+              <FolderSearch size={15} />
+              {t("浏览…")}
+            </button>
+          </div>
+        )}
+        {picking && (
+          <DirPicker
+            client={client}
+            initialPath={customWorkspace.trim()}
+            onPick={(path) => {
+              patch({ customWorkspace: path });
+              setPicking(false);
+            }}
+            onClose={() => setPicking(false)}
           />
         )}
         <textarea

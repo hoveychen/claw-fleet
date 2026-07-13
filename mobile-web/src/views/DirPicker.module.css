@@ -1,0 +1,122 @@
+/* 叠在新会话 sheet 之上（后者 z-index 40），所以这里必须更高。 */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-end;
+}
+.sheet {
+  width: 100%;
+  background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border-strong);
+  border-radius: 16px 16px 0 0;
+  padding: 14px;
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 80vh;
+}
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text);
+}
+.close {
+  background: none;
+  border: none;
+  color: var(--color-text-dim);
+  padding: 4px;
+  display: flex;
+}
+/* 当前目录：路径可能比屏幕长，且真正要看清的是尾部（叶子目录名），所以溢出时
+ * 横向滚动、并由 JS 把滚动位置钉在最右（见 DirPicker.tsx）。
+ * 不要用 `direction: rtl` 来实现「优先显示尾部」：Unicode 双向算法会把前导的
+ * `/` 当中性字符重排到行尾，`/Users/demo` 会显示成 `Users/demo/`。 */
+.crumb {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 7px 9px;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+.error {
+  font-size: 12px;
+  color: var(--color-error);
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  padding: 7px 9px;
+}
+.list {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-bg-input);
+  min-height: 180px;
+}
+.row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  padding: 11px 10px;
+  color: var(--color-text);
+  font-size: 14px;
+  text-align: left;
+}
+.row:last-child {
+  border-bottom: none;
+}
+.row:active {
+  background: var(--color-bg-card-hover);
+}
+.icon {
+  color: var(--color-text-dim);
+  flex-shrink: 0;
+}
+/* git 仓库正是用户多半要挑的东西——用强调色让它在一屏目录里跳出来。 */
+.iconRepo {
+  color: var(--color-accent);
+  flex-shrink: 0;
+}
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.empty {
+  padding: 14px 10px;
+  font-size: 12px;
+  color: var(--color-text-dim);
+  text-align: center;
+}
+.confirm {
+  width: 100%;
+  background: var(--color-accent);
+  color: #fff; /* accent 在明暗两套主题下都是深橙，白字都够对比（同 Composer 主按钮） */
+  border: none;
+  border-radius: 10px;
+  padding: 11px;
+  font-size: 14px;
+  font-weight: 600;
+}
+.confirm:disabled {
+  opacity: 0.5;
+}
