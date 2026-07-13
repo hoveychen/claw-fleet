@@ -8,6 +8,8 @@
 Watch every session, approve every risky decision, launch and relay tasks, and carry the whole cockpit in your pocket.
 Supports **Claude Code**, **Cursor**, **OpenClaw**, and **Codex**.
 
+**[▶ Watch the 66-second field guide](https://hoveychen.github.io/claw-fleet/#demo)** — Captain Claw walks all nine tips.
+
 [![Release](https://img.shields.io/github/v/release/hoveychen/claw-fleet?style=flat-square&logo=github&color=d97757)](https://github.com/hoveychen/claw-fleet/releases/latest)
 [![License](https://img.shields.io/github/license/hoveychen/claw-fleet?style=flat-square&color=4a9eff)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Mobile%20Web-lightgrey?style=flat-square)](https://github.com/hoveychen/claw-fleet/releases/latest)
@@ -37,6 +39,24 @@ When you run AI coding agents across multiple projects — or lean on multi-agen
 No server required, no API key needed beyond what your agents already use.
 
 > **Meet Captain Claw** 🦀 — our mascot. A battle-hardened crab commander who keeps every agent in formation.
+
+---
+
+## Captain Claw's nine tips
+
+The [66-second field guide](https://hoveychen.github.io/claw-fleet/#demo) in one table — each tip is a real pain, and the feature that ends it:
+
+| # | Tip | The feature |
+|---|---|---|
+| 1 | **Know who's actually working** | 8 live statuses + agent hierarchies → [See everything](#see-everything) |
+| 2 | **Watch the bill, not the vibes** | Live USD spend, $/min chart, usage windows → [See everything](#see-everything) |
+| 3 | **No unsupervised sudo on my ship** | Guard intercepts risky commands, LLM risk analysis → [Approve anything](#approve-anything--the-decision-panel) |
+| 4 | **Answer with a click, not an essay** | One decision queue: questions, plans, permissions → [Approve anything](#approve-anything--the-decision-panel) |
+| 5 | **Dispatch the whole fleet from one place** | Launch detached sessions from a composer → [Dispatch and relay](#dispatch-and-relay) |
+| 6 | **Long task? Pass the baton** | Handoff chains outlive context windows → [Dispatch and relay](#dispatch-and-relay) |
+| 7 | **Your phone is the bridge now** | Mobile web app + push, full remote → [From anywhere](#from-anywhere) |
+| 8 | **The standup writes itself** | AI daily reports, copy as Markdown → [See everything](#see-everything) |
+| 9 | **Research it once, cite it forever** | The wiki: versioned, searchable, `[[slug]]`-linked → [The platform around it](#the-platform-around-it) |
 
 ---
 
@@ -156,7 +176,7 @@ A **floating decision window** pops cards up even when the main window is minimi
 
 ## The platform around it
 
-**A wiki for everything your agents produce.** `fleet wiki publish` archives HTML reports, interactive demos, and markdown docs — versioned on every re-publish, full-text searchable, rendered live (scripts and all) on desktop and mobile.
+**A wiki for everything your agents produce.** `fleet wiki publish` archives HTML reports, interactive demos, and markdown docs — versioned on every re-publish, full-text searchable, rendered live (scripts and all) on desktop and mobile. Docs cite each other with `[[slug]]` cross-references, organize into virtual folders, and any later session reads them back with `fleet wiki cat` — research once, cite forever.
 
 **Repos view.** Browse workspace file trees, git status and diffs, and run commands in a built-in terminal — including on remote backends.
 

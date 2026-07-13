@@ -79,7 +79,7 @@ export const Intro: React.FC = () => {
           <Img src={staticFile("mascot-captain.png")} style={{ width: "100%", height: "100%" }} />
         </div>
         <Bubble
-          text="Eight tips from a crab who's seen agents go very, very wrong."
+          text="Nine tips from a crab who's seen agents go very, very wrong."
           enter={62}
           side="right"
           bottom={410}
