@@ -391,4 +391,9 @@ const DICT: Record<string, string> = {
   "{0} 小时后重置": "resets in {0}h",
   "{0} 分钟后重置": "resets in {0}m",
   "上一周期 {0}%": "prev {0}%",
+  "占用率变化 · 近 24 小时": "Occupancy · last 24h",
+  "近 24 小时占用率": "Occupancy over the last 24 hours",
+  "还没有攒够采样点，桌面端跑一阵子再看。":
+    "Not enough samples yet — leave the desktop running for a while.",
+  "纵轴 0–100%": "y: 0–100%",
 };

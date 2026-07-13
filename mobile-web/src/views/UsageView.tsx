@@ -9,6 +9,7 @@ import { fetchAccountUsage } from "../account";
 import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { AccountUsage, TodayUsage, UsageBar } from "../types";
+import { UsageChart } from "./UsageChart";
 import styles from "./UsageView.module.css";
 
 interface Props {
@@ -107,11 +108,14 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
   const [data, setData] = useState<AccountUsage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  // 点 ⟳ 时递增，作为曲线组件的 key —— 让它连同账号一起重新拉一遍。
+  const [reloadKey, setReloadKey] = useState(0);
 
   const refresh = useCallback(async () => {
     if (!client) return;
     setLoading(true);
     setError(null);
+    setReloadKey((n) => n + 1);
     try {
       setData(await fetchAccountUsage(client));
     } catch (e) {
@@ -218,6 +222,14 @@ export function UsageView({ client, todayUsage, onBack }: Props) {
             </div>
           </div>
         )}
+
+        {/* ── 近 24h 占用率曲线 ── */}
+        <div className={styles.section}>
+          <div className={styles.sectionLabel}>{t("占用率变化 · 近 24 小时")}</div>
+          <div className={styles.card}>
+            <UsageChart key={reloadKey} client={client} />
+          </div>
+        </div>
 
         {/* ── 其它 agent 源 ── */}
         {data?.sources.map((s) => (

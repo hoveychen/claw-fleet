@@ -600,3 +600,12 @@ export interface AccountUsage {
   claudeError: string | null;
   sources: SourceUsage[];
 }
+
+/** `usage_history` 回包的一个采样点：桌面端后台采样器每隔几分钟落盘一次。
+ *  三个字段都是 0–1 小数，某个窗口当次没数据时为 null。 */
+export interface UsageHistoryPoint {
+  ts: number;
+  fiveHour: number | null;
+  sevenDay: number | null;
+  sevenDaySonnet: number | null;
+}
