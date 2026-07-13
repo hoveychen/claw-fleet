@@ -57,8 +57,8 @@
   font-size: 11px;
   padding: 1px 6px;
   border-radius: 4px;
-  background: var(--color-success-bg, rgba(90, 200, 140, 0.15));
-  color: var(--color-success, #5ac88c);
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .pending_chip {
@@ -164,8 +164,8 @@
 }
 
 .option_selected {
-  border-color: var(--color-success, #5ac88c);
-  background: var(--color-success-bg, rgba(90, 200, 140, 0.08));
+  border-color: var(--color-success);
+  background: var(--color-success-bg);
 }
 
 .option_label {
@@ -183,7 +183,7 @@
   font-size: 11px;
 }
 
-.option_selected .marker { color: var(--color-success, #5ac88c); }
+.option_selected .marker { color: var(--color-success); }
 
 .option_desc {
   font-size: 11px;

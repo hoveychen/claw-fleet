@@ -298,7 +298,7 @@
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: var(--color-success, #5ac88c);
+  background: var(--color-success);
   animation: working_bounce 1.2s ease-in-out infinite;
 }
 

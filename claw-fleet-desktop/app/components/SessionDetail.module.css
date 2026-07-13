@@ -381,7 +381,7 @@
 
 .tasks_check {
   flex: 0 0 auto;
-  color: var(--color-success, #3fb950);
+  color: var(--color-success);
 }
 
 .tasks_text {

@@ -37,15 +37,15 @@
 }
 
 .item_danger {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .item_danger .item_icon {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .item_danger:hover {
-  background: rgba(248, 113, 113, 0.12);
+  background: rgb(var(--color-error-rgb) / 0.12);
 }
 
 .separator {

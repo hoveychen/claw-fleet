@@ -100,7 +100,7 @@
 
 .error {
   font-size: 12px;
-  color: #f56565;
+  color: var(--color-error);
   margin: 0 0 12px;
 }
 

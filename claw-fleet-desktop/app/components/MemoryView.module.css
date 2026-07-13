@@ -590,13 +590,13 @@
 }
 
 .history_tool_write {
-  background: rgba(74, 222, 128, 0.15);
-  color: #4ade80;
+  background: rgb(var(--color-success-rgb) / 0.15);
+  color: var(--color-success);
 }
 
 .history_tool_edit {
-  background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
+  background: rgb(var(--color-warning-rgb) / 0.15);
+  color: var(--color-warning);
 }
 
 .history_time {
@@ -624,8 +624,8 @@
 }
 
 .diff_old {
-  background: rgba(248, 113, 113, 0.1);
-  color: #f87171;
+  background: rgb(var(--color-error-rgb) / 0.1);
+  color: var(--color-error);
   display: block;
   padding: 2px 4px;
   border-radius: 4px;
@@ -633,8 +633,8 @@
 }
 
 .diff_new {
-  background: rgba(74, 222, 128, 0.1);
-  color: #4ade80;
+  background: rgb(var(--color-success-rgb) / 0.1);
+  color: var(--color-success);
   display: block;
   padding: 2px 4px;
   border-radius: 4px;
