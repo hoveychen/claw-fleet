@@ -1,43 +1,12 @@
-/* ── Page container ───────────────────────────────────────────────────────── */
-
-.page {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-  min-width: 0;
-
-  /* Risk-level color tokens (rgb triplet for alpha blending). */
+/* ── Risk-level colour tokens ─────────────────────────────────────────────────
+   rgb triplets, so a rule can blend them with an alpha. Must hang off the page
+   root: both tabs pass this class to PageShell as `className`. Without a host,
+   rgb(var(--risk-critical)) is an invalid value and the badges silently lose
+   their colour — no gate catches that, the token IS defined, just not in scope. */
+.risk_scope {
   --risk-critical: 239 68 68;   /* red-500 */
   --risk-high: 249 115 22;      /* orange-500 */
   --risk-medium: 234 179 8;     /* amber-500 */
-}
-
-/* ── Header (title + tabs) ────────────────────────────────────────────────── */
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 20px 12px;
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.title_row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
 }
 
 .tab_bar {
@@ -72,16 +41,6 @@
 }
 
 /* ── Filter bar ───────────────────────────────────────────────────────────── */
-
-.filter_bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 20px 10px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
 
 .filter_spacer {
   flex: 1;
@@ -216,14 +175,7 @@
   color: var(--color-text-dim);
 }
 
-/* ── Body split ───────────────────────────────────────────────────────────── */
-
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
+/* ── List (the MAIN container — Audit's rail is on the right) ─────────────── */
 
 .list_pane {
   flex: 1;
@@ -235,16 +187,8 @@
   min-width: 0;
 }
 
-.detail_pane {
-  position: relative; /* anchors the ResizeHandle */
-  width: 380px; /* start value; overridden inline by useResizableWidth */
-  flex-shrink: 0;
-  border-left: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
+/* The detail column IS PageShell's rail (side="right") — width, the left-hand
+   divider and the ResizeHandle all come from the shell now. */
 
 .empty {
   font-size: 12px;
