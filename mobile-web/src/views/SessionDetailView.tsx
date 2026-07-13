@@ -4,7 +4,7 @@
 // sidecar method while the session is working.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, MessageSquareDashed, Sparkles } from "lucide-react";
+import { Bot, ChevronDown, ChevronLeft, ChevronRight, MessageSquareDashed, Sparkles } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -20,6 +20,12 @@ import type {
 } from "../types";
 import { canResumeSession } from "../types";
 import { ResumeComposer } from "./Composer";
+import {
+  basename,
+  parseTaskNotification,
+  taskTitle,
+  type ParsedTaskNotification,
+} from "./taskNotification";
 import {
   DecisionHistoryTab,
   HandoffTab,
@@ -105,6 +111,46 @@ function userText(msg: RawMessage): string {
   return parts.join("\n\n").trim();
 }
 
+function TaskNotificationCard({ data }: { data: ParsedTaskNotification }) {
+  const [open, setOpen] = useState(true);
+  const raw = (data.status ?? "").toLowerCase();
+  const done = raw === "completed" || raw === "success" || raw === "done";
+  const failed = raw === "failed" || raw === "error" || raw === "cancelled";
+  const statusCls = done ? styles.tnDone : failed ? styles.tnError : styles.tnNeutral;
+  const statusLabel = done
+    ? t("已完成")
+    : raw === "failed" || raw === "error"
+      ? t("失败")
+      : raw === "cancelled"
+        ? t("已取消")
+        : data.status;
+  const hasBody = !!data.result;
+  return (
+    <div className={styles.tnCard}>
+      <button
+        className={styles.tnHeader}
+        onClick={() => hasBody && setOpen((o) => !o)}
+        style={hasBody ? undefined : { cursor: "default" }}
+      >
+        <Bot size={15} className={styles.tnIcon} />
+        <span className={styles.tnTitle}>{taskTitle(data.summary)}</span>
+        {statusLabel && <span className={`${styles.tnBadge} ${statusCls}`}>{statusLabel}</span>}
+        {hasBody && (open ? <ChevronDown size={14} /> : <ChevronRight size={14} />)}
+      </button>
+      {hasBody && open && (
+        <div className={styles.tnBody}>
+          <LazyMarkdown text={data.result!} bare />
+        </div>
+      )}
+      {data.outputFile && (
+        <div className={styles.tnMeta} title={data.outputFile}>
+          📄 {basename(data.outputFile)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 type DetailTab = "messages" | "decisions" | "plans" | "token" | "workflow" | "handoff";
 
 const TABS: Array<[DetailTab, string]> = [
@@ -129,7 +175,7 @@ interface Props {
  *  view auto-scrolls to the bottom, only the last screenful is on screen — so
  *  off-screen rows render as cheap plain text and upgrade to real markdown once
  *  they scroll within 400px of the viewport. Once upgraded, they stay upgraded. */
-function LazyMarkdown({ text }: { text: string }) {
+function LazyMarkdown({ text, bare }: { text: string; bare?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const [rich, setRich] = useState(false);
   useEffect(() => {
@@ -151,7 +197,10 @@ function LazyMarkdown({ text }: { text: string }) {
     return () => io.disconnect();
   }, [rich]);
   return (
-    <div ref={ref} className={styles.markdown}>
+    // `bare` keeps the typography rules (both classes stay on the element) but
+    // drops the assistant bubble's border/background so it can nest inside a
+    // task-notification card without a doubled frame.
+    <div ref={ref} className={bare ? `${styles.markdown} ${styles.markdownFlat}` : styles.markdown}>
       {rich ? (
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
@@ -190,6 +239,16 @@ const MessageRow = memo(function MessageRow({
   if (msg.type === "user") {
     const text = userText(msg);
     if (!text) return null;
+    // A subagent-completion notice renders as a card, not a raw-XML bubble.
+    const notif = parseTaskNotification(text);
+    if (notif) {
+      return (
+        <div className={styles.assistantRow}>
+          <TaskNotificationCard data={notif} />
+          <div className={styles.rowTime}>{fmtTime(msg.timestamp)}</div>
+        </div>
+      );
+    }
     return (
       <div className={styles.userRow}>
         <div className={styles.userBubble}>{text}</div>
