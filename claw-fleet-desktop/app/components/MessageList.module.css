@@ -230,6 +230,12 @@
   line-height: 1.5;
   color: var(--color-text);
   word-break: break-word;
+  /* The bubble is a flex item under `align-items: flex-end`, so its width is
+     `fit-content` — which never shrinks below its min-content. A nowrap child
+     (a task-notification's one-line title) therefore made min-content the width
+     of that whole line and the bubble overflowed the column *leftwards*, off
+     the pane. Clamp to the column and let the child ellipse instead. */
+  max-width: 100%;
 }
 
 /* Token usage / timestamp footer. Stays in normal inline flow so the

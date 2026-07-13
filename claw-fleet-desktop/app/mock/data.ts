@@ -594,6 +594,30 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         usage: { input_tokens: 4200, output_tokens: 450 },
       },
     },
+    // A background-shell notice with no <result> and a paragraph-long <summary>
+    // — the shape Claude Code emits when it can't tell whether a background
+    // shell from the previous session finished. Kept in the mock because it is
+    // the case that used to blow the user bubble out of its column.
+    {
+      type: "user",
+      uuid: "msg-5b",
+      timestamp: new Date(NOW - 14 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content:
+          "<task-notification>\n<task-id>bmd88yiju</task-id>\n<tool-use-id>toolu_019ioi2CFnygaVCe6Vtk2JTD</tool-use-id>\n<status>stopped</status>\n<summary>No completion record was found for this background shell command from the previous session. It may have been stopped (via the UI, Monitor timeout, or agent teardown — these leave no transcript marker), or it may have been running when the previous Claude Code process exited. Check the output file for partial results before assuming it completed.</summary>\n</task-notification>",
+      },
+    },
+    {
+      type: "user",
+      uuid: "msg-5c",
+      timestamp: new Date(NOW - 13 * MIN).toISOString(),
+      message: {
+        role: "user",
+        content:
+          '<task-notification>\n<task-id>a1389701e02753075</task-id>\n<tool-use-id>toolu_01ABCdefGHIjklMNOpqrs</tool-use-id>\n<output-file>/Users/demo/.claude/tasks/a1389701e02753075.output</output-file>\n<status>completed</status>\n<summary>Agent "审计露馅硬编码 批次3" finished</summary>\n<result>扫了 26 个 module.css，确认 3 处裸色需要换成语义 token：\n\n- `DecisionPanel.module.css` 的预览画布底色\n- `UsageBar.module.css` 的进度条底槽\n- `TrayPanel.module.css` 的分隔线\n\n其余命中都是 on-accent 白字或已有 light 覆盖，不用动。</result>\n</task-notification>',
+      },
+    },
   ],
 
   // API server session — shorter
