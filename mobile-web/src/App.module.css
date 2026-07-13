@@ -234,3 +234,35 @@
   padding: 8px 18px;
   color: var(--color-text-secondary);
 }
+
+/* 栈底返回时的「再按一次退出」提示。只在没有浮层、且已在主页 tab 时出现，
+   所以 z-index 不必压过浮层（最高 50 是目录选择器），60 只是留一档余量。 */
+.exitToast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(78px + var(--safe-bottom));
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 9px 18px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-bg-glass);
+  backdrop-filter: blur(12px);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  pointer-events: none;
+  animation: exitToastIn 140ms ease-out;
+}
+
+@keyframes exitToastIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}

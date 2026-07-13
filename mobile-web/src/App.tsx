@@ -24,6 +24,8 @@ import {
   persistSecret,
 } from "./secretStore";
 import { useI18n } from "./i18n";
+import { ExitGuard, installUnloadPrompt } from "./exitGuard";
+import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NewSessionSheet } from "./views/Composer";
 import { DecisionsView } from "./views/DecisionsView";
 import { MoreView } from "./views/MoreView";
@@ -103,12 +105,36 @@ export function App() {
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   const [push, setPush] = useState<PushState>(pushState);
   const [detailSessionId, setDetailSessionId] = useState<string | null>(null);
-  const [wikiDoc, setWikiDoc] = useState<WikiDoc | null>(null);
+  // 知识库文档是一条链而不是单页：`[[slug]]` 站内跳转往上叠一篇，返回逐篇退回。
+  const [wikiStack, setWikiStack] = useState<WikiDoc[]>([]);
   const [showRepo, setShowRepo] = useState(false);
   const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
   const [showUsage, setShowUsage] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
+  const [exitArmed, setExitArmed] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
+
+  // 栈底（主页 tab、无浮层）按返回：先拦一次给「再按一次退出」，再按才真走。
+  // beforeunload 只覆盖刷新/关标签/地址栏跳走这些非返回路径——mock 模式不装，
+  // 免得录屏流水线被原生对话框卡住。
+  useEffect(() => {
+    const install = () => (MOCK ? () => {} : installUnloadPrompt());
+    let uninstall = install();
+    let timer: number | undefined;
+    const guard = new ExitGuard(setExitArmed, () => {
+      uninstall();
+      // 万一没走成（本页就是历史里的第一条，退无可退），把兜底装回来。
+      timer = window.setTimeout(() => {
+        uninstall = install();
+      }, 1_000);
+    });
+    setRootBackHandler(guard.handleRootBack);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      uninstall();
+      setRootBackHandler(() => "leave");
+    };
+  }, []);
 
   const addDecision = useCallback((kind: DecisionKind, request: unknown) => {
     const req = request as DecisionRequest;
@@ -459,7 +485,7 @@ export function App() {
             onMarkRead={markRead}
           />
         ) : tab === "wiki" ? (
-          <WikiView client={clientRef.current} onOpenDoc={setWikiDoc} />
+          <WikiView client={clientRef.current} onOpenDoc={(doc) => setWikiStack([doc])} />
         ) : (
           <MoreView
             connected={connected}
@@ -472,55 +498,80 @@ export function App() {
         )}
       </main>
 
+      {/* 后退栈的底层：只要不在主页 tab，返回一次先回主页（安卓惯例，反复切 tab
+          也只占一条历史），再返回才轮到栈底的退出确认。挂在浮层之前，保证浮层始终压在它上面。 */}
+      {tab !== "decisions" && <HistoryLayer onBack={() => setTab("decisions")} />}
+
       {detailSession && (
-        <SessionDetailView
-          session={detailSession}
-          client={clientRef.current}
-          onBack={() => setDetailSessionId(null)}
-          onDwellRead={() => markRead([detailSession])}
-        />
+        <>
+          <HistoryLayer onBack={() => setDetailSessionId(null)} />
+          <SessionDetailView
+            session={detailSession}
+            client={clientRef.current}
+            onBack={() => setDetailSessionId(null)}
+            onDwellRead={() => markRead([detailSession])}
+          />
+        </>
       )}
 
-      {wikiDoc && (
+      {/* 每篇文档占一层，但只渲染栈顶那篇——底下几篇不必挂着重复拉正文/渲 mermaid。 */}
+      {wikiStack.map((_, i) => (
+        <HistoryLayer key={i} onBack={() => setWikiStack((s) => s.slice(0, i))} />
+      ))}
+      {wikiStack.length > 0 && (
         <WikiDocView
-          doc={wikiDoc}
+          doc={wikiStack[wikiStack.length - 1]}
           client={clientRef.current}
-          onBack={() => setWikiDoc(null)}
-          onOpenDoc={setWikiDoc}
+          onBack={() => setWikiStack((s) => s.slice(0, -1))}
+          onOpenDoc={(doc) => setWikiStack((s) => [...s, doc])}
         />
       )}
 
       {showRepo && (
-        <RepoView
-          client={clientRef.current}
-          onBack={() => setShowRepo(false)}
-          onOpenRepo={setRepoDetail}
-        />
+        <>
+          <HistoryLayer onBack={() => setShowRepo(false)} />
+          <RepoView
+            client={clientRef.current}
+            onBack={() => setShowRepo(false)}
+            onOpenRepo={setRepoDetail}
+          />
+        </>
       )}
 
       {repoDetail && (
-        <RepoDetailView
-          repo={repoDetail}
-          client={clientRef.current}
-          onBack={() => setRepoDetail(null)}
-        />
+        <>
+          <HistoryLayer onBack={() => setRepoDetail(null)} />
+          <RepoDetailView
+            repo={repoDetail}
+            client={clientRef.current}
+            onBack={() => setRepoDetail(null)}
+          />
+        </>
       )}
 
       {showUsage && (
-        <UsageView
-          client={clientRef.current}
-          todayUsage={todayUsage}
-          onBack={() => setShowUsage(false)}
-        />
+        <>
+          <HistoryLayer onBack={() => setShowUsage(false)} />
+          <UsageView
+            client={clientRef.current}
+            todayUsage={todayUsage}
+            onBack={() => setShowUsage(false)}
+          />
+        </>
       )}
 
       {showNewSession && (
-        <NewSessionSheet
-          sessions={mergedSessions}
-          client={clientRef.current}
-          onClose={() => setShowNewSession(false)}
-        />
+        <>
+          <HistoryLayer onBack={() => setShowNewSession(false)} />
+          <NewSessionSheet
+            sessions={mergedSessions}
+            client={clientRef.current}
+            onClose={() => setShowNewSession(false)}
+          />
+        </>
       )}
+
+      {exitArmed && <div className={styles.exitToast}>{t("再按一次返回退出")}</div>}
 
       <nav className={styles.tabs}>
         <button
