@@ -2,6 +2,7 @@ import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useRef } from "react";
 import { playDecisionAlert } from "../audio";
+import { normalizeForSpeech } from "../decisionText";
 import { useDecisionStore } from "../store";
 import type {
   A2uiRenderRequest,
@@ -26,8 +27,7 @@ function splitOnDivider(body: string): [string, string] {
 
 // Pull the last sentence ending with ? or ？ from a markdown blob.
 function lastQuestionSentence(text: string): string {
-  const plain = text.replace(/[`*_#>\[\]()]/g, " ");
-  const match = plain.match(/([^。！？?!\n]{1,80}[？?])\s*$/);
+  const match = normalizeForSpeech(text).match(/([^。！？?!\n]{1,80}[？?])\s*$/);
   return match ? match[1].trim() : "";
 }
 
@@ -123,7 +123,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
         const body = r.questions[0]?.question ?? "";
         const [intro, after] = splitOnDivider(body);
         const followup = after ? lastQuestionSentence(after) : "";
-        const spoken = [r.workspaceName, intro, followup]
+        const spoken = [r.workspaceName, normalizeForSpeech(intro), followup]
           .filter((s): s is string => !!s && s.length > 0)
           .join("。");
         playDecisionAlert("elicitation", spoken);
@@ -145,7 +145,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
         const body = r.questions[0]?.question ?? "";
         const [intro, after] = splitOnDivider(body);
         const followup = after ? lastQuestionSentence(after) : "";
-        const spoken = [r.workspaceName, intro, followup]
+        const spoken = [r.workspaceName, normalizeForSpeech(intro), followup]
           .filter((s): s is string => !!s && s.length > 0)
           .join("。");
         // Reuse the elicitation chime — `fleet__ask` is the same

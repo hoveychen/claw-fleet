@@ -23,6 +23,46 @@ export function stripSpeechDivider(question: string): string {
   return m && m.index !== undefined ? question.slice(0, m.index) : question;
 }
 
+/**
+ * Prepare a card body for the TTS engine.
+ *
+ * Edge TTS takes plain text only — it rejects every SSML tag, so a wrong
+ * reading cannot be corrected downstream with `<phoneme>`. The one lever we
+ * have is the text we hand it, and its Chinese frontend decides a polyphone's
+ * reading by segmenting the surrounding word. Isolate the character and the
+ * segmenter has nothing to work with, so it falls back to the most frequent
+ * reading — which for 重 is zhòng, not the chóng that "重新" needs.
+ *
+ * Two things isolate a character here:
+ *
+ *   1. A markdown marker landing inside a word. This is why the markers are
+ *      *deleted* rather than turned into spaces: substituting a space is what
+ *      splits `**重**试` into `重 试`, and a lone 重 is read zhòng.
+ *   2. Chinese/English interleaving, which is everywhere in Fleet's own
+ *      broadcasts — `10 finding 重 verify` was measured coming out as zhòng.
+ */
+export function normalizeForSpeech(text: string): string {
+  const isAscii = (c: string | undefined) => !!c && /[A-Za-z0-9]/.test(c);
+
+  let s = text;
+  // Links: speak the label, never the target.
+  s = s.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+  // Line-leading structure — bullets, ordered markers, headings, quotes.
+  s = s.replace(/^[ \t]*(?:[-*+]|\d+\.)[ \t]+/gm, "");
+  s = s.replace(/^[ \t]*#{1,6}[ \t]*/gm, "");
+  s = s.replace(/^[ \t]*>+[ \t]*/gm, "");
+  // Inline emphasis / code fences. Dropping the marker keeps a Chinese word
+  // whole; a space is only needed where it used to separate two ASCII words.
+  s = s.replace(/[`*_~]+/g, (m, offset: number, str: string) =>
+    isAscii(str[offset - 1]) && isAscii(str[offset + m.length]) ? " " : "",
+  );
+  // A 重 stranded between ASCII means "重新" — spell it out so the segmenter
+  // sees a word instead of a lone character.
+  s = s.replace(/([A-Za-z0-9)\]])([ \t]*)重([ \t]*)([A-Za-z0-9([])/g, "$1$2重新$3$4");
+
+  return s.replace(/[ \t]{2,}/g, " ").trim();
+}
+
 /** One-line gist of a question, for a collapsed header. */
 export function summarizeQuestion(question: string, max = 80): string {
   const head = stripSpeechDivider(question).replace(/\s+/g, " ").trim();
