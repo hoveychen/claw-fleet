@@ -1120,6 +1120,39 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             let usage = crate::today_usage::today_usage(&sessions);
             serde_json::to_value(usage).map_err(|e| e.to_string())
         }
+        // Account + rate-limit usage for the mobile 「账号与用量」 page: the Claude
+        // account/plan with its 5h/7d bars, plus a normalised bar set for every
+        // other available source. Runs on a plain thread rather than this ws
+        // blocking task because every fetch inside builds its own tokio runtime
+        // (`fetch_account_info_blocking` and friends) — see `account_usage_payload`.
+        "account_usage" => std::thread::spawn(account_usage_payload)
+            .join()
+            .map_err(|_| "account/usage fetch panicked".to_string()),
+        // Occupancy time series behind the mobile page's 24h chart. Pure disk
+        // read of the snapshots the background sampler persists — no network, so
+        // it stays on this thread (unlike `account_usage` above). Values are the
+        // 0–1 fraction; the window defaults to the last 24h.
+        "usage_history" => {
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let from_ms = params
+                .get("fromMs")
+                .and_then(Value::as_i64)
+                .unwrap_or(now_ms - 24 * 3_600_000);
+            let to_ms = params.get("toMs").and_then(Value::as_i64).unwrap_or(now_ms);
+            let raw = crate::account::load_usage_history(from_ms, to_ms);
+            let points: Vec<Value> = downsample_history(&raw, HISTORY_BUCKET_MS)
+                .iter()
+                .map(|p| {
+                    json!({
+                        "ts": p.ts,
+                        "fiveHour": p.five_hour,
+                        "sevenDay": p.seven_day,
+                        "sevenDaySonnet": p.seven_day_sonnet,
+                    })
+                })
+                .collect();
+            Ok(Value::Array(points))
+        }
         // Main-session invocations plus subagent sidecars, sorted by timestamp
         // (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
         "skill_history" => {
@@ -1401,6 +1434,91 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         }
         other => Err(format!("unknown method: {other}")),
     }
+}
+
+// ── Account & usage (mobile 「账号与用量」 page) ─────────────────────────────────
+
+/// Bucket width for the mobile occupancy chart. Every usage fetch appends a
+/// snapshot, so the raw series runs at a ~10s median cadence — a 24h window is
+/// ~8k points (measured on Boss's machine: 7776), which is ~700KB of JSON over
+/// the relay and an SVG path far finer than the phone has pixels. 5-min buckets
+/// cap a 24h window at 288 points.
+const HISTORY_BUCKET_MS: i64 = 5 * 60 * 1000;
+
+/// Keep the last sample of each `bucket_ms`-wide bucket. Input is ascending by
+/// `ts` (`load_usage_history` sorts); output stays ascending. "Last, not
+/// average" on purpose: the chart shows occupancy at a point in time, and a
+/// bucket's final reading is the one that actually held at that moment.
+fn downsample_history(
+    points: &[crate::account::UsageHistoryPoint],
+    bucket_ms: i64,
+) -> Vec<crate::account::UsageHistoryPoint> {
+    let bucket_ms = bucket_ms.max(1);
+    let mut out: Vec<crate::account::UsageHistoryPoint> = Vec::new();
+    for p in points {
+        let bucket = p.ts.div_euclid(bucket_ms);
+        match out.last_mut() {
+            Some(last) if last.ts.div_euclid(bucket_ms) == bucket => *last = p.clone(),
+            _ => out.push(p.clone()),
+        }
+    }
+    out
+}
+
+/// Flatten `AccountInfo` into the camelCase shape the mobile page consumes:
+/// profile fields plus one bar per rate-limit window. `utilization` and
+/// `prevUtilization` are the 0–1 fraction (`parse_usage` already divided the
+/// API's 0–100), same convention the desktop UsagePanel renders.
+fn claude_account_json(info: &crate::account::AccountInfo) -> Value {
+    let bar = |label: &str, s: &crate::account::UsageStats| {
+        json!({
+            "label": label,
+            "utilization": s.utilization,
+            "resetsAt": s.resets_at,
+            "prevUtilization": s.prev_utilization,
+        })
+    };
+    let mut bars = Vec::new();
+    if let Some(ref s) = info.five_hour {
+        bars.push(bar("5h", s));
+    }
+    if let Some(ref s) = info.seven_day {
+        bars.push(bar("7d Opus", s));
+    }
+    if let Some(ref s) = info.seven_day_sonnet {
+        bars.push(bar("7d Sonnet", s));
+    }
+    json!({
+        "email": info.email,
+        "fullName": info.full_name,
+        "organizationName": info.organization_name,
+        "plan": info.plan,
+        "usageSource": info.usage_source,
+        "bars": bars,
+    })
+}
+
+/// Claude account + the other sources' usage bars, in one payload. A failed
+/// Claude fetch (offline, not logged in) is reported as `claudeError` instead of
+/// failing the whole request — the other sources and the page shell still render.
+///
+/// Must run on a thread with **no tokio runtime context**: the fetches below are
+/// blocking wrappers that create their own runtime, and the relay's request
+/// handler itself runs inside `spawn_blocking`.
+fn account_usage_payload() -> Value {
+    let (claude, claude_error) = match crate::account::fetch_account_info_blocking() {
+        Ok(info) => (Some(claude_account_json(&info)), None),
+        Err(e) => (None, Some(e)),
+    };
+    // Claude is handled above (its AccountInfo carries the previous-period
+    // marker that `usage_summary` drops); the rest come through the same
+    // normalised summary the tray menu uses.
+    let sources: Vec<crate::backend::SourceUsageSummary> = crate::agent_source::build_sources()
+        .iter()
+        .filter(|s| s.api_name() != "claude" && s.is_available())
+        .filter_map(|s| s.usage_summary())
+        .collect();
+    json!({ "claude": claude, "claudeError": claude_error, "sources": sources })
 }
 
 // ── WebSocket client (mirrors feishu.rs's ensure_ws_client/ws_run_loop) ─────
@@ -2877,6 +2995,127 @@ mod tests {
             "supportsGzip": true,
             "supportsBinary": supports_binary,
         })
+    }
+
+    /// Only the windows the API actually returned become bars, and the 0–1
+    /// fraction is passed through untouched (the mobile page multiplies by 100).
+    #[test]
+    fn claude_account_json_emits_one_bar_per_present_window() {
+        use crate::account::{AccountInfo, UsageStats};
+        let info = AccountInfo {
+            email: "boss@example.com".into(),
+            plan: "Claude Max".into(),
+            usage_source: "anthropic".into(),
+            five_hour: Some(UsageStats {
+                utilization: 0.42,
+                resets_at: "2026-07-13T10:00:00Z".into(),
+                prev_utilization: Some(0.31),
+            }),
+            // seven_day absent → must not produce a bar.
+            seven_day_sonnet: Some(UsageStats {
+                utilization: 0.07,
+                resets_at: "2026-07-19T00:00:00Z".into(),
+                prev_utilization: None,
+            }),
+            ..Default::default()
+        };
+
+        let v = claude_account_json(&info);
+        assert_eq!(v["email"], "boss@example.com");
+        assert_eq!(v["plan"], "Claude Max");
+        assert_eq!(v["usageSource"], "anthropic");
+
+        let bars = v["bars"].as_array().expect("bars is an array");
+        assert_eq!(bars.len(), 2, "only the two present windows become bars");
+        assert_eq!(bars[0]["label"], "5h");
+        assert_eq!(bars[0]["utilization"], 0.42);
+        assert_eq!(bars[0]["prevUtilization"], 0.31);
+        assert_eq!(bars[0]["resetsAt"], "2026-07-13T10:00:00Z");
+        assert_eq!(bars[1]["label"], "7d Sonnet");
+        assert!(bars[1]["prevUtilization"].is_null(), "no previous period → null");
+    }
+
+    /// The raw series runs at a ~10s cadence; the phone gets one point per
+    /// bucket — the last reading in it — and an empty series stays empty.
+    #[test]
+    fn downsample_history_keeps_last_sample_per_bucket() {
+        use crate::account::UsageHistoryPoint;
+        let p = |ts: i64, v: f64| UsageHistoryPoint {
+            ts,
+            five_hour: Some(v),
+            seven_day: None,
+            seven_day_sonnet: None,
+        };
+        let bucket = 1_000;
+        let raw = vec![
+            p(0, 0.1),
+            p(400, 0.2),
+            p(999, 0.3), // same bucket as the two above → only this one survives
+            p(1_000, 0.4),
+            p(1_500, 0.5), // bucket 1 → 0.5 survives
+            p(7_200, 0.9), // a gap of empty buckets must not invent points
+        ];
+
+        let got = downsample_history(&raw, bucket);
+        let pairs: Vec<(i64, Option<f64>)> = got.iter().map(|q| (q.ts, q.five_hour)).collect();
+        assert_eq!(
+            pairs,
+            vec![(999, Some(0.3)), (1_500, Some(0.5)), (7_200, Some(0.9))],
+        );
+
+        assert!(downsample_history(&[], bucket).is_empty());
+    }
+
+    /// A real-shaped 24h window (~10s cadence, 8k points) must come out small
+    /// enough to ship to a phone: at most one point per 5-minute bucket.
+    #[test]
+    fn downsample_history_caps_a_24h_window() {
+        use crate::account::UsageHistoryPoint;
+        let raw: Vec<UsageHistoryPoint> = (0..8_640)
+            .map(|i| UsageHistoryPoint {
+                ts: i * 10_000, // every 10s over 24h
+                five_hour: Some(0.5),
+                seven_day: None,
+                seven_day_sonnet: None,
+            })
+            .collect();
+
+        let got = downsample_history(&raw, HISTORY_BUCKET_MS);
+        assert_eq!(got.len(), 288, "24h / 5min buckets");
+    }
+
+    /// Boss's real snapshot file (~8k points in 24h) must come back small enough
+    /// to ship: disk-only, so it's fast — but it reads the real home dir, hence
+    /// #[ignore]. Run with `-- --ignored`.
+    #[test]
+    #[ignore = "reads the real ~/.fleet history file"]
+    fn usage_history_reply_stays_small_on_real_data() {
+        let v = serve_request("usage_history", &Value::Null).expect("usage_history returns rows");
+        let rows = v.as_array().expect("an array");
+        let bytes = serde_json::to_string(&v).unwrap().len();
+        eprintln!("usage_history: {} rows, {} bytes", rows.len(), bytes);
+        assert!(rows.len() <= 289, "24h must fit in 5-min buckets, got {}", rows.len());
+    }
+
+    /// The real `account_usage` path, driven the way the ws loop drives it:
+    /// inside `spawn_blocking` on a multi-thread runtime. This is the
+    /// nested-runtime guard — `fetch_account_info_blocking` builds its own tokio
+    /// runtime, which is why the handler hands the work to a plain thread. Hits
+    /// the network / keychain, so it stays out of CI; run it locally with
+    /// `cargo test -p claw-fleet-core account_usage_runs -- --ignored`.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "network + keychain"]
+    async fn account_usage_runs_under_spawn_blocking() {
+        let v = tokio::task::spawn_blocking(|| serve_request("account_usage", &Value::Null))
+            .await
+            .expect("handler must not panic (nested runtime)")
+            .expect("account_usage always returns a payload");
+        // Claude either resolved or reported why — never both missing.
+        assert!(
+            v["claude"].is_object() || v["claudeError"].is_string(),
+            "expected a claude account or an error, got {v}"
+        );
+        assert!(v["sources"].is_array(), "sources is always an array");
     }
 
     /// The pure transport-decision matrix — no global state, safe to run alone.
