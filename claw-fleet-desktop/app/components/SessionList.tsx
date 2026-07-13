@@ -21,7 +21,7 @@ import { FilesView } from "./FilesView";
 import { PluginsView } from "./PluginsView";
 import { MobileView } from "./MobileView";
 import { SessionCard } from "./SessionCard";
-import { SessionToolbar } from "./SessionToolbar";
+import { SessionsPage } from "./SessionsBanner";
 import { HistoryView } from "./HistoryView";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
@@ -30,23 +30,11 @@ import { UsagePanel } from "./UsagePanel";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
+import { SECONDARY_SIDEBAR_VIEWS } from "./pageShellConfig";
 
 const MIN_WIDTH = 200;
 const MAX_WIDTH = 520;
 const DEFAULT_WIDTH = 280;
-
-/** Views whose page carries a secondary sidebar (二级侧边栏) that can be
- *  collapsed by re-clicking the already-active nav item. Views without one
- *  (sessions / gallery / report) just switch on click. */
-const SECONDARY_SIDEBAR_VIEWS = new Set<ViewMode>([
-  "history",
-  "audit",
-  "memory",
-  "wiki",
-  "skills",
-  "files",
-  "plugins",
-]);
 
 
 export function SessionList() {
@@ -418,18 +406,16 @@ export function SessionList() {
 
       {/* Main content area */}
       {viewMode === "list" ? (
-        <div className={styles.main_area}>
-          <SessionToolbar
-            filter={filter}
-            onFilterChange={setFilter}
-            activeCount={active.length}
-            totalCount={sessions.length}
-            showAll={showAll}
-            onToggleShowAll={() => setShowAll((v) => !v)}
-            ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
-            searching={searching}
-          />
-
+        <SessionsPage
+          filter={filter}
+          onFilterChange={setFilter}
+          activeCount={active.length}
+          totalCount={sessions.length}
+          showAll={showAll}
+          onToggleShowAll={() => setShowAll((v) => !v)}
+          ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
+          searching={searching}
+        >
           <div className={styles.list}>
             {showAll ? (
               <>
@@ -458,7 +444,7 @@ export function SessionList() {
               </>
             )}
           </div>
-        </div>
+        </SessionsPage>
       ) : viewMode === "gallery" ? (
         <GalleryView />
       ) : viewMode === "history" ? (

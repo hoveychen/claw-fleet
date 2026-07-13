@@ -2,9 +2,9 @@
 .panel {
   display: flex;
   flex-direction: column;
-  background: color-mix(in srgb, var(--color-bg-sidebar) 72%, transparent);
+  background: color-mix(in srgb, var(--color-bg) 72%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-border) 50%, transparent);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 12px;
@@ -41,7 +41,7 @@
   color: var(--color-text-secondary);
   cursor: pointer;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
 }
 
@@ -67,7 +67,7 @@
 }
 :global(html.os-windows) .session_list::-webkit-scrollbar-thumb {
   background: var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 /* ── Session group (main + its subagents) ────────────────────────────────── */
@@ -170,13 +170,13 @@
   flex: 1;
   height: 3px;
   background: var(--color-bg-secondary);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
 .context_bar_fill {
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--color-accent);
   transition: width 0.3s ease;
 }
@@ -279,7 +279,7 @@
   color: var(--color-text-secondary);
   cursor: pointer;
   padding: 4px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
   text-align: center;
 }

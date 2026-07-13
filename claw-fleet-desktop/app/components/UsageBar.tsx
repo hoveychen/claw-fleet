@@ -20,10 +20,12 @@ export interface UsageBarData {
   onClick?: () => void;
 }
 
+/** CSS `var()` refs, not hex: the value goes into an inline `style`, so a
+ *  literal would pin the dark-theme hue and never re-darken under light. */
 function colorFor(pct: number): string {
-  if (pct >= 85) return "#ef4444";
-  if (pct >= 70) return "#fbbf24";
-  return "#4ade80";
+  if (pct >= 85) return "var(--color-error)";
+  if (pct >= 70) return "var(--color-warning)";
+  return "var(--color-success)";
 }
 
 function MiniBar({ label, percent, indent }: { label: string; percent: number; indent?: boolean }) {

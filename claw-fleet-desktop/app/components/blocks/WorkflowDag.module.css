@@ -61,7 +61,7 @@
   font-size: 9px;
   color: var(--color-text-secondary);
   background: var(--color-bg-tool-hover);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 0 5px;
 }
 
@@ -108,17 +108,17 @@
   opacity: 0.75;
 }
 .status_running {
-  border-left: 3px solid var(--color-accent-tool, #f59e0b);
+  border-left: 3px solid var(--color-accent-tool);
 }
 .status_running .dot {
-  background: var(--color-accent-tool, #f59e0b);
+  background: var(--color-accent-tool);
   animation: wfdag-pulse 1.2s ease-in-out infinite;
 }
 .status_done {
-  border-left: 3px solid #22c55e;
+  border-left: 3px solid var(--color-success);
 }
 .status_done .dot {
-  background: #22c55e;
+  background: var(--color-success);
 }
 
 @keyframes wfdag-pulse {
@@ -152,19 +152,19 @@
   color: var(--color-text-secondary);
 }
 .s_running {
-  border-color: var(--color-accent-tool, #f59e0b);
-  color: var(--color-accent-tool, #f59e0b);
+  border-color: var(--color-accent-tool);
+  color: var(--color-accent-tool);
 }
 .s_done {
-  border-color: #22c55e;
-  color: #16a34a;
+  border-color: var(--color-success);
+  color: var(--color-success);
 }
 
 /* ── clickable node + selection ───────────────────────────────────────────── */
 .node { cursor: pointer; }
 .node:hover { border-color: var(--color-text-dim); }
 .selected {
-  outline: 2px solid var(--color-accent-tool, #f59e0b);
+  outline: 2px solid var(--color-accent-tool);
   outline-offset: 1px;
 }
 
@@ -205,8 +205,8 @@
 .resolvedPrompt {
   margin: 8px 10px 0;
   padding: 8px 10px;
-  background: var(--color-bg-tertiary);
-  border-radius: 6px;
+  background: var(--color-bg-sunken);
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;
   line-height: 1.5;
@@ -236,10 +236,10 @@
   background: var(--color-text-dim);
 }
 .agentDot.st_running {
-  background: var(--color-accent-tool, #f59e0b);
+  background: var(--color-accent-tool);
   animation: wfdag-pulse 1.2s ease-in-out infinite;
 }
-.agentDot.st_done { background: #22c55e; }
+.agentDot.st_done { background: var(--color-success); }
 .agentType { font-size: 11px; font-weight: 600; color: var(--color-text); }
 .agentId {
   font-family: var(--font-mono);
@@ -247,13 +247,13 @@
   color: var(--color-text-dim);
 }
 .agentStatus { font-size: 10px; color: var(--color-text-dim); }
-.agentStatus.st_running { color: var(--color-accent-tool, #f59e0b); }
-.agentStatus.st_done { color: #16a34a; }
+.agentStatus.st_running { color: var(--color-accent-tool); }
+.agentStatus.st_done { color: var(--color-success); }
 .openBtn {
   margin-left: auto;
   font-size: 10px;
   padding: 2px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg);
   color: var(--color-text-secondary);
@@ -261,15 +261,15 @@
   white-space: nowrap;
 }
 .openBtn:hover {
-  border-color: var(--color-accent-tool, #f59e0b);
-  color: var(--color-accent-tool, #f59e0b);
+  border-color: var(--color-accent-tool);
+  color: var(--color-accent-tool);
 }
 .result {
   margin: 6px 0 0;
   padding: 7px 9px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-family: var(--font-mono);
   font-size: 10px;
   line-height: 1.45;

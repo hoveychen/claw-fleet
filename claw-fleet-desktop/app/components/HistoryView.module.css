@@ -1,83 +1,18 @@
-/* ── History page: session rail + inline detail column ──────────────────── */
-
-.page {
-  flex: 1;
-  display: flex;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-  min-width: 0;
-}
-
-.rail {
-  position: relative; /* anchors the ResizeHandle */
-  flex-shrink: 0;
-  width: 300px; /* start value; overridden inline by useResizableWidth */
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow: hidden;
-  background: var(--color-bg-sidebar);
-  border-right: 1px solid var(--color-border);
-}
-
-/* Floating-slab platforms: match the sidebar's paper background so the task
-   二级菜单 reads consistently with the other views' list panes (which show
-   through to body's --color-bg) instead of as a stark white slab. */
-:global([data-platform]) .rail {
-  background: var(--color-bg);
-}
-
-/* Soften the rail + top-controls dividers on macOS vibrancy the same way the
-   MemoryView family does, so the task 二级栏's borders read at the same weight
-   as 插件/技能/记忆/仓库 instead of a harder --color-border line. */
-:global([data-platform="macos"]) .rail {
-  border-right-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .controls {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"][data-theme="light"]) .rail,
-:global([data-platform="macos"][data-theme="light"]) .controls {
-  border-color: rgba(0, 0, 0, 0.08);
-}
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 12px 10px;
-  flex-shrink: 0;
-}
-
-/* Matches the MemoryView family's `.title` (16px/700) so the task rail's
-   heading reads as the same design system as 插件/技能/记忆/仓库. */
-.header_title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-}
-
-.header_count {
-  /* Pushes the button group to the right edge; keeps them together instead of
-     spreading, which a margin-left:auto on each button would do. */
-  margin-right: auto;
-  /* Plain dim count beside the title — same treatment as the family's
-     `.count`, not a pill. */
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-dim);
-}
+/* ── History page ─────────────────────────────────────────────────────────────
+   The page frame — banner, rail, main — is PageShell's. What is left here is the
+   rail's *content* (filters + session list), the banner's two action buttons,
+   and the detail column that fills the main container. */
 
 /* "全部已读" — clears every unread session's dot in one call. Icon-only so it
-   fits beside the new-session button; dimmed and inert when nothing is unread. */
-.header_read_btn {
+   sits compactly beside the new-session button; dimmed and inert when nothing
+   is unread. */
+.read_btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg);
   color: var(--color-text-dim);
@@ -85,25 +20,25 @@
   transition: background 0.15s, color 0.15s, opacity 0.15s;
 }
 
-.header_read_btn:hover:not(:disabled) {
+.read_btn:hover:not(:disabled) {
   background: var(--color-bg-card-hover);
   color: var(--color-text);
 }
 
-.header_read_btn:disabled {
+.read_btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
 
-.header_new_btn {
+.new_btn {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 3px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-accent);
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
@@ -112,67 +47,26 @@
   transition: filter 0.1s;
 }
 
-.header_new_btn:hover {
+.new_btn:hover {
   filter: brightness(1.1);
 }
 
-.header_new_btn_active {
+.new_btn_active {
   filter: brightness(1.15);
   box-shadow: 0 0 0 2px var(--color-accent-soft);
 }
 
-/* ── Search + project filter ─────────────────────────────────────────────── */
+/* ── Rail: filters over the session list ─────────────────────────────────── */
 
+/* The search box moved up to the banner with the title and the actions, so this
+   block now opens the rail and carries its own top padding. */
 .controls {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 12px 10px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
-}
-
-.search_wrap {
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.search_icon {
-  position: absolute;
-  left: 8px;
-  color: var(--color-text-dim);
-  pointer-events: none;
-}
-
-.search_input {
-  width: 100%;
-  padding: 6px 8px 6px 26px;
-  font-size: 12px;
-  color: var(--color-text);
-  /* Filled field on the secondary surface — matches the family's `.search`
-     (which also sits on --color-bg-secondary) instead of blending into the
-     rail's page background. */
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 7px;
-  outline: none;
-  transition: border-color 0.14s;
-}
-
-.search_input:focus {
-  border-color: var(--color-accent);
-}
-
-.search_spinner {
-  position: absolute;
-  right: 8px;
-  width: 10px;
-  height: 10px;
-  border: 1.5px solid var(--color-text-dim);
-  border-top-color: transparent;
-  border-radius: 50%;
-  animation: history_spin 0.7s linear infinite;
 }
 
 @keyframes history_spin {
@@ -223,8 +117,8 @@
 
 .active_toggle_on {
   color: var(--color-text);
-  border-color: #5ac88c;
-  background: rgba(90, 200, 140, 0.12);
+  border-color: var(--color-success);
+  background: rgb(var(--color-success-rgb) / 0.12);
 }
 
 .active_toggle_dot {
@@ -236,7 +130,7 @@
 }
 
 .active_toggle_on .active_toggle_dot {
-  background: #5ac88c;
+  background: var(--color-success);
 }
 
 /* Segmented filter by manual review mark — one row can be active at a time;
@@ -293,7 +187,7 @@
    the toolbar would out-shout the actual done rows, which is where the colour
    carries meaning. */
 .mark_seg_on[data-seg="done"] {
-  color: #5ac88c;
+  color: var(--color-success);
 }
 
 .mark_seg_count {
@@ -396,7 +290,7 @@
 }
 
 .mark_toggle[data-done="true"] {
-  color: #5ac88c; /* green — finished */
+  color: var(--color-success); /* green — finished */
 }
 
 .row {
@@ -569,13 +463,14 @@
 
 /* ── Inline detail column ────────────────────────────────────────────────── */
 
+/* Fills PageShell's main container: the tab strip stacked over the detail body.
+   Keep this level — see the comment at its call site in HistoryView.tsx. */
 .detail {
   flex: 1;
   min-width: 0;
-  height: 100%;
+  min-height: 0;
   overflow: hidden;
   display: flex;
-  /* Column now: the tab strip stacks above the detail body. */
   flex-direction: column;
 }
 

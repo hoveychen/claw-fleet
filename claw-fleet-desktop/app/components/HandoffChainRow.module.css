@@ -26,7 +26,7 @@
 .handoff_panel {
   margin-top: 4px;
   padding: 6px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tool);
   cursor: default;
 }

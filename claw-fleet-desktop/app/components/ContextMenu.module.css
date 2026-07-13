@@ -5,7 +5,7 @@
   padding: 4px;
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
 }
 
@@ -17,7 +17,7 @@
   padding: 6px 10px;
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12.5px;
   color: var(--color-text);
   text-align: left;
@@ -37,15 +37,15 @@
 }
 
 .item_danger {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .item_danger .item_icon {
-  color: #f87171;
+  color: var(--color-error);
 }
 
 .item_danger:hover {
-  background: rgba(248, 113, 113, 0.12);
+  background: rgb(var(--color-error-rgb) / 0.12);
 }
 
 .separator {

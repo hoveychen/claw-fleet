@@ -16,16 +16,13 @@ import {
   FolderGit2,
   History,
   Plus,
-  Search,
   Waypoints,
 } from "lucide-react";
 import { useReadStore, useSessionsStore, useUIStore, type MarkFilter } from "../store";
-import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, isFleetOwnedEntrypoint, rowBarColor, sessionUnread } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
-import { useResizableWidth } from "../hooks/useResizableWidth";
-import { ResizeHandle } from "./ResizeHandle";
+import { PageShell } from "./PageShell";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import { SessionTabs } from "./SessionTabs";
@@ -303,13 +300,6 @@ const SessionRow = memo(function SessionRow({
  */
 export function HistoryView() {
   const { t } = useTranslation();
-  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["history"]);
-  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const {
-    width: railWidth,
-    isDragging: railDragging,
-    onMouseDown: onRailMouseDown,
-  } = useResizableWidth("history-rail-width", { min: 240, max: 640, initial: 300 });
   // Subscribe per-field: the store also carries speedHistory/costHistory, which
   // grow on every scan tick. Destructuring the whole slice would re-render the
   // launchpad on that churn even when the session list itself is unchanged.
@@ -629,19 +619,23 @@ export function HistoryView() {
   }, [activeId, overlaid, markRead]);
 
   return (
-    <div className={styles.page}>
-      {collapsed ? (
-        <CollapsedSidebarRail onExpand={() => setSecondarySidebar("history", false)} />
-      ) : (
-      <div className={styles.rail} style={{ width: railWidth }}>
-        <div className={styles.header}>
-          <span className={styles.header_title}>{t("history.title", "任务")}</span>
-          <span className={styles.header_count}>{rows.length}</span>
-          {/* Icon-only in the header: the rail starts at 300px and "Mark all read"
-              spelled out would push the new-session button off the row in en locale. */}
+    <PageShell
+      view="history"
+      title={t("history.title", "任务")}
+      count={rows.length}
+      search={{
+        value: query,
+        onChange: setQuery,
+        placeholder: t("history.search_placeholder", "搜索标题、计划、全文…"),
+        busy: searching,
+      }}
+      actions={
+        <>
+          {/* Icon-only: "Mark all read" spelled out is long enough in en locale to
+              crowd the new-session button next to it. */}
           <button
             type="button"
-            className={styles.header_read_btn}
+            className={styles.read_btn}
             disabled={unreadSessions.length === 0}
             onClick={() => markManyRead(unreadSessions)}
             title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
@@ -651,27 +645,18 @@ export function HistoryView() {
           </button>
           <button
             type="button"
-            className={`${styles.header_new_btn} ${composing ? styles.header_new_btn_active : ""}`}
+            className={`${styles.new_btn} ${composing ? styles.new_btn_active : ""}`}
             onClick={handleNewSession}
             title={t("new_session.title")}
           >
             <Plus size={12} strokeWidth={2} />
             <span>{t("new_session.button")}</span>
           </button>
-        </div>
-
+        </>
+      }
+      secondary={
+        <>
         <div className={styles.controls}>
-          <div className={styles.search_wrap}>
-            <Search size={13} strokeWidth={1.6} className={styles.search_icon} />
-            <input
-              className={styles.search_input}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={t("history.search_placeholder", "搜索标题、计划、全文…")}
-              spellCheck={false}
-            />
-            {searching && <span className={styles.search_spinner} />}
-          </div>
           <div className={styles.filter_row}>
             <select
               className={styles.project_select}
@@ -758,10 +743,13 @@ export function HistoryView() {
           )}
         </div>
 
-        <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
-      </div>
-      )}
-
+        </>
+      }
+    >
+      {/* This column wrapper is load-bearing: `.detail_body` below is a flex ROW
+          whose children (the open tabs' panes, the composer, the spawn spinner)
+          compete for the same space. Dropping this level would put the tab strip
+          side by side with them instead of above them. */}
       <div className={styles.detail}>
         {/* No tab reads as active while the composer or the spawn spinner owns
             the column — the highlighted tab would be pointing at content that
@@ -834,6 +822,6 @@ export function HistoryView() {
           ) : null}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

@@ -1,73 +1,18 @@
-.page {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-  min-width: 0;
-}
-
-/* ── Kind color tokens ─────────────────────────────────────────────────────
+/* ── Kind colour tokens ────────────────────────────────────────────────────
    Distinct from the coral --color-accent; consistent with MemoryView's
-   Tailwind-style palette. */
-.page {
+   Tailwind-style palette. Must hang off the page root — WikiView passes this
+   class to PageShell as `className`. Without a host, rgb(var(--wiki-md)) is an
+   invalid value and the kind badges silently lose their colour. */
+.wiki_scope {
   --wiki-html: 14 165 233;  /* sky */
   --wiki-dir: 139 92 246;   /* violet */
   --wiki-md: 16 185 129;    /* emerald */
 }
 
-/* ── Header ──────────────────────────────────────────────────────────────── */
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px 12px;
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.title_row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.count {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-dim);
-}
-
-.search {
-  flex: 1;
-  max-width: 280px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--color-text);
-  outline: none;
-}
-
-.search:focus {
-  border-color: var(--color-accent);
-}
-
 .ws_select {
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-field);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   font-size: 12px;
   color: var(--color-text);
@@ -81,7 +26,7 @@
   justify-content: center;
   background: none;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px;
   color: var(--color-text-dim);
   cursor: pointer;
@@ -92,33 +37,17 @@
   border-color: var(--color-text-dim);
 }
 
-/* ── Body split ──────────────────────────────────────────────────────────── */
-
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
-
+/* ── Rail content ────────────────────────────────────────────────────────────
+   The doc tree inside PageShell's rail: the rail owns width + divider, this owns
+   scrolling and spacing. It is also the root drop zone. */
 .list_pane {
-  position: relative; /* anchors the ResizeHandle */
-  width: 320px; /* start value; overridden inline by useResizableWidth */
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--color-border);
   padding: 10px 10px 20px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.detail_pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
 }
 
 /* ── Workspace groups ────────────────────────────────────────────────────── */
@@ -176,7 +105,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
   background: none;
@@ -204,7 +133,7 @@
 
 .drop_target {
   background: var(--color-bg-card-hover);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   box-shadow: inset 0 0 0 1px var(--color-accent);
   color: var(--color-text);
 }
@@ -216,7 +145,7 @@
 
 .move_error {
   font-size: 11px;
-  color: #f87171;
+  color: var(--color-error);
   padding: 6px 8px;
   cursor: pointer;
 }
@@ -265,7 +194,7 @@
 .card_title mark {
   background: rgb(var(--wiki-md) / 0.25);
   color: inherit;
-  border-radius: 2px;
+  border-radius: var(--radius-hair);
   padding: 0 1px;
 }
 
@@ -293,7 +222,7 @@
   font-weight: 800;
   letter-spacing: 0.04em;
   padding: 2px 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin-top: 1px;
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
 }
@@ -357,9 +286,9 @@
 }
 
 .version_select {
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-field);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 8px;
   font-size: 11px;
   color: var(--color-text);
@@ -374,7 +303,7 @@
   gap: 5px;
   background: none;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -389,8 +318,8 @@
 }
 
 .action_danger:hover {
-  color: #f87171;
-  border-color: rgba(248, 113, 113, 0.5);
+  color: var(--color-error);
+  border-color: rgb(var(--color-error-rgb) / 0.5);
 }
 
 /* ── Content ────────────────────────────────────────────────────────────── */
@@ -425,7 +354,7 @@
   flex: 1;
   width: 100%;
   border: none;
-  background: #fbfaf7;
+  background: var(--canvas-fixed-light);
 }
 
 .placeholder {
@@ -448,18 +377,12 @@
 
 .error {
   font-size: 12px;
-  color: #f87171;
+  color: var(--color-error);
   padding: 20px;
 }
 
-/* macOS vibrancy */
-:global([data-platform="macos"]) .list_pane {
-  border-right-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .header,
-:global([data-platform="macos"]) .detail_header {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
+/* macOS vibrancy — divider weights come from the platform-wide --color-border
+   redirect in App.css; only the translucent card fills stay per-class. */
 :global([data-platform="macos"]) .card:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -467,11 +390,6 @@
 :global([data-platform="macos"]) .card_active:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.12);
-}
-:global([data-platform="macos"][data-theme="light"]) .list_pane,
-:global([data-platform="macos"][data-theme="light"]) .header,
-:global([data-platform="macos"][data-theme="light"]) .detail_header {
-  border-color: rgba(0, 0, 0, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .card:hover {
   background: rgba(0, 0, 0, 0.05);

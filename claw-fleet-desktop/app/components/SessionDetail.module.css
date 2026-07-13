@@ -39,7 +39,7 @@
   flex-direction: column;
   padding: 12px 16px 10px;
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
   flex-shrink: 0;
   gap: 6px;
 }
@@ -90,7 +90,7 @@
 .tag_subagent {
   font-size: 10px;
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   white-space: nowrap;
 }
 
@@ -127,7 +127,7 @@
   background: var(--color-bg-secondary);
   border: 1px solid transparent;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-variant-numeric: tabular-nums;
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
   white-space: nowrap;
@@ -147,7 +147,7 @@
   padding: 0;
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--color-text-dim);
   cursor: pointer;
   font-size: 13px;
@@ -162,7 +162,7 @@
   flex-shrink: 0;
   padding: 6px 16px 10px;
   border-top: 1px solid var(--color-border);
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
 }
 
 /* Tab bar (agent segmented control + view tabs combined) */
@@ -172,7 +172,7 @@
   gap: 12px;
   padding: 8px 16px 0;
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
   flex-shrink: 0;
   overflow-x: auto;
   scrollbar-width: none;
@@ -187,7 +187,7 @@
   display: inline-flex;
   gap: 2px;
   background: var(--color-bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 3px;
   margin-bottom: 6px;
   flex-shrink: 0;
@@ -293,7 +293,7 @@
 .tasks_plan_status {
   flex: 0 0 auto;
   padding: 1px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   font-size: 10px;
   font-weight: 600;
   line-height: 1.5;
@@ -365,7 +365,7 @@
 
 .tasks_item_current {
   background: var(--color-bg-hover);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding-left: 4px;
   margin-left: -4px;
 }
@@ -381,7 +381,7 @@
 
 .tasks_check {
   flex: 0 0 auto;
-  color: var(--color-success, #3fb950);
+  color: var(--color-success);
 }
 
 .tasks_text {
@@ -419,7 +419,7 @@
   color: var(--color-text-dim);
   text-align: center;
   border-top: 1px solid var(--color-border);
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
 }
 
 .follow_bar_btn {
@@ -431,7 +431,7 @@
   text-align: center;
   border: none;
   border-top: 1px solid var(--color-border);
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
   cursor: pointer;
   transition: background 0.15s;
 }
@@ -504,9 +504,9 @@
   padding: 6px 8px;
   font-size: 12px;
   line-height: 1.4;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border, #30363d);
-  background: var(--color-bg-tertiary);
+  background: var(--color-bg-sunken);
   color: var(--color-text-secondary);
   text-align: left;
 }

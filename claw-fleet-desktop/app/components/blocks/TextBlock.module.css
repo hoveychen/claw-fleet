@@ -68,7 +68,7 @@
 .inline_code {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 1px 4px;
   font-family: var(--font-mono);
   font-size: 11px;
@@ -80,7 +80,7 @@
 /* Code block wrapper */
 .code_wrapper {
   position: relative;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   margin: 6px 0 10px;
   overflow: hidden;
@@ -104,7 +104,7 @@
   padding: 2px 6px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--color-text-dim);
   cursor: pointer;
   z-index: 1;

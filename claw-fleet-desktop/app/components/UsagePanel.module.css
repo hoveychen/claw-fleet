@@ -48,7 +48,7 @@
   gap: 6px;
   padding: 8px;
   background: var(--color-bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .tool_header {
@@ -64,9 +64,9 @@
   font-size: 9px;
   font-weight: 500;
   color: var(--color-text-secondary, var(--color-text-dim));
-  background: var(--color-bg-tertiary, rgba(128,128,128,0.15));
+  background: var(--color-bg-sunken);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   text-transform: capitalize;
 }
 
@@ -115,7 +115,7 @@
 .bar_track {
   height: 4px;
   background: var(--color-bg);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: visible;
   position: relative;
 }
@@ -124,21 +124,21 @@
   height: 100%;
   background: var(--color-text-dim);
   opacity: 0.55;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: width 0.3s ease;
 }
 
 .bar_fill_warn {
   height: 100%;
   background: var(--color-accent);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: width 0.3s ease;
 }
 
 .bar_fill_critical {
   height: 100%;
-  background: #f59e0b;
-  border-radius: 4px;
+  background: var(--color-warning);
+  border-radius: var(--radius-xs);
   transition: width 0.3s ease;
 }
 
@@ -176,7 +176,7 @@
 }
 
 .trend_slower {
-  color: #4ade80;
+  color: var(--color-success);
 }
 
 .trend_similar {
@@ -251,15 +251,15 @@
 
 .error {
   font-size: 11px;
-  color: #f87171;
+  color: var(--color-error);
   margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.25);
-  border-radius: 6px;
+  background: rgb(var(--color-error-rgb) / 0.08);
+  border: 1px solid rgb(var(--color-error-rgb) / 0.25);
+  border-radius: var(--radius-sm);
 }
 
 .error p {
@@ -272,10 +272,10 @@
 }
 
 .retry {
-  background: rgba(248, 113, 113, 0.15);
+  background: rgb(var(--color-error-rgb) / 0.15);
   border: none;
-  color: #f87171;
-  border-radius: 4px;
+  color: var(--color-error);
+  border-radius: var(--radius-xs);
   padding: 2px 8px;
   font-size: 10px;
   font-weight: 500;
@@ -284,7 +284,7 @@
 }
 
 .retry:hover {
-  background: rgba(248, 113, 113, 0.25);
+  background: rgb(var(--color-error-rgb) / 0.25);
 }
 
 /* Entry point that opens the 24h occupancy history modal */
@@ -294,7 +294,7 @@
   background: transparent;
   border: 1px dashed var(--color-border);
   color: var(--color-text-dim);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   font-size: 11px;
   cursor: pointer;
@@ -332,7 +332,7 @@
   justify-content: center;
   padding: 8px 4px;
   margin: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   gap: 1px;

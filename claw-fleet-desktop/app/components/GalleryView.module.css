@@ -1,15 +1,6 @@
-.root {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-}
-
-/* Scrollable outer container — lateral padding matches the SessionToolbar
-   above (`14px 20px 12px`) so cards line up flush with the toolbar's text
-   and search controls. */
+/* Scrollable outer container inside PageShell's main — lateral padding matches
+   the banner's (`14px 20px 12px`) so cards line up flush with its title and
+   search controls. */
 .grid {
   flex: 1;
   overflow-y: auto;
@@ -39,7 +30,7 @@
 .group {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: var(--shadow-card);
   transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
@@ -106,7 +97,7 @@
   margin: 0;
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   text-align: left;
   font-size: 11px;
   line-height: 1.4;

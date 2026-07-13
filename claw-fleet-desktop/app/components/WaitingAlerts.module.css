@@ -49,8 +49,8 @@
   min-width: 24px;
   height: 20px;
   padding: 0 6px;
-  border-radius: 8px;
-  background: var(--color-warning, #d97706);
+  border-radius: var(--radius-md);
+  background: var(--color-warning);
   color: #fff;
   font-size: 11px;
   font-weight: 700;
@@ -67,9 +67,9 @@
   align-items: flex-start;
   gap: 10px;
   padding: 12px 14px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--color-warning, #d97706) 10%, var(--color-bg-card));
-  border: 1px solid color-mix(in srgb, var(--color-warning, #d97706) 30%, var(--color-border));
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-card));
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, var(--color-border));
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35), 0 1px 4px rgba(0, 0, 0, 0.2);
   cursor: pointer;
   transition: transform 0.15s ease, opacity 0.15s ease, box-shadow 0.15s ease;
@@ -94,8 +94,8 @@
   height: 8px;
   margin-top: 5px;
   border-radius: 50%;
-  background: #ef4444;
-  box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);
+  background: var(--color-error);
+  box-shadow: 0 0 6px rgb(var(--color-error-rgb) / 0.6);
   animation: dotPulse 2s ease-in-out infinite;
 }
 
@@ -120,7 +120,7 @@
 .card_summary {
   font-size: 12px;
   font-weight: 500;
-  color: var(--color-warning, #d97706);
+  color: var(--color-warning);
   line-height: 1.4;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -144,7 +144,7 @@
   color: var(--color-text-dim);
   font-size: 11px;
   cursor: pointer;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   opacity: 0;
   transition: opacity 0.15s, background 0.15s, color 0.15s;
 }
@@ -166,7 +166,7 @@
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #ef4444;
   color: #fff;
   font-size: 10px;
@@ -202,10 +202,10 @@
 
 @keyframes dotPulse {
   0%, 100% {
-    box-shadow: 0 0 4px rgba(239, 68, 68, 0.5);
+    box-shadow: 0 0 4px rgb(var(--color-error-rgb) / 0.5);
   }
   50% {
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.8);
+    box-shadow: 0 0 10px rgb(var(--color-error-rgb) / 0.8);
   }
 }
 

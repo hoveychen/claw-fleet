@@ -40,7 +40,7 @@
   line-height: 1;
   cursor: pointer;
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .close_btn:hover:not(:disabled) {
@@ -61,10 +61,10 @@
 }
 
 .error {
-  color: #dc2626;
+  color: var(--color-error);
   font-size: 12px;
   padding: 6px 10px;
   background: rgba(220, 38, 38, 0.1);
   border: 1px solid rgba(220, 38, 38, 0.3);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }

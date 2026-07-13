@@ -13,7 +13,7 @@
   max-width: 280px;
   background: transparent;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 3px 7px;
   color: var(--color-text-secondary);
   font-size: 12px;
@@ -77,7 +77,7 @@
   padding: 6px 8px;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--color-text);
   font-size: 13px;
   font-family: inherit;
@@ -140,9 +140,9 @@
 .menu_header_input {
   width: 100%;
   box-sizing: border-box;
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-field);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 8px;
   font-size: 12px;
   font-family: var(--font-mono);

@@ -11,11 +11,8 @@
   max-width: 520px;
 }
 
-.title {
-  font-size: 18px;
-  font-weight: 700;
-  margin: 0 0 4px;
-}
+/* The page title lives in PageShell's banner now — this file's own 18px `.title`
+   was a ninth, slightly-off copy of it. */
 
 .subtitle {
   color: var(--color-text-secondary);
@@ -58,7 +55,7 @@
 }
 
 .dot[data-state="on"] {
-  background: var(--color-success, #4ade80);
+  background: var(--color-success);
 }
 
 .clients {
@@ -106,14 +103,14 @@
 .devicePush {
   font-size: 11.5px;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
 }
 
 .devicePush[data-on="yes"] {
-  color: var(--color-success, #4ade80);
-  background: rgba(74, 222, 128, 0.12);
+  color: var(--color-success);
+  background: rgb(var(--color-success-rgb) / 0.12);
 }
 
 .deviceSince {
@@ -128,7 +125,7 @@
   padding: 20px;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -138,8 +135,8 @@
 /* QR 需始终浅底才能扫码(不能随主题变深),用暖白固定值协调暖纸 light,
    而非纯冷白 #fff 或会在 dark 下变深的 var(--color-bg-card)。 */
 .qr {
-  background: #fbfaf7;
-  border-radius: 8px;
+  background: var(--canvas-fixed-light);
+  border-radius: var(--radius-md);
   padding: 8px;
   line-height: 0;
 }
@@ -158,7 +155,7 @@
   justify-content: center;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .qrHint {
@@ -190,7 +187,7 @@
 
 .urlInput {
   flex: 1;
-  background: var(--color-bg-input);
+  background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 7px;
   color: var(--color-text);
@@ -224,9 +221,9 @@
 }
 
 .dangerButton {
-  border: 1px solid rgba(248, 113, 113, 0.4);
-  color: var(--color-error, #f87171);
-  border-radius: 8px;
+  border: 1px solid rgb(var(--color-error-rgb) / 0.4);
+  color: var(--color-error);
+  border-radius: var(--radius-md);
   padding: 7px 14px;
   font-size: 13px;
   background: none;
@@ -234,7 +231,7 @@
 }
 
 .dangerButton:hover {
-  background: rgba(248, 113, 113, 0.08);
+  background: rgb(var(--color-error-rgb) / 0.08);
 }
 
 .dangerHint {
@@ -244,6 +241,6 @@
 
 .error {
   margin-top: 14px;
-  color: var(--color-error, #f87171);
+  color: var(--color-error);
   font-size: 13px;
 }
