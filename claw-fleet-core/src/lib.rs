@@ -48,6 +48,7 @@ pub mod memory;
 pub mod mobile_relay;
 pub mod model_cost;
 pub mod openclaw_source;
+pub mod launch_spec;
 pub mod parked;
 pub mod pattern_update;
 pub mod permission_prompt_ipc;
