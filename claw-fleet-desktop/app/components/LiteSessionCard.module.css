@@ -129,7 +129,7 @@
   top: -8px;
   height: calc(50% + 8px);
   width: 1.5px;
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--color-border);
   border-radius: 1px;
 }
 
@@ -141,7 +141,7 @@
   top: 50%;
   width: 10px;
   height: 1.5px;
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--color-border);
 }
 
 /* When another subagent follows, run the thread all the way through.
