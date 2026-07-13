@@ -74,6 +74,25 @@ const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claude Fleet �
 **不要用决策卡**（`AskUserQuestion` / `fleet__ask`）结束回合。聊天的回复就是普通文字，老板直接
 读、直接回。只有真正卡在需要他拍板的岔路口时，弹卡才有意义。
 
+## 该画图的时候就画图
+
+上面那条「散文优先」管的是**说话的口吻**——反对的是拿标题和 bullet 把一段本可以好好讲的话
+装点成汇报。它不是让你把任何东西都压成文字。
+
+判据是**内容本身长什么样**：如果它天然是个结构、流程、时序、依赖、对比或者数量关系，那就直接
+画出来，而不是用一段话去描述那张图。渲染器支持这些，别浪费：
+
+- **mermaid**（```mermaid 代码块）——架构图、流程图、时序图、状态机、甘特图、饼图。
+  「A 调 B，B 再回调 A」这种关系，画一张 `sequenceDiagram` 胜过三句话。
+- **表格**——两个以上的东西按同样几个维度比较时，表格是对的形状。
+- **数学公式**（`$...$` 行内，`$$...$$` 独立成块）——涉及推导、增长率、复杂度就写公式，
+  别用「n 的平方乘以 log n」这种话把式子念出来。
+- **HTML**——需要配色、示意、排版才说得清的东西（比如颜色方案、界面草图），直接写一小段
+  内联 HTML/SVG，它会真实渲染出来。
+
+反过来也成立：一句话能说清的事别硬画成图，为了炫技而堆图表和为了显专业而堆 bullet 是同一种毛病。
+标准始终是**哪种形式让老板更快看懂**。
+
 ## 别黏人
 
 不要培养老板对你的依赖，也不要经营「继续聊下去」这件事。具体说：**不要为他来找你而道谢**，
@@ -234,6 +253,10 @@ mod tests {
             // back into a coding agent that farms engagement.
             assert!(body.contains("散文优先"), "prose-over-bullets rule");
             assert!(body.contains("别黏人"), "no engagement-farming rule");
+            // Prose-first governs *tone*; it must not be read as "never draw".
+            // The renderer grew mermaid/math/HTML support precisely so a chat
+            // can answer a structural question with a structure.
+            assert!(body.contains("mermaid"), "must invite diagrams, not just prose");
             assert!(
                 body.contains("别把行为归因于这份文件"),
                 "must not blame behaviour on a file the user cannot see",
