@@ -301,6 +301,77 @@ export const ClickRipple: React.FC<{ x: number; y: number; start: number }> = ({
   );
 };
 
+// ── Pain window: the "before" beat — dark terminal chaos, then swept away ──
+export const PainWindow: React.FC<{
+  title: string;
+  lines: string[];
+  exitAt?: number;
+}> = ({ title, lines, exitAt = 50 }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const inS = spring({ frame: frame - 2, fps, config: { damping: 13, mass: 0.6 } });
+  const out = easeOut(clamp01((frame - exitAt) / 14));
+  if (out >= 1) return null;
+  return (
+    <div
+      style={{
+        position: "absolute",
+        top: 250,
+        left: 130,
+        width: 860,
+        transform: `translateX(${lerp(0, -520, out)}px) rotate(${lerp(0, -3, out)}deg) scale(${inS})`,
+        opacity: inS * (1 - out),
+      }}
+    >
+      <div
+        style={{
+          fontFamily: FONT.mono,
+          fontSize: 20,
+          letterSpacing: "0.08em",
+          color: "#b91c1c",
+          marginBottom: 12,
+          fontWeight: 600,
+        }}
+      >
+        THE PAIN
+      </div>
+      <div
+        style={{
+          background: T.night,
+          borderRadius: 14,
+          overflow: "hidden",
+          border: "2px solid rgba(185,28,28,0.5)",
+          boxShadow: "0 20px 60px rgba(32,28,18,0.3)",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "12px 16px",
+            background: T.nightDeep,
+            borderBottom: "1px solid rgba(247,248,248,0.1)",
+          }}
+        >
+          <i style={{ width: 12, height: 12, borderRadius: "50%", background: "#b91c1c" }} />
+          <span style={{ fontFamily: FONT.mono, fontSize: 18, color: T.nightDim }}>{title}</span>
+        </div>
+        <div style={{ padding: "20px 26px", fontFamily: FONT.mono, fontSize: 26, lineHeight: 1.9 }}>
+          {lines.map((l, i) => {
+            const chars = Math.max(0, Math.min(l.length, Math.floor((frame - 8 - i * 10) / 0.4)));
+            return (
+              <div key={i} style={{ color: i === lines.length - 1 ? "#fca5a5" : T.nightText, minHeight: 46 }}>
+                {l.slice(0, chars)}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 // ── Picture-in-picture: real screen capture in a mini window ───────────────
 export type PipProps = {
   src: string;

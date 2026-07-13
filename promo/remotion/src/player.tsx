@@ -6,7 +6,7 @@ import { ClawFleetPromo } from "./ClawFleetPromo";
 const App: React.FC = () => (
   <Player
     component={ClawFleetPromo}
-    durationInFrames={1980}
+    durationInFrames={1800}
     fps={30}
     compositionWidth={1920}
     compositionHeight={1080}
