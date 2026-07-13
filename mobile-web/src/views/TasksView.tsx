@@ -17,6 +17,7 @@ import { t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { SessionInfo, SessionMark, SessionStatus } from "../types";
 import { isFleetOwnedEntrypoint, isSessionUnread } from "../types";
+import { useChatWorkspace } from "../useChatWorkspace";
 import { useRelaySearch } from "../useRelaySearch";
 import styles from "./TasksView.module.css";
 
@@ -74,6 +75,28 @@ type MarkFilter = "all" | "pending" | "done";
  *  attention, so it collapses into "pending" — only an explicit done leaves. */
 function markBucket(s: SessionInfo): SessionMark {
   return s.userMark === "done" ? "done" : "pending";
+}
+
+/** Pseudo-workspaces pinned above the real directories in the workspace filter,
+ *  mirroring the desktop launchpad (`HistoryView`'s CHAT_ONLY / CHAT_HIDDEN).
+ *  "" is "all"; every other real value is an absolute path, so these bare words
+ *  can't collide with one. */
+export const CHAT_ONLY = "chat";
+export const CHAT_HIDDEN = "no-chat";
+
+/** Does `s` pass the workspace filter? `chatPath` is the desktop host's
+ *  `~/.fleet/chat`, `null` until the relay answers (or if it never does) — in
+ *  which case the two chat pseudo-values degrade to "all" rather than showing
+ *  an empty list. */
+export function matchesWorkspaceFilter(
+  s: SessionInfo,
+  filter: string,
+  chatPath: string | null,
+): boolean {
+  if (!filter) return true;
+  if (filter === CHAT_ONLY) return chatPath == null || s.workspacePath === chatPath;
+  if (filter === CHAT_HIDDEN) return chatPath == null || s.workspacePath !== chatPath;
+  return s.workspacePath === filter;
 }
 
 /** FTS5 snippets arrive with literal `<mark>…</mark>` markers (see the desktop
@@ -138,11 +161,21 @@ export function TasksView({
     [sessions, markOverride],
   );
 
+  // The desktop host's pure-chat workspace — the same path the new-session sheet
+  // pins. Null while it's in flight, which keeps the chat options hidden rather
+  // than offering a filter that can't be honoured.
+  const chatPath = useChatWorkspace(client);
+
+  // Chat is filtered through its own pinned options, so it is kept out of the
+  // project list — otherwise it would sit there a second time as plain "Chat".
   const workspaces = useMemo(() => {
     const names = new Map<string, string>();
-    for (const s of all) names.set(s.workspacePath, s.workspaceName);
+    for (const s of all) {
+      if (s.workspacePath === chatPath) continue;
+      names.set(s.workspacePath, s.workspaceName);
+    }
     return [...names.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [all]);
+  }, [all, chatPath]);
 
   const activeCount = useMemo(() => all.filter((s) => LIVE.includes(s.status)).length, [all]);
 
@@ -152,7 +185,7 @@ export function TasksView({
   const preMark = useMemo(() => {
     const q = search.trim().toLowerCase();
     return all.filter((s) => {
-      if (workspace && s.workspacePath !== workspace) return false;
+      if (!matchesWorkspaceFilter(s, workspace, chatPath)) return false;
       if (activeOnly && !LIVE.includes(s.status)) return false;
       if (q) {
         const clientMatch =
@@ -168,7 +201,7 @@ export function TasksView({
       }
       return true;
     });
-  }, [all, search, workspace, activeOnly, ftsMatchPaths]);
+  }, [all, search, workspace, chatPath, activeOnly, ftsMatchPaths]);
 
   const counts = useMemo(() => {
     let pending = 0;
@@ -312,6 +345,12 @@ export function TasksView({
             onChange={(e) => setWorkspace(e.target.value)}
           >
             <option value="">{t("全部目录")}</option>
+            {chatPath && (
+              <>
+                <option value={CHAT_ONLY}>{t("💬 仅聊天")}</option>
+                <option value={CHAT_HIDDEN}>{t("🚫 隐藏聊天")}</option>
+              </>
+            )}
             {workspaces.map(([path, name]) => (
               <option key={path} value={path}>
                 {name}
