@@ -329,19 +329,53 @@ pub fn with_autoheight(html: &str) -> String {
     format!("{html}{AUTOHEIGHT_SCRIPT}")
 }
 
-/// Inject the height-reporting script into every question's `html`, so both
-/// iframe paths in the card carry it: the `srcDoc` one (html, no images) reads
-/// `q.html` straight from this request, and the served one (images) writes the
-/// same string into `index.html` in [`ingest_images`]. Injecting here — once, at
-/// request time — keeps a single copy of the script in the tree instead of one
-/// per rendering path.
-pub fn inject_autoheight(req: &mut FleetAskRequest) {
-    for q in &mut req.questions {
-        if let Some(h) = &q.html {
-            if !h.trim().is_empty() {
-                q.html = Some(with_autoheight(h));
-            }
+/// Whether a document has anything at all to paint.
+///
+/// Only whitespace and comments survive removal, so a `true` here means the
+/// iframe would render a blank rectangle — no heuristics, no guessing at what
+/// "looks empty": markup that produces no boxes (`<img>`, `<hr>`, `<canvas>`)
+/// still counts as content and is left alone.
+fn html_renders_nothing(html: &str) -> bool {
+    let mut rest = html;
+    loop {
+        let Some(open) = rest.find("<!--") else {
+            return rest.trim().is_empty();
+        };
+        if !rest[..open].trim().is_empty() {
+            return false;
         }
+        // An unterminated comment swallows the remainder of the document, which
+        // is also how a browser parses it.
+        match rest[open + 4..].find("-->") {
+            Some(close) => rest = &rest[open + 4 + close + 3..],
+            None => return true,
+        }
+    }
+}
+
+/// Normalize every question's `html` preview before it is staged anywhere.
+///
+/// Two passes, in order:
+///
+/// 1. **Drop content-free previews.** An agent that stubs the field with a
+///    placeholder (seen in the wild: `"html": "<!--HTML-->"`) hands the card a
+///    truthy string that paints an empty 200px sandbox iframe across the
+///    question body. `None` is what "no preview" means; normalize to it here so
+///    every consumer — desktop card, decision history, mobile — is spared the
+///    blank frame, and [`ingest_images`] falls back to its synthesized gallery.
+/// 2. **Inject the height-reporting script into the rest**, so both iframe paths
+///    carry it: the `srcDoc` one (html, no images) reads `q.html` straight from
+///    this request, and the served one (images) writes the same string into
+///    `index.html` in [`ingest_images`]. Doing it here — once, at request time —
+///    keeps a single copy of the script in the tree instead of one per path.
+pub fn normalize_html(req: &mut FleetAskRequest) {
+    for q in &mut req.questions {
+        let Some(h) = &q.html else { continue };
+        q.html = if html_renders_nothing(h) {
+            None
+        } else {
+            Some(with_autoheight(h))
+        };
     }
 }
 
@@ -873,26 +907,52 @@ mod tests {
     }
 
     #[test]
-    fn inject_autoheight_covers_both_iframe_paths_and_is_idempotent() {
+    fn normalize_html_covers_both_iframe_paths_and_is_idempotent() {
         // srcDoc path: a question's own html gets the script, so the card's
         // iframe can size itself instead of clipping into a fixed-height box.
         let mut req = empty_request("card-ah");
         req.questions[0].html = Some("<p>hi</p>".into());
-        inject_autoheight(&mut req);
+        normalize_html(&mut req);
         let once = req.questions[0].html.clone().unwrap();
         assert!(once.starts_with("<p>hi</p>"), "author's html must survive intact: {once}");
         assert!(once.contains(AUTOHEIGHT_MARKER));
 
         // Re-injecting (e.g. a replayed request) must not stack a second copy.
-        inject_autoheight(&mut req);
+        normalize_html(&mut req);
         assert_eq!(req.questions[0].html.as_deref(), Some(once.as_str()));
         assert_eq!(once.matches(AUTOHEIGHT_MARKER).count(), 1);
 
-        // A question with no html stays without one — nothing to size.
+        // A question with no html keeps none — nothing to size, nothing to frame.
         let mut blank = empty_request("card-blank");
-        blank.questions[0].html = Some("   ".into());
-        inject_autoheight(&mut blank);
-        assert_eq!(blank.questions[0].html.as_deref(), Some("   "));
+        normalize_html(&mut blank);
+        assert_eq!(blank.questions[0].html, None);
+    }
+
+    #[test]
+    fn content_free_html_is_dropped_instead_of_framed() {
+        // An agent that stubs the field with a placeholder comment (observed in
+        // the wild: `"html": "<!--HTML-->"`) has authored a document that renders
+        // nothing. Keeping it would hand the card a truthy `html` and paint a
+        // 200px-tall empty sandbox iframe over the question body.
+        for junk in ["<!--HTML-->", "  <!-- todo: preview -->\n", "", "   "] {
+            let mut req = empty_request("card-junk");
+            req.questions[0].html = Some(junk.into());
+            normalize_html(&mut req);
+            assert_eq!(
+                req.questions[0].html, None,
+                "html with no renderable content must be dropped, got {:?}",
+                req.questions[0].html
+            );
+        }
+
+        // Content-free does NOT mean text-free: a document whose only content is
+        // a replaced element still renders, and must survive with its script.
+        let mut img = empty_request("card-img-only");
+        img.questions[0].html = Some("<!-- chart --><img src=\"c.png\">".into());
+        normalize_html(&mut img);
+        let out = img.questions[0].html.clone().expect("markup must survive");
+        assert!(out.starts_with("<!-- chart --><img src=\"c.png\">"));
+        assert!(out.contains(AUTOHEIGHT_MARKER));
     }
 
     #[test]
