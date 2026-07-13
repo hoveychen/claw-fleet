@@ -244,7 +244,9 @@
   padding: 4px 0;
   width: 100%;
   resize: none;
-  overflow: hidden;
+  /* Auto-grow caps at max-height; past that let the wheel scroll instead of
+     clipping (overflow:hidden left only the keyboard caret able to pan). */
+  overflow-y: auto;
   min-height: 1.5em;
   max-height: 320px;
   box-sizing: border-box;
