@@ -262,7 +262,10 @@ put in `fleet__ask`, plus three new optional per-question fields:\n\
   `<iframe sandbox=\"\">` between the question body and the answer controls — \
   no scripts, no same-origin, no forms, no top-navigation, no popups. Useful \
   for rich diff previews, screenshot tables, anything HTML can express that \
-  markdown can't. **To show images, do NOT base64-inline them into this \
+  markdown can't. **Omit the field entirely when the card has no preview** — \
+  never send a placeholder or a comment-only stub like `<!--HTML-->`; it is a \
+  document that renders nothing, and the card would paint an empty box across \
+  the question body. **To show images, do NOT base64-inline them into this \
   string** — that burns output tokens on every call. Put the files in \
   `images` (below) and reference them by name with a relative path, e.g. \
   `<img src=\"chart.png\">`.\n\
