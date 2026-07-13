@@ -172,6 +172,21 @@ impl LocalBackend {
 
         let sources = Arc::new(sources);
         let sessions: Arc<Mutex<Vec<SessionInfo>>> = Arc::new(Mutex::new(Vec::new()));
+
+        // Let the mobile relay pull the current snapshot the instant a phone
+        // connects, instead of leaving it to sit on a blank task list until the
+        // next scan-driven change (which never comes while every session is
+        // idle — the fs watcher only rescans on a jsonl write). `fleet serve`
+        // force-pushes on new-client presence in its own loop, so this provider
+        // is the equivalent hook for the desktop LocalBackend path.
+        {
+            let sess_for_relay = sessions.clone();
+            claw_fleet_core::mobile_relay::set_snapshot_provider(move || {
+                let list = sess_for_relay.lock().ok()?;
+                serde_json::to_value(&*list).ok()
+            });
+        }
+
         let watch = Arc::new(crate::WatchState::new());
         let waiting_alerts: Arc<Mutex<HashMap<String, WaitingAlert>>> =
             Arc::new(Mutex::new(HashMap::new()));
