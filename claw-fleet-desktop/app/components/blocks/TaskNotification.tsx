@@ -53,12 +53,24 @@ export function parseTaskNotification(text: string): ParsedTaskNotification | nu
   return parsed;
 }
 
-/** `summary` reads like `Agent "审计露馅硬编码 批次3" finished`; the quoted run is
- *  the agent's own label and makes a tighter title than the full sentence. */
-function titleFrom(summary: string | undefined): string {
-  if (!summary) return "Agent";
+/** How much of a `summary` we're willing to run through the header's one-line,
+ *  nowrap title. Past this it belongs in the body, where it can wrap. */
+const TITLE_MAX = 64;
+
+/**
+ * An agent notice's `summary` reads like `Agent "审计露馅硬编码 批次3" finished` —
+ * the quoted run is the agent's own label and makes a tighter title than the
+ * full sentence. A background *shell* notice has no such label: its `stopped`
+ * summary is a whole paragraph explaining that no completion record was found.
+ * Running that through the title would be unreadable (one nowrap line, most of
+ * it ellipsed away), so it goes to the body instead and the title stays generic.
+ */
+function splitSummary(summary: string | undefined): { title: string | null; body: string | null } {
+  if (!summary) return { title: null, body: null };
   const quoted = /["“]([^"”]+)["”]/.exec(summary);
-  return quoted ? quoted[1] : summary;
+  if (quoted) return { title: quoted[1], body: null };
+  if (summary.length <= TITLE_MAX) return { title: summary, body: null };
+  return { title: null, body: summary };
 }
 
 function basename(path: string): string {
@@ -90,9 +102,13 @@ export function TaskNotification({
         ? t("detail.task_failed", "失败")
         : raw === "cancelled"
           ? t("detail.task_cancelled", "已取消")
-          : data.status;
+          : raw === "stopped"
+            ? t("detail.task_stopped", "已停止")
+            : data.status;
 
-  const hasBody = !!data.result;
+  const { title, body: summaryBody } = splitSummary(data.summary);
+  const bodyText = [summaryBody, data.result].filter(Boolean).join("\n\n");
+  const hasBody = !!bodyText;
 
   return (
     <div className={styles.root}>
@@ -106,7 +122,7 @@ export function TaskNotification({
         <span className={styles.icon} aria-hidden>
           🤖
         </span>
-        <span className={styles.title}>{titleFrom(data.summary)}</span>
+        <span className={styles.title}>{title ?? t("detail.task_notification", "后台任务")}</span>
         {statusLabel && (
           <span className={`${styles.badge} ${statusCls}`}>
             <span className={styles.dot} />
@@ -118,7 +134,7 @@ export function TaskNotification({
 
       {hasBody && open && (
         <div className={styles.body}>
-          <TextBlock text={data.result!} paths={paths} />
+          <TextBlock text={bodyText} paths={paths} />
         </div>
       )}
 
