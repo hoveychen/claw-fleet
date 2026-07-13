@@ -50,12 +50,12 @@
 }
 
 .btn_danger {
-  background: #c53030;
-  color: #fff;
-  border-color: #c53030;
+  background: var(--color-error-solid);
+  color: var(--color-on-error);
+  border-color: var(--color-error-solid);
 }
 
 .btn_danger:hover {
-  background: #e53e3e;
-  border-color: #e53e3e;
+  background: var(--color-error-solid-hover);
+  border-color: var(--color-error-solid-hover);
 }

@@ -168,6 +168,26 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-success-rgb: 74, 222, 128;
   --color-warning-rgb: 251, 191, 36;
 
+  /* ── Solid axis ───────────────────────────────────────────────────────────
+     The tokens above are INK: hues tuned to be read as text/borders against the
+     page. They are the wrong thing to fill a shape with — --color-error is a
+     pale red in dark, and --color-warning is a bright amber in BOTH themes, so
+     the white text a badge puts on top of them lands at 1.7:1.
+
+     These are the FILLS: saturated blocks that carry their paired on-* ink at
+     AA in either theme, which is why they do not change between themes — a
+     solid badge is a deliberate opaque chip, not a surface that tracks the
+     canvas. Reach for these only when painting a filled shape (unread badge,
+     danger button); for text, borders and tinted backgrounds use the ink
+     tokens. Amber takes dark ink rather than white — white on amber cannot be
+     made to work without turning the amber brown. */
+  --color-error-solid: #dc2626;        /* white on this: 4.8:1 */
+  --color-error-solid-hover: #ef4444;
+  --color-error-solid-rgb: 220, 38, 38; /* for the badge's glow */
+  --color-on-error: #ffffff;
+  --color-warning-solid: #f59e0b;
+  --color-on-warning: #1c1917;         /* dark ink on amber: 11:1 */
+
   /* Semantic surface/accent tokens referenced by block presenters & cards */
   --color-success-bg: #14331f;
   --color-warning-bg: #33290a;
@@ -301,6 +321,10 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-error-rgb: 204, 51, 64;
   --color-success-rgb: 23, 128, 66;
   --color-warning-rgb: 154, 106, 8;
+
+  /* The solid axis (--color-*-solid / --color-on-*) is deliberately NOT
+     re-declared here: a filled badge is an opaque chip that reads the same on
+     either canvas, so it inherits the one set defined above. */
 
   /* Semantic surface/accent tokens referenced by block presenters & cards */
   --color-success-bg: #e7f2e6;
