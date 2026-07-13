@@ -8,7 +8,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { safeRemarkPlugins } from "../markdown/safeLinks";
+import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { usePrecedingAgentMessages } from "../hooks/usePrecedingAgentMessages";
 import type {
@@ -197,7 +197,7 @@ function GuardCard({ decision }: { decision: GuardDecision }) {
         <div className={`${styles.analysis} ${decision.analyzing ? styles.analysis_loading : ""}`}>
           {decision.analyzing
             ? t("guard.analyzing", "Analyzing command...")
-            : <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>{decision.analysis ?? ""}</ReactMarkdown>}
+            : <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{decision.analysis ?? ""}</ReactMarkdown>}
         </div>
       )}
 
@@ -445,7 +445,7 @@ function PrecedingAgentMessagesRegion({
         <div className={styles.preceding_body}>
           {messages.map((m, i) => (
             <div key={m.uuid ?? i} className={styles.preceding_msg}>
-              <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>
+              <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
                 {m.text}
               </ReactMarkdown>
             </div>
@@ -676,7 +676,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>{q.question}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{q.question}</ReactMarkdown>
         </div>
       </div>
       </div>
@@ -946,7 +946,7 @@ function SharedOptionsBlock({
       {list}
       <div className={styles.elicitation_preview}>
         {focusedPreview ? (
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>{focusedPreview}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{focusedPreview}</ReactMarkdown>
         ) : null}
       </div>
     </div>
@@ -1019,7 +1019,7 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
         />
       ) : (
         <div className={styles.plan_content}>
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>
             {decision.editedPlan ?? req.planContent}
           </ReactMarkdown>
         </div>
@@ -1522,7 +1522,7 @@ function FleetAskCard({
           {q.header && (
             <span className={styles.elicitation_header}>{q.header}</span>
           )}
-          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={mdComponents}>{q.question}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={mdComponents}>{q.question}</ReactMarkdown>
         </div>
 
         {q.images && q.images.length > 0 ? (

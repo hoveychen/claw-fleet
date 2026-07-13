@@ -3,7 +3,7 @@ import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { safeLinkComponent, safeRemarkPlugins } from "../../markdown/safeLinks";
+import { safeLinkComponent, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
 import {
   remarkWikiLinks,
   wikiLinkComponent,
@@ -75,6 +75,7 @@ export const TextBlock = memo(function TextBlock({
     <div className={styles.root}>
       <ReactMarkdown
         remarkPlugins={wiki ? [...safeRemarkPlugins, remarkWikiLinks] : safeRemarkPlugins}
+        rehypePlugins={safeRehypePlugins}
         components={{
           // Search term highlighting in text-bearing elements
           ...(highlight ? {
