@@ -417,13 +417,15 @@
   word-break: break-word;
 }
 
-/* The iframe hosts arbitrary agent-produced pages; give it a white canvas so
-   docs that assume a light background stay readable in dark mode. */
+/* The iframe hosts arbitrary agent-produced pages; give it a light canvas so
+   docs that assume a light background stay readable in dark mode. Must stay a
+   fixed light value (not var(--color-bg-card), which goes dark in dark mode);
+   warm off-white instead of cold #fff to sit better under the paper light theme. */
 .html_frame {
   flex: 1;
   width: 100%;
   border: none;
-  background: #fff;
+  background: #fbfaf7;
 }
 
 .placeholder {

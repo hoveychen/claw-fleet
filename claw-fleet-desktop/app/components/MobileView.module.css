@@ -135,8 +135,10 @@
   gap: 12px;
 }
 
+/* QR 需始终浅底才能扫码(不能随主题变深),用暖白固定值协调暖纸 light,
+   而非纯冷白 #fff 或会在 dark 下变深的 var(--color-bg-card)。 */
 .qr {
-  background: #fff;
+  background: #fbfaf7;
   border-radius: 8px;
   padding: 8px;
   line-height: 0;
