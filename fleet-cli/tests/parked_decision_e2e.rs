@@ -123,7 +123,9 @@ fn timed_out_fleet_ask_parks_the_card_interrupts_the_turn_and_resumes_with_the_a
             r#"{{"type":"user","entrypoint":"{}","cwd":"{}"}}"#,
             claw_fleet_core::session_launch::NEW_SESSION_ENTRYPOINT,
             workspace.display()
-        ) + "\n",
+        ) + "\n"
+            + r#"{"type":"assistant","message":{"model":"claude-opus-4-8","content":[]}}"#
+            + "\n",
     )
     .unwrap();
 
@@ -324,6 +326,17 @@ fn timed_out_fleet_ask_parks_the_card_interrupts_the_turn_and_resumes_with_the_a
     assert!(
         prompt.contains("保留"),
         "the boss's actual answer must reach the agent: {prompt}"
+    );
+    // The resumed session is the same session continuing — it must not be
+    // silently moved onto whatever the CLI happens to default to.
+    let model_at = args
+        .iter()
+        .position(|a| *a == "--model")
+        .expect("the resume must pin the session's own model: {args:?}");
+    assert_eq!(
+        args[model_at + 1],
+        "claude-opus-4-8",
+        "must resume on the model the transcript recorded: {args:?}"
     );
 
     // ── Assert 5: the card is resolved and gone ─────────────────────────────
