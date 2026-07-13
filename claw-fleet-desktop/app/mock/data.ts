@@ -1216,7 +1216,7 @@ export const MOCK_SETUP_STATUS = {
   cli_installed: true,
   claude_dir_exists: true,
   has_sessions: true,
-  detected_tools: { openclaw: true, cursor: true, codex: true },
+  detected_tools: { cli: true, vscode: true, openclaw: true, cursor: true, codex: true },
 };
 
 // ── Hooks setup plan ────────────────────────────────────────────────────────
