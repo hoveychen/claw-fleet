@@ -1,13 +1,13 @@
 import type { Components } from "react-markdown";
-import type { PluggableList } from "unified";
-import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { remarkCjkAutolinkFix } from "./cjkAutolinkFix";
+import { MermaidBlock } from "./MermaidBlock";
 import { PathChip, type PathLinkContext } from "./pathLinks";
 import { parsePathRef } from "./pathRef";
 import styles from "./markdown.module.css";
 
-export const safeRemarkPlugins: PluggableList = [remarkGfm, remarkCjkAutolinkFix];
+// The plugin chain lives in ./plugins (Tauri-free, so tests can drive it) and is
+// re-exported here because every render site already imports it from this file.
+export { safeRemarkPlugins, safeRehypePlugins } from "./plugins";
 
 export function safeLinkComponent(): Components["a"] {
   return function SafeLink({ href, children }) {
@@ -45,6 +45,7 @@ export function pathAwareMarkdownComponents(paths: PathLinkContext): Components 
   return {
     ...safeMarkdownComponents,
     code: ({ className, children, ...props }) => {
+      if (isMermaid(className)) return <MermaidBlock code={codeText(children)} />;
       const raw = typeof children === "string" ? children : null;
       const pathRef = raw ? parsePathRef(raw) : null;
       if (pathRef) {
@@ -63,6 +64,15 @@ export function pathAwareMarkdownComponents(paths: PathLinkContext): Components 
   };
 }
 
+/** A ```mermaid fence, as react-markdown labels it on the <code> element. */
+function isMermaid(className?: string): boolean {
+  return /(^|\s)language-mermaid(\s|$)/.test(className ?? "");
+}
+
+function codeText(children: React.ReactNode): string {
+  return String(children).replace(/\n$/, "");
+}
+
 export const safeMarkdownComponents: Components = {
   a: safeLinkComponent(),
   table: ({ children }) => (
@@ -76,9 +86,12 @@ export const safeMarkdownComponents: Components = {
   td: ({ children, style }) => (
     <td className={styles.td} style={style}>{children}</td>
   ),
-  code: ({ className, children, ...props }) => (
-    <code className={className ? `${styles.code} ${className}` : styles.code} {...props}>
-      {children}
-    </code>
-  ),
+  code: ({ className, children, ...props }) => {
+    if (isMermaid(className)) return <MermaidBlock code={codeText(children)} />;
+    return (
+      <code className={className ? `${styles.code} ${className}` : styles.code} {...props}>
+        {children}
+      </code>
+    );
+  },
 };

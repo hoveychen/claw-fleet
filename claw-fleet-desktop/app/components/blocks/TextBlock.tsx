@@ -3,12 +3,13 @@ import ReactMarkdown from "react-markdown";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-import { safeLinkComponent, safeRemarkPlugins } from "../../markdown/safeLinks";
+import { safeLinkComponent, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
 import {
   remarkWikiLinks,
   wikiLinkComponent,
   type WikiLinkContext,
 } from "../../markdown/wikiLinks";
+import { MermaidBlock } from "../../markdown/MermaidBlock";
 import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
 import { parsePathRef } from "../../markdown/pathRef";
 import styles from "./TextBlock.module.css";
@@ -75,6 +76,7 @@ export const TextBlock = memo(function TextBlock({
     <div className={styles.root}>
       <ReactMarkdown
         remarkPlugins={wiki ? [...safeRemarkPlugins, remarkWikiLinks] : safeRemarkPlugins}
+        rehypePlugins={safeRehypePlugins}
         components={{
           // Search term highlighting in text-bearing elements
           ...(highlight ? {
@@ -91,6 +93,9 @@ export const TextBlock = memo(function TextBlock({
           code({ node, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");
             const isBlock = !!(props as { inline?: boolean }).inline === false && match;
+            if (isBlock && match?.[1] === "mermaid") {
+              return <MermaidBlock code={String(children).replace(/\n$/, "")} />;
+            }
             if (isBlock && match) {
               return (
                 <div className={styles.code_wrapper}>
