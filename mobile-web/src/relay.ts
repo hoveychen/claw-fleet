@@ -14,11 +14,15 @@ export interface DeviceInfo {
   label: string;
   platform: string;
   pushSubscribed: boolean;
-  /** Whether this browser can inflate a gzipped `sessions` snapshot via the
-   *  native `DecompressionStream`. The desktop only compresses a snapshot when
-   *  every live client reports `true`, so an old client here (or one on a
-   *  browser without the API) transparently keeps receiving plaintext. */
+  /** Whether this browser can inflate a gzipped payload via the native
+   *  `DecompressionStream`. The desktop only compresses when every live client
+   *  reports `true`, so a browser without the API keeps receiving plaintext. */
   supportsGzip: boolean;
+  /** Whether this client runs the generic-compression codec: it decodes both
+   *  raw binary `msg` frames and the `{enc:"gzip",data}` text envelope. The
+   *  desktop gates *all* generic compression on every live client reporting
+   *  `true`, so an old PWA (which omits this) transparently keeps plaintext. */
+  supportsBinary: boolean;
 }
 
 /** Native gzip inflation support (Safari 16.4+, all evergreen Chrome/Firefox).
@@ -27,11 +31,23 @@ export function gzipSupported(): boolean {
   return typeof DecompressionStream !== "undefined";
 }
 
-/** Inflate a base64-encoded gzip blob (the `enc:"gzip"` sessions payload) back
- *  into its JSON string, using the streaming DecompressionStream API. */
+/** Whether this build understands binary `msg` frames and the generic
+ *  `{enc:"gzip",data}` envelope. Requires `DecompressionStream` to inflate;
+ *  binary WebSocket receive is universal where that API exists. */
+export function binarySupported(): boolean {
+  return gzipSupported();
+}
+
+/** Inflate a base64-encoded gzip blob back into its JSON string. */
 async function inflateGzipBase64(b64: string): Promise<string> {
   const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return inflateGzipBytes(bytes.buffer);
+}
+
+/** Inflate raw gzip bytes (a binary `msg` frame's body) into its JSON string,
+ *  using the streaming DecompressionStream API. */
+async function inflateGzipBytes(buf: ArrayBuffer): Promise<string> {
+  const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Response(stream).text();
 }
 
@@ -143,10 +159,22 @@ export class RelayClient {
     const ws = new WebSocket(relayWsUrl());
     this.ws = ws;
     this.authed = false;
+    // Binary frames arrive as ArrayBuffers so we can inflate them directly.
+    ws.binaryType = "arraybuffer";
     ws.onopen = () => {
       ws.send(JSON.stringify({ type: "auth", role: "client", secret: this.secret }));
     };
     ws.onmessage = (ev) => {
+      // A binary frame is a gzipped `msg` payload the relay forwarded verbatim:
+      // inflate → parse → dispatch as a business payload. Decode is async; a
+      // failure is dropped silently (the next snapshot is full state and self-
+      // heals; a lost reply just times out like any dropped frame).
+      if (ev.data instanceof ArrayBuffer) {
+        void inflateGzipBytes(ev.data)
+          .then((json) => this.handlePayload(JSON.parse(json) as Record<string, unknown>))
+          .catch(() => {});
+        return;
+      }
       let frame: Record<string, unknown>;
       try {
         frame = JSON.parse(String(ev.data));
@@ -187,11 +215,24 @@ export class RelayClient {
         this.handlers.onAuthError?.(String(frame.message ?? t("认证失败")));
         break;
       case "msg":
-        this.handlePayload((frame.payload ?? {}) as Record<string, unknown>);
+        this.dispatchMsgPayload((frame.payload ?? {}) as Record<string, unknown>);
         break;
       default:
         break; // notify frames are handled by the service worker via Web Push
     }
+  }
+
+  /** A text `msg` frame's payload. The generic compressed envelope
+   *  `{enc:"gzip",data}` wraps any event, so inflate it here before dispatch;
+   *  otherwise dispatch as-is. */
+  private dispatchMsgPayload(payload: Record<string, unknown>) {
+    if (payload.enc === "gzip" && typeof payload.data === "string") {
+      void inflateGzipBase64(payload.data)
+        .then((json) => this.handlePayload(JSON.parse(json) as Record<string, unknown>))
+        .catch(() => {});
+      return;
+    }
+    this.handlePayload(payload);
   }
 
   private handlePayload(payload: Record<string, unknown>) {
@@ -216,9 +257,11 @@ export class RelayClient {
         break;
       case "sessions": {
         const raw = payload.sessions;
-        // Compressed frame (desktop confirmed every live client supports gzip).
-        // Decode is async; a decode failure is dropped silently because the
-        // next snapshot is full state and self-heals the list.
+        // Legacy compressed shape from an un-updated desktop: the snapshot array
+        // is gzipped+base64 under `sessions` itself. Newer desktops compress the
+        // whole payload via the generic envelope (handled in dispatchMsgPayload),
+        // so this branch only fires against an older peer. Decode is async; a
+        // failure is dropped silently because the next snapshot self-heals.
         if (payload.enc === "gzip" && typeof raw === "string") {
           void inflateGzipBase64(raw)
             .then((json) => this.handlers.onSessions?.(JSON.parse(json) as SessionInfo[]))

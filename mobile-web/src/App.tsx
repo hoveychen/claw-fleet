@@ -4,7 +4,7 @@ import styles from "./App.module.css";
 import { enablePush, pushState, resyncPush, type PushState } from "./push";
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
-import { RelayClient, gzipSupported } from "./relay";
+import { RelayClient, gzipSupported, binarySupported } from "./relay";
 import type {
   DecisionKind,
   DecisionRequest,
@@ -171,6 +171,7 @@ export function App() {
           platform,
           pushSubscribed: pushState() === "granted",
           supportsGzip: gzipSupported(),
+          supportsBinary: binarySupported(),
         };
       },
     );

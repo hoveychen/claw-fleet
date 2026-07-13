@@ -8,8 +8,9 @@ class FakeWs {
   static OPEN = 1;
   static instances: FakeWs[] = [];
   readyState = FakeWs.OPEN;
+  binaryType = "blob";
   onopen: (() => void) | null = null;
-  onmessage: ((ev: { data: string }) => void) | null = null;
+  onmessage: ((ev: { data: string | ArrayBuffer }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
   sent: string[] = [];
@@ -20,9 +21,13 @@ class FakeWs {
     this.sent.push(data);
   }
   close() {}
-  /** 模拟 relay 投递一帧给这个连接。 */
+  /** 模拟 relay 投递一个文本帧给这个连接。 */
   deliver(frame: unknown) {
     this.onmessage?.({ data: JSON.stringify(frame) });
+  }
+  /** 模拟 relay 投递一个二进制帧（压缩后的 msg payload）。 */
+  deliverBinary(buf: ArrayBuffer) {
+    this.onmessage?.({ data: buf });
   }
 }
 
@@ -96,12 +101,17 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
   });
 });
 
-/** 用与桌面端对称的方式（gzip + base64）压一段 JSON，供解压测试当夹具。 */
-async function gzipBase64(json: string): Promise<string> {
+/** 用与桌面端对称的方式 gzip 一段 JSON，返回原始字节（二进制帧夹具）。 */
+async function gzipBytes(json: string): Promise<ArrayBuffer> {
   const stream = new Blob([new TextEncoder().encode(json)])
     .stream()
     .pipeThrough(new CompressionStream("gzip"));
-  const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+  return new Response(stream).arrayBuffer();
+}
+
+/** 用与桌面端对称的方式（gzip + base64）压一段 JSON，供解压测试当夹具。 */
+async function gzipBase64(json: string): Promise<string> {
+  const buf = new Uint8Array(await gzipBytes(json));
   let bin = "";
   for (const b of buf) bin += String.fromCharCode(b);
   return btoa(bin);
@@ -156,6 +166,47 @@ describe("RelayClient sessions 快照解压", () => {
 
     ws.deliver({ type: "msg", payload: { event: "sessions", sessions } });
     expect(got).toEqual(sessions); // 同步路径，无需等待
+    client.close();
+  });
+
+  it("通用 {enc:\"gzip\",data} 文本信封被解压后按事件分发", async () => {
+    const sessions = [{ id: "g1", workspaceName: "delta", status: "active" }];
+    let got: unknown = null;
+    const client = new RelayClient("shared-secret-1234567890", {
+      onSessions: (s) => (got = s),
+    });
+    client.connect();
+    const ws = FakeWs.instances[FakeWs.instances.length - 1];
+    ws.onopen?.();
+    ws.deliver({ type: "authed", agent_online: true, clients: 1 });
+
+    // 整个 payload 被压进 data —— 解压后是 {event:sessions, sessions:[...]}。
+    const data = await gzipBase64(JSON.stringify({ event: "sessions", sessions }));
+    ws.deliver({ type: "msg", payload: { enc: "gzip", data } });
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(got).toEqual(sessions);
+    client.close();
+  });
+
+  it("二进制帧被解压后按事件分发", async () => {
+    const sessions = [{ id: "b1", workspaceName: "epsilon", status: "idle" }];
+    let got: unknown = null;
+    const client = new RelayClient("shared-secret-1234567890", {
+      onSessions: (s) => (got = s),
+    });
+    client.connect();
+    const ws = FakeWs.instances[FakeWs.instances.length - 1];
+    ws.onopen?.();
+    ws.deliver({ type: "authed", agent_online: true, clients: 1 });
+    expect(ws.binaryType).toBe("arraybuffer");
+
+    // 二进制帧的内容就是压缩后的 payload 本身（relay 原样透传）。
+    const buf = await gzipBytes(JSON.stringify({ event: "sessions", sessions }));
+    ws.deliverBinary(buf);
+
+    await new Promise((r) => setTimeout(r, 20));
+    expect(got).toEqual(sessions);
     client.close();
   });
 });
