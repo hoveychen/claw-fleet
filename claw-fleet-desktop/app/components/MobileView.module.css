@@ -11,11 +11,8 @@
   max-width: 520px;
 }
 
-.title {
-  font-size: 18px;
-  font-weight: 700;
-  margin: 0 0 4px;
-}
+/* The page title lives in PageShell's banner now — this file's own 18px `.title`
+   was a ninth, slightly-off copy of it. */
 
 .subtitle {
   color: var(--color-text-secondary);
