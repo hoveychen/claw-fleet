@@ -4,7 +4,7 @@
  * statuses, and workspaces to showcase all core features.
  */
 
-import type { AuditEvent, AuditSummary, DailyReport, DailyReportStats, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
+import type { AuditEvent, AuditSummary, DailyReport, DailyReportStats, HandoffChain, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
 
 const NOW = Date.now();
 const MIN = 60_000;
@@ -508,6 +508,315 @@ export const MOCK_SESSIONS: SessionInfo[] = [
   },
 ];
 
+// ── Large-scale scenario: the "v2.4 release train" ──────────────────────────
+// Extra sessions that turn the board into a believable big-team day: a dozen
+// services shipping one release, delegating swarms, and three live handoff
+// chains. Base defaults live in mkSession; each entry only states what differs.
+
+function mkSession(
+  o: Partial<SessionInfo> & Pick<SessionInfo, "id" | "workspaceName" | "status" | "aiTitle" | "lastMessagePreview">,
+): SessionInfo {
+  return {
+    workspacePath: `/Users/demo/workspace/${o.workspaceName}`,
+    ideName: null,
+    entrypoint: "claw-fleet-newsession",
+    isSubagent: false,
+    parentSessionId: null,
+    agentType: null,
+    agentDescription: null,
+    slug: null,
+    tokenSpeed: 0,
+    agentTokenSpeed: o.tokenSpeed ?? 0,
+    totalOutputTokens: 20_000,
+    totalCostUsd: 0,
+    agentTotalCostUsd: 0,
+    costSpeedUsdPerMin: 0,
+    lastActivityMs: NOW - 1 * MIN,
+    createdAtMs: NOW - 40 * MIN,
+    jsonlPath: `/Users/demo/.claude/projects/${o.workspaceName}/${o.id}.jsonl`,
+    model: "claude-opus-4-20250805",
+    thinkingLevel: null,
+    pid: null,
+    pidPrecise: false,
+    procAlive: false,
+    lastSkill: null,
+    contextPercent: null,
+    agentSource: "claude-code",
+    lastOutcome: null,
+    ...o,
+  };
+}
+
+const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
+  // billing-service — 3-hop handoff chain mid-migration
+  mkSession({
+    id: "sess-billing-1", workspaceName: "billing-service", status: "idle",
+    aiTitle: "Usage-based billing migration — P1 schema audit",
+    lastMessagePreview: "Context at 97% — handing off to a fresh session with notes.",
+    handoff: { chainId: "chain-billing", hop: 1, chainLen: 3 },
+    contextPercent: 0.97, totalOutputTokens: 182_400,
+    lastActivityMs: NOW - 3.2 * HOUR, createdAtMs: NOW - 6 * HOUR,
+  }),
+  mkSession({
+    id: "sess-billing-2", workspaceName: "billing-service", status: "idle",
+    aiTitle: "Usage-based billing migration — P2/P3 backfill jobs",
+    lastMessagePreview: "Backfill validated on staging: 2.1M rows, 0 drift. Relaying P4.",
+    handoff: { chainId: "chain-billing", hop: 2, chainLen: 3 },
+    contextPercent: 0.94, totalOutputTokens: 168_800,
+    lastActivityMs: NOW - 40 * MIN, createdAtMs: NOW - 3.1 * HOUR,
+  }),
+  mkSession({
+    id: "sess-billing-3", workspaceName: "billing-service", status: "executing",
+    aiTitle: "Usage-based billing migration — P4 cutover switches",
+    lastMessagePreview: "Flipping read path behind usage_billing_v2 flag...",
+    handoff: { chainId: "chain-billing", hop: 3, chainLen: 3 },
+    tokenSpeed: 26.4, contextPercent: 0.22, totalOutputTokens: 31_200,
+    taskPlan: { done: 3, total: 6, planId: "billing-migration", currentPlan: "Usage-based billing migration", currentTask: "**P4** — cutover behind flag" },
+    pid: 71001, pidPrecise: true, createdAtMs: NOW - 38 * MIN,
+  }),
+  mkSession({
+    id: "sess-billing-sub", workspaceName: "billing-service", status: "streaming",
+    aiTitle: null, lastMessagePreview: "Dry-run backfill on staging replica...",
+    isSubagent: true, parentSessionId: "sess-billing-3", agentType: "general-purpose",
+    agentDescription: "Backfill dry-run on staging", tokenSpeed: 18.2,
+    model: "claude-sonnet-4-20250514",
+  }),
+
+  // payments-gateway — 2-hop handoff chain
+  mkSession({
+    id: "sess-pay-1", workspaceName: "payments-gateway", status: "idle",
+    aiTitle: "Reconcile Stripe webhooks with ledger — P1 dedupe",
+    lastMessagePreview: "Dedupe index shipped. Relay note covers the retry storm gotcha.",
+    handoff: { chainId: "chain-payments", hop: 1, chainLen: 2 },
+    contextPercent: 0.96, totalOutputTokens: 154_300,
+    lastActivityMs: NOW - 1.5 * HOUR, createdAtMs: NOW - 4 * HOUR,
+  }),
+  mkSession({
+    id: "sess-pay-2", workspaceName: "payments-gateway", status: "thinking",
+    aiTitle: "Reconcile Stripe webhooks with ledger — P2 idempotency keys",
+    lastMessagePreview: "Choosing idempotency key scheme for replayed events...",
+    handoff: { chainId: "chain-payments", hop: 2, chainLen: 2 },
+    tokenSpeed: 11.8, contextPercent: 0.18,
+    taskPlan: { done: 1, total: 4, planId: "webhook-reconcile", currentPlan: "Stripe webhook reconcile", currentTask: "**P2** — idempotency keys" },
+    pid: 71002, pidPrecise: true, createdAtMs: NOW - 80 * MIN,
+  }),
+
+  // search-service — 2-hop handoff chain
+  mkSession({
+    id: "sess-search-1", workspaceName: "search-service", status: "idle",
+    aiTitle: "Reindex pipeline for v2.4 search facets",
+    lastMessagePreview: "Mapping template done; index rebuild takes ~2h — relayed.",
+    handoff: { chainId: "chain-search", hop: 1, chainLen: 2 },
+    contextPercent: 0.98, totalOutputTokens: 176_900,
+    lastActivityMs: NOW - 55 * MIN, createdAtMs: NOW - 5 * HOUR,
+  }),
+  mkSession({
+    id: "sess-search-2", workspaceName: "search-service", status: "executing",
+    aiTitle: "Reindex pipeline for v2.4 search facets — verify & cutover",
+    lastMessagePreview: "Comparing facet counts old vs new index...",
+    handoff: { chainId: "chain-search", hop: 2, chainLen: 2 },
+    tokenSpeed: 24.1, contextPercent: 0.31,
+    pid: 71003, pidPrecise: true, createdAtMs: NOW - 50 * MIN,
+  }),
+
+  // auth-service — delegating swarm (main + 3 subagents)
+  mkSession({
+    id: "sess-auth-main", workspaceName: "auth-service", status: "delegating",
+    aiTitle: "Rotate signing keys + JWKS endpoint for v2.4",
+    lastMessagePreview: "3 subagents out: call-site map, rotation tests, key ceremony docs.",
+    tokenSpeed: 14.2, agentTokenSpeed: 96.5, contextPercent: 0.41,
+    taskPlan: { done: 2, total: 5, planId: "jwks-rotation", currentPlan: "JWKS key rotation", currentTask: "**P3** — rotation tests" },
+    pid: 71004, pidPrecise: true, totalOutputTokens: 64_100,
+  }),
+  mkSession({
+    id: "sess-auth-sub1", workspaceName: "auth-service", status: "thinking",
+    aiTitle: null, lastMessagePreview: "Grepping verify() call sites across services...",
+    isSubagent: true, parentSessionId: "sess-auth-main", agentType: "explore",
+    agentDescription: "Map all verify() call sites", tokenSpeed: 9.3,
+    model: "claude-sonnet-4-20250514",
+  }),
+  mkSession({
+    id: "sess-auth-sub2", workspaceName: "auth-service", status: "executing",
+    aiTitle: null, lastMessagePreview: "Writing JWKS rotation integration tests...",
+    isSubagent: true, parentSessionId: "sess-auth-main", agentType: "general-purpose",
+    agentDescription: "Write JWKS rotation tests", tokenSpeed: 21.7,
+  }),
+  mkSession({
+    id: "sess-auth-sub3", workspaceName: "auth-service", status: "streaming",
+    aiTitle: null, lastMessagePreview: "Documenting the key ceremony runbook...",
+    isSubagent: true, parentSessionId: "sess-auth-main", agentType: "general-purpose",
+    agentDescription: "Update key ceremony docs", tokenSpeed: 16.9,
+    model: "claude-sonnet-4-20250514",
+  }),
+
+  // e2e-tests — regression run + flaky bisect
+  mkSession({
+    id: "sess-e2e-main", workspaceName: "e2e-tests", status: "streaming",
+    aiTitle: "v2.4 regression suite — full matrix run",
+    lastMessagePreview: "412/508 specs green, 1 flaky quarantined...",
+    tokenSpeed: 31.5, contextPercent: 0.36, pid: 71005, pidPrecise: true,
+    totalOutputTokens: 88_700,
+  }),
+  mkSession({
+    id: "sess-e2e-sub", workspaceName: "e2e-tests", status: "executing",
+    aiTitle: null, lastMessagePreview: "Bisecting the flaky checkout spec (attempt 4/8)...",
+    isSubagent: true, parentSessionId: "sess-e2e-main", agentType: "general-purpose",
+    agentDescription: "Bisect flaky checkout spec", tokenSpeed: 19.8,
+    model: "claude-sonnet-4-20250514",
+  }),
+
+  // design-system — migration + a waiting audit
+  mkSession({
+    id: "sess-ds-main", workspaceName: "design-system", status: "executing",
+    aiTitle: "Migrate web-frontend to DS tokens for v2.4",
+    lastMessagePreview: "Replacing hardcoded colors in 47 components...",
+    tokenSpeed: 23.9, contextPercent: 0.52, pid: 71006, pidPrecise: true,
+    totalOutputTokens: 71_500,
+  }),
+  mkSession({
+    id: "sess-ds-audit", workspaceName: "design-system", status: "waitingInput",
+    aiTitle: "Color-contrast audit before v2.4 freeze",
+    lastMessagePreview: "3 tokens fail AA contrast. Ship as-is or fix before freeze?",
+    contextPercent: 0.61, lastActivityMs: NOW - 12 * MIN,
+    totalOutputTokens: 45_200, lastOutcome: ["needs_input"],
+  }),
+
+  // observability — tracing work
+  mkSession({
+    id: "sess-obs-main", workspaceName: "observability", status: "streaming",
+    aiTitle: "Wire OTel traces through the payment path",
+    lastMessagePreview: "Propagating trace context across the webhook consumers...",
+    tokenSpeed: 28.4, contextPercent: 0.44, pid: 71007, pidPrecise: true,
+    totalOutputTokens: 59_300,
+  }),
+  mkSession({
+    id: "sess-obs-sub", workspaceName: "observability", status: "executing",
+    aiTitle: null, lastMessagePreview: "Adding span attributes to consumer handlers...",
+    isSubagent: true, parentSessionId: "sess-obs-main", agentType: "general-purpose",
+    agentDescription: "Instrument webhook consumers", tokenSpeed: 15.1,
+    model: "claude-sonnet-4-20250514",
+  }),
+
+  // notif-service / release-tools / infra — the long tail of a release day
+  mkSession({
+    id: "sess-notif", workspaceName: "notif-service", status: "executing",
+    aiTitle: "Batch push notifications — cut p95 latency",
+    lastMessagePreview: "Coalescing per-user pushes into 500ms windows...",
+    tokenSpeed: 20.6, contextPercent: 0.29, pid: 71008, pidPrecise: true,
+  }),
+  mkSession({
+    id: "sess-release-changelog", workspaceName: "release-tools", status: "executing",
+    aiTitle: "Assemble v2.4 changelog from merged PRs",
+    lastMessagePreview: "Grouping 63 merged PRs by scope...",
+    tokenSpeed: 17.3, contextPercent: 0.24, pid: 71009, pidPrecise: true,
+  }),
+  mkSession({
+    id: "sess-release-canary", workspaceName: "release-tools", status: "thinking",
+    aiTitle: "Stage canary rollout plan (5% → 50% → 100%)",
+    lastMessagePreview: "Weighing bake time per stage against the release window...",
+    tokenSpeed: 8.9, contextPercent: 0.19,
+    pid: 71010, pidPrecise: true,
+  }),
+  mkSession({
+    id: "sess-infra-canary", workspaceName: "infra-terraform", status: "executing",
+    aiTitle: "Blue/green target groups for the v2.4 canary",
+    lastMessagePreview: "Writing the weighted target group module...",
+    tokenSpeed: 13.7, contextPercent: 0.33, pid: 71011, pidPrecise: true,
+  }),
+
+  // Finished / idle tail — a board is never all-green-lights
+  mkSession({
+    id: "sess-admin-widgets", workspaceName: "admin-dashboard", status: "idle",
+    aiTitle: "Usage analytics widgets for the ops board",
+    lastMessagePreview: "Widgets shipped behind the ops flag. All tests green.",
+    lastActivityMs: NOW - 2.5 * HOUR, lastOutcome: ["feature_added"],
+    totalOutputTokens: 93_400, contextPercent: 0.58,
+  }),
+  mkSession({
+    id: "sess-i18n-extract", workspaceName: "i18n-tooling", status: "idle",
+    aiTitle: "Extract v2.4 strings for the locale bundle",
+    lastMessagePreview: "412 new strings extracted, bundle uploaded for translation.",
+    lastActivityMs: NOW - 3.5 * HOUR, lastOutcome: ["celebrating"],
+    totalOutputTokens: 38_100, contextPercent: 0.27,
+    model: "claude-sonnet-4-20250514",
+  }),
+  mkSession({
+    id: "sess-api-e2e", workspaceName: "api-server", status: "streaming",
+    aiTitle: null, lastMessagePreview: "Replaying the auth e2e suite against the JWT fix...",
+    isSubagent: true, parentSessionId: "sess-api-main", agentType: "general-purpose",
+    agentDescription: "Verify JWT fix against e2e suite", tokenSpeed: 22.3,
+    model: "claude-sonnet-4-20250514",
+  }),
+];
+
+MOCK_SESSIONS.push(...RELEASE_TRAIN_SESSIONS);
+
+// Every session gets a believable price tag — the sidebar spend rate and the
+// per-card $ figure are sums over these, and an all-zero board reads as fake.
+for (const s of MOCK_SESSIONS) {
+  s.costSpeedUsdPerMin = Math.round(s.tokenSpeed * 1.2) / 100;
+  s.totalCostUsd = Math.round(s.totalOutputTokens * 0.45) / 10000;
+  s.agentTotalCostUsd = s.totalCostUsd;
+}
+
+// ── Handoff chains (drives the 接力 chip + expanded chain panel) ─────────────
+
+export const MOCK_HANDOFF_CHAINS: Record<string, HandoffChain> = {
+  "chain-billing": {
+    chainId: "chain-billing",
+    workspacePath: "/Users/demo/workspace/billing-service",
+    planId: "billing-migration",
+    links: [
+      {
+        fromSessionId: "sess-billing-1",
+        toSessionId: "sess-billing-2",
+        note: "P1 done — schema audit findings in wiki. Gotcha: usage_events needs the (ts, idempotency_key) unique index BEFORE backfill or dedupe silently drops rows.",
+        planId: "billing-migration",
+        nextTask: "P2",
+        handedAt: NOW - 3.1 * HOUR,
+      },
+      {
+        fromSessionId: "sess-billing-2",
+        toSessionId: "sess-billing-3",
+        note: "P2/P3 green: backfill + shadow table validated on staging (2.1M rows, 0 drift). P4: flip read path behind usage_billing_v2, keep dual-write for 48h.",
+        planId: "billing-migration",
+        nextTask: "P4",
+        handedAt: NOW - 38 * MIN,
+      },
+    ],
+  },
+  "chain-payments": {
+    chainId: "chain-payments",
+    workspacePath: "/Users/demo/workspace/payments-gateway",
+    planId: "webhook-reconcile",
+    links: [
+      {
+        fromSessionId: "sess-pay-1",
+        toSessionId: "sess-pay-2",
+        note: "P1 dedupe shipped. Watch out: Stripe retries storm after 5xx — the ledger writer must be idempotent per event id, not per charge id.",
+        planId: "webhook-reconcile",
+        nextTask: "P2",
+        handedAt: NOW - 78 * MIN,
+      },
+    ],
+  },
+  "chain-search": {
+    chainId: "chain-search",
+    workspacePath: "/Users/demo/workspace/search-service",
+    planId: null,
+    links: [
+      {
+        fromSessionId: "sess-search-1",
+        toSessionId: "sess-search-2",
+        note: "Mapping template merged; full reindex takes ~2h, started 14:05. Verify facet counts before cutover — old index stays hot until then.",
+        planId: null,
+        nextTask: null,
+        handedAt: NOW - 48 * MIN,
+      },
+    ],
+  },
+};
+
 // ── Messages (for session detail view) ──────────────────────────────────────
 
 export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
@@ -861,19 +1170,19 @@ export const MOCK_ACCOUNT_INFO = {
   auth_method: "api_key",
   usage_source: "anthropic",
   five_hour: {
-    utilization: 0.42,
-    resets_at: new Date(NOW + 2.5 * HOUR).toISOString(),
-    prev_utilization: 0.38,
+    utilization: 0.87,
+    resets_at: new Date(NOW + 1.2 * HOUR).toISOString(),
+    prev_utilization: 0.74,
   },
   seven_day: {
-    utilization: 0.28,
+    utilization: 0.64,
     resets_at: new Date(NOW + 3 * 24 * HOUR).toISOString(),
-    prev_utilization: 0.31,
+    prev_utilization: 0.58,
   },
   seven_day_sonnet: {
-    utilization: 0.15,
+    utilization: 0.31,
     resets_at: new Date(NOW + 3 * 24 * HOUR).toISOString(),
-    prev_utilization: 0.12,
+    prev_utilization: 0.26,
   },
 };
 
@@ -1009,7 +1318,7 @@ export const MOCK_SETUP_STATUS = {
   cli_installed: true,
   claude_dir_exists: true,
   has_sessions: true,
-  detected_tools: { openclaw: true, cursor: true, codex: true },
+  detected_tools: { cli: true, vscode: true, openclaw: true, cursor: true, codex: true },
 };
 
 // ── Hooks setup plan ────────────────────────────────────────────────────────

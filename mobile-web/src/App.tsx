@@ -53,13 +53,17 @@ function fmtTokens(n: number): string {
 
 type Tab = "decisions" | "tasks" | "wiki" | "more";
 
+// `?mock` runs the whole app on fixtures (no relay, no pairing) — used by the
+// promo screen-recording pipeline and for quick UI work in a plain browser.
+const MOCK = isMockMode();
+
 export function App() {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
   const { t } = useI18n();
   // `?mock` stands in for a pairing secret so the gate below opens and the
   // effect that builds the client runs — it just builds a MockRelayClient.
   const [secret, setSecret] = useState<string | null>(() =>
-    isMockMode() ? "mock-secret" : loadSecretSync(),
+    MOCK ? "mock-secret" : loadSecretSync(),
   );
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
@@ -166,7 +170,7 @@ export function App() {
       },
       onAuthError: (message: string) => setAuthError(message),
     };
-    const client = isMockMode()
+    const client = MOCK
       ? new MockRelayClient(handlers)
       : new RelayClient(
           secret,
@@ -187,7 +191,7 @@ export function App() {
         );
     clientRef.current = client;
     client.connect();
-    void resyncPush(client);
+    if (!MOCK) void resyncPush(client);
     // Mobile browsers may never run React cleanup on tab close — tell the
     // desktop we're leaving on pagehide too (desktop timeout is the backstop).
     const onPageHide = () => client.sayGoodbye();
@@ -398,7 +402,7 @@ export function App() {
         </span>
       </header>
 
-      {needsA2hsForDurableStorage() && !a2hsDismissed && (
+      {!MOCK && needsA2hsForDurableStorage() && !a2hsDismissed && (
         <div className={styles.pushBanner}>
           <span>
             {t(
@@ -417,7 +421,7 @@ export function App() {
         </div>
       )}
 
-      {push !== "granted" && push !== "unsupported" && push !== "unsupported-harmony" && (
+      {!MOCK && push !== "granted" && push !== "unsupported" && push !== "unsupported-harmony" && (
         <div className={styles.pushBanner}>
           {push === "ios-needs-a2hs" ? (
             <span>{t("要接收通知，请先用 Safari 分享菜单「添加到主屏幕」，再从主屏幕打开。")}</span>

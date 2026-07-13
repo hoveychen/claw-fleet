@@ -62,7 +62,7 @@ export const Tip1: React.FC = () => (
     }}
     bubble="Three agents coding. One's been waiting since lunch. Now you can see it."
     side="right"
-    pip={{ src: "footage/t1-board.mp4", startFrom: 240, pos: "tr" }}
+    pip={{ src: "footage/t1-board.mp4", startFrom: 210, pos: "tr", zoom: { scale: 1.5, origin: "32% 30%" } }}
   >
     <Tip1Stage />
   </TipShell>
@@ -84,7 +84,7 @@ const Tip2Stage: React.FC = () => {
     <div
       style={{
         position: "absolute",
-        top: 250,
+        top: 224,
         right: 150,
         width: 760,
         background: T.card,
@@ -103,10 +103,10 @@ const Tip2Stage: React.FC = () => {
         ${dollars.toFixed(2)}
         <span style={{ fontSize: 40, color: T.inkDim }}>/min</span>
       </div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 130, marginTop: 22 }}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 10, height: 108, marginTop: 20 }}>
         {Array.from({ length: bars }, (_, i) => {
           const grow = clamp01((frame - 10 - i * 4) / 12);
-          const h = lerp(8, 14 + Math.pow(i / bars, 2.2) * 116, easeOut(grow));
+          const h = lerp(8, 14 + Math.pow(i / bars, 2.2) * 94, easeOut(grow));
           return (
             <div
               key={i}
@@ -120,6 +120,22 @@ const Tip2Stage: React.FC = () => {
             />
           );
         })}
+      </div>
+      <div style={{ marginTop: 24, opacity: clamp01((frame - 68) / 12) }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontFamily: FONT.mono, fontSize: 19, color: T.inkSecondary, marginBottom: 8 }}>
+          <span>Claude plan · 5h window</span>
+          <span style={{ color: T.red, fontWeight: 700 }}>87%</span>
+        </div>
+        <div style={{ height: 12, borderRadius: 100, background: T.paperDeep, border: `1.5px solid ${T.border}`, overflow: "hidden" }}>
+          <div
+            style={{
+              height: "100%",
+              width: `${lerp(0, 87, ease(clamp01((frame - 70) / 22)))}%`,
+              background: T.red,
+              borderRadius: 100,
+            }}
+          />
+        </div>
       </div>
       <div
         style={{
@@ -153,7 +169,7 @@ export const Tip2: React.FC = () => (
     }}
     bubble="That's not a feature shipping. That's $4 a minute of apologies."
     side="left"
-    pip={{ src: "footage/t2-bill.mp4", startFrom: 210, pos: "tl" }}
+    pip={{ src: "footage/t2-usage.mp4", startFrom: 180, pos: "tl", zoom: { scale: 2.4, origin: "0% 74%" } }}
   >
     <Tip2Stage />
   </TipShell>
@@ -194,10 +210,25 @@ const Tip3Stage: React.FC = () => {
             color: T.nightText,
             borderRadius: 10,
             padding: "18px 24px",
-            marginBottom: 24,
+            marginBottom: 18,
           }}
         >
           $ rm -rf <span style={{ color: "#fca5a5" }}>/var/data/prod-cache</span>
+        </div>
+        <div
+          style={{
+            fontFamily: FONT.mono,
+            fontSize: 21,
+            color: T.amber,
+            background: "rgba(180,83,9,0.08)",
+            border: `1.5px solid rgba(180,83,9,0.35)`,
+            borderRadius: 10,
+            padding: "12px 18px",
+            marginBottom: 20,
+            opacity: clamp01((frame - 34) / 12),
+          }}
+        >
+          AI analysis: other services read this cache — <b>HIGH risk</b>, block it.
         </div>
         <div style={{ display: "flex", gap: 16 }}>
           <span
@@ -250,11 +281,11 @@ const Tip3Stage: React.FC = () => {
       <Cursor
         keys={[
           { at: 14, x: 1250, y: 850 },
-          { at: 44, x: 245, y: 482 },
-          { at: 62, x: 245, y: 482, click: true },
+          { at: 44, x: 245, y: 548 },
+          { at: 62, x: 245, y: 548, click: true },
         ]}
       />
-      <ClickRipple x={260} y={498} start={62} />
+      <ClickRipple x={260} y={564} start={62} />
     </>
   );
 };
@@ -268,7 +299,7 @@ export const Tip3: React.FC = () => (
     }}
     bubble="Not on my watch, sailor."
     side="right"
-    pip={{ src: "footage/t3-audit.mp4", startFrom: 210, pos: "bl" }}
+    pip={{ src: "footage/t3-guard.mp4", startFrom: 225, pos: "bl", zoom: { scale: 2.0, origin: "50% 100%" } }}
   >
     <Tip3Stage />
   </TipShell>
