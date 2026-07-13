@@ -227,42 +227,15 @@ pub fn remove_fleet_hooks() -> Result<(), String> {
 
 // ── Guard hook (synchronous interception) ────────────────────────────────────
 
-/// Resolve the `fleet` binary path for use in the guard hook command.
+/// Resolve the `fleet` binary path baked into the hook commands we write.
+///
+/// Delegates to [`crate::fleet_cli::resolve_fleet_binary`] — this used to carry
+/// its own copy that looked only for an extension-less `fleet`, only fell back
+/// to `/usr/local/bin/fleet`, and gated its PATH probe behind `#[cfg(unix)]`,
+/// so on Windows it always returned `None` and every hook install failed with
+/// "Cannot find fleet binary".
 pub(crate) fn resolve_fleet_binary() -> Option<String> {
-    // 1. Check if this process IS the fleet binary (desktop app has sidecar).
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let fleet_bin = dir.join("fleet");
-            if fleet_bin.exists() {
-                return Some(fleet_bin.to_string_lossy().to_string());
-            }
-        }
-    }
-
-    // 2. Check common install locations.
-    let candidates = [
-        "/usr/local/bin/fleet",
-    ];
-    for c in candidates {
-        if std::path::Path::new(c).exists() {
-            return Some(c.to_string());
-        }
-    }
-
-    // 3. Try PATH.
-    #[cfg(unix)]
-    {
-        if let Ok(output) = std::process::Command::new("which").arg("fleet").output() {
-            if output.status.success() {
-                let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !path.is_empty() {
-                    return Some(path);
-                }
-            }
-        }
-    }
-
-    None
+    crate::fleet_cli::resolve_fleet_binary().map(|p| p.to_string_lossy().to_string())
 }
 
 /// Install the guard hook (synchronous PreToolUse for Bash) into settings.json.

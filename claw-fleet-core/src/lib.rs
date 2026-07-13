@@ -24,6 +24,7 @@ pub mod dpapi;
 pub mod elicitation;
 pub mod feishu;
 pub mod file_explorer;
+pub mod fleet_cli;
 pub mod foxy;
 pub mod git_ops;
 pub mod guard;
