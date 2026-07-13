@@ -499,6 +499,13 @@ fn spawn_new_session_impl(
     args.extend(live_thinking_stream_args());
     args.extend(override_args);
     args.extend(permission_prompt_tool_args());
+    // The pure-chat workspace is Fleet-owned and may not exist yet — create it
+    // before the `is_dir` gate below rejects the spawn — and launch it as a chat
+    // rather than a coding agent (see `chat_workspace`).
+    if crate::chat_workspace::is_chat_workspace(workspace_path) {
+        crate::chat_workspace::ensure_chat_workspace()?;
+        args.extend(crate::chat_workspace::chat_session_args());
+    }
     crate::log_debug(&format!(
         "new_session: claude {} <prompt {} chars> (cwd={}, stderr_log={})",
         args[2..].join(" "),

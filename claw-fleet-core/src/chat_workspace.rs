@@ -135,6 +135,19 @@ fn user_settings_path() -> Option<PathBuf> {
 /// Each `--settings` / `--mcp-config` flag is added only when its file resolves,
 /// so a host without them degrades to "no global CLAUDE.md" rather than failing
 /// to launch.
+/// [`chat_session_args`] when `workspace_path` is the chat workspace, empty
+/// otherwise. Every spawn site (new session, resume, handoff, the mobile relay)
+/// runs its args through this, so a chat stays a chat across all of its turns —
+/// a resume that skipped these flags would silently reload the 22k-token
+/// doctrine on turn two and contradict the brief the first turn was given.
+pub fn chat_launch_args(workspace_path: &str) -> Vec<String> {
+    if is_chat_workspace(workspace_path) {
+        chat_session_args()
+    } else {
+        Vec::new()
+    }
+}
+
 pub fn chat_session_args() -> Vec<String> {
     let mut args = vec!["--setting-sources".to_string(), "project".to_string()];
     if let Some(settings) = user_settings_path() {
@@ -216,6 +229,16 @@ mod tests {
             // synthetic home: the flag pair must degrade, not panic.
             let args = chat_session_args();
             assert_eq!(args, vec!["--setting-sources", "project"]);
+        });
+    }
+
+    #[test]
+    fn chat_launch_args_are_empty_outside_the_chat_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        with_home(tmp.path(), || {
+            assert!(chat_launch_args("/Users/foo/my-project").is_empty());
+            let chat = tmp.path().join(".fleet/chat");
+            assert!(!chat_launch_args(&chat.to_string_lossy()).is_empty());
         });
     }
 
