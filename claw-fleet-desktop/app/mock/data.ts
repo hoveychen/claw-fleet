@@ -1790,7 +1790,7 @@ export const MOCK_TIMELINE_REPORTS: Map<string, DailyReport> = new Map([
 export const MOCK_WIKI_DOCS = [
   {
     slug: "arch/overview",
-    title: "架构总览",
+    title: "Architecture Overview",
     kind: "markdown" as const,
     entry: "overview.md",
     workspacePath: "/Users/demo/workspace/claw-fleet",
@@ -1805,7 +1805,7 @@ export const MOCK_WIKI_DOCS = [
   },
   {
     slug: "arch/session-scanner",
-    title: "会话扫描器设计",
+    title: "Session Scanner Design",
     kind: "markdown" as const,
     entry: "session-scanner.md",
     workspacePath: "/Users/demo/workspace/claw-fleet",
@@ -1818,8 +1818,53 @@ export const MOCK_WIKI_DOCS = [
     ],
   },
   {
-    slug: "perf-report",
-    title: "启动台性能分析",
+    slug: "arch/backend-trait",
+    title: "Backend Trait: Local & Remote",
+    kind: "markdown" as const,
+    entry: "backend-trait.md",
+    workspacePath: "/Users/demo/workspace/claw-fleet",
+    workspaceName: "claw-fleet",
+    createdMs: NOW - 4 * DAY,
+    updatedMs: NOW - 6 * HOUR,
+    currentVersion: "v2",
+    versions: [
+      { id: "v2", publishedMs: NOW - 6 * HOUR, sizeBytes: 11_300, fileCount: 1, sourcePath: "/tmp/backend-trait.md" },
+      { id: "v1", publishedMs: NOW - 4 * DAY, sizeBytes: 9_800, fileCount: 1, sourcePath: "/tmp/backend-trait.md" },
+    ],
+  },
+  {
+    slug: "research/token-usage",
+    title: "Token Usage Deep-Dive",
+    kind: "markdown" as const,
+    entry: "token-usage.md",
+    workspacePath: "/Users/demo/workspace/data-pipeline",
+    workspaceName: "data-pipeline",
+    createdMs: NOW - 2 * DAY,
+    updatedMs: NOW - 5 * HOUR,
+    currentVersion: "v1",
+    versions: [
+      { id: "v1", publishedMs: NOW - 5 * HOUR, sizeBytes: 7_600, fileCount: 1, sourcePath: "/tmp/token-usage.md" },
+    ],
+  },
+  {
+    slug: "guides/incident-runbook",
+    title: "Incident Response Runbook",
+    kind: "markdown" as const,
+    entry: "runbook.md",
+    workspacePath: "/Users/demo/workspace/api-server",
+    workspaceName: "api-server",
+    createdMs: NOW - 6 * DAY,
+    updatedMs: NOW - 3 * HOUR,
+    currentVersion: "v4",
+    versions: [
+      { id: "v4", publishedMs: NOW - 3 * HOUR, sizeBytes: 8_100, fileCount: 1, sourcePath: "/tmp/runbook.md" },
+      { id: "v3", publishedMs: NOW - 2 * DAY, sizeBytes: 7_700, fileCount: 1, sourcePath: "/tmp/runbook.md" },
+      { id: "v2", publishedMs: NOW - 4 * DAY, sizeBytes: 7_200, fileCount: 1, sourcePath: "/tmp/runbook.md" },
+    ],
+  },
+  {
+    slug: "perf/launchpad-report",
+    title: "Launchpad Performance Analysis",
     kind: "htmlDir" as const,
     entry: "index.html",
     workspacePath: "/Users/demo/workspace/api-server",
@@ -1833,6 +1878,173 @@ export const MOCK_WIKI_DOCS = [
     ],
   },
 ];
+
+/** Per-slug markdown bodies for `get_wiki_file_text`. Realistic English docs
+ *  with [[slug]] cross-references so the wiki-link rendering shows on camera. */
+export const MOCK_WIKI_BODIES: Record<string, string> = {
+  "arch/overview": `# Architecture Overview
+
+Fleet is a desktop cockpit for a fleet of coding agents. One scanner watches
+every agent's transcript on disk; one supervisor owns spawn/stop; the UI is a
+thin projection of that state. Nothing here polls the agents themselves —
+everything derives from files they already write.
+
+\`\`\`mermaid
+flowchart LR
+  T[Agent transcripts<br/>~/.claude/projects] --> S[Session Scanner]
+  S --> B{Backend trait}
+  B -->|local| L[LocalBackend]
+  B -->|ssh| R[RemoteBackend]
+  L --> UI[Desktop UI]
+  R --> UI
+  UI --> SUP[Supervisor<br/>spawn / stop / handoff]
+  SUP --> T
+\`\`\`
+
+## Components
+
+| Component | Crate | Responsibility |
+| --- | --- | --- |
+| Session Scanner | \`core\` | Tail JSONL transcripts, derive live status |
+| Backend trait | \`core\` | One API surface for local FS and SSH probe |
+| Supervisor | \`core\` | Detached spawn, zombie migration, handoff relay |
+| Decision Panel | \`desktop\` | Queue every wait-for-input moment as a card |
+| Guard | \`cli\` | Audit gate for Bash commands across all agents |
+
+## Design rules
+
+1. **Files are the API.** Agents never talk to Fleet; Fleet reads what agents
+   already write. A crashed UI loses nothing.
+2. **Every feature works remote.** All data access goes through the backend
+   trait — see [[arch/backend-trait]] for the contract and its failure modes.
+3. **Status is derived, never stored.** The scanner recomputes liveness from
+   transcript mtime + process table on every tick; details in
+   [[arch/session-scanner]].
+
+## Data volume
+
+At 120 concurrent sessions the scanner sustains a full pass in under 40 ms;
+token accounting for the usage report is covered in [[research/token-usage]].
+When an incident does hit the fleet, start from [[guides/incident-runbook]].
+`,
+
+  "arch/session-scanner": `# Session Scanner Design
+
+The scanner is the read path of the whole app: it tails every agent transcript
+under \`~/.claude/projects\` and derives session state without touching the
+agents. It is deliberately stateless — kill it any time, restart costs one pass.
+
+## Status derivation
+
+A session is **live** when its JSONL grew within the last 15 s *and* a process
+with a matching cwd exists in the process table. Neither signal alone is
+enough: transcripts keep growing briefly after a kill, and PIDs get reused.
+
+\`\`\`rust
+pub fn derive_status(t: &Transcript, procs: &ProcTable) -> Status {
+    match (t.grew_recently(), procs.alive_for(&t.cwd)) {
+        (true, true)   => Status::Running,
+        (true, false)  => Status::Draining,   // flush after exit
+        (false, true)  => Status::Idle,
+        (false, false) => Status::Stopped,
+    }
+}
+\`\`\`
+
+## Incremental tailing
+
+Each file keeps a byte offset; a pass only reads the delta. Full re-parse is
+reserved for truncation (offset > file length ⇒ the agent rotated the file).
+
+See [[arch/overview]] for where the scanner sits in the larger system.
+`,
+
+  "arch/backend-trait": `# Backend Trait: Local & Remote
+
+Every feature ships twice or it doesn't ship: once against the local
+filesystem, once against the SSH probe's HTTP API. The \`Backend\` trait is the
+single seam that keeps the two in lockstep.
+
+## The contract
+
+\`\`\`rust
+#[async_trait]
+pub trait Backend: Send + Sync {
+    fn scan_sessions(&self) -> Result<Vec<SessionInfo>>;
+    fn read_transcript(&self, id: &str, from: u64) -> Result<Vec<RawMessage>>;
+    fn list_wiki_docs(&self) -> Result<Vec<WikiDoc>>;
+    // ... every UI-visible capability lands here first
+}
+\`\`\`
+
+Rules that keep remote honest:
+
+- **No Tauri command bypasses the trait.** Commands delegate to
+  \`state.backend\`, never to core functions directly — otherwise the feature
+  silently works only on local.
+- **Types crossing HTTP derive both \`Serialize\` and \`Deserialize\`.**
+- **Remote errors degrade to empty, not to crash.** A dropped SSH tunnel
+  renders an offline badge; the UI keeps the last good snapshot.
+
+Background on the overall layering lives in [[arch/overview]].
+`,
+
+  "research/token-usage": `# Token Usage Deep-Dive
+
+Where do the tokens actually go? Seven days of fleet-wide accounting,
+aggregated from per-session transcripts by the scanner.
+
+## Split by consumer
+
+| Consumer | Share | Notes |
+| --- | ---: | --- |
+| Main-loop reasoning | 41% | scales with plan length, not diff size |
+| Subagent fan-out | 27% | review/verify swarms dominate |
+| Tool results re-read | 19% | biggest cut: cache-aware re-reads |
+| Context re-injection | 13% | compaction summaries + hooks |
+
+## Findings
+
+1. **Fan-out is cheap insurance.** Verification swarms cost 27% of tokens but
+   caught 4 of the 5 regressions that week.
+2. **Re-reads are the waste pool.** Agents re-reading unchanged files burn
+   ~1/5 of total spend; scoped reads cut it in half in the pilot.
+3. **Compaction pays for itself** past the 5-minute cache TTL — the math flips
+   once a session crosses ~200k context.
+
+Methodology matches the scanner's accounting pass described in
+[[arch/session-scanner]].
+`,
+
+  "guides/incident-runbook": `# Incident Response Runbook
+
+When the fleet misbehaves, work top-down: **observe → isolate → stop → replay**.
+Never debug by restarting everything — you lose the transcripts' tail state.
+
+## 1. Observe
+
+- Open the launchpad; sort by token speed. Runaway agents sit at the top.
+- \`fleet list --active\` from a terminal gives the same view headless.
+
+## 2. Isolate
+
+- Check the suspect's transcript tail before touching it: is it looping on a
+  failing tool call, or legitimately deep in a long build?
+
+## 3. Stop
+
+- \`fleet stop <session-id>\` sends the graceful path (SIGINT, resumable).
+- Only escalate to \`--force\` when the transcript shows no tool activity for
+  several minutes — force-kill orphans child processes.
+
+## 4. Replay
+
+- Resume with the transcript intact; the scanner re-derives status on the next
+  pass (see [[arch/session-scanner]]).
+
+Architecture context: [[arch/overview]].
+`,
+};
 
 // ── Explorer / Skills file trees ────────────────────────────────────────────
 // Same trap as the wiki: without a handler the mock returns null and the view

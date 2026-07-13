@@ -18,6 +18,7 @@ import {
   MOCK_OPENCLAW_ACCOUNT,
   MOCK_MEMORIES,
   MOCK_WIKI_DOCS,
+  MOCK_WIKI_BODIES,
   MOCK_EXPLORER_ROOTS,
   MOCK_EXPLORER_TREE,
   MOCK_GIT_STATUS,
@@ -164,7 +165,8 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "search_wiki_docs":
       return [];
     case "get_wiki_file_text":
-      return "# 架构总览\n\nmock 模式下的占位正文。";
+      return MOCK_WIKI_BODIES[(args.slug as string) ?? ""]
+        ?? "# Not published\n\nThis document has no mock body.";
     case "list_plugins":
       return [];
     case "list_marketplaces":
