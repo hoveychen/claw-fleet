@@ -80,6 +80,16 @@ export function DecisionsView({
   }, [foundIndex]);
   const active = sorted[activeIndex];
 
+  // A long card leaves the page scrolled to its action row; once it resolves,
+  // the next card mounts under that same offset with its head off-screen. Snap
+  // back to the top whenever the focused card changes (answered, or picked from
+  // the queue bar) so each card starts from its head.
+  const activeCardId = active?.id ?? null;
+  useEffect(() => {
+    if (activeCardId === null || window.scrollY === 0) return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeCardId]);
+
   if (decisions.length === 0) {
     return agentOnline ? (
       <EmptyState
