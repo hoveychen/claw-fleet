@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useAuditStore, useDetailStore, useSessionsStore, useUIStore } from "../store";
 import type {
@@ -12,13 +13,8 @@ import type {
 } from "../types";
 import { ShieldCheck } from "lucide-react";
 import { EmptyState } from "./EmptyState";
-import { useResizableWidth } from "../hooks/useResizableWidth";
-import { ResizeHandle } from "./ResizeHandle";
+import { PageShell } from "./PageShell";
 import styles from "./AuditView.module.css";
-
-/** The audit detail pane sits on the right, so it grows as the cursor moves left. */
-const AUDIT_RAIL = { min: 280, max: 720, initial: 380, side: "right" } as const;
-import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 
 // ── Risk level helpers ──────────────────────────────────────────────────────
 
@@ -59,35 +55,36 @@ export function AuditView() {
   const { t, i18n } = useTranslation();
   const [tab, setTab] = useState<AuditTab>("events");
 
-  return (
-    <div className={styles.page}>
-      <header className={styles.header} data-tauri-drag-region>
-        <div className={styles.title_row}>
-          <h1 className={styles.title}>{t("audit.panel_title")}</h1>
-        </div>
-        <div className={styles.tab_bar}>
-          <button
-            className={`${styles.tab_btn} ${tab === "events" ? styles.tab_active : ""}`}
-            onClick={() => setTab("events")}
-          >
-            {t("audit.tab_events")}
-          </button>
-          <button
-            className={`${styles.tab_btn} ${tab === "rules" ? styles.tab_active : ""}`}
-            onClick={() => setTab("rules")}
-          >
-            {t("audit.tab_rules")}
-          </button>
-        </div>
-      </header>
-      {tab === "events" ? <EventsTab /> : <RulesTab lang={i18n.language} />}
+  // Each tab renders its own PageShell — their sub-bar and body genuinely differ,
+  // and both declare view="audit", so the collapsed flag and the rail width are
+  // the same state either way. The tab bar is the shell's banner content.
+  const tabBar = (
+    <div className={styles.tab_bar}>
+      <button
+        className={`${styles.tab_btn} ${tab === "events" ? styles.tab_active : ""}`}
+        onClick={() => setTab("events")}
+      >
+        {t("audit.tab_events")}
+      </button>
+      <button
+        className={`${styles.tab_btn} ${tab === "rules" ? styles.tab_active : ""}`}
+        onClick={() => setTab("rules")}
+      >
+        {t("audit.tab_rules")}
+      </button>
     </div>
+  );
+
+  return tab === "events" ? (
+    <EventsTab tabBar={tabBar} />
+  ) : (
+    <RulesTab lang={i18n.language} tabBar={tabBar} />
   );
 }
 
 // ── Events Tab ──────────────────────────────────────────────────────────────
 
-function EventsTab() {
+function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   const { t } = useTranslation();
   const [summary, setSummary] = useState<AuditSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -96,13 +93,6 @@ function EventsTab() {
   const { sessions } = useSessionsStore();
   const { open } = useDetailStore();
   const { setViewMode } = useUIStore();
-  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["audit"]);
-  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const {
-    width: railWidth,
-    isDragging: railDragging,
-    onMouseDown: onRailMouseDown,
-  } = useResizableWidth("audit-rail-width", AUDIT_RAIL);
   const { isRead, markAsRead, getEventKey, setCriticalEvents, markAllCriticalAsRead, unreadCriticalCount } =
     useAuditStore();
 
@@ -148,10 +138,57 @@ function EventsTab() {
     }
   };
 
-  return (
+  const eventsDetail = selectedEvent ? (
     <>
-      {/* Filter bar */}
-      <div className={styles.filter_bar}>
+        <div className={styles.detail_header}>
+          <div className={styles.detail_title}>
+            <span className={`${styles.risk_badge} ${styles[RISK_CLASS[selectedEvent.riskLevel]]}`}>
+              {RISK_LABELS[selectedEvent.riskLevel]}
+            </span>
+            <span className={styles.detail_workspace}>{selectedEvent.workspaceName}</span>
+            <span className={styles.detail_sep}>/</span>
+            <span className={styles.detail_name}>{selectedEvent.toolName}</span>
+          </div>
+          <button className={styles.detail_close} onClick={() => setSelectedEvent(null)}>✕</button>
+        </div>
+        <div className={styles.detail_body}>
+          <DetailRow label={t("audit.workspace")} value={selectedEvent.workspaceName} />
+          <DetailRow label={t("audit.source")} value={selectedEvent.agentSource} />
+          {selectedEvent.timestamp && <DetailRow label={t("audit.time")} value={new Date(selectedEvent.timestamp).toLocaleString()} />}
+          {selectedEvent.riskTags.length > 0 && (
+            <div className={styles.detail_row}>
+              <span className={styles.detail_label}>{t("audit.tags")}</span>
+              <span className={styles.detail_value}>
+                {selectedEvent.riskTags.map((tag) => <span key={tag} className={styles.tag}>{tag}</span>)}
+              </span>
+            </div>
+          )}
+          <div className={styles.command_section}>
+            <div className={styles.command_label}>{t("audit.full_command")}</div>
+            <pre className={styles.command_pre}>{selectedEvent.fullCommand}</pre>
+          </div>
+          <div className={styles.detail_actions}>
+            {selectedEvent.riskLevel === "critical" && !isRead(selectedEvent) && (
+              <button className={styles.read_detail_btn} onClick={() => markAsRead(getEventKey(selectedEvent))}>
+                ✓ {t("audit.mark_read")}
+              </button>
+            )}
+            <button className={styles.goto_btn} onClick={() => navigateToSession(selectedEvent.jsonlPath)}>
+              {t("audit.go_to_session")}
+            </button>
+          </div>
+        </div>
+    </>
+  ) : undefined;
+
+  return (
+    <PageShell
+      view="audit"
+      className={styles.risk_scope}
+      title={t("audit.panel_title")}
+      bannerCenter={tabBar}
+      subBar={
+        <>
         <FilterChip
           label={t("audit.all")}
           count={summary?.events.length ?? 0}
@@ -186,11 +223,13 @@ function EventsTab() {
             {t("audit.scanned", { count: summary.totalSessionsScanned })}
           </span>
         )}
-      </div>
-
-      {/* Body: list + detail */}
-      <div className={styles.body}>
-        <aside className={styles.list_pane}>
+        </>
+      }
+      // Audit is the only right-hand rail: the LIST is the main container and the
+      // detail pane is the rail. It only exists once an event is picked.
+      secondary={eventsDetail}
+    >
+        <div className={styles.list_pane}>
           {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
           {!loading && filtered.length === 0 && (
             <EmptyState
@@ -259,70 +298,15 @@ function EventsTab() {
               </div>
             </div>
           ))}
-        </aside>
-
-        {selectedEvent && collapsed && (
-          <CollapsedSidebarRail side="right" onExpand={() => setSecondarySidebar("audit", false)} />
-        )}
-        {selectedEvent && !collapsed && (
-          <main className={styles.detail_pane} style={{ width: railWidth }}>
-            <ResizeHandle side="right" active={railDragging} onMouseDown={onRailMouseDown} />
-            <div className={styles.detail_header}>
-              <div className={styles.detail_title}>
-                <span className={`${styles.risk_badge} ${styles[RISK_CLASS[selectedEvent.riskLevel]]}`}>
-                  {RISK_LABELS[selectedEvent.riskLevel]}
-                </span>
-                <span className={styles.detail_workspace}>{selectedEvent.workspaceName}</span>
-                <span className={styles.detail_sep}>/</span>
-                <span className={styles.detail_name}>{selectedEvent.toolName}</span>
-              </div>
-              <button className={styles.detail_close} onClick={() => setSelectedEvent(null)}>✕</button>
-            </div>
-            <div className={styles.detail_body}>
-              <DetailRow label={t("audit.workspace")} value={selectedEvent.workspaceName} />
-              <DetailRow label={t("audit.source")} value={selectedEvent.agentSource} />
-              {selectedEvent.timestamp && <DetailRow label={t("audit.time")} value={new Date(selectedEvent.timestamp).toLocaleString()} />}
-              {selectedEvent.riskTags.length > 0 && (
-                <div className={styles.detail_row}>
-                  <span className={styles.detail_label}>{t("audit.tags")}</span>
-                  <span className={styles.detail_value}>
-                    {selectedEvent.riskTags.map((tag) => <span key={tag} className={styles.tag}>{tag}</span>)}
-                  </span>
-                </div>
-              )}
-              <div className={styles.command_section}>
-                <div className={styles.command_label}>{t("audit.full_command")}</div>
-                <pre className={styles.command_pre}>{selectedEvent.fullCommand}</pre>
-              </div>
-              <div className={styles.detail_actions}>
-                {selectedEvent.riskLevel === "critical" && !isRead(selectedEvent) && (
-                  <button className={styles.read_detail_btn} onClick={() => markAsRead(getEventKey(selectedEvent))}>
-                    ✓ {t("audit.mark_read")}
-                  </button>
-                )}
-                <button className={styles.goto_btn} onClick={() => navigateToSession(selectedEvent.jsonlPath)}>
-                  {t("audit.go_to_session")}
-                </button>
-              </div>
-            </div>
-          </main>
-        )}
-      </div>
-    </>
+        </div>
+    </PageShell>
   );
 }
 
 // ── Rules Tab ───────────────────────────────────────────────────────────────
 
-function RulesTab({ lang }: { lang: string }) {
+function RulesTab({ lang, tabBar }: { lang: string; tabBar: ReactNode }) {
   const { t } = useTranslation();
-  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["audit"]);
-  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const {
-    width: railWidth,
-    isDragging: railDragging,
-    onMouseDown: onRailMouseDown,
-  } = useResizableWidth("audit-rail-width", AUDIT_RAIL);
   const [rules, setRules] = useState<AuditRuleInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRule, setSelectedRule] = useState<AuditRuleInfo | null>(null);
@@ -404,6 +388,50 @@ function RulesTab({ lang }: { lang: string }) {
   const desc = (rule: AuditRuleInfo) =>
     lang.startsWith("zh") ? rule.descriptionZh : rule.descriptionEn;
 
+  const rulesDetail = selectedRule ? (
+    <>
+        <div className={styles.detail_header}>
+          <div className={styles.detail_title}>
+            <span className={`${styles.risk_badge} ${styles[RISK_CLASS[selectedRule.level]]}`}>
+              {RISK_LABELS[selectedRule.level]}
+            </span>
+            <span className={styles.detail_name}>{selectedRule.tag}</span>
+          </div>
+          <button className={styles.detail_close} onClick={() => setSelectedRule(null)}>✕</button>
+        </div>
+        <div className={styles.detail_body}>
+          <DetailRow label={t("audit.rule_id")} value={selectedRule.id} />
+          <DetailRow label={t("audit.rule_level")} value={t(`audit.level_${selectedRule.level}`)} />
+          <DetailRow label={t("audit.rule_category")} value={catLabel(selectedRule.category)} />
+          <DetailRow label={t("audit.rule_match_mode")} value={t(`audit.match_${selectedRule.matchMode}`)} />
+          <div className={styles.detail_row}>
+            <span className={styles.detail_label}>{t("audit.rule_description")}</span>
+          </div>
+          <p className={styles.rule_desc}>{desc(selectedRule)}</p>
+          <div className={styles.detail_row}>
+            <span className={styles.detail_label}>{t("audit.rule_patterns")}</span>
+          </div>
+          <pre className={styles.command_pre}>
+            {selectedRule.patterns.join("\n")}
+          </pre>
+          <div className={styles.detail_actions}>
+            <label className={styles.toggle}>
+              <input type="checkbox" checked={selectedRule.enabled} onChange={() => handleToggle(selectedRule)} />
+              <span className={styles.toggle_slider} />
+            </label>
+            <span className={styles.toggle_label}>
+              {selectedRule.enabled ? t("audit.rule_builtin") : t("audit.rule_custom")}
+            </span>
+            {!selectedRule.builtin && (
+              <button className={styles.delete_btn} onClick={() => handleDelete(selectedRule.id)}>
+                {t("audit.rule_delete")}
+              </button>
+            )}
+          </div>
+        </div>
+    </>
+  ) : undefined;
+
   if (showSuggest) {
     return (
       <SuggestView
@@ -414,9 +442,13 @@ function RulesTab({ lang }: { lang: string }) {
   }
 
   return (
-    <>
-      {/* Action bar */}
-      <div className={styles.filter_bar}>
+    <PageShell
+      view="audit"
+      className={styles.risk_scope}
+      title={t("audit.panel_title")}
+      bannerCenter={tabBar}
+      subBar={
+        <>
         <button className={styles.primary_btn} onClick={() => setShowSuggest(true)}>
           + {t("audit.new_rule")}
         </button>
@@ -431,10 +463,14 @@ function RulesTab({ lang }: { lang: string }) {
         <span className={styles.scan_info}>
           {query.trim() ? `${filteredRules.length} / ${rules.length}` : rules.length} {t("audit.tab_rules").toLowerCase()}
         </span>
-      </div>
-
-      <div className={styles.body}>
-        <aside className={styles.list_pane}>
+        </>
+      }
+      // Right-hand rail: the rules LIST is the main container, the detail pane is
+      // the rail — and it only exists once a rule is picked.
+      secondary={rulesDetail}
+      afterBody={<GuardAllowRulesSection />}
+    >
+        <div className={styles.list_pane}>
           {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
           {!loading && rules.length === 0 && <p className={styles.empty}>{t("audit.no_rules")}</p>}
           {!loading && rules.length > 0 && filteredRules.length === 0 && (
@@ -481,59 +517,8 @@ function RulesTab({ lang }: { lang: string }) {
               </div>
             </div>
           ))}
-        </aside>
-
-        {selectedRule && collapsed && (
-          <CollapsedSidebarRail side="right" onExpand={() => setSecondarySidebar("audit", false)} />
-        )}
-        {selectedRule && !collapsed && (
-          <main className={styles.detail_pane} style={{ width: railWidth }}>
-            <ResizeHandle side="right" active={railDragging} onMouseDown={onRailMouseDown} />
-            <div className={styles.detail_header}>
-              <div className={styles.detail_title}>
-                <span className={`${styles.risk_badge} ${styles[RISK_CLASS[selectedRule.level]]}`}>
-                  {RISK_LABELS[selectedRule.level]}
-                </span>
-                <span className={styles.detail_name}>{selectedRule.tag}</span>
-              </div>
-              <button className={styles.detail_close} onClick={() => setSelectedRule(null)}>✕</button>
-            </div>
-            <div className={styles.detail_body}>
-              <DetailRow label={t("audit.rule_id")} value={selectedRule.id} />
-              <DetailRow label={t("audit.rule_level")} value={t(`audit.level_${selectedRule.level}`)} />
-              <DetailRow label={t("audit.rule_category")} value={catLabel(selectedRule.category)} />
-              <DetailRow label={t("audit.rule_match_mode")} value={t(`audit.match_${selectedRule.matchMode}`)} />
-              <div className={styles.detail_row}>
-                <span className={styles.detail_label}>{t("audit.rule_description")}</span>
-              </div>
-              <p className={styles.rule_desc}>{desc(selectedRule)}</p>
-              <div className={styles.detail_row}>
-                <span className={styles.detail_label}>{t("audit.rule_patterns")}</span>
-              </div>
-              <pre className={styles.command_pre}>
-                {selectedRule.patterns.join("\n")}
-              </pre>
-              <div className={styles.detail_actions}>
-                <label className={styles.toggle}>
-                  <input type="checkbox" checked={selectedRule.enabled} onChange={() => handleToggle(selectedRule)} />
-                  <span className={styles.toggle_slider} />
-                </label>
-                <span className={styles.toggle_label}>
-                  {selectedRule.enabled ? t("audit.rule_builtin") : t("audit.rule_custom")}
-                </span>
-                {!selectedRule.builtin && (
-                  <button className={styles.delete_btn} onClick={() => handleDelete(selectedRule.id)}>
-                    {t("audit.rule_delete")}
-                  </button>
-                )}
-              </div>
-            </div>
-          </main>
-        )}
-      </div>
-
-      <GuardAllowRulesSection />
-    </>
+        </div>
+    </PageShell>
   );
 }
 

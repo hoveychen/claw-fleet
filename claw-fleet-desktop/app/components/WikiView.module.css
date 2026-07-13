@@ -1,67 +1,12 @@
-.page {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-  min-width: 0;
-}
-
-/* ── Kind color tokens ─────────────────────────────────────────────────────
+/* ── Kind colour tokens ────────────────────────────────────────────────────
    Distinct from the coral --color-accent; consistent with MemoryView's
-   Tailwind-style palette. */
-.page {
+   Tailwind-style palette. Must hang off the page root — WikiView passes this
+   class to PageShell as `className`. Without a host, rgb(var(--wiki-md)) is an
+   invalid value and the kind badges silently lose their colour. */
+.wiki_scope {
   --wiki-html: 14 165 233;  /* sky */
   --wiki-dir: 139 92 246;   /* violet */
   --wiki-md: 16 185 129;    /* emerald */
-}
-
-/* ── Header ──────────────────────────────────────────────────────────────── */
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 20px 12px;
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.title_row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.count {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-dim);
-}
-
-.search {
-  flex: 1;
-  max-width: 280px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--color-text);
-  outline: none;
-}
-
-.search:focus {
-  border-color: var(--color-accent);
 }
 
 .ws_select {
@@ -92,33 +37,17 @@
   border-color: var(--color-text-dim);
 }
 
-/* ── Body split ──────────────────────────────────────────────────────────── */
-
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
-
+/* ── Rail content ────────────────────────────────────────────────────────────
+   The doc tree inside PageShell's rail: the rail owns width + divider, this owns
+   scrolling and spacing. It is also the root drop zone. */
 .list_pane {
-  position: relative; /* anchors the ResizeHandle */
-  width: 320px; /* start value; overridden inline by useResizableWidth */
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--color-border);
   padding: 10px 10px 20px;
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.detail_pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
 }
 
 /* ── Workspace groups ────────────────────────────────────────────────────── */

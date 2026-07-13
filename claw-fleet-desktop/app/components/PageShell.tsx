@@ -35,6 +35,10 @@ interface Props {
   secondary?: ReactNode;
   /** The main container. */
   children: ReactNode;
+  /** Rendered inside the page root, directly after the body — for things that
+   *  belong to the page rather than to its main column: context menus and
+   *  confirm dialogs (Wiki), a footer section (Audit's rules tab). */
+  afterBody?: ReactNode;
   /** Extra class on the page root. REQUIRED by any page whose CSS reads
    *  category-colour variables (--mem-* / --wiki-* / --risk-*): those are
    *  declared on a page-local class, and rgb(var(--mem-user)) resolves to an
@@ -68,6 +72,7 @@ export function PageShell({
   subBar,
   secondary,
   children,
+  afterBody,
   className,
 }: Props) {
   const rail = RAILS[view];
@@ -139,6 +144,8 @@ export function PageShell({
           </>
         )}
       </PageBody>
+
+      {afterBody}
     </div>
   );
 }

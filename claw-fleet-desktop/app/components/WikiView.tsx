@@ -21,10 +21,7 @@ import { EmptyState } from "./EmptyState";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { PromptDialog } from "./PromptDialog";
 import { ContextMenu, type ContextMenuAnchor, type ContextMenuItem } from "./ContextMenu";
-import { useUIStore } from "../store";
-import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
-import { useResizableWidth } from "../hooks/useResizableWidth";
-import { ResizeHandle } from "./ResizeHandle";
+import { PageShell } from "./PageShell";
 import styles from "./WikiView.module.css";
 
 // ── Types (mirror claw-fleet-core/src/wiki.rs, camelCase serde) ──────────────
@@ -217,13 +214,6 @@ function buildTree(docs: WikiDoc[]): TreeNode[] {
 
 export function WikiView() {
   const { t } = useTranslation();
-  const secondaryCollapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["wiki"]);
-  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const {
-    width: railWidth,
-    isDragging: railDragging,
-    onMouseDown: onRailMouseDown,
-  } = useResizableWidth("wiki-rail-width", { min: 200, max: 640, initial: 320 });
   const [docs, setDocs] = useState<WikiDoc[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -607,19 +597,17 @@ export function WikiView() {
     });
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.title_row}>
-          <h1 className={styles.title}>{t("wiki.panel_title", "知识库")}</h1>
-          {loaded && docs.length > 0 && <span className={styles.count}>{docs.length}</span>}
-        </div>
-        <input
-          className={styles.search}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("wiki.search_placeholder", "Search docs…")}
-        />
+    <PageShell
+      view="wiki"
+      className={styles.wiki_scope}
+      title={t("wiki.panel_title", "知识库")}
+      count={loaded && docs.length > 0 ? docs.length : null}
+      search={{
+        value: query,
+        onChange: setQuery,
+        placeholder: t("wiki.search_placeholder", "Search docs…"),
+      }}
+      bannerCenter={
         <select
           className={styles.ws_select}
           value={workspaceFilter}
@@ -632,21 +620,17 @@ export function WikiView() {
             </option>
           ))}
         </select>
+      }
+      actions={
         <button className={styles.icon_btn} onClick={load} title={t("wiki.refresh", "Refresh")}>
           <RefreshCw size={13} strokeWidth={1.7} />
         </button>
-      </header>
-
-      <div className={styles.body}>
-        {secondaryCollapsed ? (
-          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("wiki", false)} />
-        ) : (
-        <>
-        {/* The pane itself is the root drop zone: dropping outside any folder
-            strips a doc's directory prefix. */}
-        <aside
+      }
+      secondary={
+        // The list is itself the root drop zone: dropping outside any folder
+        // strips a doc's directory prefix.
+        <div
           className={`${styles.list_pane} ${dragSlug && dropPath === "" ? styles.drop_target_root : ""}`}
-          style={{ width: railWidth }}
           {...dropProps("")}
         >
           {moveError && (
@@ -666,29 +650,9 @@ export function WikiView() {
             />
           )}
           {renderNodes(tree, 0, "")}
-
-          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
-        </aside>
-        </>
-        )}
-
-        <main className={styles.detail_pane}>
-          {selected ? (
-            <WikiDetail
-              doc={selected}
-              wikiLinks={wikiLinks}
-              onMove={() => openMoveDialog(selected)}
-              onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
-              onDeleteVersion={(version) =>
-                setConfirmDelete({ kind: "version", slug: selected.slug, version })
-              }
-            />
-          ) : (
-            <div className={styles.placeholder}>{t("wiki.select_hint", "Select a doc to preview")}</div>
-          )}
-        </main>
-      </div>
-
+        </div>
+      }
+      afterBody={<>
       {ctxMenu && (
         <ContextMenu
           anchor={ctxMenu.anchor}
@@ -758,7 +722,22 @@ export function WikiView() {
           onCancel={() => setConfirmDelete(null)}
         />
       )}
-    </div>
+      </>}
+    >
+      {selected ? (
+        <WikiDetail
+          doc={selected}
+          wikiLinks={wikiLinks}
+          onMove={() => openMoveDialog(selected)}
+          onDeleteDoc={() => setConfirmDelete({ kind: "doc", slug: selected.slug })}
+          onDeleteVersion={(version) =>
+            setConfirmDelete({ kind: "version", slug: selected.slug, version })
+          }
+        />
+      ) : (
+        <div className={styles.placeholder}>{t("wiki.select_hint", "Select a doc to preview")}</div>
+      )}
+    </PageShell>
   );
 }
 

@@ -1,56 +1,18 @@
 /* ── Root + Linear header ────────────────────────────────────────────────── */
 
-.root {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  flex: 1;
-  min-width: 0;
-  background: var(--color-bg);
-  overflow: hidden;
-}
 
-.header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 20px 12px;
-  /* Windows frameless: reserve room on the right so the three caption
-     buttons drawn by <WindowsFrameOverlay> don't overlap the share menu.
-     0px everywhere except Windows (see --win-caption-inset-x in App.css). */
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
 
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
 
-.header_actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
 /* ── Body split ───────────────────────────────────────────────────────────── */
 
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
 
+/* Rail content: PageShell's rail owns the width, the divider and the
+   ResizeHandle; this owns the scrolling and the spacing. */
 .list_pane {
-  width: 360px;
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--color-border);
   padding: 10px 10px 20px;
   display: flex;
   flex-direction: column;
@@ -63,13 +25,6 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.detail_pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
 
 .empty {
   font-size: 12px;

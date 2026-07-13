@@ -28,6 +28,7 @@ export const RAILS: Partial<Record<ViewMode, RailConfig>> = {
   skills: { storageKey: "skills-rail-width", min: 200, max: 640, initial: 340 },
   files: { storageKey: "files-rail-width", min: 200, max: 640, initial: 340 },
   plugins: { storageKey: "plugins-rail-width", min: 200, max: 640, initial: 340 },
+  report: { storageKey: "report-rail-width", min: 240, max: 640, initial: 360 },
 };
 
 /** Views whose page carries a collapsible secondary sidebar. Re-clicking the
