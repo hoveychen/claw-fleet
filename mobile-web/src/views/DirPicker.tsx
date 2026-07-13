@@ -24,7 +24,7 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(
-    async (path?: string) => {
+    async (path?: string, fallbackToHome = false) => {
       if (!client) return;
       setLoading(true);
       setError(null);
@@ -33,6 +33,16 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
       } catch (e) {
         // 失败保留上一屏，用户还能往回退，不至于卡在空白页。
         setError(e instanceof Error ? e.message : t("读取目录失败"));
+        // 但**起点**打不开时没有上一屏——手输框里可能是个早就删掉的路径，
+        // 列表空空如也，连一行可点的都没有，用户只能关掉重来。回退到 home
+        // 保证选择器永远走得动；错误照旧留在屏上解释为什么跳了。
+        if (fallbackToHome && path) {
+          try {
+            setData(await client.request<BrowseDirResponse>("browse_dir", {}));
+          } catch {
+            // home 也读不到，没有更靠后的退路了。
+          }
+        }
       } finally {
         setLoading(false);
       }
@@ -41,7 +51,7 @@ export function DirPicker({ client, initialPath, onPick, onClose }: DirPickerPro
   );
 
   useEffect(() => {
-    void load(initialPath || undefined);
+    void load(initialPath || undefined, true);
   }, [load, initialPath]);
 
   // 路径比屏幕长时，有意义的是尾部（当前在哪个目录），不是 `/Users` 那一截。

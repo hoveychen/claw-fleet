@@ -36,9 +36,30 @@ async function boot() {
 
   // In mock mode, auto-accept a local connection so the ConnectionDialog
   // doesn't block the layout we want to iterate on.
+  //
+  // `?mock&remote` seeds a remote connection instead — the only way to exercise
+  // the UI that branches on `isRemote` (e.g. the launcher's directory picker,
+  // which swaps the native OS dialog for the backend-driven one because the
+  // native dialog can only browse this desktop's disk).
   if (isMockMode) {
     const { useConnectionStore } = await import("./store");
-    useConnectionStore.getState().setConnection({ type: "local" });
+    useConnectionStore.getState().setConnection(
+      params.has("remote")
+        ? {
+            type: "remote",
+            connection: {
+              id: "mock-probe",
+              label: "build-box",
+              host: "build-box.internal",
+              port: 22,
+              username: "demo",
+              identityFile: null,
+              jumpHost: null,
+              sshProfile: null,
+            },
+          }
+        : { type: "local" },
+    );
   }
 
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(

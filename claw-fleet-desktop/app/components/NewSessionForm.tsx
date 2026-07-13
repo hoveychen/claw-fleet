@@ -10,6 +10,7 @@ import {
   type ChatComposerHandle,
   type ChatComposerStagedAttachment,
 } from "./ChatComposer";
+import { DirPickerDialog } from "./DirPickerDialog";
 import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
 import { SessionOptionPills } from "./SessionOptionPills";
@@ -133,6 +134,9 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState("");
+  // Remote-only: the backend-driven directory picker standing in for the native
+  // dialog, which can only browse this desktop's own disk.
+  const [pickingDir, setPickingDir] = useState(false);
   const composerRef = useRef<ChatComposerHandle | null>(null);
 
   // The pure-chat workspace. Unlike a project it has no prior sessions to be
@@ -193,7 +197,15 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
     addAttachmentEntry({ path: picked, name: basename(picked) });
   };
 
+  // Local: the native dialog is the better experience (sidebar, favourites,
+  // search) and it browses the right machine. Remote: it would browse *this*
+  // machine while the session spawns on the probe, so go through the backend
+  // instead — that's what DirPickerDialog does.
   const browseWorkspace = async () => {
+    if (isRemote) {
+      setPickingDir(true);
+      return;
+    }
     const picked = await openDialog({ multiple: false, directory: true });
     if (typeof picked === "string") setWorkspace(picked);
   };
@@ -299,20 +311,14 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
           onSelect: () => setWorkspace(w.path),
         })),
       ]}
-      footerItems={
-        isRemote
-          ? []
-          : [
-              {
-                id: "browse",
-                label: t("new_session.browse"),
-                icon: (
-                  <FolderOpen size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />
-                ),
-                onSelect: browseWorkspace,
-              },
-            ]
-      }
+      footerItems={[
+        {
+          id: "browse",
+          label: t("new_session.browse"),
+          icon: <FolderOpen size={13} strokeWidth={1.7} className={pillStyles.menu_icon} />,
+          onSelect: browseWorkspace,
+        },
+      ]}
     />
   );
 
@@ -383,6 +389,17 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
       </p>
 
       {error && <div className={styles.error}>{error}</div>}
+
+      {pickingDir && (
+        <DirPickerDialog
+          initialPath={workspace}
+          onPick={(path) => {
+            setWorkspace(path);
+            setPickingDir(false);
+          }}
+          onCancel={() => setPickingDir(false)}
+        />
+      )}
     </div>
   );
 }
