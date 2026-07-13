@@ -133,7 +133,7 @@ export const Tip5: React.FC = () => (
     }}
     bubble="Three new deckhands from one composer. Didn't even open a terminal."
     side="right"
-    pip={{ src: "footage/t5-dispatch.mp4", startFrom: 290, pos: "bl", zoom: { scale: 1.6, origin: "62% 40%" } }}
+    pip={{ src: "footage/t5-dispatch.mp4", startFrom: 565, pos: "bl", zoom: { scale: 1.8, origin: "28% 22%" } }}
   >
     <Tip5Stage />
   </TipShell>

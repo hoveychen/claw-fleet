@@ -169,7 +169,7 @@ export const Tip2: React.FC = () => (
     }}
     bubble="That's not a feature shipping. That's $4 a minute of apologies."
     side="left"
-    pip={{ src: "footage/t2-usage.mp4", startFrom: 180, pos: "tl", zoom: { scale: 2.4, origin: "4% 76%" } }}
+    pip={{ src: "footage/t2-usage.mp4", startFrom: 180, pos: "tl", zoom: { scale: 2.4, origin: "0% 74%" } }}
   >
     <Tip2Stage />
   </TipShell>
