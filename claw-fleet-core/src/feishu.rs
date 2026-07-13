@@ -1168,7 +1168,7 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
                 declined,
                 answers,
             };
-            crate::elicitation::write_response(&resp)?;
+            crate::parked::deliver(decision_id, &resp, declined, crate::elicitation::write_response)?;
             let _ = notify_decision_resolved(decision_id, resolved);
         }
         "plan" => {
@@ -1182,7 +1182,9 @@ fn handle_card_action(body: &serde_json::Value) -> Result<Vec<u8>, String> {
                 edited_plan: None,
                 feedback: None,
             };
-            crate::plan_approval::write_response(&resp)?;
+            // `dismissed: false` — a rejection is an answer, and a parked card's
+            // agent has to be woken up to hear it.
+            crate::parked::deliver(decision_id, &resp, false, crate::plan_approval::write_response)?;
             let summary = if decision == "approve" {
                 "✅ Approved (Feishu)"
             } else {
