@@ -528,7 +528,7 @@ pub fn fleet_ask_input_schema() -> serde_json::Value {
                         },
                         "html": {
                             "type": "string",
-                            "description": "HTML preview body; rendered in a sandboxed iframe (no scripts, no same-origin). To show images, DO NOT base64-inline them here — that burns output tokens. Instead list the files in `images` and reference them by their `name` with a relative path, e.g. <img src=\"chart.png\">."
+                            "description": "OPTIONAL HTML preview body; rendered in a sandboxed iframe (no scripts, no same-origin). Omit the field entirely when the card has no preview to show — never pass a placeholder or a comment-only stub like \"<!--HTML-->\", which paints an empty box over the question. To show images, DO NOT base64-inline them here — that burns output tokens. Instead list the files in `images` and reference them by their `name` with a relative path, e.g. <img src=\"chart.png\">."
                         },
                         "images": {
                             "type": "array",
