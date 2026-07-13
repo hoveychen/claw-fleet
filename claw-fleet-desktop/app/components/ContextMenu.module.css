@@ -36,6 +36,24 @@
   color: var(--color-text-dim);
 }
 
+/* Two-line item: label over the value it acts on. The sub line is capped so a
+   long path ellipsizes instead of stretching the menu across the window. */
+.item_text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.item_sub {
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
+
 .item_danger {
   color: var(--color-error);
 }
