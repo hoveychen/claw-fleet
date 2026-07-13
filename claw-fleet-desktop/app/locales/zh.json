@@ -1771,6 +1771,7 @@
     "proc_starting": "启动中",
     "proc_exited": "已退出 ({{code}})",
     "proc_exited_unknown": "已退出",
+    "proc_took": "用时 {{d}}",
     "proc_rerun": "重跑",
     "proc_kill": "停止",
     "proc_force_kill": "强杀",
