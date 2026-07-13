@@ -41,12 +41,12 @@
 }
 
 .btn_primary {
-  background: #2563eb;
+  background: var(--color-accent);
   color: #fff;
-  border-color: #2563eb;
+  border-color: var(--color-accent);
 }
 
 .btn_primary:hover {
-  background: #3b82f6;
-  border-color: #3b82f6;
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
 }
