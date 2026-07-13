@@ -47,7 +47,7 @@
 
 /* Guard variant: red glow */
 .panel_guard {
-  border-color: #e53e3e;
+  border-color: var(--color-error);
   box-shadow:
     0 0 0 1px rgba(229, 62, 62, 0.15),
     0 0 20px rgba(229, 62, 62, 0.25),
@@ -200,7 +200,7 @@
 /* Variant colors for the collapsed bar — compound selectors beat the base
  * `.panel_collapsed_bar` rule despite coming earlier in the file. */
 .panel_collapsed_bar.panel_guard {
-  border-color: #e53e3e;
+  border-color: var(--color-error);
   box-shadow:
     0 0 0 1px rgba(229, 62, 62, 0.15),
     0 4px 16px rgba(0, 0, 0, 0.25);
@@ -405,7 +405,7 @@
 }
 
 .tab_guard .tab_icon {
-  color: #e53e3e;
+  color: var(--color-error);
 }
 
 .tab_elicitation .tab_icon {
@@ -562,7 +562,7 @@
 .card_icon {
   width: 18px;
   height: 18px;
-  color: #e53e3e;
+  color: var(--color-error);
   flex-shrink: 0;
 }
 
@@ -652,7 +652,7 @@
   padding: 1px 6px;
   border-radius: 4px;
   background: rgba(229, 62, 62, 0.15);
-  color: #e53e3e;
+  color: var(--color-error);
 }
 
 /* Analysis section */
@@ -764,7 +764,7 @@
 }
 
 .block_reason_input:focus {
-  border-color: #e53e3e;
+  border-color: var(--color-error);
   box-shadow: 0 0 0 2px rgba(229, 62, 62, 0.15);
 }
 
@@ -798,14 +798,14 @@
 
 .btn_block {
   background: transparent;
-  color: #e53e3e;
-  border-color: #e53e3e;
+  color: var(--color-error);
+  border-color: var(--color-error);
 }
 
 .btn_block:hover {
-  background: rgba(229, 62, 62, 0.08);
-  color: #c53030;
-  border-color: #c53030;
+  background: rgb(var(--color-error-rgb) / 0.08);
+  color: var(--color-error);
+  border-color: var(--color-error);
 }
 
 .btn_always_allow {
@@ -1309,7 +1309,7 @@
 
 .elicitation_attachment_remove:hover {
   background: rgba(229, 62, 62, 0.15);
-  color: #e53e3e;
+  color: var(--color-error);
 }
 
 .elicitation_attach_error {
@@ -1321,7 +1321,7 @@
   border-radius: 6px;
   background: rgba(229, 62, 62, 0.12);
   border: 1px solid rgba(229, 62, 62, 0.4);
-  color: #c53030;
+  color: var(--color-error);
   font-size: 12px;
 }
 

@@ -137,7 +137,7 @@
 
 .bar_fill_critical {
   height: 100%;
-  background: #f59e0b;
+  background: var(--color-warning);
   border-radius: 4px;
   transition: width 0.3s ease;
 }
@@ -176,7 +176,7 @@
 }
 
 .trend_slower {
-  color: #4ade80;
+  color: var(--color-success);
 }
 
 .trend_similar {
@@ -251,14 +251,14 @@
 
 .error {
   font-size: 11px;
-  color: #f87171;
+  color: var(--color-error);
   margin: 0;
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.25);
+  background: rgb(var(--color-error-rgb) / 0.08);
+  border: 1px solid rgb(var(--color-error-rgb) / 0.25);
   border-radius: 6px;
 }
 
@@ -272,9 +272,9 @@
 }
 
 .retry {
-  background: rgba(248, 113, 113, 0.15);
+  background: rgb(var(--color-error-rgb) / 0.15);
   border: none;
-  color: #f87171;
+  color: var(--color-error);
   border-radius: 4px;
   padding: 2px 8px;
   font-size: 10px;
@@ -284,7 +284,7 @@
 }
 
 .retry:hover {
-  background: rgba(248, 113, 113, 0.25);
+  background: rgb(var(--color-error-rgb) / 0.25);
 }
 
 /* Entry point that opens the 24h occupancy history modal */

@@ -454,9 +454,9 @@
 }
 
 .read_btn:hover {
-  background: rgba(74, 222, 128, 0.18);
-  color: #4ade80;
-  border-color: #4ade80;
+  background: rgb(var(--color-success-rgb) / 0.18);
+  color: var(--color-success);
+  border-color: var(--color-success);
 }
 
 /* ── Rule pattern preview ─────────────────────────────────────────────────── */
@@ -637,18 +637,18 @@
 
 .read_detail_btn {
   background: none;
-  border: 1px solid #4ade80;
+  border: 1px solid var(--color-success);
   border-radius: 6px;
   padding: 6px 14px;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  color: #4ade80;
+  color: var(--color-success);
   transition: background 0.1s;
 }
 
 .read_detail_btn:hover {
-  background: rgba(74, 222, 128, 0.18);
+  background: rgb(var(--color-success-rgb) / 0.18);
 }
 
 /* ── Toggle switch ────────────────────────────────────────────────────────── */
@@ -728,19 +728,19 @@
 
 .delete_btn {
   background: none;
-  border: 1px solid #ef4444;
+  border: 1px solid var(--color-error);
   border-radius: 6px;
   padding: 5px 12px;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  color: #ef4444;
+  color: var(--color-error);
   margin-left: auto;
   transition: background 0.1s;
 }
 
 .delete_btn:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: rgb(var(--color-error-rgb) / 0.1);
 }
 
 /* ── Suggest view ─────────────────────────────────────────────────────────── */
@@ -811,7 +811,7 @@
 
 .suggest_error {
   font-size: 12px;
-  color: #ef4444;
+  color: var(--color-error);
   padding: 8px 20px;
   margin: 0;
 }

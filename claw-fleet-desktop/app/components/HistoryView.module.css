@@ -213,8 +213,8 @@
 
 .active_toggle_on {
   color: var(--color-text);
-  border-color: #5ac88c;
-  background: rgba(90, 200, 140, 0.12);
+  border-color: var(--color-success);
+  background: rgb(var(--color-success-rgb) / 0.12);
 }
 
 .active_toggle_dot {
@@ -226,7 +226,7 @@
 }
 
 .active_toggle_on .active_toggle_dot {
-  background: #5ac88c;
+  background: var(--color-success);
 }
 
 /* Segmented filter by manual review mark — one row can be active at a time;
@@ -283,7 +283,7 @@
    the toolbar would out-shout the actual done rows, which is where the colour
    carries meaning. */
 .mark_seg_on[data-seg="done"] {
-  color: #5ac88c;
+  color: var(--color-success);
 }
 
 .mark_seg_count {
@@ -386,7 +386,7 @@
 }
 
 .mark_toggle[data-done="true"] {
-  color: #5ac88c; /* green — finished */
+  color: var(--color-success); /* green — finished */
 }
 
 .row {

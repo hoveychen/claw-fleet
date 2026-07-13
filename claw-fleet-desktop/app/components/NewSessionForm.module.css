@@ -61,7 +61,7 @@
 }
 
 .error {
-  color: #dc2626;
+  color: var(--color-error);
   font-size: 12px;
   padding: 6px 10px;
   background: rgba(220, 38, 38, 0.1);

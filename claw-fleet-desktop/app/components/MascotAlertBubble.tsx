@@ -122,7 +122,13 @@ export function MascotAlertBubble() {
             cy={ringSize / 2}
             r={ringR}
             fill="none"
-            stroke={progress < 0.25 ? "#ef4444" : progress < 0.5 ? "#fbbf24" : "#4ade80"}
+            stroke={
+              progress < 0.25
+                ? "var(--color-error)"
+                : progress < 0.5
+                  ? "var(--color-warning)"
+                  : "var(--color-success)"
+            }
             strokeWidth="1.5"
             strokeDasharray={ringCirc}
             strokeDashoffset={ringOffset}

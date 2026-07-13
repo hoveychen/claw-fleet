@@ -20,7 +20,7 @@
 }
 
 .clickable:focus-visible {
-  outline: 2px solid var(--color-accent, #4ade80);
+  outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }
 

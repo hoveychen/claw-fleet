@@ -103,7 +103,7 @@
 
 .badge_sub {
   background: rgba(245, 158, 11, 0.18);
-  color: #fbbf24;
+  color: var(--color-warning);
   max-width: 70px;
   overflow: hidden;
 }

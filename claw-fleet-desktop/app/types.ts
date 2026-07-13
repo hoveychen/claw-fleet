@@ -65,11 +65,16 @@ export const LIVE_STATUSES = new Set([
 /** Run-status colour: green = agent still live, amber = waiting for input.
  *  Ended sessions get nothing (null) — this is a positive "this one's doing
  *  something" signal, not another mark on every row. Shared by the 启动台 list
- *  rows and its detail tab bar so a session wears the same dot in both. */
+ *  rows and its detail tab bar so a session wears the same dot in both.
+ *
+ *  Returns a CSS `var()` reference rather than a hex literal: the value lands in
+ *  an inline `style`, and a hex pins whichever theme it was authored against —
+ *  the amber and green here were dark-theme hues that never re-darkened under
+ *  the light theme. */
 export function rowBarColor(s: SessionInfo): string | null {
   if (!LIVE_STATUSES.has(s.status)) return null;
-  if (s.status === "waitingInput") return "#d0a85a";
-  return "#5ac88c";
+  if (s.status === "waitingInput") return "var(--color-warning)";
+  return "var(--color-success)";
 }
 
 /** Statuses that mean a turn is genuinely in flight. Note `waitingInput` is

@@ -63,8 +63,8 @@
 }
 
 .status_done {
-  background: var(--color-success-bg, rgba(90, 200, 140, 0.15));
-  color: var(--color-success, #4ade80);
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 
 .status_error {

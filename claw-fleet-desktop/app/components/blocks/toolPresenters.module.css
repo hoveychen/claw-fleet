@@ -17,8 +17,8 @@
 }
 
 .chip_add {
-  background: var(--color-success-bg, rgba(90, 200, 140, 0.15));
-  color: var(--color-success, #5ac88c);
+  background: var(--color-success-bg);
+  color: var(--color-success);
   font-variant-numeric: tabular-nums;
 }
 
@@ -163,7 +163,7 @@
   opacity: 0.6;
 }
 
-.todo_done .todo_mark { color: var(--color-success, #5ac88c); }
+.todo_done .todo_mark { color: var(--color-success); }
 
 .todo_current {
   color: var(--color-text);
