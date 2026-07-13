@@ -117,18 +117,14 @@
   flex-shrink: 0;
 }
 
-:global([data-platform="macos"]) .tree_pane {
-  border-right-color: rgba(255, 255, 255, 0.08);
-}
+/* .tree_pane's divider is var(--color-border), already softened platform-wide by
+   the macOS redirect in App.css. Only the translucent hover fills stay. */
 :global([data-platform="macos"]) .tree_item:hover {
   background: rgba(255, 255, 255, 0.08);
 }
 :global([data-platform="macos"]) .tree_item_active,
 :global([data-platform="macos"]) .tree_item_active:hover {
   background: rgba(255, 255, 255, 0.12);
-}
-:global([data-platform="macos"][data-theme="light"]) .tree_pane {
-  border-right-color: rgba(0, 0, 0, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .tree_item:hover {
   background: rgba(0, 0, 0, 0.06);

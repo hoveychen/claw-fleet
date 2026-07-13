@@ -28,19 +28,9 @@
   background: var(--color-bg);
 }
 
-/* Soften the rail + top-controls dividers on macOS vibrancy the same way the
-   MemoryView family does, so the task 二级栏's borders read at the same weight
-   as 插件/技能/记忆/仓库 instead of a harder --color-border line. */
-:global([data-platform="macos"]) .rail {
-  border-right-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .controls {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"][data-theme="light"]) .rail,
-:global([data-platform="macos"][data-theme="light"]) .controls {
-  border-color: rgba(0, 0, 0, 0.08);
-}
+/* The rail + top-controls dividers use var(--color-border), which App.css
+   redirects to the glass weight on macOS — the hand-copied overrides that used
+   to live here are gone. */
 
 .header {
   display: flex;

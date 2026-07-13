@@ -655,20 +655,9 @@
   padding: 20px;
 }
 
-/* macOS vibrancy */
-:global([data-platform="macos"]) .list_pane {
-  border-right-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .header {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .detail_header,
-:global([data-platform="macos"]) .tabs {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .filter_bar {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
+/* macOS vibrancy — divider weights come from the platform-wide --color-border
+   redirect in App.css; only the translucent card fills (and the heavier active
+   border, which the token cannot express) stay per-class. */
 :global([data-platform="macos"]) .card:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -676,13 +665,6 @@
 :global([data-platform="macos"]) .card_active:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.12);
-}
-:global([data-platform="macos"][data-theme="light"]) .list_pane,
-:global([data-platform="macos"][data-theme="light"]) .header,
-:global([data-platform="macos"][data-theme="light"]) .filter_bar,
-:global([data-platform="macos"][data-theme="light"]) .detail_header,
-:global([data-platform="macos"][data-theme="light"]) .tabs {
-  border-color: rgba(0, 0, 0, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .card:hover {
   background: rgba(0, 0, 0, 0.05);

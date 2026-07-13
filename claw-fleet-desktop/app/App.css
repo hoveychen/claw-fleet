@@ -69,22 +69,29 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
      canvas, same plane as cards); `sunken` is RECESSED (segmented-control
      troughs, tab-strip grounds). The light theme's own comment below spells
      this out — "off-white cards/inputs read as raised surfaces" — and light
-     honours it. Dark currently flattens both to #18191b, which is why the
-     split went unnoticed for so long: half the search boxes reach for
-     --color-bg-input and half for --color-bg-secondary, and in dark you
-     cannot tell. P1 pulls these two apart in dark as well, so dark stops
-     hiding this class of drift. */
-  --color-bg-field: #18191b;
-  --color-bg-sunken: #18191b;
+     honours it. Dark used to flatten five tokens (field / sunken / card-hover
+     / hover / tool-hover) onto one #18191b, which is why the split went
+     unnoticed for so long: half the search boxes reach for --color-bg-input
+     and half for --color-bg-secondary, and in dark you could not tell them
+     apart. The ladder below pulls them back apart, so dark stops hiding this
+     class of drift:
+       bg      #08090a  canvas
+       sunken  #0e0f11  recessed (troughs, tab grounds, tool blocks)
+       card    #101113  card plane
+       field   #16171a  raised — form controls
+       hover   #1c1d20  card / tool hover
+       selected #1f2023 card selected */
+  --color-bg-field: #16171a;
+  --color-bg-sunken: #0e0f11;
 
   --color-bg-secondary: var(--color-bg-sunken);
   --color-bg-tertiary: #0e0f11;
   --color-bg-card: #101113;
-  --color-bg-card-hover: #18191b;
+  --color-bg-card-hover: #1c1d20;
   --color-bg-card-selected: #1f2023;
   --color-bg-hover: var(--color-bg-card-hover);
-  --color-bg-tool: #0e0f11;
-  --color-bg-tool-hover: #18191b;
+  --color-bg-tool: var(--color-bg-sunken);
+  --color-bg-tool-hover: var(--color-bg-card-hover);
   --color-bg-user: #161b29;
   /* DEPRECATED — use --color-bg-field. Alias kept until every consumer is
      migrated (P2); check-css-tokens.mjs hard-fails on it from P4. */
@@ -99,10 +106,8 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-soft: rgba(255, 255, 255, 0.05);
   --color-border-strong: rgba(255, 255, 255, 0.15);
-  /* Border weight under macOS vibrancy. P1 redirects --color-border to this
-     for the whole platform (`html.tauri-host.os-macos`), retiring the ~30
-     hand-copied `[data-platform="macos"] .x { border-color: rgba(…) }` blocks
-     that were duplicated across 8 module.css files. */
+  /* Border weight under macOS vibrancy — see the platform redirect below the
+     light block. */
   --color-border-glass: rgba(255, 255, 255, 0.08);
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -331,6 +336,26 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --scrollbar-thumb-hover: rgba(32, 28, 18, 0.4);
 
   color-scheme: light;
+}
+
+/* ── macOS: soften every border under the vibrancy layer ──────────────────────
+   Eight module.css files each hand-copied their own
+   `[data-platform="macos"] .x { border-color: rgba(255,255,255,.08) }` (plus a
+   light-theme twin) to lighten the divider they draw with var(--color-border).
+   One redirect at the root does the same job for every consumer at once.
+
+   Keyed on the HOST class, not [data-platform]: main.tsx stamps
+   `tauri-host os-macos` synchronously before React mounts, whereas App.tsx sets
+   [data-platform] from an async `invoke("get_platform")` — driving a color
+   token off the latter flashes the wrong border on first paint.
+
+   Higher specificity (.class.class + type) than the [data-theme] blocks above,
+   so it wins on <html> in both themes; --color-border-glass itself is themed,
+   so light still resolves to its own rgba(0,0,0,.08). Borders on components
+   that never wrote a macOS override (SessionToolbar, GalleryView, …) now soften
+   too — intended: that is what "one source of truth" buys. */
+html.tauri-host.os-macos {
+  --color-border: var(--color-border-glass);
 }
 
 /* ── Base typography ──────────────────────────────────────────────────────── */

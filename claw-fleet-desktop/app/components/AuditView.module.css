@@ -966,14 +966,13 @@
   color: var(--color-text-muted);
 }
 
-/* ── macOS vibrancy ───────────────────────────────────────────────────────── */
+/* ── macOS vibrancy ───────────────────────────────────────────────────────────
+   Dividers (.header / .filter_bar / .detail_header / .detail_pane) are drawn
+   with var(--color-border), which App.css already redirects to the glass weight
+   under `html.tauri-host.os-macos` — no per-class override needed. What stays
+   here is the vibrancy-only tuning the token cannot express: translucent card
+   fills, and the heavier-than-glass border that marks the active card. */
 
-:global([data-platform="macos"]) .header,
-:global([data-platform="macos"]) .filter_bar,
-:global([data-platform="macos"]) .detail_header,
-:global([data-platform="macos"]) .detail_pane {
-  border-color: rgba(255, 255, 255, 0.08);
-}
 :global([data-platform="macos"]) .card:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -981,12 +980,6 @@
 :global([data-platform="macos"]) .card_active:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.12);
-}
-:global([data-platform="macos"][data-theme="light"]) .header,
-:global([data-platform="macos"][data-theme="light"]) .filter_bar,
-:global([data-platform="macos"][data-theme="light"]) .detail_header,
-:global([data-platform="macos"][data-theme="light"]) .detail_pane {
-  border-color: rgba(0, 0, 0, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .card:hover {
   background: rgba(0, 0, 0, 0.05);
