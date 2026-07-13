@@ -1761,6 +1761,7 @@
     "proc_starting": "Starting",
     "proc_exited": "Exited ({{code}})",
     "proc_exited_unknown": "Exited",
+    "proc_took": "took {{d}}",
     "proc_rerun": "Re-run",
     "proc_kill": "Stop",
     "proc_force_kill": "Force kill",

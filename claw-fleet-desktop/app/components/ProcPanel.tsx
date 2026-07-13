@@ -178,15 +178,34 @@ export function ProcPanel({
 
 function statusLabel(p: ProcRecord, t: (k: string, o?: Record<string, unknown>) => string): string {
   if (p.status === "starting") return t("files.proc_starting");
-  if (p.status === "running") return `${t("files.proc_running")} · ${elapsed(p.startedMs)}`;
-  return p.exitCode !== undefined
-    ? t("files.proc_exited", { code: p.exitCode })
-    : t("files.proc_exited_unknown");
+  if (p.status === "running") return `${t("files.proc_running")} · ${fmtDuration(Date.now() - p.startedMs)}`;
+  const exited =
+    p.exitCode !== undefined
+      ? t("files.proc_exited", { code: p.exitCode })
+      : t("files.proc_exited_unknown");
+  // Exited rows gain "took Xs · Y ago": duration = finish − start, "ago" anchored
+  // to when the command was launched. finishedMs is absent on inferred exits.
+  const parts = [exited];
+  if (p.finishedMs !== undefined) {
+    parts.push(t("files.proc_took", { d: fmtDuration(p.finishedMs - p.startedMs) }));
+  }
+  parts.push(timeAgo(p.startedMs, t));
+  return parts.join(" · ");
 }
 
-function elapsed(startedMs: number): string {
-  const secs = Math.max(0, Math.floor((Date.now() - startedMs) / 1000));
+/** Format a millisecond span as a single-line, whole-second duration. */
+function fmtDuration(ms: number): string {
+  const secs = Math.max(0, Math.floor(ms / 1000));
   if (secs < 60) return `${secs}s`;
   if (secs < 3600) return `${Math.floor(secs / 60)}m${secs % 60 > 0 ? ` ${secs % 60}s` : ""}`;
   return `${Math.floor(secs / 3600)}h ${Math.floor((secs % 3600) / 60)}m`;
+}
+
+/** How long ago `ms` was, reusing the app-wide relative-time keys. */
+function timeAgo(ms: number, t: (k: string, o?: Record<string, unknown>) => string): string {
+  const diff = Date.now() - ms;
+  if (diff < 60_000) return t("just_now");
+  if (diff < 3_600_000) return t("m_ago", { n: Math.floor(diff / 60_000) });
+  if (diff < 86_400_000) return t("h_ago", { n: Math.floor(diff / 3_600_000) });
+  return t("d_ago", { n: Math.floor(diff / 86_400_000) });
 }
