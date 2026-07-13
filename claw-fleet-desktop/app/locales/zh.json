@@ -1816,5 +1816,13 @@
     "reveal_in_explorer": "在资源管理器中显示",
     "open_hint": "打开 {{path}}",
     "not_found": "路径不存在"
+  },
+  "dir_picker": {
+    "title": "选择工作目录",
+    "up": "上一级",
+    "confirm": "用这个目录",
+    "empty": "这里没有子目录",
+    "truncated": "子目录过多，仅显示前 500 个",
+    "loading": "读取中…"
   }
 }
