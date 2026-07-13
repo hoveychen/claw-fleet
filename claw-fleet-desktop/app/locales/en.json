@@ -1269,7 +1269,9 @@
     "files": "files",
     "session_id": "Session ID",
     "copy_session_id": "Copy session ID",
-    "copy_transcript_path": "Copy transcript path"
+    "copy_transcript_path": "Copy transcript path",
+    "copy_workspace_path": "Copy workspace path",
+    "more": "More"
   },
   "settings": {
     "title": "Settings",

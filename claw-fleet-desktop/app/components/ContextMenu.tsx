@@ -13,6 +13,8 @@ export interface ContextMenuItem {
   id: string;
   label: string;
   icon?: ReactNode;
+  /** Dim monospace second line — the value the item acts on (a path, an id). */
+  sub?: string;
   /** Renders in the danger colour and sits below a separator. */
   danger?: boolean;
   onSelect: () => void;
@@ -87,7 +89,16 @@ export function ContextMenu({
       }}
     >
       <span className={styles.item_icon}>{item.icon}</span>
-      <span>{item.label}</span>
+      {item.sub ? (
+        <span className={styles.item_text}>
+          <span>{item.label}</span>
+          <span className={styles.item_sub} title={item.sub}>
+            {item.sub}
+          </span>
+        </span>
+      ) : (
+        <span>{item.label}</span>
+      )}
     </button>
   );
 

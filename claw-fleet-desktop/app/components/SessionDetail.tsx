@@ -20,7 +20,7 @@ import { ThinkingBlock } from "./blocks/ThinkingBlock";
 import { ResumeComposer } from "./ResumeComposer";
 import { ScratchpadView } from "./ScratchpadView";
 import type { ExplorerEntry } from "./ExplorerPane";
-import { SessionIdRow } from "./SessionIdRow";
+import { SessionHeaderMenu } from "./SessionHeaderMenu";
 import { SkillHistory } from "./SkillHistory";
 import { TokenSpendPanel } from "./TokenSpendPanel";
 import { WorkflowDag } from "./blocks/WorkflowDag";
@@ -542,45 +542,62 @@ export function SessionDetail({
       <div className={`${styles.root} ${liveSession ? styles.open : ""} ${lite ? styles.lite : ""} ${inline ? styles.inline : ""}`}>
         {liveSession && (
           <>
-          {/* Header */}
+          {/* Header — two rows. The AI title leads (it is what identifies the
+              session); everything you only ever copy (session id, transcript
+              path, workspace path) lives behind the ⋯ menu. */}
           <div className={styles.header}>
             <div className={styles.header_row}>
-              <div className={styles.header_left}>
-                <span className={styles.workspace} title={liveSession.workspaceName}>
-                  {liveSession.workspaceName}
-                </span>
-                {liveSession.isSubagent ? (
-                  <span className={styles.tag_subagent}>
-                    ⎇ {liveSession.agentType ?? t("subagent")}
-                  </span>
-                ) : (
-                  <span className={styles.tag_main}>◈ {t("main")}</span>
-                )}
+              <div
+                className={styles.header_title}
+                title={liveSession.aiTitle || liveSession.workspacePath}
+              >
+                {liveSession.aiTitle || liveSession.workspaceName}
               </div>
+              <SessionHeaderMenu
+                sessionId={liveSession.id}
+                jsonlPath={liveSession.jsonlPath}
+                workspacePath={liveSession.workspacePath}
+                isLocal={connection?.type !== "remote"}
+              />
               {!inline && (
                 <button className={styles.close_btn} onClick={close} title={t("common.close") || "Close"}>
                   ✕
                 </button>
               )}
             </div>
-            {liveSession.aiTitle && (
-              <div className={styles.ai_title}>{liveSession.aiTitle}</div>
-            )}
             <div className={styles.meta_row}>
-              {liveSession.slug && (
-                <span className={styles.slug}>{liveSession.slug}</span>
+              {/* Only when the title line isn't already the workspace name. */}
+              {liveSession.aiTitle && (
+                <span
+                  className={styles.workspace_chip}
+                  title={liveSession.workspacePath}
+                >
+                  {liveSession.workspaceName}
+                </span>
               )}
-              {liveSession.ideName && (
-                <span className={styles.meta_chip}>{liveSession.ideName}</span>
+              {liveSession.isSubagent ? (
+                <span className={styles.tag_subagent}>
+                  ⎇ {liveSession.agentType ?? t("subagent")}
+                </span>
+              ) : (
+                <span className={styles.tag_main}>◈ {t("main")}</span>
               )}
-              <span className={styles.meta_chip} title={t("tokens_out")}>
-                {liveSession.totalOutputTokens.toLocaleString()} {t("tokens_out")}
-              </span>
+              {liveSession.contextPercent != null && (
+                <span
+                  className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
+                  title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
+                >
+                  ctx {Math.round(liveSession.contextPercent * 100)}%
+                </span>
+              )}
               {(liveSession.totalCostUsd ?? 0) >= 0.005 && (
                 <span className={styles.meta_chip} title={t("card.tip_cost")}>
                   ${liveSession.totalCostUsd.toFixed(2)}
                 </span>
               )}
+              <span className={styles.meta_chip} title={t("tokens_out")}>
+                {liveSession.totalOutputTokens.toLocaleString()} tok
+              </span>
               {(liveSession.compactCount ?? 0) > 0 && (
                 <span
                   className={styles.meta_chip}
@@ -594,17 +611,15 @@ export function SessionDetail({
                   ⊞ {liveSession.compactCount}× ~${(liveSession.compactCostUsd ?? 0).toFixed(2)}
                 </span>
               )}
-              {liveSession.contextPercent != null && (
-                <span
-                  className={`${styles.meta_chip} ${liveSession.contextPercent >= 0.8 ? styles.meta_chip_warn : ""}`}
-                  title={t("card.tip_context", { percent: Math.round(liveSession.contextPercent * 100) })}
-                >
-                  ctx {Math.round(liveSession.contextPercent * 100)}%
+              {liveSession.ideName && (
+                <span className={styles.meta_chip}>{liveSession.ideName}</span>
+              )}
+              {liveSession.slug && (
+                <span className={styles.slug} title={t("card.tip_slug", { slug: liveSession.slug })}>
+                  {liveSession.slug}
                 </span>
               )}
             </div>
-            <div className={styles.path} title={liveSession.workspacePath}>{liveSession.workspacePath}</div>
-            <SessionIdRow id={liveSession.id} jsonlPath={liveSession.jsonlPath} />
             {/* Handoff relay chain — chip toggles the chain detail panel */}
             {liveSession.handoff && <HandoffChainRow session={liveSession} />}
           </div>

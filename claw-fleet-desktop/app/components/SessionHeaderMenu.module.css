@@ -1,0 +1,25 @@
+/* Same 24px ghost square as the header's close button — they read as one pair. */
+.btn {
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  color: var(--color-text-dim);
+  cursor: pointer;
+}
+
+.btn:hover,
+.btn_open {
+  background: var(--color-bg-secondary);
+  color: var(--color-text);
+}
+
+.btn_failed {
+  color: var(--color-error);
+}
