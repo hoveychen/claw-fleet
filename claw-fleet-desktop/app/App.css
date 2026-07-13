@@ -63,7 +63,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
 
   /* Linear-inspired cool neutrals (dark) */
   --color-bg: #08090a;
-  --color-bg-sidebar: var(--color-bg);
 
   /* Surface roles. `field` is RAISED (form controls sit a layer above the
      canvas, same plane as cards); `sunken` is RECESSED (segmented-control
@@ -71,10 +70,10 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
      this out — "off-white cards/inputs read as raised surfaces" — and light
      honours it. Dark used to flatten five tokens (field / sunken / card-hover
      / hover / tool-hover) onto one #18191b, which is why the split went
-     unnoticed for so long: half the search boxes reach for --color-bg-input
-     and half for --color-bg-secondary, and in dark you could not tell them
-     apart. The ladder below pulls them back apart, so dark stops hiding this
-     class of drift:
+     unnoticed for so long: half the search boxes reached for the old
+     --color-bg-input and half for --color-bg-secondary, and in dark you could
+     not tell them apart. The ladder below pulls them back apart, so dark stops
+     hiding this class of drift:
        bg      #08090a  canvas
        sunken  #0e0f11  recessed (troughs, tab grounds, tool blocks)
        card    #101113  card plane
@@ -85,7 +84,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-bg-sunken: #0e0f11;
 
   --color-bg-secondary: var(--color-bg-sunken);
-  --color-bg-tertiary: #0e0f11;
   --color-bg-card: #101113;
   --color-bg-card-hover: #1c1d20;
   --color-bg-card-selected: #1f2023;
@@ -93,9 +91,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-bg-tool: var(--color-bg-sunken);
   --color-bg-tool-hover: var(--color-bg-card-hover);
   --color-bg-user: #161b29;
-  /* DEPRECATED — use --color-bg-field. Alias kept until every consumer is
-     migrated (P2); check-css-tokens.mjs hard-fails on it from P4. */
-  --color-bg-input: var(--color-bg-field);
   --color-bg-modal: #1c1d20;
   --color-bg-modal-overlay: rgba(0, 0, 0, 0.75);
 
@@ -216,7 +211,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
      cards/inputs read as raised surfaces; the neutral ink is warm-tinted
      (rgba(32,28,18,…)) instead of the cool blue-gray used in dark mode. */
   --color-bg: #f1efea;
-  --color-bg-sidebar: var(--color-bg);
 
   /* Surface roles — light is where the two actually differ, and where the
      comment above ("inputs read as raised surfaces") is honoured:
@@ -231,7 +225,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-bg-sunken: #e7e4dd;
 
   --color-bg-secondary: var(--color-bg-sunken);
-  --color-bg-tertiary: #ece9e2;
   --color-bg-card: #fbfaf7;
   --color-bg-card-hover: #f1eee7;
   --color-bg-card-selected: #e9e5db;
@@ -239,8 +232,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-bg-tool: #ece9e2;
   --color-bg-tool-hover: #e5e1d8;
   --color-bg-user: #f0e8dd;
-  /* DEPRECATED — use --color-bg-field (see dark block). */
-  --color-bg-input: var(--color-bg-field);
   --color-bg-modal: #fbfaf7;
   --color-bg-modal-overlay: rgba(32, 28, 18, 0.4);
 

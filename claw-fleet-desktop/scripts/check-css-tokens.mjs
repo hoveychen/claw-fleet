@@ -44,9 +44,11 @@ function collectCss(dir, out = []) {
 //   --drift: Onboarding.tsx sets it per confetti particle for the fall animation.
 const RUNTIME_INJECTED = new Set(["--drift"]);
 
-// Retired token names. App.css still defines them as aliases so nothing breaks
-// mid-migration, which is exactly why a plain "is it defined?" check can't see a
-// regression here — the name resolves. Referencing one is an error.
+// Retired token names — tombstones. App.css no longer defines them, so the
+// undefined-var check below would already catch a reference; this map is kept so
+// the failure says WHICH token to use instead of just "undefined". (During the
+// migration they were live aliases, and this list was the only thing that could
+// see a regression, because the name still resolved.)
 const DEPRECATED = new Map([
   ["--color-bg-input", "--color-bg-field (form controls are a RAISED surface)"],
   ["--color-bg-tertiary", "--color-bg-sunken (the one recessed surface role)"],
@@ -134,7 +136,7 @@ if (bareColors.length) {
 }
 
 if (deprecatedRefs.length) {
-  console.error(`\n✖  ${deprecatedRefs.length} reference(s) to DEPRECATED CSS variables (they still resolve, so nothing else catches this):`);
+  console.error(`\n✖  ${deprecatedRefs.length} reference(s) to RETIRED CSS variables (removed from App.css — they resolve to nothing):`);
   for (const d of deprecatedRefs) console.error(`   ${d.file}:${d.line}  var(${d.token}) → use ${d.replacement}`);
   console.error("");
   process.exit(1);
