@@ -6008,6 +6008,43 @@ pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
     kill_pid_tree(pid, false)
 }
 
+/// Build `taskkill` arguments to force-kill whole process trees. `None` when
+/// there are no pids — the caller must NOT spawn a bare `taskkill /F /T /PID`,
+/// which is a syntax error. Each pid needs its OWN `/PID`: `taskkill /F /T /PID
+/// a b c` is rejected by taskkill, so the pre-fix multi-pid workspace kill
+/// silently no-oped while still reporting success.
+#[cfg(any(not(unix), test))]
+fn build_taskkill_tree_args(pids: &[u32]) -> Option<Vec<String>> {
+    if pids.is_empty() {
+        return None;
+    }
+    let mut args = vec!["/F".to_string(), "/T".to_string()];
+    for &p in pids {
+        args.push("/PID".to_string());
+        args.push(p.to_string());
+    }
+    Some(args)
+}
+
+#[cfg(test)]
+mod taskkill_tests {
+    use super::build_taskkill_tree_args;
+
+    #[test]
+    fn each_pid_gets_its_own_pid_flag_and_empty_is_none() {
+        // Zero pids: caller must skip taskkill entirely, not emit `/F /T /PID`.
+        assert!(
+            build_taskkill_tree_args(&[]).is_none(),
+            "empty pid set must yield None, not a bare `taskkill /F /T /PID`"
+        );
+        // Multiple pids: taskkill needs `/PID a /PID b`, never `/PID a b`.
+        let args = build_taskkill_tree_args(&[100, 200]).expect("non-empty must be Some");
+        let pid_flags = args.iter().filter(|a| a.as_str() == "/PID").count();
+        assert_eq!(pid_flags, 2, "each pid needs its own /PID, got {args:?}");
+        assert!(args.contains(&"/F".to_string()) && args.contains(&"/T".to_string()));
+    }
+}
+
 /// Kill `pid` **and every descendant**. Signalling the root alone leaves the
 /// agent's tool children — a build, a test run, a dev server — reparented to
 /// init and still burning CPU after the agent itself is gone.
@@ -6103,17 +6140,26 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
 
     #[cfg(not(unix))]
     {
-        crate::process_util::command("taskkill")
-            .args(["/F", "/T", "/PID"])
-            .args(
-                scan_cli_processes()
-                    .iter()
-                    .filter(|p| p.cwd == workspace_path)
-                    .map(|p| p.pid.to_string())
-                    .collect::<Vec<_>>(),
-            )
+        let pids: Vec<u32> = scan_cli_processes()
+            .iter()
+            .filter(|p| p.cwd == workspace_path)
+            .map(|p| p.pid)
+            .collect();
+        // Match the unix branch: an empty workspace is an explicit error, not a
+        // bare `taskkill /F /T /PID` that spawn-succeeds, syntax-errors, and is
+        // then reported as success. `build_taskkill_tree_args` also gives each
+        // pid its own `/PID` (`/PID a b c` is rejected by taskkill).
+        let Some(args) = build_taskkill_tree_args(&pids) else {
+            return Err(format!("No agent processes found in {}", workspace_path));
+        };
+        let status = crate::process_util::command("taskkill")
+            .args(&args)
             .status()
             .map_err(|e| format!("taskkill failed: {e}"))?;
+        crate::log_debug(&format!(
+            "kill_workspace: taskkill {:?} for '{}' -> {}",
+            args, workspace_path, status
+        ));
         Ok(())
     }
 }
