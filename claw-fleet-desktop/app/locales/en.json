@@ -411,7 +411,20 @@
     "delete_doc_confirm": "Delete “{{slug}}” and all its versions?",
     "delete_version_confirm": "Delete version {{version}} of “{{slug}}”?",
     "export": "Export this version to a file",
-    "export_short": "Export"
+    "export_short": "Export",
+    "move": "Move / rename…",
+    "move_short": "Move",
+    "move_title": "Move / rename “{{title}}”",
+    "move_title_short": "Move or rename — type a slug with / to make a folder",
+    "move_hint": "Enter the new slug. Use / for folders — design/foo creates a design folder. Up to 8 levels, ≤64 chars per segment.",
+    "move_confirm": "Move",
+    "folder_rename": "Rename folder…",
+    "folder_rename_title": "Rename folder “{{path}}”",
+    "folder_rename_hint": "All {{count}} docs under this folder get the new prefix. Type a/b to move it under another folder; merging into an existing folder is fine, but a slug collision fails the whole move.",
+    "folder_rename_confirm": "Rename",
+    "folder_dissolve": "Dissolve folder (move docs up)",
+    "folder_delete": "Delete folder and its {{count}} docs",
+    "delete_folder_confirm": "Delete all {{count}} docs under “{{path}}” (including every version)? This cannot be undone."
   },
   "live": {
     "section_title": "Live"
