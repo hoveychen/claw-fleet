@@ -307,7 +307,7 @@
 
 .tasks_plan_status_done {
   color: var(--color-text-dim);
-  background: rgba(128, 128, 128, 0.15);
+  background: var(--color-bg-secondary);
 }
 
 .tasks_plan_count {
