@@ -139,7 +139,10 @@
   min-height: 160px;
   border: 1px solid var(--color-border);
   border-radius: 5px;
-  background: #fff;
+  /* Hosts arbitrary fleet__ask HTML previews that assume a light background, so
+     it must stay a fixed light canvas (not var(--color-bg-card), which goes dark
+     in dark mode); warm off-white to sit better under the paper light theme. */
+  background: #fbfaf7;
   margin-bottom: 8px;
 }
 
