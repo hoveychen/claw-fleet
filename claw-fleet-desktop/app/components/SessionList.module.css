@@ -290,8 +290,8 @@
 .nav_badge {
   font-size: 10px;
   font-weight: 700;
-  background: #ef4444;
-  color: #fff;
+  background: var(--color-error-solid);
+  color: var(--color-on-error);
   border-radius: var(--radius-md);
   padding: 1px 6px;
   min-width: 18px;
@@ -304,7 +304,7 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: #ef4444;
+  background: var(--color-error-solid);
   flex-shrink: 0;
 }
 
