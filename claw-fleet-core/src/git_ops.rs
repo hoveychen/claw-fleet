@@ -519,7 +519,11 @@ mod tests {
         // Bare "remote" + a clone that tracks it.
         let remote = tmp.path().join("remote.git");
         fs::create_dir_all(&remote).unwrap();
-        git(&remote, &["init", "-q", "--bare"]);
+        // `-b main` pins the bare repo's HEAD so it doesn't default to the
+        // ambient `init.defaultBranch` (often "master" on CI runners, which
+        // leaves HEAD dangling after we only push `main` → clone can't check
+        // out and status reports no upstream).
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
 
         let ws = tmp.path().join("ws");
         init_repo(&ws);
@@ -552,7 +556,11 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let remote = tmp.path().join("remote.git");
         fs::create_dir_all(&remote).unwrap();
-        git(&remote, &["init", "-q", "--bare"]);
+        // `-b main` pins the bare repo's HEAD so it doesn't default to the
+        // ambient `init.defaultBranch` (often "master" on CI runners, which
+        // leaves HEAD dangling after we only push `main` → clone can't check
+        // out and status reports no upstream).
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
 
         // First clone seeds the remote with two commits.
         let seed = tmp.path().join("seed");
@@ -669,7 +677,11 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let remote = tmp.path().join("remote.git");
         fs::create_dir_all(&remote).unwrap();
-        git(&remote, &["init", "-q", "--bare"]);
+        // `-b main` pins the bare repo's HEAD so it doesn't default to the
+        // ambient `init.defaultBranch` (often "master" on CI runners, which
+        // leaves HEAD dangling after we only push `main` → clone can't check
+        // out and status reports no upstream).
+        git(&remote, &["init", "-q", "--bare", "-b", "main"]);
         let ws = tmp.path().join("ws");
         init_repo(&ws);
         git(&ws, &["remote", "add", "origin", remote.to_str().unwrap()]);
