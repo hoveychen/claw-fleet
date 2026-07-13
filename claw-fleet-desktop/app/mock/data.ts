@@ -2123,3 +2123,47 @@ export const MOCK_SKILL_FILES = [
   { name: "cli.md", relativePath: "reference/cli.md", absolutePath: "/Users/demo/.claude/skills/muveectl/reference/cli.md", sizeBytes: 12_200, isDir: false },
   { name: "datasets.md", relativePath: "reference/datasets.md", absolutePath: "/Users/demo/.claude/skills/muveectl/reference/datasets.md", sizeBytes: 6_800, isDir: false },
 ];
+
+/** A slice of the *probe host's* home, for the launcher's remote directory
+ *  picker (`?mock&remote`). Mirrors what `workspace_browse::browse_dir` serves:
+ *  directories only, dotfiles filtered, git repos flagged, `parent: null` at a
+ *  root. Kept shallow — enough to exercise descend / ascend / pick. */
+export const MOCK_BROWSE_HOME = "/home/demo";
+export const MOCK_BROWSE_TREE: Record<
+  string,
+  { path: string; parent: string | null; entries: { name: string; path: string; isGitRepo: boolean }[]; truncated: boolean }
+> = {
+  [MOCK_BROWSE_HOME]: {
+    path: MOCK_BROWSE_HOME,
+    parent: null,
+    entries: [
+      { name: "src", path: `${MOCK_BROWSE_HOME}/src`, isGitRepo: false },
+      { name: "deploy", path: `${MOCK_BROWSE_HOME}/deploy`, isGitRepo: true },
+    ],
+    truncated: false,
+  },
+  [`${MOCK_BROWSE_HOME}/src`]: {
+    path: `${MOCK_BROWSE_HOME}/src`,
+    parent: MOCK_BROWSE_HOME,
+    entries: [
+      { name: "api-server", path: `${MOCK_BROWSE_HOME}/src/api-server`, isGitRepo: true },
+      { name: "billing-service", path: `${MOCK_BROWSE_HOME}/src/billing-service`, isGitRepo: true },
+      { name: "sandbox", path: `${MOCK_BROWSE_HOME}/src/sandbox`, isGitRepo: false },
+    ],
+    truncated: false,
+  },
+};
+
+/** Mirrors the desktop's `browse_dir`. A path inside the tree with no explicit
+ *  fixture is a real, empty directory (every directory the picker offers can be
+ *  entered); only a path outside it throws, as `canonicalize` would. */
+export function mockBrowseDir(path?: string | null) {
+  const p = path?.trim() || MOCK_BROWSE_HOME;
+  const hit = MOCK_BROWSE_TREE[p];
+  if (hit) return hit;
+  const parent = p.slice(0, p.lastIndexOf("/"));
+  if (!MOCK_BROWSE_TREE[parent]?.entries.some((e) => e.path === p)) {
+    throw new Error(`${p}: No such file or directory`);
+  }
+  return { path: p, parent, entries: [], truncated: false };
+}
