@@ -211,7 +211,7 @@
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #6b6b72;
+  background: var(--color-text-dim);
   flex: 0 0 auto;
 }
 
