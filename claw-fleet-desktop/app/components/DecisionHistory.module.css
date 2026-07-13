@@ -62,7 +62,7 @@
   gap: 2px;
   padding: 6px 8px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
 }
 
@@ -77,7 +77,7 @@
   flex-wrap: wrap;
   cursor: pointer;
   user-select: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: background 0.12s;
 }
 
@@ -89,7 +89,7 @@
   font-size: 10px;
   font-weight: 600;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--tag-skill-bg);
   color: var(--tag-skill-fg);
 }
@@ -107,7 +107,7 @@
 .outcome_chip {
   font-size: 10px;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--color-bg);
   color: var(--color-text-secondary);
 }
@@ -171,14 +171,14 @@
   font-size: 0.9em;
   background: var(--color-bg);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .question_text pre {
   font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--color-bg);
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin: 0.3em 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -207,7 +207,7 @@
   flex-direction: column;
   gap: 2px;
   padding: 4px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 11px;
   color: var(--color-text-secondary);
 }
@@ -242,7 +242,7 @@
   font-size: 0.9em;
   background: var(--color-bg);
   padding: 0 3px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .option_label strong,
@@ -268,7 +268,7 @@
   color: var(--color-text-secondary);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 6px 8px;
   max-height: 240px;
   overflow: auto;
@@ -284,14 +284,14 @@
   font-size: 0.9em;
   background: var(--color-bg-secondary);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .plan_content pre {
   font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--color-bg-secondary);
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin: 0.3em 0;
   white-space: pre-wrap;
   word-break: break-word;
@@ -329,7 +329,7 @@
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 6px;
   max-height: 240px;
   overflow: auto;

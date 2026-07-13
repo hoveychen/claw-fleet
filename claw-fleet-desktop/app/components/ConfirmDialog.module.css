@@ -13,7 +13,7 @@
 .dialog {
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 20px 24px;
   max-width: 420px;
   width: 100%;
@@ -36,7 +36,7 @@
 
 .btn {
   padding: 6px 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-card);
   color: var(--color-text);

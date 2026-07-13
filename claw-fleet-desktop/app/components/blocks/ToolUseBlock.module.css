@@ -1,5 +1,5 @@
 .root {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   overflow: hidden;
   margin: 4px 0;
@@ -58,7 +58,7 @@
 .error_badge {
   font-size: 10px;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--color-error-bg);
   color: var(--color-error-fg);
 }
@@ -138,7 +138,7 @@
   font-family: var(--font-mono);
   font-size: 10px;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
   border: 1px solid var(--color-border);
@@ -152,7 +152,7 @@
 
 /* Grouped */
 .group {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--tool-group-border);
   overflow: hidden;
   margin: 4px 0;

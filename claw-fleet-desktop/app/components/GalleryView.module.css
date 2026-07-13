@@ -39,7 +39,7 @@
 .group {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border-soft);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   box-shadow: var(--shadow-card);
   transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
@@ -106,7 +106,7 @@
   margin: 0;
   background: none;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   text-align: left;
   font-size: 11px;
   line-height: 1.4;

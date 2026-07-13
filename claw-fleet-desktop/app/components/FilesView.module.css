@@ -12,7 +12,7 @@
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
@@ -59,7 +59,7 @@
 .image_preview {
   max-width: 100%;
   max-height: 70vh;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   /* Checkerboard so transparent images stay legible in both themes. */
   background:
     repeating-conic-gradient(rgba(128, 128, 128, 0.15) 0% 25%, transparent 0% 50%)
@@ -74,7 +74,7 @@
 .truncated_notice {
   margin: 0 0 8px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
@@ -145,7 +145,7 @@
   align-items: center;
   gap: 5px;
   padding: 3px 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
@@ -167,7 +167,7 @@
   width: 100%;
   margin: 4px 16px 0;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 11px;
   white-space: pre-wrap;
   word-break: break-word;
@@ -216,7 +216,7 @@
 .proc_input {
   flex: 1;
   padding: 5px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-field);
   color: var(--color-text);
@@ -234,7 +234,7 @@
   align-items: center;
   gap: 4px;
   padding: 5px 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-accent);
   background: transparent;
   color: var(--color-accent);
@@ -257,7 +257,7 @@
   font-size: 11px;
   color: var(--color-error);
   padding: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-error-bg);
 }
 
@@ -274,7 +274,7 @@
 }
 
 .proc_item {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .proc_row {
@@ -291,7 +291,7 @@
   gap: 6px;
   padding: 4px 6px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px;
@@ -342,7 +342,7 @@
   align-items: center;
   gap: 4px;
   padding: 3px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
@@ -364,7 +364,7 @@
 .proc_term_wrap {
   margin: 4px 0 8px 24px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--color-bg-tool);
 }
@@ -378,7 +378,7 @@
   min-width: 18px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-success);
   color: var(--color-bg-card);
   font-size: 10px;

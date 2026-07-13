@@ -44,14 +44,14 @@
   display: flex;
   gap: 2px;
   background: var(--color-bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 3px;
 }
 
 .tab_btn {
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 12px;
   font-size: 12px;
   font-weight: 500;
@@ -93,7 +93,7 @@
   gap: 6px;
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -152,7 +152,7 @@
 .action_btn {
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -171,7 +171,7 @@
 .icon_btn {
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   width: 26px;
   height: 24px;
   cursor: pointer;
@@ -200,7 +200,7 @@
   max-width: 320px;
   background: var(--color-bg-field);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 10px;
   font-size: 11px;
   color: var(--color-text);
@@ -274,7 +274,7 @@
   text-align: left;
   cursor: pointer;
   color: var(--color-text-dim);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: background 0.12s, color 0.12s;
 }
 
@@ -300,7 +300,7 @@
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .workspace_count {
@@ -323,7 +323,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
   background: none;
@@ -416,7 +416,7 @@
   font-weight: 800;
   letter-spacing: 0.04em;
   padding: 2px 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin-top: 1px;
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
 }
@@ -444,7 +444,7 @@
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-dim);
@@ -469,7 +469,7 @@
   color: var(--color-text);
   background: var(--color-bg-secondary);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -520,7 +520,7 @@
   font-size: 14px;
   padding: 4px 6px;
   line-height: 1;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .detail_close:hover {
@@ -567,7 +567,7 @@
   font-size: 10px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
   margin-right: 4px;
   font-family: "SF Mono", "Fira Code", monospace;
@@ -593,7 +593,7 @@
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -617,7 +617,7 @@
   background: var(--color-accent);
   color: var(--color-on-accent);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 14px;
   font-size: 11px;
   font-weight: 600;
@@ -638,7 +638,7 @@
 .read_detail_btn {
   background: none;
   border: 1px solid var(--color-success);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 14px;
   font-size: 11px;
   font-weight: 600;
@@ -672,7 +672,7 @@
   inset: 0;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -711,7 +711,7 @@
   color: var(--color-accent);
   background: rgba(217, 119, 87, 0.12);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
   font-weight: 600;
   text-transform: uppercase;
@@ -729,7 +729,7 @@
 .delete_btn {
   background: none;
   border: 1px solid var(--color-error);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 12px;
   font-size: 11px;
   font-weight: 600;
@@ -795,7 +795,7 @@
   width: 100%;
   resize: vertical;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 12px;
   background: var(--color-bg-field);
@@ -827,7 +827,7 @@
 
 .suggest_card {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 12px;
   cursor: pointer;
   transition: border-color 0.1s, background 0.1s;
@@ -952,7 +952,7 @@
   background: rgba(var(--color-accent-rgb), 0.12);
   color: var(--color-accent);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11px;
 }

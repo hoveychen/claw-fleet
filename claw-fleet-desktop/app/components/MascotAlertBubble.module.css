@@ -7,7 +7,7 @@
   gap: 8px;
   padding: 8px 10px;
   margin: 4px 10px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: color-mix(in srgb, var(--color-warning) 16%, var(--mascot-bubble-bg, rgba(255, 255, 255, 0.12)));
   border: 1px solid color-mix(in srgb, var(--color-warning) 45%, var(--mascot-bubble-border, rgba(255, 255, 255, 0.15)));
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
@@ -99,7 +99,7 @@
   min-width: 20px;
   height: 18px;
   padding: 0 5px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--color-warning);
   color: #fff;
   font-size: 10px;

@@ -3,7 +3,7 @@
    real work landing — but quieter than a decision card. */
 .root {
   margin: 10px 0;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   border-left: 3px solid var(--color-accent, #60a5fa);
   overflow: hidden;
