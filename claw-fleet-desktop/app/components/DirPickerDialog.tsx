@@ -38,22 +38,32 @@ export function DirPickerDialog({ initialPath, onPick, onCancel }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async (path?: string) => {
+  const load = useCallback(async (path?: string, fallbackToHome = false) => {
     setLoading(true);
     setError(null);
     try {
       setData(await invoke<BrowseDirResponse>("browse_dir", { path: path ?? null }));
     } catch (e) {
-      // Keep the previous listing on screen so the user can still navigate away
-      // from a directory that failed to open.
       setError(String(e));
+      // A dead starting point (a workspace that has since been deleted, or —
+      // under a remote connection — a path that only exists on the desktop)
+      // would otherwise strand the user: the listing is empty, so there is not
+      // even a row to click away from. Fall back to the host's home so the
+      // picker is always navigable; the error stays on screen to explain why.
+      if (fallbackToHome && path) {
+        try {
+          setData(await invoke<BrowseDirResponse>("browse_dir", { path: null }));
+        } catch {
+          // Home itself is unreachable — nothing left to fall back to.
+        }
+      }
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    void load(initialPath.trim() || undefined);
+    void load(initialPath.trim() || undefined, true);
   }, [load, initialPath]);
 
   // Long paths matter at their tail (which directory am I in), not their head.
