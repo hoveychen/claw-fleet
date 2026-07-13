@@ -739,6 +739,34 @@ src/components/MemoryPanel.tsx:77:      const data = await invoke<WorkspaceMemor
         usage: { input_tokens: 3200, output_tokens: 320 },
       },
     },
+    // Exercises every markdown capability the renderer claims to have — the
+    // first line is the exact sentence that exposed the CJK emphasis bug
+    // (CommonMark refuses to bold `**` glued between a CJK char and a quote).
+    // Keep it: it's the fastest way to eyeball a regression in `?mock`.
+    {
+      type: "assistant",
+      uuid: "api-msg-4",
+      timestamp: new Date(NOW - 38 * MIN).toISOString(),
+      message: {
+        role: "assistant",
+        model: "claude-opus-4-20250805",
+        content: [
+          {
+            type: "text",
+            text:
+              '一个是**“一年一两次、口径每年变”这个特征本身**。所有 SaaS 的商业模式都建立在“你会持续用我”上。\n\n' +
+              "鉴权失败的时序是这样的：\n\n" +
+              "```mermaid\nsequenceDiagram\n    participant C as Client\n    participant G as Gateway\n    participant A as Auth\n    C->>G: 带旧 issuer 的 token\n    G->>A: 校验 issuer\n    A-->>G: 拒绝 (api-server ≠ api-server-v2)\n    G-->>C: 401\n```\n\n" +
+              "重试退避是指数的：$t_n = t_0 \\cdot 2^{n}$，所以第 5 次已经等到\n\n$$t_5 = 100\\text{ms} \\cdot 2^5 = 3.2\\text{s}$$\n\n" +
+              "| 方案 | 迁移成本 | 风险 |\n|:---|:---:|---:|\n| 双 issuer 并存 | 低 | 低 |\n| 强制换发 token | 高 | 中 |\n\n" +
+              "- [x] 定位根因\n- [ ] 灰度发布\n\n" +
+              "水分子写作 H<sub>2</sub>O，~~不是 H3O~~。",
+          },
+        ],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 3400, output_tokens: 410 },
+      },
+    },
   ],
 };
 
