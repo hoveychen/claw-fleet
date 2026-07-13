@@ -22,7 +22,7 @@
 }
 
 .rail:hover {
-  background: rgba(128, 128, 128, 0.12);
+  background: var(--color-bg-hover);
   color: var(--color-text);
 }
 

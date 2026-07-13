@@ -101,8 +101,8 @@
 
 .bar_segment[data-color="warn"] { background: #d97757; }
 .bar_segment[data-color="info"] { background: #5b8def; }
-.bar_segment[data-color="system"] { background: #8a8a8a; }
-.bar_segment[data-color="residual"] { background: #c0c0c0; }
+.bar_segment[data-color="system"] { background: #8a8578; }
+.bar_segment[data-color="residual"] { background: #c2bcae; }
 
 /* ── Legend table ──────────────────────────────────────────────── */
 .legend_table {
@@ -157,8 +157,8 @@
 
 .dot[data-color="warn"] { background: #d97757; }
 .dot[data-color="info"] { background: #5b8def; }
-.dot[data-color="system"] { background: #8a8a8a; }
-.dot[data-color="residual"] { background: #c0c0c0; }
+.dot[data-color="system"] { background: #8a8578; }
+.dot[data-color="residual"] { background: #c2bcae; }
 
 .col_num {
   text-align: right;

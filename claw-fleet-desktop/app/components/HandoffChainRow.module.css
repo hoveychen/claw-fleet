@@ -12,7 +12,7 @@
   gap: 4px;
   padding: 1px 6px;
   border-radius: 9px;
-  background: var(--color-hover, rgba(127, 127, 127, 0.12));
+  background: var(--color-bg-tool);
   color: var(--color-text-secondary);
   cursor: pointer;
   font-size: 10px;
@@ -20,14 +20,14 @@
 }
 
 .handoff_chip:hover {
-  background: rgba(127, 127, 127, 0.22);
+  background: var(--color-bg-secondary);
 }
 
 .handoff_panel {
   margin-top: 4px;
   padding: 6px 8px;
   border-radius: 6px;
-  background: var(--color-hover, rgba(127, 127, 127, 0.08));
+  background: var(--color-bg-tool);
   cursor: default;
 }
 
