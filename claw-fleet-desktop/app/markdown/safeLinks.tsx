@@ -1,5 +1,6 @@
 import type { Components } from "react-markdown";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { MermaidBlock } from "./MermaidBlock";
 import { PathChip, type PathLinkContext } from "./pathLinks";
 import { parsePathRef } from "./pathRef";
 import styles from "./markdown.module.css";
@@ -44,6 +45,7 @@ export function pathAwareMarkdownComponents(paths: PathLinkContext): Components 
   return {
     ...safeMarkdownComponents,
     code: ({ className, children, ...props }) => {
+      if (isMermaid(className)) return <MermaidBlock code={codeText(children)} />;
       const raw = typeof children === "string" ? children : null;
       const pathRef = raw ? parsePathRef(raw) : null;
       if (pathRef) {
@@ -62,6 +64,15 @@ export function pathAwareMarkdownComponents(paths: PathLinkContext): Components 
   };
 }
 
+/** A ```mermaid fence, as react-markdown labels it on the <code> element. */
+function isMermaid(className?: string): boolean {
+  return /(^|\s)language-mermaid(\s|$)/.test(className ?? "");
+}
+
+function codeText(children: React.ReactNode): string {
+  return String(children).replace(/\n$/, "");
+}
+
 export const safeMarkdownComponents: Components = {
   a: safeLinkComponent(),
   table: ({ children }) => (
@@ -75,9 +86,12 @@ export const safeMarkdownComponents: Components = {
   td: ({ children, style }) => (
     <td className={styles.td} style={style}>{children}</td>
   ),
-  code: ({ className, children, ...props }) => (
-    <code className={className ? `${styles.code} ${className}` : styles.code} {...props}>
-      {children}
-    </code>
-  ),
+  code: ({ className, children, ...props }) => {
+    if (isMermaid(className)) return <MermaidBlock code={codeText(children)} />;
+    return (
+      <code className={className ? `${styles.code} ${className}` : styles.code} {...props}>
+        {children}
+      </code>
+    );
+  },
 };

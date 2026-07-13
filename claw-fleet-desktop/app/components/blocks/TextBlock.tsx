@@ -9,6 +9,7 @@ import {
   wikiLinkComponent,
   type WikiLinkContext,
 } from "../../markdown/wikiLinks";
+import { MermaidBlock } from "../../markdown/MermaidBlock";
 import { PathChip, type PathLinkContext } from "../../markdown/pathLinks";
 import { parsePathRef } from "../../markdown/pathRef";
 import styles from "./TextBlock.module.css";
@@ -92,6 +93,9 @@ export const TextBlock = memo(function TextBlock({
           code({ node, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || "");
             const isBlock = !!(props as { inline?: boolean }).inline === false && match;
+            if (isBlock && match?.[1] === "mermaid") {
+              return <MermaidBlock code={String(children).replace(/\n$/, "")} />;
+            }
             if (isBlock && match) {
               return (
                 <div className={styles.code_wrapper}>

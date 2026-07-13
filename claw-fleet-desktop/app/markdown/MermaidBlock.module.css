@@ -1,0 +1,38 @@
+.diagram {
+  margin: 10px 0;
+  padding: 12px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow-x: auto;
+  text-align: center;
+}
+
+/* Let a wide diagram scroll rather than shrink itself into unreadability. */
+.diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.failed {
+  margin: 10px 0;
+  border: 1px solid var(--color-error);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.failed_label {
+  padding: 6px 10px;
+  background: var(--color-error-bg);
+  color: var(--color-error-fg);
+  font-size: 11px;
+}
+
+.failed_source {
+  margin: 0;
+  padding: 10px;
+  background: var(--color-bg-secondary);
+  color: var(--color-code-fg);
+  font-size: 12px;
+  overflow-x: auto;
+}
