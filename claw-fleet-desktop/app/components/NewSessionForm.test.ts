@@ -79,4 +79,25 @@ describe("distinctWorkspaces", () => {
     ]);
     expect(out).toHaveLength(1);
   });
+
+  it("drops the chat workspace from recents — it is pinned separately", () => {
+    // Without this the launcher would list it twice once chatting has started:
+    // once as the pinned entry, once as an ordinary recent workspace.
+    const out = distinctWorkspaces(
+      [
+        { workspacePath: "/Users/foo/.fleet/chat", workspaceName: "Chat", lastActivityMs: 30 },
+        { workspacePath: "/w/a", workspaceName: "a", lastActivityMs: 20 },
+      ],
+      30,
+      "/Users/foo/.fleet/chat",
+    );
+    expect(out.map((w) => w.path)).toEqual(["/w/a"]);
+  });
+
+  it("keeps the chat workspace listed when the path is unknown (backend offline)", () => {
+    const out = distinctWorkspaces([
+      { workspacePath: "/Users/foo/.fleet/chat", workspaceName: "Chat", lastActivityMs: 30 },
+    ]);
+    expect(out).toHaveLength(1);
+  });
 });
