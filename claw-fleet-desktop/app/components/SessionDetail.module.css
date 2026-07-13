@@ -287,7 +287,7 @@
   white-space: nowrap;
   font-weight: 600;
   font-size: 13px;
-  color: var(--color-text-primary);
+  color: var(--color-text);
 }
 
 .tasks_plan_status {
@@ -364,14 +364,14 @@
 }
 
 .tasks_item_current {
-  background: var(--color-hover, rgba(127, 127, 127, 0.1));
+  background: var(--color-bg-hover);
   border-radius: 4px;
   padding-left: 4px;
   margin-left: -4px;
 }
 
 .tasks_item_current .tasks_text {
-  color: var(--color-text-primary);
+  color: var(--color-text);
   font-weight: 600;
 }
 
@@ -506,7 +506,7 @@
   line-height: 1.4;
   border-radius: 6px;
   border: 1px solid var(--color-border, #30363d);
-  background: var(--color-bg-subtle, rgba(255, 255, 255, 0.02));
+  background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
   text-align: left;
 }
