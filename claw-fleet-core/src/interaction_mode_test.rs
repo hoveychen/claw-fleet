@@ -68,6 +68,7 @@ pub fn build_test_request() -> ElicitationRequest {
             multi_select: false,
         }],
         timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
     }
 }
 
@@ -83,6 +84,7 @@ pub fn build_test_fleet_ask_request() -> crate::mcp_ipc::FleetAskRequest {
         workspace_name: TEST_WORKSPACE_MARKER.to_string(),
         ai_title: Some("QA Diagnostic — fleet__ask".into()),
         timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
         questions: vec![FleetAskQuestion {
             question: "QA 诊断 (fleet__ask)：看到这条卡片说明 MCP 通路正常。\n\n---\n\n这是 Fleet 通过新 fleet__ask 通道发出的测试卡片，回答任一选项或忽略都行（10 秒后自动清理）。".into(),
             header: "诊断测试".into(),

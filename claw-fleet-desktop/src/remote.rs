@@ -2291,6 +2291,9 @@ fn connect_remote_start_probe(
         let probe_elicit = probe.clone();
         std::thread::spawn(move || {
             let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            // Ids already announced as parked, so the flip fires once.
+            let mut newly_parked: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             loop {
                 std::thread::sleep(Duration::from_millis(500));
                 if !*pr_elicit.lock().unwrap() {
@@ -2301,6 +2304,14 @@ fn connect_remote_start_probe(
                 };
                 let pending_ids: std::collections::HashSet<String> =
                     pending.iter().map(|r| r.id.clone()).collect();
+                for req in pending.iter().filter(|r| r.parked) {
+                    // The probe folds parked cards into `/x/pending`, so the id
+                    // stays put and no dismissal fires. Announce the flip once so
+                    // a card the UI already shows can badge itself.
+                    if known.contains(&req.id) && newly_parked.insert(req.id.clone()) {
+                        let _ = app_elicit.emit("decision-parked", req.id.clone());
+                    }
+                }
                 for req in &pending {
                     if known.insert(req.id.clone()) {
                         claw_fleet_core::log_debug(&format!(
@@ -2327,6 +2338,9 @@ fn connect_remote_start_probe(
         let probe_ask = probe.clone();
         std::thread::spawn(move || {
             let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            // Ids already announced as parked, so the flip fires once.
+            let mut newly_parked: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             loop {
                 std::thread::sleep(Duration::from_millis(500));
                 if !*pr_ask.lock().unwrap() {
@@ -2337,6 +2351,14 @@ fn connect_remote_start_probe(
                 };
                 let pending_ids: std::collections::HashSet<String> =
                     pending.iter().map(|r| r.id.clone()).collect();
+                for req in pending.iter().filter(|r| r.parked) {
+                    // The probe folds parked cards into `/x/pending`, so the id
+                    // stays put and no dismissal fires. Announce the flip once so
+                    // a card the UI already shows can badge itself.
+                    if known.contains(&req.id) && newly_parked.insert(req.id.clone()) {
+                        let _ = app_ask.emit("decision-parked", req.id.clone());
+                    }
+                }
                 for req in &pending {
                     if known.insert(req.id.clone()) {
                         claw_fleet_core::log_debug(&format!(
@@ -2402,6 +2424,9 @@ fn connect_remote_start_probe(
         let probe_a2ui = probe.clone();
         std::thread::spawn(move || {
             let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            // Ids already announced as parked, so the flip fires once.
+            let mut newly_parked: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             loop {
                 std::thread::sleep(Duration::from_millis(500));
                 if !*pr_a2ui.lock().unwrap() {
@@ -2412,6 +2437,14 @@ fn connect_remote_start_probe(
                 };
                 let pending_ids: std::collections::HashSet<String> =
                     pending.iter().map(|r| r.id.clone()).collect();
+                for req in pending.iter().filter(|r| r.parked) {
+                    // The probe folds parked cards into `/x/pending`, so the id
+                    // stays put and no dismissal fires. Announce the flip once so
+                    // a card the UI already shows can badge itself.
+                    if known.contains(&req.id) && newly_parked.insert(req.id.clone()) {
+                        let _ = app_a2ui.emit("decision-parked", req.id.clone());
+                    }
+                }
                 for req in &pending {
                     if known.insert(req.id.clone()) {
                         claw_fleet_core::log_debug(&format!(
@@ -2436,6 +2469,9 @@ fn connect_remote_start_probe(
         let probe_plan = probe.clone();
         std::thread::spawn(move || {
             let mut known: std::collections::HashSet<String> = std::collections::HashSet::new();
+            // Ids already announced as parked, so the flip fires once.
+            let mut newly_parked: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             loop {
                 std::thread::sleep(Duration::from_millis(500));
                 if !*pr_plan.lock().unwrap() {
@@ -2446,6 +2482,14 @@ fn connect_remote_start_probe(
                 };
                 let pending_ids: std::collections::HashSet<String> =
                     pending.iter().map(|r| r.id.clone()).collect();
+                for req in pending.iter().filter(|r| r.parked) {
+                    // The probe folds parked cards into `/x/pending`, so the id
+                    // stays put and no dismissal fires. Announce the flip once so
+                    // a card the UI already shows can badge itself.
+                    if known.contains(&req.id) && newly_parked.insert(req.id.clone()) {
+                        let _ = app_plan.emit("decision-parked", req.id.clone());
+                    }
+                }
                 for req in &pending {
                     if known.insert(req.id.clone()) {
                         claw_fleet_core::log_debug(&format!(

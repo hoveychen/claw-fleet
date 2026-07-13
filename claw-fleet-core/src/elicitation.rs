@@ -52,6 +52,9 @@ pub struct ElicitationRequest {
     pub ai_title: Option<String>,
     pub questions: Vec<ElicitationQuestion>,
     pub timestamp: String,
+    /// Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parked: bool,
 }
 
 /// Written by Fleet desktop app → read by `fleet elicitation`.

@@ -2031,6 +2031,31 @@ pub fn find_session_jsonl(session_id: &str) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
+/// Launch identity of a session, read from its transcript: the FIRST `user`
+/// record's `entrypoint` field (the Claude CLI persists `CLAUDE_CODE_ENTRYPOINT`
+/// there at spawn time). First record only — a later `--resume` run stamps its
+/// own entrypoint on the records it appends, and that must not reclassify who
+/// originally launched the session.
+///
+/// Feed the result to [`crate::session_launch::is_fleet_owned_entrypoint`] to
+/// answer "did Fleet spawn this?" from a process that only knows a session id
+/// (the `fleet mcp` child, the hook CLIs) and has no session scan to consult.
+pub fn session_entrypoint(session_id: &str) -> Option<String> {
+    entrypoint_from_jsonl(&find_session_jsonl(session_id)?)
+}
+
+fn entrypoint_from_jsonl(path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    raw.lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .find(|v| v.get("type").and_then(|t| t.as_str()) == Some("user"))
+        .and_then(|v| {
+            v.get("entrypoint")
+                .and_then(|s| s.as_str())
+                .map(str::to_string)
+        })
+}
+
 /// The directory Claude Code itself was launched in for this session, read from
 /// its transcript.
 ///

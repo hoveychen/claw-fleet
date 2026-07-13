@@ -5,6 +5,7 @@ import { MessageProcessor, SurfaceModel } from "@a2ui/web_core/v0_9";
 import { useDecisionStore } from "../store";
 import type { A2uiRenderDecision } from "../types";
 import styles from "./DecisionPanel.module.css";
+import { ParkedBanner } from "./DecisionPanel";
 
 // Flatten the agent's `userAction.context` (arbitrary JSON values) into the
 // `Record<String, String>` shape the Rust backend expects. Non-string values
@@ -110,6 +111,7 @@ export function A2uiRenderCard({ decision }: { decision: A2uiRenderDecision }) {
         )}
       </div>
 
+      {decision.request.parked === true && <ParkedBanner />}
       <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}

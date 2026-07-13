@@ -33,6 +33,12 @@ pub struct FleetAskRequest {
     pub ai_title: Option<String>,
     #[serde(default)]
     pub timestamp: String,
+    /// True once the card has been through [`crate::parked`]: the wait timed
+    /// out, the turn that asked was interrupted, and the question is now sitting
+    /// in `~/.fleet/parked/` until the user gets to it. Answering a parked card
+    /// resumes the session instead of unblocking a (long-gone) MCP poll.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parked: bool,
     pub questions: Vec<FleetAskQuestion>,
 }
 
@@ -584,6 +590,7 @@ mod tests {
 
     fn empty_request(id: &str) -> FleetAskRequest {
         FleetAskRequest {
+            parked: false,
             id: id.into(),
             session_id: String::new(),
             workspace_name: String::new(),
@@ -604,6 +611,7 @@ mod tests {
     #[test]
     fn round_trip_minimal_request() {
         let req = FleetAskRequest {
+            parked: false,
             id: "abc".into(),
             session_id: String::new(),
             workspace_name: String::new(),
