@@ -11,6 +11,7 @@ import { ToolCallChart } from "./ToolCallChart";
 import { ReportShareMenu } from "./ReportShareMenu";
 import { BarChart3 } from "lucide-react";
 import { EmptyState } from "../EmptyState";
+import { PageShell } from "../PageShell";
 import styles from "./ReportView.module.css";
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -63,26 +64,21 @@ export function ReportView() {
   }, [selectedDate, loadReport]);
 
   return (
-    <div className={styles.root}>
-      <header className={styles.header} data-tauri-drag-region>
-        <h1 className={styles.title}>{t("report.panel_title")}</h1>
-        <div className={styles.header_actions}>
-          <ReportShareMenu />
-        </div>
-      </header>
-
-      <div className={styles.body}>
-        <aside className={styles.list_pane}>
+    <PageShell
+      view="report"
+      title={t("report.panel_title")}
+      actions={<ReportShareMenu />}
+      secondary={
+        <div className={styles.list_pane}>
           <div className={styles.list_pane_heatmap}>
             <ContributionsHeatmap compact />
           </div>
           <DateList />
-        </aside>
-        <main className={styles.detail_pane}>
-          <ReportDetail />
-        </main>
-      </div>
-    </div>
+        </div>
+      }
+    >
+      <ReportDetail />
+    </PageShell>
   );
 }
 

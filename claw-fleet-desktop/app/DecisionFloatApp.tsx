@@ -140,7 +140,7 @@ export default function DecisionFloatApp() {
       style={{
         position: "fixed",
         inset: 0,
-        background: "var(--color-bg-sidebar, #141414)",
+        background: "var(--color-bg)",
         overflowX: "hidden",
         overflowY: "auto",
       }}

@@ -573,7 +573,7 @@ function NotificationSettingsCard({
             padding: "6px 10px",
             borderRadius: 6,
             border: "1px solid var(--color-border)",
-            background: "var(--color-bg-input, var(--color-bg))",
+            background: "var(--color-bg-field)",
             color: "var(--color-text)",
             fontSize: 13,
             width: 160,

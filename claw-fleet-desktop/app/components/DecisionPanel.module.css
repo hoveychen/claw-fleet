@@ -13,13 +13,13 @@
   /* Reserve 44px at the viewport top so the panel never covers the macOS
    * traffic lights (the drag bar is 38px); bottom 12px keeps the existing gap. */
   max-height: calc(100vh - 56px);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1.5px solid var(--color-accent);
   box-shadow:
     0 0 0 1px rgba(var(--color-accent-rgb), 0.15),
     0 0 20px rgba(var(--color-accent-rgb), 0.25),
     0 8px 32px rgba(0, 0, 0, 0.35);
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
   animation: panelSlideIn 0.3s ease;
   transition: opacity 0.12s ease;
 }
@@ -34,7 +34,7 @@
   content: "";
   position: absolute;
   inset: -3px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 2px solid rgba(var(--color-accent-rgb), 0.5);
   animation: pulseGlow 2s ease-in-out infinite;
   pointer-events: none;
@@ -47,7 +47,7 @@
 
 /* Guard variant: red glow */
 .panel_guard {
-  border-color: #e53e3e;
+  border-color: var(--color-error);
   box-shadow:
     0 0 0 1px rgba(229, 62, 62, 0.15),
     0 0 20px rgba(229, 62, 62, 0.25),
@@ -139,7 +139,7 @@
   justify-content: center;
   padding: 0;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: var(--color-text-dim);
   cursor: pointer;
@@ -170,7 +170,7 @@
   padding: 0 12px;
   border-radius: 14px;
   border: 1.5px solid var(--color-accent);
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
   color: var(--color-text);
   font-size: 12px;
   font-weight: 500;
@@ -200,7 +200,7 @@
 /* Variant colors for the collapsed bar — compound selectors beat the base
  * `.panel_collapsed_bar` rule despite coming earlier in the file. */
 .panel_collapsed_bar.panel_guard {
-  border-color: #e53e3e;
+  border-color: var(--color-error);
   box-shadow:
     0 0 0 1px rgba(229, 62, 62, 0.15),
     0 4px 16px rgba(0, 0, 0, 0.25);
@@ -243,7 +243,7 @@
 }
 .card_area::-webkit-scrollbar-thumb {
   background: rgba(var(--color-accent-rgb), 0.35);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -271,7 +271,7 @@
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tool);
   color: var(--color-text-secondary, rgba(255, 255, 255, 0.55));
   cursor: pointer;
@@ -307,7 +307,7 @@
   padding: 0 3px;
   border-radius: 7px;
   background: var(--color-accent, #60a5fa);
-  color: #ffffff;
+  color: var(--color-on-accent);
   font-size: 9px;
   font-weight: 600;
   line-height: 14px;
@@ -377,7 +377,7 @@
   align-items: center;
   gap: 5px;
   padding: 4px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   cursor: pointer;
@@ -405,7 +405,7 @@
 }
 
 .tab_guard .tab_icon {
-  color: #e53e3e;
+  color: var(--color-error);
 }
 
 .tab_elicitation .tab_icon {
@@ -443,7 +443,7 @@
 .card {
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px 16px;
 }
 
@@ -494,7 +494,7 @@
 }
 .card_scroll::-webkit-scrollbar-thumb {
   background: rgba(var(--color-accent-rgb), 0.35);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -562,7 +562,7 @@
 .card_icon {
   width: 18px;
   height: 18px;
-  color: #e53e3e;
+  color: var(--color-error);
   flex-shrink: 0;
 }
 
@@ -587,7 +587,7 @@
   color: var(--color-accent, #6366f1);
   background: color-mix(in srgb, var(--color-accent, #6366f1) 12%, transparent);
   padding: 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   flex-shrink: 0;
   font-weight: 500;
   max-width: 240px;
@@ -611,7 +611,7 @@
   color: var(--color-text-dim);
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
   cursor: pointer;
   flex-shrink: 0;
@@ -631,7 +631,7 @@
   color: var(--color-text);
   background: var(--color-bg-tool);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   word-break: break-all;
   white-space: pre-wrap;
@@ -650,9 +650,9 @@
   font-size: 10px;
   font-weight: 500;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: rgba(229, 62, 62, 0.15);
-  color: #e53e3e;
+  color: var(--color-error);
 }
 
 /* Analysis section */
@@ -662,7 +662,7 @@
   color: var(--color-text);
   background: var(--color-bg-tool);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   white-space: pre-wrap;
   margin-bottom: 8px;
@@ -690,7 +690,7 @@
   font-size: 0.9em;
   background: var(--color-bg);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .analysis pre,
@@ -699,7 +699,7 @@
   font-size: 0.9em;
   background: var(--color-bg);
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin: 0.3em 0;
   max-width: 100%;
   white-space: pre-wrap;
@@ -749,9 +749,9 @@
   width: 100%;
   box-sizing: border-box;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
-  background: var(--color-bg-card);
+  background: var(--color-bg-field);
   color: var(--color-text);
   font-size: 12px;
   line-height: 1.4;
@@ -764,13 +764,13 @@
 }
 
 .block_reason_input:focus {
-  border-color: #e53e3e;
+  border-color: var(--color-error);
   box-shadow: 0 0 0 2px rgba(229, 62, 62, 0.15);
 }
 
 .btn {
   padding: 6px 18px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-card);
   color: var(--color-text);
@@ -798,14 +798,14 @@
 
 .btn_block {
   background: transparent;
-  color: #e53e3e;
-  border-color: #e53e3e;
+  color: var(--color-error);
+  border-color: var(--color-error);
 }
 
 .btn_block:hover {
-  background: rgba(229, 62, 62, 0.08);
-  color: #c53030;
-  border-color: #c53030;
+  background: rgb(var(--color-error-rgb) / 0.08);
+  color: var(--color-error);
+  border-color: var(--color-error);
 }
 
 .btn_always_allow {
@@ -823,7 +823,7 @@
 .btn_always_allow code {
   background: rgba(var(--color-accent-rgb), 0.12);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11px;
   display: inline-block;
@@ -852,7 +852,7 @@
   max-width: 360px;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
   padding: 6px;
   display: flex;
@@ -881,7 +881,7 @@
   border: none;
   text-align: left;
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   color: var(--color-text);
   font-size: 12px;
@@ -897,7 +897,7 @@
   background: rgba(var(--color-accent-rgb), 0.12);
   color: var(--color-accent);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11px;
   word-break: break-all;
@@ -987,7 +987,7 @@
   font-size: 10px;
   font-weight: 600;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: rgba(var(--color-accent-rgb), 0.15);
   color: var(--color-accent);
   margin-right: 6px;
@@ -1017,7 +1017,7 @@
   font-size: 12px;
   line-height: 1.45;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-tool);
   color: var(--color-text);
@@ -1046,7 +1046,7 @@
   align-items: flex-start;
   gap: 2px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-tool);
   cursor: pointer;
@@ -1077,7 +1077,7 @@
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-tool);
   color: var(--color-text-secondary);
@@ -1101,7 +1101,7 @@
   font-size: 10px;
   font-weight: 600;
   padding: 2px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   background: var(--color-bg-tool);
   color: var(--color-text-secondary);
@@ -1150,7 +1150,7 @@
   flex-direction: column;
   gap: 4px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-tool);
   cursor: text;
@@ -1206,7 +1206,7 @@
   padding: 0;
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--color-text-secondary);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
@@ -1238,7 +1238,7 @@
   padding: 2px 4px 2px 8px;
   background: var(--color-bg-card-hover);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   color: var(--color-text);
 }
@@ -1254,7 +1254,7 @@
   width: 36px;
   height: 36px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg);
   display: block;
 }
@@ -1284,7 +1284,7 @@
 .elicitation_attachment_badge {
   font-size: 10px;
   padding: 1px 5px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgba(var(--color-accent-rgb), 0.15);
   color: var(--color-accent);
   text-transform: uppercase;
@@ -1309,7 +1309,7 @@
 
 .elicitation_attachment_remove:hover {
   background: rgba(229, 62, 62, 0.15);
-  color: #e53e3e;
+  color: var(--color-error);
 }
 
 .elicitation_attach_error {
@@ -1318,10 +1318,10 @@
   gap: 8px;
   margin-top: 8px;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(229, 62, 62, 0.12);
   border: 1px solid rgba(229, 62, 62, 0.4);
-  color: #c53030;
+  color: var(--color-error);
   font-size: 12px;
 }
 
@@ -1462,7 +1462,7 @@
   color: var(--color-text);
   background: var(--color-bg-tool);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   margin-bottom: 10px;
   max-height: 60vh;
@@ -1471,8 +1471,8 @@
 
 .plan_content p { margin: 0 0 0.5em; }
 .plan_content p:last-child { margin-bottom: 0; }
-.plan_content code { font-family: var(--font-mono); font-size: 0.9em; background: var(--color-bg); padding: 1px 4px; border-radius: 4px; }
-.plan_content pre { font-family: var(--font-mono); font-size: 0.9em; background: var(--color-bg); padding: 6px 8px; border-radius: 4px; margin: 0.4em 0; white-space: pre-wrap; word-break: break-word; }
+.plan_content code { font-family: var(--font-mono); font-size: 0.9em; background: var(--color-bg); padding: 1px 4px; border-radius: var(--radius-xs); }
+.plan_content pre { font-family: var(--font-mono); font-size: 0.9em; background: var(--color-bg); padding: 6px 8px; border-radius: var(--radius-xs); margin: 0.4em 0; white-space: pre-wrap; word-break: break-word; }
 .plan_content pre code { background: transparent; padding: 0; }
 .plan_content ul, .plan_content ol { margin: 0.3em 0; padding-left: 1.5em; }
 .plan_content li { margin-bottom: 0.25em; }
@@ -1487,9 +1487,9 @@
   font-size: 12px;
   line-height: 1.5;
   color: var(--color-text);
-  background: var(--color-bg-tool);
+  background: var(--color-bg-field);
   border: 1px solid #8a5cf6;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   margin-bottom: 10px;
   box-sizing: border-box;
@@ -1504,7 +1504,7 @@
   color: var(--color-text);
   background: var(--color-bg-tool);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   margin-bottom: 10px;
   box-sizing: border-box;
@@ -1572,7 +1572,7 @@
   padding: 4px 6px;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--color-text-secondary);
   text-align: left;
@@ -1637,14 +1637,14 @@
   font-size: 0.9em;
   background: var(--color-bg);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 .preceding_msg pre {
   font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--color-bg);
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin: 0.3em 0;
   max-width: 100%;
   white-space: pre-wrap;

@@ -76,8 +76,8 @@ export function CostSpeedChart({ compact = false }: { compact?: boolean } = {}) 
               >
                 <defs>
                   <linearGradient id="costGrad" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="5%" stopColor="var(--color-warning, #f59e0b)" stopOpacity={0.4} />
-                    <stop offset="95%" stopColor="var(--color-warning, #f59e0b)" stopOpacity={0} />
+                    <stop offset="5%" stopColor="var(--color-warning)" stopOpacity={0.4} />
+                    <stop offset="95%" stopColor="var(--color-warning)" stopOpacity={0} />
                   </linearGradient>
                 </defs>
                 {compact ? (
@@ -117,7 +117,7 @@ export function CostSpeedChart({ compact = false }: { compact?: boolean } = {}) 
                 <Area
                   type="monotone"
                   dataKey="costPerMin"
-                  stroke="var(--color-warning, #f59e0b)"
+                  stroke="var(--color-warning)"
                   strokeWidth={1.5}
                   fill="url(#costGrad)"
                   dot={false}

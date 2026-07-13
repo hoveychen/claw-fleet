@@ -1,17 +1,15 @@
-.page {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-  min-width: 0;
-}
+/* ── Category colour tokens ──────────────────────────────────────────────────
+   Tailwind-style palette, chosen to be distinct from the coral --color-accent.
 
-/* ── Type color tokens ──────────────────────────────────────────────────── */
-/* Tailwind-style palette, chosen to be distinct from the coral --color-accent. */
-
-.page {
+   These MUST hang off the page root, and every page in this family has to wear
+   the class — SkillsView.module.css and PluginsView.module.css read --mem-index
+   / --mem-project / --mem-user for their own badges, and used to inherit them
+   only because all four shared this file's `.page`. Now that PageShell owns the
+   page root, each of the four passes `className={styles.mem_scope}` to it.
+   Drop the class from one of them and its badges lose the declaration's host:
+   rgb(var(--mem-user)) becomes an invalid value and the badge silently renders
+   colourless. No gate catches that — the token IS defined, just not in scope. */
+.mem_scope {
   --mem-user: 16 185 129;     /* emerald */
   --mem-feedback: 245 158 11; /* amber */
   --mem-project: 139 92 246;  /* violet */
@@ -19,85 +17,18 @@
   --mem-index: 217 119 87;    /* coral (matches accent) */
 }
 
-/* ── Header ──────────────────────────────────────────────────────────────── */
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 20px 12px;
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.title_row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.count {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-dim);
-}
-
-.search {
-  flex: 1;
-  max-width: 320px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--color-text);
-  outline: none;
-}
-
-.search:focus {
-  border-color: var(--color-accent);
-}
-
-/* ── Body split ──────────────────────────────────────────────────────────── */
-
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* Shared by Memory / Skills / Files / Plugins — each passes its own persisted
-   width inline (useResizableWidth); the value here is just the start width. */
+/* ── Rail content ────────────────────────────────────────────────────────────
+   The scrolling card list inside PageShell's rail. The rail itself owns the
+   width, the divider and the ResizeHandle; this owns the scrolling and the
+   spacing. Shared by Memory / Skills / Files / Plugins. */
 .list_pane {
-  position: relative; /* anchors the ResizeHandle */
-  width: 340px;
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--color-border);
   padding: 10px 10px 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-/* ── Filter bar ──────────────────────────────────────────────────────────── */
-
-.filter_bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 20px 10px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
 }
 
 .chip {
@@ -106,7 +37,7 @@
   gap: 6px;
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -158,14 +89,6 @@
   color: rgb(var(--mem-reference));
 }
 
-.detail_pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
-
 /* ── Workspace groups ────────────────────────────────────────────────────── */
 
 .workspace_group {
@@ -198,7 +121,7 @@
 .badge {
   font-size: 9px;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-weight: 700;
   background: rgba(217, 119, 87, 0.15);
   color: var(--color-accent);
@@ -231,7 +154,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
   background: none;
@@ -313,7 +236,7 @@
   font-weight: 800;
   letter-spacing: 0.04em;
   padding: 2px 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin-top: 1px;
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
 }
@@ -365,7 +288,7 @@
   color: var(--color-text-dim);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .unindexed_header:hover {
@@ -488,7 +411,7 @@
 .promote_btn {
   background: none;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 12px;
   font-size: 11px;
   font-weight: 600;
@@ -513,7 +436,7 @@
   right: 0;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
   z-index: 10;
   overflow: hidden;
@@ -568,7 +491,7 @@
 
 .history_entry {
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   overflow: hidden;
 }
 
@@ -585,18 +508,18 @@
   font-size: 10px;
   font-weight: 700;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   text-transform: uppercase;
 }
 
 .history_tool_write {
-  background: rgba(74, 222, 128, 0.15);
-  color: #4ade80;
+  background: rgb(var(--color-success-rgb) / 0.15);
+  color: var(--color-success);
 }
 
 .history_tool_edit {
-  background: rgba(251, 191, 36, 0.15);
-  color: #fbbf24;
+  background: rgb(var(--color-warning-rgb) / 0.15);
+  color: var(--color-warning);
 }
 
 .history_time {
@@ -624,20 +547,20 @@
 }
 
 .diff_old {
-  background: rgba(248, 113, 113, 0.1);
-  color: #f87171;
+  background: rgb(var(--color-error-rgb) / 0.1);
+  color: var(--color-error);
   display: block;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin-bottom: 4px;
 }
 
 .diff_new {
-  background: rgba(74, 222, 128, 0.1);
-  color: #4ade80;
+  background: rgb(var(--color-success-rgb) / 0.1);
+  color: var(--color-success);
   display: block;
   padding: 2px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .no_history {
@@ -655,20 +578,9 @@
   padding: 20px;
 }
 
-/* macOS vibrancy */
-:global([data-platform="macos"]) .list_pane {
-  border-right-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .header {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .detail_header,
-:global([data-platform="macos"]) .tabs {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
-:global([data-platform="macos"]) .filter_bar {
-  border-bottom-color: rgba(255, 255, 255, 0.08);
-}
+/* macOS vibrancy — divider weights come from the platform-wide --color-border
+   redirect in App.css; only the translucent card fills (and the heavier active
+   border, which the token cannot express) stay per-class. */
 :global([data-platform="macos"]) .card:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -676,13 +588,6 @@
 :global([data-platform="macos"]) .card_active:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.12);
-}
-:global([data-platform="macos"][data-theme="light"]) .list_pane,
-:global([data-platform="macos"][data-theme="light"]) .header,
-:global([data-platform="macos"][data-theme="light"]) .filter_bar,
-:global([data-platform="macos"][data-theme="light"]) .detail_header,
-:global([data-platform="macos"][data-theme="light"]) .tabs {
-  border-color: rgba(0, 0, 0, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .card:hover {
   background: rgba(0, 0, 0, 0.05);

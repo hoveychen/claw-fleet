@@ -1,57 +1,26 @@
-/* ── Page container ───────────────────────────────────────────────────────── */
-
-.page {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-  min-width: 0;
-
-  /* Risk-level color tokens (rgb triplet for alpha blending). */
+/* ── Risk-level colour tokens ─────────────────────────────────────────────────
+   rgb triplets, so a rule can blend them with an alpha. Must hang off the page
+   root: both tabs pass this class to PageShell as `className`. Without a host,
+   rgb(var(--risk-critical)) is an invalid value and the badges silently lose
+   their colour — no gate catches that, the token IS defined, just not in scope. */
+.risk_scope {
   --risk-critical: 239 68 68;   /* red-500 */
   --risk-high: 249 115 22;      /* orange-500 */
   --risk-medium: 234 179 8;     /* amber-500 */
-}
-
-/* ── Header (title + tabs) ────────────────────────────────────────────────── */
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 20px 12px;
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.title_row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
 }
 
 .tab_bar {
   display: flex;
   gap: 2px;
   background: var(--color-bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 3px;
 }
 
 .tab_btn {
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 5px 12px;
   font-size: 12px;
   font-weight: 500;
@@ -73,16 +42,6 @@
 
 /* ── Filter bar ───────────────────────────────────────────────────────────── */
 
-.filter_bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 20px 10px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
 .filter_spacer {
   flex: 1;
 }
@@ -93,7 +52,7 @@
   gap: 6px;
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 3px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -152,7 +111,7 @@
 .action_btn {
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 10px;
   font-size: 11px;
   font-weight: 600;
@@ -171,7 +130,7 @@
 .icon_btn {
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   width: 26px;
   height: 24px;
   cursor: pointer;
@@ -198,9 +157,9 @@
   flex: 1 1 auto;
   min-width: 0;
   max-width: 320px;
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-field);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 10px;
   font-size: 11px;
   color: var(--color-text);
@@ -216,14 +175,7 @@
   color: var(--color-text-dim);
 }
 
-/* ── Body split ───────────────────────────────────────────────────────────── */
-
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
+/* ── List (the MAIN container — Audit's rail is on the right) ─────────────── */
 
 .list_pane {
   flex: 1;
@@ -235,16 +187,8 @@
   min-width: 0;
 }
 
-.detail_pane {
-  position: relative; /* anchors the ResizeHandle */
-  width: 380px; /* start value; overridden inline by useResizableWidth */
-  flex-shrink: 0;
-  border-left: 1px solid var(--color-border);
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
+/* The detail column IS PageShell's rail (side="right") — width, the left-hand
+   divider and the ResizeHandle all come from the shell now. */
 
 .empty {
   font-size: 12px;
@@ -274,7 +218,7 @@
   text-align: left;
   cursor: pointer;
   color: var(--color-text-dim);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: background 0.12s, color 0.12s;
 }
 
@@ -300,7 +244,7 @@
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .workspace_count {
@@ -323,7 +267,7 @@
   align-items: flex-start;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
   background: none;
@@ -416,7 +360,7 @@
   font-weight: 800;
   letter-spacing: 0.04em;
   padding: 2px 0;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   margin-top: 1px;
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
 }
@@ -444,7 +388,7 @@
   justify-content: center;
   width: 22px;
   height: 22px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-dim);
@@ -454,9 +398,9 @@
 }
 
 .read_btn:hover {
-  background: rgba(74, 222, 128, 0.18);
-  color: #4ade80;
-  border-color: #4ade80;
+  background: rgb(var(--color-success-rgb) / 0.18);
+  color: var(--color-success);
+  border-color: var(--color-success);
 }
 
 /* ── Rule pattern preview ─────────────────────────────────────────────────── */
@@ -469,7 +413,7 @@
   color: var(--color-text);
   background: var(--color-bg-secondary);
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -520,7 +464,7 @@
   font-size: 14px;
   padding: 4px 6px;
   line-height: 1;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .detail_close:hover {
@@ -567,7 +511,7 @@
   font-size: 10px;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 1px 6px;
   margin-right: 4px;
   font-family: "SF Mono", "Fira Code", monospace;
@@ -593,7 +537,7 @@
   font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   white-space: pre-wrap;
   word-break: break-all;
@@ -615,9 +559,9 @@
 .goto_btn,
 .primary_btn {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 14px;
   font-size: 11px;
   font-weight: 600;
@@ -637,18 +581,18 @@
 
 .read_detail_btn {
   background: none;
-  border: 1px solid #4ade80;
-  border-radius: 6px;
+  border: 1px solid var(--color-success);
+  border-radius: var(--radius-sm);
   padding: 6px 14px;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  color: #4ade80;
+  color: var(--color-success);
   transition: background 0.1s;
 }
 
 .read_detail_btn:hover {
-  background: rgba(74, 222, 128, 0.18);
+  background: rgb(var(--color-success-rgb) / 0.18);
 }
 
 /* ── Toggle switch ────────────────────────────────────────────────────────── */
@@ -672,7 +616,7 @@
   inset: 0;
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: background 0.2s;
 }
@@ -711,7 +655,7 @@
   color: var(--color-accent);
   background: rgba(217, 119, 87, 0.12);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
   font-weight: 600;
   text-transform: uppercase;
@@ -728,19 +672,19 @@
 
 .delete_btn {
   background: none;
-  border: 1px solid #ef4444;
-  border-radius: 6px;
+  border: 1px solid var(--color-error);
+  border-radius: var(--radius-sm);
   padding: 5px 12px;
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  color: #ef4444;
+  color: var(--color-error);
   margin-left: auto;
   transition: background 0.1s;
 }
 
 .delete_btn:hover {
-  background: rgba(239, 68, 68, 0.1);
+  background: rgb(var(--color-error-rgb) / 0.1);
 }
 
 /* ── Suggest view ─────────────────────────────────────────────────────────── */
@@ -795,10 +739,10 @@
   width: 100%;
   resize: vertical;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 10px;
   font-size: 12px;
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-field);
   color: var(--color-text);
   font-family: inherit;
   box-sizing: border-box;
@@ -811,7 +755,7 @@
 
 .suggest_error {
   font-size: 12px;
-  color: #ef4444;
+  color: var(--color-error);
   padding: 8px 20px;
   margin: 0;
 }
@@ -827,7 +771,7 @@
 
 .suggest_card {
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 12px;
   cursor: pointer;
   transition: border-color 0.1s, background 0.1s;
@@ -952,7 +896,7 @@
   background: rgba(var(--color-accent-rgb), 0.12);
   color: var(--color-accent);
   padding: 2px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
   font-size: 11px;
 }
@@ -966,14 +910,13 @@
   color: var(--color-text-muted);
 }
 
-/* ── macOS vibrancy ───────────────────────────────────────────────────────── */
+/* ── macOS vibrancy ───────────────────────────────────────────────────────────
+   Dividers (.header / .filter_bar / .detail_header / .detail_pane) are drawn
+   with var(--color-border), which App.css already redirects to the glass weight
+   under `html.tauri-host.os-macos` — no per-class override needed. What stays
+   here is the vibrancy-only tuning the token cannot express: translucent card
+   fills, and the heavier-than-glass border that marks the active card. */
 
-:global([data-platform="macos"]) .header,
-:global([data-platform="macos"]) .filter_bar,
-:global([data-platform="macos"]) .detail_header,
-:global([data-platform="macos"]) .detail_pane {
-  border-color: rgba(255, 255, 255, 0.08);
-}
 :global([data-platform="macos"]) .card:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -981,12 +924,6 @@
 :global([data-platform="macos"]) .card_active:hover {
   background: rgba(255, 255, 255, 0.1);
   border-color: rgba(255, 255, 255, 0.12);
-}
-:global([data-platform="macos"][data-theme="light"]) .header,
-:global([data-platform="macos"][data-theme="light"]) .filter_bar,
-:global([data-platform="macos"][data-theme="light"]) .detail_header,
-:global([data-platform="macos"][data-theme="light"]) .detail_pane {
-  border-color: rgba(0, 0, 0, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .card:hover {
   background: rgba(0, 0, 0, 0.05);

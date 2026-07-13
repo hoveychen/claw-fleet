@@ -17,7 +17,7 @@
   width: auto;
   height: auto;
   object-fit: contain;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
   cursor: default;
   user-select: none;

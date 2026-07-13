@@ -21,13 +21,13 @@ import {
   useUIStore,
   type FileNavRequest,
 } from "../store";
-import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
 import { ProcPanel } from "./ProcPanel";
 import { ProcTerminal } from "./ProcTerminal";
 import { FilePreview, FileTree } from "./ExplorerPane";
 import type { ExplorerEntry, ExplorerFileContent, RevealRequest } from "./ExplorerPane";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
+import { PageShell } from "./PageShell";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 import fileStyles from "./FilesView.module.css";
@@ -80,13 +80,6 @@ function pickRoot(roots: ExplorerRoot[], absPath: string): ExplorerRoot | null {
 
 export function FilesView() {
   const { t } = useTranslation();
-  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["files"]);
-  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const {
-    width: railWidth,
-    isDragging: railDragging,
-    onMouseDown: onRailMouseDown,
-  } = useResizableWidth("files-rail-width", { min: 200, max: 640, initial: 340 });
   const sessions = useSessionsStore((s) => s.sessions);
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const procs = useProcStore((s) => s.procs);
@@ -126,19 +119,13 @@ export function FilesView() {
   const active = workspaces.find((w) => w.path === selected) ?? null;
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.title_row}>
-          <h1 className={styles.title}>{t("files.panel_title")}</h1>
-          {workspaces.length > 0 && <span className={styles.count}>{workspaces.length}</span>}
-        </div>
-      </header>
-
-      <div className={styles.body}>
-        {collapsed ? (
-          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("files", false)} />
-        ) : (
-        <aside className={styles.list_pane} style={{ width: railWidth }}>
+    <PageShell
+      view="files"
+      className={styles.mem_scope}
+      title={t("files.panel_title")}
+      count={workspaces.length > 0 ? workspaces.length : null}
+      secondary={
+        <div className={styles.list_pane}>
           {workspaces.length === 0 && (
             <EmptyState
               icon={<FolderOpen size={28} strokeWidth={1.5} />}
@@ -168,25 +155,20 @@ export function FilesView() {
               </button>
             ))}
           </div>
-
-          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
-        </aside>
-        )}
-
-        <main className={styles.detail_pane}>
-          {active ? (
-            <WorkspaceExplorer
-              key={active.path}
-              workspace={active.path}
-              name={active.name}
-              nav={fileNav?.workspacePath === active.path ? fileNav : null}
-            />
-          ) : (
-            <div className={styles.placeholder}>{t("files.select_workspace")}</div>
-          )}
-        </main>
-      </div>
-    </div>
+        </div>
+      }
+    >
+      {active ? (
+        <WorkspaceExplorer
+          key={active.path}
+          workspace={active.path}
+          name={active.name}
+          nav={fileNav?.workspacePath === active.path ? fileNav : null}
+        />
+      ) : (
+        <div className={styles.placeholder}>{t("files.select_workspace")}</div>
+      )}
+    </PageShell>
   );
 }
 

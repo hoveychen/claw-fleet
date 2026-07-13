@@ -61,7 +61,7 @@
 .path_chip {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 1px 4px;
   font-family: var(--font-mono);
   font-size: 11px;

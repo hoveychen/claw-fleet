@@ -16,6 +16,42 @@ html, body, #root {
 :root { --win-caption-inset-x: 0px; }
 html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
 
+/* ── Design scales (theme-independent) ────────────────────────────────────────
+   Radius/space/type had NO scale before: a survey of the component CSS found
+   border-radius hardcoded at 15 distinct values. These collapse it to a small
+   ladder. `check-css-tokens.mjs` emits an advisory for any raw border-radius
+   outside {1px, 2px} so new code lands on the ladder instead of inventing a
+   16th step. Existing CSS is migrated opportunistically, not wholesale. */
+:root {
+  --radius-hair: 2px;   /* progress bars / hairline meters */
+  --radius-xs: 4px;     /* inline tags, tiny swatches, meta chips */
+  --radius-sm: 6px;     /* DEFAULT: buttons, inputs, chips */
+  --radius-md: 8px;     /* segmented controls, popovers, tab strips */
+  --radius-lg: 12px;    /* cards, panels, the sidebar slab */
+  --radius-pill: 999px;
+
+  --space-1: 4px;  --space-2: 6px;  --space-3: 8px;
+  --space-4: 10px; --space-5: 12px; --space-6: 14px;
+  --space-7: 16px; --space-8: 20px; --space-9: 24px;
+
+  --font-size-2xs: 10px;  /* meta, counts, badges */
+  --font-size-xs: 11px;   /* secondary buttons, chips */
+  --font-size-sm: 12px;   /* component default */
+  --font-size-md: 13px;   /* body / detail prose */
+  --font-size-lg: 16px;   /* page title */
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Deliberately fixed light canvas — does NOT follow the theme. Hosts foreign
+     content that assumes a light background: the pairing QR code (unscannable
+     on a dark ground) and agent-authored HTML. Named outside the --color-bg-*
+     family on purpose, so a future theme pass doesn't "fix" it into a dark
+     surface. Consumers: MobileView `.qr`, WikiView `.html_frame`,
+     blocks/DecisionToolCard `.html_preview`. */
+  --canvas-fixed-light: #fbfaf7;
+}
+
 /* ── CSS variables (dark theme) ───────────────────────────────────────────── */
 :root,
 [data-theme="dark"] {
@@ -27,17 +63,34 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
 
   /* Linear-inspired cool neutrals (dark) */
   --color-bg: #08090a;
-  --color-bg-sidebar: var(--color-bg);
-  --color-bg-secondary: #18191b;
-  --color-bg-tertiary: #0e0f11;
+
+  /* Surface roles. `field` is RAISED (form controls sit a layer above the
+     canvas, same plane as cards); `sunken` is RECESSED (segmented-control
+     troughs, tab-strip grounds). The light theme's own comment below spells
+     this out — "off-white cards/inputs read as raised surfaces" — and light
+     honours it. Dark used to flatten five tokens (field / sunken / card-hover
+     / hover / tool-hover) onto one #18191b, which is why the split went
+     unnoticed for so long: half the search boxes reached for the old
+     --color-bg-input and half for --color-bg-secondary, and in dark you could
+     not tell them apart. The ladder below pulls them back apart, so dark stops
+     hiding this class of drift:
+       bg      #08090a  canvas
+       sunken  #0e0f11  recessed (troughs, tab grounds, tool blocks)
+       card    #101113  card plane
+       field   #16171a  raised — form controls
+       hover   #1c1d20  card / tool hover
+       selected #1f2023 card selected */
+  --color-bg-field: #16171a;
+  --color-bg-sunken: #0e0f11;
+
+  --color-bg-secondary: var(--color-bg-sunken);
   --color-bg-card: #101113;
-  --color-bg-card-hover: #18191b;
+  --color-bg-card-hover: #1c1d20;
   --color-bg-card-selected: #1f2023;
   --color-bg-hover: var(--color-bg-card-hover);
-  --color-bg-tool: #0e0f11;
-  --color-bg-tool-hover: #18191b;
+  --color-bg-tool: var(--color-bg-sunken);
+  --color-bg-tool-hover: var(--color-bg-card-hover);
   --color-bg-user: #161b29;
-  --color-bg-input: #18191b;
   --color-bg-modal: #1c1d20;
   --color-bg-modal-overlay: rgba(0, 0, 0, 0.75);
 
@@ -48,6 +101,9 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-soft: rgba(255, 255, 255, 0.05);
   --color-border-strong: rgba(255, 255, 255, 0.15);
+  /* Border weight under macOS vibrancy — see the platform redirect below the
+     light block. */
+  --color-border-glass: rgba(255, 255, 255, 0.08);
 
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-card-hover: 0 2px 6px rgba(0, 0, 0, 0.5);
@@ -58,6 +114,9 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-accent-hover: #c96040;
   --color-accent-rgb: 217, 119, 87;
   --color-accent-soft: rgba(217, 119, 87, 0.18);
+  /* Foreground on an accent-filled surface. Replaces the bare `color: #fff`
+     (and `#ffffff`) copied into 15+ component files. */
+  --color-on-accent: #ffffff;
 
   /* Status badge colors */
   --badge-thinking-bg: #2a1a4a;    --badge-thinking-fg: #c084fc;
@@ -98,6 +157,16 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-error: var(--color-error-fg);
   --color-status-error: var(--color-error-fg);
   --color-error-result-bg: #1a0d0d;
+  /* Bare RGB triples of the three status hues, so a component can tint with
+     an alpha via the `rgb(<triple> / 0.15)` form. Components had been
+     hand-writing `rgba(248,113,113,0.1)` etc, which pins the DARK hue and so
+     never re-darkens under the light theme — a real contrast bug, not just a
+     style nit. P3 migrates them.
+     (NB: no literal var() reference in this comment — check-css-tokens.mjs
+     does not strip comments and would read it as an undefined token.) */
+  --color-error-rgb: 248, 113, 113;
+  --color-success-rgb: 74, 222, 128;
+  --color-warning-rgb: 251, 191, 36;
 
   /* Semantic surface/accent tokens referenced by block presenters & cards */
   --color-success-bg: #14331f;
@@ -142,9 +211,20 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
      cards/inputs read as raised surfaces; the neutral ink is warm-tinted
      (rgba(32,28,18,…)) instead of the cool blue-gray used in dark mode. */
   --color-bg: #f1efea;
-  --color-bg-sidebar: var(--color-bg);
-  --color-bg-secondary: #e7e4dd;
-  --color-bg-tertiary: #ece9e2;
+
+  /* Surface roles — light is where the two actually differ, and where the
+     comment above ("inputs read as raised surfaces") is honoured:
+       field  #fbfaf7 — LIGHTER than the #f1efea canvas → raised (same plane
+                        as --color-bg-card, which is the same hex on purpose)
+       sunken #e7e4dd — DARKER than the canvas → recessed
+     They are semantic opposites. Any component that reaches for `sunken` to
+     paint a form field gets a trough where the design calls for a raised
+     card — the exact bug behind "the sessions search box is white but the
+     memory/wiki ones are beige". P2 points every field at --color-bg-field. */
+  --color-bg-field: #fbfaf7;
+  --color-bg-sunken: #e7e4dd;
+
+  --color-bg-secondary: var(--color-bg-sunken);
   --color-bg-card: #fbfaf7;
   --color-bg-card-hover: #f1eee7;
   --color-bg-card-selected: #e9e5db;
@@ -152,7 +232,6 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-bg-tool: #ece9e2;
   --color-bg-tool-hover: #e5e1d8;
   --color-bg-user: #f0e8dd;
-  --color-bg-input: #fbfaf7;
   --color-bg-modal: #fbfaf7;
   --color-bg-modal-overlay: rgba(32, 28, 18, 0.4);
 
@@ -164,6 +243,7 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-border: rgba(32, 28, 18, 0.11);
   --color-border-soft: rgba(32, 28, 18, 0.07);
   --color-border-strong: rgba(32, 28, 18, 0.22);
+  --color-border-glass: rgba(0, 0, 0, 0.08);
 
   --shadow-card: 0 1px 2px rgba(32, 28, 18, 0.08);
   --shadow-card-hover: 0 2px 6px rgba(32, 28, 18, 0.14);
@@ -174,6 +254,8 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-accent-hover: #a94527;
   --color-accent-rgb: 194, 82, 50;
   --color-accent-soft: rgba(194, 82, 50, 0.13);
+  /* White on the light accent #c25232 measures 4.9:1 — passes WCAG AA. */
+  --color-on-accent: #ffffff;
 
   /* Status badge colors — light (fg darkened one shade for contrast on the pale bgs) */
   --badge-thinking-bg: #f3e8ff;    --badge-thinking-fg: #6d28d9;
@@ -214,6 +296,11 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-error: var(--color-error-fg);
   --color-status-error: var(--color-error-fg);
   --color-error-result-bg: #fff5f5;
+  /* Light counterparts of the status hues (see dark block). These are the
+     values the hardcoded dark hex never switches to — hence the contrast bug. */
+  --color-error-rgb: 204, 51, 64;
+  --color-success-rgb: 23, 128, 66;
+  --color-warning-rgb: 154, 106, 8;
 
   /* Semantic surface/accent tokens referenced by block presenters & cards */
   --color-success-bg: #e7f2e6;
@@ -240,6 +327,26 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --scrollbar-thumb-hover: rgba(32, 28, 18, 0.4);
 
   color-scheme: light;
+}
+
+/* ── macOS: soften every border under the vibrancy layer ──────────────────────
+   Eight module.css files each hand-copied their own
+   `[data-platform="macos"] .x { border-color: rgba(255,255,255,.08) }` (plus a
+   light-theme twin) to lighten the divider they draw with var(--color-border).
+   One redirect at the root does the same job for every consumer at once.
+
+   Keyed on the HOST class, not [data-platform]: main.tsx stamps
+   `tauri-host os-macos` synchronously before React mounts, whereas App.tsx sets
+   [data-platform] from an async `invoke("get_platform")` — driving a color
+   token off the latter flashes the wrong border on first paint.
+
+   Higher specificity (.class.class + type) than the [data-theme] blocks above,
+   so it wins on <html> in both themes; --color-border-glass itself is themed,
+   so light still resolves to its own rgba(0,0,0,.08). Borders on components
+   that never wrote a macOS override (SessionToolbar, GalleryView, …) now soften
+   too — intended: that is what "one source of truth" buys. */
+html.tauri-host.os-macos {
+  --color-border: var(--color-border-glass);
 }
 
 /* ── Base typography ──────────────────────────────────────────────────────── */

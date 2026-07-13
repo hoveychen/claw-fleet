@@ -6,7 +6,7 @@
   gap: 6px;
   width: 100%;
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--color-border);
   background: var(--color-bg-tool);
   box-sizing: border-box;
@@ -42,7 +42,7 @@
   padding: 2px 4px 2px 8px;
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   font-size: 12px;
   color: var(--color-text);
 }
@@ -60,7 +60,7 @@
   margin: 0;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: zoom-in;
   line-height: 0;
   transition: opacity 0.15s, transform 0.15s;
@@ -81,7 +81,7 @@
   width: 36px;
   height: 36px;
   object-fit: cover;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg);
   display: block;
 }
@@ -111,7 +111,7 @@
 .badge {
   font-size: 10px;
   padding: 1px 5px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: rgba(var(--color-accent-rgb), 0.15);
   color: var(--color-accent);
   text-transform: uppercase;
@@ -193,7 +193,7 @@
   padding: 4px;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   display: flex;
   flex-direction: column;
@@ -216,7 +216,7 @@
   padding: 6px 8px;
   background: transparent;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--color-text);
   font-size: 13px;
   cursor: pointer;
@@ -272,7 +272,7 @@
   background: var(--color-accent);
   border: 1px solid var(--color-accent);
   border-radius: 50%;
-  color: #ffffff;
+  color: var(--color-on-accent);
   cursor: pointer;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }

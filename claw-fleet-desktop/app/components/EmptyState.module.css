@@ -45,7 +45,7 @@
   color: var(--color-bg);
   background: var(--color-text);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: opacity 0.12s ease;
 }

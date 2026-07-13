@@ -1,6 +1,6 @@
 .root {
   margin: 4px 0;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--thinking-border);
   overflow: hidden;
 }

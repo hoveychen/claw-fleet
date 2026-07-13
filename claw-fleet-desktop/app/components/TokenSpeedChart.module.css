@@ -74,11 +74,9 @@
 /* macOS vibrancy: semi-transparent backgrounds */
 :global([data-platform="macos"]) .panel {
   background: rgba(255, 255, 255, 0.06);
-  border-bottom-color: rgba(255, 255, 255, 0.08);
 }
 :global([data-platform="macos"][data-theme="light"]) .panel {
   background: rgba(0, 0, 0, 0.04);
-  border-bottom-color: rgba(0, 0, 0, 0.08);
 }
 
 /* ── Collapsed tile (rail mode) ─────────────────────────────────────────── */
@@ -90,7 +88,7 @@
   justify-content: center;
   padding: 8px 4px;
   margin: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   gap: 1px;

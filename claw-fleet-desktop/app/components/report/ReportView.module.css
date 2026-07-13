@@ -1,56 +1,18 @@
 /* ── Root + Linear header ────────────────────────────────────────────────── */
 
-.root {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  flex: 1;
-  min-width: 0;
-  background: var(--color-bg);
-  overflow: hidden;
-}
 
-.header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 20px 12px;
-  /* Windows frameless: reserve room on the right so the three caption
-     buttons drawn by <WindowsFrameOverlay> don't overlap the share menu.
-     0px everywhere except Windows (see --win-caption-inset-x in App.css). */
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
 
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
 
-.header_actions {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
 
 /* ── Body split ───────────────────────────────────────────────────────────── */
 
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
 
+/* Rail content: PageShell's rail owns the width, the divider and the
+   ResizeHandle; this owns the scrolling and the spacing. */
 .list_pane {
-  width: 360px;
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--color-border);
   padding: 10px 10px 20px;
   display: flex;
   flex-direction: column;
@@ -63,13 +25,6 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-.detail_pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
-}
 
 .empty {
   font-size: 12px;
@@ -97,7 +52,7 @@
   flex-direction: column;
   gap: 6px;
   padding: 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
   background: none;
@@ -154,7 +109,7 @@
   background: var(--color-bg-secondary);
   border: 1px solid transparent;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -247,9 +202,9 @@
 
 .primary_btn {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 8px 20px;
   cursor: pointer;
   font-size: 13px;
@@ -277,7 +232,7 @@
 
 .metric_card {
   background: var(--color-bg-card);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px;
   text-align: center;
 }
@@ -314,7 +269,7 @@
 
 .chart_card {
   background: var(--color-bg-card);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px;
   min-height: 240px;
 }
@@ -356,14 +311,14 @@
   flex: 1;
   height: 14px;
   background: var(--color-bg-secondary);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   overflow: hidden;
 }
 
 .bar_fill {
   height: 100%;
   background: var(--color-accent);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   transition: width 0.3s;
   min-width: 2px;
 }
@@ -432,7 +387,7 @@
 
 .project_card {
   background: var(--color-bg-card);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   margin-bottom: 8px;
   overflow: hidden;
 }
@@ -501,7 +456,7 @@
   color: white;
   font-size: 9px;
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-weight: 500;
 }
 
@@ -509,7 +464,7 @@
 
 .summary_card {
   background: var(--color-bg-card);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 
@@ -595,7 +550,7 @@
   width: 3px;
   height: 14px;
   background: var(--color-accent);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   flex-shrink: 0;
 }
 
@@ -630,7 +585,7 @@
 .summary_content :global(code) {
   background: var(--color-bg-secondary);
   padding: 1px 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-size: 12px;
 }
 
@@ -654,7 +609,7 @@
 
 .summary_empty {
   background: var(--color-bg-card);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 24px;
   text-align: center;
   color: var(--color-text-dim);
@@ -665,7 +620,7 @@
 .share_btn {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 12px;
   cursor: pointer;
   color: var(--color-text);
@@ -680,7 +635,7 @@
 
 .lessons_empty {
   background: var(--color-bg-card);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 24px;
   text-align: center;
   color: var(--color-text-dim);
@@ -694,7 +649,7 @@
 
 .lesson_card {
   background: var(--color-bg-card);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 14px 16px;
   display: flex;
   align-items: flex-start;
@@ -726,7 +681,7 @@
 .lesson_add_btn {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 4px 10px;
   cursor: pointer;
   color: var(--color-text);

@@ -9,7 +9,7 @@
 /* ── Spotlight cutout ─────────────────────────────────────────────────────── */
 .spotlight {
   position: fixed;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.45);
   z-index: 901;
   pointer-events: none;
@@ -23,7 +23,7 @@
   z-index: 902;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 16px;
   max-width: 280px;
   display: flex;
@@ -82,9 +82,9 @@
 
 .btn_next {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 6px 14px;
   font-size: 12px;
   font-weight: 600;

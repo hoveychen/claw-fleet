@@ -1883,7 +1883,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                             style={{
                               width: 90,
                               padding: "4px 6px",
-                              background: "var(--color-bg-input)",
+                              background: "var(--color-bg-field)",
                               border: "1px solid var(--color-border, #333)",
                               borderRadius: 4,
                               color: "var(--color-text, #eee)",
@@ -1912,7 +1912,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                             style={{
                               width: 90,
                               padding: "4px 6px",
-                              background: "var(--color-bg-input)",
+                              background: "var(--color-bg-field)",
                               border: "1px solid var(--color-border, #333)",
                               borderRadius: 4,
                               color: "var(--color-text, #eee)",
@@ -1943,7 +1943,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                             style={{
                               width: 90,
                               padding: "4px 6px",
-                              background: "var(--color-bg-input)",
+                              background: "var(--color-bg-field)",
                               border: "1px solid var(--color-border, #333)",
                               borderRadius: 4,
                               color: "var(--color-text, #eee)",
@@ -2031,7 +2031,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                               <code
                                 style={{
                                   padding: "0 4px",
-                                  background: "var(--color-bg-input)",
+                                  background: "var(--color-bg-field)",
                                   border: "1px solid var(--color-border, #333)",
                                   borderRadius: 3,
                                   fontFamily: "monospace",
@@ -2056,7 +2056,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                             display: "inline-block",
                             marginLeft: 4,
                             padding: "1px 5px",
-                            background: "var(--color-bg-input)",
+                            background: "var(--color-bg-field)",
                             border: "1px solid var(--color-border, #333)",
                             borderRadius: 4,
                             fontFamily: "monospace",
@@ -2094,7 +2094,7 @@ export function SettingsPanel({ onClose, standalone = false }: { onClose: () => 
                           autoCapitalize="off"
                           style={{
                             padding: "6px 8px",
-                            background: "var(--color-bg-input)",
+                            background: "var(--color-bg-field)",
                             border: "1px solid var(--color-border, #333)",
                             borderRadius: 4,
                             color: "var(--color-text, #eee)",
