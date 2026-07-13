@@ -39,6 +39,22 @@
   height: 44px;
 }
 
+/* In-progress states (connecting / loading first snapshot): spin the glyph so
+ * the surface clearly reads as "working" rather than "empty" or "stuck". */
+.iconChip[data-spin] {
+  color: var(--color-accent, var(--color-text));
+}
+
+.iconChip[data-spin] > :global(svg) {
+  animation: emptySpin 0.9s linear infinite;
+}
+
+@keyframes emptySpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .title {
   font-size: 15px;
   font-weight: 600;

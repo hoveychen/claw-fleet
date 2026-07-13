@@ -5,10 +5,12 @@ import {
   Clock,
   Folder,
   Inbox,
+  Loader2,
   Search,
   SearchX,
   Share2,
   Square,
+  WifiOff,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { t } from "../i18n";
@@ -89,12 +91,27 @@ function renderSnippet(snippet: string): ReactNode[] {
 interface Props {
   sessions: SessionInfo[];
   client: RelayClient | null;
+  /** WS link phone↔relay. */
+  connected: boolean;
+  /** Desktop↔relay link — false means nothing is there to push a snapshot. */
+  agentOnline: boolean;
+  /** Whether at least one `sessions` snapshot has arrived since connecting.
+   *  Distinguishes "still waiting for the first push" from "pushed, but empty". */
+  sessionsLoaded: boolean;
   onOpenSession: (session: SessionInfo) => void;
   onMarkRead: (sessions: SessionInfo[]) => void;
 }
 
 // 新会话入口由 App 底部导航中间的凸起按钮统一持有，任务页内不再重复放置。
-export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props) {
+export function TasksView({
+  sessions,
+  client,
+  connected,
+  agentOnline,
+  sessionsLoaded,
+  onOpenSession,
+  onMarkRead,
+}: Props) {
   const [search, setSearch] = useState("");
   const [workspace, setWorkspace] = useState<string>("");
   const [activeOnly, setActiveOnly] = useState(false);
@@ -222,12 +239,46 @@ export function TasksView({ sessions, client, onOpenSession, onMarkRead }: Props
     [client, busyOp],
   );
 
+  // Distinguish the reasons the list can be empty, so a blank screen never
+  // leaves 老板 guessing "是错了还是在加载". Order matters: connectivity first
+  // (can we even get data?), then whether the first snapshot has landed, then
+  // a genuine "no tasks". Only the last is a true empty; the others are
+  // transient/among-actionable states with their own copy and a spinner.
   if (all.length === 0) {
+    if (!connected) {
+      return (
+        <EmptyState
+          spin
+          icon={Loader2}
+          title={t("正在连接…")}
+          description={t("正在连接中转服务。若长时间停在这里，请检查手机网络。")}
+        />
+      );
+    }
+    if (!agentOnline) {
+      return (
+        <EmptyState
+          icon={WifiOff}
+          title={t("桌面端离线")}
+          description={t("已连上中转，但桌面端 Fleet 未在线，暂时拿不到任务快照。请确认电脑上的 Fleet 正在运行。")}
+        />
+      );
+    }
+    if (!sessionsLoaded) {
+      return (
+        <EmptyState
+          spin
+          icon={Loader2}
+          title={t("正在加载任务…")}
+          description={t("桌面端在线，正在接收首屏快照，通常一两秒内到达。")}
+        />
+      );
+    }
     return (
       <EmptyState
         icon={Inbox}
         title={t("还没有会话")}
-        description={t("等待桌面端推送快照。桌面端各会话上线后会出现在这里。")}
+        description={t("桌面端各会话上线后会出现在这里。")}
       />
     );
   }
