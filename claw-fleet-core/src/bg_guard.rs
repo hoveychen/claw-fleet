@@ -17,6 +17,16 @@
 //! to wake the model. (Observed: a scene-items relay session ended exactly that
 //! way, leaving a 0-byte task output file.)
 //!
+//! The kill-on-exit applies to background **shells and monitors only**. Background
+//! subagents and workflows are exempt: "their result is part of the final output,
+//! so `claude -p` waits for them to complete" (headless docs), capped by
+//! `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS` (default 10 min; Fleet spawns with `0` =
+//! unlimited, see `session_launch`). Isolation experiment 2026-07-13 (CC 2.1.206):
+//! a `-p` process stayed alive ~100s past its final text waiting for a 90s
+//! background subagent and re-invoked the model with its result, while a running
+//! Monitor and a background shell were both killed ~5s after the final result.
+//! The guard therefore blocks only on doomed task types.
+//!
 //! The fix is to refuse the stop. A `Stop` hook that exits 2 with a reason on
 //! stderr keeps the turn alive and feeds the reason back to the agent as a new
 //! instruction, so the process — and with it the background tasks — stays up
@@ -47,10 +57,20 @@ pub struct BackgroundTask {
 }
 
 impl BackgroundTask {
-    /// Still live when the turn ended, i.e. about to be killed by the headless
-    /// exit path.
+    /// Still live when the turn ended.
     pub fn is_running(&self) -> bool {
         self.status == "running"
+    }
+
+    /// Would the headless exit path kill this task ~5s after the final result?
+    ///
+    /// Subagents and workflows are exempt — `claude -p` waits for them because
+    /// their result is part of the final output, and the completion notification
+    /// re-invokes the model (docs + isolation experiment, see module docs).
+    /// Every other type — `shell`, `monitor`, and anything future/unknown — is
+    /// treated as doomed, keeping the guard conservative where unverified.
+    pub fn doomed_on_headless_exit(&self) -> bool {
+        !matches!(self.task_type.as_str(), "subagent" | "workflow")
     }
 
     /// One line for the block reason: enough for the agent to recognise which
@@ -151,7 +171,13 @@ pub fn block_reason(payload: &StopPayload, is_headless: bool) -> Option<String> 
         return None;
     }
 
-    let running = running_tasks(payload);
+    // Only the doomed types block: a running subagent/workflow is waited on by
+    // the `-p` exit path and will re-invoke the model when it completes, so the
+    // promised "稍后汇报" actually happens — interrupting there is a false alarm.
+    let running: Vec<&BackgroundTask> = running_tasks(payload)
+        .into_iter()
+        .filter(|t| t.doomed_on_headless_exit())
+        .collect();
     let crons = &payload.session_crons;
     if running.is_empty() && crons.is_empty() {
         return None;
@@ -303,6 +329,44 @@ mod tests {
         let reason = block_reason(&p, true).expect("must block");
         assert!(reason.contains("GHA build result"));
         assert!(reason.contains("[monitor]"));
+    }
+
+    /// Verified by isolation experiment (2026-07-13, CC 2.1.206): a `claude -p`
+    /// run that ended its turn with a 90s background subagent still running
+    /// stayed alive ~100s past its final text, got re-invoked by the completion
+    /// notification, and delivered the promised report. The headless docs agree:
+    /// background subagents and workflows are exempt from the 5s grace — "their
+    /// result is part of the final output, so `claude -p` waits for them to
+    /// complete". Blocking on them is a false alarm.
+    #[test]
+    fn does_not_block_on_running_subagents_or_workflows() {
+        let json = r#"{
+            "session_id": "s1",
+            "background_tasks": [
+                {"id":"a1","type":"subagent","status":"running","description":"查移动端任务计数逻辑"},
+                {"id":"w1","type":"workflow","status":"running","description":"review sweep"}
+            ]
+        }"#;
+        let p = parse_stop_payload(json).unwrap();
+        assert_eq!(block_reason(&p, true), None);
+    }
+
+    /// Mixed doomed + waited work: the guard must still block for the shell, but
+    /// the reason must not smear the "killed in ~5s" claim onto the subagent.
+    #[test]
+    fn mixed_shell_and_subagent_blocks_and_lists_only_the_shell() {
+        let json = r#"{
+            "session_id": "s1",
+            "background_tasks": [
+                {"id":"sh1","type":"shell","status":"running","description":"tail deploy log"},
+                {"id":"a1","type":"subagent","status":"running","description":"audit desktop counters"}
+            ]
+        }"#;
+        let p = parse_stop_payload(json).unwrap();
+        let reason = block_reason(&p, true).expect("shell must still block");
+        assert!(reason.contains("tail deploy log"), "{reason}");
+        assert!(reason.contains("1 个后台任务"), "{reason}");
+        assert!(!reason.contains("audit desktop counters"), "{reason}");
     }
 
     #[test]
