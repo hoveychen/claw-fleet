@@ -3,7 +3,7 @@
 // store) and ride the prompt as a `Context files:` list, same as the desktop.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Paperclip, Send, X } from "lucide-react";
+import { Check, FolderSearch, Paperclip, Send, X } from "lucide-react";
 import { useDraft } from "../draft";
 import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type RelayClient } from "../relay";
@@ -11,6 +11,7 @@ import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
 import styles from "./Composer.module.css";
+import { DirPicker } from "./DirPicker";
 
 const MODEL_CHOICES: Array<[string, string]> = [
   ["", "默认模型"],
@@ -282,6 +283,7 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
   const [draft, setDraft, clearDraft] = useDraft(NEW_SESSION_DRAFT_KEY, NEW_SESSION_DEFAULT);
   const patch = (p: Partial<typeof NEW_SESSION_DEFAULT>) => setDraft((d) => ({ ...d, ...p }));
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
   const { attachments, uploading, addFiles, remove, reset } = useAttachments(
     client,
     NEW_SESSION_ATTACH_KEY,
@@ -367,11 +369,34 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           <option value="__custom__">{t("自定义路径…")}</option>
         </select>
         {workspace === "__custom__" && (
-          <input
-            className={styles.customPath}
-            placeholder="/path/to/workspace"
-            value={customWorkspace}
-            onChange={(e) => patch({ customWorkspace: e.target.value })}
+          // 手输仍然保留（粘贴路径最快），但主路径是「浏览…」——手机用户看不见
+          // 桌面上有什么目录，靠盲敲绝对路径本来就是这个入口坏掉的根因之一。
+          <div className={styles.customPathRow}>
+            <input
+              className={styles.customPath}
+              placeholder={t("~/workspace/项目 或点右侧浏览")}
+              value={customWorkspace}
+              onChange={(e) => patch({ customWorkspace: e.target.value })}
+            />
+            <button
+              className={styles.browseBtn}
+              onClick={() => setPicking(true)}
+              disabled={!client}
+            >
+              <FolderSearch size={15} />
+              {t("浏览…")}
+            </button>
+          </div>
+        )}
+        {picking && (
+          <DirPicker
+            client={client}
+            initialPath={customWorkspace.trim()}
+            onPick={(path) => {
+              patch({ customWorkspace: path });
+              setPicking(false);
+            }}
+            onClose={() => setPicking(false)}
           />
         )}
         <textarea

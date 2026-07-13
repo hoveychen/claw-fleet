@@ -53,6 +53,33 @@
   font-size: 13px;
 }
 
+/* 手输框 + 浏览按钮。输入框吃掉剩余宽度，按钮保持自身尺寸不被压扁。 */
+.customPathRow {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.customPathRow .customPath {
+  flex: 1;
+  min-width: 0;
+}
+.browseBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border-strong);
+  border-radius: 10px;
+  padding: 9px 11px;
+  color: var(--color-text);
+  font-size: 13px;
+  white-space: nowrap;
+}
+.browseBtn:disabled {
+  opacity: 0.5;
+}
+
 .promptInput {
   width: 100%;
   background: var(--color-bg-input);
