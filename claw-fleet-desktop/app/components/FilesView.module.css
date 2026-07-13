@@ -13,20 +13,20 @@
   gap: 5px;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  border: 1px solid var(--color-border);
   background: transparent;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
   font-size: 11px;
   cursor: pointer;
 }
 
 .root_pill:hover {
-  color: var(--text-primary, #ddd);
+  color: var(--color-text);
 }
 
 .root_pill_active {
-  border-color: var(--accent, #7aa2f7);
-  color: var(--accent, #7aa2f7);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
 }
 
 .root_branch {
@@ -38,7 +38,7 @@
   align-items: center;
   gap: 5px;
   font-size: 11px;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -68,7 +68,7 @@
 
 .image_meta {
   font-size: 11px;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
 }
 
 .truncated_notice {
@@ -76,8 +76,8 @@
   padding: 6px 10px;
   border-radius: 6px;
   font-size: 11px;
-  color: var(--text-secondary, #999);
-  background: rgba(128, 128, 128, 0.12);
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
 }
 
 .copy_content_row {
@@ -101,7 +101,7 @@
   align-items: center;
   gap: 12px;
   font-size: 11px;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
 }
 
 .scm_chip {
@@ -111,23 +111,23 @@
 }
 
 .scm_chip_ahead {
-  color: var(--accent, #7aa2f7);
+  color: var(--color-accent);
 }
 
 .scm_chip_behind,
 .scm_chip_dirty {
-  color: #e0af68;
+  color: var(--color-warning);
 }
 
 .scm_synced {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #9ece6a;
+  color: var(--color-success);
 }
 
 .scm_muted {
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
   opacity: 0.7;
 }
 
@@ -146,16 +146,16 @@
   gap: 5px;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  border: 1px solid var(--color-border);
   background: transparent;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
   font-size: 11px;
   cursor: pointer;
 }
 
 .scm_btn:hover:not(:disabled) {
-  color: var(--text-primary, #ddd);
-  border-color: var(--accent, #7aa2f7);
+  color: var(--color-text);
+  border-color: var(--color-accent);
 }
 
 .scm_btn:disabled {
@@ -172,16 +172,16 @@
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--mono, ui-monospace, monospace);
-  background: rgba(128, 128, 128, 0.12);
-  color: var(--text-secondary, #999);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
 }
 
 .scm_msg_ok {
-  color: #9ece6a;
+  color: var(--color-success);
 }
 
 .scm_msg_err {
-  color: #f7768e;
+  color: var(--color-error);
 }
 
 /* ── Workspace command runner (ProcPanel) ─────────────────────────────────── */
@@ -217,16 +217,16 @@
   flex: 1;
   padding: 5px 10px;
   border-radius: 6px;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
-  background: var(--bg-primary, transparent);
-  color: var(--text-primary, #ddd);
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-input);
+  color: var(--color-text);
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
 }
 
 .proc_input:focus {
   outline: none;
-  border-color: var(--accent, #7aa2f7);
+  border-color: var(--color-accent);
 }
 
 .proc_run_btn {
@@ -235,9 +235,9 @@
   gap: 4px;
   padding: 5px 12px;
   border-radius: 6px;
-  border: 1px solid var(--accent, #7aa2f7);
+  border: 1px solid var(--color-accent);
   background: transparent;
-  color: var(--accent, #7aa2f7);
+  color: var(--color-accent);
   font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
@@ -249,22 +249,22 @@
 }
 
 .proc_run_btn:not(:disabled):hover {
-  background: var(--accent, #7aa2f7);
-  color: var(--bg-primary, #1a1b26);
+  background: var(--color-accent);
+  color: var(--color-bg-card);
 }
 
 .proc_error {
   font-size: 11px;
-  color: var(--error, #f7768e);
+  color: var(--color-error);
   padding: 4px 8px;
   border-radius: 6px;
-  background: rgba(247, 118, 142, 0.1);
+  background: var(--color-error-bg);
 }
 
 .proc_empty {
   margin: 0;
   font-size: 11px;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
 }
 
 .proc_list {
@@ -293,15 +293,15 @@
   border: none;
   border-radius: 6px;
   background: transparent;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
   font-size: 12px;
   cursor: pointer;
   text-align: left;
 }
 
 .proc_row_main:hover {
-  background: rgba(128, 128, 128, 0.1);
-  color: var(--text-primary, #ddd);
+  background: var(--color-bg-hover);
+  color: var(--color-text);
 }
 
 .proc_dot {
@@ -312,12 +312,12 @@
 }
 
 .proc_dot_running {
-  background: var(--success, #9ece6a);
-  box-shadow: 0 0 4px var(--success, #9ece6a);
+  background: var(--color-success);
+  box-shadow: 0 0 4px var(--color-success);
 }
 
 .proc_dot_exited {
-  background: rgba(128, 128, 128, 0.5);
+  background: var(--color-text-dim);
 }
 
 .proc_command {
@@ -328,13 +328,13 @@
   white-space: nowrap;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
-  color: var(--text-primary, #ddd);
+  color: var(--color-text);
 }
 
 .proc_status {
   flex-shrink: 0;
   font-size: 11px;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
 }
 
 .proc_action {
@@ -343,30 +343,30 @@
   gap: 4px;
   padding: 3px 8px;
   border-radius: 6px;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  border: 1px solid var(--color-border);
   background: transparent;
-  color: var(--text-secondary, #999);
+  color: var(--color-text-secondary);
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
 }
 
 .proc_action:hover {
-  color: var(--text-primary, #ddd);
-  border-color: var(--text-secondary, #999);
+  color: var(--color-text);
+  border-color: var(--color-text-secondary);
 }
 
 .proc_action_danger:hover {
-  color: var(--error, #f7768e);
-  border-color: var(--error, #f7768e);
+  color: var(--color-error);
+  border-color: var(--color-error);
 }
 
 .proc_term_wrap {
   margin: 4px 0 8px 24px;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.25));
+  border: 1px solid var(--color-border);
   border-radius: 8px;
   overflow: hidden;
-  background: #16161e;
+  background: var(--color-bg-tool);
 }
 
 /* Running-count badge on the workspace cards (secondary sidebar). */
@@ -379,8 +379,8 @@
   height: 18px;
   padding: 0 5px;
   border-radius: 999px;
-  background: var(--success, #9ece6a);
-  color: #1a1b26;
+  background: var(--color-success);
+  color: var(--color-bg-card);
   font-size: 10px;
   font-weight: 700;
 }
