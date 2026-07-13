@@ -66,6 +66,7 @@ async fn auth_then_forward_between_roles() {
     let (mut agent, authed) = connect(&url, "agent", SECRET).await;
     assert_eq!(authed["type"], "authed");
     assert_eq!(authed["clients"], 0);
+    assert_eq!(authed["binary"], true, "relay must advertise binary forwarding");
 
     let (mut client, authed) = connect(&url, "client", SECRET).await;
     assert_eq!(authed["type"], "authed");
@@ -101,6 +102,43 @@ async fn auth_then_forward_between_roles() {
     let got = recv_json(&mut client).await;
     assert_eq!(got["type"], "notify");
     assert_eq!(got["title"], "t");
+}
+
+/// A binary WebSocket frame is forwarded verbatim to the opposite role — the
+/// transport path compressed `msg` payloads ride on top of.
+#[tokio::test]
+async fn binary_frame_forwarded_verbatim_between_roles() {
+    let url = spawn_server().await;
+
+    let (mut agent, _) = connect(&url, "agent", SECRET).await;
+    let (mut client, _) = connect(&url, "client", SECRET).await;
+    // drain the agent's presence bump from the client joining
+    let _ = recv_json(&mut agent).await;
+
+    let blob = vec![0x1f, 0x8b, 0x08, 0x00, 0x00, 0x11, 0x22, 0x33, 0xff];
+    agent.send(Message::Binary(blob.clone().into())).await.unwrap();
+    let got = recv_binary(&mut client).await;
+    assert_eq!(got, blob, "agent binary frame reaches client byte-for-byte");
+
+    // and the reverse direction
+    client.send(Message::Binary(blob.clone().into())).await.unwrap();
+    let got = recv_binary(&mut agent).await;
+    assert_eq!(got, blob, "client binary frame reaches agent byte-for-byte");
+}
+
+async fn recv_binary(ws: &mut Client) -> Vec<u8> {
+    loop {
+        let msg = tokio::time::timeout(std::time::Duration::from_secs(5), ws.next())
+            .await
+            .expect("timed out waiting for frame")
+            .expect("socket closed")
+            .expect("socket error");
+        match msg {
+            Message::Binary(b) => return b.to_vec(),
+            Message::Text(_) => continue, // skip presence/status chatter
+            _ => continue,
+        }
+    }
 }
 
 #[tokio::test]
