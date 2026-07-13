@@ -373,12 +373,25 @@ export const PainWindow: React.FC<{
 };
 
 // ── Picture-in-picture: real screen capture in a mini window ───────────────
+// v6: every capture opens on the full-app panorama, then the camera pushes in
+// (scale + transform-origin) to the panel the tip is about.
+export type PipZoom = {
+  /** Final scale of the push-in (1 = no zoom). */
+  scale: number;
+  /** transform-origin of the push-in, e.g. "8% 78%" = sidebar bottom-left. */
+  origin: string;
+  /** Local pip frame the push-in starts at (after the pip has entered). */
+  at?: number;
+  /** Push-in duration in frames. */
+  dur?: number;
+};
 export type PipProps = {
   src: string;
   startFrom?: number;
   pos: "tl" | "tr" | "bl" | "br";
   objectPosition?: string;
   enter?: number;
+  zoom?: PipZoom;
 };
 const PIP_POS: Record<PipProps["pos"], React.CSSProperties> = {
   tl: { top: 200, left: 90 },
@@ -386,16 +399,24 @@ const PIP_POS: Record<PipProps["pos"], React.CSSProperties> = {
   bl: { bottom: 70, left: 90 },
   br: { bottom: 70, right: 90 },
 };
-export const Pip: React.FC<PipProps> = ({ src, startFrom = 210, pos, objectPosition = "top left", enter = 34 }) => {
+export const Pip: React.FC<PipProps> = ({ src, startFrom = 210, pos, objectPosition = "top left", enter = 34, zoom }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const s = spring({ frame: frame - enter, fps, config: { damping: 13, mass: 0.6 } });
+  const zoomStart = enter + (zoom?.at ?? 24);
+  const z = zoom
+    ? interpolate(frame, [zoomStart, zoomStart + (zoom.dur ?? 34)], [1, zoom.scale], {
+        extrapolateLeft: "clamp",
+        extrapolateRight: "clamp",
+        easing: ease,
+      })
+    : 1;
   return (
     <div
       style={{
         position: "absolute",
         ...PIP_POS[pos],
-        width: 480,
+        width: 560,
         borderRadius: 14,
         overflow: "hidden",
         border: `2px solid ${T.borderStrong}`,
@@ -424,12 +445,62 @@ export const Pip: React.FC<PipProps> = ({ src, startFrom = 210, pos, objectPosit
           the real app · live capture
         </span>
       </div>
-      <div style={{ height: 252, overflow: "hidden" }}>
+      <div style={{ height: 294, overflow: "hidden" }}>
         <OffthreadVideo
           muted
           src={staticFile(src)}
           startFrom={startFrom}
-          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition }}
+          style={{
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            objectPosition,
+            transform: `scale(${z})`,
+            transformOrigin: zoom?.origin ?? "center",
+          }}
+        />
+      </div>
+    </div>
+  );
+};
+
+// ── Phone-framed real capture (portrait) — Tip 7's mobile footage ──────────
+export const PhonePip: React.FC<{
+  src: string;
+  startFrom?: number;
+  enter?: number;
+  left?: number;
+  top?: number;
+  width?: number;
+}> = ({ src, startFrom = 0, enter = 4, left = 250, top = 200, width = 330 }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const s = spring({ frame: frame - enter, fps, config: { damping: 13, mass: 0.7 } });
+  const screenH = Math.round((width - 24) * (844 / 390));
+  return (
+    <div
+      style={{
+        position: "absolute",
+        left,
+        top,
+        width,
+        background: T.night,
+        border: `3px solid ${T.borderStrong}`,
+        borderRadius: 44,
+        padding: "14px 12px 18px",
+        boxShadow: "0 20px 60px rgba(32,28,18,0.25)",
+        opacity: s,
+        transform: `translateY(${lerp(40, 0, s)}px)`,
+        zIndex: 40,
+      }}
+    >
+      <div style={{ width: 90, height: 7, borderRadius: 100, background: "rgba(247,248,248,0.25)", margin: "0 auto 10px" }} />
+      <div style={{ height: screenH, overflow: "hidden", borderRadius: 24 }}>
+        <OffthreadVideo
+          muted
+          src={staticFile(src)}
+          startFrom={startFrom}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition: "top center" }}
         />
       </div>
     </div>
