@@ -15,7 +15,9 @@ import type { DecisionKind } from "../types";
 import {
   MOCK_CHAT_WORKSPACE,
   MOCK_ELICITATION,
+  MOCK_FLEET_ASK,
   MOCK_GUARD,
+  MOCK_GUARD_ANALYSIS,
   MOCK_MESSAGES,
   MOCK_SESSIONS,
   MOCK_TODAY_USAGE,
@@ -81,7 +83,14 @@ export class MockRelayClient extends RelayClient {
         return {
           guard: [MOCK_GUARD].filter((r) => !this.answered.has(r.id)),
           elicitation: [MOCK_ELICITATION].filter((r) => !this.answered.has(r.id)),
+          fleetAsk: [MOCK_FLEET_ASK].filter((r) => !this.answered.has(r.id)),
         };
+      // Deliberately slow, like the real LLM round-trip — the card shows its
+      // "Analyzing…" state first, which is part of what gets screenshotted.
+      case "guard_analyze":
+        return new Promise((resolve) =>
+          setTimeout(() => resolve({ analysis: MOCK_GUARD_ANALYSIS }), 1400),
+        );
       case "chat_workspace":
         return { path: MOCK_CHAT_WORKSPACE };
       case "today_usage":
