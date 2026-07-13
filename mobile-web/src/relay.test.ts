@@ -95,3 +95,67 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
     expect(bSettled).toBe("PENDING");
   });
 });
+
+/** 用与桌面端对称的方式（gzip + base64）压一段 JSON，供解压测试当夹具。 */
+async function gzipBase64(json: string): Promise<string> {
+  const stream = new Blob([new TextEncoder().encode(json)])
+    .stream()
+    .pipeThrough(new CompressionStream("gzip"));
+  const buf = new Uint8Array(await new Response(stream).arrayBuffer());
+  let bin = "";
+  for (const b of buf) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+describe("RelayClient sessions 快照解压", () => {
+  beforeEach(() => {
+    FakeWs.instances = [];
+    (globalThis as unknown as { window: unknown }).window = {
+      location: { origin: "http://localhost" },
+      setTimeout: (fn: () => void, ms?: number) => setTimeout(fn, ms) as unknown as number,
+      clearTimeout: (id: number) => clearTimeout(id),
+      setInterval: (fn: () => void, ms?: number) => setInterval(fn, ms) as unknown as number,
+      clearInterval: (id: number) => clearInterval(id),
+    };
+    (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWs;
+  });
+
+  it("enc:\"gzip\" 帧被解压回原始会话数组", async () => {
+    const sessions = [
+      { id: "s1", workspaceName: "alpha", status: "active" },
+      { id: "s2", workspaceName: "beta", status: "idle" },
+    ];
+    let got: unknown = null;
+    const client = new RelayClient("shared-secret-1234567890", {
+      onSessions: (s) => (got = s),
+    });
+    client.connect();
+    const ws = FakeWs.instances[FakeWs.instances.length - 1];
+    ws.onopen?.();
+    ws.deliver({ type: "authed", agent_online: true, clients: 1 });
+
+    const b64 = await gzipBase64(JSON.stringify(sessions));
+    ws.deliver({ type: "msg", payload: { event: "sessions", enc: "gzip", sessions: b64 } });
+
+    // 解压是异步的，给 microtask 一拍。
+    await new Promise((r) => setTimeout(r, 20));
+    expect(got).toEqual(sessions);
+    client.close();
+  });
+
+  it("明文数组帧仍按老路径直接透传", async () => {
+    const sessions = [{ id: "s9", workspaceName: "gamma", status: "active" }];
+    let got: unknown = null;
+    const client = new RelayClient("shared-secret-1234567890", {
+      onSessions: (s) => (got = s),
+    });
+    client.connect();
+    const ws = FakeWs.instances[FakeWs.instances.length - 1];
+    ws.onopen?.();
+    ws.deliver({ type: "authed", agent_online: true, clients: 1 });
+
+    ws.deliver({ type: "msg", payload: { event: "sessions", sessions } });
+    expect(got).toEqual(sessions); // 同步路径，无需等待
+    client.close();
+  });
+});
