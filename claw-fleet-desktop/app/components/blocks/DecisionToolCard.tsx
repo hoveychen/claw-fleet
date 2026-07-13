@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
-import { safeMarkdownComponents, safeRemarkPlugins } from "../../markdown/safeLinks";
+import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
 import {
   normalizeAnswer,
   parseAnswersFromResultText,
@@ -219,7 +219,7 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
               <div key={qi} className={styles.question_block}>
                 <div className={styles.question_text}>
                   <ReactMarkdown
-                    remarkPlugins={safeRemarkPlugins}
+                    remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                     components={safeMarkdownComponents}
                   >
                     {q.question}
@@ -254,13 +254,13 @@ export function DecisionToolCard({ block, result, meta, records, isPartial }: Pr
                     >
                       <span className={styles.option_label}>
                         <span className={styles.marker}>{isSelected ? "✓" : "○"}</span>
-                        <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={inlineMarkdown}>
+                        <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={inlineMarkdown}>
                           {opt.label}
                         </ReactMarkdown>
                       </span>
                       {opt.description && (
                         <span className={styles.option_desc}>
-                          <ReactMarkdown remarkPlugins={safeRemarkPlugins} components={inlineMarkdown}>
+                          <ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={inlineMarkdown}>
                             {opt.description}
                           </ReactMarkdown>
                         </span>
