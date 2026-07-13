@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { PageShell } from "./PageShell";
 import styles from "./MobileView.module.css";
 
 interface MobileRelayConfig {
@@ -141,14 +142,21 @@ export function MobileView() {
     }
   }, [refreshQr]);
 
+  // Even before the config loads the page wears its shell — otherwise the banner
+  // (and with it the window's drag region) would blink in only once the invoke
+  // resolved.
   if (!config) {
-    return <div className={styles.container}>{error ?? "…"}</div>;
+    return (
+      <PageShell view="mobile" title={t("mobile_title", "移动端")}>
+        <div className={styles.container}>{error ?? "…"}</div>
+      </PageShell>
+    );
   }
 
   return (
-    <div className={styles.container}>
+    <PageShell view="mobile" title={t("mobile_title", "移动端")}>
+      <div className={styles.container}>
       <div className={styles.panel}>
-        <h2 className={styles.title}>{t("mobile_title", "移动端")}</h2>
         <p className={styles.subtitle}>
           {t(
             "mobile_subtitle",
@@ -272,6 +280,7 @@ export function MobileView() {
 
         {error && <div className={styles.error}>{error}</div>}
       </div>
-    </div>
+      </div>
+    </PageShell>
   );
 }
