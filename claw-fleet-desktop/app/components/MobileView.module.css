@@ -106,7 +106,7 @@
 .devicePush {
   font-size: 11.5px;
   padding: 2px 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
 }
@@ -128,7 +128,7 @@
   padding: 20px;
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -139,7 +139,7 @@
    而非纯冷白 #fff 或会在 dark 下变深的 var(--color-bg-card)。 */
 .qr {
   background: var(--canvas-fixed-light);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 8px;
   line-height: 0;
 }
@@ -158,7 +158,7 @@
   justify-content: center;
   color: var(--color-text-dim);
   background: var(--color-bg-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 
 .qrHint {
@@ -226,7 +226,7 @@
 .dangerButton {
   border: 1px solid rgb(var(--color-error-rgb) / 0.4);
   color: var(--color-error);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 7px 14px;
   font-size: 13px;
   background: none;

@@ -17,7 +17,7 @@
   flex-direction: column;
   height: 100%;
   overflow: hidden;
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
   border-right: 1px solid var(--color-border);
 }
 
@@ -67,7 +67,7 @@
   justify-content: center;
   flex-shrink: 0;
   padding: 4px 6px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg);
   color: var(--color-text-dim);
@@ -90,7 +90,7 @@
   align-items: center;
   gap: 4px;
   padding: 3px 9px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-accent);
   background: var(--color-accent);
   color: var(--color-on-accent);

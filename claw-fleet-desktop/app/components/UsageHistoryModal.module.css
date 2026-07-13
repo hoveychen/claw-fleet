@@ -13,7 +13,7 @@
 .modal {
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   display: flex;
   flex-direction: column;
   width: 100%;
@@ -28,7 +28,7 @@
   justify-content: space-between;
   padding: 12px 16px;
   border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
   flex-shrink: 0;
   gap: 8px;
   min-height: 44px;
@@ -44,7 +44,7 @@
   padding: 3px 8px;
   background: none;
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   color: var(--color-text-dim);
   cursor: pointer;
   font-size: 12px;

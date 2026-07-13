@@ -24,7 +24,7 @@
   color: var(--color-accent, #60a5fa);
   background: none;
   border: 1px dashed var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   text-align: center;
   transition: background 0.15s, border-color 0.15s;
@@ -70,7 +70,7 @@
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .search_count {
@@ -91,7 +91,7 @@
   color: var(--color-text);
   background: var(--color-bg);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
 }
 
@@ -108,7 +108,7 @@
 /* The hit the reader jumped to. Without this the scroll lands somewhere and
    nothing says which row was the match. */
 .active_match {
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   box-shadow: 0 0 0 2px var(--color-accent, #60a5fa);
 }
 

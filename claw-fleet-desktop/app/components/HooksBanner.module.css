@@ -4,7 +4,7 @@
   gap: 8px;
   padding: 6px 12px;
   margin: 4px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-card);
   border: 1px solid var(--color-border);
   font-size: 11px;
@@ -31,7 +31,7 @@
 
 .install_btn {
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: none;
   background: var(--color-accent);
   color: var(--color-on-accent);
@@ -46,7 +46,7 @@
 
 .dismiss_btn {
   padding: 2px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
@@ -76,7 +76,7 @@
 .dialog {
   background: var(--color-bg-modal);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 20px 24px;
   max-width: 480px;
   width: 100%;
@@ -112,7 +112,7 @@
 
 .cancel_btn {
   padding: 6px 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: var(--color-bg-card);
   color: var(--color-text);
@@ -126,7 +126,7 @@
 
 .confirm_btn {
   padding: 6px 16px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: none;
   background: #3b82f6;
   color: #fff;

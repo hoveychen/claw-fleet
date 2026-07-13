@@ -12,9 +12,14 @@
  *
  * Checks:
  *   [error] var(--x) where --x is never defined in any scanned CSS → exit 1.
+ *   [error] var(--x) where --x is DEPRECATED → exit 1. These names still resolve
+ *           (App.css keeps them as aliases until every consumer is migrated), so
+ *           nothing else would ever catch a fresh reference — it would just quietly
+ *           re-open the split the alias was created to close.
  *   [warn]  bare hardcoded color literals in a .module.css outside a var()
  *           fallback → printed, does NOT fail the build (semantic colors and
  *           deliberate fixed canvases are legitimate; this is advisory only).
+ *   [warn]  border-radius with a raw px value off the --radius-* ladder.
  *
  * Run from claw-fleet-desktop/: `node scripts/check-css-tokens.mjs`
  */
@@ -39,6 +44,21 @@ function collectCss(dir, out = []) {
 //   --drift: Onboarding.tsx sets it per confetti particle for the fall animation.
 const RUNTIME_INJECTED = new Set(["--drift"]);
 
+// Retired token names. App.css still defines them as aliases so nothing breaks
+// mid-migration, which is exactly why a plain "is it defined?" check can't see a
+// regression here — the name resolves. Referencing one is an error.
+const DEPRECATED = new Map([
+  ["--color-bg-input", "--color-bg-field (form controls are a RAISED surface)"],
+  ["--color-bg-tertiary", "--color-bg-sunken (the one recessed surface role)"],
+  ["--color-bg-sidebar", "--color-bg (it was a no-op alias of the page canvas)"],
+]);
+
+// Every value on the --radius-* ladder now reads as var(--radius-x), so a raw px
+// border-radius means a new step got invented. 1px/1.5px hairlines sit below the
+// smallest token and stay raw.
+const RAW_RADIUS_OK = new Set(["1px", "1.5px"]);
+const RADIUS_RE = /border-radius:\s*(\d+(?:\.\d+)?px)\s*;/;
+
 const DEF_RE = /(--[A-Za-z0-9-]+)\s*:/g; // `--x:` — only ever a definition
 const USE_RE = /var\(\s*(--[A-Za-z0-9-]+)/g; // `var(--x` — a reference
 
@@ -58,19 +78,30 @@ for (const f of files) {
 }
 
 const undefinedRefs = []; // {file, line, token}
+const deprecatedRefs = []; // {file, line, token, replacement}
 const bareColors = []; // {file, line, snippet}
+const offLadderRadii = []; // {file, line, value}
 
 for (const f of files) {
   const rel = relative(".", f);
+  const isTokenSource = rel.endsWith("App.css"); // where the aliases are declared
   const lines = readFileSync(f, "utf8").split("\n");
   lines.forEach((line, i) => {
-    // undefined var references
+    // undefined / deprecated var references
     let m;
     USE_RE.lastIndex = 0;
     while ((m = USE_RE.exec(line))) {
       if (!defined.has(m[1]) && !RUNTIME_INJECTED.has(m[1])) {
         undefinedRefs.push({ file: rel, line: i + 1, token: m[1] });
       }
+      if (DEPRECATED.has(m[1]) && !isTokenSource) {
+        deprecatedRefs.push({ file: rel, line: i + 1, token: m[1], replacement: DEPRECATED.get(m[1]) });
+      }
+    }
+    // advisory: a border-radius that isn't on the ladder
+    const rr = RADIUS_RE.exec(line);
+    if (rr && !RAW_RADIUS_OK.has(rr[1])) {
+      offLadderRadii.push({ file: rel, line: i + 1, value: rr[1] });
     }
     // advisory: bare color literals in .module.css, outside var() fallbacks
     if (rel.endsWith(".module.css")) {
@@ -90,10 +121,23 @@ for (const f of files) {
   });
 }
 
+if (offLadderRadii.length) {
+  console.warn(`\n⚠  ${offLadderRadii.length} border-radius value(s) off the --radius-* ladder (advisory):`);
+  for (const r of offLadderRadii) console.warn(`   ${r.file}:${r.line}  border-radius: ${r.value}`);
+  console.warn("   → ladder: --radius-hair 2 / -xs 4 / -sm 6 / -md 8 / -lg 12 / -pill 999.");
+}
+
 if (bareColors.length) {
   console.warn(`\n⚠  ${bareColors.length} bare color literal(s) in module.css (advisory — not failing build):`);
   for (const b of bareColors) console.warn(`   ${b.file}:${b.line}  ${b.snippet}`);
   console.warn("   → prefer var(--color-*) tokens unless this is a fixed canvas / chart / semantic color.");
+}
+
+if (deprecatedRefs.length) {
+  console.error(`\n✖  ${deprecatedRefs.length} reference(s) to DEPRECATED CSS variables (they still resolve, so nothing else catches this):`);
+  for (const d of deprecatedRefs) console.error(`   ${d.file}:${d.line}  var(${d.token}) → use ${d.replacement}`);
+  console.error("");
+  process.exit(1);
 }
 
 if (undefinedRefs.length) {

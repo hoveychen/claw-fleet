@@ -53,7 +53,7 @@
   gap: 4px;
   background: var(--color-bg-secondary);
   border: 1px solid transparent;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 2px 6px;
   font-size: 11px;
   cursor: pointer;
@@ -85,7 +85,7 @@
   color: var(--tag-skill-fg);
   background: var(--tag-skill-bg);
   padding: 0 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 .args {
@@ -132,5 +132,5 @@
   overflow-y: auto;
   background: var(--color-bg);
   padding: 6px 8px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }

@@ -475,7 +475,7 @@
   margin: 4px 10px 10px;
   background: var(--mascot-bubble-bg, rgba(255, 255, 255, 0.12));
   border: 1px solid var(--mascot-bubble-border, rgba(255, 255, 255, 0.15));
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 6px 12px;
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);

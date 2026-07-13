@@ -4,7 +4,7 @@
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg-sidebar);
+  background: var(--color-bg);
   border-right: 1px solid var(--color-border);
   height: 100vh;
   overflow: hidden;
@@ -83,7 +83,7 @@
   background: none;
   color: var(--color-text-dim);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   opacity: 0.75;
   z-index: 5;
   transition: background 0.14s, color 0.14s, opacity 0.14s;
@@ -129,7 +129,7 @@
   border-right: none;
   margin: 8px 0 8px 8px;
   height: calc(100vh - 16px);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   box-shadow:
     inset 0 0 0 0.5px rgba(255, 255, 255, 0.1),
     0 1px 2px rgba(0, 0, 0, 0.18),
@@ -162,7 +162,7 @@
    Active gets a slightly tinted glass tone + 0.5px hairline highlight that
    reads as a soft bevel — matches Tahoe's Mail/Settings selection language. */
 :global([data-platform]) .nav_item {
-  border-radius: 8px;
+  border-radius: var(--radius-md);
 }
 :global([data-platform]) .nav_item:hover {
   background: rgba(255, 255, 255, 0.05);
@@ -242,7 +242,7 @@
   align-items: center;
   gap: 10px;
   padding: 7px 12px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   border: none;
   background: none;
   cursor: pointer;
@@ -292,7 +292,7 @@
   font-weight: 700;
   background: #ef4444;
   color: #fff;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 1px 6px;
   min-width: 18px;
   text-align: center;
@@ -324,7 +324,7 @@
   gap: 6px;
   width: 100%;
   padding: 5px 10px 5px 32px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: none;
   background: none;
   cursor: pointer;
@@ -359,7 +359,7 @@
   font-weight: 600;
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 1px 6px;
   min-width: 18px;
   text-align: center;
@@ -464,7 +464,7 @@
   margin-top: 2px;
   border: none;
   background: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   color: var(--color-text-dim);
   font-size: 12px;
@@ -543,7 +543,7 @@
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   transition: background 0.14s ease;
   border: none;
@@ -559,7 +559,7 @@
 .footer_avatar {
   width: 30px;
   height: 30px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
   display: flex;
   align-items: center;
@@ -637,7 +637,7 @@
   background: none;
   color: var(--color-text-dim);
   cursor: pointer;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   flex-shrink: 0;
   opacity: 0.75;
   transition: background 0.14s, color 0.14s, opacity 0.14s;
