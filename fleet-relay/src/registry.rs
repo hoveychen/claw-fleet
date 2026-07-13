@@ -14,7 +14,17 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::frames::{OutFrame, Role};
 
-pub type Tx = UnboundedSender<String>;
+/// A frame queued for one connection's write pump. Text carries the relay's
+/// structured JSON envelopes (`authed`/`msg`/`presence`/…); Binary carries an
+/// opaque compressed `msg` payload forwarded verbatim between paired endpoints
+/// — the relay never inspects its bytes.
+#[derive(Debug, Clone)]
+pub enum OutMsg {
+    Text(String),
+    Binary(Vec<u8>),
+}
+
+pub type Tx = UnboundedSender<OutMsg>;
 
 pub fn channel_id(secret: &str) -> String {
     let mut h = Sha256::new();
@@ -91,20 +101,30 @@ impl Registry {
         }
     }
 
-    /// Send a frame to every connection of the opposite role. Returns the
-    /// number of connections the frame was delivered to.
+    /// Send a structured JSON frame to every connection of the opposite role.
+    /// Returns the number of connections the frame was delivered to.
     pub fn forward(&self, channel: &str, from: Role, frame: &OutFrame) -> usize {
         let serialized = match serde_json::to_string(frame) {
             Ok(s) => s,
             Err(_) => return 0,
         };
+        self.deliver(channel, from, OutMsg::Text(serialized))
+    }
+
+    /// Forward an opaque binary blob (a compressed `msg` payload) to every
+    /// connection of the opposite role, verbatim. Returns the delivery count.
+    pub fn forward_binary(&self, channel: &str, from: Role, bytes: Vec<u8>) -> usize {
+        self.deliver(channel, from, OutMsg::Binary(bytes))
+    }
+
+    fn deliver(&self, channel: &str, from: Role, msg: OutMsg) -> usize {
         let channels = self.channels.lock().unwrap();
         let Some(ch) = channels.get(channel) else {
             return 0;
         };
         let mut delivered = 0;
         for tx in ch.members(from.opposite()).values() {
-            if tx.send(serialized.clone()).is_ok() {
+            if tx.send(msg.clone()).is_ok() {
                 delivered += 1;
             }
         }
@@ -121,7 +141,7 @@ impl Registry {
             return;
         };
         for tx in ch.members(changed.opposite()).values() {
-            let _ = tx.send(serialized.clone());
+            let _ = tx.send(OutMsg::Text(serialized.clone()));
         }
     }
 }
@@ -132,10 +152,24 @@ mod tests {
     use serde_json::json;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
-    fn drain(rx: &mut UnboundedReceiver<String>) -> Vec<serde_json::Value> {
+    fn drain(rx: &mut UnboundedReceiver<OutMsg>) -> Vec<serde_json::Value> {
         let mut out = Vec::new();
-        while let Ok(s) = rx.try_recv() {
-            out.push(serde_json::from_str(&s).unwrap());
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                OutMsg::Text(s) => out.push(serde_json::from_str(&s).unwrap()),
+                OutMsg::Binary(_) => panic!("expected text frame, got binary"),
+            }
+        }
+        out
+    }
+
+    fn drain_binary(rx: &mut UnboundedReceiver<OutMsg>) -> Vec<Vec<u8>> {
+        let mut out = Vec::new();
+        while let Ok(msg) = rx.try_recv() {
+            match msg {
+                OutMsg::Binary(b) => out.push(b),
+                OutMsg::Text(_) => panic!("expected binary frame, got text"),
+            }
         }
         out
     }
@@ -173,6 +207,23 @@ mod tests {
         let got = drain(&mut client_rx);
         assert_eq!(got.len(), 1);
         assert_eq!(got[0]["payload"]["y"], 2);
+    }
+
+    #[test]
+    fn forward_binary_reaches_opposite_role_verbatim() {
+        let reg = Registry::default();
+        let (agent_tx, mut agent_rx) = unbounded_channel();
+        let (client_tx, mut client_rx) = unbounded_channel();
+        reg.join("ch", Role::Agent, agent_tx);
+        reg.join("ch", Role::Client, client_tx);
+        drain(&mut agent_rx);
+        drain(&mut client_rx);
+
+        let blob = vec![0x1f, 0x8b, 0x08, 0x00, 0xde, 0xad, 0xbe, 0xef];
+        let n = reg.forward_binary("ch", Role::Agent, blob.clone());
+        assert_eq!(n, 1, "agent binary frame reaches the one client");
+        assert_eq!(drain_binary(&mut client_rx), vec![blob], "bytes forwarded verbatim");
+        assert!(agent_rx.try_recv().is_err(), "sender's own role gets nothing");
     }
 
     #[test]

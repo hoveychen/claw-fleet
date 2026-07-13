@@ -11,7 +11,7 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc::unbounded_channel;
 
 use crate::frames::{InFrame, OutFrame, PushPayload, Role};
-use crate::registry::channel_id;
+use crate::registry::{channel_id, OutMsg};
 use crate::AppState;
 
 const AUTH_TIMEOUT: Duration = Duration::from_secs(10);
@@ -40,13 +40,14 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
     };
     let channel = channel_id(&secret);
 
-    let (tx, mut rx) = unbounded_channel::<String>();
+    let (tx, mut rx) = unbounded_channel::<OutMsg>();
     let joined = state.registry.join(&channel, role, tx);
     log::info!("{role:?} joined channel {}… ({} client(s))", &channel[..12], joined.clients);
     let authed = OutFrame::Authed {
         role,
         clients: joined.clients,
         agent_online: joined.agent_online,
+        binary: true,
     };
     if send_frame(&mut socket, &authed).await.is_err() {
         state.registry.leave(&channel, role, joined.conn_id);
@@ -57,8 +58,12 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
 
     // write pump: registry -> socket
     let write = tokio::spawn(async move {
-        while let Some(s) = rx.recv().await {
-            if sink.send(Message::Text(s.into())).await.is_err() {
+        while let Some(out) = rx.recv().await {
+            let msg = match out {
+                OutMsg::Text(s) => Message::Text(s.into()),
+                OutMsg::Binary(b) => Message::Binary(b.into()),
+            };
+            if sink.send(msg).await.is_err() {
                 break;
             }
         }
@@ -69,6 +74,14 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
     while let Some(Ok(msg)) = stream.next().await {
         let text = match msg {
             Message::Text(t) => t.to_string(),
+            // A binary frame is always an opaque `msg` payload (a compressed
+            // envelope): forward the bytes verbatim to the opposite role. The
+            // relay never decompresses or inspects them — only the paired
+            // endpoints share the codec.
+            Message::Binary(b) => {
+                state.registry.forward_binary(&channel, role, b.to_vec());
+                continue;
+            }
             Message::Close(_) => break,
             _ => continue, // ping/pong handled by the stack
         };

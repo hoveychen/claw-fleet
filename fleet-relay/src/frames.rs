@@ -46,8 +46,18 @@ pub enum InFrame {
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum OutFrame {
-    /// Auth acknowledgement with the initial channel state.
-    Authed { role: Role, clients: usize, agent_online: bool },
+    /// Auth acknowledgement with the initial channel state. `binary` advertises
+    /// that this relay forwards WebSocket binary frames verbatim between paired
+    /// endpoints — an agent uses it to decide whether it may ship compressed
+    /// `msg` payloads as raw bytes instead of base64-in-JSON. Older relays omit
+    /// the field, so `#[serde(default)]` on the reader yields `false` and the
+    /// agent falls back to text transport.
+    Authed {
+        role: Role,
+        clients: usize,
+        agent_online: bool,
+        binary: bool,
+    },
     Msg { payload: Value },
     Notify {
         title: String,
