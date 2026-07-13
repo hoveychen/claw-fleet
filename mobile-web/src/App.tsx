@@ -5,6 +5,7 @@ import { enablePush, pushState, resyncPush, type PushState } from "./push";
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
 import { RelayClient, gzipSupported, binarySupported } from "./relay";
+import { MockRelayClient, isMockMode } from "./mock/relay";
 import type {
   DecisionKind,
   DecisionRequest,
@@ -55,7 +56,11 @@ type Tab = "decisions" | "tasks" | "wiki" | "more";
 export function App() {
   // 订阅语言切换：App 根重渲即可带动整树（无 React.memo），各处 t() 现算。
   const { t } = useI18n();
-  const [secret, setSecret] = useState<string | null>(loadSecretSync);
+  // `?mock` stands in for a pairing secret so the gate below opens and the
+  // effect that builds the client runs — it just builds a MockRelayClient.
+  const [secret, setSecret] = useState<string | null>(() =>
+    isMockMode() ? "mock-secret" : loadSecretSync(),
+  );
   // null = still probing IndexedDB; only after that fails do we show the gate.
   const [idbProbed, setIdbProbed] = useState(false);
   const [a2hsDismissed, setA2hsDismissed] = useState(
@@ -145,38 +150,41 @@ export function App() {
 
   useEffect(() => {
     if (!secret) return;
-    const client = new RelayClient(
-      secret,
-      {
-        onStatus: setConnected,
-        onAgentOnline: (online) => {
-          setAgentOnline(online);
-          if (online && clientRef.current) {
-            void refreshPending(clientRef.current);
-          }
-        },
-        onDecisionCreated: addDecision,
-        onDecisionResolved: removeDecision,
-        onSessions: (list) => {
-          setSessions(list);
-          setSessionsLoaded(true);
-        },
-        onAuthError: (message) => setAuthError(message),
+    const handlers = {
+      onStatus: setConnected,
+      onAgentOnline: (online: boolean) => {
+        setAgentOnline(online);
+        if (online && clientRef.current) {
+          void refreshPending(clientRef.current);
+        }
       },
-      // Announced on every heartbeat so `pushSubscribed` stays current — read
-      // live rather than captured at construction.
-      () => {
-        const { label, platform } = deviceLabel(navigator.userAgent);
-        return {
-          clientId: getClientId(),
-          label,
-          platform,
-          pushSubscribed: pushState() === "granted",
-          supportsGzip: gzipSupported(),
-          supportsBinary: binarySupported(),
-        };
+      onDecisionCreated: addDecision,
+      onDecisionResolved: removeDecision,
+      onSessions: (list: SessionInfo[]) => {
+        setSessions(list);
+        setSessionsLoaded(true);
       },
-    );
+      onAuthError: (message: string) => setAuthError(message),
+    };
+    const client = isMockMode()
+      ? new MockRelayClient(handlers)
+      : new RelayClient(
+          secret,
+          handlers,
+          // Announced on every heartbeat so `pushSubscribed` stays current — read
+          // live rather than captured at construction.
+          () => {
+            const { label, platform } = deviceLabel(navigator.userAgent);
+            return {
+              clientId: getClientId(),
+              label,
+              platform,
+              pushSubscribed: pushState() === "granted",
+              supportsGzip: gzipSupported(),
+              supportsBinary: binarySupported(),
+            };
+          },
+        );
     clientRef.current = client;
     client.connect();
     void resyncPush(client);
