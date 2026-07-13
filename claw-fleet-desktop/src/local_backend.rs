@@ -1547,18 +1547,6 @@ pub fn resume_session_impl(
     )
 }
 
-/// Route a Decision Card response through the parked store: `Some` when this id
-/// was a timed-out card (the response wakes the session up, or drops the card),
-/// `None` when it is still live and the caller should write its response file.
-fn parked_resolve(
-    id: &str,
-    resp: &impl serde::Serialize,
-    dismissed: bool,
-) -> Option<Result<(), String>> {
-    let payload = serde_json::to_value(resp).ok()?;
-    claw_fleet_core::parked::try_resolve(id, &payload, dismissed)
-}
-
 /// Max number of `claude --resume` auto-resume processes alive at once. Each
 /// is a full Claude Code process (~150-200MB), so an unbounded fan-out of a
 /// few hundred is tens of GB of RSS — the startup runaway this caps.
@@ -2506,10 +2494,12 @@ impl Backend for LocalBackend {
         // hook that asked timed out and its turn was interrupted. Resolving it
         // resumes the session with the answer instead (or, if the user declined,
         // just drops the question).
-        let result = match parked_resolve(id, &resp, declined) {
-            Some(r) => r,
-            None => crate::elicitation::write_response(&resp),
-        };
+        let result = claw_fleet_core::parked::deliver(
+            id,
+            &resp,
+            declined,
+            crate::elicitation::write_response,
+        );
         resolve_feishu_card(id, resolved);
         result
     }
@@ -2525,10 +2515,7 @@ impl Backend for LocalBackend {
             answers,
             cancelled,
         };
-        match parked_resolve(id, &resp, cancelled) {
-            Some(r) => r,
-            None => claw_fleet_core::mcp_ipc::write_response(&resp),
-        }
+        claw_fleet_core::parked::deliver(id, &resp, cancelled, claw_fleet_core::mcp_ipc::write_response)
     }
 
     fn respond_to_permission_prompt(
@@ -2562,10 +2549,12 @@ impl Backend for LocalBackend {
             action_context,
             cancelled,
         };
-        match parked_resolve(id, &resp, cancelled) {
-            Some(r) => r,
-            None => claw_fleet_core::mcp_a2ui_ipc::write_response(&resp),
-        }
+        claw_fleet_core::parked::deliver(
+            id,
+            &resp,
+            cancelled,
+            claw_fleet_core::mcp_a2ui_ipc::write_response,
+        )
     }
 
     fn apply_mcp_injector(&self, fleet_path: &str) -> Result<(), String> {
@@ -2664,10 +2653,12 @@ impl Backend for LocalBackend {
         };
         // `dismissed: false` — a rejection is an answer the agent has to be woken
         // up to hear ("老板拒绝了，理由是…"), not a card the user waved away.
-        let result = match parked_resolve(id, &resp, false) {
-            Some(r) => r,
-            None => crate::plan_approval::write_response(&resp),
-        };
+        let result = claw_fleet_core::parked::deliver(
+            id,
+            &resp,
+            false,
+            crate::plan_approval::write_response,
+        );
         resolve_feishu_card(
             id,
             claw_fleet_core::feishu::resolved_card(

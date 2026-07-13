@@ -2734,14 +2734,11 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<plan_approval::PlanApprovalResponse>(&body_bytes) {
                     Ok(resp) => {
-                        // Parked card: nothing is polling for a response file any
-                        // more, so resolving it resumes the session with the answer
-                        // (or drops the card when the user dismissed it).
-                        let payload = serde_json::to_value(&resp).unwrap_or_default();
-                        let outcome = match crate::parked::try_resolve(&resp.id, &payload, false) {
-                            Some(r) => r,
-                            None => plan_approval::write_response(&resp),
-                        };
+                        // A parked card has no producer left polling for a response
+                        // file, so `deliver` resumes the session with the answer
+                        // instead (or drops the card when the user dismissed it).
+                        let outcome =
+                            crate::parked::deliver(&resp.id, &resp, false, plan_approval::write_response);
                         match outcome {
                             Ok(()) => {
                                 let _ = request.respond(
@@ -2775,14 +2772,11 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<elicitation::ElicitationResponse>(&body_bytes) {
                     Ok(resp) => {
-                        // Parked card: nothing is polling for a response file any
-                        // more, so resolving it resumes the session with the answer
-                        // (or drops the card when the user dismissed it).
-                        let payload = serde_json::to_value(&resp).unwrap_or_default();
-                        let outcome = match crate::parked::try_resolve(&resp.id, &payload, resp.declined) {
-                            Some(r) => r,
-                            None => elicitation::write_response(&resp),
-                        };
+                        // A parked card has no producer left polling for a response
+                        // file, so `deliver` resumes the session with the answer
+                        // instead (or drops the card when the user dismissed it).
+                        let outcome =
+                            crate::parked::deliver(&resp.id, &resp, resp.declined, elicitation::write_response);
                         match outcome {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet elicitation` CLI
@@ -2855,14 +2849,11 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::mcp_ipc::FleetAskResponse>(&body_bytes) {
                     Ok(resp) => {
-                        // Parked card: nothing is polling for a response file any
-                        // more, so resolving it resumes the session with the answer
-                        // (or drops the card when the user dismissed it).
-                        let payload = serde_json::to_value(&resp).unwrap_or_default();
-                        let outcome = match crate::parked::try_resolve(&resp.id, &payload, resp.cancelled) {
-                            Some(r) => r,
-                            None => crate::mcp_ipc::write_response(&resp),
-                        };
+                        // A parked card has no producer left polling for a response
+                        // file, so `deliver` resumes the session with the answer
+                        // instead (or drops the card when the user dismissed it).
+                        let outcome =
+                            crate::parked::deliver(&resp.id, &resp, resp.cancelled, crate::mcp_ipc::write_response);
                         match outcome {
                             Ok(()) => {
                                 // Don't cleanup here — the `fleet mcp` server
@@ -2993,14 +2984,11 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::mcp_a2ui_ipc::A2uiRenderResponse>(&body_bytes) {
                     Ok(resp) => {
-                        // Parked card: nothing is polling for a response file any
-                        // more, so resolving it resumes the session with the answer
-                        // (or drops the card when the user dismissed it).
-                        let payload = serde_json::to_value(&resp).unwrap_or_default();
-                        let outcome = match crate::parked::try_resolve(&resp.id, &payload, resp.cancelled) {
-                            Some(r) => r,
-                            None => crate::mcp_a2ui_ipc::write_response(&resp),
-                        };
+                        // A parked card has no producer left polling for a response
+                        // file, so `deliver` resumes the session with the answer
+                        // instead (or drops the card when the user dismissed it).
+                        let outcome =
+                            crate::parked::deliver(&resp.id, &resp, resp.cancelled, crate::mcp_a2ui_ipc::write_response);
                         match outcome {
                             Ok(()) => {
                                 let _ = request.respond(
