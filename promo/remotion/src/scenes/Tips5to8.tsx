@@ -17,11 +17,12 @@ export const Tip5: React.FC = () => {
   const h = lerp(84, 302, morph);
   return (
     <TipShell
-      n={5}
+      n={6}
       title="Dispatch from anywhere"
       bubble="New deckhand, reporting for duty. Didn't even open a terminal."
       side="right"
       bubbleEnter={112}
+      pip={{ src: "footage/tasks.mp4", startFrom: 240, pos: "tr" }}
     >
       <div
         style={{
@@ -95,11 +96,12 @@ export const Tip6: React.FC = () => {
   const noteX = lerp(330, 950, pass);
   return (
     <TipShell
-      n={6}
+      n={7}
       title="Long task? Pass the baton"
       bubble="Context window's full. The mission isn't. Relay!"
       side="left"
       bubbleEnter={108}
+      pip={{ src: "footage/gallery.mp4", startFrom: 300, pos: "br" }}
     >
       <div style={{ position: "absolute", top: 290, left: 130, opacity: aIn, filter: `grayscale(${pass * 0.7})` }}>
         <SessionCard
@@ -164,11 +166,12 @@ export const Tip7: React.FC = () => {
   const done = spring({ frame: frame - 104, fps, config: { damping: 11, mass: 0.5 } });
   return (
     <TipShell
-      n={7}
+      n={8}
       title="Your phone is the bridge now"
       bubble="Approved from the beach. The fleet never knew I left."
       side="right"
       bubbleEnter={116}
+      pip={{ src: "footage/gallery.mp4", startFrom: 210, pos: "tr" }}
     >
       <div
         style={{
@@ -241,8 +244,8 @@ export const Tip7: React.FC = () => {
       <div
         style={{
           position: "absolute",
-          top: 430,
-          left: 720,
+          top: 590,
+          left: 700,
           fontFamily: FONT.mono,
           fontSize: 24,
           color: T.green,
@@ -270,11 +273,12 @@ export const Tip8: React.FC = () => {
   const copied = spring({ frame: frame - 118, fps, config: { damping: 11, mass: 0.5 } });
   return (
     <TipShell
-      n={8}
+      n={9}
       title="The standup writes itself"
       bubble="Eight hours of fleet work, summarized before your coffee's cold."
       side="left"
       bubbleEnter={122}
+      pip={{ src: "footage/report.mp4", startFrom: 150, pos: "tl" }}
     >
       <div
         style={{

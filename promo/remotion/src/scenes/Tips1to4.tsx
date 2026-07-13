@@ -21,6 +21,7 @@ export const Tip1: React.FC = () => {
       title="Know who's actually working"
       bubble="Three agents coding. One's been waiting for you since lunch."
       side="right"
+      pip={{ src: "footage/gallery.mp4", startFrom: 270, pos: "tr" }}
     >
       <div style={{ position: "absolute", top: 240, left: 120, display: "grid", gap: 26 }}>
         <SessionCard
@@ -74,6 +75,7 @@ export const Tip2: React.FC = () => {
       bubble="That's not a feature shipping. That's $4 a minute of apologies."
       side="left"
       bubbleEnter={104}
+      pip={{ src: "footage/report.mp4", startFrom: 270, pos: "tl" }}
     >
       <div
         style={{
@@ -154,6 +156,7 @@ export const Tip3: React.FC = () => {
       bubble="Not on my watch, sailor."
       side="right"
       bubbleEnter={108}
+      pip={{ src: "footage/audit.mp4", startFrom: 240, pos: "bl" }}
     >
       <div
         style={{
@@ -265,6 +268,7 @@ export const Tip4: React.FC = () => {
       bubble={'Step 4 used to say "rewrite everything". I fixed step 4.'}
       side="left"
       bubbleEnter={118}
+      pip={{ src: "footage/detail.mp4", startFrom: 300, pos: "tl" }}
     >
       <div
         style={{
