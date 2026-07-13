@@ -1283,6 +1283,16 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             let path = crate::chat_workspace::ensure_chat_workspace()?;
             Ok(json!({ "path": path }))
         }
+        // Directory picker for the new-session composer. Deliberately NOT gated
+        // on `known_workspaces` the way the explorer/git methods below are: the
+        // point is to reach a directory that has never had a session. It carries
+        // its own boundary instead (home + off-home known workspaces, canonical,
+        // directories only) — see `workspace_browse`.
+        "browse_dir" => {
+            let path = params.get("path").and_then(Value::as_str);
+            let resp = crate::workspace_browse::browse_dir(path, &known_workspaces())?;
+            serde_json::to_value(resp).map_err(|e| e.to_string())
+        }
         // ── Write methods ────────────────────────────────────────────────
         // All of these run inside `spawn_blocking` (see ws_connect_once), so
         // process spawns / kills / file writes never block the ws runtime.
