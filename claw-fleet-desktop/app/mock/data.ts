@@ -709,6 +709,14 @@ const RELEASE_TRAIN_SESSIONS: SessionInfo[] = [
 
 MOCK_SESSIONS.push(...RELEASE_TRAIN_SESSIONS);
 
+// Every session gets a believable price tag — the sidebar spend rate and the
+// per-card $ figure are sums over these, and an all-zero board reads as fake.
+for (const s of MOCK_SESSIONS) {
+  s.costSpeedUsdPerMin = Math.round(s.tokenSpeed * 1.2) / 100;
+  s.totalCostUsd = Math.round(s.totalOutputTokens * 0.45) / 10000;
+  s.agentTotalCostUsd = s.totalCostUsd;
+}
+
 // ── Handoff chains (drives the 接力 chip + expanded chain panel) ─────────────
 
 export const MOCK_HANDOFF_CHAINS: Record<string, HandoffChain> = {

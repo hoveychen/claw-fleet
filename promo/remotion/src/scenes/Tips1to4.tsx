@@ -299,7 +299,7 @@ export const Tip3: React.FC = () => (
     }}
     bubble="Not on my watch, sailor."
     side="right"
-    pip={{ src: "footage/t3-guard.mp4", startFrom: 225, pos: "bl", zoom: { scale: 1.9, origin: "50% 74%" } }}
+    pip={{ src: "footage/t3-guard.mp4", startFrom: 225, pos: "bl", zoom: { scale: 2.0, origin: "50% 100%" } }}
   >
     <Tip3Stage />
   </TipShell>

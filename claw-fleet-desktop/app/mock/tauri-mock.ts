@@ -50,10 +50,13 @@ function tickSessions() {
     const jitter = (Math.random() - 0.3) * 5;
     const newSpeed = Math.max(0, s.tokenSpeed + jitter);
     const tokensAdded = Math.round(newSpeed * 2);
+    const costPerMin = Math.round(newSpeed * 1.2) / 100;
     return {
       ...s,
       tokenSpeed: Math.round(newSpeed * 10) / 10,
       totalOutputTokens: s.totalOutputTokens + tokensAdded,
+      costSpeedUsdPerMin: costPerMin,
+      totalCostUsd: Math.round(((s.totalCostUsd ?? 0) + (costPerMin * 2) / 60) * 100) / 100,
       lastActivityMs: Date.now() - Math.random() * 5000,
     };
   });
@@ -257,6 +260,17 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
           "Your fleet is in good shape, captain!",
           "Nice work on that last task!",
         ],
+      };
+
+    // ── Today's cumulative spend (sidebar badge) ──
+    case "today_usage":
+      return {
+        date: new Date().toISOString().slice(0, 10),
+        outputTokens: 1_284_500,
+        costUsd: 23.87,
+        agentCostUsd: 21.4,
+        fleetCostUsd: 2.47,
+        sessionCount: 37,
       };
 
     // ── Guard LLM analysis (feeds the "Analyzing command…" beat) ──

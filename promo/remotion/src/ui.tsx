@@ -392,6 +392,8 @@ export type PipProps = {
   objectPosition?: string;
   enter?: number;
   zoom?: PipZoom;
+  /** Playback speed of the capture (1 = realtime). */
+  rate?: number;
 };
 const PIP_POS: Record<PipProps["pos"], React.CSSProperties> = {
   tl: { top: 200, left: 90 },
@@ -399,7 +401,7 @@ const PIP_POS: Record<PipProps["pos"], React.CSSProperties> = {
   bl: { bottom: 70, left: 90 },
   br: { bottom: 70, right: 90 },
 };
-export const Pip: React.FC<PipProps> = ({ src, startFrom = 210, pos, objectPosition = "top left", enter = 34, zoom }) => {
+export const Pip: React.FC<PipProps> = ({ src, startFrom = 210, pos, objectPosition = "top left", enter = 34, zoom, rate = 1 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const s = spring({ frame: frame - enter, fps, config: { damping: 13, mass: 0.6 } });
@@ -450,6 +452,7 @@ export const Pip: React.FC<PipProps> = ({ src, startFrom = 210, pos, objectPosit
           muted
           src={staticFile(src)}
           startFrom={startFrom}
+          playbackRate={rate}
           style={{
             width: "100%",
             height: "100%",

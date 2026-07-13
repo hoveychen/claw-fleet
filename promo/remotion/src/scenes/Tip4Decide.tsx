@@ -105,7 +105,7 @@ export const Tip4: React.FC = () => (
     }}
     bubble="It asks. You click. It sails on. No essays."
     side="right"
-    pip={{ src: "footage/t4-ask.mp4", startFrom: 200, pos: "tr", zoom: { scale: 1.7, origin: "50% 55%" } }}
+    pip={{ src: "footage/t4-ask.mp4", startFrom: 230, pos: "tr", zoom: { scale: 1.3, origin: "50% 94%" } }}
   >
     <Tip4Stage />
   </TipShell>
