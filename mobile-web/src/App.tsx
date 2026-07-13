@@ -24,7 +24,8 @@ import {
   persistSecret,
 } from "./secretStore";
 import { useI18n } from "./i18n";
-import { HistoryLayer } from "./useNavStack";
+import { ExitGuard, installUnloadPrompt } from "./exitGuard";
+import { HistoryLayer, setRootBackHandler } from "./useNavStack";
 import { NewSessionSheet } from "./views/Composer";
 import { DecisionsView } from "./views/DecisionsView";
 import { MoreView } from "./views/MoreView";
@@ -110,7 +111,30 @@ export function App() {
   const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
   const [showUsage, setShowUsage] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
+  const [exitArmed, setExitArmed] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
+
+  // 栈底（主页 tab、无浮层）按返回：先拦一次给「再按一次退出」，再按才真走。
+  // beforeunload 只覆盖刷新/关标签/地址栏跳走这些非返回路径——mock 模式不装，
+  // 免得录屏流水线被原生对话框卡住。
+  useEffect(() => {
+    const install = () => (MOCK ? () => {} : installUnloadPrompt());
+    let uninstall = install();
+    let timer: number | undefined;
+    const guard = new ExitGuard(setExitArmed, () => {
+      uninstall();
+      // 万一没走成（本页就是历史里的第一条，退无可退），把兜底装回来。
+      timer = window.setTimeout(() => {
+        uninstall = install();
+      }, 1_000);
+    });
+    setRootBackHandler(guard.handleRootBack);
+    return () => {
+      if (timer !== undefined) window.clearTimeout(timer);
+      uninstall();
+      setRootBackHandler(() => "leave");
+    };
+  }, []);
 
   const addDecision = useCallback((kind: DecisionKind, request: unknown) => {
     const req = request as DecisionRequest;
@@ -546,6 +570,8 @@ export function App() {
           />
         </>
       )}
+
+      {exitArmed && <div className={styles.exitToast}>{t("再按一次返回退出")}</div>}
 
       <nav className={styles.tabs}>
         <button
