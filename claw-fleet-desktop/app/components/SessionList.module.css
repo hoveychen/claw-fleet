@@ -122,7 +122,10 @@
    window so the traffic-light buttons sit inside the sidebar (Finder / Mail in
    macOS Tahoe); on Windows the full-width drag bar overlays the same strip. */
 :global([data-platform]) .sidebar {
-  background: var(--color-bg-card);
+  /* Paper bg (not card) so the floating sidebar matches body & the other views'
+     二级菜单 instead of reading as the whitest surface in the app; it still
+     lifts off the page via its radius + shadow below. */
+  background: var(--color-bg);
   border-right: none;
   margin: 8px 0 8px 8px;
   height: calc(100vh - 16px);
