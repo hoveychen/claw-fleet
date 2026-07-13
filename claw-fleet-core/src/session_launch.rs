@@ -45,6 +45,49 @@ pub struct SpawnSessionRequest {
     pub session_id: Option<String>,
 }
 
+/// Bring a caller-supplied workspace path into the shape the spawn gate
+/// (`Path::is_dir`) can actually check: trimmed, `~` expanded, bare-relative
+/// resolved against the home directory.
+///
+/// The mobile client lets the user type a workspace path by hand, and the two
+/// most natural things to type on a phone — `~/workspace/foo` and
+/// `workspace/foo` — both fail `is_dir()` verbatim, because `~` is a shell
+/// convention the kernel knows nothing about and a relative path would resolve
+/// against the *desktop process's* cwd, which the phone can't see or reason
+/// about. Anchoring relatives at `$HOME` is what the user means.
+///
+/// Deliberately does NOT canonicalize: that would resolve symlinks, so a
+/// workspace reached through one would spawn under a path that no longer
+/// matches the `workspacePath` the desktop's own picker (Tauri's native dialog,
+/// which hands back the un-resolved path) records for the same directory —
+/// splitting one workspace into two entries in every recents list.
+pub fn normalize_workspace_path(input: &str) -> Result<String, String> {
+    normalize_workspace_path_with_home(input, crate::session::real_home_dir().as_deref())
+}
+
+/// Home-injectable core of [`normalize_workspace_path`], so the expansion rules
+/// are testable without touching `$HOME` / `FLEET_HOME` process-wide.
+fn normalize_workspace_path_with_home(input: &str, home: Option<&Path>) -> Result<String, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("workspace path is required".to_string());
+    }
+    let needs_home =
+        trimmed == "~" || trimmed.starts_with("~/") || !Path::new(trimmed).is_absolute();
+    if !needs_home {
+        return Ok(trimmed.to_string());
+    }
+    let home = home.ok_or_else(|| format!("cannot resolve '{trimmed}': home directory unknown"))?;
+    let resolved = if trimmed == "~" {
+        home.to_path_buf()
+    } else if let Some(rest) = trimmed.strip_prefix("~/") {
+        home.join(rest)
+    } else {
+        home.join(trimmed)
+    };
+    Ok(resolved.to_string_lossy().into_owned())
+}
+
 /// `CLAUDE_CODE_ENTRYPOINT` value stamped on sessions launched by the "新会话"
 /// button. The CLI writes it verbatim into each `user` record's `entrypoint`
 /// field, which is what the history panel filters on.
@@ -475,6 +518,11 @@ fn spawn_new_session_impl(
     if prompt.is_empty() {
         return Err("prompt is required".to_string());
     }
+    // The mobile composer accepts a hand-typed workspace path, so `~/...` and
+    // bare relatives arrive here as-is and would die at the `is_dir` gate.
+    // Normalise before the chat-workspace check so a typed `~/.fleet/chat` is
+    // still recognised as the chat workspace.
+    let workspace_path = &normalize_workspace_path(workspace_path)?;
     // Validate overrides (permission mode) before any CLI/filesystem checks so
     // the frontend gets a stable error regardless of the host environment.
     let mut override_args = Vec::new();
@@ -536,6 +584,54 @@ fn spawn_new_session_impl(
 
 #[cfg(test)]
 mod tests {
+    use super::normalize_workspace_path_with_home;
+    use std::path::Path;
+
+    /// The mobile composer's "自定义路径…" box is a bare text input, so the two
+    /// shapes a phone user actually types (`~/...` and a bare relative) reach
+    /// the spawn gate verbatim. `Path::is_dir()` knows nothing about `~`, and a
+    /// relative path would be resolved against the desktop process's cwd, so
+    /// both used to die at `spawn_claude_detached_with_envs`'s `is_dir` check
+    /// with "Workspace directory not found".
+    #[test]
+    fn normalize_expands_tilde_and_anchors_relatives_at_home() {
+        let home = Path::new("/Users/tester");
+        let cases = [
+            ("~/workspace/foo", "/Users/tester/workspace/foo"),
+            ("~", "/Users/tester"),
+            ("workspace/foo", "/Users/tester/workspace/foo"),
+            ("  ~/workspace/foo  ", "/Users/tester/workspace/foo"),
+            // Absolute paths are already what the gate wants — pass through,
+            // only trimmed. No canonicalize: resolving symlinks here would make
+            // the spawned session's workspacePath disagree with the one the
+            // desktop's native picker records for the same directory.
+            ("/abs/ws", "/abs/ws"),
+            ("  /abs/ws  ", "/abs/ws"),
+        ];
+        for (input, want) in cases {
+            assert_eq!(
+                normalize_workspace_path_with_home(input, Some(home)).as_deref(),
+                Ok(want),
+                "input {input:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn normalize_rejects_blank_and_reports_missing_home() {
+        assert!(normalize_workspace_path_with_home("   ", Some(Path::new("/Users/tester"))).is_err());
+        assert!(normalize_workspace_path_with_home("", None).is_err());
+        // A home-relative path with no home to anchor it must fail loudly
+        // rather than silently spawning in the desktop process's cwd.
+        assert!(normalize_workspace_path_with_home("~/ws", None).is_err());
+        assert!(normalize_workspace_path_with_home("ws", None).is_err());
+        // ...but an absolute path never needs the home, so it still resolves.
+        assert_eq!(
+            normalize_workspace_path_with_home("/abs/ws", None).as_deref(),
+            Ok("/abs/ws")
+        );
+    }
+
     #[test]
     fn live_thinking_stream_args_request_summarized_thinking() {
         // Claude 5-family and Opus 4.8 default `thinking.display` to "omitted",
