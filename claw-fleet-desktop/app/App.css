@@ -99,6 +99,13 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-status-error: var(--color-error-fg);
   --color-error-result-bg: #1a0d0d;
 
+  /* Semantic surface/accent tokens referenced by block presenters & cards */
+  --color-success-bg: #14331f;
+  --color-warning-bg: #33290a;
+  --color-info: #a371f7;
+  --color-teal: #39c5cf;
+  --color-text-dim-rgb: 98, 102, 109;
+
   /* Inline code */
   --color-code-fg: #e2c08d;
 
@@ -207,6 +214,13 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
   --color-error: var(--color-error-fg);
   --color-status-error: var(--color-error-fg);
   --color-error-result-bg: #fff5f5;
+
+  /* Semantic surface/accent tokens referenced by block presenters & cards */
+  --color-success-bg: #e7f2e6;
+  --color-warning-bg: #f7f0dd;
+  --color-info: #8250df;
+  --color-teal: #1b7f87;
+  --color-text-dim-rgb: 111, 112, 120;
 
   /* Inline code — light */
   --color-code-fg: #92400e;

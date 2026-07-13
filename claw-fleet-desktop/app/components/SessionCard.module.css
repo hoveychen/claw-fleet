@@ -327,7 +327,7 @@
 }
 
 .taskplan_row:hover {
-  background: var(--color-hover, rgba(127, 127, 127, 0.1));
+  background: var(--color-bg-hover);
 }
 
 .taskplan_head {
