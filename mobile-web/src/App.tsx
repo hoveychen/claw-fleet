@@ -79,6 +79,9 @@ export function App() {
   const [agentOnline, setAgentOnline] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
+  // Flips true the first time a `sessions` snapshot arrives, so the task page
+  // can tell "still waiting for the first push" from "pushed, genuinely empty".
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [todayUsage, setTodayUsage] = useState<TodayUsage | null>(null);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
   const [push, setPush] = useState<PushState>(pushState);
@@ -145,7 +148,10 @@ export function App() {
         },
         onDecisionCreated: addDecision,
         onDecisionResolved: removeDecision,
-        onSessions: setSessions,
+        onSessions: (list) => {
+          setSessions(list);
+          setSessionsLoaded(true);
+        },
         onAuthError: (message) => setAuthError(message),
       },
       // Announced on every heartbeat so `pushSubscribed` stays current — read
@@ -395,6 +401,9 @@ export function App() {
           <TasksView
             sessions={mergedSessions}
             client={clientRef.current}
+            connected={connected}
+            agentOnline={agentOnline}
+            sessionsLoaded={sessionsLoaded}
             onOpenSession={(s) => setDetailSessionId(s.id)}
             onMarkRead={markRead}
           />

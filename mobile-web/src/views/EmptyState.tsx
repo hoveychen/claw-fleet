@@ -12,6 +12,9 @@ type Props = {
   action?: React.ReactNode;
   /** Tighter layout for inline / filtered-result empties (search, tabs). */
   compact?: boolean;
+  /** Spin the icon — for in-progress states (connecting / loading) so the
+   *  surface reads as "working on it" rather than "nothing here / stuck". */
+  spin?: boolean;
 };
 
 /**
@@ -19,10 +22,10 @@ type Props = {
  * muted description, centered. One component for every "nothing here yet"
  * surface so they read as one system across the app.
  */
-export function EmptyState({ icon: Icon, title, description, action, compact }: Props) {
+export function EmptyState({ icon: Icon, title, description, action, compact, spin }: Props) {
   return (
     <div className={styles.root} data-compact={compact || undefined}>
-      <div className={styles.iconChip} aria-hidden="true">
+      <div className={styles.iconChip} data-spin={spin || undefined} aria-hidden="true">
         <Icon size={compact ? 20 : 26} strokeWidth={1.75} />
       </div>
       <div className={styles.title}>{title}</div>
