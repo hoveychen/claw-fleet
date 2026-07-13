@@ -197,6 +197,18 @@ pub fn fleet_server_registered() -> bool {
     extract_fleet_entry(&v).0.is_some()
 }
 
+/// The `mcpServers.fleet` entry as currently registered in `~/.claude.json`,
+/// or `None` when the injection isn't live. Chat sessions exclude the user
+/// setting source (which is where the CLI would otherwise find this server),
+/// so they need to hand the same entry back through `--mcp-config` — see
+/// `crate::chat_workspace::chat_session_args`.
+pub fn registered_fleet_entry() -> Option<serde_json::Value> {
+    let path = claude_json_path()?;
+    let content = std::fs::read_to_string(&path).ok()?;
+    let v = serde_json::from_str::<serde_json::Value>(&content).ok()?;
+    extract_fleet_entry(&v).0
+}
+
 fn extract_fleet_entry(v: &serde_json::Value) -> (Option<serde_json::Value>, bool, bool) {
     // Returns (fleet_entry, had_mcp_servers_object, json_existed_dummy).
     // Last bool is unused here — kept symmetric with the read_settings path

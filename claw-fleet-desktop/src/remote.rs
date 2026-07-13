@@ -356,6 +356,19 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json("/spawn_session", &req)
     }
 
+    fn chat_workspace(&self) -> Result<String, String> {
+        // The path lives in the probe host's home, so it must be resolved (and
+        // created) there — never guessed from the desktop's own home.
+        #[derive(serde::Deserialize)]
+        struct Resp {
+            path: String,
+        }
+        self.probe
+            .get::<Resp>("/chat_workspace")
+            .map(|r| r.path)
+            .map_err(|e| format!("probe /chat_workspace failed: {e}"))
+    }
+
     fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
         self.probe
             .get::<claw_fleet_core::auto_resume::AutoResumeConfig>("/auto_resume_config")

@@ -586,6 +586,11 @@ pub(crate) fn encode_workspace_path(path: &str) -> String {
 /// Human-facing name for a workspace path. Shared with the memory module so
 /// both derive worktree names identically.
 pub(crate) fn workspace_name(path: &str) -> String {
+    // The pure-chat workspace is a Fleet-owned directory, not a project — its
+    // `chat` basename would read as a random folder in the session list.
+    if crate::chat_workspace::is_chat_workspace(path) {
+        return crate::chat_workspace::CHAT_WORKSPACE_NAME.to_string();
+    }
     let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
     // Fleet develops plans inside `<repo-root>/.worktrees/<task-id>` (see the
     // worktree workflow). Such a checkout belongs to the repo, so name it after
@@ -4925,6 +4930,22 @@ mod tests {
     #[test]
     fn workspace_name_basic() {
         assert_eq!(workspace_name("/Users/foo/my-project"), "my-project");
+    }
+
+    #[test]
+    fn workspace_name_chat_workspace_is_renamed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _g = crate::session::fleet_home_lock();
+        let prev = std::env::var_os("FLEET_HOME");
+        unsafe { std::env::set_var("FLEET_HOME", tmp.path()) };
+        let chat = tmp.path().join(".fleet/chat");
+        assert_eq!(workspace_name(&chat.to_string_lossy()), "Chat");
+        // A sibling directory keeps its basename.
+        assert_eq!(workspace_name(&tmp.path().join(".fleet/wiki").to_string_lossy()), "wiki");
+        match prev {
+            Some(v) => unsafe { std::env::set_var("FLEET_HOME", v) },
+            None => unsafe { std::env::remove_var("FLEET_HOME") },
+        }
     }
 
     #[test]

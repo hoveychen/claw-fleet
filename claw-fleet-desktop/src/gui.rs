@@ -739,6 +739,14 @@ fn spawn_new_claude_session(
         .spawn_new_session(workspace_path, prompt, model, effort, permission_mode)
 }
 
+/// Absolute path of the pure-chat workspace, created on demand. The launcher
+/// pins it as a fixed entry — it has no prior sessions to be discovered from,
+/// and under a remote connection it resolves against the probe host's home.
+#[tauri::command]
+fn chat_workspace(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    state.backend.read().unwrap().chat_workspace()
+}
+
 #[tauri::command]
 fn get_auto_resume_config(
     state: tauri::State<'_, AppState>,
@@ -3809,6 +3817,7 @@ pub fn run() {
             kill_workspace_sessions,
             resume_rate_limited_session,
             spawn_new_claude_session,
+            chat_workspace,
             get_auto_resume_config,
             set_auto_resume_config,
             set_session_mark,

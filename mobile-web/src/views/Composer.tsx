@@ -268,7 +268,20 @@ const NEW_SESSION_DEFAULT = {
 };
 
 export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) {
+  // 纯聊天 workspace：不绑定项目，路径在桌面主机的 home 下，手机端推导不出来，
+  // 所以向 relay 要。它没有「最近会话」可被发现，必须显式钉在选项首位。
+  const [chatPath, setChatPath] = useState<string | null>(null);
+  useEffect(() => {
+    if (!client) return;
+    client
+      .request<{ path: string }>("chat_workspace")
+      .then((r) => setChatPath(r.path))
+      .catch(() => setChatPath(null));
+  }, [client]);
+
   const recents = [...new Map(sessions.map((s) => [s.workspacePath, s.workspaceName])).entries()]
+    // 聊过之后它也会出现在 recents 里——剔除，避免同一项列两次。
+    .filter(([path]) => path !== chatPath)
     .sort((a, b) => a[1].localeCompare(b[1]));
   // 供超时后的宽限期确认读取最新快照(prop 每次快照推送都会更新)。
   const sessionsRef = useRef(sessions);
@@ -285,10 +298,11 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
   // 持久化的 workspace 可能已失效（那个 workspace 不在最近列表里了），
   // 落不到有效选项时退回列表首项，避免 <select> 显示空白。
   const workspacePaths = new Set(recents.map((r) => r[0]));
+  if (chatPath) workspacePaths.add(chatPath);
   const workspace =
     draft.workspace === "__custom__" || workspacePaths.has(draft.workspace)
       ? draft.workspace
-      : (recents[0]?.[0] ?? "");
+      : (recents[0]?.[0] ?? chatPath ?? "");
 
   const effectiveWorkspace = workspace === "__custom__" ? customWorkspace.trim() : workspace;
   const canSubmit = Boolean(client && effectiveWorkspace && prompt.trim() && !busy && !uploading);
@@ -342,6 +356,9 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           value={workspace}
           onChange={(e) => patch({ workspace: e.target.value })}
         >
+          {chatPath && (
+            <option value={chatPath}>{t("💬 纯聊天 — 不绑定任何项目目录")}</option>
+          )}
           {recents.map(([path, name]) => (
             <option key={path} value={path}>
               {name} — {path}

@@ -1404,6 +1404,28 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            // Absolute path of this host's pure-chat workspace, created on
+            // demand. The remote desktop pins it in its launcher but cannot
+            // derive it — the path is under *this* host's home.
+            "/chat_workspace" if request.method() == &tiny_http::Method::Get => {
+                match crate::chat_workspace::ensure_chat_workspace() {
+                    Ok(path) => {
+                        let body = serde_json::json!({"path": path}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({"error": e}).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(500)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             // Spawn a brand-new headless Claude Code session (sessions page's
             // "new session" button, remote backend). Detached `claude -p`;
             // the session appears via the scanner once its JSONL exists.
