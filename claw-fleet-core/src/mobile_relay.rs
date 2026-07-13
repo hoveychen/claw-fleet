@@ -1128,6 +1128,31 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         "account_usage" => std::thread::spawn(account_usage_payload)
             .join()
             .map_err(|_| "account/usage fetch panicked".to_string()),
+        // Occupancy time series behind the mobile page's 24h chart. Pure disk
+        // read of the snapshots the background sampler persists — no network, so
+        // it stays on this thread (unlike `account_usage` above). Values are the
+        // 0–1 fraction; the window defaults to the last 24h.
+        "usage_history" => {
+            let now_ms = chrono::Utc::now().timestamp_millis();
+            let from_ms = params
+                .get("fromMs")
+                .and_then(Value::as_i64)
+                .unwrap_or(now_ms - 24 * 3_600_000);
+            let to_ms = params.get("toMs").and_then(Value::as_i64).unwrap_or(now_ms);
+            let raw = crate::account::load_usage_history(from_ms, to_ms);
+            let points: Vec<Value> = downsample_history(&raw, HISTORY_BUCKET_MS)
+                .iter()
+                .map(|p| {
+                    json!({
+                        "ts": p.ts,
+                        "fiveHour": p.five_hour,
+                        "sevenDay": p.seven_day,
+                        "sevenDaySonnet": p.seven_day_sonnet,
+                    })
+                })
+                .collect();
+            Ok(Value::Array(points))
+        }
         // Main-session invocations plus subagent sidecars, sorted by timestamp
         // (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
         "skill_history" => {
@@ -1412,6 +1437,33 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
 }
 
 // ── Account & usage (mobile 「账号与用量」 page) ─────────────────────────────────
+
+/// Bucket width for the mobile occupancy chart. Every usage fetch appends a
+/// snapshot, so the raw series runs at a ~10s median cadence — a 24h window is
+/// ~8k points (measured on Boss's machine: 7776), which is ~700KB of JSON over
+/// the relay and an SVG path far finer than the phone has pixels. 5-min buckets
+/// cap a 24h window at 288 points.
+const HISTORY_BUCKET_MS: i64 = 5 * 60 * 1000;
+
+/// Keep the last sample of each `bucket_ms`-wide bucket. Input is ascending by
+/// `ts` (`load_usage_history` sorts); output stays ascending. "Last, not
+/// average" on purpose: the chart shows occupancy at a point in time, and a
+/// bucket's final reading is the one that actually held at that moment.
+fn downsample_history(
+    points: &[crate::account::UsageHistoryPoint],
+    bucket_ms: i64,
+) -> Vec<crate::account::UsageHistoryPoint> {
+    let bucket_ms = bucket_ms.max(1);
+    let mut out: Vec<crate::account::UsageHistoryPoint> = Vec::new();
+    for p in points {
+        let bucket = p.ts.div_euclid(bucket_ms);
+        match out.last_mut() {
+            Some(last) if last.ts.div_euclid(bucket_ms) == bucket => *last = p.clone(),
+            _ => out.push(p.clone()),
+        }
+    }
+    out
+}
 
 /// Flatten `AccountInfo` into the camelCase shape the mobile page consumes:
 /// profile fields plus one bar per rate-limit window. `utilization` and
@@ -2981,6 +3033,68 @@ mod tests {
         assert_eq!(bars[0]["resetsAt"], "2026-07-13T10:00:00Z");
         assert_eq!(bars[1]["label"], "7d Sonnet");
         assert!(bars[1]["prevUtilization"].is_null(), "no previous period → null");
+    }
+
+    /// The raw series runs at a ~10s cadence; the phone gets one point per
+    /// bucket — the last reading in it — and an empty series stays empty.
+    #[test]
+    fn downsample_history_keeps_last_sample_per_bucket() {
+        use crate::account::UsageHistoryPoint;
+        let p = |ts: i64, v: f64| UsageHistoryPoint {
+            ts,
+            five_hour: Some(v),
+            seven_day: None,
+            seven_day_sonnet: None,
+        };
+        let bucket = 1_000;
+        let raw = vec![
+            p(0, 0.1),
+            p(400, 0.2),
+            p(999, 0.3), // same bucket as the two above → only this one survives
+            p(1_000, 0.4),
+            p(1_500, 0.5), // bucket 1 → 0.5 survives
+            p(7_200, 0.9), // a gap of empty buckets must not invent points
+        ];
+
+        let got = downsample_history(&raw, bucket);
+        let pairs: Vec<(i64, Option<f64>)> = got.iter().map(|q| (q.ts, q.five_hour)).collect();
+        assert_eq!(
+            pairs,
+            vec![(999, Some(0.3)), (1_500, Some(0.5)), (7_200, Some(0.9))],
+        );
+
+        assert!(downsample_history(&[], bucket).is_empty());
+    }
+
+    /// A real-shaped 24h window (~10s cadence, 8k points) must come out small
+    /// enough to ship to a phone: at most one point per 5-minute bucket.
+    #[test]
+    fn downsample_history_caps_a_24h_window() {
+        use crate::account::UsageHistoryPoint;
+        let raw: Vec<UsageHistoryPoint> = (0..8_640)
+            .map(|i| UsageHistoryPoint {
+                ts: i * 10_000, // every 10s over 24h
+                five_hour: Some(0.5),
+                seven_day: None,
+                seven_day_sonnet: None,
+            })
+            .collect();
+
+        let got = downsample_history(&raw, HISTORY_BUCKET_MS);
+        assert_eq!(got.len(), 288, "24h / 5min buckets");
+    }
+
+    /// Boss's real snapshot file (~8k points in 24h) must come back small enough
+    /// to ship: disk-only, so it's fast — but it reads the real home dir, hence
+    /// #[ignore]. Run with `-- --ignored`.
+    #[test]
+    #[ignore = "reads the real ~/.fleet history file"]
+    fn usage_history_reply_stays_small_on_real_data() {
+        let v = serve_request("usage_history", &Value::Null).expect("usage_history returns rows");
+        let rows = v.as_array().expect("an array");
+        let bytes = serde_json::to_string(&v).unwrap().len();
+        eprintln!("usage_history: {} rows, {} bytes", rows.len(), bytes);
+        assert!(rows.len() <= 289, "24h must fit in 5-min buckets, got {}", rows.len());
     }
 
     /// The real `account_usage` path, driven the way the ws loop drives it:

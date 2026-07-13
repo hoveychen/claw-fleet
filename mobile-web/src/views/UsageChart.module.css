@@ -1,0 +1,82 @@
+.wrap {
+  padding: 12px 14px 10px;
+}
+
+.svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.grid {
+  stroke: var(--color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+/* 时间刻度用绝对定位贴在图下方：SVG 里的 <text> 会跟着 viewBox 一起缩放，
+   在窄屏上字号会走形。 */
+.axis {
+  position: relative;
+  height: 14px;
+  margin-top: 4px;
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  font-size: 10px;
+  color: var(--color-text-dim);
+  white-space: nowrap;
+}
+
+.tick:first-child {
+  transform: none;
+}
+
+.tick:last-child {
+  transform: translateX(-100%);
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.legendItem {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legendItem i {
+  width: 10px;
+  height: 3px;
+  border-radius: 2px;
+}
+
+.scale {
+  margin-left: auto;
+  color: var(--color-text-dim);
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  padding: 14px;
+}

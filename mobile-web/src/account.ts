@@ -3,11 +3,20 @@
 // 为 header 轮询 `today_usage`，页面直接复用那份数据，不重复扫会话。
 
 import type { RelayClient } from "./relay";
-import type { AccountUsage } from "./types";
+import type { AccountUsage, UsageHistoryPoint } from "./types";
 
 /** Claude 账号档案 + 各源限流用量。桌面端会真去打 Anthropic / cursor / codex 的接口。 */
 export function fetchAccountUsage(client: RelayClient): Promise<AccountUsage> {
   return client.request<AccountUsage>("account_usage", undefined, ACCOUNT_TIMEOUT_MS);
+}
+
+/** 占用率采样序列（默认近 24h）。桌面端只读它后台采样器落盘的快照，不打网络。 */
+export function fetchUsageHistory(
+  client: RelayClient,
+  fromMs: number,
+  toMs: number,
+): Promise<UsageHistoryPoint[]> {
+  return client.request<UsageHistoryPoint[]>("usage_history", { fromMs, toMs });
 }
 
 /** 桌面端要打网络（甚至读钥匙串），默认超时不够用。 */
