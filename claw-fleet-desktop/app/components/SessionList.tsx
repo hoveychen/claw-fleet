@@ -21,7 +21,7 @@ import { FilesView } from "./FilesView";
 import { PluginsView } from "./PluginsView";
 import { MobileView } from "./MobileView";
 import { SessionCard } from "./SessionCard";
-import { SessionToolbar } from "./SessionToolbar";
+import { SessionsPage } from "./SessionsBanner";
 import { HistoryView } from "./HistoryView";
 import styles from "./SessionList.module.css";
 import { LiveStats } from "./LiveStats";
@@ -406,18 +406,16 @@ export function SessionList() {
 
       {/* Main content area */}
       {viewMode === "list" ? (
-        <div className={styles.main_area}>
-          <SessionToolbar
-            filter={filter}
-            onFilterChange={setFilter}
-            activeCount={active.length}
-            totalCount={sessions.length}
-            showAll={showAll}
-            onToggleShowAll={() => setShowAll((v) => !v)}
-            ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
-            searching={searching}
-          />
-
+        <SessionsPage
+          filter={filter}
+          onFilterChange={setFilter}
+          activeCount={active.length}
+          totalCount={sessions.length}
+          showAll={showAll}
+          onToggleShowAll={() => setShowAll((v) => !v)}
+          ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
+          searching={searching}
+        >
           <div className={styles.list}>
             {showAll ? (
               <>
@@ -446,7 +444,7 @@ export function SessionList() {
               </>
             )}
           </div>
-        </div>
+        </SessionsPage>
       ) : viewMode === "gallery" ? (
         <GalleryView />
       ) : viewMode === "history" ? (

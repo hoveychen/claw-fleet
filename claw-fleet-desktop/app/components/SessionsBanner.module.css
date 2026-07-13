@@ -1,70 +1,17 @@
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 20px 12px;
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-bg);
-  flex-shrink: 0;
-}
-
-.search_wrap {
-  flex: 1;
-  position: relative;
-  display: flex;
-  align-items: center;
-}
-
-.search {
-  width: 100%;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border);
-  background: var(--color-bg-field);
-  color: var(--color-text);
-  font-size: 12px;
-  outline: none;
-}
-
-.search:focus {
-  border-color: var(--color-accent);
-}
-
-.spinner {
-  position: absolute;
-  right: 8px;
-  width: 12px;
-  height: 12px;
-  border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent);
-  border-radius: 50%;
-  animation: spin 0.6s linear infinite;
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-.total_badge {
-  font-size: 11px;
-  background: var(--color-bg-secondary);
-  color: var(--color-text-dim);
-  padding: 2px 7px;
-  border-radius: var(--radius-md);
-  font-variant-numeric: tabular-nums;
-  flex-shrink: 0;
-}
+/* ── Sessions banner ──────────────────────────────────────────────────────────
+   Only what is specific to the sessions page's banner: the active-count readout
+   and the action cluster. The page frame, the search box and the title/count are
+   PageShell's — this file used to carry its own copy of all three. */
 
 .count {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--color-text-dim);
   white-space: nowrap;
 }
 
 .fts_count {
   color: var(--color-accent);
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
 }
 
 .toggle_btn {
@@ -73,7 +20,7 @@
   border: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
   color: var(--color-text-dim);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.1s, color 0.1s;
@@ -109,15 +56,11 @@
   color: var(--color-text);
 }
 
-.icon_btn_active {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-  border-color: var(--color-accent);
-}
-
+.icon_btn_active,
 .icon_btn_active:hover {
   background: var(--color-accent);
   color: var(--color-on-accent);
+  border-color: var(--color-accent);
 }
 
 .view_toggle {
@@ -134,7 +77,7 @@
   border: none;
   background: transparent;
   color: var(--color-text-dim);
-  font-size: 13px;
+  font-size: var(--font-size-md);
   line-height: 1;
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
@@ -149,11 +92,7 @@
   color: var(--color-text);
 }
 
-.view_toggle_btn_active {
-  background: var(--color-accent);
-  color: var(--color-on-accent);
-}
-
+.view_toggle_btn_active,
 .view_toggle_btn_active:hover {
   background: var(--color-accent);
   color: var(--color-on-accent);

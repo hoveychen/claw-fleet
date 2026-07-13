@@ -5,7 +5,7 @@ import { useSessionSearch } from "../hooks/useSessionSearch";
 import type { SessionInfo, SessionStatus } from "../types";
 import { isWorkflowAgent } from "../workflowAgent";
 import { SessionCard, StatusIcon, SubagentTypeIcon, formatModel } from "./SessionCard";
-import { SessionToolbar } from "./SessionToolbar";
+import { SessionsPage } from "./SessionsBanner";
 import { SessionEmptyState } from "./EmptyState";
 import styles from "./GalleryView.module.css";
 import sessionStyles from "./SessionCard.module.css";
@@ -226,19 +226,16 @@ export function GalleryView() {
     : [];
 
   return (
-    <div className={styles.root}>
-      <SessionToolbar
-        filter={filter}
-        onFilterChange={setFilter}
-        activeCount={activeSessions.filter((s) => !s.isSubagent).length}
-        totalCount={sessions.length}
-        showAll={showAll}
-        onToggleShowAll={() => setShowAll((v) => !v)}
-        ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
-        searching={searching}
-      />
-
-      {/* Grid */}
+    <SessionsPage
+      filter={filter}
+      onFilterChange={setFilter}
+      activeCount={activeSessions.filter((s) => !s.isSubagent).length}
+      totalCount={sessions.length}
+      showAll={showAll}
+      onToggleShowAll={() => setShowAll((v) => !v)}
+      ftsMatchCount={filter.trim().length >= 2 ? ftsMatchPaths.size : undefined}
+      searching={searching}
+    >
       <div className={styles.grid} onClick={handleGridClick}>
         {showAll ? (
           <>
@@ -273,7 +270,6 @@ export function GalleryView() {
           </>
         )}
       </div>
-
-    </div>
+    </SessionsPage>
   );
 }
