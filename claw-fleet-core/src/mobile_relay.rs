@@ -2454,10 +2454,14 @@ mod tests {
 
     #[test]
     fn sessions_frame_gzip_roundtrip_above_threshold() {
-        // A snapshot large enough to cross SESSIONS_COMPRESS_MIN_BYTES.
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        // A snapshot large enough to cross SESSIONS_COMPRESS_MIN_BYTES. Sessions
+        // must be Fleet-owned (`entrypoint`) or `slim_sessions_snapshot` filters
+        // them out before they reach the size we're testing compression on.
         let many: Vec<Value> = (0..200)
             .map(|i| json!({"id": format!("session-{i}"), "isSubagent": false,
-                            "lastActivityMs": i, "workspaceName": "some-workspace-name"}))
+                            "lastActivityMs": i, "workspaceName": "some-workspace-name",
+                            "entrypoint": NEW_SESSION_ENTRYPOINT}))
             .collect();
         let slim = slim_sessions_snapshot(&Value::Array(many));
         let raw = slim.to_string();
