@@ -747,6 +747,21 @@ fn chat_workspace(state: tauri::State<'_, AppState>) -> Result<String, String> {
     state.backend.read().unwrap().chat_workspace()
 }
 
+/// One level of directories under `path` on the *backend host* (`None` = its
+/// home), for the launcher's workspace picker.
+///
+/// Goes through the backend rather than Tauri's native dialog plugin because the
+/// dialog can only ever browse the machine the desktop runs on — under a remote
+/// connection that is the wrong host, which is why the launcher used to just hide
+/// its Browse button in that mode.
+#[tauri::command]
+fn browse_dir(
+    state: tauri::State<'_, AppState>,
+    path: Option<String>,
+) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+    state.backend.read().unwrap().browse_dir(path)
+}
+
 #[tauri::command]
 fn get_auto_resume_config(
     state: tauri::State<'_, AppState>,
@@ -3818,6 +3833,7 @@ pub fn run() {
             resume_rate_limited_session,
             spawn_new_claude_session,
             chat_workspace,
+            browse_dir,
             get_auto_resume_config,
             set_auto_resume_config,
             set_session_mark,

@@ -1738,6 +1738,13 @@ impl Backend for LocalBackend {
         claw_fleet_core::chat_workspace::ensure_chat_workspace()
     }
 
+    fn browse_dir(
+        &self,
+        path: Option<String>,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        claw_fleet_core::workspace_browse::browse_dir(path.as_deref(), &self.known_workspaces())
+    }
+
     fn spawn_new_session(
         &self,
         workspace_path: String,

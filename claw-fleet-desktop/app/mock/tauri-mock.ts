@@ -11,6 +11,7 @@ import type { SessionInfo } from "../types";
 import {
   MOCK_SESSIONS,
   MOCK_CHAT_WORKSPACE,
+  mockBrowseDir,
   MOCK_ACCOUNT_INFO,
   MOCK_CURSOR_USAGE,
   MOCK_CODEX_USAGE,
@@ -141,6 +142,11 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     // new-session form's pinned chat entry appear in mock mode.
     case "chat_workspace":
       return MOCK_CHAT_WORKSPACE;
+
+    // Launcher's remote directory picker. Under `?mock&remote` this stands in
+    // for the probe host's filesystem.
+    case "browse_dir":
+      return mockBrowseDir((args as { path?: string | null })?.path);
 
     case "list_skill_files":
       return MOCK_SKILL_FILES;

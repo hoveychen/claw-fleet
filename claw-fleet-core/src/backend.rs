@@ -333,6 +333,21 @@ pub trait Backend: Send + Sync {
     /// backend, since under a remote connection it lives in the *probe host's*
     /// home directory, not the desktop's.
     fn chat_workspace(&self) -> Result<String, String>;
+    /// List the directories one level under `path` (`None` = the backend host's
+    /// home), so the launcher can pick a workspace that has never had a session.
+    ///
+    /// Must go through the backend for the same reason `chat_workspace` does:
+    /// under a remote connection the directory the user is choosing lives on the
+    /// *probe host*, not on this desktop's disk. That is why the launcher's
+    /// native OS dialog cannot serve this case — it can only ever browse the
+    /// machine the desktop runs on.
+    ///
+    /// Unlike the explorer methods above, this is deliberately NOT restricted to
+    /// known session workspaces (see `workspace_browse` for its own boundary).
+    fn browse_dir(
+        &self,
+        path: Option<String>,
+    ) -> Result<crate::workspace_browse::BrowseDirResponse, String>;
     /// Read the auto-resume scheduler config.
     fn get_auto_resume_config(&self) -> crate::auto_resume::AutoResumeConfig;
     /// Persist the auto-resume scheduler config.

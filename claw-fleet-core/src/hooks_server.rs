@@ -1426,6 +1426,42 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
+            // Directory picker for the remote desktop's launcher. Same reason
+            // /chat_workspace exists: the directory the user is choosing lives on
+            // *this* host, and the desktop's native OS dialog can only browse its
+            // own disk. `path` absent = this host's home.
+            //
+            // Not gated on known session workspaces — picking a directory that has
+            // never had a session is the entire point. `workspace_browse` carries
+            // its own boundary (home + off-home known workspaces, canonical).
+            "/browse_dir" if request.method() == &tiny_http::Method::Get => {
+                let path = query
+                    .get("path")
+                    .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
+                    .filter(|s| !s.is_empty());
+                let known: Vec<String> = sources
+                    .iter()
+                    .flat_map(|s| s.scan_sessions())
+                    .map(|s| s.workspace_path)
+                    .collect();
+                match crate::workspace_browse::browse_dir(path.as_deref(), &known) {
+                    Ok(resp) => {
+                        let body = serde_json::to_string(&resp).unwrap_or_default();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body).with_header(json_header),
+                        );
+                    }
+                    Err(e) => {
+                        let body = serde_json::json!({ "error": e }).to_string();
+                        let _ = request.respond(
+                            tiny_http::Response::from_string(body)
+                                .with_status_code(400)
+                                .with_header(json_header),
+                        );
+                    }
+                }
+            }
+
             // Spawn a brand-new headless Claude Code session (sessions page's
             // "new session" button, remote backend). Detached `claude -p`;
             // the session appears via the scanner once its JSONL exists.
