@@ -140,7 +140,7 @@
 .menu_header_input {
   width: 100%;
   box-sizing: border-box;
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 6px 8px;
