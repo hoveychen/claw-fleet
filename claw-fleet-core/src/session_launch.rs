@@ -275,6 +275,14 @@ pub fn spawn_claude_detached_with_envs(
         );
     }
     cmd.env("PATH", path);
+    // Fleet sessions are headless `claude -p`: after the final result the CLI
+    // waits for still-running background subagents/workflows, but by default
+    // only up to CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS (10 min, CC v2.1.182+) —
+    // past the ceiling they are killed mid-flight and their report is lost.
+    // Lift the ceiling so long-running background subagents always complete
+    // (bg_guard stopped blocking on them for the same reason; see its module
+    // docs for the isolation experiment). `extra_envs` below can still override.
+    cmd.env("CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS", "0");
     for (k, v) in extra_envs {
         cmd.env(k, v);
     }
