@@ -8,6 +8,10 @@
   border-left: 3px solid var(--color-accent, #60a5fa);
   overflow: hidden;
   font-size: 12px;
+  /* Never widen the container that holds us — the user bubble sizes to
+     fit-content and would otherwise inherit this card's nowrap header width. */
+  max-width: 100%;
+  min-width: 0;
 }
 
 .header {
