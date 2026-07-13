@@ -10,6 +10,7 @@ import { emit } from "@tauri-apps/api/event";
 import type { SessionInfo } from "../types";
 import {
   MOCK_SESSIONS,
+  MOCK_CHAT_WORKSPACE,
   MOCK_ACCOUNT_INFO,
   MOCK_CURSOR_USAGE,
   MOCK_CODEX_USAGE,
@@ -97,6 +98,12 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
 
     case "list_skills":
       return MOCK_SKILLS;
+    // The pure-chat workspace. Returning it (rather than falling through to
+    // `default: return null`) is what makes the launchpad's chat filter and the
+    // new-session form's pinned chat entry appear in mock mode.
+    case "chat_workspace":
+      return MOCK_CHAT_WORKSPACE;
+
     case "list_skill_files":
       return MOCK_SKILL_FILES;
     case "get_skill_content":

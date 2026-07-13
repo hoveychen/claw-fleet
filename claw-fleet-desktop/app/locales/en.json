@@ -1733,6 +1733,8 @@
     "resume_permission_default": "Keep session settings",
     "filter_workspace": "Filter by workspace",
     "all_workspaces": "All workspaces",
+    "chat_only": "💬 Chat only",
+    "chat_hidden": "🚫 Hide chat",
     "only_active": "Active only",
     "filter_active_tip": "Show only sessions still running or waiting for input",
     "mark_all_read": "Mark all read",
