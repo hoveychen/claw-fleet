@@ -7,6 +7,7 @@
 // scenario — the promo pipeline records the phone against these fixtures, so
 // they must read like the same fleet the desktop footage shows.
 import type {
+  BrowseDirResponse,
   ElicitationRequest,
   FleetAskRequest,
   GuardRequest,
@@ -284,3 +285,60 @@ export const MOCK_WIKI_DOCS: WikiDoc[] = [
     updatedMs: NOW - 2 * HOUR,
   } as WikiDoc,
 ];
+
+/** A slice of Boss's home directory, for the new-session directory picker.
+ *  Keyed by the canonical path the desktop would return; mirrors what
+ *  `workspace_browse::browse_dir` serves (directories only, dotfiles filtered,
+ *  git repos flagged). The `?mock` tree is deliberately shallow — enough to
+ *  exercise descend / ascend / pick, not a whole filesystem. */
+export const MOCK_HOME = "/Users/demo";
+export const MOCK_DIR_TREE: Record<string, BrowseDirResponse> = {
+  [MOCK_HOME]: {
+    path: MOCK_HOME,
+    parent: null, // home is a root — no ".." row
+    entries: [
+      { name: "Documents", path: `${MOCK_HOME}/Documents`, isGitRepo: false },
+      { name: "Downloads", path: `${MOCK_HOME}/Downloads`, isGitRepo: false },
+      { name: "workspace", path: `${MOCK_HOME}/workspace`, isGitRepo: false },
+    ],
+    truncated: false,
+  },
+  [`${MOCK_HOME}/workspace`]: {
+    path: `${MOCK_HOME}/workspace`,
+    parent: MOCK_HOME,
+    entries: [
+      { name: "api-server", path: `${MOCK_HOME}/workspace/api-server`, isGitRepo: true },
+      { name: "claude-fleet", path: `${MOCK_HOME}/workspace/claude-fleet`, isGitRepo: true },
+      { name: "design-system", path: `${MOCK_HOME}/workspace/design-system`, isGitRepo: true },
+      { name: "scratch", path: `${MOCK_HOME}/workspace/scratch`, isGitRepo: false },
+    ],
+    truncated: false,
+  },
+  [`${MOCK_HOME}/workspace/api-server`]: {
+    path: `${MOCK_HOME}/workspace/api-server`,
+    parent: `${MOCK_HOME}/workspace`,
+    entries: [
+      { name: "migrations", path: `${MOCK_HOME}/workspace/api-server/migrations`, isGitRepo: false },
+      { name: "src", path: `${MOCK_HOME}/workspace/api-server/src`, isGitRepo: false },
+    ],
+    truncated: false,
+  },
+};
+
+/** Mirrors the desktop's `browse_dir`.
+ *
+ *  A path *inside* the tree that has no explicit fixture is a real, empty
+ *  directory — on the desktop every directory the picker offers can be entered,
+ *  so a fixture-less leaf must render as "no subdirectories", not as an error.
+ *  Only a path outside the tree fails, which is what the real `canonicalize`
+ *  does for a nonexistent path — that's the picker's error row. */
+export function mockBrowseDir(path?: string): BrowseDirResponse {
+  const p = path?.trim() || MOCK_HOME;
+  const hit = MOCK_DIR_TREE[p];
+  if (hit) return hit;
+  const parent = p.slice(0, p.lastIndexOf("/"));
+  if (!MOCK_DIR_TREE[parent]?.entries.some((e) => e.path === p)) {
+    throw new Error(`${p}: No such file or directory`);
+  }
+  return { path: p, parent, entries: [], truncated: false };
+}

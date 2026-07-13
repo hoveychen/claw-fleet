@@ -25,6 +25,35 @@ export interface DeviceInfo {
   supportsBinary: boolean;
 }
 
+/** A failed `request()`, tagged with *where* the failure came from.
+ *
+ *  `remote: true` — the desktop received the request, judged it, and said no
+ *  (an `ok:false` reply). The message is the desktop's own text. Retrying or
+ *  waiting changes nothing; show it to the user now.
+ *
+ *  `remote: false` — the request never got a verdict: it timed out, the socket
+ *  was down, or the reply frame was dropped (the relay forwards best-effort, no
+ *  queue, no retry — a phone that switched networks mid-flight never sees it).
+ *  The desktop may well have done the work, so the caller is entitled to
+ *  confirm out-of-band before declaring failure (see `waitForSessionId`). */
+export class RelayRequestError extends Error {
+  constructor(
+    message: string,
+    readonly remote: boolean,
+  ) {
+    super(message);
+    this.name = "RelayRequestError";
+  }
+}
+
+/** True when the desktop explicitly rejected the request — as opposed to the
+ *  reply never arriving. Callers that have a grace-period fallback must gate it
+ *  on this being false, or they will sit out the whole window on an error the
+ *  desktop already handed them. */
+export function isDesktopRejection(e: unknown): e is RelayRequestError {
+  return e instanceof RelayRequestError && e.remote;
+}
+
 /** Native gzip inflation support (Safari 16.4+, all evergreen Chrome/Firefox).
  *  Announced to the desktop in `client_hello` so it can gate compression. */
 export function gzipSupported(): boolean {
@@ -280,7 +309,8 @@ export class RelayClient {
         if (payload.ok) {
           entry.resolve(payload.data);
         } else {
-          entry.reject(new Error(String(payload.error ?? t("请求失败"))));
+          // A verdict from the desktop — not a lost frame. See RelayRequestError.
+          entry.reject(new RelayRequestError(String(payload.error ?? t("请求失败")), true));
         }
         break;
       }
@@ -311,7 +341,7 @@ export class RelayClient {
     return new Promise<T>((resolve, reject) => {
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
-        reject(new Error(t("请求超时（桌面端可能离线）")));
+        reject(new RelayRequestError(t("请求超时（桌面端可能离线）"), false));
       }, timeoutMs ?? REQUEST_TIMEOUT_MS);
       this.pending.set(reqId, {
         resolve: resolve as (v: unknown) => void,
@@ -321,7 +351,7 @@ export class RelayClient {
       if (!this.sendPayload({ event: "req", req_id: reqId, method, params: params ?? {} })) {
         this.pending.delete(reqId);
         window.clearTimeout(timer);
-        reject(new Error(t("尚未连接 relay")));
+        reject(new RelayRequestError(t("尚未连接 relay"), false));
       }
     });
   }
@@ -334,7 +364,9 @@ export class RelayClient {
   private failPending(message: string) {
     for (const [, entry] of this.pending) {
       window.clearTimeout(entry.timer);
-      entry.reject(new Error(message));
+      // The socket dropped while these were in flight: no verdict, so callers
+      // with an out-of-band confirmation path may still use it.
+      entry.reject(new RelayRequestError(message, false));
     }
     this.pending.clear();
   }

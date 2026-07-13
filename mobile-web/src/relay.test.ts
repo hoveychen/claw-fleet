@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { RelayClient } from "./relay";
+import { RelayClient, RelayRequestError, isDesktopRejection } from "./relay";
 
 // relay.ts 依赖浏览器全局（window.setTimeout/WebSocket/location），node 环境没有，
 // 用最小 shim 注入，并用假 WebSocket 捕获发出的帧、手动投递收到的帧。
@@ -98,6 +98,77 @@ describe("RelayClient 跨设备 req_id 隔离", () => {
     // 让 microtask/timer 有机会跑，再断言 B 没被 A 的回复串号。
     await new Promise((r) => setTimeout(r, 20));
     expect(bSettled).toBe("PENDING");
+  });
+});
+
+// 一个请求可能因为两种完全不同的原因失败，调用方的正确反应也完全相反：
+//   - 桌面端明确回了 ok:false（"Workspace directory not found: ..."）——桌面收到了、
+//     判断了、拒绝了。重试/等待都没有意义，该立刻把错误摊给用户。
+//   - reply 帧丢了（切网/息屏/重连，relay 是 best-effort 不排队）——桌面很可能已经
+//     照做了，只是回执没回来。这时才该进宽限期盯快照。
+// 以前两者都是裸 Error，Composer 无法区分，于是把桌面的明确拒绝也拖进 20 秒宽限期，
+// 表现成"点了没反应，二十秒后才报错"。
+describe("RelayClient 失败来源可区分", () => {
+  const clients: RelayClient[] = [];
+
+  beforeEach(() => {
+    FakeWs.instances = [];
+    (globalThis as unknown as { window: unknown }).window = {
+      location: { origin: "http://localhost" },
+      setTimeout: (fn: () => void, ms?: number) => setTimeout(fn, ms) as unknown as number,
+      clearTimeout: (id: number) => clearTimeout(id),
+      setInterval: (fn: () => void, ms?: number) => setInterval(fn, ms) as unknown as number,
+      clearInterval: (id: number) => clearInterval(id),
+    };
+    (globalThis as unknown as { WebSocket: unknown }).WebSocket = FakeWs;
+  });
+
+  afterEach(() => {
+    for (const c of clients.splice(0)) c.close();
+  });
+
+  it("桌面端 ok:false 的 reply → remote 错误，携带桌面原文", async () => {
+    const { client, ws } = connected();
+    clients.push(client);
+    const p = client.request("spawn_session", { workspacePath: "~/nope" });
+    ws.deliver({
+      type: "msg",
+      payload: {
+        event: "reply",
+        req_id: sentReqId(ws),
+        ok: false,
+        error: "Workspace directory not found: /Users/x/nope",
+      },
+    });
+    const err = await p.catch((e) => e);
+    expect(err).toBeInstanceOf(RelayRequestError);
+    expect((err as RelayRequestError).remote).toBe(true);
+    expect((err as Error).message).toContain("Workspace directory not found");
+    expect(isDesktopRejection(err)).toBe(true);
+  });
+
+  it("请求超时（帧可能丢了）→ 非 remote 错误，调用方仍可进宽限期", async () => {
+    const { client, ws } = connected();
+    clients.push(client);
+    const p = client.request("spawn_session", {}, 5); // 5ms 超时，不投递 reply
+    void ws;
+    const err = await p.catch((e) => e);
+    expect(err).toBeInstanceOf(RelayRequestError);
+    expect((err as RelayRequestError).remote).toBe(false);
+    expect(isDesktopRejection(err)).toBe(false);
+  });
+
+  it("未连接 → 非 remote 错误", async () => {
+    const client = new RelayClient("shared-secret-1234567890", {});
+    clients.push(client);
+    const err = await client.request("spawn_session", {}).catch((e) => e);
+    expect(isDesktopRejection(err)).toBe(false);
+  });
+
+  it("普通 Error / 非 Error 值不会被误判成桌面拒绝", () => {
+    expect(isDesktopRejection(new Error("boom"))).toBe(false);
+    expect(isDesktopRejection("boom")).toBe(false);
+    expect(isDesktopRejection(undefined)).toBe(false);
   });
 });
 

@@ -609,3 +609,19 @@ export interface UsageHistoryPoint {
   sevenDay: number | null;
   sevenDaySonnet: number | null;
 }
+
+/** `browse_dir` 回包里的一个子目录。镜像 claw-fleet-core/src/workspace_browse.rs。 */
+export interface BrowseEntry {
+  name: string;
+  path: string;
+  isGitRepo: boolean;
+}
+
+/** `browse_dir` 回包：某个目录下的一层子目录。桌面端只列目录、不列文件，
+ *  且把「能不能往上翻」的判断做在服务端——`parent` 为 null 就是到根了。 */
+export interface BrowseDirResponse {
+  path: string;
+  parent: string | null;
+  entries: BrowseEntry[];
+  truncated: boolean;
+}
