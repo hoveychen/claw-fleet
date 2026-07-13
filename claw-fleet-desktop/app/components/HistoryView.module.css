@@ -21,10 +21,11 @@
   border-right: 1px solid var(--color-border);
 }
 
-/* Floating-slab platforms: match the sidebar's card-style background so the
-   two columns read as one glass panel group. */
+/* Floating-slab platforms: match the sidebar's paper background so the task
+   二级菜单 reads consistently with the other views' list panes (which show
+   through to body's --color-bg) instead of as a stark white slab. */
 :global([data-platform]) .rail {
-  background: var(--color-bg-card);
+  background: var(--color-bg);
 }
 
 .header {
