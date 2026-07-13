@@ -561,6 +561,11 @@ fn spawn_new_session_impl(
         workspace_path,
         stderr_log.display()
     ));
+    // Write down what we launched it with. Reconstructing this from the transcript
+    // later is lossy (the CLI records a resolved id and drops `[1m]`-style
+    // suffixes), and Fleet has no reason to guess at a flag it chose itself —
+    // `resolve_session_model_spec` reads this back for handoff / parked / resume.
+    crate::launch_spec::record(&session_id, model, effort);
     let pid = spawn_claude_detached_with_envs(
         &claude,
         &args,
