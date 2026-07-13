@@ -1033,6 +1033,7 @@ dependencies = [
  "crc32fast",
  "ctrlc",
  "dirs 5.0.1",
+ "flate2",
  "futures",
  "git2",
  "lark-websocket-protobuf",
