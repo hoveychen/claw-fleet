@@ -375,6 +375,10 @@ fn spawn_resume_with_path(
     // Route native permission prompts to Fleet's Decision Panel instead of
     // headless auto-deny (no-op when the fleet MCP server isn't injected).
     args.extend(crate::session_launch::permission_prompt_tool_args());
+    // Keep a chat a chat on every turn after the first: without these, the
+    // resumed process would reload the global doctrine the initial spawn
+    // deliberately excluded (no-op outside the chat workspace).
+    args.extend(crate::chat_workspace::chat_launch_args(workspace_path));
     crate::session_launch::spawn_claude_detached_with_envs(
         claude_path,
         &args,
