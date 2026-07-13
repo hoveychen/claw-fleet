@@ -369,6 +369,22 @@ impl crate::backend::Backend for RemoteBackend {
             .map_err(|e| format!("probe /chat_workspace failed: {e}"))
     }
 
+    fn browse_dir(
+        &self,
+        path: Option<String>,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        // The directories being listed are the *probe host's*. An omitted `path`
+        // means "that host's home" — which only it can resolve, so send no
+        // `path` param rather than substituting the desktop's own home.
+        let endpoint = match path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
+            Some(p) => format!("/browse_dir?path={}", encode_path(p)),
+            None => "/browse_dir".to_string(),
+        };
+        self.probe
+            .get(&endpoint)
+            .map_err(|e| format!("probe /browse_dir failed: {e}"))
+    }
+
     fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
         self.probe
             .get::<claw_fleet_core::auto_resume::AutoResumeConfig>("/auto_resume_config")

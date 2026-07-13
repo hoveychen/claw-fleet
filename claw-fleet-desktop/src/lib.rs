@@ -168,6 +168,13 @@ impl Backend for NullBackend {
         Err("backend not ready".into())
     }
 
+    fn browse_dir(
+        &self,
+        _path: Option<String>,
+    ) -> Result<claw_fleet_core::workspace_browse::BrowseDirResponse, String> {
+        Err("backend not ready".into())
+    }
+
     fn spawn_new_session(
         &self,
         _: String,
