@@ -2,8 +2,10 @@ import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ContentBlock, ImageBlock } from "../../types";
 import { splitContextFiles } from "../../userAttachments";
+import type { PathLinkContext } from "../../markdown/pathLinks";
 import { AttachmentRow } from "./AttachmentRow";
 import { ImageThumb } from "./ImageThumb";
+import { parseTaskNotification, TaskNotification } from "./TaskNotification";
 import styles from "./UserContent.module.css";
 
 /**
@@ -44,6 +46,9 @@ interface Props {
   content: ContentBlock[] | string;
   /** Renders one text run; MessageList supplies search-term highlighting. */
   renderText: (text: string, key: number) => ReactNode;
+  /** Makes path-shaped inline-code clickable inside a task-notification's
+   *  markdown result. Context-free callers leave it out and paths stay inert. */
+  paths?: PathLinkContext;
 }
 
 /**
@@ -59,8 +64,10 @@ interface Props {
  * but no branch ever rendered it, so every screenshot pasted into a session
  * vanished from the transcript view.
  */
-export function UserContent({ content, renderText }: Props) {
+export function UserContent({ content, renderText, paths }: Props) {
   if (typeof content === "string") {
+    const notif = parseTaskNotification(content);
+    if (notif) return <TaskNotification data={notif} paths={paths} />;
     const cmd = parseSlashCommand(content);
     if (cmd) return <SlashCommand name={cmd.name} args={cmd.args} />;
     return <UserText text={content} index={0} renderText={renderText} />;
@@ -78,6 +85,11 @@ export function UserContent({ content, renderText }: Props) {
     if (block.type !== "text") return;
 
     const text = (block as { type: "text"; text: string }).text;
+    const notif = parseTaskNotification(text);
+    if (notif) {
+      parts.push(<TaskNotification key={i} data={notif} paths={paths} />);
+      return;
+    }
     const cmd = parseSlashCommand(text);
     if (cmd) {
       parts.push(<SlashCommand key={i} name={cmd.name} args={cmd.args} />);
