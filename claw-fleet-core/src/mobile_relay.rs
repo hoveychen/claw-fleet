@@ -1120,6 +1120,14 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             let usage = crate::today_usage::today_usage(&sessions);
             serde_json::to_value(usage).map_err(|e| e.to_string())
         }
+        // Account + rate-limit usage for the mobile 「账号与用量」 page: the Claude
+        // account/plan with its 5h/7d bars, plus a normalised bar set for every
+        // other available source. Runs on a plain thread rather than this ws
+        // blocking task because every fetch inside builds its own tokio runtime
+        // (`fetch_account_info_blocking` and friends) — see `account_usage_payload`.
+        "account_usage" => std::thread::spawn(account_usage_payload)
+            .join()
+            .map_err(|_| "account/usage fetch panicked".to_string()),
         // Main-session invocations plus subagent sidecars, sorted by timestamp
         // (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
         "skill_history" => {
@@ -1401,6 +1409,64 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         }
         other => Err(format!("unknown method: {other}")),
     }
+}
+
+// ── Account & usage (mobile 「账号与用量」 page) ─────────────────────────────────
+
+/// Flatten `AccountInfo` into the camelCase shape the mobile page consumes:
+/// profile fields plus one bar per rate-limit window. `utilization` and
+/// `prevUtilization` are the 0–1 fraction (`parse_usage` already divided the
+/// API's 0–100), same convention the desktop UsagePanel renders.
+fn claude_account_json(info: &crate::account::AccountInfo) -> Value {
+    let bar = |label: &str, s: &crate::account::UsageStats| {
+        json!({
+            "label": label,
+            "utilization": s.utilization,
+            "resetsAt": s.resets_at,
+            "prevUtilization": s.prev_utilization,
+        })
+    };
+    let mut bars = Vec::new();
+    if let Some(ref s) = info.five_hour {
+        bars.push(bar("5h", s));
+    }
+    if let Some(ref s) = info.seven_day {
+        bars.push(bar("7d Opus", s));
+    }
+    if let Some(ref s) = info.seven_day_sonnet {
+        bars.push(bar("7d Sonnet", s));
+    }
+    json!({
+        "email": info.email,
+        "fullName": info.full_name,
+        "organizationName": info.organization_name,
+        "plan": info.plan,
+        "usageSource": info.usage_source,
+        "bars": bars,
+    })
+}
+
+/// Claude account + the other sources' usage bars, in one payload. A failed
+/// Claude fetch (offline, not logged in) is reported as `claudeError` instead of
+/// failing the whole request — the other sources and the page shell still render.
+///
+/// Must run on a thread with **no tokio runtime context**: the fetches below are
+/// blocking wrappers that create their own runtime, and the relay's request
+/// handler itself runs inside `spawn_blocking`.
+fn account_usage_payload() -> Value {
+    let (claude, claude_error) = match crate::account::fetch_account_info_blocking() {
+        Ok(info) => (Some(claude_account_json(&info)), None),
+        Err(e) => (None, Some(e)),
+    };
+    // Claude is handled above (its AccountInfo carries the previous-period
+    // marker that `usage_summary` drops); the rest come through the same
+    // normalised summary the tray menu uses.
+    let sources: Vec<crate::backend::SourceUsageSummary> = crate::agent_source::build_sources()
+        .iter()
+        .filter(|s| s.api_name() != "claude" && s.is_available())
+        .filter_map(|s| s.usage_summary())
+        .collect();
+    json!({ "claude": claude, "claudeError": claude_error, "sources": sources })
 }
 
 // ── WebSocket client (mirrors feishu.rs's ensure_ws_client/ws_run_loop) ─────
@@ -2877,6 +2943,65 @@ mod tests {
             "supportsGzip": true,
             "supportsBinary": supports_binary,
         })
+    }
+
+    /// Only the windows the API actually returned become bars, and the 0–1
+    /// fraction is passed through untouched (the mobile page multiplies by 100).
+    #[test]
+    fn claude_account_json_emits_one_bar_per_present_window() {
+        use crate::account::{AccountInfo, UsageStats};
+        let info = AccountInfo {
+            email: "boss@example.com".into(),
+            plan: "Claude Max".into(),
+            usage_source: "anthropic".into(),
+            five_hour: Some(UsageStats {
+                utilization: 0.42,
+                resets_at: "2026-07-13T10:00:00Z".into(),
+                prev_utilization: Some(0.31),
+            }),
+            // seven_day absent → must not produce a bar.
+            seven_day_sonnet: Some(UsageStats {
+                utilization: 0.07,
+                resets_at: "2026-07-19T00:00:00Z".into(),
+                prev_utilization: None,
+            }),
+            ..Default::default()
+        };
+
+        let v = claude_account_json(&info);
+        assert_eq!(v["email"], "boss@example.com");
+        assert_eq!(v["plan"], "Claude Max");
+        assert_eq!(v["usageSource"], "anthropic");
+
+        let bars = v["bars"].as_array().expect("bars is an array");
+        assert_eq!(bars.len(), 2, "only the two present windows become bars");
+        assert_eq!(bars[0]["label"], "5h");
+        assert_eq!(bars[0]["utilization"], 0.42);
+        assert_eq!(bars[0]["prevUtilization"], 0.31);
+        assert_eq!(bars[0]["resetsAt"], "2026-07-13T10:00:00Z");
+        assert_eq!(bars[1]["label"], "7d Sonnet");
+        assert!(bars[1]["prevUtilization"].is_null(), "no previous period → null");
+    }
+
+    /// The real `account_usage` path, driven the way the ws loop drives it:
+    /// inside `spawn_blocking` on a multi-thread runtime. This is the
+    /// nested-runtime guard — `fetch_account_info_blocking` builds its own tokio
+    /// runtime, which is why the handler hands the work to a plain thread. Hits
+    /// the network / keychain, so it stays out of CI; run it locally with
+    /// `cargo test -p claw-fleet-core account_usage_runs -- --ignored`.
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "network + keychain"]
+    async fn account_usage_runs_under_spawn_blocking() {
+        let v = tokio::task::spawn_blocking(|| serve_request("account_usage", &Value::Null))
+            .await
+            .expect("handler must not panic (nested runtime)")
+            .expect("account_usage always returns a payload");
+        // Claude either resolved or reported why — never both missing.
+        assert!(
+            v["claude"].is_object() || v["claudeError"].is_string(),
+            "expected a claude account or an error, got {v}"
+        );
+        assert!(v["sources"].is_array(), "sources is always an array");
     }
 
     /// The pure transport-decision matrix — no global state, safe to run alone.

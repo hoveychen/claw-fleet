@@ -1,0 +1,235 @@
+/* 页面外壳沿用 RepoView 的全屏子页；卡片/行沿用 MoreView 的设置卡观感。 */
+
+.page {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  background: var(--color-bg);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  padding-top: calc(10px + env(safe-area-inset-top));
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+  flex-shrink: 0;
+}
+
+.backButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  border: none;
+  background: none;
+  color: var(--color-accent);
+  font-size: 15px;
+  padding: 4px 8px 4px 0;
+  flex-shrink: 0;
+}
+
+.headerText {
+  flex: 1;
+  min-width: 0;
+}
+
+.headerTitle {
+  font-size: 15px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.refresh {
+  font-size: 18px;
+  color: var(--color-text-secondary);
+  padding: 2px 6px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.refresh:disabled {
+  color: var(--color-text-dim);
+}
+
+.body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-text-dim);
+  padding: 0 4px;
+}
+
+.card {
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 14px;
+  min-height: 42px;
+}
+
+.rowLabel {
+  font-size: 14px;
+  color: var(--color-text);
+  flex-shrink: 0;
+}
+
+.rowValue {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.divider {
+  height: 1px;
+  background: var(--color-border);
+  margin: 0 14px;
+}
+
+.hint {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+  padding: 14px;
+}
+
+/* ── 今日累计 ── */
+
+.today {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 14px 14px 12px;
+}
+
+.todayCost {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+}
+
+.todayTokens {
+  font-size: 12px;
+  color: var(--color-text-dim);
+}
+
+/* ── 限流条 ── */
+
+.bars {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 13px 14px;
+}
+
+.bar {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.barHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.barLabel {
+  font-size: 13px;
+  color: var(--color-text);
+}
+
+.barPct {
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-secondary);
+}
+
+.barPct[data-tone="warn"] {
+  color: var(--color-warning);
+}
+
+.barPct[data-tone="critical"] {
+  color: var(--color-error);
+}
+
+.barTrack {
+  position: relative;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  overflow: hidden;
+}
+
+.barFill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--color-accent);
+  transition: width 0.25s ease;
+}
+
+.barFill[data-tone="warn"] {
+  background: var(--color-warning);
+}
+
+.barFill[data-tone="critical"] {
+  background: var(--color-error);
+}
+
+/* 上一周期同一时刻的占用率刻度——比当前填充靠右说明这轮烧得更慢。 */
+.barPrev {
+  position: absolute;
+  top: -1px;
+  bottom: -1px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--color-border-strong);
+}
+
+.barFoot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--color-text-dim);
+}
+
+.barPrevLabel {
+  flex-shrink: 0;
+}

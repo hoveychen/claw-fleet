@@ -30,6 +30,7 @@ import { RepoView } from "./views/RepoView";
 import { RepoDetailView } from "./views/RepoDetailView";
 import { SessionDetailView } from "./views/SessionDetailView";
 import { TasksView } from "./views/TasksView";
+import { UsageView } from "./views/UsageView";
 import { WikiView } from "./views/WikiView";
 import { WikiDocView } from "./views/WikiDocView";
 
@@ -96,6 +97,7 @@ export function App() {
   const [wikiDoc, setWikiDoc] = useState<WikiDoc | null>(null);
   const [showRepo, setShowRepo] = useState(false);
   const [repoDetail, setRepoDetail] = useState<RepoSummary | null>(null);
+  const [showUsage, setShowUsage] = useState(false);
   const [showNewSession, setShowNewSession] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
 
@@ -453,6 +455,7 @@ export function App() {
             push={push}
             onEnablePush={handleEnablePush}
             onOpenRepo={() => setShowRepo(true)}
+            onOpenUsage={() => setShowUsage(true)}
           />
         )}
       </main>
@@ -488,6 +491,14 @@ export function App() {
           repo={repoDetail}
           client={clientRef.current}
           onBack={() => setRepoDetail(null)}
+        />
+      )}
+
+      {showUsage && (
+        <UsageView
+          client={clientRef.current}
+          todayUsage={todayUsage}
+          onBack={() => setShowUsage(false)}
         />
       )}
 
