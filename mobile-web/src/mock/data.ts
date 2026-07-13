@@ -2,8 +2,13 @@
 // actually serves (claw-fleet-core/src/mobile_relay.rs); the point is to drive
 // the real UI without a relay, a desktop, or a pairing secret — so a headless
 // browser can screenshot the phone views the same way `?mock` does on desktop.
+//
+// Content is English and mirrors the desktop `?mock` "v2.4 release train"
+// scenario — the promo pipeline records the phone against these fixtures, so
+// they must read like the same fleet the desktop footage shows.
 import type {
   ElicitationRequest,
+  FleetAskRequest,
   GuardRequest,
   RawMessage,
   SessionInfo,
@@ -17,68 +22,90 @@ const HOUR = 3_600_000;
 
 /** Stands in for the desktop host's `~/.fleet/chat` — what the `chat_workspace`
  *  method returns. The chat session below lives here, so the tasks page's
- *  「仅聊天 / 隐藏聊天」 filter has something to bite on. */
+ *  chat-only / hide-chat filter has something to bite on. */
 export const MOCK_CHAT_WORKSPACE = "/Users/demo/.fleet/chat";
 
 export const MOCK_SESSIONS: SessionInfo[] = [
   {
-    id: "sess-web-active",
-    workspacePath: "/Users/demo/workspace/web-frontend",
-    workspaceName: "web-frontend",
-    aiTitle: "把共享组件抽进设计系统",
-    slug: "refactor/design-system",
-    status: "thinking",
-    isSubagent: false,
-    lastMessagePreview: "正在对比两版 Button 的 props，准备合并…",
-    lastActivityMs: NOW - 20_000,
-    createdAtMs: NOW - 65 * MIN,
-    jsonlPath: "/Users/demo/.claude/projects/web-frontend/sess-web-active.jsonl",
-    model: "claude-opus-4-20250805",
-    entrypoint: "claw-fleet-newsession",
-    pid: 4321,
-    pidPrecise: true,
-    procAlive: true,
-    contextPercent: 0.42,
-    totalCostUsd: 1.83,
-    taskPlan: {
-      done: 2,
-      total: 5,
-      planId: "design-system",
-      currentPlan: "组件收敛进设计系统",
-      currentTask: "P3 — 统一 Button/Input 的尺寸标度",
-    },
-    lastReadMs: NOW - 40 * MIN,
-  },
-  {
-    id: "sess-api-waiting",
+    id: "sess-api-main",
     workspacePath: "/Users/demo/workspace/api-server",
     workspaceName: "api-server",
-    aiTitle: "给 /orders 接口补幂等键",
-    slug: "fix/idempotency",
+    aiTitle: "Fix JWT token validation in auth middleware",
+    slug: "fix/auth-middleware",
     status: "waitingInput",
     isSubagent: false,
-    lastMessagePreview: "要对历史订单做回填吗？这一步不可逆。",
-    lastActivityMs: NOW - 3 * MIN,
-    createdAtMs: NOW - 25 * MIN,
-    jsonlPath: "/Users/demo/.claude/projects/api-server/sess-api-waiting.jsonl",
+    lastMessagePreview: "May I run the pending database migration?",
+    lastActivityMs: NOW - 2 * MIN,
+    createdAtMs: NOW - 45 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/api-server/sess-api-main.jsonl",
     model: "claude-opus-4-20250805",
     entrypoint: "claw-fleet-newsession",
     pid: 4400,
     pidPrecise: true,
     procAlive: true,
-    contextPercent: 0.19,
-    totalCostUsd: 0.42,
+    contextPercent: 0.72,
+    totalCostUsd: 4.33,
     lastReadMs: null,
+  },
+  {
+    id: "sess-billing-3",
+    workspacePath: "/Users/demo/workspace/billing-service",
+    workspaceName: "billing-service",
+    aiTitle: "Usage-based billing migration — P4 cutover switches",
+    slug: "feat/usage-billing",
+    status: "executing",
+    isSubagent: false,
+    lastMessagePreview: "Flipping read path behind usage_billing_v2 flag...",
+    lastActivityMs: NOW - 1 * MIN,
+    createdAtMs: NOW - 38 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/billing-service/sess-billing-3.jsonl",
+    model: "claude-opus-4-20250805",
+    entrypoint: "claw-fleet-newsession",
+    pid: 4401,
+    pidPrecise: true,
+    procAlive: true,
+    contextPercent: 0.22,
+    totalCostUsd: 1.45,
+    handoff: { chainId: "chain-billing", hop: 3, chainLen: 3 },
+    taskPlan: {
+      done: 3,
+      total: 6,
+      planId: "billing-migration",
+      currentPlan: "Usage-based billing migration",
+      currentTask: "P4 — cutover behind flag",
+    },
+    lastReadMs: NOW - 30 * MIN,
+  },
+  {
+    id: "sess-e2e-main",
+    workspacePath: "/Users/demo/workspace/e2e-tests",
+    workspaceName: "e2e-tests",
+    aiTitle: "v2.4 regression suite — full matrix run",
+    slug: null,
+    status: "streaming",
+    isSubagent: false,
+    lastMessagePreview: "412/508 specs green, 1 flaky quarantined...",
+    lastActivityMs: NOW - 30_000,
+    createdAtMs: NOW - 70 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/e2e-tests/sess-e2e-main.jsonl",
+    model: "claude-opus-4-20250805",
+    entrypoint: "claw-fleet-newsession",
+    pid: 4402,
+    pidPrecise: true,
+    procAlive: true,
+    contextPercent: 0.36,
+    totalCostUsd: 4.02,
+    lastReadMs: NOW - 60 * MIN,
   },
   {
     id: "sess-infra-idle",
     workspacePath: "/Users/demo/workspace/infra-terraform",
     workspaceName: "infra-terraform",
-    aiTitle: "给 ECS 服务配置自动扩缩容",
-    slug: "feat/auto-scaling",
+    aiTitle: "Blue/green target groups for the v2.4 canary",
+    slug: "feat/canary",
     status: "idle",
     isSubagent: false,
-    lastMessagePreview: "terraform plan 没问题，可以 apply 了。",
+    lastMessagePreview: "terraform plan is clean — ready to apply.",
     lastActivityMs: NOW - 4 * HOUR,
     createdAtMs: NOW - 5 * HOUR,
     jsonlPath: "/Users/demo/.claude/projects/infra-terraform/sess-infra-idle.jsonl",
@@ -97,11 +124,12 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     id: "sess-chat-idle",
     workspacePath: MOCK_CHAT_WORKSPACE,
     workspaceName: "Chat",
-    aiTitle: "解释一下 Raft 的选举流程",
+    aiTitle: "Explain the Raft election flow",
     slug: null,
     status: "idle",
     isSubagent: false,
-    lastMessagePreview: "简单说，任期内每个节点最多投一票，拿到多数票的候选人当选 leader。",
+    lastMessagePreview:
+      "In short: one vote per node per term; the candidate with a majority becomes leader.",
     lastActivityMs: NOW - 40 * MIN,
     createdAtMs: NOW - 50 * MIN,
     jsonlPath: "/Users/demo/.claude/projects/chat/sess-chat-idle.jsonl",
@@ -115,39 +143,48 @@ export const MOCK_SESSIONS: SessionInfo[] = [
   },
 ];
 
-/** A guard card (risky Bash) and an elicitation card (a real fork in the road) —
- *  the two shapes the decision list renders most. */
+/** The three card shapes the decision list renders most: a guard (risky Bash),
+ *  an elicitation (a real fork in the road), and a fleet__ask decision card. */
 export const MOCK_GUARD: GuardRequest = {
   id: "guard-1",
-  sessionId: "sess-api-waiting",
+  sessionId: "sess-api-main",
   workspaceName: "api-server",
-  aiTitle: "给 /orders 接口补幂等键",
+  aiTitle: "Wants to run a database migration",
   toolName: "Bash",
-  command: "psql $DATABASE_URL -c 'UPDATE orders SET idem_key = gen_random_uuid()'",
-  commandSummary: "回填全部历史订单的幂等键",
-  riskTags: ["database-write", "irreversible"],
+  command: "npx prisma migrate deploy",
+  commandSummary: "Apply pending migrations to production",
+  riskTags: ["database", "production"],
   timestamp: new Date(NOW - 3 * MIN).toISOString(),
 };
 
+/** What `guard_analyze` returns for MOCK_GUARD (markdown). */
+export const MOCK_GUARD_ANALYSIS = [
+  "**What it does:** applies all pending Prisma migrations to the production database, altering live schema.",
+  "",
+  "**Risk: MEDIUM.** 2 of 3 pending migrations are additive; one drops `legacy_plan`. Writers still referencing that column would fail mid-deploy.",
+  "",
+  "**Recommendation:** allow once **after** confirming the 14:00 snapshot completed — the agent's plan already gates the drop behind a feature flag.",
+].join("\n");
+
 export const MOCK_ELICITATION: ElicitationRequest = {
   id: "elic-1",
-  sessionId: "sess-web-active",
-  workspaceName: "web-frontend",
-  aiTitle: "把共享组件抽进设计系统",
+  sessionId: "sess-e2e-main",
+  workspaceName: "e2e-tests",
+  aiTitle: "Flaky checkout spec — how should I proceed?",
   questions: [
     {
       question:
-        "两版 Button 的 size 标度对不上。\n---\n旧版是 sm/md/lg，新版是 1–5 的数字档。统一到哪一套？\n\n要选哪个？",
-      header: "尺寸标度",
+        "The checkout spec fails 1 in 8 runs on a race in cart totals. Pick my move:",
+      header: "Flaky spec",
       multiSelect: false,
       options: [
         {
-          label: "统一到 sm/md/lg（推荐）",
-          description: "调用点最多的一套，改动面最小；数字档只在图表里用过两处。",
+          label: "Fix the race now",
+          description: "Root-cause the cart-totals race before the release.",
         },
         {
-          label: "统一到数字档",
-          description: "表达力更强，但要改 40+ 个调用点，且和设计稿的命名对不上。",
+          label: "Quarantine for v2.4",
+          description: "Ship with the spec quarantined, fix after the train.",
         },
       ],
     },
@@ -155,13 +192,38 @@ export const MOCK_ELICITATION: ElicitationRequest = {
   timestamp: new Date(NOW - 90_000).toISOString(),
 };
 
+export const MOCK_FLEET_ASK: FleetAskRequest = {
+  id: "ask-1",
+  sessionId: "sess-billing-3",
+  workspaceName: "billing-service",
+  aiTitle: "Cutover plan ready — pick the rollout window",
+  timestamp: new Date(NOW - 40_000).toISOString(),
+  questions: [
+    {
+      question: "Backfill is validated (2.1M rows, 0 drift). Pick the cutover window:",
+      header: "Cutover",
+      multiSelect: false,
+      options: [
+        {
+          label: "Tonight 02:00 UTC",
+          description: "Lowest traffic; on-call is already scheduled.",
+        },
+        {
+          label: "Saturday 06:00 UTC",
+          description: "More slack, but pushes the release train by 2 days.",
+        },
+      ],
+    },
+  ],
+};
+
 export const MOCK_TODAY_USAGE: TodayUsage = {
   date: new Date(NOW).toISOString().slice(0, 10),
-  outputTokens: 486_200,
-  costUsd: 12.47,
-  agentCostUsd: 11.9,
-  fleetCostUsd: 0.57,
-  sessionCount: 6,
+  outputTokens: 1_284_500,
+  costUsd: 23.87,
+  agentCostUsd: 21.4,
+  fleetCostUsd: 2.47,
+  sessionCount: 37,
 };
 
 /** Transcript for the chat session — what `tail` serves for its detail view. */
@@ -171,7 +233,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       type: "user",
       uuid: "m1",
       timestamp: new Date(NOW - 50 * MIN).toISOString(),
-      message: { role: "user", content: "解释一下 Raft 的选举流程" },
+      message: { role: "user", content: "Explain the Raft election flow" },
     },
     {
       type: "assistant",
@@ -182,7 +244,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
         content: [
           {
             type: "text",
-            text: "Raft 把时间切成任期（term），每个任期最多选出一个 leader。\n\n跟随者在选举超时内没收到心跳，就把自己的任期加一、转成候选人并向所有节点拉票。每个节点在一个任期里只投一票，先到先得，且只投给日志不比自己旧的候选人——这条限制保证了当选者一定拥有全部已提交的日志。\n\n拿到多数票就当选，立刻发心跳压制其他候选人。票数分散没人过半就等随机超时后重来一轮，随机化是避免反复分票的关键。",
+            text: "Raft slices time into terms, and each term elects at most one leader.\n\nA follower that hears no heartbeat within its election timeout bumps its term, becomes a candidate, and asks every node for a vote. Each node votes once per term, first-come-first-served, and only for candidates whose log is at least as up-to-date as its own — that restriction guarantees the winner holds every committed entry.\n\nA majority of votes wins; the new leader immediately heartbeats to suppress other candidates. If the vote splits, nobody reaches a majority, everyone waits out a fresh randomized timeout and tries again — the randomization is what keeps repeat splits unlikely.",
           },
         ],
       },
@@ -191,7 +253,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
       type: "user",
       uuid: "m3",
       timestamp: new Date(NOW - 41 * MIN).toISOString(),
-      message: { role: "user", content: "那如果两个节点同时超时呢？" },
+      message: { role: "user", content: "What if two nodes time out at the same moment?" },
     },
     {
       type: "assistant",
@@ -202,7 +264,7 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
         content: [
           {
             type: "text",
-            text: "简单说，任期内每个节点最多投一票，拿到多数票的候选人当选 leader。两个候选人同时拉票时票会被分掉，谁也不过半，这一轮就作废；各自等一个随机的选举超时再重来，随机区间通常是 150–300ms，所以下一轮几乎不可能再撞上。",
+            text: "In short: one vote per node per term, majority wins. Two simultaneous candidates split the vote, nobody clears the bar, and the round is wasted; each waits a fresh random election timeout (typically 150–300ms) before retrying, so the next round almost never collides again.",
           },
         ],
       },
@@ -213,11 +275,11 @@ export const MOCK_MESSAGES: Record<string, RawMessage[]> = {
 export const MOCK_WIKI_DOCS: WikiDoc[] = [
   {
     slug: "arch/overview",
-    title: "架构总览",
+    title: "Architecture overview",
     kind: "markdown",
     entry: "index.md",
-    workspacePath: "/Users/demo/workspace/web-frontend",
-    workspaceName: "web-frontend",
+    workspacePath: "/Users/demo/workspace/api-server",
+    workspaceName: "api-server",
     createdMs: NOW - 30 * HOUR,
     updatedMs: NOW - 2 * HOUR,
   } as WikiDoc,
