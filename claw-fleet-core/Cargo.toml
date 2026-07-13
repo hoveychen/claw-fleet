@@ -32,6 +32,10 @@ base64 = "0.22"
 # gzip the mobile sessions snapshot before it crosses the relay (~110KB→29KB on
 # weak links). The mobile client inflates with the native `DecompressionStream`.
 flate2 = "1"
+# Downscale oversized decision-asset images before they cross the relay so the
+# mobile client can render them (the WS frame budget can't carry a full-res
+# 3-5 MiB AI preview). png/jpeg decode + jpeg encode is all we need.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 conch-parser = "0.1.1"
 shell-words = "1.1.1"
 ctrlc = { version = "3", features = ["termination"] }
