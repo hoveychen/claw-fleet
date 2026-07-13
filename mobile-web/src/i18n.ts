@@ -154,6 +154,8 @@ const DICT: Record<string, string> = {
   "搜索标题 / 摘要…": "Search title / summary…",
   "搜索标题、计划、全文…": "Search title, plan, full text…",
   全部目录: "All workspaces",
+  "💬 仅聊天": "💬 Chat only",
+  "🚫 隐藏聊天": "🚫 Hide chat",
   仅活跃: "Live only",
   "全部已读 ({0})": "Mark all read ({0})",
   全部: "All",
