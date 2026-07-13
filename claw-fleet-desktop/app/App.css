@@ -151,7 +151,8 @@ html.tauri-host.os-windows { --win-caption-inset-x: 152px; }
 
   --color-text: #1f2023;
   --color-text-secondary: #5d6168;
-  --color-text-dim: #8d9199;
+  /* dim 比移动端(#8d9199)压深一档 — 桌面 UI 更密，极淡的 dim 字偏淡 */
+  --color-text-dim: #6f7078;
   --color-text-muted: var(--color-text-dim);
   --color-border: rgba(32, 28, 18, 0.11);
   --color-border-soft: rgba(32, 28, 18, 0.07);
