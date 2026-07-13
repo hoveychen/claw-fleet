@@ -1,7 +1,7 @@
 .wrap {
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid var(--border, rgba(128, 128, 128, 0.2));
+  border-top: 1px solid var(--color-border);
 }
 
 .header {
@@ -45,7 +45,7 @@
   width: 52px;
   font-size: 11px;
   padding: 2px 4px;
-  border: 1px solid var(--border, rgba(128, 128, 128, 0.3));
+  border: 1px solid var(--color-border);
   border-radius: 4px;
   background: transparent;
   color: inherit;
