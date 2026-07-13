@@ -141,6 +141,9 @@ interface DemoHandlers {
 }
 
 class DemoRelayClient {
+  /** Answered ids — the periodic pending_snapshot reconcile must not resurrect them. */
+  private answered = new Set<string>();
+
   constructor(private handlers: DemoHandlers) {}
 
   get isAuthed(): boolean {
@@ -158,14 +161,22 @@ class DemoRelayClient {
   close(): void {}
   sayGoodbye(): void {}
 
-  answer(): boolean {
+  answer(_kind: string, id: string): boolean {
+    this.answered.add(id);
     return true;
   }
 
   request<T>(method: string): Promise<T> {
     switch (method) {
-      case "pending_snapshot":
-        return Promise.resolve(DEMO_SNAPSHOT as T);
+      case "pending_snapshot": {
+        const keep = <R extends { id: string }>(list?: R[]) =>
+          (list ?? []).filter((r) => !this.answered.has(r.id));
+        return Promise.resolve({
+          guard: keep(DEMO_SNAPSHOT.guard),
+          elicitation: keep(DEMO_SNAPSHOT.elicitation),
+          fleetAsk: keep(DEMO_SNAPSHOT.fleetAsk),
+        } as T);
+      }
       case "today_usage":
         return Promise.resolve({
           date: new Date(NOW).toISOString().slice(0, 10),
