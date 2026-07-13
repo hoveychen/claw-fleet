@@ -114,6 +114,28 @@ function computeGuardAllowPrefixes(req: GuardDecision["request"]): string[] {
   return fallback ? [fallback] : [];
 }
 
+/**
+ * Shown on a card whose wait timed out. The card did not go away and the agent
+ * did not carry on without an answer: Fleet interrupted that turn and is holding
+ * the question. Submitting now resumes the session with the reply attached.
+ */
+export function ParkedBanner() {
+  const { t } = useTranslation();
+  return (
+    <div className={styles.parked_banner} role="status">
+      <span className={styles.parked_badge}>
+        {t("parked.badge", "Timed out — session paused")}
+      </span>
+      <span className={styles.parked_hint}>
+        {t(
+          "parked.hint",
+          "No answer arrived in time, so Fleet stopped this turn and kept the question. Answering resumes the session with your reply attached.",
+        )}
+      </span>
+    </div>
+  );
+}
+
 function GuardCard({ decision }: { decision: GuardDecision }) {
   const { t } = useTranslation();
   const { respond } = useDecisionStore();
@@ -517,6 +539,7 @@ function OptionsCollapseBar({
 }
 
 function ElicitationCard({ decision, compact = false }: { decision: ElicitationDecision; compact?: boolean }) {
+  const parked = decision.request.parked === true;
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
   const {
@@ -732,12 +755,13 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
           </div>
         )}
 
+        {parked && <ParkedBanner />}
         <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
           onClick={handleDecline}
         >
-          {t("elicitation.decline", "Decline")}
+          {parked ? t("parked.discard", "Discard") : t("elicitation.decline", "Decline")}
         </button>
         <div className={styles.actions_spacer} />
         {step > 0 && (
@@ -754,7 +778,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
             onClick={handleSubmit}
             disabled={!allAnswered}
           >
-            {t("elicitation.submit", "Submit")}
+            {parked ? t("parked.submit", "Answer & wake the session") : t("elicitation.submit", "Submit")}
           </button>
         ) : (
           <button
@@ -1034,6 +1058,7 @@ function PlanApprovalCard({ decision }: { decision: PlanApprovalDecision }) {
         />
       )}
 
+      {decision.request.parked === true && <ParkedBanner />}
       <div className={styles.actions}>
         {editing ? (
           <>
@@ -1331,6 +1356,7 @@ function FleetAskCard({
   decision: FleetAskDecision;
   compact?: boolean;
 }) {
+  const parked = decision.request.parked === true;
   const { t } = useTranslation();
   const mdComponents = usePathMarkdown(decision.request.sessionId);
   const {
@@ -1631,12 +1657,13 @@ function FleetAskCard({
           </div>
         )}
 
+        {parked && <ParkedBanner />}
         <div className={styles.actions}>
         <button
           className={`${styles.btn} ${styles.btn_secondary}`}
           onClick={handleCancel}
         >
-          {t("fleet_ask.cancel", "Cancel")}
+          {parked ? t("parked.discard", "Discard") : t("fleet_ask.cancel", "Cancel")}
         </button>
         <div className={styles.actions_spacer} />
         {step > 0 && (
@@ -1653,7 +1680,7 @@ function FleetAskCard({
             onClick={handleSubmit}
             disabled={!allAnswered}
           >
-            {t("fleet_ask.submit", "Submit")}
+            {parked ? t("parked.submit", "Answer & wake the session") : t("fleet_ask.submit", "Submit")}
           </button>
         ) : (
           <button
