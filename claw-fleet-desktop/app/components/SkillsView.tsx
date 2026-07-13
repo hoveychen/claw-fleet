@@ -4,10 +4,10 @@ import { useTranslation } from "react-i18next";
 import { Sparkles } from "lucide-react";
 import { TextBlock } from "./blocks/TextBlock";
 import { EmptyState } from "./EmptyState";
-import { useConnectionStore, useUIStore } from "../store";
-import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
+import { useConnectionStore } from "../store";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
+import { PageShell } from "./PageShell";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 
@@ -92,13 +92,6 @@ function indentLevel(relativePath: string): number {
 
 export function SkillsView() {
   const { t } = useTranslation();
-  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["skills"]);
-  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const {
-    width: railWidth,
-    isDragging: railDragging,
-    onMouseDown: onRailMouseDown,
-  } = useResizableWidth("skills-rail-width", { min: 200, max: 640, initial: 340 });
   const [skills, setSkills] = useState<SkillItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
@@ -134,28 +127,18 @@ export function SkillsView() {
   }, [filtered, selected]);
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.title_row}>
-          <h1 className={styles.title}>{t("skills.panel_title")}</h1>
-          {loaded && skills.length > 0 && (
-            <span className={styles.count}>{skills.length}</span>
-          )}
-        </div>
-        <input
-          className={styles.search}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("skills.panel_title")}
-        />
-      </header>
-
-      <div className={styles.body}>
-        {collapsed ? (
-          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("skills", false)} />
-        ) : (
-        <aside className={styles.list_pane} style={{ width: railWidth }}>
+    <PageShell
+      view="skills"
+      className={styles.mem_scope}
+      title={t("skills.panel_title")}
+      count={loaded && skills.length > 0 ? skills.length : null}
+      search={{
+        value: query,
+        onChange: setQuery,
+        placeholder: t("skills.panel_title"),
+      }}
+      secondary={
+        <div className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("skills.loading")}</p>}
           {loaded && filtered.length === 0 && (
             <EmptyState
@@ -174,30 +157,25 @@ export function SkillsView() {
               />
             ))}
           </div>
-
-          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
-        </aside>
-        )}
-
-        <main className={styles.detail_pane}>
-          {selected ? (
-            <SkillDetail
-              skill={selected}
-              onDeleted={(path) => {
-                setSkills((prev) => prev.filter((s) => s.path !== path));
-                setSelected(null);
-              }}
-            />
-          ) : (
-            <div className={styles.placeholder}>
-              {loaded && skills.length > 0
-                ? t("skills.panel_title")
-                : t("skills.no_skills")}
-            </div>
-          )}
-        </main>
-      </div>
-    </div>
+        </div>
+      }
+    >
+      {selected ? (
+        <SkillDetail
+          skill={selected}
+          onDeleted={(path) => {
+            setSkills((prev) => prev.filter((s) => s.path !== path));
+            setSelected(null);
+          }}
+        />
+      ) : (
+        <div className={styles.placeholder}>
+          {loaded && skills.length > 0
+            ? t("skills.panel_title")
+            : t("skills.no_skills")}
+        </div>
+      )}
+    </PageShell>
   );
 }
 

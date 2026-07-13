@@ -2,11 +2,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Blocks } from "lucide-react";
-import { useConnectionStore, useUIStore } from "../store";
+import { useConnectionStore } from "../store";
 import { EmptyState } from "./EmptyState";
-import { CollapsedSidebarRail } from "./CollapsedSidebarRail";
-import { useResizableWidth } from "../hooks/useResizableWidth";
-import { ResizeHandle } from "./ResizeHandle";
+import { PageShell } from "./PageShell";
 import styles from "./MemoryView.module.css";
 import pluginStyles from "./PluginsView.module.css";
 
@@ -168,13 +166,6 @@ function PluginCard({
 
 export function PluginsView() {
   const { t } = useTranslation();
-  const collapsed = useUIStore((s) => !!s.secondarySidebarCollapsed["plugins"]);
-  const setSecondarySidebar = useUIStore((s) => s.setSecondarySidebar);
-  const {
-    width: railWidth,
-    isDragging: railDragging,
-    onMouseDown: onRailMouseDown,
-  } = useResizableWidth("plugins-rail-width", { min: 200, max: 640, initial: 340 });
   const [plugins, setPlugins] = useState<PluginItem[]>([]);
   const [marketplaces, setMarketplaces] = useState<MarketplaceItem[]>([]);
   const [loaded, setLoaded] = useState(false);
@@ -277,32 +268,24 @@ export function PluginsView() {
   };
 
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div className={styles.title_row}>
-          <h1 className={styles.title}>{t("plugins.panel_title")}</h1>
-          {loaded && plugins.length > 0 && (
-            <span className={styles.count}>{plugins.length}</span>
-          )}
-        </div>
-        <input
-          className={styles.search}
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t("plugins.filter_placeholder")}
-        />
+    <PageShell
+      view="plugins"
+      className={styles.mem_scope}
+      title={t("plugins.panel_title")}
+      count={loaded && plugins.length > 0 ? plugins.length : null}
+      search={{
+        value: query,
+        onChange: setQuery,
+        placeholder: t("plugins.filter_placeholder"),
+      }}
+      bannerCenter={
         <MarketplaceBar
           marketplaces={marketplaces}
           onChanged={() => setLoaded(false)}
         />
-      </header>
-
-      <div className={styles.body}>
-        {collapsed ? (
-          <CollapsedSidebarRail onExpand={() => setSecondarySidebar("plugins", false)} />
-        ) : (
-        <aside className={styles.list_pane} style={{ width: railWidth }}>
+      }
+      secondary={
+        <div className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("plugins.loading")}</p>}
           {loaded && plugins.length === 0 && (
             <EmptyState
@@ -341,29 +324,24 @@ export function PluginsView() {
               )}
             </>
           )}
-
-          <ResizeHandle active={railDragging} onMouseDown={onRailMouseDown} />
-        </aside>
-        )}
-
-        <main className={styles.detail_pane}>
-          {selected ? (
-            <PluginDetail
-              plugin={selected}
-              onChanged={() => {
-                setLoaded(false);
-              }}
-            />
-          ) : (
-            <div className={styles.placeholder}>
-              {loaded && plugins.length > 0
-                ? t("plugins.pick_plugin")
-                : t("plugins.no_plugins")}
-            </div>
-          )}
-        </main>
-      </div>
-    </div>
+        </div>
+      }
+    >
+      {selected ? (
+        <PluginDetail
+          plugin={selected}
+          onChanged={() => {
+            setLoaded(false);
+          }}
+        />
+      ) : (
+        <div className={styles.placeholder}>
+          {loaded && plugins.length > 0
+            ? t("plugins.pick_plugin")
+            : t("plugins.no_plugins")}
+        </div>
+      )}
+    </PageShell>
   );
 }
 

@@ -1,0 +1,152 @@
+/* ── PageShell ────────────────────────────────────────────────────────────────
+   The one copy of the page structure that used to live, duplicated, in seven
+   module.css files: banner over [rail | main]. */
+
+.page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--color-bg);
+  min-width: 0;
+}
+
+/* ── Banner ───────────────────────────────────────────────────────────────── */
+
+.banner {
+  display: flex;
+  align-items: center;
+  gap: var(--space-7);
+  padding: 14px var(--space-8) var(--space-5);
+  /* Keeps the action cluster clear of the caption buttons WindowsFrameOverlay
+     draws over this strip. 0px on every other platform. */
+  padding-right: calc(var(--space-8) + var(--win-caption-inset-x));
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+/* The banner is a drag region (frameless window), which would otherwise swallow
+   clicks on the controls sitting in it. */
+.banner :is(input, button, select, a, textarea) {
+  -webkit-app-region: no-drag;
+}
+
+.title_row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+}
+
+.title {
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text);
+  margin: 0;
+}
+
+.count {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-dim);
+}
+
+.search_wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1;
+  max-width: 320px;
+}
+
+.search {
+  width: 100%;
+  /* Raised surface: a form control sits a layer ABOVE the canvas, on the card
+     plane. The recessed --color-bg-sunken is for troughs, not fields. */
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-size-sm);
+  color: var(--color-text);
+  outline: none;
+  transition: border-color 0.14s;
+}
+
+.search:focus {
+  border-color: var(--color-accent);
+}
+
+.search_spinner {
+  position: absolute;
+  right: var(--space-3);
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid var(--color-text-dim);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: page_shell_spin 0.7s linear infinite;
+}
+
+@keyframes page_shell_spin {
+  to { transform: rotate(360deg); }
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+/* ── Sub bar (filter chips / tabs) ────────────────────────────────────────── */
+
+.sub_bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-8) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+/* ── Body: rail + main ────────────────────────────────────────────────────── */
+
+.body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* The rail owns only the outer shell — width, divider, and the ResizeHandle's
+   positioning context. Padding / gap / scrolling belong to the content each page
+   passes as `secondary`, because they genuinely differ (a card list scrolls and
+   wants breathing room; Audit's detail rail is a header over its own scroller). */
+.rail {
+  position: relative; /* anchors the ResizeHandle */
+  flex-shrink: 0;
+  /* width comes in inline from useResizableWidth; this is only a fallback. */
+  width: 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--color-border);
+}
+
+/* A right-hand rail (Audit) hangs its divider on the other edge. */
+.body > .main + .rail {
+  border-right: none;
+  border-left: 1px solid var(--color-border);
+}
+
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}

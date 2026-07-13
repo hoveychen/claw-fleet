@@ -1,17 +1,15 @@
-.page {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-  min-width: 0;
-}
+/* ── Category colour tokens ──────────────────────────────────────────────────
+   Tailwind-style palette, chosen to be distinct from the coral --color-accent.
 
-/* ── Type color tokens ──────────────────────────────────────────────────── */
-/* Tailwind-style palette, chosen to be distinct from the coral --color-accent. */
-
-.page {
+   These MUST hang off the page root, and every page in this family has to wear
+   the class — SkillsView.module.css and PluginsView.module.css read --mem-index
+   / --mem-project / --mem-user for their own badges, and used to inherit them
+   only because all four shared this file's `.page`. Now that PageShell owns the
+   page root, each of the four passes `className={styles.mem_scope}` to it.
+   Drop the class from one of them and its badges lose the declaration's host:
+   rgb(var(--mem-user)) becomes an invalid value and the badge silently renders
+   colourless. No gate catches that — the token IS defined, just not in scope. */
+.mem_scope {
   --mem-user: 16 185 129;     /* emerald */
   --mem-feedback: 245 158 11; /* amber */
   --mem-project: 139 92 246;  /* violet */
@@ -19,85 +17,18 @@
   --mem-index: 217 119 87;    /* coral (matches accent) */
 }
 
-/* ── Header ──────────────────────────────────────────────────────────────── */
-
-.header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 20px 12px;
-  padding-right: calc(20px + var(--win-caption-inset-x));
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-}
-
-.title_row {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-
-.title {
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--color-text);
-  margin: 0;
-}
-
-.count {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-dim);
-}
-
-.search {
-  flex: 1;
-  max-width: 320px;
-  background: var(--color-bg-field);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: 6px 10px;
-  font-size: 12px;
-  color: var(--color-text);
-  outline: none;
-}
-
-.search:focus {
-  border-color: var(--color-accent);
-}
-
-/* ── Body split ──────────────────────────────────────────────────────────── */
-
-.body {
-  flex: 1;
-  display: flex;
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* Shared by Memory / Skills / Files / Plugins — each passes its own persisted
-   width inline (useResizableWidth); the value here is just the start width. */
+/* ── Rail content ────────────────────────────────────────────────────────────
+   The scrolling card list inside PageShell's rail. The rail itself owns the
+   width, the divider and the ResizeHandle; this owns the scrolling and the
+   spacing. Shared by Memory / Skills / Files / Plugins. */
 .list_pane {
-  position: relative; /* anchors the ResizeHandle */
-  width: 340px;
-  flex-shrink: 0;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--color-border);
   padding: 10px 10px 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-/* ── Filter bar ──────────────────────────────────────────────────────────── */
-
-.filter_bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 20px 10px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
 }
 
 .chip {
@@ -156,14 +87,6 @@
   background: rgb(var(--mem-reference) / 0.18);
   border-color: rgb(var(--mem-reference) / 0.5);
   color: rgb(var(--mem-reference));
-}
-
-.detail_pane {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow: hidden;
 }
 
 /* ── Workspace groups ────────────────────────────────────────────────────── */
