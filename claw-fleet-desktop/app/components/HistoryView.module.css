@@ -28,6 +28,20 @@
   background: var(--color-bg);
 }
 
+/* Soften the rail + top-controls dividers on macOS vibrancy the same way the
+   MemoryView family does, so the task 二级栏's borders read at the same weight
+   as 插件/技能/记忆/仓库 instead of a harder --color-border line. */
+:global([data-platform="macos"]) .rail {
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+:global([data-platform="macos"]) .controls {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+:global([data-platform="macos"][data-theme="light"]) .rail,
+:global([data-platform="macos"][data-theme="light"]) .controls {
+  border-color: rgba(0, 0, 0, 0.08);
+}
+
 .header {
   display: flex;
   align-items: center;
@@ -36,9 +50,11 @@
   flex-shrink: 0;
 }
 
+/* Matches the MemoryView family's `.title` (16px/700) so the task rail's
+   heading reads as the same design system as 插件/技能/记忆/仓库. */
 .header_title {
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 700;
   color: var(--color-text);
 }
 
@@ -46,11 +62,11 @@
   /* Pushes the button group to the right edge; keeps them together instead of
      spreading, which a margin-left:auto on each button would do. */
   margin-right: auto;
-  font-size: 11px;
+  /* Plain dim count beside the title — same treatment as the family's
+     `.count`, not a pill. */
+  font-size: 12px;
+  font-weight: 600;
   color: var(--color-text-dim);
-  background: var(--color-bg-card-hover);
-  border-radius: 8px;
-  padding: 1px 7px;
 }
 
 /* "全部已读" — clears every unread session's dot in one call. Icon-only so it
@@ -102,7 +118,7 @@
 
 .header_new_btn_active {
   filter: brightness(1.15);
-  box-shadow: 0 0 0 2px var(--color-accent-soft, rgba(122, 160, 250, 0.35));
+  box-shadow: 0 0 0 2px var(--color-accent-soft);
 }
 
 /* ── Search + project filter ─────────────────────────────────────────────── */
@@ -134,7 +150,10 @@
   padding: 6px 8px 6px 26px;
   font-size: 12px;
   color: var(--color-text);
-  background: var(--color-bg);
+  /* Filled field on the secondary surface — matches the family's `.search`
+     (which also sits on --color-bg-secondary) instead of blending into the
+     rail's page background. */
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: 7px;
   outline: none;
@@ -142,7 +161,7 @@
 }
 
 .search_input:focus {
-  border-color: var(--color-accent, #7aa0fa);
+  border-color: var(--color-accent);
 }
 
 .search_spinner {
@@ -295,7 +314,9 @@
   padding: 6px 8px 12px;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  /* Match the family's `.card_list` row rhythm (gap 4) so the list breathes
+     the same as 记忆/插件 rather than packing tighter. */
+  gap: 4px;
 }
 
 .empty {
@@ -607,7 +628,7 @@
   width: 22px;
   height: 22px;
   border: 2px solid var(--color-border);
-  border-top-color: var(--color-accent, #7aa0fa);
+  border-top-color: var(--color-accent);
   border-radius: 50%;
   animation: history_spin 0.7s linear infinite;
 }
