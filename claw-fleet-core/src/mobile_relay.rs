@@ -1276,6 +1276,13 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
                 "base64": base64::engine::general_purpose::STANDARD.encode(&export.bytes),
             }))
         }
+        // Absolute path of this host's pure-chat workspace, created on demand.
+        // The phone pins it in its new-session sheet; like the desktop it cannot
+        // derive the path itself (it's under the *desktop* host's home).
+        "chat_workspace" => {
+            let path = crate::chat_workspace::ensure_chat_workspace()?;
+            Ok(json!({ "path": path }))
+        }
         // ── Write methods ────────────────────────────────────────────────
         // All of these run inside `spawn_blocking` (see ws_connect_once), so
         // process spawns / kills / file writes never block the ws runtime.

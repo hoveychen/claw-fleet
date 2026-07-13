@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText, Folder, FolderOpen } from "lucide-react";
+import { FileText, Folder, FolderOpen, MessageCircle } from "lucide-react";
 import { useConnectionStore, useSessionsStore } from "../store";
 import {
   ChatComposer,
@@ -76,15 +76,21 @@ interface WorkspaceSessionLike {
 /** Distinct workspaces from known sessions, most-recently-active first. In-repo
  *  worktree checkouts are collapsed onto their repo root so a repo with both a
  *  main checkout and a live worktree appears once, pointing at the durable root
- *  (see {@link repoRootPath}). */
+ *  (see {@link repoRootPath}).
+ *
+ *  `chatPath` — when the chat workspace already has sessions it would otherwise
+ *  show up here as an ordinary recent entry, duplicating the pinned one. Passing
+ *  the path drops it from the recents. */
 export function distinctWorkspaces(
   sessions: WorkspaceSessionLike[],
   limit = 30,
+  chatPath?: string | null,
 ): WorkspaceOption[] {
   const byPath = new Map<string, WorkspaceOption>();
   for (const s of sessions) {
     if (!s.workspacePath) continue;
     const path = repoRootPath(s.workspacePath);
+    if (chatPath && path === chatPath) continue;
     const prev = byPath.get(path);
     if (!prev || s.lastActivityMs > prev.lastMs) {
       byPath.set(path, {
@@ -126,11 +132,27 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState("");
+  const [chatPath, setChatPath] = useState<string | null>(null);
   const composerRef = useRef<ChatComposerHandle | null>(null);
+
+  // The pure-chat workspace. Unlike a project it has no prior sessions to be
+  // discovered from, so it must be pinned explicitly — and its path comes from
+  // the backend because under a remote connection it lives in the probe host's
+  // home, not this machine's.
+  useEffect(() => {
+    invoke<string>("chat_workspace")
+      .then(setChatPath)
+      .catch(() => setChatPath(null));
+  }, []);
 
   // Distinct workspaces from known sessions, most recently active first.
   // Worktree checkouts collapse onto their repo root — see distinctWorkspaces.
-  const recentWorkspaces = useMemo(() => distinctWorkspaces(sessions), [sessions]);
+  const recentWorkspaces = useMemo(
+    () => distinctWorkspaces(sessions, 30, chatPath),
+    [sessions, chatPath],
+  );
+
+  const isChat = !!chatPath && workspace === chatPath;
 
   // Seed the workspace to the most-recent one once, on mount. The form is
   // remounted each time the user re-enters "new session" mode, so a plain
@@ -220,9 +242,25 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const workspacePill = (
     <PillMenu
       placement="below"
-      icon={<FolderOpen size={13} strokeWidth={1.7} />}
-      label={workspace ? basename(workspace) : t("new_session.workspace")}
-      title={workspace || t("new_session.workspace_placeholder")}
+      icon={
+        isChat ? (
+          <MessageCircle size={13} strokeWidth={1.7} />
+        ) : (
+          <FolderOpen size={13} strokeWidth={1.7} />
+        )
+      }
+      label={
+        isChat
+          ? t("new_session.chat")
+          : workspace
+            ? basename(workspace)
+            : t("new_session.workspace")
+      }
+      title={
+        isChat
+          ? t("new_session.chat_sub")
+          : workspace || t("new_session.workspace_placeholder")
+      }
       disabled={submitting}
       menuHeader={(close) => (
         <div className={pillStyles.menu_header}>
@@ -243,13 +281,30 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
           />
         </div>
       )}
-      items={recentWorkspaces.map((w) => ({
-        id: w.path,
-        label: w.name,
-        sub: w.path,
-        checked: w.path === workspace,
-        onSelect: () => setWorkspace(w.path),
-      }))}
+      items={[
+        // Pinned first: the chat workspace is a destination, not a recent.
+        ...(chatPath
+          ? [
+              {
+                // No `icon` here on purpose: PillMenu renders `item.icon` *in
+                // place of* the check column, which would hide the selected
+                // state. The pill's own icon already marks chat mode.
+                id: chatPath,
+                label: t("new_session.chat"),
+                sub: t("new_session.chat_sub"),
+                checked: isChat,
+                onSelect: () => setWorkspace(chatPath),
+              },
+            ]
+          : []),
+        ...recentWorkspaces.map((w) => ({
+          id: w.path,
+          label: w.name,
+          sub: w.path,
+          checked: w.path === workspace,
+          onSelect: () => setWorkspace(w.path),
+        })),
+      ]}
       footerItems={
         isRemote
           ? []
@@ -329,7 +384,9 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
         ]}
       />
 
-      <p className={styles.hint}>{t("new_session.hint")}</p>
+      <p className={styles.hint}>
+        {isChat ? t("new_session.hint_chat") : t("new_session.hint")}
+      </p>
 
       {error && <div className={styles.error}>{error}</div>}
     </div>

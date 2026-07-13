@@ -327,6 +327,12 @@ pub trait Backend: Send + Sync {
         effort: Option<String>,
         permission_mode: Option<String>,
     ) -> Result<crate::session_launch::SpawnSessionResponse, String>;
+    /// Absolute path of the pure-chat workspace, creating it if absent. The
+    /// launcher pins this as a fixed entry because, unlike a project, it has no
+    /// prior sessions to be discovered from — and the path must come from the
+    /// backend, since under a remote connection it lives in the *probe host's*
+    /// home directory, not the desktop's.
+    fn chat_workspace(&self) -> Result<String, String>;
     /// Read the auto-resume scheduler config.
     fn get_auto_resume_config(&self) -> crate::auto_resume::AutoResumeConfig;
     /// Persist the auto-resume scheduler config.

@@ -164,6 +164,10 @@ impl Backend for NullBackend {
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }
+    fn chat_workspace(&self) -> Result<String, String> {
+        Err("backend not ready".into())
+    }
+
     fn spawn_new_session(
         &self,
         _: String,
