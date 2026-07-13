@@ -1,0 +1,111 @@
+/* A background-agent completion notice, in place of its raw <task-notification>
+   XML envelope. Kept a touch more prominent than a plain tool card — it marks
+   real work landing — but quieter than a decision card. */
+.root {
+  margin: 10px 0;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  border-left: 3px solid var(--color-accent, #60a5fa);
+  overflow: hidden;
+  font-size: 12px;
+}
+
+.header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--color-bg-tool);
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--color-text);
+}
+
+.header:hover {
+  background: var(--color-bg-tool-hover);
+}
+
+.icon {
+  font-size: 14px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  color: var(--color-text);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 20px;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+}
+
+.status_done {
+  background: var(--color-success-bg, rgba(90, 200, 140, 0.15));
+  color: var(--color-success, #4ade80);
+}
+
+.status_error {
+  background: var(--color-error-bg, rgba(220, 91, 91, 0.15));
+  color: var(--color-error-fg, #dc5b5b);
+}
+
+.status_neutral {
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+}
+
+.arrow {
+  color: var(--color-text-dim);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.body {
+  padding: 4px 14px 10px;
+  background: var(--color-bg-card, var(--color-bg));
+  border-top: 1px solid var(--color-border-soft, var(--color-border));
+  max-height: 420px;
+  overflow-y: auto;
+  word-break: break-word;
+}
+
+.meta {
+  display: flex;
+  gap: 12px;
+  padding: 7px 14px;
+  background: var(--color-bg-tool);
+  border-top: 1px solid var(--color-border-soft, var(--color-border));
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--color-text-dim);
+}
+
+.meta_item {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 60%;
+}

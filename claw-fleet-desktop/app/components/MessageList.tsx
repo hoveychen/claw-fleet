@@ -314,6 +314,7 @@ const MessageRow = memo(function MessageRow({ msg, resultMap, metaMap, decisionR
           <div className={styles.user_text}>
             <UserContent
               content={content}
+              paths={paths}
               renderText={(text, key) =>
                 searchTerms ? (
                   <HighlightedText key={key} text={text} terms={searchTerms} />
