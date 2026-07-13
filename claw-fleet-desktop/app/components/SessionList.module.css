@@ -651,21 +651,10 @@
 
 /* ── Main content area (list mode) ─────────────────────────────────────── */
 
-.main_area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-  background: var(--color-bg);
-  min-width: 0;
-}
-
-/* Page-edge gutter matches the SessionToolbar above (`14px 20px 12px`) and
-   GalleryView's `.grid`, so card edges line up with the toolbar's text and
-   search input rather than bleeding out 4px further. Previously this was
-   `0 6px 12px`, which made list mode the only page where cards ran all the
-   way to the window edge. */
+/* The page frame is PageShell's; this is only the scroller inside its main
+   container. The gutter matches the banner's (`14px 20px 12px`) and
+   GalleryView's `.grid`, so card edges line up with the banner's title and
+   search input rather than bleeding out 4px further. */
 .list {
   flex: 1;
   overflow-y: auto;
