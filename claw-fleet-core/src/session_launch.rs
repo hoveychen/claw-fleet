@@ -307,7 +307,7 @@ pub fn spawn_claude_detached_with_envs(
     // A GUI app launched by launchd carries a minimal PATH
     // (/usr/bin:/bin:/usr/sbin:/sbin); a child inheriting it can't find
     // user-installed binaries (fleet, cws, node) from its Bash tool.
-    // Prepend ~/.claude/fleet/bin (see supervisor::ensure_fleet_cli_link)
+    // Prepend ~/.claude/fleet/bin (populated by fleet_cli::ensure_fleet_cli_link)
     // and the common install dirs; the parent's PATH stays at the tail.
     let mut path = crate::openclaw_source::augmented_path();
     if let Some(home) = crate::session::real_home_dir() {

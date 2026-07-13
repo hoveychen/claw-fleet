@@ -196,4 +196,56 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    /// The end the user actually cares about: a spawned agent's Bash runs
+    /// `fleet plan check`, which means `fleet` must RESOLVE THROUGH PATH and
+    /// EXECUTE. Reproduces that by putting the published dir on PATH exactly
+    /// the way `session_launch` does, then invoking the bare name.
+    #[cfg(unix)]
+    #[test]
+    fn published_fleet_is_runnable_by_bare_name_through_the_session_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!("fleet_cli_exec_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let home = tmp.join("home");
+        let exe_dir = tmp.join("app");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&exe_dir).unwrap();
+
+        // An executable stand-in for the shipped CLI.
+        let sidecar = exe_dir.join(LINK_NAME);
+        std::fs::write(&sidecar, b"#!/bin/sh\necho fleet-ok\n").unwrap();
+        std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &home);
+        let published = ensure_link_from(&exe_dir);
+        let bin_dir = fleet_bin_dir();
+        match prev {
+            Some(v) => std::env::set_var("FLEET_HOME", v),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        published.expect("ensure_link_from failed");
+
+        // Same PATH shape session_launch builds for a spawned agent.
+        let path = format!(
+            "{}:{}",
+            bin_dir.unwrap().display(),
+            std::env::var("PATH").unwrap_or_default()
+        );
+        let out = std::process::Command::new("fleet")
+            .env("PATH", &path)
+            .output()
+            .expect("`fleet` did not resolve through the session PATH");
+        assert!(out.status.success(), "`fleet` exited nonzero");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "fleet-ok",
+            "bare `fleet` must run the published CLI"
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

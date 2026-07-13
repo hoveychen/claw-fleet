@@ -3568,6 +3568,17 @@ pub fn run() {
                 });
             }
 
+            // Publish the bundled fleet CLI into ~/.claude/fleet/bin, which
+            // session_launch already prepends to every spawned agent's PATH.
+            // Without this the directory stays empty and the agent's
+            // `fleet plan …` calls — which the PRD-discipline guidance tells it
+            // to make — only resolve on macOS, via the /usr/local/bin symlink
+            // that the macOS-only installer command creates. Non-fatal: a
+            // failure just means those calls won't resolve.
+            if let Err(e) = claw_fleet_core::fleet_cli::ensure_fleet_cli_link() {
+                claw_fleet_core::log_debug(&format!("ensure_fleet_cli_link failed: {e}"));
+            }
+
             // Inject Fleet's permissions allowlist into ~/.claude/settings.json
             // so fleet guard becomes the sole audit gate. prune_dead_holders
             // inside acquire self-heals when a prior Fleet process died
