@@ -594,7 +594,7 @@ pub(crate) fn workspace_name(path: &str) -> String {
     if crate::chat_workspace::is_chat_workspace(path) {
         return crate::chat_workspace::CHAT_WORKSPACE_NAME.to_string();
     }
-    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let segments: Vec<&str> = path.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
     // Fleet develops plans inside `<repo-root>/.worktrees/<task-id>` (see the
     // worktree workflow). Such a checkout belongs to the repo, so name it after
     // the segment before `.worktrees` rather than the task-id leaf.
@@ -608,6 +608,23 @@ pub(crate) fn workspace_name(path: &str) -> String {
         .copied()
         .unwrap_or(path)
         .to_string()
+}
+
+#[cfg(test)]
+mod workspace_name_win_tests {
+    use super::workspace_name;
+
+    #[test]
+    fn windows_backslash_path_yields_basename() {
+        // A real Windows path reaches here from lock files / browsed dirs.
+        // Splitting on '/' only leaves the whole `C:\...\proj` as the name.
+        assert_eq!(workspace_name("C:\\Users\\foo\\proj"), "proj");
+    }
+
+    #[test]
+    fn windows_worktree_uses_repo_name() {
+        assert_eq!(workspace_name("C:\\code\\repo\\.worktrees\\task-1"), "repo");
+    }
 }
 
 // ── CLI process scanning ─────────────────────────────────────────────────────
