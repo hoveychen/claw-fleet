@@ -29,6 +29,9 @@ zstd = "0.13"
 crc32fast = "1"
 sha2 = "0.10"
 base64 = "0.22"
+# gzip the mobile sessions snapshot before it crosses the relay (~110KB→29KB on
+# weak links). The mobile client inflates with the native `DecompressionStream`.
+flate2 = "1"
 conch-parser = "0.1.1"
 shell-words = "1.1.1"
 ctrlc = { version = "3", features = ["termination"] }

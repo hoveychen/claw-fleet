@@ -4,7 +4,7 @@ import styles from "./App.module.css";
 import { enablePush, pushState, resyncPush, type PushState } from "./push";
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
-import { RelayClient } from "./relay";
+import { RelayClient, gzipSupported } from "./relay";
 import type {
   DecisionKind,
   DecisionRequest,
@@ -152,7 +152,13 @@ export function App() {
       // live rather than captured at construction.
       () => {
         const { label, platform } = deviceLabel(navigator.userAgent);
-        return { clientId: getClientId(), label, platform, pushSubscribed: pushState() === "granted" };
+        return {
+          clientId: getClientId(),
+          label,
+          platform,
+          pushSubscribed: pushState() === "granted",
+          supportsGzip: gzipSupported(),
+        };
       },
     );
     clientRef.current = client;

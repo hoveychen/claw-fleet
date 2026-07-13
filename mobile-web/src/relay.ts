@@ -14,6 +14,25 @@ export interface DeviceInfo {
   label: string;
   platform: string;
   pushSubscribed: boolean;
+  /** Whether this browser can inflate a gzipped `sessions` snapshot via the
+   *  native `DecompressionStream`. The desktop only compresses a snapshot when
+   *  every live client reports `true`, so an old client here (or one on a
+   *  browser without the API) transparently keeps receiving plaintext. */
+  supportsGzip: boolean;
+}
+
+/** Native gzip inflation support (Safari 16.4+, all evergreen Chrome/Firefox).
+ *  Announced to the desktop in `client_hello` so it can gate compression. */
+export function gzipSupported(): boolean {
+  return typeof DecompressionStream !== "undefined";
+}
+
+/** Inflate a base64-encoded gzip blob (the `enc:"gzip"` sessions payload) back
+ *  into its JSON string, using the streaming DecompressionStream API. */
+async function inflateGzipBase64(b64: string): Promise<string> {
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Response(stream).text();
 }
 
 export interface RelayHandlers {
@@ -189,9 +208,20 @@ export class RelayClient {
           String(payload.id ?? ""),
         );
         break;
-      case "sessions":
-        this.handlers.onSessions?.((payload.sessions ?? []) as SessionInfo[]);
+      case "sessions": {
+        const raw = payload.sessions;
+        // Compressed frame (desktop confirmed every live client supports gzip).
+        // Decode is async; a decode failure is dropped silently because the
+        // next snapshot is full state and self-heals the list.
+        if (payload.enc === "gzip" && typeof raw === "string") {
+          void inflateGzipBase64(raw)
+            .then((json) => this.handlers.onSessions?.(JSON.parse(json) as SessionInfo[]))
+            .catch(() => {});
+        } else {
+          this.handlers.onSessions?.((raw ?? []) as SessionInfo[]);
+        }
         break;
+      }
       case "reply": {
         const reqId = String(payload.req_id ?? "");
         const entry = this.pending.get(reqId);
