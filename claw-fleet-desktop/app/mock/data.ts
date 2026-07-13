@@ -13,6 +13,11 @@ const DAY = 24 * HOUR;
 
 // ── Sessions ────────────────────────────────────────────────────────────────
 
+/** Stands in for `~/.fleet/chat` — what the real `chat_workspace` command
+ *  returns. The chat session below lives here, and the launchpad's chat filter
+ *  compares against it. */
+export const MOCK_CHAT_WORKSPACE = "/Users/demo/.fleet/chat";
+
 export const MOCK_SESSIONS: SessionInfo[] = [
   // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
   {
@@ -463,6 +468,43 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     contextPercent: 0.41,
     agentSource: "claude-code",
     lastOutcome: ["feature_added"],
+  },
+
+  // ── 9. Pure-chat session: the `~/.fleet/chat` workspace, not a project ──
+  // Its workspacePath must match the mock `chat_workspace` command, which is
+  // what the launchpad's 「仅聊天 / 隐藏聊天」 filter keys off.
+  {
+    id: "sess-chat-idle",
+    workspacePath: MOCK_CHAT_WORKSPACE,
+    workspaceName: "Chat",
+    ideName: null,
+    entrypoint: "claw-fleet-newsession",
+    isSubagent: false,
+    parentSessionId: null,
+    agentType: null,
+    agentDescription: null,
+    slug: null,
+    aiTitle: "解释一下 Raft 的选举流程",
+    status: "idle",
+    tokenSpeed: 0,
+    agentTokenSpeed: 0,
+    totalOutputTokens: 3200,
+    totalCostUsd: 0,
+    agentTotalCostUsd: 0,
+    costSpeedUsdPerMin: 0,
+    lastMessagePreview: "简单说，任期内每个节点最多投一票，拿到多数票的候选人当选 leader。",
+    lastActivityMs: NOW - 40 * MIN,
+    createdAtMs: NOW - 50 * MIN,
+    jsonlPath: "/Users/demo/.claude/projects/chat/sess-chat-idle.jsonl",
+    model: "claude-opus-4-20250805",
+    thinkingLevel: null,
+    pid: null,
+    pidPrecise: false,
+    procAlive: false,
+    lastSkill: null,
+    contextPercent: 0.08,
+    agentSource: "claude-code",
+    lastOutcome: [],
   },
 ];
 
