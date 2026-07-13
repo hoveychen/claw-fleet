@@ -2432,6 +2432,7 @@ mod tests {
     fn resolved_elicitation_card_keeps_questions_and_marks_picks() {
         use crate::elicitation::{ElicitationOption, ElicitationQuestion, ElicitationRequest};
         let request = ElicitationRequest {
+            parked: false,
             id: "e-1".into(),
             session_id: "s".into(),
             workspace_name: "demo".into(),

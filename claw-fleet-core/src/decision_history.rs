@@ -601,6 +601,7 @@ mod tests {
 
     fn sample_request(session_id: &str, id: &str) -> ElicitationRequest {
         ElicitationRequest {
+            parked: false,
             id: id.into(),
             session_id: session_id.into(),
             workspace_name: "claude-fleet".into(),
@@ -873,6 +874,7 @@ mod tests {
     fn sample_fleet_ask_request(session_id: &str, id: &str) -> FleetAskRequest {
         use crate::mcp_ipc::{FleetAskOption, FormFieldKind};
         FleetAskRequest {
+            parked: false,
             id: id.into(),
             session_id: session_id.into(),
             workspace_name: "claude-fleet".into(),
@@ -1005,6 +1007,7 @@ mod tests {
         append_record(&DecisionHistoryRecord::Elicitation(elic_rec)).unwrap();
 
         let fa_req = FleetAskRequest {
+            parked: false,
             id: "fa-1".into(),
             session_id: "ssn-mix".into(),
             workspace_name: "claude-fleet".into(),

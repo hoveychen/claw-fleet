@@ -31,6 +31,9 @@ pub struct A2uiRenderRequest {
     pub ai_title: Option<String>,
     #[serde(default)]
     pub timestamp: String,
+    /// Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parked: bool,
     /// The A2UI v0.9 agent-to-client message tree, passed through verbatim
     /// to `@a2ui/web_core`'s `MessageProcessor` on the desktop side.
     pub message_tree: serde_json::Value,
@@ -202,6 +205,7 @@ mod tests {
     #[test]
     fn request_round_trips_camel_case_with_message_tree() {
         let req = A2uiRenderRequest {
+            parked: false,
             id: "abc".into(),
             session_id: "sess-1".into(),
             workspace_name: "claude-fleet".into(),
