@@ -1,24 +1,33 @@
 import React from "react";
-import { FadeInOut, PaperStage, Pip, PipProps, Porthole, Bubble, TipHeader } from "../ui";
+import { Sequence } from "remotion";
+import { FadeInOut, PaperStage, PainWindow, Pip, PipProps, Porthole, Bubble, TipHeader } from "../ui";
 
-// Shared layout for every tip beat: header top-left, stage center,
-// captain porthole + speech bubble reaction in a corner, and an optional
-// real-screen-capture picture-in-picture window.
+export type Pain = { title: string; lines: string[] };
+
+// Two-beat tip: THE PAIN (dark terminal chaos, frames 0–~60) is swept away,
+// then the elegant solve plays. Real screen capture rides picture-in-picture
+// during the solve. Captain watches throughout and quips at the end.
 export const TipShell: React.FC<{
   n: number;
   title: string;
+  pain: Pain;
   bubble: string;
   bubbleEnter?: number;
   side?: "left" | "right";
   duration?: number;
   pip?: PipProps;
   children: React.ReactNode;
-}> = ({ n, title, bubble, bubbleEnter = 96, side = "right", duration = 180, pip, children }) => (
+}> = ({ n, title, pain, bubble, bubbleEnter = 130, side = "right", duration = 180, pip, children }) => (
   <FadeInOut duration={duration} fadeIn={8} fadeOut={10}>
     <PaperStage>
       <TipHeader n={n} title={title} />
-      {children}
-      {pip ? <Pip {...pip} /> : null}
+      <PainWindow title={pain.title} lines={pain.lines} exitAt={50} />
+      <Sequence from={56}>{children}</Sequence>
+      {pip ? (
+        <Sequence from={56}>
+          <Pip {...pip} enter={16} />
+        </Sequence>
+      ) : null}
       <Porthole side={side} enter={10} />
       <Bubble text={bubble} enter={bubbleEnter} side={side} />
     </PaperStage>
