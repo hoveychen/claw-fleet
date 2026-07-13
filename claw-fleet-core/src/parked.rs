@@ -64,6 +64,15 @@ pub struct ParkedCard {
     /// pure replay of what we already resolved.
     pub workspace_path: String,
     pub parked_at: String,
+    /// `--model` spec the session was running, so the resume continues on the
+    /// same model instead of falling through to whatever the CLI defaults to.
+    /// `None` (including on cards parked before this field existed) means "let
+    /// the CLI pick", which is the old behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Reasoning effort the session was running; same rationale as `model`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
     /// The original request payload (`FleetAskRequest`, `ElicitationRequest`,
     /// `A2uiRenderRequest` or `PlanApprovalRequest`), verbatim.
     pub request: Value,
@@ -119,6 +128,25 @@ pub fn park(
     workspace_path: &str,
     request: &impl Serialize,
 ) -> Result<ParkedCard, String> {
+    park_with(id, kind, session_id, workspace_path, request, None, None)
+}
+
+/// [`park`] plus the launch flags the resumed session must come back on.
+///
+/// Split out because only the *producer* can supply them: `model` is resolved
+/// from the transcript and `effort` is read from `CLAUDE_EFFORT`, which only
+/// exists in the environment of a process running inside the session — the
+/// `fleet mcp` child and the hook CLIs, not the desktop.
+#[allow(clippy::too_many_arguments)]
+pub fn park_with(
+    id: &str,
+    kind: ParkedKind,
+    session_id: &str,
+    workspace_path: &str,
+    request: &impl Serialize,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Result<ParkedCard, String> {
     let dir = parked_dir().ok_or("cannot determine home dir")?;
     fs::create_dir_all(&dir).map_err(|e| format!("create parked dir: {e}"))?;
     let mut payload =
@@ -132,6 +160,8 @@ pub fn park(
         session_id: session_id.to_string(),
         workspace_path: workspace_path.to_string(),
         parked_at: chrono::Utc::now().to_rfc3339(),
+        model: model.map(str::to_string),
+        effort: effort.map(str::to_string),
         request: payload,
     };
     let path = card_path(id).unwrap();
@@ -241,7 +271,24 @@ pub fn park_and_stop(
     let Some(workspace) = parkable_workspace(session_id) else {
         return false;
     };
-    if let Err(e) = park(id, kind, session_id, &workspace, request) {
+    // Capture the launch flags *here*, in the producer, because this is the only
+    // place they exist: `park_and_stop` runs inside the session's own process
+    // tree (the `fleet mcp` child / a hook CLI), so `CLAUDE_EFFORT` is in the
+    // environment. The desktop process that later answers the card has neither.
+    let model = crate::session::resolve_session_model_spec(session_id);
+    let effort = std::env::var("CLAUDE_EFFORT")
+        .ok()
+        .map(|e| e.trim().to_string())
+        .filter(|e| !e.is_empty());
+    if let Err(e) = park_with(
+        id,
+        kind,
+        session_id,
+        &workspace,
+        request,
+        model.as_deref(),
+        effort.as_deref(),
+    ) {
         // Couldn't preserve the question — don't strand the agent behind a card
         // that isn't there. Fall back to the old path.
         crate::log_debug(&format!("parked: park {id} failed: {e}; not parking"));
@@ -310,6 +357,17 @@ fn wait_for_exit(pid: u32, budget: Duration) -> bool {
 /// It is rendered, together with the original question, into the prompt of a
 /// `claude --resume`.
 pub fn answer(id: &str, response: &Value) -> Result<(), String> {
+    answer_with(id, response, |session_id, workspace, prompt, model, effort, perm| {
+        crate::auto_resume::spawn_resume_prompt(session_id, workspace, prompt, model, effort, perm)
+    })
+}
+
+/// [`answer`] with the resume injected, so tests can observe what the session
+/// would actually have been relaunched with.
+pub fn answer_with<S>(id: &str, response: &Value, spawn: S) -> Result<(), String>
+where
+    S: FnOnce(&str, &str, &str, Option<&str>, Option<&str>, Option<&str>) -> Result<(), String>,
+{
     let card = get(id).ok_or_else(|| format!("no parked card {id}"))?;
 
     // The turn that asked should already be dead (we SIGINT'd it at park time).
@@ -325,18 +383,19 @@ pub fn answer(id: &str, response: &Value) -> Result<(), String> {
     }
 
     let prompt = build_resume_prompt(&card, response);
-    crate::auto_resume::spawn_resume_prompt(
+    // The resumed session is the *same* session continuing its work, so it has to
+    // come back on the same model and effort it was running. Falling through to
+    // the CLI default would silently switch models mid-task — an `opus[1m]`
+    // session would wake up as plain `opus`, losing 800K of context window. Same
+    // reasoning as `handoff`, which makes the launch flags follow the relay.
+    // `permission_mode` is deliberately not carried: an answer should not
+    // re-grant an elevated mode.
+    spawn(
         &card.session_id,
         &card.workspace_path,
         &prompt,
-        // No model / effort / permission-mode override: `--resume` inherits the
-        // CLI's configured default, exactly like the desktop's own 「恢复会话」
-        // box and auto-resume do. The session's original `--model` spec is not
-        // recoverable from the transcript (it records a bare model id, dropping
-        // suffixes like `[1m]`), so guessing one here could silently downgrade
-        // the session.
-        None,
-        None,
+        card.model.as_deref(),
+        card.effort.as_deref(),
         None,
     )?;
     discard(id)
@@ -652,6 +711,71 @@ mod tests {
         let card = park("card-5", ParkedKind::FleetAsk, "sess-5", "/ws/a", &req).unwrap();
         let prompt = build_resume_prompt(&card, &json!({ "id": "card-5", "answers": {} }));
         assert!(prompt.contains("(未作答)"), "{prompt}");
+    }
+
+    /// A parked card's whole point is that the *same* session picks the work back
+    /// up. Resuming it on whatever `~/.claude/settings.json` happens to default
+    /// to silently switches the model mid-task — an `opus[1m]` session would wake
+    /// up as plain `opus` and lose 800K of context window, a fable-5 session would
+    /// wake up as opus. The launch flags have to follow the card, exactly as
+    /// `handoff` makes them follow the relay.
+    #[test]
+    fn resume_is_launched_on_the_session_s_own_model_and_effort() {
+        let _home = TmpHome::new("resume-model");
+        let req = fleet_ask_request("card-m", "sess-m");
+        park_with(
+            "card-m",
+            ParkedKind::FleetAsk,
+            "sess-m",
+            "/ws/a",
+            &req,
+            Some("claude-opus-4-8[1m]"),
+            Some("high"),
+        )
+        .unwrap();
+
+        let spy = std::cell::RefCell::new((None::<String>, None::<String>, None::<String>));
+        answer_with(
+            "card-m",
+            &json!({ "id": "card-m", "answers": { "要不要保留向后兼容？": "保留" } }),
+            |_sid, _ws, prompt, model, effort, _perm| {
+                *spy.borrow_mut() = (
+                    Some(prompt.to_string()),
+                    model.map(str::to_string),
+                    effort.map(str::to_string),
+                );
+                Ok(())
+            },
+        )
+        .unwrap();
+
+        let (prompt, model, effort) = spy.into_inner();
+        assert_eq!(
+            model.as_deref(),
+            Some("claude-opus-4-8[1m]"),
+            "the resumed session must stay on its own model, not the CLI default"
+        );
+        assert_eq!(effort.as_deref(), Some("high"), "same for reasoning effort");
+        assert!(prompt.unwrap().contains("保留"), "the answer still has to get through");
+    }
+
+    /// A card parked with no recorded model (its transcript had no assistant turn
+    /// to read one from) must not invent one — passing a guess would be the same
+    /// silent switch, just in the other direction. The CLI default stands.
+    #[test]
+    fn resume_without_a_recorded_model_passes_no_override() {
+        let _home = TmpHome::new("resume-nomodel");
+        let req = fleet_ask_request("card-n", "sess-n");
+        park_with("card-n", ParkedKind::FleetAsk, "sess-n", "/ws/a", &req, None, None).unwrap();
+
+        let spy = std::cell::RefCell::new((None::<String>, None::<String>));
+        answer_with("card-n", &json!({ "id": "card-n", "answers": {} }), |_s, _w, _p, model, effort, _perm| {
+            *spy.borrow_mut() = (model.map(str::to_string), effort.map(str::to_string));
+            Ok(())
+        })
+        .unwrap();
+
+        assert_eq!(spy.into_inner(), (None, None));
     }
 
     #[test]
