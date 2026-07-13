@@ -188,13 +188,12 @@
 
 .option {
   display: flex;
-  gap: 10px;
   width: 100%;
   text-align: left;
-  padding: 10px 12px;
+  padding: 8px 12px;
   margin-top: 8px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--color-bg-secondary);
   align-items: flex-start;
 }
@@ -237,15 +236,95 @@
 }
 
 .optionLabel {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 500;
   overflow-wrap: anywhere;
 }
 
 .optionDesc {
-  font-size: 12.5px;
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--color-text-secondary);
   overflow-wrap: anywhere;
+}
+
+/* ── Always-visible "Other" composer (desktop-aligned) ── */
+.otherBlock {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.otherLabel {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+}
+
+.otherBox {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-secondary);
+  transition: border-color 0.15s;
+}
+
+.otherBox:focus-within {
+  border-color: var(--color-accent);
+}
+
+.otherChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.otherRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Inline `+` picker inside the box, matching the desktop composer's attach
+   button (the old standalone "附件" chip is gone). */
+.otherAttach {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.otherAttach:disabled {
+  opacity: 0.45;
+}
+
+.otherInput {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--color-text);
+  padding: 2px 0;
+}
+
+.otherInput::placeholder {
+  color: var(--color-text-dim);
 }
 
 /* form fields */
@@ -448,12 +527,22 @@
   padding: 4px 0;
 }
 
+/* Boxed preview under the option — matches the desktop panel's bordered,
+   inset preview pane (desktop shows it side-by-side; the narrow mobile card
+   stacks it below instead). Full-width, no dangling left-border indent. */
 .optionPreview {
-  margin: 4px 0 8px 26px;
-  border-left: 2px solid var(--color-border-strong);
-  padding: 4px 0 4px 10px;
+  margin: 6px 0 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+  line-height: 1.45;
   color: var(--color-text-secondary);
+  max-height: 40vh;
+  overflow: auto;
+  overscroll-behavior: contain;
   word-break: break-word;
 }
 
@@ -461,8 +550,12 @@
   margin: 0 0 6px;
 }
 
+.optionPreview p:last-child {
+  margin-bottom: 0;
+}
+
 .optionPreview pre {
-  background: var(--color-bg);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 6px;
@@ -604,24 +697,33 @@
   min-width: 0;
 }
 
+/* Side action rail — stretches to the option card's height so the pencil /
+   preview buttons read as tall boxes flanking the card, matching the desktop
+   panel's full-height "copy to Other" pencil rather than small chips. */
 .optionSide {
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 4px;
   margin-top: 8px;
 }
 
 .optionSideBtn {
+  flex: 1;
+  min-height: 0;
+  width: 34px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
-  color: var(--color-text-dim);
+  color: var(--color-text-secondary);
   border-radius: 8px;
-  padding: 4px 7px;
+  padding: 0;
   line-height: 1;
+}
+
+.optionSideBtn:active {
+  background: var(--color-bg-card-hover);
 }
 
 .optionSideBtn[data-active="true"] {

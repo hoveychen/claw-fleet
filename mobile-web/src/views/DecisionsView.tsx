@@ -6,8 +6,8 @@ import {
   ChevronRight,
   CloudOff,
   Eye,
-  Paperclip,
   Pencil,
+  Plus,
   X,
 } from "lucide-react";
 import { EmptyState } from "./EmptyState";
@@ -753,8 +753,6 @@ function PrecedingNarration({
 
 // ── elicitation / fleet-ask ──────────────────────────────────────────────────
 
-const OTHER = "__other__";
-
 function QuestionsCard({
   request,
   isFleetAsk,
@@ -768,7 +766,7 @@ function QuestionsCard({
   session: SessionInfo | undefined;
   submit: (f: Record<string, unknown>) => void;
 }) {
-  // question text → selected labels (OTHER = custom text active)
+  // question text → selected option labels
   const [selections, setSelections] = useState<Record<string, string[]>>({});
   const [custom, setCustom] = useState<Record<string, string>>({});
   // question text → user flipped a single-select into multi-select
@@ -797,11 +795,11 @@ function QuestionsCard({
    *  with required form fields filled. Gates Next/Submit instead of erroring
    *  after the fact. */
   const answeredQuestion = (q: ElicitationQuestion | FleetAskQuestion): boolean => {
-    const hasOptions = (q.options?.length ?? 0) > 0;
-    const sel = selections[q.question] ?? [];
-    const picked = sel.filter((l) => l !== OTHER);
-    const customActive = !hasOptions || sel.includes(OTHER);
-    const customText = customActive ? (custom[q.question] ?? "").trim() : "";
+    const picked = selections[q.question] ?? [];
+    // Custom text is always live now (the "Other" box is always visible), so it
+    // folds into the answer whenever non-empty — matching the desktop panel's
+    // always-present composer instead of the old "其他…" toggle sentinel.
+    const customText = (custom[q.question] ?? "").trim();
     const atts = attachments[q.question] ?? [];
     const fields = (q as FleetAskQuestion).formFields ?? [];
     const requiredOk = fields.every((f) => !f.required || (form[f.name] ?? "").trim());
@@ -813,14 +811,8 @@ function QuestionsCard({
   /** Desktop's per-option pencil: seed the Other composer with the option's
    *  text so it can be tweaked instead of retyped. */
   const editToOther = (q: ElicitationQuestion | FleetAskQuestion, o: { label: string; description?: string }) => {
-    const effectiveMulti = q.multiSelect || multiOverride[q.question] === true;
-    setSelections((prev) => {
-      const cur = prev[q.question] ?? [];
-      if (effectiveMulti) {
-        return cur.includes(OTHER) ? prev : { ...prev, [q.question]: [...cur, OTHER] };
-      }
-      return { ...prev, [q.question]: [OTHER] };
-    });
+    // Just seed the always-visible "Other" box; its non-empty text is enough to
+    // count as an answer (same as desktop's pencil → composer flow).
     setCustom((p) => ({
       ...p,
       [q.question]: o.description ? `${o.label} — ${o.description}` : o.label,
@@ -882,12 +874,10 @@ function QuestionsCard({
     }
     const answers: Record<string, string> = {};
     for (const q of request.questions) {
-      const hasOptions = (q.options?.length ?? 0) > 0;
-      const picked = (selections[q.question] ?? []).filter((l) => l !== OTHER);
-      // Option-less questions expose the free-text box directly (no "其他…"
-      // toggle), mirroring the desktop's always-present composer.
-      const customActive = !hasOptions || (selections[q.question] ?? []).includes(OTHER);
-      const customText = customActive ? (custom[q.question] ?? "").trim() : "";
+      const picked = selections[q.question] ?? [];
+      // The "Other" box is always live; its non-empty text folds into the
+      // answer alongside any picked options, mirroring the desktop composer.
+      const customText = (custom[q.question] ?? "").trim();
       const parts = [...picked];
       if (customText) parts.push(customText);
       const atts0 = attachments[q.question] ?? [];
@@ -975,7 +965,6 @@ function QuestionsCard({
           ) : null}
           {(q.options ?? []).map((o) => {
             const selected = (selections[q.question] ?? []).includes(o.label);
-            const effectiveMulti = q.multiSelect || multiOverride[q.question] === true;
             const previewKey = `${q.question} ${o.label}`;
             // Desktop shows a focused option's preview BEFORE selection (the
             // point of preview is comparing candidates); no hover on touch,
@@ -989,9 +978,9 @@ function QuestionsCard({
                     data-selected={selected}
                     onClick={() => toggle(q, o.label)}
                   >
-                    <span className={styles.optionMark} data-multi={effectiveMulti}>
-                      {selected && <Check size={12} />}
-                    </span>
+                    {/* No leading radio/checkbox mark — selection reads from the
+                        card's coral border + soft fill, matching desktop's clean
+                        option cards. */}
                     <span className={styles.optionBody}>
                       <span className={styles.optionLabel}>{o.label}</span>
                       {o.description && <span className={styles.optionDesc}>{o.description}</span>}
@@ -1027,47 +1016,29 @@ function QuestionsCard({
               </div>
             );
           })}
-          {(q.options?.length ?? 0) > 0 ? (
-            <>
-              <button
-                className={styles.option}
-                data-selected={(selections[q.question] ?? []).includes(OTHER)}
-                onClick={() => toggle(q, OTHER)}
-              >
-                <span
-                  className={styles.optionMark}
-                  data-multi={q.multiSelect || multiOverride[q.question] === true}
-                >
-                  {(selections[q.question] ?? []).includes(OTHER) && <Check size={12} />}
-                </span>
-                <span className={styles.optionBody}>
-                  <span className={styles.optionLabel}>{t("其他…")}</span>
-                </span>
-              </button>
-              {(selections[q.question] ?? []).includes(OTHER) && (
-                <textarea
-                  className={styles.reasonInput}
-                  placeholder={t("自定义回答")}
-                  value={custom[q.question] ?? ""}
-                  onChange={(e) => setCustom((p) => ({ ...p, [q.question]: e.target.value }))}
-                  rows={2}
-                />
-              )}
-            </>
-          ) : (
-            // No options: the free-text box is the answer surface itself,
-            // like the desktop's always-rendered composer (form-only cards
-            // may leave it empty; required fields gate submit instead).
-            <textarea
-              className={styles.reasonInput}
-              placeholder={t("自由回答…")}
-              value={custom[q.question] ?? ""}
-              onChange={(e) => setCustom((p) => ({ ...p, [q.question]: e.target.value }))}
-              rows={2}
-            />
-          )}
-          <div className={styles.questionTools}>
-            {(q.options?.length ?? 0) > 0 && !q.multiSelect && (
+          {/* Always-visible "Other" composer — mirrors the desktop panel: a
+              labelled bordered box with an inline `+` attach button and a
+              borderless textarea. Its non-empty text folds into the answer, so
+              no explicit "其他…" toggle is needed. Option-less questions drop
+              the label and let the box stand as the primary answer surface. */}
+          <OtherComposer
+            label={(q.options?.length ?? 0) > 0 ? t("其他") : undefined}
+            placeholder={(q.options?.length ?? 0) > 0 ? t("自定义回答") : t("自由回答…")}
+            value={custom[q.question] ?? ""}
+            onChange={(v) => setCustom((p) => ({ ...p, [q.question]: v }))}
+            question={q.question}
+            attachments={attachments[q.question] ?? []}
+            uploading={uploadingQ === q.question}
+            onPick={(files) => void addQuestionFiles(q.question, files)}
+            onRemove={(path) =>
+              setAttachments((prev) => ({
+                ...prev,
+                [q.question]: (prev[q.question] ?? []).filter((a) => a.path !== path),
+              }))
+            }
+          />
+          {(q.options?.length ?? 0) > 0 && !q.multiSelect && (
+            <div className={styles.questionTools}>
               <button
                 className={styles.toolToggle}
                 data-active={multiOverride[q.question] === true}
@@ -1075,20 +1046,8 @@ function QuestionsCard({
               >
                 {multiOverride[q.question] ? t("已改为多选") : t("改为多选")}
               </button>
-            )}
-            <QuestionAttachRow
-              question={q.question}
-              attachments={attachments[q.question] ?? []}
-              uploading={uploadingQ === q.question}
-              onPick={(files) => void addQuestionFiles(q.question, files)}
-              onRemove={(path) =>
-                setAttachments((prev) => ({
-                  ...prev,
-                  [q.question]: (prev[q.question] ?? []).filter((a) => a.path !== path),
-                }))
-              }
-            />
-          </div>
+            </div>
+          )}
           {(q.formFields ?? []).map((f) => (
             <FormFieldControl
               key={f.name}
@@ -1131,14 +1090,26 @@ function QuestionsCard({
   );
 }
 
-/** Per-question attachment chips + picker (answers gain `@path` mentions). */
-function QuestionAttachRow({
+/** Always-visible "Other" composer — the desktop panel's clean equivalent of
+ *  the old "其他…" toggle. A labelled bordered box holds attachment chips, an
+ *  inline `+` picker (answers gain `@path` mentions), and a borderless textarea
+ *  whose non-empty text folds into the answer. `label` is omitted for
+ *  option-less questions, where the box is the primary answer surface. */
+function OtherComposer({
+  label,
+  placeholder,
+  value,
+  onChange,
   question,
   attachments,
   uploading,
   onPick,
   onRemove,
 }: {
+  label?: string;
+  placeholder: string;
+  value: string;
+  onChange: (v: string) => void;
   question: string;
   attachments: Attachment[];
   uploading: boolean;
@@ -1147,40 +1118,50 @@ function QuestionAttachRow({
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   return (
-    <div className={styles.attachRow}>
-      {attachments.map((a) => (
-        <span key={a.path} className={styles.attachChip}>
-          {a.name}
-          <button className={styles.attachRemove} onClick={() => onRemove(a.path)}>
-            <X size={12} />
-          </button>
-        </span>
-      ))}
-      <button
-        className={styles.toolToggle}
-        disabled={uploading}
-        onClick={() => inputRef.current?.click()}
-      >
-        {uploading ? (
-          t("上传中…")
-        ) : (
-          <>
-            <Paperclip size={13} />
-            {t("附件")}
-          </>
+    <div className={styles.otherBlock}>
+      {label && <span className={styles.otherLabel}>{label}</span>}
+      <div className={styles.otherBox}>
+        {attachments.length > 0 && (
+          <div className={styles.otherChips}>
+            {attachments.map((a) => (
+              <span key={a.path} className={styles.attachChip}>
+                {a.name}
+                <button className={styles.attachRemove} onClick={() => onRemove(a.path)}>
+                  <X size={12} />
+                </button>
+              </span>
+            ))}
+          </div>
         )}
-      </button>
-      <input
-        ref={inputRef}
-        type="file"
-        multiple
-        hidden
-        aria-label={t("为「{0}」添加附件", question)}
-        onChange={(e) => {
-          onPick(e.target.files);
-          e.target.value = "";
-        }}
-      />
+        <div className={styles.otherRow}>
+          <button
+            className={styles.otherAttach}
+            disabled={uploading}
+            onClick={() => inputRef.current?.click()}
+            aria-label={t("为「{0}」添加附件", question)}
+          >
+            <Plus size={14} />
+          </button>
+          <textarea
+            className={styles.otherInput}
+            placeholder={uploading ? t("上传中…") : placeholder}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            rows={2}
+          />
+        </div>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          hidden
+          aria-label={t("为「{0}」添加附件", question)}
+          onChange={(e) => {
+            onPick(e.target.files);
+            e.target.value = "";
+          }}
+        />
+      </div>
     </div>
   );
 }
