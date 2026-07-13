@@ -2332,6 +2332,7 @@ fn cmd_elicitation() {
         ai_title: None,
         questions,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
     };
 
     if let Err(e) = elicitation::write_request(&req) {
@@ -2567,6 +2568,7 @@ fn cmd_plan_approval() {
         plan_content,
         plan_file_path,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
     };
 
     if let Err(e) = plan_approval::write_request(&req) {

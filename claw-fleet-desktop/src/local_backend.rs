@@ -1459,6 +1459,18 @@ pub fn resume_session_impl(
     )
 }
 
+/// Route a Decision Card response through the parked store: `Some` when this id
+/// was a timed-out card (the response wakes the session up, or drops the card),
+/// `None` when it is still live and the caller should write its response file.
+fn parked_resolve(
+    id: &str,
+    resp: &impl serde::Serialize,
+    dismissed: bool,
+) -> Option<Result<(), String>> {
+    let payload = serde_json::to_value(resp).ok()?;
+    claw_fleet_core::parked::try_resolve(id, &payload, dismissed)
+}
+
 /// Max number of `claude --resume` auto-resume processes alive at once. Each
 /// is a full Claude Code process (~150-200MB), so an unbounded fan-out of a
 /// few hundred is tens of GB of RSS — the startup runaway this caps.
@@ -2395,7 +2407,14 @@ impl Backend for LocalBackend {
             declined,
             answers,
         };
-        let result = crate::elicitation::write_response(&resp);
+        // A parked card has no producer left polling for a response file: the
+        // hook that asked timed out and its turn was interrupted. Resolving it
+        // resumes the session with the answer instead (or, if the user declined,
+        // just drops the question).
+        let result = match parked_resolve(id, &resp, declined) {
+            Some(r) => r,
+            None => crate::elicitation::write_response(&resp),
+        };
         resolve_feishu_card(id, resolved);
         result
     }
@@ -2411,7 +2430,10 @@ impl Backend for LocalBackend {
             answers,
             cancelled,
         };
-        claw_fleet_core::mcp_ipc::write_response(&resp)
+        match parked_resolve(id, &resp, cancelled) {
+            Some(r) => r,
+            None => claw_fleet_core::mcp_ipc::write_response(&resp),
+        }
     }
 
     fn respond_to_permission_prompt(
@@ -2445,7 +2467,10 @@ impl Backend for LocalBackend {
             action_context,
             cancelled,
         };
-        claw_fleet_core::mcp_a2ui_ipc::write_response(&resp)
+        match parked_resolve(id, &resp, cancelled) {
+            Some(r) => r,
+            None => claw_fleet_core::mcp_a2ui_ipc::write_response(&resp),
+        }
     }
 
     fn apply_mcp_injector(&self, fleet_path: &str) -> Result<(), String> {
@@ -2481,6 +2506,7 @@ impl Backend for LocalBackend {
     }
 
     fn list_pending_decisions(&self) -> claw_fleet_core::backend::PendingDecisions {
+        use claw_fleet_core::parked::{self, ParkedKind};
         let mut pending = claw_fleet_core::backend::PendingDecisions {
             guard: crate::guard::list_pending_requests()
                 .iter()
@@ -2489,18 +2515,26 @@ impl Backend for LocalBackend {
             elicitation: crate::elicitation::list_pending_requests()
                 .iter()
                 .filter_map(|id| crate::elicitation::read_request(id))
+                // Cards whose wait timed out live in the parked store, not in the
+                // channel's request dir — the producer that was blocking on them
+                // is long gone. They keep showing up here, flagged `parked`,
+                // until the user actually resolves them.
+                .chain(parked::list_requests(ParkedKind::Elicitation))
                 .collect(),
             fleet_ask: claw_fleet_core::mcp_ipc::list_pending_requests()
                 .iter()
                 .filter_map(|id| claw_fleet_core::mcp_ipc::read_request(id))
+                .chain(parked::list_requests(ParkedKind::FleetAsk))
                 .collect(),
             a2ui_render: claw_fleet_core::mcp_a2ui_ipc::list_pending_requests()
                 .iter()
                 .filter_map(|id| claw_fleet_core::mcp_a2ui_ipc::read_request(id))
+                .chain(parked::list_requests(ParkedKind::A2uiRender))
                 .collect(),
             plan_approval: crate::plan_approval::list_pending_requests()
                 .iter()
                 .filter_map(|id| crate::plan_approval::read_request(id))
+                .chain(parked::list_requests(ParkedKind::PlanApproval))
                 .collect(),
             permission_prompt: claw_fleet_core::permission_prompt_ipc::list_pending_requests()
                 .iter()
@@ -2533,7 +2567,12 @@ impl Backend for LocalBackend {
             edited_plan,
             feedback,
         };
-        let result = crate::plan_approval::write_response(&resp);
+        // `dismissed: false` — a rejection is an answer the agent has to be woken
+        // up to hear ("老板拒绝了，理由是…"), not a card the user waved away.
+        let result = match parked_resolve(id, &resp, false) {
+            Some(r) => r,
+            None => crate::plan_approval::write_response(&resp),
+        };
         resolve_feishu_card(
             id,
             claw_fleet_core::feishu::resolved_card(

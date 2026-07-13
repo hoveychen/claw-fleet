@@ -32,6 +32,9 @@ pub struct PlanApprovalRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub plan_file_path: Option<String>,
     pub timestamp: String,
+    /// Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub parked: bool,
 }
 
 /// Written by Fleet desktop app → read by `fleet plan-approval`.
@@ -181,6 +184,7 @@ mod tests {
     #[test]
     fn roundtrip_request_serde() {
         let req = PlanApprovalRequest {
+            parked: false,
             id: "abc".into(),
             session_id: "s1".into(),
             workspace_name: "claude-fleet".into(),

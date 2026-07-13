@@ -106,7 +106,12 @@ pub fn parkable_workspace(session_id: &str) -> Option<String> {
 }
 
 /// Move a timed-out request into the parked store. `request` is the channel's
-/// own request struct; it is stored verbatim and handed back to the desktop.
+/// own request struct; it is stored (near-)verbatim and handed back to the
+/// desktop, the phone and the decision-float window as an ordinary pending card.
+///
+/// The one mutation is `parked: true`, stamped into the stored payload here — at
+/// the single point where a request becomes parked — so no listing, relay or
+/// event-emit path downstream has to remember to set it.
 pub fn park(
     id: &str,
     kind: ParkedKind,
@@ -116,13 +121,18 @@ pub fn park(
 ) -> Result<ParkedCard, String> {
     let dir = parked_dir().ok_or("cannot determine home dir")?;
     fs::create_dir_all(&dir).map_err(|e| format!("create parked dir: {e}"))?;
+    let mut payload =
+        serde_json::to_value(request).map_err(|e| format!("serialize request: {e}"))?;
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("parked".into(), Value::Bool(true));
+    }
     let card = ParkedCard {
         id: id.to_string(),
         kind,
         session_id: session_id.to_string(),
         workspace_path: workspace_path.to_string(),
         parked_at: chrono::Utc::now().to_rfc3339(),
-        request: serde_json::to_value(request).map_err(|e| format!("serialize request: {e}"))?,
+        request: payload,
     };
     let path = card_path(id).unwrap();
     let json = serde_json::to_string_pretty(&card).map_err(|e| format!("serialize card: {e}"))?;
@@ -313,6 +323,24 @@ pub fn answer(id: &str, response: &Value) -> Result<(), String> {
     discard(id)
 }
 
+/// The seam every `respond_to_*` path goes through, on both backends.
+///
+/// `None` — this id is a live card; the caller writes its response file as it
+/// always did, and the blocked producer picks it up.
+/// `Some(..)` — this id is parked: there is no producer left to unblock, so the
+/// response instead either wakes the session up with the answer, or (when the
+/// user dismissed the card rather than answering it) quietly drops the question.
+///
+/// `dismissed` is per-channel: `cancelled` for `fleet__ask` / A2UI, `declined`
+/// for elicitation. Plan approval passes `false` — a *rejection* is a real
+/// answer that the agent must be woken up to hear, not a dismissal.
+pub fn try_resolve(id: &str, response: &Value, dismissed: bool) -> Option<Result<(), String>> {
+    if !is_parked(id) {
+        return None;
+    }
+    Some(if dismissed { discard(id) } else { answer(id, response) })
+}
+
 /// Render "here is what you asked, here is what the boss said" for the resume
 /// prompt. The agent reads this as a fresh user turn, so it has to carry enough
 /// context to stand alone — the tool call it came from was interrupted and never
@@ -463,6 +491,7 @@ mod tests {
 
     fn fleet_ask_request(id: &str, session_id: &str) -> crate::mcp_ipc::FleetAskRequest {
         crate::mcp_ipc::FleetAskRequest {
+            parked: false,
             id: id.into(),
             session_id: session_id.into(),
             workspace_name: "claude-fleet".into(),

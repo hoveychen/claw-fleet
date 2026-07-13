@@ -228,6 +228,7 @@ fn handle_fleet_ask_call(params: &Value) -> Result<Value, JsonRpcError> {
         workspace_name,
         ai_title: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
         questions,
     };
 
@@ -400,6 +401,7 @@ fn handle_a2ui_render_call(params: &Value) -> Result<Value, JsonRpcError> {
         workspace_name,
         ai_title: None,
         timestamp: chrono::Utc::now().to_rfc3339(),
+        parked: false,
         message_tree,
     };
 
