@@ -801,6 +801,15 @@ function QuestionsCard({
   // `${question} ${label}` → preview expanded before selection.
   const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
 
+  // Same head-off-screen problem one level down: the 上一题/下一题 buttons and the
+  // step dots sit below a long question, so stepping leaves the next question's
+  // header scrolled past. Snap back on every step change, like the card-level
+  // effect above.
+  useEffect(() => {
+    if (window.scrollY === 0) return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step]);
+
   /** Desktop `hasAnswer`: option / custom text / attachment / form-only,
    *  with required form fields filled. Gates Next/Submit instead of erroring
    *  after the fact. */
