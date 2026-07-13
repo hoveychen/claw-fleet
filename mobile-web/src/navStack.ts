@@ -40,7 +40,9 @@ export class NavStack {
   constructor(
     private history: HistoryLike,
     private onRootBack: () => RootBackResult,
-    private schedule: (fn: () => void) => void = queueMicrotask,
+    // 必须包一层：直接写 `= queueMicrotask` 会把它当裸函数存进实例字段，之后
+    // this.schedule(...) 的 receiver 是 NavStack 实例，浏览器抛 "Illegal invocation"。
+    private schedule: (fn: () => void) => void = (fn) => queueMicrotask(fn),
   ) {}
 
   /** 压入哨兵。必须在任何 push() 之前调用一次。 */

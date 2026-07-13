@@ -107,6 +107,33 @@ describe("NavStack", () => {
     expect(stack.depth).toBe(1);
   });
 
+  // 浏览器里 queueMicrotask 是 window 上的方法，必须以 window 为 receiver 调用；
+  // 把它当裸函数存进实例字段再 this.schedule(...) 调用，receiver 会变成 NavStack
+  // 实例，Chrome 直接抛 "Illegal invocation"——effect 里抛错会让 React 卸载整棵树，
+  // 表现就是点一下 tab 整个 app 白屏。node 的 queueMicrotask 不挑 receiver，所以
+  // 这里换一个会校验 receiver 的实现，把浏览器的语义搬进单测。
+  it("默认 scheduler 以全局为 receiver 调用 queueMicrotask（不是裸引用）", async () => {
+    const real = globalThis.queueMicrotask;
+    const seen: unknown[] = [];
+    globalThis.queueMicrotask = function (this: unknown, cb: () => void) {
+      seen.push(this);
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return real(cb);
+    };
+    try {
+      const { history, calls } = fakeHistory();
+      const stack = new NavStack(history, () => "hold"); // 不注入 scheduler，走默认值
+      stack.start();
+      expect(() => stack.push(vi.fn())).not.toThrow();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(calls).toEqual(["push", "push"]); // 哨兵 + 这一层，说明微任务真的跑了
+      expect(seen.every((r) => r === undefined || r === globalThis)).toBe(true);
+    } finally {
+      globalThis.queueMicrotask = real;
+    }
+  });
+
   it("栈底返回：hold 拦下并压回哨兵，leave 才真的离开", () => {
     const hold = mk(() => "hold");
     hold.stack.handlePopState(); // 吃掉哨兵
