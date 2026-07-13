@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
-import { safeRemarkPlugins } from "../markdown/safeLinks";
+import { safeRemarkPlugins, safeRehypePlugins } from "../markdown/safeLinks";
 import { usePathMarkdown } from "../hooks/usePathLinks";
 import { normalizeAnswer, summarizeQuestion } from "../decisionText";
 import type {
@@ -91,7 +91,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
           <div key={qi} className={styles.question_block}>
             <div className={styles.question_text}>
               <ReactMarkdown
-                remarkPlugins={safeRemarkPlugins}
+                remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                 components={md.block}
               >
                 {q.question}
@@ -110,7 +110,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                   <span className={styles.option_label}>
                     <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
                     <ReactMarkdown
-                      remarkPlugins={safeRemarkPlugins}
+                      remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                       components={md.inline}
                     >
                       {opt.label}
@@ -119,7 +119,7 @@ function ElicitationBody({ rec }: { rec: ElicitationHistoryRecord }) {
                   {opt.description && (
                     <span className={styles.option_desc}>
                       <ReactMarkdown
-                        remarkPlugins={safeRemarkPlugins}
+                        remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                         components={md.inline}
                       >
                         {opt.description}
@@ -166,7 +166,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
     <div className={styles.body}>
       <div className={styles.plan_content}>
         <ReactMarkdown
-          remarkPlugins={safeRemarkPlugins}
+          remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
           components={md.block}
         >
           {rec.planContent}
@@ -179,7 +179,7 @@ function PlanApprovalBody({ rec }: { rec: PlanApprovalHistoryRecord }) {
           </div>
           <div className={styles.plan_content}>
             <ReactMarkdown
-              remarkPlugins={safeRemarkPlugins}
+              remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
               components={md.block}
             >
               {rec.editedPlan}
@@ -226,7 +226,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
           <div key={qi} className={styles.question_block}>
             <div className={styles.question_text}>
               <ReactMarkdown
-                remarkPlugins={safeRemarkPlugins}
+                remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                 components={md.block}
               >
                 {q.question}
@@ -266,7 +266,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                   <span className={styles.option_label}>
                     <span className={styles.option_marker}>{isSelected ? "✓" : "○"}</span>
                     <ReactMarkdown
-                      remarkPlugins={safeRemarkPlugins}
+                      remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                       components={md.inline}
                     >
                       {opt.label}
@@ -275,7 +275,7 @@ function FleetAskBody({ rec }: { rec: FleetAskHistoryRecord }) {
                   {opt.description && (
                     <span className={styles.option_desc}>
                       <ReactMarkdown
-                        remarkPlugins={safeRemarkPlugins}
+                        remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins}
                         components={md.inline}
                       >
                         {opt.description}

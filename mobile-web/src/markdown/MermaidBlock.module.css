@@ -1,0 +1,37 @@
+.diagram {
+  margin: 10px 0;
+  padding: 10px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  overflow-x: auto;
+  text-align: center;
+}
+
+.diagram svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.failed {
+  margin: 10px 0;
+  border: 1px solid var(--color-error);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.failed_label {
+  padding: 6px 10px;
+  color: var(--color-error);
+  font-size: 11px;
+}
+
+.failed_source {
+  margin: 0;
+  padding: 10px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow-x: auto;
+}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import ReactMarkdown from "react-markdown";
-import { safeMarkdownComponents, safeRemarkPlugins } from "../../markdown/safeLinks";
+import { safeMarkdownComponents, safeRemarkPlugins, safeRehypePlugins } from "../../markdown/safeLinks";
 import { useReportStore } from "../../store";
 import type { Lesson } from "../../types";
 import styles from "./ReportView.module.css";
@@ -46,8 +46,8 @@ export function LessonsCard({
           {lessons.map((lesson, idx) => (
             <div key={idx} className={styles.lesson_card}>
               <div className={styles.lesson_content}>
-                <div className={styles.lesson_text}><ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{lesson.content}</ReactMarkdown></div>
-                <div className={styles.lesson_reason}><ReactMarkdown remarkPlugins={safeRemarkPlugins} components={safeMarkdownComponents}>{lesson.reason}</ReactMarkdown></div>
+                <div className={styles.lesson_text}><ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{lesson.content}</ReactMarkdown></div>
+                <div className={styles.lesson_reason}><ReactMarkdown remarkPlugins={safeRemarkPlugins} rehypePlugins={safeRehypePlugins} components={safeMarkdownComponents}>{lesson.reason}</ReactMarkdown></div>
                 <div className={styles.lesson_meta}>
                   {lesson.workspaceName} · {lesson.sessionId}
                 </div>

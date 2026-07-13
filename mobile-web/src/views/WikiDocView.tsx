@@ -7,7 +7,8 @@ import type { ComponentPropsWithoutRef } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft } from "lucide-react";
 import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { MermaidBlock } from "../markdown/MermaidBlock";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type { WikiDoc } from "../types";
@@ -157,6 +158,16 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
           </a>
         );
       },
+      code: ({ className, children, ...rest }: ComponentPropsWithoutRef<"code">) => {
+        if (/(^|\s)language-mermaid(\s|$)/.test(className ?? "")) {
+          return <MermaidBlock code={String(children).replace(/\n$/, "")} />;
+        }
+        return (
+          <code className={className} {...rest}>
+            {children}
+          </code>
+        );
+      },
     }),
     [client],
   );
@@ -209,7 +220,7 @@ export function WikiDocView({ doc, client, onBack, onOpenDoc }: Props) {
           ) : (
             <div className={styles.markdown}>
               <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
+                remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}
                 components={mdComponents}
                 // Preserve our `wiki:` scheme (default sanitizer would strip it
                 // to ""); everything else keeps react-markdown's safety pass.
