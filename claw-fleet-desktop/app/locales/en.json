@@ -1819,5 +1819,13 @@
     "reveal_in_explorer": "Show in File Explorer",
     "open_hint": "Open {{path}}",
     "not_found": "Path not found"
+  },
+  "dir_picker": {
+    "title": "Pick a workspace directory",
+    "up": "Up one level",
+    "confirm": "Use this directory",
+    "empty": "No subdirectories here",
+    "truncated": "Too many subdirectories — showing the first 500",
+    "loading": "Loading…"
   }
 }
