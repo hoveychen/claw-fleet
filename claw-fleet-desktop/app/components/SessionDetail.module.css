@@ -60,27 +60,37 @@
   min-height: 24px;
 }
 
-.header_left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
-  flex: 1;
-  min-width: 0;
-}
-
 .meta_row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px 8px;
+  gap: 4px 6px;
   row-gap: 4px;
 }
 
-.workspace {
-  font-weight: 700;
-  font-size: 14px;
+/* The session's own title, and the only thing in the header set at heading
+   weight — the workspace name sits below it as a chip. */
+.header_title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
   color: var(--color-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace_chip {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-text);
+  background: var(--color-bg-secondary);
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  max-width: 180px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -96,18 +106,6 @@
 
 .tag_main    { background: var(--tag-main-bg); color: var(--tag-main-fg); }
 .tag_subagent{ background: var(--tag-sub-bg);  color: var(--tag-sub-fg); }
-
-.ai_title {
-  font-size: 13px;
-  color: var(--color-text);
-  font-weight: 500;
-  line-height: 1.3;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-}
 
 .slug {
   font-size: 11px;
@@ -388,17 +386,6 @@
   flex: 1 1 auto;
   min-width: 0;
   word-break: break-word;
-}
-
-/* Path (rendered inside the header, no separate row/border) */
-.path {
-  font-size: 10px;
-  color: var(--color-text-dim);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  margin-top: 2px;
 }
 
 /* Scroll area */
