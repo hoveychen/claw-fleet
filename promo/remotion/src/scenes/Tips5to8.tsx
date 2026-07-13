@@ -133,7 +133,7 @@ export const Tip5: React.FC = () => (
     }}
     bubble="Three new deckhands from one composer. Didn't even open a terminal."
     side="right"
-    pip={{ src: "footage/t5-dispatch.mp4", startFrom: 565, pos: "bl", zoom: { scale: 1.8, origin: "28% 22%" } }}
+    pip={{ src: "footage/t5-dispatch.mp4", startFrom: 355, pos: "bl", rate: 1.5, zoom: { scale: 1.45, origin: "59% 57%" } }}
   >
     <Tip5Stage />
   </TipShell>
@@ -209,7 +209,7 @@ export const Tip6: React.FC = () => (
     }}
     bubble="Context window's full. The mission isn't. Relay!"
     side="left"
-    pip={{ src: "footage/t6-chains.mp4", startFrom: 210, pos: "br", zoom: { scale: 2.0, origin: "70% 45%" } }}
+    pip={{ src: "footage/t6-chains.mp4", startFrom: 210, pos: "br", zoom: { scale: 3.6, origin: "78% 60%" } }}
   >
     <Tip6Stage />
   </TipShell>
@@ -353,7 +353,7 @@ export const Tip8: React.FC = () => (
     }}
     bubble="Eight hours of fleet work, summarized before your coffee's cold."
     side="left"
-    pip={{ src: "footage/t8-report.mp4", startFrom: 180, pos: "tl", zoom: { scale: 1.5, origin: "50% 40%" } }}
+    pip={{ src: "footage/t8-report.mp4", startFrom: 200, pos: "tl", zoom: { scale: 1.5, origin: "55% 45%" } }}
   >
     <Tip8Stage />
   </TipShell>
