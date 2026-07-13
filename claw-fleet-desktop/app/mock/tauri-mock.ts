@@ -32,6 +32,7 @@ import {
   MOCK_SKILL_HISTORY,
   MOCK_AUDIT_SUMMARY,
   MOCK_DAILY_REPORT,
+  MOCK_HANDOFF_CHAINS,
   MOCK_HEATMAP_STATS,
   MOCK_LESSONS,
   MOCK_TIMELINE_REPORTS,
@@ -61,6 +62,39 @@ function tickSessions() {
 }
 
 // ── IPC handler ─────────────────────────────────────────────────────────────
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Command-aware canned LLM risk analysis for the guard card (markdown). */
+function guardAnalysisFor(command: string): string {
+  if (/rm\s+-rf|drop\s+table|truncate/i.test(command)) {
+    return [
+      "**What it does:** recursively deletes the target path — in this case a production cache directory that other services read from.",
+      "",
+      "**Risk: HIGH.** The path is not regenerated automatically; the cache warmer runs nightly. Deleting it now means every request until ~02:00 misses cache and hits the primary DB.",
+      "",
+      "**Recommendation:** block. If the agent needs a clean cache, `redis-cli FLUSHDB` on the staging instance is the safe equivalent.",
+    ].join("\n");
+  }
+  if (/migrate|prisma|alembic/i.test(command)) {
+    return [
+      "**What it does:** applies all pending migrations to the production database, altering live schema.",
+      "",
+      "**Risk: MEDIUM.** 2 of 3 pending migrations are additive; one drops `legacy_plan`. Writers still referencing that column would fail mid-deploy.",
+      "",
+      "**Recommendation:** allow once **after** confirming the 14:00 snapshot completed — the agent's plan already gates the drop behind a feature flag.",
+    ].join("\n");
+  }
+  return [
+    "**What it does:** " + command.split("\n")[0] + "",
+    "",
+    "**Risk: LOW.** No destructive flags detected; the command only touches the workspace sandbox.",
+    "",
+    "**Recommendation:** safe to allow once.",
+  ].join("\n");
+}
+
+let spawnCounter = 0;
 
 function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
   switch (cmd) {
@@ -225,6 +259,79 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
         ],
       };
 
+    // ── Guard LLM analysis (feeds the "Analyzing command…" beat) ──
+    case "get_guard_context":
+      return "The agent just finished the migration plan review and asked to apply it. Last assistant message: \"All 3 migrations reviewed; the drop is gated behind usage_billing_v2. Requesting approval to deploy.\"";
+    case "analyze_guard_command":
+      return delay(1400).then(() => guardAnalysisFor((args.command as string) ?? ""));
+
+    // ── Handoff chains (接力 chip + expanded panel) ──
+    case "get_handoff_chain": {
+      const sid = args.sessionId as string;
+      const sess = currentSessions.find((s) => s.id === sid);
+      const chainId = sess?.handoff?.chainId;
+      return (chainId && MOCK_HANDOFF_CHAINS[chainId]) || null;
+    }
+
+    // ── Mobile relay (Mobile 板块; static demo values) ──
+    case "get_mobile_relay_config":
+    case "set_mobile_relay_config":
+    case "rotate_mobile_relay_secret":
+      return {
+        enabled: true,
+        relayUrl: "https://fleet-relay.example.com",
+        secret: "demo-pairing-secret",
+      };
+    case "mobile_relay_status":
+      return {
+        enabled: true,
+        connected: true,
+        clients: 2,
+        relayUrl: "https://fleet-relay.example.com",
+        secretSet: true,
+        devices: [
+          { clientId: "dev-iphone", label: "iPhone 15 Pro", platform: "ios", pushSubscribed: true, connectedAtMs: Date.now() - 3_600_000, lastSeenMs: Date.now() - 4_000 },
+          { clientId: "dev-android", label: "Pixel 9", platform: "android", pushSubscribed: true, connectedAtMs: Date.now() - 7_200_000, lastSeenMs: Date.now() - 65_000 },
+        ],
+      };
+    case "mobile_relay_qr_svg":
+      return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" fill="#fff"/><path fill="#000" d="M2 2h7v7H2zM20 2h7v7h-7zM2 20h7v7H2zM4 4h3v3H4zM22 4h3v3h-4zM4 22h3v3H4zM11 2h2v2h-2zM15 2h2v3h-2zM11 6h3v2h-3zM16 6h2v2h-2zM11 10h2v3h-2zM15 11h3v2h-3zM20 11h3v2h-3zM25 11h2v3h-2zM2 11h3v2H2zM6 12h3v2H6zM11 15h2v3h-2zM14 16h3v2h-3zM19 15h2v3h-2zM23 16h2v2h-2zM26 16h1v3h-1zM11 20h3v2h-3zM16 21h2v3h-2zM20 20h3v2h-3zM24 21h3v2h-3zM11 24h2v3h-2zM14 25h3v2h-3zM20 24h2v3h-2zM23 25h3v2h-3z"/></svg>`;
+
+    // ── Dispatch (New Session form) — spawn a fake session onto the board ──
+    case "spawn_new_claude_session": {
+      spawnCounter += 1;
+      const ws = (args.workspacePath as string) ?? "/Users/demo/workspace/new-task";
+      const name = ws.split("/").filter(Boolean).pop() ?? "new-task";
+      const id = `sess-spawned-${spawnCounter}`;
+      const prompt = (args.prompt as string) ?? "";
+      const spawned: SessionInfo = {
+        ...structuredClone(MOCK_SESSIONS[0]),
+        id,
+        workspacePath: ws,
+        workspaceName: name,
+        ideName: null,
+        isSubagent: false,
+        parentSessionId: null,
+        agentType: null,
+        agentDescription: null,
+        slug: null,
+        aiTitle: prompt.split("\n")[0].slice(0, 72) || "New dispatched task",
+        status: "thinking",
+        tokenSpeed: 6 + Math.random() * 8,
+        agentTokenSpeed: 0,
+        totalOutputTokens: 0,
+        lastMessagePreview: "Reading the workspace and drafting a plan...",
+        lastActivityMs: Date.now(),
+        createdAtMs: Date.now(),
+        jsonlPath: `/Users/demo/.claude/projects/${name}/${id}.jsonl`,
+        contextPercent: 0.01,
+        handoff: null,
+      };
+      currentSessions = [spawned, ...currentSessions];
+      emit("sessions-updated", currentSessions);
+      return { pid: 90000 + spawnCounter, sessionId: id };
+    }
+
     // Window plugin
     case "plugin:window|set_theme":
     case "plugin:window|set_title":
@@ -341,6 +448,43 @@ export function installMocks() {
       commandSummary: "Delete root filesystem",
       riskTags: ["destructive", "filesystem"],
       timestamp: new Date().toISOString(),
+      ...overrides,
+    });
+    return id;
+  };
+  // v2 fleet__ask card: rich HTML preview + dynamic form fields + options.
+  (window as any).__mock_fleet_ask = (overrides: Record<string, unknown> = {}) => {
+    const id = `mock-ask-${Date.now()}`;
+    emit("fleet-ask-request", {
+      id,
+      sessionId: "sess-billing-3",
+      workspaceName: "billing-service",
+      aiTitle: "Cutover plan ready — pick the rollout window",
+      timestamp: new Date().toISOString(),
+      questions: [
+        {
+          question: "Backfill is validated (2.1M rows, 0 drift). Review the cutover impact below, leave a note for the status page, and pick the window.",
+          header: "Cutover",
+          multiSelect: false,
+          html: `<div style="font-family:-apple-system,Segoe UI,sans-serif;font-size:13px;color:#1f2023">
+  <table style="border-collapse:collapse;width:100%">
+    <tr style="text-align:left;border-bottom:2px solid #e7e4dd"><th style="padding:6px 8px">table</th><th style="padding:6px 8px">rows</th><th style="padding:6px 8px">est. lock</th></tr>
+    <tr style="border-bottom:1px solid #e7e4dd"><td style="padding:6px 8px;font-family:monospace">usage_events</td><td style="padding:6px 8px">2.1M</td><td style="padding:6px 8px">~40s</td></tr>
+    <tr style="border-bottom:1px solid #e7e4dd"><td style="padding:6px 8px;font-family:monospace">invoices</td><td style="padding:6px 8px">380K</td><td style="padding:6px 8px">~6s</td></tr>
+    <tr><td style="padding:6px 8px;font-family:monospace">plans</td><td style="padding:6px 8px">1.2K</td><td style="padding:6px 8px">&lt;1s</td></tr>
+  </table>
+  <p style="margin:10px 0 0;color:#b45309">⚠ dual-write stays on for 48h — rollback is a flag flip, not a restore.</p>
+</div>`,
+          formFields: [
+            { name: "status_note", kind: "textarea", label: "Status-page note", placeholder: "What customers will see during the window", required: false },
+            { name: "bake_hours", kind: "range", label: "Dual-write bake time (hours)", min: 12, max: 72, step: 12, default: 48 },
+          ],
+          options: [
+            { label: "Tonight 02:00 UTC", description: "Lowest traffic; on-call is already scheduled." },
+            { label: "Saturday 06:00 UTC", description: "More slack, but pushes the release train by 2 days." },
+          ],
+        },
+      ],
       ...overrides,
     });
     return id;
