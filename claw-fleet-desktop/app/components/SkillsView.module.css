@@ -48,7 +48,7 @@
 }
 
 .tree_filter {
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-field);
   border: 1px solid var(--color-border);
   border-radius: 6px;
   padding: 4px 8px;

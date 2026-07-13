@@ -21,7 +21,7 @@
   padding: 6px 10px;
   border-radius: 6px;
   border: 1px solid var(--color-border);
-  background: var(--color-bg-input);
+  background: var(--color-bg-field);
   color: var(--color-text);
   font-size: 12px;
   outline: none;
@@ -86,7 +86,7 @@
 
 .toggle_btn_active {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   border-color: var(--color-accent);
 }
 
@@ -111,13 +111,13 @@
 
 .icon_btn_active {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
   border-color: var(--color-accent);
 }
 
 .icon_btn_active:hover {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 
 .view_toggle {
@@ -151,10 +151,10 @@
 
 .view_toggle_btn_active {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
 
 .view_toggle_btn_active:hover {
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-on-accent);
 }
