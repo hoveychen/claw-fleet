@@ -14,6 +14,7 @@ import { RelayClient, type RelayHandlers } from "../relay";
 import type { DecisionKind } from "../types";
 import {
   MOCK_CHAT_WORKSPACE,
+  mockBrowseDir,
   MOCK_ELICITATION,
   MOCK_FLEET_ASK,
   MOCK_GUARD,
@@ -107,6 +108,8 @@ export class MockRelayClient extends RelayClient {
         return { claude: null, claudeError: null, sources: [] };
       case "attachments_exist":
         return { existing: [] };
+      case "browse_dir":
+        return mockBrowseDir(params?.path as string | undefined);
       // Write methods: acknowledge without doing anything. The UI's optimistic
       // update is what we're exercising, not the desktop's side of it.
       case "session_mark":
