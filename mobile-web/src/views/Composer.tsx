@@ -10,6 +10,7 @@ import { UPLOAD_REQUEST_TIMEOUT_MS, isDesktopRejection, type RelayClient } from 
 import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
 import { useChatWorkspace } from "../useChatWorkspace";
+import { HistoryLayer } from "../useNavStack";
 import styles from "./Composer.module.css";
 import { DirPicker } from "./DirPicker";
 
@@ -389,15 +390,19 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
           </div>
         )}
         {picking && (
-          <DirPicker
-            client={client}
-            initialPath={customWorkspace.trim()}
-            onPick={(path) => {
-              patch({ customWorkspace: path });
-              setPicking(false);
-            }}
-            onClose={() => setPicking(false)}
-          />
+          <>
+            {/* 目录选择器压在新会话面板之上：返回一次收起它，再返回才关面板。 */}
+            <HistoryLayer onBack={() => setPicking(false)} />
+            <DirPicker
+              client={client}
+              initialPath={customWorkspace.trim()}
+              onPick={(path) => {
+                patch({ customWorkspace: path });
+                setPicking(false);
+              }}
+              onClose={() => setPicking(false)}
+            />
+          </>
         )}
         <textarea
           className={styles.promptInput}
