@@ -7,7 +7,8 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bot, ChevronDown, ChevronLeft, ChevronRight, MessageSquareDashed, Sparkles } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
+import { MermaidBlock } from "../markdown/MermaidBlock";
 import { dateLocale, t } from "../i18n";
 import { CopyButton } from "./CopyButton";
 import type { RelayClient } from "../relay";
@@ -203,9 +204,18 @@ function LazyMarkdown({ text, bare }: { text: string; bare?: boolean }) {
     <div ref={ref} className={bare ? `${styles.markdown} ${styles.markdownFlat}` : styles.markdown}>
       {rich ? (
         <ReactMarkdown
-          remarkPlugins={[remarkGfm]}
+          remarkPlugins={mdRemarkPlugins}
+          rehypePlugins={mdRehypePlugins}
           components={{
             a: ({ children }) => <span className={styles.mdLink}>{children}</span>,
+            code: ({ className, children, ...rest }) =>
+              /(^|\s)language-mermaid(\s|$)/.test(className ?? "") ? (
+                <MermaidBlock code={String(children).replace(/\n$/, "")} />
+              ) : (
+                <code className={className} {...rest}>
+                  {children}
+                </code>
+              ),
           }}
         >
           {text}

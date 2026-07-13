@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { Check, CheckCircle2, ListTodo, Waypoints, Workflow } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { mdRemarkPlugins, mdRehypePlugins } from "../markdown/plugins";
 import { dateLocale, t } from "../i18n";
 import type { RelayClient } from "../relay";
 import type {
@@ -397,7 +397,7 @@ export function HandoffTab({
             </div>
           )}
           <div className={styles.markdown}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{l.note}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={mdRemarkPlugins} rehypePlugins={mdRehypePlugins}>{l.note}</ReactMarkdown>
           </div>
         </div>
       ))}
