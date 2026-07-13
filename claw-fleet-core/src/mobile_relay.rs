@@ -827,9 +827,11 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
     }
 }
 
-/// Route a mobile answer into the same `write_response()` files the desktop
-/// panel and Feishu write — the waiting hook/MCP subprocess polls these and
-/// unblocks (see `feishu.rs::handle_card_action` for the sibling path).
+/// Route a mobile answer through `parked::deliver`, exactly as the desktop panel
+/// and the probe API do: a live card unblocks the waiting hook/MCP subprocess via
+/// its `<id>.response.json`, and a parked one (whose producer is long gone)
+/// resumes the session with the answer instead. See `feishu.rs::handle_card_action`
+/// for the sibling path.
 fn handle_answer(payload: &Value) -> Result<(), String> {
     let kind = payload.get("kind").and_then(Value::as_str).ok_or("missing kind")?;
     let id = payload
@@ -877,11 +879,9 @@ fn handle_answer(payload: &Value) -> Result<(), String> {
                 .transpose()
                 .map_err(|e| format!("bad answers: {e}"))?
                 .unwrap_or_default();
-            crate::elicitation::write_response(&crate::elicitation::ElicitationResponse {
-                id,
-                declined: payload.get("declined").and_then(Value::as_bool).unwrap_or(false),
-                answers,
-            })
+            let declined = payload.get("declined").and_then(Value::as_bool).unwrap_or(false);
+            let resp = crate::elicitation::ElicitationResponse { id: id.clone(), declined, answers };
+            crate::parked::deliver(&id, &resp, declined, crate::elicitation::write_response)
         }
         "fleet-ask" => {
             let answers: std::collections::BTreeMap<String, String> = payload
@@ -891,20 +891,21 @@ fn handle_answer(payload: &Value) -> Result<(), String> {
                 .transpose()
                 .map_err(|e| format!("bad answers: {e}"))?
                 .unwrap_or_default();
-            crate::mcp_ipc::write_response(&crate::mcp_ipc::FleetAskResponse {
-                id,
-                answers,
-                cancelled: payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false),
-            })
+            let cancelled = payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false);
+            let resp = crate::mcp_ipc::FleetAskResponse { id: id.clone(), answers, cancelled };
+            crate::parked::deliver(&id, &resp, cancelled, crate::mcp_ipc::write_response)
         }
         "plan-approval" => {
             let decision = str_field("decision").ok_or("missing decision")?;
-            crate::plan_approval::write_response(&crate::plan_approval::PlanApprovalResponse {
-                id,
+            let resp = crate::plan_approval::PlanApprovalResponse {
+                id: id.clone(),
                 decision,
                 edited_plan: str_field("editedPlan"),
                 feedback: str_field("feedback"),
-            })
+            };
+            // `dismissed: false` — a rejection is an answer the agent has to wake
+            // up and hear, not a card the user waved away.
+            crate::parked::deliver(&id, &resp, false, crate::plan_approval::write_response)
         }
         "a2ui-render" => {
             let action_context: std::collections::BTreeMap<String, String> = payload
@@ -914,12 +915,14 @@ fn handle_answer(payload: &Value) -> Result<(), String> {
                 .transpose()
                 .map_err(|e| format!("bad actionContext: {e}"))?
                 .unwrap_or_default();
-            crate::mcp_a2ui_ipc::write_response(&crate::mcp_a2ui_ipc::A2uiRenderResponse {
-                id,
+            let cancelled = payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false);
+            let resp = crate::mcp_a2ui_ipc::A2uiRenderResponse {
+                id: id.clone(),
                 action_name: str_field("actionName"),
                 action_context,
-                cancelled: payload.get("cancelled").and_then(Value::as_bool).unwrap_or(false),
-            })
+                cancelled,
+            };
+            crate::parked::deliver(&id, &resp, cancelled, crate::mcp_a2ui_ipc::write_response)
         }
         "permission-prompt" => {
             let allow = payload.get("allow").and_then(Value::as_bool).ok_or("missing allow")?;
@@ -968,32 +971,63 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         // the session-cache display enrichment — the mobile client resolves
         // workspace/title labels from its own `sessions` snapshot.
         "pending_snapshot" => {
-            let read_all = |ids: Vec<String>, read: &dyn Fn(&str) -> Option<Value>| -> Vec<Value> {
+            // Parked cards are pending too — they just live in the parked store
+            // rather than the channel's request dir. The phone's snapshot is
+            // authoritative (it *replaces* the client's card list), so omitting
+            // them here would make a timed-out card vanish from the phone on the
+            // very next reconcile — the disappearance this whole mechanism exists
+            // to prevent, just on the other screen.
+            let read_all = |ids: Vec<String>,
+                            read: &dyn Fn(&str) -> Option<Value>,
+                            kind: crate::parked::ParkedKind|
+             -> Vec<Value> {
+                ids.iter()
+                    .filter_map(|id| read(id))
+                    .chain(crate::parked::list_requests::<Value>(kind))
+                    .collect()
+            };
+            // Guard and permission prompts are never parked (their timeout is a
+            // deny, not a pause), so they keep the plain live-only listing.
+            let read_live = |ids: Vec<String>, read: &dyn Fn(&str) -> Option<Value>| -> Vec<Value> {
                 ids.iter().filter_map(|id| read(id)).collect()
             };
             Ok(json!({
-                "guard": read_all(crate::guard::list_pending_requests(), &|id| {
+                "guard": read_live(crate::guard::list_pending_requests(), &|id| {
                     crate::guard::read_request(id).and_then(|r| serde_json::to_value(r).ok())
                 }),
-                "elicitation": read_all(crate::elicitation::list_pending_requests(), &|id| {
-                    crate::elicitation::read_request(id).and_then(|r| serde_json::to_value(r).ok())
-                }),
-                "fleetAsk": read_all(crate::mcp_ipc::list_pending_requests(), &|id| {
-                    crate::mcp_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok())
-                }),
-                "planApproval": read_all(crate::plan_approval::list_pending_requests(), &|id| {
-                    crate::plan_approval::read_request(id).and_then(|r| serde_json::to_value(r).ok())
-                }),
-                "permissionPrompt": read_all(
+                "elicitation": read_all(
+                    crate::elicitation::list_pending_requests(),
+                    &|id| {
+                        crate::elicitation::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+                    },
+                    crate::parked::ParkedKind::Elicitation,
+                ),
+                "fleetAsk": read_all(
+                    crate::mcp_ipc::list_pending_requests(),
+                    &|id| crate::mcp_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok()),
+                    crate::parked::ParkedKind::FleetAsk,
+                ),
+                "planApproval": read_all(
+                    crate::plan_approval::list_pending_requests(),
+                    &|id| {
+                        crate::plan_approval::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+                    },
+                    crate::parked::ParkedKind::PlanApproval,
+                ),
+                "permissionPrompt": read_live(
                     crate::permission_prompt_ipc::list_pending_requests(),
                     &|id| {
                         crate::permission_prompt_ipc::read_request(id)
                             .and_then(|r| serde_json::to_value(r).ok())
                     },
                 ),
-                "a2uiRender": read_all(crate::mcp_a2ui_ipc::list_pending_requests(), &|id| {
-                    crate::mcp_a2ui_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok())
-                }),
+                "a2uiRender": read_all(
+                    crate::mcp_a2ui_ipc::list_pending_requests(),
+                    &|id| {
+                        crate::mcp_a2ui_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+                    },
+                    crate::parked::ParkedKind::A2uiRender,
+                ),
             }))
         }
         "task_plans" => {
@@ -1751,6 +1785,182 @@ mod tests {
             }
         }
         let _ = fs::remove_dir_all(&tmp);
+    }
+
+    /// Park a fleet__ask card for a session whose transcript says Fleet launched
+    /// it, and point the CLI resolution at a recorder — so a resume, if one
+    /// happens, is observable and lands on a harmless binary instead of a real
+    /// `claude`.
+    fn park_a_card(home: &std::path::Path, id: &str, resume_log: &std::path::Path) {
+        let workspace = home.join("ws");
+        let projects = home.join(".claude").join("projects").join("p");
+        fs::create_dir_all(&workspace).unwrap();
+        fs::create_dir_all(&projects).unwrap();
+        fs::write(
+            projects.join("sess-mob.jsonl"),
+            format!(
+                "{{\"type\":\"user\",\"entrypoint\":\"{}\",\"cwd\":\"{}\"}}\n",
+                crate::session_launch::NEW_SESSION_ENTRYPOINT,
+                workspace.display()
+            ),
+        )
+        .unwrap();
+
+        let recorder = home.join("claude-recorder");
+        fs::write(&recorder, format!("#!/bin/sh\necho resumed >> {}\n", resume_log.display())).unwrap();
+        #[cfg(unix)]
+        {
+            let mut perms = fs::metadata(&recorder).unwrap().permissions();
+            std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+            fs::set_permissions(&recorder, perms).unwrap();
+        }
+        fs::create_dir_all(home.join(".fleet")).unwrap();
+        fs::write(
+            home.join(".fleet").join("claude-binary.json"),
+            serde_json::json!({ "override_path": recorder.to_string_lossy() }).to_string(),
+        )
+        .unwrap();
+
+        let req = crate::mcp_ipc::FleetAskRequest {
+            id: id.to_string(),
+            session_id: "sess-mob".into(),
+            workspace_name: "ws".into(),
+            ai_title: None,
+            timestamp: "2026-07-14T00:00:00Z".into(),
+            parked: false,
+            questions: vec![crate::mcp_ipc::FleetAskQuestion {
+                question: "保留兼容？".into(),
+                header: "兼容".into(),
+                multi_select: false,
+                options: vec![],
+                html: None,
+                form_fields: vec![],
+                images: vec![],
+            }],
+        };
+        crate::parked::park(
+            id,
+            crate::parked::ParkedKind::FleetAsk,
+            "sess-mob",
+            workspace.to_str().unwrap(),
+            &req,
+        )
+        .unwrap();
+    }
+
+    /// Answering a parked card **from the phone** has to do what answering it on
+    /// the desktop does: wake the session up. The mobile relay used to write the
+    /// response straight into the channel's `<id>.response.json` — but a parked
+    /// card has no producer left polling that file, so the answer would land in
+    /// an orphan file, the session would never resume, and the card would sit on
+    /// the phone forever looking answered-but-stuck.
+    #[test]
+    fn a_phone_answer_to_a_parked_card_resumes_the_session() {
+        let _guard = fleet_home_lock();
+        let home = std::env::temp_dir().join(format!(
+            "fleet-mobile-parked-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+
+        let resume_log = home.join("resumed.txt");
+        park_a_card(&home, "card-mob", &resume_log);
+
+        handle_answer(&serde_json::json!({
+            "kind": "fleet-ask",
+            "id": "card-mob",
+            "answers": { "保留兼容？": "保留" },
+            "cancelled": false
+        }))
+        .unwrap();
+
+        // The session was woken up...
+        let resumed = (0..50).any(|_| {
+            if resume_log.is_file() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            false
+        });
+        assert!(resumed, "a phone answer must resume the parked session");
+
+        // ...the card is resolved...
+        assert!(
+            !crate::parked::is_parked("card-mob"),
+            "an answered card must not stay parked, or it would resume twice"
+        );
+
+        // ...and no orphan response file was left behind for nobody to read.
+        let orphan = home
+            .join(".fleet")
+            .join("fleet-ask")
+            .join("card-mob.response.json");
+        assert!(
+            !orphan.is_file(),
+            "the answer must not be filed for a producer that no longer exists"
+        );
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&home);
+    }
+
+    /// The phone's snapshot *replaces* its card list (see `refreshPending` in
+    /// mobile-web's App.tsx), so a card missing from it is a card that vanishes
+    /// from the phone on the next reconcile. A parked card is still pending —
+    /// it just lives in the parked store — and must show up here, flagged, or
+    /// the timeout would still make the question disappear, only on mobile.
+    #[test]
+    fn the_phone_snapshot_carries_parked_cards_flagged() {
+        let _guard = fleet_home_lock();
+        let home = std::env::temp_dir().join(format!(
+            "fleet-mobile-snap-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&home).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        // SAFETY: serialised by fleet_home_lock.
+        unsafe { std::env::set_var("FLEET_HOME", &home) };
+
+        park_a_card(&home, "card-snap", &home.join("unused.txt"));
+        let snap = serve_request("pending_snapshot", &serde_json::json!({})).unwrap();
+
+        let asks = snap["fleetAsk"].as_array().expect("fleetAsk list");
+        assert_eq!(asks.len(), 1, "the parked card must still be pending: {snap}");
+        assert_eq!(asks[0]["id"], serde_json::json!("card-snap"));
+        assert_eq!(
+            asks[0]["parked"],
+            serde_json::json!(true),
+            "the phone needs the flag to badge the card as paused"
+        );
+        assert_eq!(
+            asks[0]["questions"][0]["question"],
+            serde_json::json!("保留兼容？"),
+            "the question itself has to survive the trip"
+        );
+
+        unsafe {
+            match prev {
+                Some(p) => std::env::set_var("FLEET_HOME", p),
+                None => std::env::remove_var("FLEET_HOME"),
+            }
+        }
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[test]

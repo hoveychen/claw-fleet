@@ -59,6 +59,12 @@ export interface ElicitationRequest {
   aiTitle?: string | null;
   questions: ElicitationQuestion[];
   timestamp: string;
+  /**
+   * The wait timed out: the turn that asked was interrupted and the session is
+   * paused, holding for this answer. Answering resumes it with the reply
+   * attached (the desktop and the phone both route through `parked::deliver`).
+   */
+  parked?: boolean;
 }
 
 export type FleetAskFormFieldKind =
@@ -108,6 +114,12 @@ export interface FleetAskRequest {
   aiTitle?: string | null;
   questions: FleetAskQuestion[];
   timestamp: string;
+  /**
+   * The wait timed out: the turn that asked was interrupted and the session is
+   * paused, holding for this answer. Answering resumes it with the reply
+   * attached (the desktop and the phone both route through `parked::deliver`).
+   */
+  parked?: boolean;
 }
 
 export interface PlanApprovalRequest {
@@ -118,6 +130,12 @@ export interface PlanApprovalRequest {
   planContent: string;
   planFilePath?: string | null;
   timestamp: string;
+  /**
+   * The wait timed out: the turn that asked was interrupted and the session is
+   * paused, holding for this answer. Answering resumes it with the reply
+   * attached (the desktop and the phone both route through `parked::deliver`).
+   */
+  parked?: boolean;
 }
 
 export interface PermissionPromptRequest {
@@ -140,6 +158,8 @@ export interface A2uiRenderRequest {
   workspaceName: string;
   aiTitle?: string | null;
   timestamp: string;
+  /** Timed out and parked — see `FleetAskRequest.parked`. */
+  parked?: boolean;
   messageTree: unknown;
 }
 
