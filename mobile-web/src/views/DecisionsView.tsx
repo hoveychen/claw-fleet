@@ -80,6 +80,16 @@ export function DecisionsView({
   }, [foundIndex]);
   const active = sorted[activeIndex];
 
+  // A long card leaves the page scrolled to its action row; once it resolves,
+  // the next card mounts under that same offset with its head off-screen. Snap
+  // back to the top whenever the focused card changes (answered, or picked from
+  // the queue bar) so each card starts from its head.
+  const activeCardId = active?.id ?? null;
+  useEffect(() => {
+    if (activeCardId === null || window.scrollY === 0) return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [activeCardId]);
+
   if (decisions.length === 0) {
     return agentOnline ? (
       <EmptyState
@@ -790,6 +800,15 @@ function QuestionsCard({
   const [step, setStep] = useState(0);
   // `${question} ${label}` → preview expanded before selection.
   const [previewOpen, setPreviewOpen] = useState<Record<string, boolean>>({});
+
+  // Same head-off-screen problem one level down: the 上一题/下一题 buttons and the
+  // step dots sit below a long question, so stepping leaves the next question's
+  // header scrolled past. Snap back on every step change, like the card-level
+  // effect above.
+  useEffect(() => {
+    if (window.scrollY === 0) return;
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }, [step]);
 
   /** Desktop `hasAnswer`: option / custom text / attachment / form-only,
    *  with required form fields filled. Gates Next/Submit instead of erroring
