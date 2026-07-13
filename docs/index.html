@@ -4,1229 +4,606 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claw Fleet — Mission Control for AI Coding Agents</title>
-  <meta name="description" content="Real-time dashboard to monitor, manage, and analyze all your Claude Code, Cursor, Codex, and OpenClaw agents. Free &amp; open-source.">
+  <meta name="description" content="See every agent, approve every decision, dispatch tasks, and run the whole fleet from your phone. Open-source command tower for Claude Code, Cursor, OpenClaw, and Codex.">
   <meta property="og:title" content="Claw Fleet — Mission Control for AI Coding Agents">
-  <meta property="og:description" content="Real-time dashboard to monitor, manage, and analyze all your AI coding agents.">
+  <meta property="og:description" content="See every agent, approve every decision, dispatch tasks — from your desk or your phone. Free &amp; open-source.">
   <meta property="og:image" content="https://hoveychen.github.io/claw-fleet/hero.png">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="icon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
-    /* ── Reset & Variables ─────────────────────────────────────────── */
+    /* ── Warm-paper design tokens (mirrors the app's light theme, App.css) ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
-      --bg-primary: #070b16;
-      --bg-secondary: #0c1222;
-      --bg-card: #121a2e;
-      --bg-card-hover: #1a2340;
-      --bg-elevated: #0f1628;
-      --text-primary: #e8ecf5;
-      --text-secondary: #9da8bf;
-      --text-dim: #5f6a82;
-      --border: rgba(130, 160, 210, 0.14);
-      --accent: #e8743a;
-      --accent-bright: #ff9a5e;
-      --accent-rgb: 232, 116, 58;
-      --purple: #c084fc;
-      --purple-bg: #2a1a4a;
-      --cyan: #22d3ee;
-      --cyan-bg: #0a3a3a;
-      --green: #4ade80;
-      --green-bg: #1a4a1a;
-      --lime: #a3e635;
-      --lime-bg: #2a3a1a;
-      --amber: #fbbf24;
-      --amber-bg: #3a2a08;
-      --blue: #60a5fa;
-      --blue-bg: #1a2a3a;
-      --red: #f87171;
-      --red-bg: #4a1a1a;
-      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-      --font-mono: "JetBrains Mono", "Cascadia Code", "Fira Code", "Menlo", monospace;
-      --radius: 12px;
-      --radius-sm: 8px;
-      --max-width: 1200px;
+      --paper: #f1efea;
+      --paper-deep: #e7e4dd;
+      --card: #fbfaf7;
+      --card-hover: #f1eee7;
+      --ink: #1f2023;
+      --ink-secondary: #5d6168;
+      --ink-dim: #6f7078;
+      --border: rgba(32, 28, 18, 0.11);
+      --border-soft: rgba(32, 28, 18, 0.07);
+      --border-strong: rgba(32, 28, 18, 0.22);
+      --accent: #c25232;
+      --accent-hover: #a94527;
+      --accent-soft: rgba(194, 82, 50, 0.13);
+      --shadow-card: 0 1px 2px rgba(32, 28, 18, 0.08);
+      --shadow-raised: 0 12px 32px rgba(32, 28, 18, 0.16);
+      /* dark terminal / app-frame surfaces (mirrors dark theme) */
+      --night: #101113;
+      --night-deep: #08090a;
+      --night-border: rgba(247, 248, 248, 0.1);
+      --night-text: #f7f8f8;
+      --night-dim: #8a8f98;
+      --coral-night: #d97757;
+      /* status badge colors, straight from the app */
+      --badge-thinking-bg: #f3e8ff;  --badge-thinking-fg: #6d28d9;
+      --badge-executing-bg: #cffafe; --badge-executing-fg: #0e7490;
+      --badge-streaming-bg: #dcfce7; --badge-streaming-fg: #15803d;
+      --badge-waiting-bg: #fef3c7;   --badge-waiting-fg: #b45309;
+      --badge-delegating-bg: #fce7f3;--badge-delegating-fg: #be185d;
+      --font-display: "Fraunces", Georgia, serif;
+      --font-body: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: "JetBrains Mono", "Cascadia Code", Menlo, monospace;
+      --max-width: 1140px;
+      --radius: 10px;
     }
 
     html { scroll-behavior: smooth; }
     body {
-      font-family: var(--font-sans);
-      background: var(--bg-primary);
-      color: var(--text-primary);
-      line-height: 1.6;
-      overflow-x: hidden;
+      font-family: var(--font-body);
+      background: var(--paper);
+      color: var(--ink);
+      line-height: 1.65;
       -webkit-font-smoothing: antialiased;
-      position: relative;
     }
-    /* Subtle starfield — fixed, behind content, outside hero */
-    body::before {
-      content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
-      background-image:
-        radial-gradient(1.2px 1.2px at 13% 22%, rgba(255,255,255,0.55), transparent 50%),
-        radial-gradient(1px 1px at 27% 68%, rgba(255,255,255,0.4), transparent 50%),
-        radial-gradient(1.4px 1.4px at 42% 15%, rgba(200,220,255,0.5), transparent 50%),
-        radial-gradient(1px 1px at 58% 82%, rgba(255,255,255,0.35), transparent 50%),
-        radial-gradient(1.6px 1.6px at 71% 38%, rgba(255,230,200,0.45), transparent 50%),
-        radial-gradient(1px 1px at 84% 12%, rgba(255,255,255,0.4), transparent 50%),
-        radial-gradient(1px 1px at 91% 74%, rgba(200,220,255,0.35), transparent 50%),
-        radial-gradient(1.2px 1.2px at 6% 55%, rgba(255,255,255,0.3), transparent 50%),
-        radial-gradient(1px 1px at 35% 91%, rgba(255,255,255,0.35), transparent 50%),
-        radial-gradient(1.4px 1.4px at 64% 6%, rgba(255,255,255,0.4), transparent 50%);
-      background-size: 100% 100%;
-    }
-    /* Content layers sit above starfield */
-    .hero, .section, .footer { position: relative; z-index: 1; }
-    a { color: var(--accent-bright); text-decoration: none; }
+    a { color: var(--accent); text-decoration: none; }
     a:hover { text-decoration: underline; }
+    ::selection { background: var(--accent-soft); }
 
-    /* ── Navigation ────────────────────────────────────────────────── */
+    /* ── Nav ── */
     .nav {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      background: rgba(7, 11, 22, 0.72);
-      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-      border-bottom: 1px solid rgba(130, 160, 210, 0.12);
-      transition: background 0.3s;
+      background: rgba(241, 239, 234, 0.85);
+      backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+      border-bottom: 1px solid var(--border-soft);
     }
     .nav-inner {
-      max-width: var(--max-width); margin: 0 auto;
-      padding: 0 24px; height: 64px;
+      max-width: var(--max-width); margin: 0 auto; padding: 0 24px; height: 60px;
       display: flex; align-items: center; justify-content: space-between;
     }
-    .nav-logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 18px; color: var(--text-primary); }
-    .nav-logo img { width: 32px; height: 32px; border-radius: 6px; }
-    .nav-links { display: flex; align-items: center; gap: 28px; }
-    .nav-links a { color: var(--text-secondary); font-size: 14px; font-weight: 500; text-decoration: none; transition: color 0.2s; }
-    .nav-links a:hover { color: var(--text-primary); text-decoration: none; }
+    .nav-logo { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-weight: 600; font-size: 19px; color: var(--ink); }
+    .nav-logo img { width: 30px; height: 30px; border-radius: 7px; }
+    .nav-links { display: flex; align-items: center; gap: 26px; }
+    .nav-links a { color: var(--ink-secondary); font-size: 14px; font-weight: 500; }
+    .nav-links a:hover { color: var(--ink); text-decoration: none; }
     .nav-cta {
-      background: var(--accent); color: #fff; padding: 8px 20px;
+      background: var(--accent); color: #fff !important; padding: 7px 18px;
       border-radius: 8px; font-size: 14px; font-weight: 600;
-      text-decoration: none !important; transition: all 0.2s;
     }
-    .nav-cta:hover { background: var(--accent-bright); transform: translateY(-1px); text-decoration: none !important; }
+    .nav-cta:hover { background: var(--accent-hover); text-decoration: none !important; }
+    @media (max-width: 720px) { .nav-links a:not(.nav-cta) { display: none; } }
 
-    /* ── Hero ──────────────────────────────────────────────────────── */
+    /* ── Hero: asymmetric, headline left, component collage right ── */
     .hero {
-      min-height: 100vh; display: flex; flex-direction: column;
-      align-items: center; justify-content: flex-start;
-      padding: 62vh 24px 80px; position: relative; overflow: hidden;
-      isolation: isolate;
+      max-width: var(--max-width); margin: 0 auto;
+      padding: 150px 24px 90px;
+      display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 5fr);
+      gap: 56px; align-items: center;
     }
-    /* Full-bleed mascot cockpit — constrained to viewport height so content below can breathe */
-    .hero::before {
-      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 100vh;
-      background-image: url('mascot.png');
-      background-size: cover;
-      background-position: center center;
-      background-repeat: no-repeat;
-      z-index: -2;
-      pointer-events: none;
-    }
-    /* Vignette + bottom fade to page bg, matching the mascot layer */
-    .hero::after {
-      content: ''; position: absolute; top: 0; left: 0; right: 0; height: 100vh;
-      background:
-        linear-gradient(180deg,
-          var(--bg-primary) 0%,
-          rgba(7, 11, 22, 0.2) 6%,
-          transparent 18%,
-          transparent 42%,
-          rgba(7, 11, 22, 0.85) 72%,
-          var(--bg-primary) 100%),
-        radial-gradient(ellipse 85% 60% at 50% 40%,
-          transparent 0%, transparent 50%,
-          rgba(7, 11, 22, 0.55) 85%,
-          var(--bg-primary) 100%);
-      z-index: -1;
-      pointer-events: none;
-    }
-    .hero-content {
-      max-width: var(--max-width); text-align: center; position: relative;
-    }
-    .hero-badge {
+    .hero-eyebrow {
       display: inline-flex; align-items: center; gap: 8px;
-      background: rgba(232, 116, 58, 0.12); border: 1px solid rgba(232, 116, 58, 0.25);
-      border-radius: 100px; padding: 6px 16px; font-size: 13px; color: var(--accent-bright);
-      margin-bottom: 24px;
+      font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.04em;
+      color: var(--accent); border: 1px solid var(--border);
+      background: var(--card); border-radius: 100px; padding: 5px 14px; margin-bottom: 22px;
     }
-    .hero-badge-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse-dot 2s ease-in-out infinite; }
-    @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     .hero h1 {
-      font-size: clamp(40px, 6vw, 72px); font-weight: 800; line-height: 1.08;
-      letter-spacing: -0.03em; margin-bottom: 20px;
-      background: linear-gradient(135deg, #fff 0%, var(--accent-bright) 100%);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-      background-clip: text;
+      font-family: var(--font-display); font-weight: 600;
+      font-size: clamp(38px, 5.2vw, 58px); line-height: 1.08;
+      letter-spacing: -0.015em; margin-bottom: 22px;
     }
-    .hero p {
-      font-size: clamp(16px, 2vw, 20px); color: var(--text-secondary);
-      max-width: 640px; margin: 0 auto 40px; line-height: 1.6;
-    }
-    .hero-actions { display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap; }
+    .hero h1 em { font-style: italic; color: var(--accent); }
+    .hero-sub { font-size: 18px; color: var(--ink-secondary); max-width: 46ch; margin-bottom: 32px; }
+    .hero-actions { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
     .btn-primary {
-      display: inline-flex; align-items: center; gap: 10px;
-      background: var(--accent); color: #fff; padding: 14px 32px;
-      border-radius: 12px; font-size: 16px; font-weight: 600;
-      text-decoration: none !important; transition: all 0.2s;
-      box-shadow: 0 4px 24px rgba(232, 116, 58, 0.3);
+      display: inline-flex; align-items: center; gap: 9px;
+      background: var(--accent); color: #fff !important; font-weight: 600; font-size: 15.5px;
+      padding: 13px 26px; border-radius: 9px; box-shadow: var(--shadow-card);
     }
-    .btn-primary:hover { background: var(--accent-bright); transform: translateY(-2px); box-shadow: 0 8px 32px rgba(232, 116, 58, 0.4); text-decoration: none !important; }
-    .btn-secondary {
-      display: inline-flex; align-items: center; gap: 10px;
-      background: rgba(255, 255, 255, 0.06); color: var(--text-primary); padding: 14px 32px;
-      border-radius: 12px; font-size: 16px; font-weight: 600; border: 1px solid var(--border);
-      text-decoration: none !important; transition: all 0.2s;
+    .btn-primary:hover { background: var(--accent-hover); text-decoration: none !important; }
+    .btn-ghost {
+      display: inline-flex; align-items: center; gap: 8px;
+      color: var(--ink) !important; font-weight: 600; font-size: 15.5px;
+      padding: 13px 22px; border-radius: 9px; border: 1px solid var(--border-strong); background: var(--card);
     }
-    .btn-secondary:hover { background: rgba(255, 255, 255, 0.1); transform: translateY(-2px); text-decoration: none !important; }
-    .hero-agents {
-      display: flex; align-items: center; justify-content: center; gap: 24px;
-      margin-top: 48px; flex-wrap: wrap;
-    }
-    .hero-agent {
-      display: flex; align-items: center; gap: 8px;
-      color: var(--text-dim); font-size: 13px; font-weight: 500;
-    }
-    .hero-agent img { width: 20px; height: 20px; opacity: 0.6; }
-    .hero-screenshot {
-      margin-top: 64px; border-radius: 16px; overflow: hidden;
-      border: 1px solid var(--border); box-shadow: 0 32px 80px rgba(0,0,0,0.6);
-      max-width: 100%;
-    }
-    .hero-screenshot img { width: 100%; display: block; }
+    .btn-ghost:hover { background: var(--card-hover); text-decoration: none !important; }
+    .hero-meta { margin-top: 18px; font-size: 13px; color: var(--ink-dim); font-family: var(--font-mono); }
 
-    /* ── Section shared ───────────────────────────────────────────── */
-    .section { padding: 120px 24px; position: relative; }
-    .section-alt { background: var(--bg-secondary); }
-    .section-inner { max-width: var(--max-width); margin: 0 auto; }
-    .section-label {
-      display: inline-flex; align-items: center; gap: 6px;
-      font-size: 12px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
-      color: var(--accent); margin-bottom: 16px;
+    /* Component collage — session card + guard card + push chip, rebuilt in HTML */
+    .collage { position: relative; min-height: 420px; }
+    .ui-card {
+      position: absolute; background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow-raised); padding: 16px 18px;
     }
-    .section-title {
-      font-size: clamp(28px, 4vw, 44px); font-weight: 700; line-height: 1.15;
-      letter-spacing: -0.02em; margin-bottom: 16px;
+    .session-card { top: 0; left: 0; right: 12%; transform: rotate(-1.2deg); }
+    .sc-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+    .sc-title { font-weight: 650; font-size: 15px; }
+    .badge {
+      font-family: var(--font-mono); font-size: 11px; font-weight: 600;
+      padding: 3px 9px; border-radius: 100px; white-space: nowrap;
     }
-    .section-desc {
-      font-size: 17px; color: var(--text-secondary); max-width: 600px; margin-bottom: 48px;
-      line-height: 1.7;
+    .b-waiting { background: var(--badge-waiting-bg); color: var(--badge-waiting-fg); }
+    .b-delegating { background: var(--badge-delegating-bg); color: var(--badge-delegating-fg); }
+    .b-executing { background: var(--badge-executing-bg); color: var(--badge-executing-fg); }
+    .b-thinking { background: var(--badge-thinking-bg); color: var(--badge-thinking-fg); }
+    .b-streaming { background: var(--badge-streaming-bg); color: var(--badge-streaming-fg); }
+    .sc-line { font-size: 13px; color: var(--ink-secondary); margin-bottom: 6px; }
+    .sc-sub { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-secondary); padding: 6px 8px; border-radius: 7px; background: var(--paper-deep); margin-bottom: 5px; }
+    .sc-sub .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--badge-streaming-fg); flex-shrink: 0; }
+    .sc-stats { display: flex; gap: 14px; margin-top: 10px; font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); }
+    .sc-stats strong { color: var(--accent); font-weight: 600; }
+    .guard-card { top: 178px; left: 10%; right: 0; transform: rotate(0.8deg); border-left: 3px solid var(--accent); }
+    .gc-label { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.06em; color: var(--accent); text-transform: uppercase; margin-bottom: 8px; }
+    .gc-cmd {
+      font-family: var(--font-mono); font-size: 13px; background: var(--night); color: var(--night-text);
+      border-radius: 7px; padding: 9px 12px; margin-bottom: 12px; overflow-x: auto; white-space: nowrap;
     }
-
-    /* ── Reveal animation ─────────────────────────────────────────── */
-    .reveal {
-      opacity: 0; transform: translateY(40px);
-      transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    .gc-cmd .hl { color: #fca5a5; }
+    .gc-actions { display: flex; gap: 8px; }
+    .gc-btn { font-size: 13px; font-weight: 600; padding: 7px 16px; border-radius: 7px; }
+    .gc-allow { background: var(--accent); color: #fff; }
+    .gc-deny { background: var(--paper-deep); color: var(--ink-secondary); border: 1px solid var(--border); }
+    .push-chip {
+      position: absolute; bottom: 10px; right: 4%; transform: rotate(-1.6deg);
+      display: flex; gap: 10px; align-items: center;
+      background: var(--night); color: var(--night-text); border-radius: 14px;
+      box-shadow: var(--shadow-raised); padding: 12px 16px; max-width: 300px;
     }
-    .reveal.visible { opacity: 1; transform: translateY(0); }
-
-    /* ── Video Section ────────────────────────────────────────────── */
-    .video-wrapper {
-      position: relative; padding-bottom: 56.25%; height: 0; overflow: hidden;
-      border-radius: 16px; border: 1px solid var(--border);
-      box-shadow: 0 24px 64px rgba(0,0,0,0.5);
-    }
-    .video-wrapper iframe {
-      position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0;
-    }
-
-    /* ── Demo: Gallery ────────────────────────────────────────────── */
-    .demo-frame {
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 16px; overflow: hidden;
-      box-shadow: 0 24px 64px rgba(0,0,0,0.4);
-    }
-    .demo-titlebar {
-      display: flex; align-items: center; gap: 8px;
-      padding: 12px 16px; background: #0d1422;
-      border-bottom: 1px solid var(--border);
-    }
-    .demo-dot { width: 12px; height: 12px; border-radius: 50%; }
-    .demo-dot-r { background: #ff5f57; }
-    .demo-dot-y { background: #febc2e; }
-    .demo-dot-g { background: #28c840; }
-    .demo-titlebar-text { flex: 1; text-align: center; font-size: 12px; color: var(--text-dim); }
-
-    .gallery-grid {
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-      gap: 12px; padding: 16px;
-    }
-    .session-card {
-      background: var(--bg-elevated); border: 1px solid transparent;
-      border-radius: var(--radius-sm); padding: 12px 14px;
-      transition: all 0.15s; cursor: default;
-    }
-    .session-card:hover { background: var(--bg-card-hover); border-color: var(--border); }
-    .session-card-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
-    .session-card-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
-    .session-card-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .session-card-ide { font-size: 11px; color: var(--text-dim); }
-    .session-card-model { font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); }
-
-    .status-badge {
-      display: inline-flex; align-items: center; gap: 5px;
-      font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px;
-      white-space: nowrap;
-    }
-    .status-thinking { background: var(--purple-bg); color: var(--purple); }
-    .status-executing { background: var(--cyan-bg); color: var(--cyan); }
-    .status-streaming { background: var(--green-bg); color: var(--green); }
-    .status-processing { background: var(--lime-bg); color: var(--lime); }
-    .status-waitingInput { background: var(--amber-bg); color: var(--amber); }
-    .status-active { background: var(--blue-bg); color: var(--blue); }
-    .status-delegating { background: var(--purple-bg); color: var(--purple); }
-    .status-idle { background: rgba(110, 110, 110, 0.15); color: var(--text-dim); }
-
-    .status-indicator { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-    .status-thinking .status-indicator,
-    .status-executing .status-indicator,
-    .status-streaming .status-indicator,
-    .status-delegating .status-indicator { animation: status-pulse 1.5s ease-in-out infinite; }
-    @keyframes status-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
-
-    .session-card-tags { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-    .tag { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 500; }
-    .tag-main { background: #1e2a40; color: #93c5fd; }
-    .tag-sub { background: #2d1e40; color: #c4b5fd; }
-    .tag-skill { background: #3a1e0a; color: #f97316; }
-    .tag-agent-type { background: rgba(255,255,255,0.06); color: var(--text-secondary); }
-
-    .session-card-preview {
-      font-size: 12px; color: var(--text-secondary); line-height: 1.5;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: 8px;
-    }
-    .session-card-footer {
-      display: flex; align-items: center; justify-content: space-between;
-      font-size: 11px; color: var(--text-dim);
-    }
-    .session-card-speed { color: var(--green); font-family: var(--font-mono); font-weight: 600; }
-    .session-card-cost { color: var(--text-dim); font-family: var(--font-mono); }
-    .session-card-cost-total { color: var(--amber); font-weight: 500; margin-left: 2px; }
-    .session-card-ctx { display: flex; align-items: center; gap: 6px; }
-    .ctx-bar { width: 48px; height: 4px; background: rgba(255,255,255,0.08); border-radius: 2px; overflow: hidden; }
-    .ctx-fill { height: 100%; border-radius: 2px; transition: width 0.5s; }
-    .ctx-fill-low { background: var(--green); }
-    .ctx-fill-mid { background: var(--amber); }
-    .ctx-fill-high { background: var(--red); }
-
-    .subagent-chips { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 6px; }
-    .subagent-chip {
-      font-size: 10px; padding: 2px 8px; border-radius: 100px; font-weight: 500;
-      display: inline-flex; align-items: center; gap: 4px;
-    }
-
-    .workspace-group { margin-bottom: 16px; }
-    .workspace-group:last-child { margin-bottom: 0; }
-    .workspace-group-header {
-      font-size: 12px; font-weight: 600; color: var(--text-secondary);
-      padding: 4px 8px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;
-    }
-    .workspace-group-count { color: var(--text-dim); font-weight: 400; }
-
-    /* ── Demo: Audit ──────────────────────────────────────────────── */
-    .audit-list { padding: 16px; display: flex; flex-direction: column; gap: 8px; }
-    .audit-event {
-      display: flex; align-items: flex-start; gap: 12px;
-      padding: 12px 14px; border-radius: var(--radius-sm);
-      background: var(--bg-elevated); border: 1px solid transparent;
-      transition: all 0.15s;
-    }
-    .audit-event:hover { background: var(--bg-card-hover); border-color: var(--border); }
-    .risk-badge {
-      font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-      padding: 3px 8px; border-radius: 4px; white-space: nowrap; min-width: 64px; text-align: center;
-    }
-    .risk-critical { background: var(--red-bg); color: var(--red); }
-    .risk-high { background: var(--amber-bg); color: var(--amber); }
-    .risk-medium { background: var(--blue-bg); color: var(--blue); }
-    .audit-body { flex: 1; min-width: 0; }
-    .audit-cmd { font-family: var(--font-mono); font-size: 13px; color: var(--text-primary); margin-bottom: 6px; word-break: break-all; }
-    .audit-meta { display: flex; align-items: center; gap: 12px; font-size: 11px; color: var(--text-dim); flex-wrap: wrap; }
-    .audit-tags { display: flex; gap: 4px; flex-wrap: wrap; }
-    .risk-tag { font-size: 10px; padding: 1px 6px; border-radius: 3px; background: rgba(255,255,255,0.05); color: var(--text-secondary); }
-
-    /* ── Demo: Report ─────────────────────────────────────────────── */
-    .report-grid {
-      display: grid; grid-template-columns: repeat(4, 1fr);
-      gap: 12px; padding: 16px;
-    }
-    .metric-card {
-      background: var(--bg-elevated); border-radius: var(--radius-sm);
-      padding: 16px; text-align: center;
-    }
-    .metric-value { font-size: 28px; font-weight: 700; font-family: var(--font-mono); margin-bottom: 4px; }
-    .metric-label { font-size: 12px; color: var(--text-dim); }
-    .metric-highlight { color: var(--accent-bright); }
-    .metric-cost { color: var(--amber); }
-
-    .report-body { padding: 0 16px 16px; display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-    .report-summary {
-      background: var(--bg-elevated); border-radius: var(--radius-sm); padding: 20px;
-    }
-    .report-summary h4 { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .report-summary p { font-size: 14px; line-height: 1.8; color: var(--text-secondary); }
-
-    .heatmap-card {
-      background: var(--bg-elevated); border-radius: var(--radius-sm); padding: 20px;
-    }
-    .heatmap-card h4 { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .heatmap { display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px; }
-    .heatmap-cell {
-      aspect-ratio: 1; border-radius: 3px;
-      transition: transform 0.15s;
-    }
-    .heatmap-cell:hover { transform: scale(1.4); }
-    .heat-0 { background: #161b22; }
-    .heat-1 { background: #0e4429; }
-    .heat-2 { background: #006d32; }
-    .heat-3 { background: #26a641; }
-    .heat-4 { background: #39d353; }
-    .heatmap-hours {
-      display: grid; grid-template-columns: repeat(24, 1fr); gap: 3px;
-      margin-top: 4px;
-    }
-    .heatmap-hour { font-size: 8px; color: var(--text-dim); text-align: center; }
-
-    .lessons-section { padding: 0 16px 16px; }
-    .lesson-card {
-      background: var(--bg-elevated); border-radius: var(--radius-sm); padding: 16px;
-      border-left: 3px solid var(--amber);
-    }
-    .lesson-card h4 { font-size: 13px; color: var(--text-dim); margin-bottom: 12px; text-transform: uppercase; letter-spacing: 0.05em; }
-    .lesson-item { margin-bottom: 12px; }
-    .lesson-item:last-child { margin-bottom: 0; }
-    .lesson-text { font-size: 13px; color: var(--text-primary); margin-bottom: 4px; }
-    .lesson-reason { font-size: 12px; color: var(--text-dim); font-style: italic; }
-
-    /* ── Demo: Session Detail ─────────────────────────────────────── */
-    .chat-messages { padding: 16px; display: flex; flex-direction: column; gap: 12px; max-height: 480px; overflow-y: auto; }
-    .chat-msg { display: flex; flex-direction: column; gap: 8px; }
-    .chat-role {
-      font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
-    }
-    .chat-role-user { color: var(--blue); }
-    .chat-role-assistant { color: var(--accent-bright); }
-    .chat-text { font-size: 14px; line-height: 1.7; color: var(--text-secondary); }
-
-    .thinking-block {
-      background: #0b1120; border: 1px solid #1e2942; border-radius: var(--radius-sm);
-      overflow: hidden;
-    }
-    .thinking-toggle {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 12px; font-size: 12px; color: #a78bfa;
-      background: #101a30; cursor: pointer; border: none; width: 100%;
-      text-align: left; font-family: inherit;
-    }
-    .thinking-toggle:hover { background: #152238; }
-    .thinking-content {
-      padding: 12px; font-size: 13px; color: var(--text-dim);
-      line-height: 1.7; font-family: var(--font-mono);
-      border-top: 1px solid #1e2942; display: none;
-    }
-    .thinking-block.open .thinking-content { display: block; }
-    .thinking-block.open .thinking-arrow { transform: rotate(90deg); }
-    .thinking-arrow { transition: transform 0.2s; display: inline-block; }
-
-    .tool-block {
-      background: #0d1a0d; border: 1px solid #1e2a1e; border-radius: var(--radius-sm);
-      overflow: hidden;
-    }
-    .tool-header {
-      display: flex; align-items: center; gap: 8px;
-      padding: 8px 12px; font-size: 12px; font-weight: 600; color: #86efac;
-      background: rgba(13, 26, 13, 0.5);
-    }
-    .tool-content {
-      padding: 12px; font-size: 12px; color: var(--text-secondary);
-      font-family: var(--font-mono); line-height: 1.6;
-      border-top: 1px solid #1e2a1e;
-    }
-    .tool-result {
-      background: #0d0d1a; border: 1px solid #1e1e2a; border-radius: var(--radius-sm);
-      padding: 12px; font-size: 12px; color: var(--text-dim);
-      font-family: var(--font-mono); line-height: 1.6;
-    }
-
-    /* ── Download Section ─────────────────────────────────────────── */
-    .download-grid {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 16px; margin-top: 48px;
-    }
-    .download-card {
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 32px 24px; text-align: center;
-      transition: all 0.2s; cursor: pointer; text-decoration: none !important; color: inherit;
-      display: block;
-    }
-    .download-card:hover {
-      background: var(--bg-card-hover); border-color: var(--accent);
-      transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,0.4);
-      text-decoration: none !important;
-    }
-    .download-icon { width: 48px; height: 48px; margin: 0 auto 16px; }
-    .download-icon svg { width: 100%; height: 100%; }
-    .download-platform { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
-    .download-arch { font-size: 13px; color: var(--text-dim); }
-    .download-format { font-size: 12px; color: var(--text-dim); margin-top: 4px; font-family: var(--font-mono); }
-
-    /* ── Agents Banner ────────────────────────────────────────────── */
-    .agents-row {
-      display: flex; align-items: center; justify-content: center; gap: 48px;
-      flex-wrap: wrap; margin-top: 48px;
-    }
-    .agent-item {
-      display: flex; align-items: center; gap: 12px;
-      font-size: 16px; font-weight: 500; color: var(--text-secondary);
-    }
-    .agent-item img { width: 32px; height: 32px; }
-    .agent-check { color: var(--green); font-size: 18px; }
-
-    /* ── Footer ───────────────────────────────────────────────────── */
-    .footer {
-      border-top: 1px solid var(--border); padding: 48px 24px;
-      text-align: center; color: var(--text-dim); font-size: 13px;
-    }
-    .footer-links { display: flex; justify-content: center; gap: 24px; margin-bottom: 16px; flex-wrap: wrap; }
-    .footer-links a { color: var(--text-secondary); }
-
-    /* ── Responsive ───────────────────────────────────────────────── */
-    @media (max-width: 768px) {
-      .nav-links { display: none; }
-      .gallery-grid { grid-template-columns: 1fr; }
-      .report-grid { grid-template-columns: repeat(2, 1fr); }
-      .report-body { grid-template-columns: 1fr; }
-      .download-grid { grid-template-columns: 1fr 1fr; }
-      .hero { min-height: auto; padding: 120px 16px 60px; }
-      .section { padding: 80px 16px; }
-      .agents-row { gap: 24px; }
-    }
-    @media (max-width: 480px) {
-      .download-grid { grid-template-columns: 1fr; }
-      .report-grid { grid-template-columns: 1fr 1fr; }
-      .heatmap { gap: 2px; }
-    }
-
-    /* ── Feature layout ───────────────────────────────────────────── */
-    .feature-split {
-      display: grid; grid-template-columns: 1fr 1.4fr; gap: 48px; align-items: center;
-    }
-    .feature-split-reverse { grid-template-columns: 1.4fr 1fr; }
-    .feature-split-reverse .feature-text { order: 2; }
-    .feature-split-reverse .feature-demo { order: 1; }
+    .push-chip img { width: 30px; height: 30px; border-radius: 7px; }
+    .push-chip .pc-t { font-size: 12.5px; font-weight: 600; }
+    .push-chip .pc-b { font-size: 12px; color: var(--night-dim); line-height: 1.35; }
     @media (max-width: 900px) {
-      .feature-split, .feature-split-reverse { grid-template-columns: 1fr; }
-      .feature-split-reverse .feature-text { order: 1; }
-      .feature-split-reverse .feature-demo { order: 2; }
+      .hero { grid-template-columns: 1fr; padding-top: 120px; }
+      .collage { min-height: 400px; max-width: 480px; }
     }
-    .feature-text { }
-    .feature-bullets { list-style: none; margin-top: 24px; display: flex; flex-direction: column; gap: 12px; }
-    .feature-bullets li {
-      display: flex; align-items: flex-start; gap: 10px;
-      font-size: 14px; color: var(--text-secondary); line-height: 1.5;
+
+    /* ── Agents strip ── */
+    .agents-strip { border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); background: var(--card); }
+    .agents-inner {
+      max-width: var(--max-width); margin: 0 auto; padding: 18px 24px;
+      display: flex; align-items: center; justify-content: center; gap: 12px 40px; flex-wrap: wrap;
+      font-family: var(--font-mono); font-size: 13.5px; color: var(--ink-secondary);
     }
-    .feature-bullet-icon { color: var(--accent); font-size: 16px; margin-top: 2px; flex-shrink: 0; }
+    .agents-inner .lead { color: var(--ink-dim); font-family: var(--font-body); font-size: 13px; }
+    .agents-inner span b { color: var(--ink); font-weight: 600; }
+
+    /* ── Sections ── */
+    .section { max-width: var(--max-width); margin: 0 auto; padding: 88px 24px; }
+    .section + .section { border-top: 1px solid var(--border-soft); }
+    .kicker {
+      font-family: var(--font-mono); font-size: 12.5px; letter-spacing: 0.08em;
+      text-transform: uppercase; color: var(--accent); margin-bottom: 14px; display: block;
+    }
+    .kicker::before { content: "— "; }
+    .section h2 {
+      font-family: var(--font-display); font-weight: 600; font-size: clamp(28px, 3.6vw, 40px);
+      line-height: 1.15; letter-spacing: -0.01em; margin-bottom: 16px; max-width: 22ch;
+    }
+    .section-desc { font-size: 16.5px; color: var(--ink-secondary); max-width: 62ch; margin-bottom: 36px; }
+    .two-col { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 52px; align-items: center; }
+    .two-col.flip { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+    @media (max-width: 900px) { .two-col, .two-col.flip { grid-template-columns: 1fr; gap: 32px; } }
+
+    .feature-list { list-style: none; display: grid; gap: 18px; }
+    .feature-list li { padding-left: 26px; position: relative; font-size: 15px; color: var(--ink-secondary); }
+    .feature-list li::before {
+      content: ""; position: absolute; left: 0; top: 7px; width: 12px; height: 12px;
+      border: 2px solid var(--accent); border-radius: 3px; background: var(--accent-soft);
+    }
+    .feature-list b { color: var(--ink); font-weight: 650; display: block; margin-bottom: 2px; font-size: 15.5px; }
+
+    /* screenshots framed as app windows on paper */
+    .shot { border-radius: 12px; overflow: hidden; border: 1px solid var(--border-strong); box-shadow: var(--shadow-raised); background: var(--night); }
+    .shot-bar { display: flex; gap: 6px; padding: 10px 12px; background: var(--night-deep); border-bottom: 1px solid var(--night-border); }
+    .shot-bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--night-border); }
+    .shot img { display: block; width: 100%; }
+
+    /* ── Video ── */
+    .video-wrap { max-width: 880px; margin: 0 auto; }
+    .video-frame {
+      position: relative; padding-top: 56.25%; border-radius: 12px; overflow: hidden;
+      border: 1px solid var(--border-strong); box-shadow: var(--shadow-raised); background: var(--night);
+    }
+    .video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+    /* ── Decision queue mock ── */
+    .queue { display: grid; gap: 12px; }
+    .q-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: var(--shadow-card); padding: 14px 16px; display: flex; gap: 12px; align-items: flex-start;
+    }
+    .q-icon {
+      flex-shrink: 0; width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center;
+      background: var(--accent-soft); color: var(--accent); font-size: 16px;
+    }
+    .q-body { min-width: 0; }
+    .q-kind { font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--ink-dim); margin-bottom: 2px; }
+    .q-text { font-size: 14px; color: var(--ink); }
+    .q-text code { font-family: var(--font-mono); font-size: 12.5px; background: var(--paper-deep); padding: 1px 6px; border-radius: 5px; }
+
+    /* ── Terminal blocks ── */
+    .term {
+      background: var(--night); border-radius: 12px; border: 1px solid var(--border-strong);
+      box-shadow: var(--shadow-raised); overflow: hidden; font-family: var(--font-mono); font-size: 13.5px;
+    }
+    .term-bar { display: flex; align-items: center; gap: 6px; padding: 10px 14px; background: var(--night-deep); border-bottom: 1px solid var(--night-border); }
+    .term-bar i { width: 10px; height: 10px; border-radius: 50%; background: var(--night-border); }
+    .term-bar span { margin-left: 8px; color: var(--night-dim); font-size: 12px; }
+    .term-body { padding: 18px 20px; color: var(--night-text); line-height: 1.75; overflow-x: auto; }
+    .term-body .p { color: var(--coral-night); }
+    .term-body .c { color: var(--night-dim); }
+    .term-body .g { color: #4ade80; }
+    .term-body .y { color: #fbbf24; }
+    .term-body .b { color: #7dd3fc; }
+
+    /* ── Phone mock ── */
+    .phone {
+      width: 280px; margin: 0 auto; background: var(--card); border: 1px solid var(--border-strong);
+      border-radius: 34px; box-shadow: var(--shadow-raised); padding: 14px 12px 20px; position: relative;
+    }
+    .phone::before { content: ""; display: block; width: 78px; height: 5px; border-radius: 100px; background: var(--border-strong); margin: 2px auto 12px; }
+    .phone-head { display: flex; justify-content: space-between; align-items: center; padding: 0 8px 10px; }
+    .phone-head .ph-t { font-weight: 700; font-size: 14px; }
+    .phone-head .ph-cost { font-family: var(--font-mono); font-size: 11.5px; color: var(--accent); }
+    .phone .q-card { padding: 11px 12px; }
+    .phone .q-text { font-size: 12.5px; }
+    .phone .gc-actions { margin-top: 8px; }
+    .phone .gc-btn { font-size: 12px; padding: 6px 13px; }
+
+    /* ── Pillar-extra strip (quiet list, not cards) ── */
+    .extras { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; background: var(--card); }
+    .extra { padding: 24px 26px; border-top: 1px solid var(--border-soft); }
+    .extras .extra:nth-child(-n+3) { border-top: 0; }
+    .extra + .extra { border-left: 1px solid var(--border-soft); }
+    @media (max-width: 760px) { .extra + .extra { border-left: 0; } .extras .extra:nth-child(-n+3) { border-top: 1px solid var(--border-soft); } .extras .extra:first-child { border-top: 0; } }
+    .extra h3 { font-size: 15.5px; font-weight: 650; margin-bottom: 6px; }
+    .extra p { font-size: 13.5px; color: var(--ink-secondary); }
+
+    /* ── Download ── */
+    .dl-table { display: grid; gap: 12px; max-width: 720px; margin: 0 auto; }
+    .dl-row {
+      display: flex; align-items: center; gap: 16px; background: var(--card);
+      border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 22px; box-shadow: var(--shadow-card);
+    }
+    .dl-row img { width: 26px; height: 26px; }
+    .dl-row .dl-name { font-weight: 650; font-size: 15px; min-width: 90px; }
+    .dl-row .dl-arch { font-size: 13px; color: var(--ink-dim); flex: 1; }
+    .dl-row a { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+    .dl-note { text-align: center; margin-top: 20px; font-size: 14px; color: var(--ink-secondary); }
+
+    /* ── Footer ── */
+    .footer { border-top: 1px solid var(--border-soft); background: var(--card); }
+    .footer-inner {
+      max-width: var(--max-width); margin: 0 auto; padding: 36px 24px;
+      display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap;
+      font-size: 13.5px; color: var(--ink-dim);
+    }
+    .footer-inner .f-logo { display: flex; align-items: center; gap: 8px; font-family: var(--font-display); font-weight: 600; font-size: 16px; color: var(--ink); }
+    .footer-inner .f-logo img { width: 24px; height: 24px; border-radius: 6px; }
+    .footer-links { display: flex; gap: 20px; }
+
+    /* reveal on scroll */
+    .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.5s ease, transform 0.5s ease; }
+    .reveal.in { opacity: 1; transform: none; }
+    @media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } }
   </style>
 </head>
 <body>
 
-  <!-- ═══ Navigation ═══ -->
   <nav class="nav">
     <div class="nav-inner">
-      <a href="#" class="nav-logo">
-        <img src="icon.png" alt="Claw Fleet">
-        <span>Claw Fleet</span>
-      </a>
+      <a class="nav-logo" href="#" style="text-decoration:none"><img src="icon.png" alt="">Claw Fleet</a>
       <div class="nav-links">
-        <a href="#features">Features</a>
-        <a href="#video">Demo</a>
-        <a href="#download">Download</a>
-        <a href="https://github.com/hoveychen/claw-fleet" target="_blank">GitHub</a>
+        <a href="#see">Monitor</a>
+        <a href="#approve">Decisions</a>
+        <a href="#dispatch">Orchestrate</a>
+        <a href="#anywhere">Mobile</a>
+        <a href="https://github.com/hoveychen/claw-fleet">GitHub</a>
+        <a class="nav-cta" href="#download">Download</a>
       </div>
     </div>
   </nav>
 
   <!-- ═══ Hero ═══ -->
-  <section class="hero" id="hero">
-    <div class="hero-content">
-      <div class="hero-badge">
-        <span class="hero-badge-dot"></span>
-        Free &amp; Open Source (AGPL)
-      </div>
-      <h1>Mission Control for<br>Your AI Agents</h1>
-      <p>
-        Monitor, manage, and analyze all your Claude Code sessions in real-time.
-        One dashboard for every agent across every project.
+  <header class="hero">
+    <div>
+      <span class="hero-eyebrow">open-source · AGPL-3.0 · no API key</span>
+      <h1>Your agents write the code. <em>You</em> run the fleet.</h1>
+      <p class="hero-sub">
+        Claw Fleet is the command tower for Claude Code, Cursor, OpenClaw, and Codex:
+        live status and real USD spend for every session, one inbox for every decision
+        your agents need from you, and a phone app so the fleet never waits for you to be at your desk.
       </p>
       <div class="hero-actions">
         <a href="#download" class="btn-primary" id="hero-download-btn">
-          <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           <span id="hero-download-text">Download for Free</span>
         </a>
-        <a href="https://github.com/hoveychen/claw-fleet" class="btn-secondary" target="_blank">
-          <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-          Star on GitHub
-        </a>
+        <a href="https://github.com/hoveychen/claw-fleet" class="btn-ghost">Star on GitHub</a>
       </div>
-      <div class="hero-agents">
-        <span class="hero-agent"><span>Works with:</span></span>
-        <span class="hero-agent"><img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/claw-fleet-desktop/app/assets/icons/claude.svg" alt="Claude Code"> Claude Code</span>
-        <span class="hero-agent"><img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/claw-fleet-desktop/app/assets/icons/cursor.svg" alt="Cursor"> Cursor</span>
-        <span class="hero-agent"><img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/claw-fleet-desktop/app/assets/icons/codex.svg" alt="Codex"> Codex</span>
-        <span class="hero-agent"><img src="https://raw.githubusercontent.com/hoveychen/claw-fleet/main/claw-fleet-desktop/app/assets/icons/openclaw.svg" alt="OpenClaw"> OpenClaw</span>
+      <p class="hero-meta">macOS · Windows · Linux · mobile web — reads local session files, zero config</p>
+    </div>
+    <div class="collage" aria-hidden="true">
+      <div class="ui-card session-card">
+        <div class="sc-head"><span class="sc-title">api-server</span><span class="badge b-delegating">Delegating</span></div>
+        <div class="sc-line">Refactor auth middleware and update the integration tests…</div>
+        <div class="sc-sub"><span class="dot"></span>#1 · Run integration tests — Streaming</div>
+        <div class="sc-sub"><span class="dot" style="background: var(--badge-thinking-fg)"></span>#2 · Review PR changes — Thinking</div>
+        <div class="sc-stats"><span><strong>$4.87</strong> session</span><span>92.3 tok/s</span><span>ctx 61%</span></div>
       </div>
-      <div class="hero-screenshot reveal">
-        <img src="screenshots/01_gallery.png" alt="Claw Fleet Gallery View" loading="lazy">
+      <div class="ui-card guard-card">
+        <div class="gc-label">Guard · command approval</div>
+        <div class="gc-cmd">$ git push <span class="hl">--force</span> origin main</div>
+        <div class="gc-actions">
+          <span class="gc-btn gc-deny">Block</span>
+          <span class="gc-btn gc-allow">Allow once</span>
+        </div>
+      </div>
+      <div class="push-chip">
+        <img src="icon.png" alt="">
+        <div>
+          <div class="pc-t">Claw Fleet</div>
+          <div class="pc-b">web-frontend is waiting for your answer — 2 decisions pending</div>
+        </div>
       </div>
     </div>
-  </section>
+  </header>
+
+  <!-- ═══ Agents strip ═══ -->
+  <div class="agents-strip">
+    <div class="agents-inner">
+      <span class="lead">Watches sessions from</span>
+      <span><b>Claude Code</b> full support</span>
+      <span><b>Cursor</b> monitoring</span>
+      <span><b>OpenClaw</b> monitoring</span>
+      <span><b>Codex</b> monitoring</span>
+    </div>
+  </div>
 
   <!-- ═══ Video ═══ -->
-  <section class="section section-alt" id="video">
-    <div class="section-inner reveal" style="text-align: center;">
-      <span class="section-label">📺 See It In Action</span>
-      <h2 class="section-title" style="margin-left: auto; margin-right: auto;">Two-Minute Overview</h2>
-      <p class="section-desc" style="margin-left: auto; margin-right: auto;">Watch how Claw Fleet turns chaos into clarity when running multiple AI agents.</p>
-      <div class="video-wrapper">
+  <section class="section" id="video">
+    <div class="video-wrap reveal">
+      <span class="kicker">two minutes</span>
+      <h2>See it in action</h2>
+      <p class="section-desc">How Claw Fleet turns a swarm of terminals into one calm cockpit.</p>
+      <!-- TODO: replace with the new Remotion launch video once uploaded -->
+      <div class="video-frame">
         <iframe src="https://www.youtube.com/embed/sk1SbKkjXSQ?rel=0&modestbranding=1" title="Claw Fleet Demo" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen loading="lazy"></iframe>
       </div>
     </div>
   </section>
 
-  <!-- ═══ Feature 1: Gallery / Real-time Dashboard ═══ -->
-  <section class="section" id="features">
-    <div class="section-inner">
-      <div class="feature-split reveal">
-        <div class="feature-text">
-          <span class="section-label">⚡ Real-Time Dashboard</span>
-          <h2 class="section-title">See Every Agent<br>At a Glance</h2>
-          <p class="section-desc" style="margin-bottom: 0;">
-            8 distinct live statuses, token speed, live USD spend, context utilization, and subagent hierarchies — all updating in real-time.
-          </p>
-          <ul class="feature-bullets">
-            <li><span class="feature-bullet-icon">→</span> Sessions grouped by workspace with subagent tree</li>
-            <li><span class="feature-bullet-icon">→</span> Live token speed (tok/s) <em>and</em> cost rate ($/min) — cache-aware, per model</li>
-            <li><span class="feature-bullet-icon">→</span> Per-session USD spend rolls up across delegated subagents</li>
-            <li><span class="feature-bullet-icon">→</span> Context window meter shows remaining capacity</li>
-            <li><span class="feature-bullet-icon">→</span> Zero-config — reads from <code style="color:var(--accent);background:rgba(232,116,58,0.12);padding:1px 5px;border-radius:3px;">~/.claude/</code> automatically</li>
-          </ul>
-        </div>
-        <div class="feature-demo">
-          <div class="demo-frame">
-            <div class="demo-titlebar">
-              <span class="demo-dot demo-dot-r"></span>
-              <span class="demo-dot demo-dot-y"></span>
-              <span class="demo-dot demo-dot-g"></span>
-              <span class="demo-titlebar-text">Claw Fleet — Gallery</span>
-            </div>
-            <div style="padding: 12px;">
-              <!-- Workspace: claw-fleet -->
-              <div class="workspace-group">
-                <div class="workspace-group-header">
-                  <span>claw-fleet</span>
-                  <span class="workspace-group-count">5 sessions</span>
-                </div>
-                <div class="gallery-grid">
-                  <!-- Main session -->
-                  <div class="session-card">
-                    <div class="session-card-header">
-                      <div class="session-card-left">
-                        <span class="session-card-name">Implement mock mode for demo</span>
-                      </div>
-                      <span class="status-badge status-delegating"><span class="status-indicator"></span> Delegating</span>
-                    </div>
-                    <div class="session-card-tags">
-                      <span class="tag tag-main">main</span>
-                      <span class="tag tag-agent-type">VS Code</span>
-                    </div>
-                    <div class="subagent-chips">
-                      <span class="subagent-chip" style="background:hsla(280,28%,20%,1);color:hsla(280,60%,72%,1);border:1px solid hsla(280,28%,32%,1);">Explore project structure</span>
-                      <span class="subagent-chip" style="background:hsla(160,28%,20%,1);color:hsla(160,60%,72%,1);border:1px solid hsla(160,28%,32%,1);">Write mock data module</span>
-                      <span class="subagent-chip" style="background:hsla(40,28%,20%,1);color:hsla(40,60%,72%,1);border:1px solid hsla(40,28%,32%,1);">Run integration tests</span>
-                      <span class="subagent-chip" style="background:hsla(340,28%,20%,1);color:hsla(340,60%,72%,1);border:1px solid hsla(340,28%,32%,1);">Review PR changes</span>
-                    </div>
-                    <div class="session-card-preview">Creating mock data module with realistic sessions...</div>
-                    <div class="session-card-footer">
-                      <span class="session-card-model">claude-opus-4</span>
-                      <span class="session-card-speed" data-speed="12.3">12.3 tok/s</span>
-                      <span class="session-card-cost" title="Self: $0.42 · Agent total (main + subagents): $1.87">$0.42<span class="session-card-cost-total"> · $1.87</span></span>
-                      <span class="session-card-ctx">
-                        <span class="ctx-bar"><span class="ctx-fill ctx-fill-low" style="width:34%"></span></span>
-                        34%
-                      </span>
-                    </div>
-                  </div>
-                  <!-- Subagent: Explore -->
-                  <div class="session-card">
-                    <div class="session-card-header">
-                      <div class="session-card-left">
-                        <span class="session-card-name">Explore project structure</span>
-                      </div>
-                      <span class="status-badge status-thinking"><span class="status-indicator"></span> Thinking</span>
-                    </div>
-                    <div class="session-card-tags">
-                      <span class="tag tag-sub">explore</span>
-                    </div>
-                    <div class="session-card-preview">Searching for component files...</div>
-                    <div class="session-card-footer">
-                      <span class="session-card-model">claude-sonnet-4</span>
-                      <span class="session-card-speed" data-speed="8.7">8.7 tok/s</span>
-                      <span class="session-card-cost" title="Session cost (USD)">$0.18</span>
-                      <span class="session-card-ctx">
-                        <span class="ctx-bar"><span class="ctx-fill ctx-fill-low" style="width:12%"></span></span>
-                        12%
-                      </span>
-                    </div>
-                  </div>
-                  <!-- Subagent: Write -->
-                  <div class="session-card">
-                    <div class="session-card-header">
-                      <div class="session-card-left">
-                        <span class="session-card-name">Write mock data module</span>
-                      </div>
-                      <span class="status-badge status-executing"><span class="status-indicator"></span> Executing</span>
-                    </div>
-                    <div class="session-card-tags">
-                      <span class="tag tag-sub">general-purpose</span>
-                    </div>
-                    <div class="session-card-preview">Writing src/mock/data.ts...</div>
-                    <div class="session-card-footer">
-                      <span class="session-card-model">claude-opus-4</span>
-                      <span class="session-card-speed" data-speed="15.2">15.2 tok/s</span>
-                      <span class="session-card-cost" title="Session cost (USD)">$0.64</span>
-                      <span class="session-card-ctx">
-                        <span class="ctx-bar"><span class="ctx-fill ctx-fill-low" style="width:8%"></span></span>
-                        8%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <!-- Workspace: api-server -->
-              <div class="workspace-group">
-                <div class="workspace-group-header">
-                  <span>api-server</span>
-                  <span class="workspace-group-count">2 sessions</span>
-                </div>
-                <div class="gallery-grid">
-                  <div class="session-card">
-                    <div class="session-card-header">
-                      <div class="session-card-left">
-                        <span class="session-card-name">Fix JWT token validation</span>
-                      </div>
-                      <span class="status-badge status-executing"><span class="status-indicator"></span> Executing</span>
-                    </div>
-                    <div class="session-card-tags">
-                      <span class="tag tag-main">main</span>
-                      <span class="tag tag-agent-type">JetBrains</span>
-                      <span class="tag tag-skill">/commit</span>
-                    </div>
-                    <div class="session-card-preview">Running test suite after applying the fix...</div>
-                    <div class="session-card-footer">
-                      <span class="session-card-model">claude-opus-4</span>
-                      <span class="session-card-speed" data-speed="22.5">22.5 tok/s</span>
-                      <span class="session-card-cost" title="Session cost (USD)">$2.31</span>
-                      <span class="session-card-ctx">
-                        <span class="ctx-bar"><span class="ctx-fill ctx-fill-mid" style="width:72%"></span></span>
-                        72%
-                      </span>
-                    </div>
-                  </div>
-                  <div class="session-card">
-                    <div class="session-card-header">
-                      <div class="session-card-left">
-                        <span class="session-card-name">Refactor shared components</span>
-                      </div>
-                      <span class="status-badge status-waitingInput"><span class="status-indicator"></span> Waiting Input</span>
-                    </div>
-                    <div class="session-card-tags">
-                      <span class="tag tag-main">main</span>
-                      <span class="tag tag-agent-type">VS Code</span>
-                    </div>
-                    <div class="session-card-preview">Should I proceed with breaking changes to the Button API?</div>
-                    <div class="session-card-footer">
-                      <span class="session-card-model">claude-opus-4</span>
-                      <span class="session-card-speed" data-speed="0">0 tok/s</span>
-                      <span class="session-card-cost" title="Session cost (USD)">$3.08</span>
-                      <span class="session-card-ctx">
-                        <span class="ctx-bar"><span class="ctx-fill ctx-fill-high" style="width:89%"></span></span>
-                        89%
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              </div>
+  <!-- ═══ Pillar 1: See ═══ -->
+  <section class="section" id="see">
+    <div class="two-col">
+      <div class="reveal">
+        <span class="kicker">see everything</span>
+        <h2>Eight live statuses, real dollars, zero guessing</h2>
+        <ul class="feature-list">
+          <li><b>Live fleet board</b>Thinking, executing, streaming, delegating, waiting for you — with subagent hierarchies grouped under their parent. Kill or interrupt from the card.</li>
+          <li><b>Cost that matches your bill</b>Per-session USD with cache-aware, per-model pricing; a fleet-wide $/min chart and a today-counter catch runaway loops early.</li>
+          <li><b>Deep session detail</b>Full conversation timeline, workflow DAGs for multi-agent runs, handoff chains, skill history, scratchpad, and TODOs.</li>
+          <li><b>AI daily report &amp; lessons</b>Each day distilled into a standup-ready narrative; extracted lessons land in <code style="font-family:var(--font-mono);font-size:13px">CLAUDE.md</code> with one click.</li>
+          <li><b>Security audit</b>Every Bash command classified by risk — plus custom rules and AI-suggested ones.</li>
+        </ul>
+      </div>
+      <div class="reveal">
+        <div class="shot"><div class="shot-bar"><i></i><i></i><i></i></div><img src="screenshots/01_gallery.png" alt="Claw Fleet gallery view: live multi-agent dashboard" loading="lazy"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Pillar 2: Approve ═══ -->
+  <section class="section" id="approve">
+    <div class="two-col flip">
+      <div class="reveal">
+        <div class="queue">
+          <div class="q-card">
+            <div class="q-icon">⛨</div>
+            <div class="q-body">
+              <div class="q-kind">guard</div>
+              <div class="q-text">data-pipeline wants to run <code>rm -rf ./cache</code> — allow?</div>
             </div>
           </div>
+          <div class="q-card">
+            <div class="q-icon">?</div>
+            <div class="q-body">
+              <div class="q-kind">question</div>
+              <div class="q-text">"Keep backwards compatibility for the v1 API, or drop it?"</div>
+            </div>
+          </div>
+          <div class="q-card">
+            <div class="q-icon">☰</div>
+            <div class="q-body">
+              <div class="q-kind">plan approval</div>
+              <div class="q-text">web-frontend proposes a 6-step migration plan — review &amp; edit before it starts.</div>
+            </div>
+          </div>
+          <div class="q-card">
+            <div class="q-icon">✓</div>
+            <div class="q-body">
+              <div class="q-kind">permission</div>
+              <div class="q-text">Headless session requests <code>WebFetch</code> on an external domain.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="reveal">
+        <span class="kicker">approve anything</span>
+        <h2>Every decision, one inbox</h2>
+        <p class="section-desc">
+          Agents don't just need watching — they need answers. Claw Fleet routes everything that
+          used to interrupt five terminals into a single Decision Panel.
+        </p>
+        <ul class="feature-list">
+          <li><b>Guard for risky commands</b>Dangerous Bash intercepted before it runs, with on-demand LLM risk analysis and "always allow this prefix".</li>
+          <li><b>Native permission bridge</b>Claude Code's own permission prompts from headless sessions, answered in the app.</li>
+          <li><b>Questions &amp; plans</b>Wizard-style answers with options, forms, and attachments; edit an agent's plan right in the card before approving.</li>
+          <li><b>Discipline modes</b>Interaction Mode turns reports into cards; PRD Mode keeps long tasks running without commit-nagging; the permissions injector ends double-prompting; rate-limited sessions auto-resume.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ Pillar 3: Dispatch ═══ -->
+  <section class="section" id="dispatch">
+    <div class="two-col">
+      <div class="reveal">
+        <span class="kicker">dispatch &amp; relay</span>
+        <h2>Launch, hand off, loop — agents that outlive a context window</h2>
+        <ul class="feature-list">
+          <li><b>Launch from the app</b>Pick a workspace, model, effort, and permission mode; attach context files; manage sessions in launchpad tabs. Works from the phone too.</li>
+          <li><b>Handoff chains</b>When context runs long, an agent leaves a note and Fleet spawns a successor that picks up the work — the relay chain stays visible on every card.</li>
+          <li><b>Reliable loops</b><code style="font-family:var(--font-mono);font-size:13px">fleet loop</code> re-runs a prompt on schedule, each iteration a fresh detached session.</li>
+          <li><b>Agents managing agents</b>The Fleet skill teaches agents the CLI: check load, watch peers, stop runaways. Installs into Claude Code, Copilot, and Gemini CLI.</li>
+        </ul>
+      </div>
+      <div class="reveal">
+        <div class="term">
+          <div class="term-bar"><i></i><i></i><i></i><span>fleet — zsh</span></div>
+          <div class="term-body"><span class="p">$</span> fleet agents<br>
+<span class="c">WORKSPACE      STATUS      SPEED     SPEND</span><br>
+api-server     <span class="g">executing</span>   27 tok/s  $3.12<br>
+web-frontend   <span class="y">waiting</span>     —         $1.84<br>
+data-pipeline  <span class="b">delegating</span>  84 tok/s  $6.40<br>
+<br>
+<span class="p">$</span> fleet handoff --note <span class="g">"P3 done, tests green — continue P4"</span><br>
+<span class="c">✓ successor session will spawn when this turn ends</span><br>
+<br>
+<span class="p">$</span> fleet loop create --interval 30m --prompt <span class="g">"/babysit-ci"</span><br>
+<span class="c">✓ loop #3 registered — every 30m, fresh session</span></div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- ═══ Feature 2: Security Audit ═══ -->
-  <section class="section section-alt">
-    <div class="section-inner">
-      <div class="feature-split feature-split-reverse reveal">
-        <div class="feature-demo">
-          <div class="demo-frame">
-            <div class="demo-titlebar">
-              <span class="demo-dot demo-dot-r"></span>
-              <span class="demo-dot demo-dot-y"></span>
-              <span class="demo-dot demo-dot-g"></span>
-              <span class="demo-titlebar-text">Claw Fleet — Security Audit</span>
+  <!-- ═══ Pillar 4: Anywhere ═══ -->
+  <section class="section" id="anywhere">
+    <div class="two-col flip">
+      <div class="reveal" style="text-align:center">
+        <div class="phone">
+          <div class="phone-head"><span class="ph-t">Decisions</span><span class="ph-cost">today $12.40 · 1.2M tok</span></div>
+          <div class="queue">
+            <div class="q-card">
+              <div class="q-icon">⛨</div>
+              <div class="q-body">
+                <div class="q-kind">guard · api-server</div>
+                <div class="q-text">Allow <code>npx prisma migrate</code>?</div>
+                <div class="gc-actions"><span class="gc-btn gc-deny">Block</span><span class="gc-btn gc-allow">Allow</span></div>
+              </div>
             </div>
-            <div class="audit-list">
-              <div class="audit-event">
-                <span class="risk-badge risk-critical">CRITICAL</span>
-                <div class="audit-body">
-                  <div class="audit-cmd">sudo rm -rf /var/log/app/* && sudo systemctl restart nginx</div>
-                  <div class="audit-meta">
-                    <span>api-server</span>
-                    <span>claude-code</span>
-                    <span>2 min ago</span>
-                    <div class="audit-tags">
-                      <span class="risk-tag">shell:sudo</span>
-                      <span class="risk-tag">destructive:rm</span>
-                      <span class="risk-tag">recursive</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="audit-event">
-                <span class="risk-badge risk-high">HIGH</span>
-                <div class="audit-body">
-                  <div class="audit-cmd">git push --force origin main</div>
-                  <div class="audit-meta">
-                    <span>web-frontend</span>
-                    <span>claude-code</span>
-                    <span>5 min ago</span>
-                    <div class="audit-tags">
-                      <span class="risk-tag">force-push</span>
-                      <span class="risk-tag">main-branch</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="audit-event">
-                <span class="risk-badge risk-high">HIGH</span>
-                <div class="audit-body">
-                  <div class="audit-cmd">curl -s https://install.example.com | bash</div>
-                  <div class="audit-meta">
-                    <span>infra-terraform</span>
-                    <span>cursor</span>
-                    <span>12 min ago</span>
-                    <div class="audit-tags">
-                      <span class="risk-tag">pipe-to-shell</span>
-                      <span class="risk-tag">external-url</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="audit-event">
-                <span class="risk-badge risk-medium">MEDIUM</span>
-                <div class="audit-body">
-                  <div class="audit-cmd">chmod 777 /tmp/deploy.sh</div>
-                  <div class="audit-meta">
-                    <span>data-pipeline</span>
-                    <span>codex</span>
-                    <span>18 min ago</span>
-                    <div class="audit-tags">
-                      <span class="risk-tag">permissions:wide</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div class="audit-event">
-                <span class="risk-badge risk-medium">MEDIUM</span>
-                <div class="audit-body">
-                  <div class="audit-cmd">docker run --privileged -v /:/host ubuntu bash</div>
-                  <div class="audit-meta">
-                    <span>ml-training</span>
-                    <span>openclaw</span>
-                    <span>25 min ago</span>
-                    <div class="audit-tags">
-                      <span class="risk-tag">docker:privileged</span>
-                      <span class="risk-tag">mount:root</span>
-                    </div>
-                  </div>
-                </div>
+            <div class="q-card">
+              <div class="q-icon">?</div>
+              <div class="q-body">
+                <div class="q-kind">question · web-frontend</div>
+                <div class="q-text">"Ship behind a feature flag?"</div>
               </div>
             </div>
           </div>
         </div>
-        <div class="feature-text">
-          <span class="section-label">🛡️ Security Audit</span>
-          <h2 class="section-title">Catch Risky<br>Commands Instantly</h2>
-          <p class="section-desc" style="margin-bottom: 0;">
-            Every bash command your agents run is scanned for risk. Get real-time alerts for dangerous operations before they cause damage.
-          </p>
-          <ul class="feature-bullets">
-            <li><span class="feature-bullet-icon">→</span> <code style="color:var(--red);background:var(--red-bg);padding:1px 5px;border-radius:3px;">sudo</code>, <code style="color:var(--red);background:var(--red-bg);padding:1px 5px;border-radius:3px;">rm -rf</code>, force push — all flagged</li>
-            <li><span class="feature-bullet-icon">→</span> Three severity levels: Critical, High, Medium</li>
-            <li><span class="feature-bullet-icon">→</span> Risk tags explain why each command was flagged</li>
-            <li><span class="feature-bullet-icon">→</span> Desktop notifications for critical alerts</li>
-          </ul>
-        </div>
+      </div>
+      <div class="reveal">
+        <span class="kicker">from anywhere</span>
+        <h2>The whole cockpit, in your pocket</h2>
+        <p class="section-desc">
+          Scan a QR code and your phone becomes a full remote — a web app you add to your
+          home screen, no store, no install.
+        </p>
+        <ul class="feature-list">
+          <li><b>Answer from the couch</b>The full decision inbox on mobile: options, forms, attachments, plan editing. Web Push pings you the moment a card arrives.</li>
+          <li><b>Run the fleet remotely</b>Live task list with stop/interrupt, session detail down to token breakdowns, launch new tasks, even git push/pull your repos.</li>
+          <li><b>No network gymnastics</b>The desktop dials out to a relay — no port forwarding, no VPN. Channels gated by a shared secret over TLS; the public relay works out of the box, or self-host one container.</li>
+          <li><b>The fleet stops waiting for your desk</b>Approve a migration from the school run, unblock a stuck agent from a café — the human bottleneck travels with you, so agents keep working around the clock.</li>
+          <li><b>SSH remote machines</b>Cloud boxes appear next to local agents; Fleet bootstraps itself on the remote side.</li>
+        </ul>
       </div>
     </div>
   </section>
 
-  <!-- ═══ Feature 3: Daily Reports ═══ -->
+  <!-- ═══ Platform extras ═══ -->
   <section class="section">
-    <div class="section-inner">
-      <div class="feature-split reveal">
-        <div class="feature-text">
-          <span class="section-label">📊 AI-Powered Reports</span>
-          <h2 class="section-title">Know What Your<br>Agents Accomplished</h2>
-          <p class="section-desc" style="margin-bottom: 0;">
-            AI-generated daily summaries, token and cost analytics, hourly activity heatmaps, and lessons learned — ready to paste into your standup.
-          </p>
-          <ul class="feature-bullets">
-            <li><span class="feature-bullet-icon">→</span> One-click AI summary of the entire day</li>
-            <li><span class="feature-bullet-icon">→</span> Token <em>and</em> USD cost breakdown by project &amp; model</li>
-            <li><span class="feature-bullet-icon">→</span> Extract lessons → auto-add to CLAUDE.md</li>
-            <li><span class="feature-bullet-icon">→</span> Copy as Markdown for Slack / standup</li>
-          </ul>
-        </div>
-        <div class="feature-demo">
-          <div class="demo-frame">
-            <div class="demo-titlebar">
-              <span class="demo-dot demo-dot-r"></span>
-              <span class="demo-dot demo-dot-y"></span>
-              <span class="demo-dot demo-dot-g"></span>
-              <span class="demo-titlebar-text">Claw Fleet — Daily Report · Apr 10</span>
-            </div>
-            <div class="report-grid">
-              <div class="metric-card">
-                <div class="metric-value metric-highlight" data-count="2847632" data-format="compact">2.8M</div>
-                <div class="metric-label">Input Tokens</div>
-              </div>
-              <div class="metric-card">
-                <div class="metric-value metric-highlight" data-count="1523451" data-format="compact">1.5M</div>
-                <div class="metric-label">Output Tokens</div>
-              </div>
-              <div class="metric-card">
-                <div class="metric-value">12</div>
-                <div class="metric-label">Sessions</div>
-              </div>
-              <div class="metric-card">
-                <div class="metric-value metric-cost">$4.23</div>
-                <div class="metric-label">Total Cost (USD)</div>
-              </div>
-            </div>
-            <div class="report-body">
-              <div class="report-summary">
-                <h4>✨ AI Summary</h4>
-                <p>
-                  Today was a productive day across 5 projects. The <strong>auth middleware rewrite</strong> in api-server was completed and merged — JWT validation now handles edge cases for expired refresh tokens.
-                  The <strong>claw-fleet mock mode</strong> is nearly done with 4 subagents collaborating on implementation. Notably, the Cursor agent in mobile-app shipped a complete dark mode implementation in 15 minutes.
-                  <br><br>
-                  Total cost estimate: <strong>$4.23</strong> across 12 sessions.
-                </p>
-              </div>
-              <div class="heatmap-card">
-                <h4>Hourly Activity</h4>
-                <div class="heatmap" id="heatmap"></div>
-                <div class="heatmap-hours" id="heatmap-hours"></div>
-              </div>
-            </div>
-            <div class="lessons-section">
-              <div class="lesson-card">
-                <h4>💡 Lessons Learned</h4>
-                <div class="lesson-item">
-                  <div class="lesson-text">Always pin dependency versions in package.json before running npm install in CI</div>
-                  <div class="lesson-reason">Agent spent 45 minutes debugging version conflicts that only appeared in the GitHub Actions environment.</div>
-                </div>
-                <div class="lesson-item">
-                  <div class="lesson-text">Run database migrations in a transaction to allow rollback on failure</div>
-                  <div class="lesson-reason">An agent applied a destructive ALTER TABLE without a transaction, requiring manual data recovery from backup.</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ Feature 4: Session Detail ═══ -->
-  <section class="section section-alt">
-    <div class="section-inner">
-      <div class="feature-split feature-split-reverse reveal">
-        <div class="feature-demo">
-          <div class="demo-frame">
-            <div class="demo-titlebar">
-              <span class="demo-dot demo-dot-r"></span>
-              <span class="demo-dot demo-dot-y"></span>
-              <span class="demo-dot demo-dot-g"></span>
-              <span class="demo-titlebar-text">Session Detail — api-server · Fix JWT token validation</span>
-            </div>
-            <div class="chat-messages">
-              <!-- User message -->
-              <div class="chat-msg">
-                <span class="chat-role chat-role-user">User</span>
-                <div class="chat-text">The auth middleware is rejecting valid refresh tokens after they've been rotated. Can you investigate and fix it?</div>
-              </div>
-              <!-- Assistant with thinking -->
-              <div class="chat-msg">
-                <span class="chat-role chat-role-assistant">Claude Opus 4</span>
-                <div class="thinking-block open">
-                  <button class="thinking-toggle" onclick="this.parentElement.classList.toggle('open')">
-                    <span class="thinking-arrow">▶</span> Extended Thinking
-                  </button>
-                  <div class="thinking-content">The user reports that valid refresh tokens are being rejected after rotation. This suggests a race condition in the token rotation logic — when a new token is issued, the old one should remain valid for a grace period to handle concurrent requests.
-
-Let me trace the flow:
-1. Client sends refresh token
-2. Server validates → issues new token pair
-3. Old token is immediately invalidated
-4. But if another request arrives with the old token before the client receives the new one...
-
-I need to look at the token rotation implementation.</div>
-                </div>
-                <div class="chat-text">I'll investigate the refresh token rotation logic. This sounds like a race condition where concurrent requests during rotation can fail.</div>
-              </div>
-              <!-- Tool use -->
-              <div class="chat-msg">
-                <div class="tool-block">
-                  <div class="tool-header">
-                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-                    Read — src/middleware/auth.rs:142-180
-                  </div>
-                  <div class="tool-content">pub fn validate_refresh_token(token: &str) -> Result&lt;Claims&gt; {
-    let claims = decode_jwt(token)?;
-    // BUG: This immediately checks revocation without grace period
-    if self.revoked_tokens.contains(&claims.jti) {
-        return Err(AuthError::TokenRevoked);
-    }
-    // Rotate: revoke old, issue new
-    self.revoked_tokens.insert(claims.jti.clone());
-    Ok(claims)
-}</div>
-                </div>
-              </div>
-              <!-- Assistant fix -->
-              <div class="chat-msg">
-                <span class="chat-role chat-role-assistant">Claude Opus 4</span>
-                <div class="chat-text">Found it. The <code style="color:var(--accent);background:rgba(232,116,58,0.12);padding:1px 4px;border-radius:3px;">validate_refresh_token</code> function immediately revokes the old token with no grace period. When concurrent requests arrive during rotation, the second request sees the token as revoked.</div>
-              </div>
-              <!-- Tool use: Edit -->
-              <div class="chat-msg">
-                <div class="tool-block">
-                  <div class="tool-header">
-                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-                    Edit — src/middleware/auth.rs
-                  </div>
-                  <div class="tool-content" style="color: var(--green);">+ // Grace period: allow old token for 30s after rotation
-+ let grace = Duration::from_secs(30);
-+ if let Some(revoked_at) = self.revoked_tokens.get(&claims.jti) {
-+     if revoked_at.elapsed() > grace {
-+         return Err(AuthError::TokenRevoked);
-+     }
-+ }</div>
-                </div>
-              </div>
-              <!-- Tool result -->
-              <div class="chat-msg">
-                <div class="tool-block">
-                  <div class="tool-header">
-                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
-                    Bash — cargo test -- auth::tests
-                  </div>
-                  <div class="tool-content" style="color: var(--green);">running 8 tests
-test auth::tests::test_refresh_rotation ... ok
-test auth::tests::test_concurrent_refresh ... ok
-test auth::tests::test_expired_grace_period ... ok
-test auth::tests::test_revoked_after_grace ... ok
-...
-test result: ok. 8 passed; 0 failed</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="feature-text">
-          <span class="section-label">🔍 Session Detail</span>
-          <h2 class="section-title">Full Conversation<br>History</h2>
-          <p class="section-desc" style="margin-bottom: 0;">
-            Dive into any session to see the complete message history — thinking blocks, tool calls, code edits, and test results.
-          </p>
-          <ul class="feature-bullets">
-            <li><span class="feature-bullet-icon">→</span> Extended thinking blocks with expand/collapse</li>
-            <li><span class="feature-bullet-icon">→</span> Syntax-highlighted tool calls &amp; results</li>
-            <li><span class="feature-bullet-icon">→</span> Real-time streaming — watch agents think &amp; code live</li>
-            <li><span class="feature-bullet-icon">→</span> Navigate to any message in the conversation</li>
-          </ul>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ Feature 5: Multi-Agent + Remote ═══ -->
-  <section class="section">
-    <div class="section-inner reveal" style="text-align:center;">
-      <span class="section-label">🌐 Works Everywhere</span>
-      <h2 class="section-title">Local. Remote.</h2>
-      <p class="section-desc" style="margin-left:auto;margin-right:auto;">
-        Monitor agents on your machine or on cloud servers via SSH tunnel. Same dashboard, everywhere.
-      </p>
-      <div class="agents-row" style="margin-top: 48px;">
-        <div class="agent-item">
-          <span class="agent-check">✓</span>
-          macOS / Windows / Linux desktop
-        </div>
-        <div class="agent-item">
-          <span class="agent-check">✓</span>
-          SSH remote monitoring
-        </div>
-        <div class="agent-item">
-          <span class="agent-check">✓</span>
-          Floating overlay widget
-        </div>
-      </div>
-      <div style="margin-top: 48px; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; text-align: left;">
-          <div style="font-size: 32px; margin-bottom: 12px;">🖥️</div>
-          <h3 style="font-size: 18px; margin-bottom: 8px;">Desktop App</h3>
-          <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.6;">Full-featured Tauri 2 app with native performance. System tray, overlay widget, and dark/light theme support.</p>
-        </div>
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; text-align: left;">
-          <div style="font-size: 32px; margin-bottom: 12px;">☁️</div>
-          <h3 style="font-size: 18px; margin-bottom: 8px;">SSH Remote</h3>
-          <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.6;">Monitor agents on cloud machines. Fleet installs a lightweight probe via SSH — no VPN or port forwarding needed.</p>
-        </div>
-        <div style="background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 32px; text-align: left;">
-          <div style="font-size: 32px; margin-bottom: 12px;">🧠</div>
-          <h3 style="font-size: 18px; margin-bottom: 8px;">Memory Browser</h3>
-          <p style="font-size: 14px; color: var(--text-secondary); line-height: 1.6;">Browse and search all CLAUDE.md files across every project. See what your agents have learned.</p>
-        </div>
-      </div>
+    <span class="kicker">and the platform around it</span>
+    <h2>Everything a fleet leaves behind, kept</h2>
+    <div class="extras reveal" style="margin-top: 28px">
+      <div class="extra"><h3>Agent wiki</h3><p>HTML reports, demos, and docs published by agents — versioned, searchable, rendered live on desktop and mobile.</p></div>
+      <div class="extra"><h3>Memory browser</h3><p>CLAUDE.md files and memory entries from every project, indexed in one place. Diff and promote to global.</p></div>
+      <div class="extra"><h3>Repos view</h3><p>File trees, git status and diffs, and a built-in command terminal — local or over SSH.</p></div>
+      <div class="extra"><h3>Plugins &amp; skills</h3><p>Install Claude Code plugins from marketplaces; view and edit installed skills in the app.</p></div>
+      <div class="extra"><h3>Lite mode &amp; tray</h3><p>A mini floating window and tray panel keep the essentials visible while you work.</p></div>
+      <div class="extra"><h3>Full CLI</h3><p><span style="font-family:var(--font-mono);font-size:12.5px">agents · stop · audit · search · report · wiki · plan · handoff · loop</span> — most with <span style="font-family:var(--font-mono);font-size:12.5px">--json</span>, all with <span style="font-family:var(--font-mono);font-size:12.5px">--remote</span>.</p></div>
     </div>
   </section>
 
   <!-- ═══ Download ═══ -->
-  <section class="section section-alt" id="download">
-    <div class="section-inner reveal" style="text-align:center;">
-      <span class="section-label">⬇️ Get Claw Fleet</span>
-      <h2 class="section-title">Download for Your Platform</h2>
-      <p class="section-desc" style="margin-left:auto;margin-right:auto;">
-        Free, open-source, zero-config. Install and it just works.
-      </p>
-      <div class="download-grid">
-        <!-- macOS Universal -->
-        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-macos.pkg" class="download-card">
-          <div class="download-icon">
-            <svg viewBox="0 0 24 24" fill="#e5e5e5" xmlns="http://www.w3.org/2000/svg"><path d="M12.152 6.896c-.948 0-2.415-1.078-3.96-1.04-2.04.027-3.91 1.183-4.961 3.014-2.117 3.675-.546 9.103 1.519 12.09 1.013 1.454 2.208 3.09 3.792 3.039 1.52-.065 2.09-.987 3.935-.987 1.831 0 2.35.987 3.96.948 1.637-.026 2.676-1.48 3.676-2.948 1.156-1.688 1.636-3.325 1.662-3.415-.039-.013-3.182-1.221-3.22-4.857-.026-3.04 2.48-4.494 2.597-4.559-1.429-2.09-3.623-2.324-4.39-2.376-2-.156-3.675 1.09-4.61 1.09zM15.53 3.83c.843-1.012 1.4-2.427 1.245-3.83-1.207.052-2.662.805-3.532 1.818-.78.896-1.454 2.338-1.273 3.714 1.338.104 2.715-.688 3.559-1.701"/></svg>
-          </div>
-          <div class="download-platform">macOS</div>
-          <div class="download-arch">Universal (Intel + Apple Silicon)</div>
-          <div class="download-format">.pkg</div>
-        </a>
-        <!-- Windows -->
-        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-x64-setup.exe" class="download-card">
-          <div class="download-icon">
-            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128"><path fill="#00ADEF" d="M126 1.637l-67 9.834v49.831l67-.534zM1.647 66.709l.003 42.404 50.791 6.983-.04-49.057zm56.82.68l.094 49.465 67.376 9.509.016-58.863zM1.61 19.297l.047 42.383 50.791-.289-.023-49.016z"/></svg>
-          </div>
-          <div class="download-platform">Windows</div>
-          <div class="download-arch">x64 / ARM64</div>
-          <div class="download-format">.exe</div>
-        </a>
-        <!-- Linux -->
-        <a href="https://github.com/hoveychen/claw-fleet/releases/latest" class="download-card">
-          <div class="download-icon">
-            <svg viewBox="0 0 24 24" fill="#e5e5e5" xmlns="http://www.w3.org/2000/svg"><path d="M12.504 0c-.155 0-.315.008-.48.021-4.226.333-3.105 4.807-3.17 6.298-.076 1.092-.3 1.953-1.05 3.02-.885 1.051-2.127 2.75-2.716 4.521-.278.832-.41 1.684-.287 2.489a.424.424 0 00-.11.135c-.26.268-.45.6-.663.839-.199.199-.485.267-.797.4-.313.136-.658.269-.864.68-.09.189-.136.394-.132.602 0 .199.027.4.055.536.058.399.116.728.04.97-.249.68-.28 1.145-.106 1.484.174.334.535.47.94.601.81.2 1.91.135 2.774.6.926.466 1.866.67 2.616.47.526-.116.97-.464 1.208-.946.587-.003 1.23-.269 2.26-.334.699-.058 1.574.267 2.577.2.025.134.063.198.114.333l.003.003c.391.778 1.113 1.368 1.884 1.43.868.074 1.68-.534 1.413-1.738-.068-.298-.162-.53-.276-.734.026-.09.166-.6.166-.731-.001-.005.003-.01.003-.015 0-.07-.023-.126-.038-.17.498-.707.932-1.501.879-2.5a3.406 3.406 0 00-.236-1.063c.102-.178.19-.359.208-.554a.47.47 0 00.007-.07c0-.015-.003-.028-.003-.04a.906.906 0 00-.088-.256 3.822 3.822 0 00-.4-.559c-.162-.175-.324-.324-.381-.443-.066-.134-.063-.349-.063-.564 0-.26.03-.5.003-.725a3.768 3.768 0 00-.168-.677 6.996 6.996 0 00-.524-1.206 6.908 6.908 0 00-3.085-2.921 5.127 5.127 0 00-.084-.044c.008-.082.018-.17.018-.26 0-.85-.313-1.51-.587-1.948l-.001-.002a3.56 3.56 0 00-.087-.14c-.01-.016-.02-.028-.03-.044a4.31 4.31 0 00-.404-.53c-.09-.098-.18-.178-.18-.178a2.726 2.726 0 00-1.537-.852 2.24 2.24 0 00-.28-.033z"/></svg>
-          </div>
-          <div class="download-platform">Linux</div>
-          <div class="download-arch">x64 / ARM64</div>
-          <div class="download-format">.deb / .AppImage</div>
-        </a>
+  <section class="section" id="download">
+    <div style="text-align:center; margin-bottom: 36px">
+      <span class="kicker" style="display:block">get started</span>
+      <h2 style="margin-left:auto; margin-right:auto">Download, open, done</h2>
+      <p class="section-desc" style="margin: 0 auto">Reads local session files directly — no server, no API key, no signup.</p>
+    </div>
+    <div class="dl-table reveal">
+      <div class="dl-row">
+        <img src="icon-apple.svg" alt=""><span class="dl-name">macOS</span>
+        <span class="dl-arch">Universal — Intel &amp; Apple Silicon</span>
+        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-macos.pkg">claw-fleet-macos.pkg</a>
+      </div>
+      <div class="dl-row">
+        <img src="icon-windows.svg" alt=""><span class="dl-name">Windows</span>
+        <span class="dl-arch">x64 / ARM64</span>
+        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-x64-setup.exe">setup.exe</a>
+      </div>
+      <div class="dl-row">
+        <img src="icon-linux.svg" alt=""><span class="dl-name">Linux</span>
+        <span class="dl-arch">x86_64</span>
+        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.deb">.deb</a>
+        <a href="https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.AppImage">.AppImage</a>
       </div>
     </div>
+    <p class="dl-note">The mobile app needs no install — enable <b>Mobile</b> in the desktop app and scan the QR code.</p>
   </section>
 
-  <!-- ═══ Footer ═══ -->
   <footer class="footer">
-    <div class="footer-links">
-      <a href="https://github.com/hoveychen/claw-fleet" target="_blank">GitHub</a>
-      <a href="https://github.com/hoveychen/claw-fleet/releases" target="_blank">Releases</a>
-      <a href="https://github.com/hoveychen/claw-fleet/issues" target="_blank">Issues</a>
-      <a href="https://github.com/hoveychen/claw-fleet/blob/main/LICENSE" target="_blank">AGPL-3.0 License</a>
+    <div class="footer-inner">
+      <span class="f-logo"><img src="icon.png" alt="">Claw Fleet</span>
+      <div class="footer-links">
+        <a href="https://github.com/hoveychen/claw-fleet">GitHub</a>
+        <a href="https://github.com/hoveychen/claw-fleet/releases">Releases</a>
+        <a href="https://github.com/hoveychen/claw-fleet/blob/main/LICENSE">AGPL-3.0</a>
+      </div>
+      <span>© <span id="year">2026</span> hoveychen · built with Tauri 2</span>
     </div>
-    <p>Built with Tauri 2, React 19, and Rust. Made by <a href="https://github.com/hoveychen" target="_blank">hoveychen</a>.</p>
   </footer>
 
-  <!-- ═══ Scripts ═══ -->
   <script>
-    // ── Reveal on scroll ──
-    const observer = new IntersectionObserver((entries) => {
-      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add('visible'); observer.unobserve(e.target); } });
-    }, { threshold: 0.1, rootMargin: '0px 0px -60px 0px' });
-    document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+    // reveal on scroll
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
+    }, { threshold: 0.12 });
+    document.querySelectorAll('.reveal').forEach((el) => io.observe(el));
 
-    // ── Heatmap generation ──
-    const heatmapData = [
-      // 7 rows (days), 24 cols (hours) — realistic coding pattern
-      [0,0,0,0,0,0,0,0,1,2,3,4,4,3,2,3,4,4,3,2,1,1,0,0],
-      [0,0,0,0,0,0,0,1,2,3,4,3,3,2,1,2,3,4,4,3,2,1,0,0],
-      [0,0,0,0,0,0,0,0,1,3,4,4,3,2,2,3,4,3,2,1,0,0,0,0],
-      [0,0,0,0,0,0,0,1,2,3,3,4,4,3,2,3,4,4,3,2,1,0,0,0],
-      [0,0,0,0,0,0,0,0,2,3,4,3,3,1,1,2,3,4,4,3,2,1,0,0],
-      [0,0,0,0,0,0,0,0,0,1,2,2,1,1,0,1,2,3,2,1,0,0,0,0],
-      [0,0,0,0,0,0,0,0,0,0,1,2,2,1,0,0,1,2,3,2,1,0,0,0],
-    ];
-    const heatEl = document.getElementById('heatmap');
-    const hoursEl = document.getElementById('heatmap-hours');
-    heatmapData.forEach(row => {
-      row.forEach(v => {
-        const cell = document.createElement('div');
-        cell.className = `heatmap-cell heat-${v}`;
-        heatEl.appendChild(cell);
-      });
-    });
-    for (let h = 0; h < 24; h++) {
-      const el = document.createElement('div');
-      el.className = 'heatmap-hour';
-      el.textContent = h % 6 === 0 ? `${h}:00` : '';
-      hoursEl.appendChild(el);
-    }
-
-    // ── Platform detection for hero download button ──
-    (function() {
+    // platform-aware hero button
+    (function () {
       const ua = navigator.userAgent;
-      const btn = document.getElementById('hero-download-btn');
-      const txt = document.getElementById('hero-download-text');
-      if (/Mac/.test(ua)) {
-        if (window.matchMedia && window.matchMedia('(pointer: fine)').matches) {
-          btn.href = 'https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-macos.pkg';
-          txt.textContent = 'Download for macOS';
-        }
-      } else if (/Win/.test(ua)) {
-        btn.href = 'https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-x64-setup.exe';
-        txt.textContent = 'Download for Windows';
-      } else if (/Linux/.test(ua) && !/Android/.test(ua)) {
-        btn.href = 'https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.AppImage';
-        txt.textContent = 'Download for Linux';
-      }
+      const t = document.getElementById('hero-download-text');
+      if (/Macintosh/.test(ua)) t.textContent = 'Download for macOS';
+      else if (/Windows/.test(ua)) t.textContent = 'Download for Windows';
+      else if (/Linux/.test(ua) && !/Android/.test(ua)) t.textContent = 'Download for Linux';
     })();
 
-    // ── Animate token speeds ──
-    function animateSpeeds() {
-      document.querySelectorAll('.session-card-speed[data-speed]').forEach(el => {
-        const base = parseFloat(el.dataset.speed);
-        if (base > 0) {
-          const jitter = base + (Math.random() - 0.5) * base * 0.3;
-          el.textContent = jitter.toFixed(1) + ' tok/s';
-        }
-      });
-    }
-    setInterval(animateSpeeds, 2000);
-
-    // ── Smooth scroll for anchor links ──
-    document.querySelectorAll('a[href^="#"]').forEach(a => {
-      a.addEventListener('click', e => {
-        e.preventDefault();
-        const target = document.querySelector(a.getAttribute('href'));
-        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      });
-    });
+    document.getElementById('year').textContent = new Date().getFullYear();
   </script>
 </body>
 </html>

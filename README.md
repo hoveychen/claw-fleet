@@ -5,12 +5,12 @@
 # Claw Fleet
 
 **Mission control for your AI coding agents.**
-Monitor every session, track token throughput **and live USD spend**, get AI-generated daily summaries and lessons learned — all from one place.
+Watch every session, approve every risky decision, launch and relay tasks, and carry the whole cockpit in your pocket.
 Supports **Claude Code**, **Cursor**, **OpenClaw**, and **Codex**.
 
 [![Release](https://img.shields.io/github/v/release/hoveychen/claw-fleet?style=flat-square&logo=github&color=d97757)](https://github.com/hoveychen/claw-fleet/releases/latest)
 [![License](https://img.shields.io/github/license/hoveychen/claw-fleet?style=flat-square&color=4a9eff)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Android-lightgrey?style=flat-square)](https://github.com/hoveychen/claw-fleet/releases/latest)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux%20%7C%20Mobile%20Web-lightgrey?style=flat-square)](https://github.com/hoveychen/claw-fleet/releases/latest)
 [![Built with Tauri](https://img.shields.io/badge/built%20with-Tauri%202-24C8DB?style=flat-square&logo=tauri)](https://tauri.app)
 [![React](https://img.shields.io/badge/React-19-61dafb?style=flat-square&logo=react)](https://react.dev)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178c6?style=flat-square&logo=typescript)](https://www.typescriptlang.org)
@@ -19,12 +19,22 @@ Supports **Claude Code**, **Cursor**, **OpenClaw**, and **Codex**.
 
 ---
 
-
 ## What is Claw Fleet?
 
-When you run Claude Code across multiple projects simultaneously — or lean on its multi-agent delegation feature — it's easy to lose track of what each agent is doing, how fast it's working, or whether it's stuck waiting for your input. At the end of the day, you want to know: what actually got done? And what mistakes should your agents avoid next time?
+When you run AI coding agents across multiple projects — or lean on multi-agent delegation — three problems show up fast:
 
-**Claw Fleet** solves both. It watches session files in real time and presents everything in a clean dashboard. At the end of each day, it generates **AI-powered summaries** of what your agents accomplished and extracts **lessons learned** from their mistakes — turning raw session logs into actionable standup reports and persistent knowledge. No server required, no API key needed beyond what Claude Code already uses.
+1. **You can't see them.** Which agent is stuck waiting for input? Which one is burning tokens in a loop?
+2. **You can't govern them.** Agents ask questions, request permissions, and run risky commands in five different terminals — and every interruption demands *you*, at *your desk*, *right now*.
+3. **You can't leave.** Step away for lunch and the whole fleet stalls on a question nobody answered.
+
+**Claw Fleet** started as a monitoring dashboard and grew into a full command tower:
+
+- **See everything** — live status, token speed, real USD spend, AI-written daily reports.
+- **Approve anything** — every agent question, plan, permission request, and dangerous command lands in one Decision Panel.
+- **Dispatch and relay** — launch new agent sessions from the app (or your phone), chain long tasks across context windows, run recurring loops.
+- **From anywhere** — a mobile web app and a Feishu/Lark channel mean the fleet never waits for you to be at your desk.
+
+No server required, no API key needed beyond what your agents already use.
 
 > **Meet Captain Claw** 🦀 — our mascot. A battle-hardened crab commander who keeps every agent in formation.
 
@@ -32,24 +42,14 @@ When you run Claude Code across multiple projects simultaneously — or lean on 
 
 ## Supported Agents
 
-Claw Fleet can monitor sessions from multiple AI coding agents:
-
 | | Agent | Status |
 |---|---|---|
-| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/claude.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/claude-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/claude-dark.svg" width="24" height="24"></picture> | **Claude Code** | Fully supported — enabled by default |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/cursor.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/cursor-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/cursor-dark.svg" width="24" height="24"></picture> | **Cursor** | Supported — opt-in via Settings |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/openclaw.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/openclaw-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/openclaw-dark.svg" width="24" height="24"></picture> | **OpenClaw** | Fully supported |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/codex.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/codex-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/codex-dark.svg" width="24" height="24"></picture> | **Codex** | Fully supported |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/claude.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/claude-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/claude-dark.svg" width="24" height="24"></picture> | **Claude Code** | Fully supported — monitoring, decisions, orchestration |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/cursor.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/cursor-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/cursor-dark.svg" width="24" height="24"></picture> | **Cursor** | Monitoring supported — opt-in via Settings |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/openclaw.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/openclaw-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/openclaw-dark.svg" width="24" height="24"></picture> | **OpenClaw** | Monitoring supported |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/codex.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/codex-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/codex-dark.svg" width="24" height="24"></picture> | **Codex** | Monitoring supported |
 
-> Toggle agent sources on or off in the app's Settings panel. Claw Fleet auto-detects which tools are installed on your system.
-
----
-
-## Why Claw Fleet?
-
-<div align="center">
-<img src="docs/features_grid.png" width="720" alt="Claw Fleet — Key Features" />
-</div>
+> Decision routing, plan approval, and orchestration features are built on Claude Code's hooks & MCP; monitoring works for all sources. Claw Fleet auto-detects which tools are installed.
 
 ---
 
@@ -92,31 +92,79 @@ Claw Fleet can monitor sessions from multiple AI coding agents:
 
 ---
 
-## Features
+## See everything
 
-**AI daily summaries — the standup update you never write.** Each day's sessions are distilled into a narrative: what your agents built, which tasks completed, where they got stuck. Token usage, activity heatmap, tool call breakdown — all generated automatically. Copy as Markdown and paste straight into Slack or your standup thread.
+**8 live statuses, not just "running".** Thinking, executing, streaming, delegating, waiting for you — with parent–child agent hierarchies grouped automatically. Stuck agent? Kill or interrupt it from the dashboard.
 
-**Lessons learned — AI mistakes become team knowledge.** Claw Fleet scans session logs for missteps — wrong assumptions, failed approaches, repeated retries — and extracts concise lessons. One click adds them to your `CLAUDE.md`, so agents never repeat the same mistakes. This is how your fleet gets smarter over time.
+**Cost tracking that matches your bill.** Live **USD spend per session** on every card — cached reads, cache writes, input/output pricing, and per-model rates all accounted for. Delegating agents show their own cost *and* the aggregate across every subagent they spawned. A fleet-wide **$/min chart** with a rolling 5-minute window catches runaway loops before they drain your account, and a **today counter** in the nav bar keeps the running total in sight.
 
-**8 live statuses, not just "running".** Your agents are thinking, executing, streaming, delegating, or waiting for you — Claw Fleet tells you which, with parent-child hierarchies grouped automatically. Stuck agent? Kill it from the dashboard.
+**Session detail that goes deep.** Full conversation timeline with thinking blocks, tool calls, and diffs; a **workflow DAG** that redraws multi-agent orchestration as a live graph; **handoff chains** showing how a long task relayed across sessions; skill invocation history; the session's scratchpad; its TODO progress.
 
-**Cost tracker that reflects what you actually pay.** Token speed tells you how fast an agent is streaming; it doesn't tell you what it's costing you. Claw Fleet shows live **USD spend per session** on every card, plus a fleet-wide **`$/min` rate chart** with a rolling 5-minute window total — fully accounting for cached reads, cache writes, input vs. output pricing, and per-model rates. For a main agent that delegates, you see both its own cost and the aggregate including every subagent it spawned. Catch a runaway loop before it drains your account, and finally know which project is burning your budget.
+**AI daily summaries — the standup update you never write.** Each day's sessions distilled into a narrative: what got built, what completed, where agents got stuck. Copy as Markdown, paste into Slack.
 
-**Security audit built in.** Every Bash command your agents run gets scanned and classified by risk. `sudo`, `git push --force`, `rm -rf` — you'll catch the dangerous ones before they become incidents.
+**Lessons learned — AI mistakes become team knowledge.** Claw Fleet scans logs for missteps and extracts concise lessons. One click adds them to your `CLAUDE.md`, so agents never repeat the same mistake.
 
-**Your agents' memory, finally visible.** `CLAUDE.md` files and memory entries scattered across dozens of projects, indexed in one place. Browse, diff, promote to global scope.
+**Security audit built in.** Every Bash command your agents ran gets scanned and classified by risk — plus custom audit rules and AI-suggested new ones.
 
-**A wiki for everything your agents produce.** HTML reports, interactive demos, and markdown docs no longer die in scratch workdirs — agents archive them with `fleet wiki publish <path>` and they show up in the Wiki board: filterable by workspace, versioned on every re-publish, rendered live (scripts and all) for local and remote backends alike. An optional guidance toggle teaches agents to publish finished artifacts automatically.
+**Ambient awareness.** A **Lite mini-window** and a **tray panel** keep the essentials on screen; optional **TTS** reads summaries aloud; full-text search (FTS5) finds any conversation ever; Captain Claw's eyes track your usage ring.
 
-**Monitor from your phone.** The companion Android app connects to your desktop via a secure tunnel — scan a QR code and you're in. See live agent statuses, token speeds, and conversation history from anywhere. Stop a runaway agent from the couch.
+---
 
-**Remote agents, local dashboard.** SSH into your cloud box and monitor remote agents alongside local ones. Auto-bootstraps itself on the remote side. No port forwarding, no VPN.
+## Approve anything — the Decision Panel
 
-**Agents that manage agents.** Install the Fleet Skill and your AI coding agent can check on — and stop — other running agents on its own.
+Everything that needs a human lands in **one card queue**, instead of five scattered terminals:
 
-**A CLI for everything.** `fleet agents`, `fleet stop`, `fleet audit`, `fleet search`, `fleet wiki` — all with `--json`. Stay in the terminal if that's your thing.
+- **Guard** — risky Bash commands intercepted before they run, with on-demand LLM risk analysis and "always allow this prefix".
+- **Permission prompts** — Claude Code's native permission requests, bridged from headless sessions.
+- **Agent questions** — `AskUserQuestion` answered through a step-by-step wizard: options, forms, attachments, custom answers.
+- **Plan approval** — review an agent's plan before it starts working; edit it right in the card, then approve or reject.
+- **Rich cards** — agents can render forms, image galleries, even full A2UI interfaces to ask better questions.
 
-**Zero config.** Download. Open. It reads local session files directly — no server, no API key. macOS, Windows, Linux.
+A **floating decision window** pops cards up even when the main window is minimized. Every decision is recorded in history.
+
+**Interaction discipline, opt-in per feature:** *Interaction Mode* turns every agent report into a decision card; *PRD Mode* keeps long multi-step tasks running without commit-nagging and survives context compression; the *permissions injector* makes Fleet the single approval gate (no double-prompting); rate-limited sessions can **auto-resume** when the window resets.
+
+---
+
+## Dispatch and relay
+
+**Launch sessions from the app.** Pick a workspace, write the prompt, choose model / reasoning effort / permission mode, attach context files — Fleet spawns a detached headless session and the launchpad manages them in tabs. Works from the phone too.
+
+**Handoff — long tasks outlive context windows.** When context runs long, an agent registers `fleet handoff --note "..."` and Fleet automatically spawns a successor session that picks up where it left off. The full relay chain stays visible (`接力 n/N`) on every card.
+
+**Loops that actually survive.** `fleet loop create --interval 30m --prompt "..."` re-runs a prompt on schedule, each iteration a fresh detached session — reliable where in-session timers die with the turn.
+
+**Plans on disk.** `fleet plan` keeps multi-step task lists in `TASKS.md` — multiple plans in parallel, per-session attribution, progress visible on every session card.
+
+**Agents that manage agents.** `fleet skill install` teaches your agents the Fleet CLI — they can check system load, watch each other, and stop runaway peers. Installs into Claude Code, GitHub Copilot, and Gemini CLI.
+
+---
+
+## From anywhere
+
+**Your phone is a full remote.** Scan a QR code and the **mobile web app** (add it to your home screen) connects through a relay: the decision inbox with all card types, live task list with stop/interrupt, session detail down to token breakdowns and workflow trees, the wiki, even `git push`/`pull` on your repos. Web Push notifies you the moment a card arrives.
+
+**Which means the fleet stops waiting for your desk.** Kick off a task from the couch, approve a migration from the school run, unblock a stuck agent from a café — agents keep working around the clock because the human bottleneck travels with you.
+
+- The desktop dials *out* to the relay — **no port forwarding, no VPN**.
+- Channels are gated by a shared secret (only its SHA-256 touches the server) over TLS; rotate the key any time.
+- The public relay works out of the box; self-hosting is one container.
+
+**Remote machines, local dashboard.** Point Fleet at a cloud box over SSH and its agents appear next to local ones — it bootstraps itself on the remote side. Every CLI command takes `--remote <host>`.
+
+---
+
+## The platform around it
+
+**A wiki for everything your agents produce.** `fleet wiki publish` archives HTML reports, interactive demos, and markdown docs — versioned on every re-publish, full-text searchable, rendered live (scripts and all) on desktop and mobile.
+
+**Repos view.** Browse workspace file trees, git status and diffs, and run commands in a built-in terminal — including on remote backends.
+
+**Plugins & skills.** Browse and install Claude Code plugins from marketplaces; view and edit installed skills without leaving the app.
+
+**A CLI for everything.** `fleet agents`, `stop`, `interrupt`, `speed`, `account`, `search`, `audit`, `report`, `memory`, `wiki`, `plan`, `handoff`, `loop`, `serve` — most with `--json`. Stay in the terminal if that's your thing.
+
+**Zero config.** Download. Open. It reads local session files directly — no server, no API key, no signup. macOS, Windows, Linux.
 
 ---
 
@@ -130,9 +178,11 @@ Download the latest pre-built binary for your platform from the [Releases page](
 | <img src="docs/icon-windows.svg" width="24"> | Windows | x64 / ARM64 | [claw-fleet-windows-x64-setup.exe](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-windows-x64-setup.exe) |
 | <img src="docs/icon-linux.svg" width="24"> | Linux | x86\_64 | [claw-fleet-linux-x64.deb](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.deb) · [claw-fleet-linux-x64.AppImage](https://github.com/hoveychen/claw-fleet/releases/latest/download/claw-fleet-linux-x64.AppImage) |
 
+The mobile app needs no install — enable **Mobile** in the desktop app and scan the QR code.
+
 ### Prerequisites
 
-Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You need Claude Code installed and have run at least one session before anything shows up.
+Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You need Claude Code installed and at least one session run before anything shows up. Cursor, OpenClaw, and Codex sources can be enabled in Settings.
 
 ---
 
@@ -141,22 +191,22 @@ Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You nee
 ### Requirements
 
 - [Rust](https://rustup.rs) (stable, 1.77+)
-- [Node.js](https://nodejs.org) 20+
-- [Tauri CLI v2](https://tauri.app/start/prerequisites/)
+- [Node.js](https://nodejs.org) 20+ with [pnpm](https://pnpm.io)
+- [Tauri CLI v2 prerequisites](https://tauri.app/start/prerequisites/)
 
 ### Steps
 
 ```bash
 git clone https://github.com/hoveychen/claw-fleet.git
-cd claw-fleet
+cd claw-fleet/claw-fleet-desktop
 
 pnpm install
 
 # Development (hot-reload)
-pnpm tauri dev
+pnpm tauri:dev
 
 # Production build
-pnpm tauri build
+pnpm tauri:build
 ```
 
 The output binary and installer are placed under `target/release/bundle/`.
@@ -165,23 +215,23 @@ The output binary and installer are placed under `target/release/bundle/`.
 
 ## How It Works
 
-Claw Fleet reads directly from Claude Code's local data directory (`~/.claude/`) — no network calls, no background services, nothing you need to configure.
+**Monitoring** reads directly from each agent's local data directory (for Claude Code, `~/.claude/`) — append-only JSONL conversation logs and lock files. OS-native file events (FSEvents / inotify) pick up new lines the moment they're written; status, token speed, and cost are derived in-process in the Tauri Rust backend. No network calls, nothing to configure.
+
+**Decisions** ride on Claude Code's extension points: hooks (guard, questions, plan approval, PRD context) and MCP tools (`fleet__ask`, `fleet__render_a2ui`, `fleet__permission_prompt`) route into a local hooks server. Desktop panel, floating window, and mobile app are surfaces over the same queue — answering on any of them unblocks the waiting agent.
+
+**Remote & mobile:** an SSH-bootstrapped `fleet serve` probe exposes the same data plane for remote machines; for mobile, the desktop dials out to a content-agnostic relay over WebSocket, and your phone joins the channel with the shared key from the QR code.
 
 ```
-~/.claude/
-├── ide/
-│   └── *.lock          ← active IDE process info (pid, workspace, auth token)
-└── projects/
-    └── <workspace>/
-        └── *.jsonl     ← append-only conversation history (one JSON object per line)
+agents (Claude Code / Cursor / OpenClaw / Codex)
+   │  JSONL + lock files            hooks + MCP
+   ▼                                    ▼
+ file watcher ──────────────► Fleet core (Rust)
+                                   │
+        ┌──────────┬───────────────┼──────────────┐
+        ▼          ▼               ▼              ▼
+    desktop UI  floating card   mobile PWA    fleet CLI
+                                (via relay)    (--json)
 ```
-
-1. **Startup** — scans all `.lock` files to find live IDE processes
-2. **File watcher** — uses OS-native events (FSEvents on macOS, inotify on Linux) to detect new JSONL lines the moment Claude writes them
-3. **Status inference** — derives session state from the last assistant message's `stop_reason` field and file modification time
-4. **Token speed** — aggregates `usage.output_tokens` across the most recent messages and divides by elapsed time
-
-Everything runs in-process inside the Tauri Rust backend. The React frontend communicates via Tauri's IPC bridge.
 
 ---
 
@@ -189,9 +239,10 @@ Everything runs in-process inside the Tauri Rust backend. The React frontend com
 
 Pull requests are welcome! A few pointers:
 
-- **Backend** is Rust in `claw-fleet-core/src/` — `session.rs` owns session parsing, `watcher.rs` owns the file-system loop
-- **Frontend** is React + TypeScript in `src/` — components use CSS Modules, state is managed with Zustand
-- **i18n** — locale files live in `src/locales/`; copy `en.json`, translate, register in `src/i18n.ts`
+- **Core** is Rust in `claw-fleet-core/src/` — session parsing, watchers, hooks server, decision routing
+- **Desktop** is Tauri: Rust glue in `claw-fleet-desktop/src/`, React + TypeScript UI in `claw-fleet-desktop/app/`
+- **CLI** lives in `fleet-cli/`, the mobile web app in `mobile-web/`, the relay in `fleet-relay/`
+- **i18n** — locale files live in `claw-fleet-desktop/app/locales/`
 
 Please open an issue before starting large changes so we can coordinate.
 
