@@ -175,6 +175,25 @@ pub fn list_requests<T: for<'de> Deserialize<'de>>(kind: ParkedKind) -> Vec<T> {
         .collect()
 }
 
+/// Ids of the parked cards on one channel. The desktop watchers union this into
+/// the channel's live pending set: parking *deletes* the request file (the
+/// producer is gone, nothing may block on it again), and without this the
+/// watcher would read that deletion as "resolved" and pull the card off screen —
+/// the exact disappearance this feature exists to prevent.
+pub fn ids_of(kind: ParkedKind) -> Vec<String> {
+    list()
+        .into_iter()
+        .filter(|c| c.kind == kind)
+        .map(|c| c.id)
+        .collect()
+}
+
+/// One parked card's request, typed. The watcher falls back to this when an id
+/// in its pending set has no request file — i.e. the card is parked.
+pub fn request_of<T: for<'de> Deserialize<'de>>(id: &str) -> Option<T> {
+    serde_json::from_value(get(id)?.request).ok()
+}
+
 /// True when this session already has a card waiting for the user. The producers
 /// use it as a re-entry guard: an agent that ignored [`STOP_NOTICE`] and asked
 /// again must not get a second card queued behind the first — it gets the notice

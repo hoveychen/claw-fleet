@@ -905,6 +905,13 @@ interface DecisionState {
   setElicitationStep: (id: string, step: number) => void;
   /** Dismiss a decision without responding (e.g. expired). */
   dismiss: (id: string) => void;
+  /**
+   * Flip a card the panel is already showing into the parked state (its wait
+   * timed out; the session has been interrupted and is waiting on this answer
+   * to be resumed). Done in place so anything the user has already picked or
+   * typed into the card survives the transition.
+   */
+  markParked: (id: string) => void;
   /** Update analysis state for a specific decision. */
   setAnalysis: (id: string, analysis: string | null, analyzing: boolean) => void;
   /** Switch the active decision shown in the card area. */
@@ -1537,6 +1544,15 @@ export const useDecisionStore = create<DecisionState>((set, get) => ({
   },
 
   dismiss: (id) => set((s) => removeDecision(s, id)),
+
+  markParked: (id) =>
+    set((s) => ({
+      decisions: s.decisions.map((d) =>
+        d.id === id && "request" in d && d.request
+          ? { ...d, request: { ...d.request, parked: true } }
+          : d,
+      ) as typeof s.decisions,
+    })),
 
   setAnalysis: (id, analysis, analyzing) =>
     set((s) => ({

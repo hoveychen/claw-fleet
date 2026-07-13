@@ -51,6 +51,7 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   const addPlanApprovalRequest = useDecisionStore((s) => s.addPlanApprovalRequest);
   const addPermissionPromptRequest = useDecisionStore((s) => s.addPermissionPromptRequest);
   const dismiss = useDecisionStore((s) => s.dismiss);
+  const markParked = useDecisionStore((s) => s.markParked);
 
   // Dedup: re-emitted payloads (e.g. after remount / reconnect) shouldn't
   // double-chime.
@@ -115,7 +116,9 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   useEffect(() => {
     const unlisten = listen<ElicitationRequest>("elicitation-request", (e) => {
       const r = e.payload;
-      if (!silent && !announcedIds.current.has(r.id)) {
+      // A parked card is an old question being re-listed, not a new ask — chiming
+      // for it would re-announce the same question on every app restart.
+      if (!silent && !r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const body = r.questions[0]?.question ?? "";
         const [intro, after] = splitOnDivider(body);
@@ -135,7 +138,9 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   useEffect(() => {
     const unlisten = listen<FleetAskRequest>("fleet-ask-request", (e) => {
       const r = e.payload;
-      if (!silent && !announcedIds.current.has(r.id)) {
+      // A parked card is an old question being re-listed, not a new ask — chiming
+      // for it would re-announce the same question on every app restart.
+      if (!silent && !r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const body = r.questions[0]?.question ?? "";
         const [intro, after] = splitOnDivider(body);
@@ -157,7 +162,9 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   useEffect(() => {
     const unlisten = listen<A2uiRenderRequest>("a2ui-render-request", (e) => {
       const r = e.payload;
-      if (!silent && !announcedIds.current.has(r.id)) {
+      // A parked card is an old question being re-listed, not a new ask — chiming
+      // for it would re-announce the same question on every app restart.
+      if (!silent && !r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         // A2UI surfaces are opaque to Fleet — speak the workspace + title
         // only; the actual UI is announced by `@a2ui/react` accessibility.
@@ -176,7 +183,9 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
   useEffect(() => {
     const unlisten = listen<PlanApprovalRequest>("plan-approval-request", (e) => {
       const r = e.payload;
-      if (!silent && !announcedIds.current.has(r.id)) {
+      // A parked card is an old question being re-listed, not a new ask — chiming
+      // for it would re-announce the same question on every app restart.
+      if (!silent && !r.parked && !announcedIds.current.has(r.id)) {
         announcedIds.current.add(r.id);
         const spoken = [r.workspaceName, r.aiTitle ?? ""]
           .filter((s): s is string => !!s && s.length > 0)
@@ -209,11 +218,28 @@ export function useDecisionEvents(options: { silent?: boolean } = {}) {
     };
   }, [addPermissionPromptRequest, silent]);
 
+  // Park events — a card the panel is already showing just timed out. It does
+  // NOT go away: the backend interrupted the session's turn and is holding the
+  // question until it gets an answer, which then resumes the session. Flip the
+  // card in place so it can badge itself, keeping whatever the user had already
+  // filled in.
+  useEffect(() => {
+    const unlisten = listen<string>("decision-parked", (e) => {
+      const id = e.payload;
+      if (!id) return;
+      console.log(`[decision] decision-parked id=${id} — wait timed out, session interrupted; card stays until answered`);
+      markParked(id);
+    });
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [markParked]);
+
   // Dismiss events — fire when another client (another desktop) answers
-  // a pending decision, or when `fleet guard`/`fleet elicitation` times out
-  // and cleans up the request file. The backend polling loop in
-  // local_backend.rs / remote.rs emits these by diffing the known id set
-  // against the current pending set.
+  // a pending decision, or when `fleet guard` times out and cleans up the
+  // request file. The backend polling loop in local_backend.rs / remote.rs
+  // emits these by diffing the known id set against the current pending set.
+  // A parked card is NOT dismissed: the backend keeps it in the pending set.
   useEffect(() => {
     const unlistens = [
       "guard-dismissed",
