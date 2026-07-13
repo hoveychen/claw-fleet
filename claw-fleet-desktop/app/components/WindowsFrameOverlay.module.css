@@ -55,11 +55,11 @@
 }
 
 .caption_btn:hover {
-  background: var(--caption-hover, rgba(255, 255, 255, 0.08));
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .caption_btn:active {
-  background: var(--caption-active, rgba(255, 255, 255, 0.04));
+  background: rgba(255, 255, 255, 0.04);
 }
 
 /* The close button gets a red hover like the OS does. */
