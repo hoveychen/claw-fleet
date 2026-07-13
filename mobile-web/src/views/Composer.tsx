@@ -9,6 +9,7 @@ import { t } from "../i18n";
 import { UPLOAD_REQUEST_TIMEOUT_MS, type RelayClient } from "../relay";
 import { waitForSessionId } from "../spawnConfirm";
 import type { SessionInfo } from "../types";
+import { useChatWorkspace } from "../useChatWorkspace";
 import styles from "./Composer.module.css";
 
 const MODEL_CHOICES: Array<[string, string]> = [
@@ -268,16 +269,8 @@ const NEW_SESSION_DEFAULT = {
 };
 
 export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) {
-  // 纯聊天 workspace：不绑定项目，路径在桌面主机的 home 下，手机端推导不出来，
-  // 所以向 relay 要。它没有「最近会话」可被发现，必须显式钉在选项首位。
-  const [chatPath, setChatPath] = useState<string | null>(null);
-  useEffect(() => {
-    if (!client) return;
-    client
-      .request<{ path: string }>("chat_workspace")
-      .then((r) => setChatPath(r.path))
-      .catch(() => setChatPath(null));
-  }, [client]);
+  // 纯聊天 workspace：不绑定项目，没有「最近会话」可被发现，必须显式钉在选项首位。
+  const chatPath = useChatWorkspace(client);
 
   const recents = [...new Map(sessions.map((s) => [s.workspacePath, s.workspaceName])).entries()]
     // 聊过之后它也会出现在 recents 里——剔除，避免同一项列两次。

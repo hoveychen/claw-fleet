@@ -2484,6 +2484,21 @@ mod tests {
         });
     }
 
+    /// The phone filters chat sessions out of its tasks list by comparing each
+    /// session's `workspacePath` against this reply, so it must be the very same
+    /// path the scanner stamps on a chat session — not merely "some path".
+    #[test]
+    fn request_chat_workspace_returns_the_scanner_path() {
+        with_temp_home(|| {
+            let data = request_ok("chat_workspace", json!({}));
+            let path = data["path"].as_str().expect("reply must carry a path");
+            assert!(
+                crate::chat_workspace::is_chat_workspace(path),
+                "relay handed back a path the scanner won't recognise as chat: {path}"
+            );
+        });
+    }
+
     #[test]
     fn request_spawn_session_validates_before_spawning() {
         with_temp_home(|| {
