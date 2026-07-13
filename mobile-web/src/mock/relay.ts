@@ -29,6 +29,9 @@ export function isMockMode(): boolean {
 export class MockRelayClient extends RelayClient {
   // The base class keeps `handlers` private, so hold our own reference.
   private mockHandlers: RelayHandlers;
+  /** Answered card ids — App's periodic pending_snapshot reconcile (every few
+   *  seconds while cards are pending) must not resurrect a card just answered. */
+  private answered = new Set<string>();
 
   constructor(handlers: RelayHandlers) {
     super("mock-secret", handlers);
@@ -59,6 +62,7 @@ export class MockRelayClient extends RelayClient {
 
   /** Answering a card just drops it from the list, like a real resolve event. */
   override answer(kind: DecisionKind, id: string): boolean {
+    this.answered.add(id);
     this.mockHandlers.onDecisionResolved?.(kind, id);
     return true;
   }
@@ -74,7 +78,10 @@ export class MockRelayClient extends RelayClient {
   private serve(method: string, params?: Record<string, unknown>): unknown {
     switch (method) {
       case "pending_snapshot":
-        return { guard: [MOCK_GUARD], elicitation: [MOCK_ELICITATION] };
+        return {
+          guard: [MOCK_GUARD].filter((r) => !this.answered.has(r.id)),
+          elicitation: [MOCK_ELICITATION].filter((r) => !this.answered.has(r.id)),
+        };
       case "chat_workspace":
         return { path: MOCK_CHAT_WORKSPACE };
       case "today_usage":

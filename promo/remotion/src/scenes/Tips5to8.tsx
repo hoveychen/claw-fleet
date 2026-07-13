@@ -2,91 +2,138 @@ import React from "react";
 import { spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { clamp01, ease, lerp } from "../helpers";
 import { FONT, T } from "../tokens";
-import { Badge, SessionCard } from "../ui";
+import { Badge, PhonePip, SessionCard } from "../ui";
 import { TipShell } from "./TipShell";
 
 // Stages render inside <Sequence from={56}> — local frame 0 = pain swept away.
 
-// ── Tip #5 — Dispatch from anywhere ───────────────────────────────────────
+// ── Tip #5 — One composer, whole fleet dispatched ──────────────────────────
+const DISPATCHES = [
+  { ws: "billing-service", prompt: "Alert when the 5h window crosses 80%" },
+  { ws: "search-service", prompt: "Reindex the v2.4 facets on staging" },
+  { ws: "notif-service", prompt: "Coalesce pushes into 500ms batches" },
+];
+const DISPATCH_AT = [6, 44, 82]; // local frame each prompt starts typing
 const Tip5Stage: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const pillIn = spring({ frame: frame - 4, fps, config: { damping: 13 } });
-  const morph = ease(clamp01((frame - 28) / 20));
-  const launched = spring({ frame: frame - 86, fps, config: { damping: 11, mass: 0.6 } });
-  const w = lerp(560, 900, morph);
-  const h = lerp(84, 302, morph);
+  const composerIn = spring({ frame: frame - 2, fps, config: { damping: 13 } });
+  const active = frame >= DISPATCH_AT[2] ? 2 : frame >= DISPATCH_AT[1] ? 1 : 0;
+  const d = DISPATCHES[active];
+  const chars = Math.max(0, Math.min(d.prompt.length, Math.floor((frame - DISPATCH_AT[active]) * 2.4)));
+  const caption = clamp01((frame - 116) / 12);
   return (
-    <div
-      style={{
-        position: "absolute",
-        top: 250,
-        left: 130,
-        width: w,
-        height: h,
-        background: T.card,
-        border: `2px solid ${T.borderStrong}`,
-        borderRadius: 20,
-        boxShadow: "0 10px 34px rgba(32,28,18,0.14)",
-        padding: "22px 30px",
-        overflow: "hidden",
-        opacity: pillIn,
-      }}
-    >
-      <div style={{ fontSize: 27, color: morph > 0.4 ? T.ink : T.inkDim, fontFamily: FONT.mono }}>
-        Ship the onboarding flow revamp…
-      </div>
-      <div style={{ opacity: clamp01((morph - 0.55) / 0.45) }}>
-        <div style={{ display: "flex", gap: 14, marginTop: 26, flexWrap: "wrap" }}>
-          {["~/work/web-frontend", "opus · high effort", "plan mode"].map((chip) => (
-            <span
-              key={chip}
-              style={{
-                fontFamily: FONT.mono,
-                fontSize: 21,
-                padding: "8px 18px",
-                borderRadius: 100,
-                background: T.paperDeep,
-                border: `1.5px solid ${T.border}`,
-                color: T.inkSecondary,
-              }}
-            >
-              {chip}
-            </span>
-          ))}
-        </div>
-        <div style={{ marginTop: 30, display: "flex", alignItems: "center", gap: 18 }}>
+    <>
+      <div
+        style={{
+          position: "absolute",
+          top: 260,
+          left: 120,
+          width: 680,
+          background: T.card,
+          border: `2px solid ${T.borderStrong}`,
+          borderRadius: 20,
+          boxShadow: "0 10px 34px rgba(32,28,18,0.14)",
+          padding: "24px 30px",
+          opacity: composerIn,
+          transform: `translateY(${lerp(30, 0, composerIn)}px)`,
+        }}
+      >
+        <div style={{ display: "flex", gap: 12, marginBottom: 18 }}>
           <span
             style={{
-              fontSize: 26,
-              fontWeight: 650,
-              padding: "13px 38px",
-              borderRadius: 10,
-              background: launched > 0.4 ? "#15803d" : T.coral,
-              color: "#fff",
+              fontFamily: FONT.mono,
+              fontSize: 20,
+              padding: "7px 18px",
+              borderRadius: 100,
+              background: T.coralSoft,
+              border: `1.5px solid ${T.coral}`,
+              color: T.coral,
             }}
           >
-            {launched > 0.4 ? "Session spawned ✓" : "Launch"}
+            📁 {d.ws}
           </span>
-          <span style={{ fontFamily: FONT.mono, fontSize: 20, color: T.inkDim, opacity: launched }}>
-            detached · headless · yours to watch
+          <span
+            style={{
+              fontFamily: FONT.mono,
+              fontSize: 20,
+              padding: "7px 18px",
+              borderRadius: 100,
+              background: T.paperDeep,
+              border: `1.5px solid ${T.border}`,
+              color: T.inkSecondary,
+            }}
+          >
+            opus · high effort
           </span>
         </div>
+        <div style={{ fontFamily: FONT.mono, fontSize: 26, color: T.ink, minHeight: 38 }}>
+          {d.prompt.slice(0, chars)}
+          <span style={{ opacity: frame % 16 < 8 ? 1 : 0, color: T.coral }}>▍</span>
+        </div>
+        <div style={{ marginTop: 16, fontFamily: FONT.mono, fontSize: 18, color: T.inkDim }}>
+          ⏎ Enter to dispatch — session #{active + 1} of 3
+        </div>
       </div>
-    </div>
+      {DISPATCHES.map((disp, i) => {
+        const pop = spring({ frame: frame - (DISPATCH_AT[i] + 30), fps, config: { damping: 12, mass: 0.6 } });
+        if (frame < DISPATCH_AT[i] + 26) return null;
+        return (
+          <div
+            key={disp.ws}
+            style={{
+              position: "absolute",
+              top: 236 + i * 118,
+              left: 900,
+              width: 480,
+              background: T.card,
+              border: `2px solid ${T.border}`,
+              borderLeft: `5px solid ${T.coral}`,
+              borderRadius: 14,
+              padding: "16px 22px",
+              boxShadow: "0 8px 26px rgba(32,28,18,0.12)",
+              opacity: pop,
+              transform: `translateX(${lerp(46, 0, pop)}px)`,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 24, fontWeight: 700 }}>{disp.ws}</span>
+              <Badge kind="thinking" label="Thinking" />
+            </div>
+            <div style={{ fontFamily: FONT.mono, fontSize: 17, color: T.inkDim, marginTop: 8 }}>
+              spawned ✓ · detached · headless
+            </div>
+          </div>
+        );
+      })}
+      <div
+        style={{
+          position: "absolute",
+          top: 610,
+          left: 120,
+          fontFamily: FONT.mono,
+          fontSize: 24,
+          color: T.green,
+          opacity: caption,
+          transform: `translateX(${lerp(-16, 0, caption)}px)`,
+        }}
+      >
+        ✓ three sessions launched — zero terminals opened
+      </div>
+    </>
   );
 };
 export const Tip5: React.FC = () => (
   <TipShell
     n={5}
-    title="Dispatch from anywhere"
+    title="Dispatch the whole fleet from one place"
     pain={{
       title: "starting task #7 today",
       lines: ["$ cd ~/work/thing && claude", "$ paste 400 lines of context…", "$ repeat for every single task"],
     }}
-    bubble="New deckhand, reporting for duty. Didn't even open a terminal."
+    bubble="Three new deckhands from one composer. Didn't even open a terminal."
     side="right"
-    pip={{ src: "footage/t5-dispatch.mp4", startFrom: 270, pos: "tr" }}
+    pip={{ src: "footage/t5-dispatch.mp4", startFrom: 355, pos: "bl", rate: 1.5, zoom: { scale: 1.45, origin: "59% 57%" } }}
   >
     <Tip5Stage />
   </TipShell>
@@ -162,91 +209,40 @@ export const Tip6: React.FC = () => (
     }}
     bubble="Context window's full. The mission isn't. Relay!"
     side="left"
-    pip={{ src: "footage/t6-detail.mp4", startFrom: 240, pos: "br" }}
+    pip={{ src: "footage/t6-chains.mp4", startFrom: 210, pos: "br", zoom: { scale: 3.6, origin: "78% 60%" } }}
   >
     <Tip6Stage />
   </TipShell>
 );
 
 // ── Tip #7 — Your phone is the bridge now ─────────────────────────────────
+// The phone IS the live capture: mobile-web demo footage inside a bezel.
 const Tip7Stage: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const phoneIn = spring({ frame: frame - 4, fps, config: { damping: 13 } });
-  const notifDrop = spring({ frame: frame - 22, fps, config: { damping: 12, mass: 0.5 } });
-  const tapped = frame >= 68;
-  const done = spring({ frame: frame - 72, fps, config: { damping: 11, mass: 0.5 } });
+  const line1 = spring({ frame: frame - 34, fps, config: { damping: 12, mass: 0.5 } });
+  const done = spring({ frame: frame - 96, fps, config: { damping: 11, mass: 0.5 } });
   return (
     <>
+      <PhonePip src="footage/t7-mobile.mp4" startFrom={115} enter={4} left={270} top={200} width={330} />
       <div
         style={{
           position: "absolute",
-          top: 210,
-          left: 250,
-          width: 380,
-          background: T.card,
-          border: `3px solid ${T.borderStrong}`,
-          borderRadius: 44,
-          padding: "18px 16px 26px",
-          boxShadow: "0 20px 60px rgba(32,28,18,0.22)",
-          opacity: phoneIn,
-          transform: `translateY(${lerp(40, 0, phoneIn)}px)`,
+          top: 330,
+          left: 700,
+          fontFamily: FONT.mono,
+          fontSize: 24,
+          color: T.inkSecondary,
+          opacity: line1,
+          transform: `translateX(${lerp(-20, 0, line1)}px)`,
         }}
       >
-        <div style={{ width: 100, height: 7, borderRadius: 100, background: T.borderStrong, margin: "0 auto 16px" }} />
-        <div
-          style={{
-            background: T.night,
-            color: T.nightText,
-            borderRadius: 16,
-            padding: "14px 16px",
-            marginBottom: 14,
-            transform: `translateY(${lerp(-90, 0, notifDrop)}px)`,
-            opacity: notifDrop,
-          }}
-        >
-          <div style={{ fontSize: 17, fontWeight: 650 }}>Claw Fleet</div>
-          <div style={{ fontSize: 15.5, color: T.nightDim }}>Guard: api-server wants to run a migration</div>
-        </div>
-        <div
-          style={{
-            background: T.paper,
-            border: `2px solid ${T.border}`,
-            borderRadius: 16,
-            padding: "16px 18px",
-            opacity: clamp01((frame - 40) / 12),
-          }}
-        >
-          <div style={{ fontFamily: FONT.mono, fontSize: 14, color: T.coral, marginBottom: 8 }}>
-            GUARD · api-server
-          </div>
-          <div style={{ fontFamily: FONT.mono, fontSize: 16, background: T.night, color: T.nightText, borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
-            $ npx prisma migrate deploy
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <span
-              style={{
-                fontSize: 17,
-                fontWeight: 650,
-                padding: "9px 22px",
-                borderRadius: 8,
-                background: tapped ? "#15803d" : T.coral,
-                color: "#fff",
-                transform: `scale(${tapped ? lerp(1, 1.05, done) : 1})`,
-              }}
-            >
-              {tapped ? "Allowed ✓" : "Allow"}
-            </span>
-            <span style={{ fontSize: 17, fontWeight: 650, padding: "9px 22px", borderRadius: 8, background: T.paperDeep, color: T.inkSecondary, border: `1.5px solid ${T.border}` }}>
-              Block
-            </span>
-          </div>
-        </div>
+        guard card → your pocket, AI risk analysis included
       </div>
       <div
         style={{
           position: "absolute",
-          top: 620,
+          top: 400,
           left: 700,
           fontFamily: FONT.mono,
           fontSize: 24,
@@ -255,7 +251,7 @@ const Tip7Stage: React.FC = () => {
           transform: `translateX(${lerp(-20, 0, done)}px)`,
         }}
       >
-        ✓ desktop session unblocked — agent continues
+        ✓ one tap — desktop session unblocked
       </div>
     </>
   );
@@ -270,7 +266,6 @@ export const Tip7: React.FC = () => (
     }}
     bubble="Approved from the beach. The fleet never knew I left."
     side="right"
-    pip={{ src: "footage/t7-guard.mp4", startFrom: 140, pos: "tr" }}
   >
     <Tip7Stage />
   </TipShell>
@@ -358,7 +353,7 @@ export const Tip8: React.FC = () => (
     }}
     bubble="Eight hours of fleet work, summarized before your coffee's cold."
     side="left"
-    pip={{ src: "footage/t8-report.mp4", startFrom: 180, pos: "tl" }}
+    pip={{ src: "footage/t8-report.mp4", startFrom: 200, pos: "tl", zoom: { scale: 1.5, origin: "55% 45%" } }}
   >
     <Tip8Stage />
   </TipShell>
