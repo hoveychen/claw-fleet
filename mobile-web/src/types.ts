@@ -563,3 +563,49 @@ export interface GitOpResult {
   ok: boolean;
   output: string;
 }
+
+// ── 账号与用量（`account_usage` 回包）─────────────────────────────────────────
+
+/** 一条限流窗口。`utilization` / `prevUtilization` 都是 0–1 小数（页面自己 ×100），
+ *  与 `claw_fleet_core::backend::UsageBar` 一致。 */
+export interface UsageBar {
+  label: string;
+  utilization: number;
+  resetsAt: string | null;
+  /** 上一周期同一窗口的占用率 —— 只有 Claude 的条目带。 */
+  prevUtilization?: number | null;
+}
+
+/** Claude 账号档案 + 它的 5h / 7d 限流条。 */
+export interface ClaudeAccount {
+  email: string;
+  fullName: string;
+  organizationName: string;
+  plan: string;
+  /** 用量数字的来源："anthropic" 直连，或 "foxy-switcher" 读本地守护进程。 */
+  usageSource: string;
+  bars: UsageBar[];
+}
+
+/** 非 Claude 源（cursor / codex / openclaw）的归一化用量（`SourceUsageSummary`）。 */
+export interface SourceUsage {
+  source: string;
+  plan: string | null;
+  bars: UsageBar[];
+}
+
+/** `account_usage` 回包。Claude 拉取失败时只填 `claudeError`，其余照常渲染。 */
+export interface AccountUsage {
+  claude: ClaudeAccount | null;
+  claudeError: string | null;
+  sources: SourceUsage[];
+}
+
+/** `usage_history` 回包的一个采样点：桌面端后台采样器每隔几分钟落盘一次。
+ *  三个字段都是 0–1 小数，某个窗口当次没数据时为 null。 */
+export interface UsageHistoryPoint {
+  ts: number;
+  fiveHour: number | null;
+  sevenDay: number | null;
+  sevenDaySonnet: number | null;
+}
