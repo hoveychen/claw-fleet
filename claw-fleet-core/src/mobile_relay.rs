@@ -325,6 +325,43 @@ static CONFIG_GEN: AtomicU64 = AtomicU64::new(0);
 static OUT_TX: Mutex<Option<tokio::sync::mpsc::UnboundedSender<String>>> = Mutex::new(None);
 static SESSIONS_LAST_SENT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
+/// Host-supplied source for the *current* full sessions snapshot, used to push
+/// state to a phone the moment it connects instead of waiting for the next
+/// scan-driven change. The desktop `LocalBackend` registers this (see
+/// `local_backend.rs`); `fleet serve` leaves it unset because its broadcast
+/// loop already force-pushes on a new-client presence bump. When unset, the
+/// on-connect push is a no-op and the old "wait for the next scan tick"
+/// behaviour applies — which is exactly what the serve loop covers.
+#[allow(clippy::type_complexity)]
+static SNAPSHOT_PROVIDER: Mutex<Option<Box<dyn Fn() -> Option<Value> + Send + Sync>>> =
+    Mutex::new(None);
+
+/// Register the current-sessions provider (see [`SNAPSHOT_PROVIDER`]). Called
+/// once at backend startup; a later call replaces the previous provider.
+pub fn set_snapshot_provider<F>(f: F)
+where
+    F: Fn() -> Option<Value> + Send + Sync + 'static,
+{
+    *SNAPSHOT_PROVIDER.lock().unwrap() = Some(Box::new(f));
+}
+
+/// Push the current snapshot to clients right now, bypassing the change-dedup
+/// (the caller just reset [`SESSIONS_LAST_HASH`], so a phone that connected
+/// mid-idle still gets state even though nothing changed for existing clients).
+/// No-op when no provider is registered — see [`SNAPSHOT_PROVIDER`].
+fn push_snapshot_on_connect() {
+    let snapshot = {
+        let guard = SNAPSHOT_PROVIDER.lock().unwrap();
+        match guard.as_ref() {
+            Some(provider) => provider(),
+            None => None,
+        }
+    };
+    if let Some(v) = snapshot {
+        publish_sessions(&v);
+    }
+}
+
 fn send_raw(frame: String) {
     if let Some(tx) = OUT_TX.lock().unwrap().as_ref() {
         let _ = tx.send(frame);
@@ -1299,15 +1336,26 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                         clear_clients();
                         SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
                         crate::log_debug("[mobile-relay] connected");
+                        // Reconnected with clients already on the channel: push
+                        // the current state now instead of waiting for the next
+                        // scan-driven change (which may be minutes away when
+                        // every session is idle). No-op when no provider is set.
+                        if frame.get("clients").and_then(Value::as_u64).unwrap_or(0) > 0 {
+                            push_snapshot_on_connect();
+                        }
                     }
                     Some("presence") => {
                         if let Some(n) = frame.get("clients").and_then(Value::as_u64) {
                             let prev = CLIENTS.swap(n as usize, Ordering::SeqCst);
-                            // A client just joined: drop the dedup hash so the
-                            // next scan tick pushes the current state to it
-                            // even when nothing changed for existing clients.
+                            // A client just joined: drop the dedup hash and push
+                            // the current state to it right away, even when
+                            // nothing changed for existing clients. Without this
+                            // active push a phone connecting mid-idle would sit
+                            // on a blank task list until some session file next
+                            // changed (see push_snapshot_on_connect).
                             if n as usize > prev {
                                 SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
+                                push_snapshot_on_connect();
                             }
                             // Everyone's gone: forget the device list immediately
                             // rather than waiting out the stale timeout.
@@ -2602,5 +2650,50 @@ mod tests {
             serde_json::from_str(&build_sessions_frame(&slim, true)).expect("valid frame");
         assert!(frame["payload"].get("enc").is_none(), "tiny snapshot stays plaintext");
         assert!(frame["payload"]["sessions"].is_array());
+    }
+
+    #[test]
+    fn on_connect_push_emits_current_snapshot_via_provider() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+
+        // Observable outbound channel so send_raw's frames can be inspected.
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        *OUT_TX.lock().unwrap() = Some(tx);
+        // Simulate an authed channel with one phone attached, freshly connected:
+        // dedup hash reset and no prior push to throttle against.
+        CONNECTED.store(true, Ordering::SeqCst);
+        CLIENTS.store(1, Ordering::SeqCst);
+        SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
+        *SESSIONS_LAST_SENT.lock().unwrap() = None;
+
+        // No provider (the `fleet serve` fallback, and the pre-fix desktop
+        // behaviour): a connect pushes nothing — the phone would sit blank until
+        // the next scan-driven change. This is exactly the bug being fixed.
+        *SNAPSHOT_PROVIDER.lock().unwrap() = None;
+        push_snapshot_on_connect();
+        assert!(rx.try_recv().is_err(), "no provider → no on-connect push (pre-fix state)");
+
+        // With a provider registered (the desktop LocalBackend path), connecting
+        // emits the current snapshot immediately, no scan tick required.
+        set_snapshot_provider(|| {
+            Some(json!([{
+                "id": "s1", "isSubagent": false, "lastActivityMs": 1,
+                "workspaceName": "w", "entrypoint": NEW_SESSION_ENTRYPOINT
+            }]))
+        });
+        push_snapshot_on_connect();
+        let frame: Value =
+            serde_json::from_str(&rx.try_recv().expect("on-connect push emitted a frame"))
+                .expect("valid frame");
+        assert_eq!(frame["type"], "msg");
+        assert_eq!(frame["payload"]["event"], "sessions");
+
+        // Reset shared globals so sibling tests start from a known state.
+        *SNAPSHOT_PROVIDER.lock().unwrap() = None;
+        *OUT_TX.lock().unwrap() = None;
+        CONNECTED.store(false, Ordering::SeqCst);
+        CLIENTS.store(0, Ordering::SeqCst);
+        SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
+        *SESSIONS_LAST_SENT.lock().unwrap() = None;
     }
 }
