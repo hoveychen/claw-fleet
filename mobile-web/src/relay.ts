@@ -203,6 +203,12 @@ export class RelayClient {
         );
         break;
       case "decision_resolved":
+        // Diagnostic: whether the live resolved broadcast actually lands here
+        // is the open question behind the "desktop-answered card won't dismiss
+        // on mobile" bug. If this logs but the card lingered, the fault is in
+        // acting on it; if it never logs during a repro, the frame isn't
+        // arriving. The periodic reconcile in App.tsx is the fallback either way.
+        console.debug("[decision] resolved recv", payload.kind, payload.id);
         this.handlers.onDecisionResolved?.(
           payload.kind as DecisionKind,
           String(payload.id ?? ""),
