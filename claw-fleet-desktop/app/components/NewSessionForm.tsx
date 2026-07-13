@@ -13,6 +13,7 @@ import {
 import { PillMenu } from "./PillMenu";
 import pillStyles from "./PillMenu.module.css";
 import { SessionOptionPills } from "./SessionOptionPills";
+import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useComposerDraft } from "../composerDraft";
 import { resolveStagedAttachment } from "../userAttachments";
 import styles from "./NewSessionForm.module.css";
@@ -132,18 +133,11 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState("");
-  const [chatPath, setChatPath] = useState<string | null>(null);
   const composerRef = useRef<ChatComposerHandle | null>(null);
 
   // The pure-chat workspace. Unlike a project it has no prior sessions to be
-  // discovered from, so it must be pinned explicitly — and its path comes from
-  // the backend because under a remote connection it lives in the probe host's
-  // home, not this machine's.
-  useEffect(() => {
-    invoke<string>("chat_workspace")
-      .then(setChatPath)
-      .catch(() => setChatPath(null));
-  }, []);
+  // discovered from, so it must be pinned explicitly.
+  const chatPath = useChatWorkspace();
 
   // Distinct workspaces from known sessions, most recently active first.
   // Worktree checkouts collapse onto their repo root — see distinctWorkspaces.

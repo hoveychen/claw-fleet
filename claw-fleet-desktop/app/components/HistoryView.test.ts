@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sessionEq } from "./HistoryView";
+import { CHAT_HIDDEN, CHAT_ONLY, matchesWorkspaceFilter, sessionEq } from "./HistoryView";
 import type { SessionInfo } from "../types";
 
 /**
@@ -110,5 +110,44 @@ describe("sessionEq", () => {
     const a = base();
     const b = { ...base(), someNewField: 1 } as unknown as SessionInfo;
     expect(sessionEq(a, b)).toBe(false);
+  });
+});
+
+/**
+ * The workspace `<select>` mixes real paths with two pseudo-values for the
+ * pure-chat workspace. The cases that matter: chat is reachable on its own, it
+ * can be excluded from the default view, and a chat path the backend never
+ * handed us must not silently empty the rail.
+ */
+describe("matchesWorkspaceFilter", () => {
+  const CHAT = "/Users/foo/.fleet/chat";
+  const chatSession = { ...base(), workspacePath: CHAT } as SessionInfo;
+  const repoSession = { ...base(), workspacePath: "/Users/foo/repo" } as SessionInfo;
+
+  it("passes everything under 'all', chat included", () => {
+    expect(matchesWorkspaceFilter(chatSession, "all", CHAT)).toBe(true);
+    expect(matchesWorkspaceFilter(repoSession, "all", CHAT)).toBe(true);
+  });
+
+  it("keeps only chat sessions under CHAT_ONLY", () => {
+    expect(matchesWorkspaceFilter(chatSession, CHAT_ONLY, CHAT)).toBe(true);
+    expect(matchesWorkspaceFilter(repoSession, CHAT_ONLY, CHAT)).toBe(false);
+  });
+
+  it("drops chat sessions under CHAT_HIDDEN", () => {
+    expect(matchesWorkspaceFilter(chatSession, CHAT_HIDDEN, CHAT)).toBe(false);
+    expect(matchesWorkspaceFilter(repoSession, CHAT_HIDDEN, CHAT)).toBe(true);
+  });
+
+  it("still matches a plain workspace path", () => {
+    expect(matchesWorkspaceFilter(repoSession, "/Users/foo/repo", CHAT)).toBe(true);
+    expect(matchesWorkspaceFilter(chatSession, "/Users/foo/repo", CHAT)).toBe(false);
+  });
+
+  it("degrades both chat pseudo-values to 'all' when the chat path is unknown", () => {
+    for (const s of [chatSession, repoSession]) {
+      expect(matchesWorkspaceFilter(s, CHAT_ONLY, null)).toBe(true);
+      expect(matchesWorkspaceFilter(s, CHAT_HIDDEN, null)).toBe(true);
+    }
   });
 });

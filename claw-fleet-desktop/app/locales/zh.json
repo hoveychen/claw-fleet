@@ -1743,6 +1743,8 @@
     "resume_permission_default": "沿用会话设置",
     "filter_workspace": "按工作目录筛选",
     "all_workspaces": "全部目录",
+    "chat_only": "💬 仅聊天",
+    "chat_hidden": "🚫 隐藏聊天",
     "only_active": "仅活跃",
     "filter_active_tip": "只显示仍在运行或等待输入的会话",
     "mark_all_read": "全部已读",

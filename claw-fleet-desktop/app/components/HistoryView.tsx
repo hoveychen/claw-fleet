@@ -21,6 +21,7 @@ import {
 import { useReadStore, useSessionsStore, useUIStore, type MarkFilter } from "../store";
 import type { SessionInfo } from "../types";
 import { LIVE_STATUSES, isFleetOwnedEntrypoint, rowBarColor, sessionUnread } from "../types";
+import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
@@ -96,6 +97,28 @@ const MARK_SEGMENTS: MarkFilter[] = ["all", "pending", "done"];
  *  pending. */
 function markBucket(s: SessionInfo): "pending" | "done" {
   return s.userMark === "done" ? "done" : "pending";
+}
+
+/** The two pseudo-workspaces the workspace `<select>` pins above the real
+ *  directories. Every real value is an absolute path, so these bare words can
+ *  never collide with one — including on Windows, where a path starts with a
+ *  drive letter. They are persisted like any other filter value. */
+export const CHAT_ONLY = "chat";
+export const CHAT_HIDDEN = "no-chat";
+
+/** Does `s` pass the workspace filter? `chatPath` is the pure-chat workspace,
+ *  `null` while the backend call is in flight or if it failed — in which case
+ *  the two chat pseudo-values degrade to "all" rather than silently emptying
+ *  the rail. */
+export function matchesWorkspaceFilter(
+  s: SessionInfo,
+  filter: string,
+  chatPath: string | null,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === CHAT_ONLY) return chatPath == null || s.workspacePath === chatPath;
+  if (filter === CHAT_HIDDEN) return chatPath == null || s.workspacePath !== chatPath;
+  return s.workspacePath === filter;
 }
 
 function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
@@ -373,22 +396,40 @@ export function HistoryView() {
     [sessions],
   );
 
+  // The pure-chat workspace is filtered through its own pinned options, so it
+  // is kept out of the project list below — otherwise it would sit in there a
+  // second time, alphabetised among the repos as plain "Chat".
+  const chatPath = useChatWorkspace();
+
   const workspaces = useMemo(() => {
     const byPath = new Map<string, string>();
-    for (const s of adhocSessions) byPath.set(s.workspacePath, s.workspaceName);
+    for (const s of adhocSessions) {
+      if (s.workspacePath === chatPath) continue;
+      byPath.set(s.workspacePath, s.workspaceName);
+    }
     return [...byPath.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [adhocSessions]);
+  }, [adhocSessions, chatPath]);
+
+  // A filter persisted before the chat workspace got its own option is a raw
+  // chat path; it no longer appears among the project options, so promote it to
+  // the pseudo-value instead of letting the reset below silently drop it.
+  useEffect(() => {
+    if (chatPath && workspaceFilter === chatPath) setWorkspaceFilter(CHAT_ONLY);
+  }, [chatPath, workspaceFilter, setWorkspaceFilter]);
 
   // The workspace filter is persisted, but the dropdown's options only cover
   // workspaces with sessions inside the scanner's 7-day window. A restored path
   // whose sessions have aged out would render a blank <select> over an empty
   // rail, with no obvious way back — fall back to "all" once the scan lands.
+  // The two chat pseudo-values are always offered, so they never age out.
   useEffect(() => {
     if (!scanReady || workspaceFilter === "all") return;
+    if (workspaceFilter === CHAT_ONLY || workspaceFilter === CHAT_HIDDEN) return;
+    if (workspaceFilter === chatPath) return; // promoted by the effect above
     if (!workspaces.some(([path]) => path === workspaceFilter)) {
       setWorkspaceFilter("all");
     }
-  }, [scanReady, workspaces, workspaceFilter, setWorkspaceFilter]);
+  }, [scanReady, workspaces, workspaceFilter, chatPath, setWorkspaceFilter]);
 
   const { rows, markCounts } = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -396,7 +437,7 @@ export function HistoryView() {
     // this set so each count reflects how many rows its segment would reveal
     // under the current workspace / query / active filters.
     const preMark = adhocSessions
-      .filter((s) => workspaceFilter === "all" || s.workspacePath === workspaceFilter)
+      .filter((s) => matchesWorkspaceFilter(s, workspaceFilter, chatPath))
       .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
       .filter((s) => {
         if (!q) return true;
@@ -426,7 +467,7 @@ export function HistoryView() {
       // created-at order would interleave stale rows between fresh ones.
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
     return { rows, markCounts: counts };
-  }, [adhocSessions, workspaceFilter, activeOnly, query, ftsMatchPaths, markFilter]);
+  }, [adhocSessions, workspaceFilter, chatPath, activeOnly, query, ftsMatchPaths, markFilter]);
 
   const activeCount = useMemo(
     () => adhocSessions.filter((s) => LIVE_STATUSES.has(s.status)).length,
@@ -665,6 +706,15 @@ export function HistoryView() {
               title={t("history.filter_workspace", "按工作目录筛选")}
             >
               <option value="all">{t("history.all_workspaces", "全部目录")}</option>
+              {/* The chat workspace is a category, not a project — pinned above
+                  the repos, in both directions. Hidden entirely if the backend
+                  couldn't name it, since neither option could then be honoured. */}
+              {chatPath && (
+                <>
+                  <option value={CHAT_ONLY}>{t("history.chat_only", "💬 仅聊天")}</option>
+                  <option value={CHAT_HIDDEN}>{t("history.chat_hidden", "🚫 隐藏聊天")}</option>
+                </>
+              )}
               {workspaces.map(([path, name]) => (
                 <option key={path} value={path} title={path}>{name}</option>
               ))}
