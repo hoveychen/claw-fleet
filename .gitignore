@@ -30,7 +30,9 @@ promo/video/node_modules/
 *.njsproj
 *.sln
 *.sw?
-promo/
+promo/*
+!promo/remotion/
+promo/remotion/out/
 Cargo.toml.bak
 
 # Fleet PRD Discipline scratch state — agent-managed, not for version control

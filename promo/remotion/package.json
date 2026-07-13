@@ -1,0 +1,24 @@
+{
+  "name": "claw-fleet-promo",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "studio": "remotion studio",
+    "render": "remotion render ClawFleetPromo out/promo.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.246",
+    "@remotion/google-fonts": "^4.0.246",
+    "@remotion/player": "^4.0.246",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.246"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "typescript": "^5.6.0",
+    "vite": "^8.1.4"
+  }
+}
