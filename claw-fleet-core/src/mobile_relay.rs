@@ -388,14 +388,25 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "handoff",
 ];
 
-/// Most-recently-active sessions kept in the mobile snapshot.
-const SNAPSHOT_MAX_SESSIONS: usize = 120;
+/// Most-recently-active sessions kept in the mobile snapshot. Sized comfortably
+/// above the number of Fleet-owned sessions a busy workspace accumulates inside
+/// the scanner's 7-day window, so the cap never crops the task list the mobile
+/// client would otherwise render (fields are whitelisted + previews truncated,
+/// so even 500 rows stay a small payload).
+const SNAPSHOT_MAX_SESSIONS: usize = 500;
 /// `lastMessagePreview` cap (chars) — the list row clamps to two lines anyway.
 const SNAPSHOT_PREVIEW_CHARS: usize = 160;
 
 /// Slim a full desktop sessions snapshot down to what the mobile client
-/// renders: drop subagents, keep the most recently active
-/// [`SNAPSHOT_MAX_SESSIONS`], whitelist fields, truncate previews.
+/// renders: drop subagents and non-Fleet-owned sessions, keep the most recently
+/// active [`SNAPSHOT_MAX_SESSIONS`], whitelist fields, truncate previews.
+///
+/// The Fleet-owned filter mirrors the mobile client's own
+/// `isFleetOwnedEntrypoint` gate (TasksView / NewSessionSheet only ever render
+/// Fleet-launched sessions) and MUST run *before* the truncation: applying the
+/// cap first let external VS Code / bare-CLI sessions occupy slots that the
+/// client then discarded, cropping the visible task list below the cap and
+/// making the count diverge from the desktop's.
 pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     let Some(list) = sessions.as_array() else {
         return Value::Array(Vec::new());
@@ -403,6 +414,11 @@ pub fn slim_sessions_snapshot(sessions: &Value) -> Value {
     let mut kept: Vec<&Value> = list
         .iter()
         .filter(|s| !s.get("isSubagent").and_then(Value::as_bool).unwrap_or(false))
+        .filter(|s| {
+            crate::session_launch::is_fleet_owned_entrypoint(
+                s.get("entrypoint").and_then(Value::as_str),
+            )
+        })
         .collect();
     kept.sort_by_key(|s| {
         std::cmp::Reverse(s.get("lastActivityMs").and_then(Value::as_u64).unwrap_or(0))
@@ -2164,25 +2180,32 @@ mod tests {
 
     #[test]
     fn slim_snapshot_filters_and_whitelists() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
         let sessions = json!([
             {
                 "id": "old", "isSubagent": false, "lastActivityMs": 100,
                 "workspaceName": "w", "tokenSpeed": 42.0, "rateLimit": {"until": 1},
-                "lastMessagePreview": "短预览", "userMark": "done", "aiTitle": null
+                "lastMessagePreview": "短预览", "userMark": "done", "aiTitle": null,
+                "entrypoint": NEW_SESSION_ENTRYPOINT
             },
             {
                 "id": "sub", "isSubagent": true, "lastActivityMs": 300,
-                "workspaceName": "w"
+                "workspaceName": "w", "entrypoint": NEW_SESSION_ENTRYPOINT
+            },
+            {
+                "id": "ext", "isSubagent": false, "lastActivityMs": 250,
+                "workspaceName": "w", "entrypoint": "vscode"
             },
             {
                 "id": "new", "isSubagent": false, "lastActivityMs": 200,
                 "workspaceName": "w",
-                "lastMessagePreview": "长".repeat(500)
+                "lastMessagePreview": "长".repeat(500),
+                "entrypoint": NEW_SESSION_ENTRYPOINT
             },
         ]);
         let slim = slim_sessions_snapshot(&sessions);
         let list = slim.as_array().expect("array");
-        // Subagent dropped; remainder sorted most-recent first.
+        // Subagent + non-Fleet dropped; remainder sorted most-recent first.
         assert_eq!(list.len(), 2);
         assert_eq!(list[0]["id"], "new");
         assert_eq!(list[1]["id"], "old");
@@ -2200,22 +2223,66 @@ mod tests {
 
     #[test]
     fn slim_snapshot_caps_session_count() {
-        let many: Vec<Value> = (0..300)
-            .map(|i| json!({"id": format!("s{i}"), "isSubagent": false, "lastActivityMs": i}))
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let total = SNAPSHOT_MAX_SESSIONS + 100;
+        let many: Vec<Value> = (0..total)
+            .map(|i| {
+                json!({
+                    "id": format!("s{i}"), "isSubagent": false, "lastActivityMs": i,
+                    "entrypoint": NEW_SESSION_ENTRYPOINT
+                })
+            })
             .collect();
         let slim = slim_sessions_snapshot(&Value::Array(many));
         let list = slim.as_array().unwrap();
         assert_eq!(list.len(), SNAPSHOT_MAX_SESSIONS);
         // Kept the MOST recent ones (highest lastActivityMs).
-        assert_eq!(list[0]["id"], "s299");
-        assert_eq!(list.last().unwrap()["id"], format!("s{}", 300 - SNAPSHOT_MAX_SESSIONS));
+        assert_eq!(list[0]["id"], format!("s{}", total - 1));
+        assert_eq!(list.last().unwrap()["id"], format!("s{}", total - SNAPSHOT_MAX_SESSIONS));
+    }
+
+    #[test]
+    fn slim_snapshot_drops_non_fleet_and_keeps_all_fleet() {
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        // 130 Fleet-owned sessions (> the old 120 cap, < the new 500 cap) plus
+        // 10 non-Fleet sessions given the MOST-recent activity so that, under the
+        // buggy filter-after-truncate order, they would steal the top slots.
+        let mut sessions: Vec<Value> = (0..130)
+            .map(|i| {
+                json!({
+                    "id": format!("fleet{i}"),
+                    "isSubagent": false,
+                    "lastActivityMs": i,
+                    "entrypoint": NEW_SESSION_ENTRYPOINT,
+                })
+            })
+            .collect();
+        sessions.extend((0..10).map(|i| {
+            json!({
+                "id": format!("ext{i}"),
+                "isSubagent": false,
+                "lastActivityMs": 100_000 + i, // most recent
+                "entrypoint": "vscode",
+            })
+        }));
+        let slim = slim_sessions_snapshot(&Value::Array(sessions));
+        let list = slim.as_array().expect("array");
+        // Every Fleet-owned session survives (cap raised above 130) and no
+        // non-Fleet session is present (filter applied before truncation).
+        assert_eq!(list.len(), 130);
+        assert!(
+            list.iter().all(|s| s["id"].as_str().unwrap().starts_with("fleet")),
+            "non-Fleet sessions must not appear in the mobile snapshot"
+        );
     }
 
     #[test]
     fn snapshot_hash_dedups_identical_content() {
-        let a = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1}]));
-        let b = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1}]));
-        let c = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 2}]));
+        use crate::session_launch::NEW_SESSION_ENTRYPOINT;
+        let ep = NEW_SESSION_ENTRYPOINT;
+        let a = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1, "entrypoint": ep}]));
+        let b = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 1, "entrypoint": ep}]));
+        let c = slim_sessions_snapshot(&json!([{"id": "x", "lastActivityMs": 2, "entrypoint": ep}]));
         assert_eq!(snapshot_hash(&a), snapshot_hash(&b));
         assert_ne!(snapshot_hash(&a), snapshot_hash(&c));
         assert_ne!(snapshot_hash(&a), 0, "hash must never equal the sentinel");
