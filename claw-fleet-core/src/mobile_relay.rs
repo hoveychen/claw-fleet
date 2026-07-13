@@ -399,6 +399,50 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "handoff",
 ];
 
+/// Decision-asset images at or below this size are sent to the mobile client
+/// verbatim; larger ones are downscaled so the WS frame stays small (the relay
+/// hop can't be assumed to carry a full-res 3-5 MiB AI preview).
+const DECISION_ASSET_SOFT_CAP: usize = 2 * 1024 * 1024;
+/// Longest edge (px) a downscaled decision image is fit within — comfortably
+/// beyond any phone screen, so the shrink is visually lossless in practice.
+const DECISION_ASSET_MAX_DIM: u32 = 2048;
+
+/// Shrink an oversized decision-asset image so it survives the mobile relay
+/// hop, returning `(bytes, mime)`. Assets already within
+/// [`DECISION_ASSET_SOFT_CAP`] pass through byte-for-byte; larger raster images
+/// are resized to fit [`DECISION_ASSET_MAX_DIM`] and re-encoded as JPEG.
+/// Anything that fails to decode (unknown/vector format) is returned untouched
+/// so the caller's frame guard still applies.
+fn downscale_decision_asset(bytes: Vec<u8>, mime: &str) -> (Vec<u8>, String) {
+    if bytes.len() <= DECISION_ASSET_SOFT_CAP {
+        return (bytes, mime.to_string());
+    }
+    let Ok(img) = image::load_from_memory(&bytes) else {
+        // Undecodable (e.g. a vector/unknown format) — nothing to resize; hand
+        // the original back and let the caller's frame guard decide.
+        return (bytes, mime.to_string());
+    };
+    // Fit within DECISION_ASSET_MAX_DIM on the longest edge (no-op when already
+    // smaller); JPEG can't carry alpha, so flatten to RGB before encoding.
+    let resized = if img.width() > DECISION_ASSET_MAX_DIM || img.height() > DECISION_ASSET_MAX_DIM {
+        img.resize(
+            DECISION_ASSET_MAX_DIM,
+            DECISION_ASSET_MAX_DIM,
+            image::imageops::FilterType::Lanczos3,
+        )
+    } else {
+        img
+    };
+    let mut out = Vec::new();
+    match image::DynamicImage::ImageRgb8(resized.to_rgb8())
+        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Jpeg)
+    {
+        Ok(()) => (out, "image/jpeg".to_string()),
+        // Re-encode failed for some reason — fall back to the original bytes.
+        Err(_) => (bytes, mime.to_string()),
+    }
+}
+
 /// Most-recently-active sessions kept in the mobile snapshot. Sized comfortably
 /// above the number of Fleet-owned sessions a busy workspace accumulates inside
 /// the scanner's 7-day window, so the cap never crops the task list the mobile
@@ -771,13 +815,18 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
             let qidx = params.get("qidx").and_then(Value::as_str).ok_or("missing qidx")?;
             let rel = params.get("rel").and_then(Value::as_str).ok_or("missing rel")?;
             let asset = crate::mcp_ipc::read_decision_asset(id, qidx, rel)?;
-            const MAX_ASSET_BYTES: usize = 2 * 1024 * 1024;
-            if asset.bytes.len() > MAX_ASSET_BYTES {
-                return Err(format!("asset too large: {} bytes", asset.bytes.len()));
+            // Oversized images are downscaled so the WS frame stays small
+            // enough to cross the relay; small ones pass through untouched.
+            let (bytes, mime) = downscale_decision_asset(asset.bytes, &asset.mime);
+            // Defensive ceiling: a downscaled 2048px JPEG is well under this, so
+            // this only trips on a pathological asset we couldn't shrink.
+            const MAX_ASSET_BYTES: usize = 12 * 1024 * 1024;
+            if bytes.len() > MAX_ASSET_BYTES {
+                return Err(format!("asset too large: {} bytes", bytes.len()));
             }
             Ok(json!({
-                "mime": asset.mime,
-                "base64": base64::engine::general_purpose::STANDARD.encode(&asset.bytes),
+                "mime": mime,
+                "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
             }))
         }
         // Last `n` transcript messages — the mobile SessionDetail polls this
@@ -2330,6 +2379,58 @@ mod tests {
             list.iter().all(|s| s["id"].as_str().unwrap().starts_with("fleet")),
             "non-Fleet sessions must not appear in the mobile snapshot"
         );
+    }
+
+    #[test]
+    fn downscale_shrinks_oversized_decision_image() {
+        // A 4000x3000 opaque image with a high-frequency (poorly compressible)
+        // pattern → PNG well over the 2 MiB cap, standing in for a real AI
+        // preview asset the mobile client currently can't open.
+        let (w, h) = (4000u32, 3000u32);
+        let mut buf = image::RgbImage::new(w, h);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgb([
+                (x ^ y) as u8,
+                (x.wrapping_mul(31) ^ y) as u8,
+                (x.wrapping_add(y)) as u8,
+            ]);
+        }
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(buf)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        assert!(
+            png.len() > DECISION_ASSET_SOFT_CAP,
+            "fixture must exceed the cap, got {}",
+            png.len()
+        );
+
+        let (out, mime) = downscale_decision_asset(png.clone(), "image/png");
+        // Fits a single WS frame comfortably, shrank in dimension, re-encoded.
+        assert!(
+            out.len() < DECISION_ASSET_SOFT_CAP,
+            "downscaled asset must be under the cap, got {}",
+            out.len()
+        );
+        assert_eq!(mime, "image/jpeg");
+        let decoded = image::load_from_memory(&out).expect("downscaled bytes must decode");
+        assert!(
+            decoded.width() <= DECISION_ASSET_MAX_DIM && decoded.height() <= DECISION_ASSET_MAX_DIM,
+            "downscaled dims {}x{} must fit within {}",
+            decoded.width(),
+            decoded.height(),
+            DECISION_ASSET_MAX_DIM
+        );
+    }
+
+    #[test]
+    fn downscale_passes_small_assets_through_untouched() {
+        // Under the cap → returned byte-for-byte with its original mime, even
+        // when the bytes are not a decodable image.
+        let small = vec![0x89, b'P', b'N', b'G', 1, 2, 3, 4];
+        let (out, mime) = downscale_decision_asset(small.clone(), "image/png");
+        assert_eq!(out, small);
+        assert_eq!(mime, "image/png");
     }
 
     #[test]
