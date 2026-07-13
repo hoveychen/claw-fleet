@@ -1734,6 +1734,10 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
+    fn chat_workspace(&self) -> Result<String, String> {
+        claw_fleet_core::chat_workspace::ensure_chat_workspace()
+    }
+
     fn spawn_new_session(
         &self,
         workspace_path: String,
