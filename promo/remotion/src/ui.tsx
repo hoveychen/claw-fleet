@@ -2,6 +2,7 @@ import React from "react";
 import {
   AbsoluteFill,
   Img,
+  OffthreadVideo,
   interpolate,
   spring,
   staticFile,
@@ -297,6 +298,70 @@ export const ClickRipple: React.FC<{ x: number; y: number; start: number }> = ({
         zIndex: 49,
       }}
     />
+  );
+};
+
+// ── Picture-in-picture: real screen capture in a mini window ───────────────
+export type PipProps = {
+  src: string;
+  startFrom?: number;
+  pos: "tl" | "tr" | "bl" | "br";
+  objectPosition?: string;
+  enter?: number;
+};
+const PIP_POS: Record<PipProps["pos"], React.CSSProperties> = {
+  tl: { top: 200, left: 90 },
+  tr: { top: 200, right: 90 },
+  bl: { bottom: 70, left: 90 },
+  br: { bottom: 70, right: 90 },
+};
+export const Pip: React.FC<PipProps> = ({ src, startFrom = 210, pos, objectPosition = "top left", enter = 34 }) => {
+  const frame = useCurrentFrame();
+  const { fps } = useVideoConfig();
+  const s = spring({ frame: frame - enter, fps, config: { damping: 13, mass: 0.6 } });
+  return (
+    <div
+      style={{
+        position: "absolute",
+        ...PIP_POS[pos],
+        width: 480,
+        borderRadius: 14,
+        overflow: "hidden",
+        border: `2px solid ${T.borderStrong}`,
+        boxShadow: "0 18px 50px rgba(32,28,18,0.28)",
+        background: T.night,
+        transform: `scale(${s})`,
+        opacity: s,
+        transformOrigin: pos.includes("l") ? "bottom left" : "bottom right",
+        zIndex: 40,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "8px 12px",
+          background: T.nightDeep,
+          borderBottom: "1px solid rgba(247,248,248,0.1)",
+        }}
+      >
+        <i style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(247,248,248,0.16)" }} />
+        <i style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(247,248,248,0.16)" }} />
+        <i style={{ width: 9, height: 9, borderRadius: "50%", background: "rgba(247,248,248,0.16)" }} />
+        <span style={{ marginLeft: 8, fontFamily: FONT.mono, fontSize: 13, color: T.nightDim }}>
+          the real app · live capture
+        </span>
+      </div>
+      <div style={{ height: 252, overflow: "hidden" }}>
+        <OffthreadVideo
+          muted
+          src={staticFile(src)}
+          startFrom={startFrom}
+          style={{ width: "100%", height: "100%", objectFit: "cover", objectPosition }}
+        />
+      </div>
+    </div>
   );
 };
 
