@@ -1,0 +1,94 @@
+use super::*;
+
+// ── Tauri commands ───────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub(crate) fn list_sessions(state: tauri::State<AppState>) -> Vec<SessionInfo> {
+    state.backend.read().unwrap().list_sessions()
+}
+
+#[tauri::command]
+pub(crate) fn today_usage(state: tauri::State<AppState>) -> claw_fleet_core::today_usage::TodayUsage {
+    state.backend.read().unwrap().today_usage()
+}
+
+#[tauri::command]
+pub(crate) fn search_sessions(
+    query: String,
+    limit: Option<usize>,
+    state: tauri::State<AppState>,
+) -> Vec<search_index::SearchHit> {
+    let limit = limit.unwrap_or(50);
+    if query.trim().is_empty() {
+        return vec![];
+    }
+    state.backend.read().unwrap().search_sessions(&query, limit)
+}
+
+#[tauri::command]
+pub(crate) fn get_messages(
+    jsonl_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<Value>, String> {
+    state.backend.read().unwrap().get_messages(&jsonl_path)
+}
+
+/// Read at most the last `tail` messages of a session. Used by SessionDetail
+/// to avoid stalling the webview on large transcripts.
+///
+/// `(async)` runs this on Tauri's threadpool instead of the main thread: it
+/// reads whole transcript files (can be tens of MB) and is polled every ~1.5s
+/// plus fired on every decision-card mount, so keeping it off the main thread
+/// prevents it from stalling paints / other IPC (a source of decision-panel
+/// submit jank). The body stays synchronous.
+#[tauri::command(async)]
+pub(crate) fn get_messages_tail(
+    jsonl_path: String,
+    tail: usize,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<Value>, String> {
+    state.backend.read().unwrap().get_messages_tail(&jsonl_path, tail)
+}
+
+#[tauri::command]
+pub(crate) fn get_skill_history(
+    jsonl_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
+    state.backend.read().unwrap().get_skill_history(&jsonl_path)
+}
+
+#[tauri::command]
+pub(crate) fn get_workflow_trees(
+    jsonl_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::workflow::WorkflowTree>, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .get_workflow_trees(&jsonl_path)
+}
+
+#[tauri::command]
+pub(crate) fn get_task_token_breakdown(
+    jsonl_path: String,
+    project_root: Option<String>,
+    state: tauri::State<AppState>,
+) -> Result<claw_fleet_core::token_analysis::TaskTokenBreakdown, String> {
+    state
+        .backend
+        .read()
+        .unwrap()
+        .get_task_token_breakdown(&jsonl_path, project_root.as_deref())
+}
+
+#[tauri::command]
+pub(crate) fn get_session_todos(
+    jsonl_path: String,
+    state: tauri::State<AppState>,
+) -> Result<Vec<claw_fleet_core::session_todos::TodoItem>, String> {
+    let messages = state.backend.read().unwrap().get_messages(&jsonl_path)?;
+    Ok(claw_fleet_core::session_todos::extract_latest_todos(&messages))
+}
+
