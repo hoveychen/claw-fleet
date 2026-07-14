@@ -1531,50 +1531,6 @@ fn list_pending_decisions(
     state.backend.read().unwrap().list_pending_decisions()
 }
 
-// ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────────
-
-#[tauri::command]
-fn connect_feishu(
-    state: tauri::State<AppState>,
-) -> Result<claw_fleet_core::feishu::OauthHandle, String> {
-    state.backend.read().unwrap().start_feishu_oauth()
-}
-
-#[tauri::command]
-fn poll_feishu_oauth(
-    state: tauri::State<AppState>,
-    oauth_state: String,
-) -> Result<claw_fleet_core::feishu::OauthStatus, String> {
-    state.backend.read().unwrap().poll_feishu_oauth(&oauth_state)
-}
-
-#[tauri::command]
-fn feishu_status(
-    state: tauri::State<AppState>,
-) -> Result<claw_fleet_core::feishu::FeishuConnection, String> {
-    state.backend.read().unwrap().feishu_status()
-}
-
-#[tauri::command]
-fn disconnect_feishu(state: tauri::State<AppState>) -> Result<(), String> {
-    state.backend.read().unwrap().disconnect_feishu()
-}
-
-#[tauri::command]
-fn get_feishu_creds(
-    state: tauri::State<AppState>,
-) -> Result<claw_fleet_core::feishu::StoredCreds, String> {
-    state.backend.read().unwrap().get_feishu_creds()
-}
-
-#[tauri::command]
-fn set_feishu_creds(
-    state: tauri::State<AppState>,
-    creds: claw_fleet_core::feishu::StoredCreds,
-) -> Result<(), String> {
-    state.backend.read().unwrap().set_feishu_creds(creds)
-}
-
 #[tauri::command]
 fn get_mobile_relay_config(
     state: tauri::State<AppState>,
@@ -3949,12 +3905,6 @@ pub fn run() {
             respond_to_plan_approval,
             list_session_decisions,
             list_pending_decisions,
-            connect_feishu,
-            poll_feishu_oauth,
-            feishu_status,
-            disconnect_feishu,
-            get_feishu_creds,
-            set_feishu_creds,
             get_mobile_relay_config,
             set_mobile_relay_config,
             rotate_mobile_relay_secret,
