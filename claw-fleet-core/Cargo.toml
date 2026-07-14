@@ -49,3 +49,7 @@ windows = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_
 [dev-dependencies]
 tempfile = "3"
 serde_yaml = "0.9"
+# Source-text parsing for the backend drift-guard test (tests/backend_drift_guard.rs).
+# Already in the dependency tree transitively (v1.12.x via reqwest/sysinfo etc), so
+# this adds no new download; used only by the guard to detect fan-out drift.
+regex = "1"
