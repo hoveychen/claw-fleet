@@ -45,6 +45,7 @@ pub mod mcp_a2ui_ipc;
 pub mod mcp_server;
 pub mod memory;
 pub mod mobile_relay;
+pub mod relay_crypto;
 pub mod model_cost;
 pub mod launch_spec;
 pub mod parked;

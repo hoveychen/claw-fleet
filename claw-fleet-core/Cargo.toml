@@ -29,6 +29,13 @@ zstd = "0.13"
 crc32fast = "1"
 sha2 = "0.10"
 base64 = "0.22"
+# End-to-end encryption of relay `msg` payloads (relay_crypto.rs). HKDF-SHA256
+# derives a channel token + AES-256-GCM key from the pairing secret; the relay
+# only ever sees the token and ciphertext. Both primitives are natively
+# available in the mobile-web peer's WebCrypto, so the wire format interops
+# with zero JS crypto dependency.
+hkdf = "0.12"
+aes-gcm = "0.10"
 # gzip the mobile sessions snapshot before it crosses the relay (~110KB→29KB on
 # weak links). The mobile client inflates with the native `DecompressionStream`.
 flate2 = "1"
