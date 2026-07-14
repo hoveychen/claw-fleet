@@ -19,7 +19,7 @@ import type {
   SessionInfo,
   SessionStatus,
 } from "../types";
-import { canResumeSession } from "../types";
+import { canResumeSession, canEnqueueSession } from "../types";
 import { ResumeComposer } from "./Composer";
 import {
   basename,
@@ -558,6 +558,9 @@ export function SessionDetailView({ session, client, onBack, onDwellRead }: Prop
 
       {tab === "messages" && canResumeSession(session) && (
         <ResumeComposer session={session} client={client} />
+      )}
+      {tab === "messages" && canEnqueueSession(session) && (
+        <ResumeComposer session={session} client={client} mode="enqueue" />
       )}
     </div>
   );
