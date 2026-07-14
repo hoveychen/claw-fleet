@@ -509,19 +509,18 @@ fn accumulate_record(stats: &mut DecisionCardStats, rec: &DecisionHistoryRecord,
     }
 }
 
-/// Scan `~/.fleet/decision-history/*.jsonl` and aggregate every decision card
-/// whose `requestedAt` falls on `date` (local calendar day).
+/// Visit every decision-history record that could belong to `date`, calling
+/// `f` on each parsed record. Callers apply their own per-record date filter.
 ///
 /// Files whose mtime is strictly before the start of `date` are skipped: since
 /// records are only ever appended and `resolvedAt >= requestedAt`, such a file
 /// cannot hold a card requested on `date`. This keeps the scan cheap even with
 /// thousands of per-session history files.
-pub fn compute_stats_for_date(date: &str) -> DecisionCardStats {
+fn for_each_record_on_date(date: &str, mut f: impl FnMut(&DecisionHistoryRecord)) {
     use chrono::TimeZone;
 
-    let mut stats = DecisionCardStats::default();
     let Some(dir) = history_dir() else {
-        return stats;
+        return;
     };
 
     // Compute the start-of-day SystemTime for mtime pruning.
@@ -537,7 +536,7 @@ pub fn compute_stats_for_date(date: &str) -> DecisionCardStats {
         });
 
     let Ok(entries) = fs::read_dir(&dir) else {
-        return stats;
+        return;
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -562,11 +561,137 @@ pub fn compute_stats_for_date(date: &str) -> DecisionCardStats {
                 continue;
             }
             if let Ok(rec) = serde_json::from_str::<DecisionHistoryRecord>(line) {
-                accumulate_record(&mut stats, &rec, date);
+                f(&rec);
             }
         }
     }
+}
+
+/// Scan `~/.fleet/decision-history/*.jsonl` and aggregate every decision card
+/// whose `requestedAt` falls on `date` (local calendar day).
+pub fn compute_stats_for_date(date: &str) -> DecisionCardStats {
+    let mut stats = DecisionCardStats::default();
+    for_each_record_on_date(date, |rec| accumulate_record(&mut stats, rec, date));
     stats
+}
+
+/// A single decision card where the user rejected the AI's offered choices —
+/// either by typing a free-text answer via "Other" (elicitation / fleet-ask)
+/// or by rejecting a proposed plan. High-signal evidence that the AI misjudged
+/// how to frame the decision. Fed into the daily lessons generator.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OtherPickContext {
+    /// "elicitation" | "fleet-ask" | "plan-approval".
+    pub card_type: String,
+    pub workspace_name: String,
+    pub session_id: String,
+    /// The question / decision prompt the AI raised.
+    pub question: String,
+    /// The options the AI offered, each rendered as `label — description`;
+    /// the recommended option (if any) keeps its `(Recommended)` marker.
+    /// Empty for plan-approval rejections.
+    pub options: Vec<String>,
+    /// What the user actually chose or typed instead (or their rejection
+    /// feedback for a plan). Empty when the user gave no free text.
+    pub user_choice: String,
+}
+
+/// Collect the day's "Other"-answered elicitation/fleet-ask questions and
+/// rejected plan-approvals as `OtherPickContext` evidence, oldest files first.
+/// Bounded to `max` contexts so the lessons prompt stays within budget.
+pub fn collect_other_picks_for_date(date: &str, max: usize) -> Vec<OtherPickContext> {
+    let mut out: Vec<OtherPickContext> = Vec::new();
+    for_each_record_on_date(date, |rec| {
+        if out.len() >= max {
+            return;
+        }
+        match rec {
+            DecisionHistoryRecord::Elicitation(r) => {
+                if r.outcome != ElicitationOutcome::Answered {
+                    return;
+                }
+                if local_date_of(&r.requested_at).as_deref() != Some(date) {
+                    return;
+                }
+                for q in &r.questions {
+                    let Some(sel) = r.answers.get(&q.question) else {
+                        continue;
+                    };
+                    if !sel.other {
+                        continue;
+                    }
+                    out.push(OtherPickContext {
+                        card_type: "elicitation".into(),
+                        workspace_name: r.workspace_name.clone(),
+                        session_id: r.session_id.clone(),
+                        question: q.question.clone(),
+                        options: q
+                            .options
+                            .iter()
+                            .map(|o| format!("{} — {}", o.label, o.description))
+                            .collect(),
+                        user_choice: sel.label.clone(),
+                    });
+                    if out.len() >= max {
+                        break;
+                    }
+                }
+            }
+            DecisionHistoryRecord::FleetAsk(r) => {
+                if r.outcome != FleetAskOutcome::Answered {
+                    return;
+                }
+                if local_date_of(&r.requested_at).as_deref() != Some(date) {
+                    return;
+                }
+                for q in &r.questions {
+                    if q.options.is_empty() {
+                        continue;
+                    }
+                    let Some(ans) = r.answers.get(&q.question) else {
+                        continue;
+                    };
+                    if q.options.iter().any(|o| o.label == *ans) {
+                        continue; // picked a listed option, not "Other"
+                    }
+                    out.push(OtherPickContext {
+                        card_type: "fleet-ask".into(),
+                        workspace_name: r.workspace_name.clone(),
+                        session_id: r.session_id.clone(),
+                        question: q.question.clone(),
+                        options: q
+                            .options
+                            .iter()
+                            .map(|o| format!("{} — {}", o.label, o.description))
+                            .collect(),
+                        user_choice: ans.clone(),
+                    });
+                    if out.len() >= max {
+                        break;
+                    }
+                }
+            }
+            DecisionHistoryRecord::PlanApproval(r) => {
+                if r.outcome != PlanApprovalOutcome::Rejected {
+                    return;
+                }
+                if local_date_of(&r.requested_at).as_deref() != Some(date) {
+                    return;
+                }
+                let excerpt: String = r.plan_content.chars().take(300).collect();
+                out.push(OtherPickContext {
+                    card_type: "plan-approval".into(),
+                    workspace_name: r.workspace_name.clone(),
+                    session_id: r.session_id.clone(),
+                    question: format!("Proposed plan (rejected):\n{excerpt}"),
+                    options: Vec::new(),
+                    user_choice: r.feedback.clone().unwrap_or_default(),
+                });
+            }
+            DecisionHistoryRecord::UserPrompt(_) => {}
+        }
+    });
+    out
 }
 
 // ── Storage ──────────────────────────────────────────────────────────────────
@@ -1479,6 +1604,86 @@ mod tests {
         assert_eq!(s.declined, 1);
         assert_eq!(s.with_recommendation, 0);
         assert_eq!(s.latency_count, 1);
+    }
+
+    #[test]
+    fn collect_other_picks_only_grabs_other_answers() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = temp_dir("collect-other");
+        let _home = FleetHomeOverride::new(&tmp);
+
+        // Card 1: user typed a free-text answer via "Other" → should be collected.
+        let req_other = recommended_request("sess-collect", "other-1");
+        let mut a1 = HashMap::new();
+        a1.insert("Which approach?".into(), "just rewrite it from scratch".into());
+        let rec_other = build_elicitation_record(
+            &req_other,
+            ElicitationOutcome::Answered,
+            &a1,
+            "2026-04-28T02:00:05Z".into(),
+        );
+        append_record(&DecisionHistoryRecord::Elicitation(rec_other)).unwrap();
+
+        // Card 2: user picked a listed option → must NOT be collected.
+        let req_picked = recommended_request("sess-collect", "picked-1");
+        let mut a2 = HashMap::new();
+        a2.insert("Which approach?".into(), "Refactor first".into());
+        let rec_picked = build_elicitation_record(
+            &req_picked,
+            ElicitationOutcome::Answered,
+            &a2,
+            "2026-04-28T02:00:06Z".into(),
+        );
+        append_record(&DecisionHistoryRecord::Elicitation(rec_picked)).unwrap();
+
+        let picks = collect_other_picks_for_date("2026-04-28", 40);
+        assert_eq!(picks.len(), 1, "only the Other-answered card should be collected");
+        let ctx = &picks[0];
+        assert_eq!(ctx.card_type, "elicitation");
+        assert_eq!(ctx.question, "Which approach?");
+        assert_eq!(ctx.user_choice, "just rewrite it from scratch");
+        assert_eq!(ctx.options.len(), 2);
+        assert!(ctx.options[0].contains("(Recommended)"));
+
+        // A different day yields nothing.
+        assert!(collect_other_picks_for_date("2020-01-01", 40).is_empty());
+    }
+
+    #[test]
+    fn collect_other_picks_grabs_rejected_plan() {
+        let _g = crate::session::fleet_home_lock();
+        let tmp = temp_dir("collect-reject");
+        let _home = FleetHomeOverride::new(&tmp);
+
+        let req = PlanApprovalRequest {
+            parked: false,
+            id: "plan-rej".into(),
+            session_id: "sess-plan".into(),
+            workspace_name: "claude-fleet".into(),
+            ai_title: None,
+            timestamp: "2026-04-28T03:00:00Z".into(),
+            plan_content: "Step 1: delete everything\nStep 2: rewrite".into(),
+            plan_file_path: None,
+        };
+        let resp = PlanApprovalResponse {
+            id: "plan-rej".into(),
+            decision: "reject".into(),
+            edited_plan: None,
+            feedback: Some("don't delete the tests".into()),
+        };
+        let rec = build_plan_approval_record(
+            &req,
+            PlanApprovalOutcome::Rejected,
+            Some(&resp),
+            "2026-04-28T03:00:20Z".into(),
+        );
+        append_record(&DecisionHistoryRecord::PlanApproval(rec)).unwrap();
+
+        let picks = collect_other_picks_for_date("2026-04-28", 40);
+        assert_eq!(picks.len(), 1);
+        assert_eq!(picks[0].card_type, "plan-approval");
+        assert_eq!(picks[0].user_choice, "don't delete the tests");
+        assert!(picks[0].question.contains("delete everything"));
     }
 
     #[test]
