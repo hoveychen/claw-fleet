@@ -15,6 +15,7 @@ use crate::log_debug;
 // ── Types ────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DailyReport {
     pub date: String,
@@ -29,6 +30,7 @@ pub struct DailyReport {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DailyMetrics {
     pub total_input_tokens: u64,
@@ -57,6 +59,7 @@ pub struct DailyMetrics {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ModelTokens {
     pub input_tokens: u64,
@@ -70,6 +73,7 @@ pub struct ModelTokens {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectMetrics {
     pub workspace_path: String,
@@ -91,6 +95,8 @@ pub struct ProjectMetrics {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(rename = "ReportSessionSummary"))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionSummary {
     pub id: String,
@@ -105,6 +111,7 @@ pub struct SessionSummary {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DailyReportStats {
     pub date: String,
@@ -115,6 +122,7 @@ pub struct DailyReportStats {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct Lesson {
     /// The lesson content (actionable instruction).

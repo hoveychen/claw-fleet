@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(rename = "SessionTodo"))]
 #[serde(rename_all = "camelCase")]
 pub struct TodoItem {
     pub content: String,
@@ -22,6 +24,7 @@ pub struct TodoItem {
 /// session has never invoked TodoWrite; a populated summary with all zeros
 /// means the user cleared the list explicitly.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TodoSummary {
     pub completed: u32,

@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 /// Written by `fleet plan-approval` → read by Fleet desktop app.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PlanApprovalRequest {
     pub id: String,

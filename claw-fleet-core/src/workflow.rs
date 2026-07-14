@@ -41,6 +41,7 @@ use std::path::{Path, PathBuf};
 
 /// Status of a single fan-out workflow agent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum WorkflowAgentStatus {
     /// `started` seen in journal, no matching `result` yet.
@@ -51,6 +52,7 @@ pub enum WorkflowAgentStatus {
 
 /// A single fan-out agent inside a workflow run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct WorkflowAgent {
     /// Opaque agent id from the journal (`agentId`).
     #[serde(rename = "agentId")]
@@ -78,6 +80,7 @@ pub struct WorkflowAgent {
 
 /// One declared phase, parsed from the script's `meta.phases`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct WorkflowPhase {
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -86,6 +89,7 @@ pub struct WorkflowPhase {
 
 /// How a DAG node's agent(s) were orchestrated in the script.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum WorkflowNodeKind {
     /// A bare `agent(...)` call (awaited sequentially).
@@ -98,6 +102,7 @@ pub enum WorkflowNodeKind {
 
 /// Rolled-up live status of a DAG node, derived from its bound agents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum WorkflowNodeStatus {
     /// No runtime agent bound yet (declared but not started).
@@ -113,6 +118,7 @@ pub enum WorkflowNodeStatus {
 /// `parallel(arr.map(() => agent(...)))` is a single node that binds many
 /// runtime agents).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct WorkflowNode {
     /// Stable id (`n0`, `n1`, ...), referenced by [`WorkflowEdge`].
     pub id: String,
@@ -140,6 +146,7 @@ pub struct WorkflowNode {
 
 /// A directed dependency edge between two [`WorkflowNode`]s (`from` → `to`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct WorkflowEdge {
     pub from: String,
     pub to: String,
@@ -147,6 +154,7 @@ pub struct WorkflowEdge {
 
 /// A full workflow run discovered on disk for one parent session.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct WorkflowTree {
     /// The `wf_<run-id>` directory name, e.g. `wf_c3ab5242-718`.
     #[serde(rename = "runId")]
