@@ -90,21 +90,23 @@ impl Push {
 
     /// Register a subscription for the channel. Two client kinds share one
     /// store: a browser Web Push subscription (`endpoint` + `keys`, deduped by
-    /// endpoint) and a HarmonyOS Push Kit registration
-    /// (`platform:"harmony"` + `token`, deduped by token). A subscription with
-    /// no explicit `platform` is treated as Web Push for backward compat.
+    /// endpoint) and a HarmonyOS 元服务 account subscription
+    /// (`platform:"harmony"` + `openId`, deduped by openId). The 元服务 channel
+    /// delivers by Huawei-account OpenID, not a device push token — see
+    /// `harmony_push.rs`. A subscription with no explicit `platform` is treated
+    /// as Web Push for backward compat.
     pub fn subscribe(&self, channel: &str, subscription: Value) -> Result<(), String> {
         if subscription.get("platform").and_then(Value::as_str) == Some("harmony") {
-            let token = subscription
-                .get("token")
+            let open_id = subscription
+                .get("openId")
                 .and_then(Value::as_str)
-                .ok_or("harmony subscription has no token")?
+                .ok_or("harmony subscription has no openId")?
                 .to_string();
             let _g = self.file_lock.lock().unwrap();
             let mut subs = self.load_subs(channel);
             subs.retain(|s| {
                 !(s.get("platform").and_then(Value::as_str) == Some("harmony")
-                    && s.get("token").and_then(Value::as_str) == Some(token.as_str()))
+                    && s.get("openId").and_then(Value::as_str) == Some(open_id.as_str()))
             });
             subs.push(subscription);
             self.save_subs(channel, &subs);
@@ -165,16 +167,16 @@ impl Push {
         let mut dead: Vec<String> = Vec::new();
         for sub in &subs {
             if Self::is_harmony(sub) {
-                // Push Kit path. No-op when the channel is disabled (creds
-                // absent → harmony is None). Dead-token pruning needs Push
-                // Kit's specific failure codes, only observable with real
-                // creds — deferred to P6; the skeleton just logs.
-                let (Some(hp), Some(token)) =
-                    (harmony, sub.get("token").and_then(Value::as_str))
+                // 元服务 account service-notification path. No-op when the
+                // channel is disabled (creds absent → harmony is None).
+                // Dead-OpenID pruning needs Push Kit's specific failure codes,
+                // only observable with real creds — deferred; this just logs.
+                let (Some(hp), Some(open_id)) =
+                    (harmony, sub.get("openId").and_then(Value::as_str))
                 else {
                     continue;
                 };
-                if let Err(e) = hp.send(token, payload).await {
+                if let Err(e) = hp.send(open_id, payload).await {
                     log::warn!("harmony push failed on channel {channel}: {e}");
                 }
                 continue;
@@ -245,8 +247,8 @@ mod tests {
         })
     }
 
-    fn mk_harmony(token: &str) -> Value {
-        json!({ "platform": "harmony", "token": token })
+    fn mk_harmony(open_id: &str) -> Value {
+        json!({ "platform": "harmony", "openId": open_id })
     }
 
     #[test]
@@ -282,12 +284,12 @@ mod tests {
     }
 
     #[test]
-    fn subscribe_accepts_harmony_and_dedups_by_token() {
+    fn subscribe_accepts_harmony_and_dedups_by_open_id() {
         let dir = tempfile::tempdir().unwrap();
         let push = mk_push(dir.path());
-        push.subscribe("ch", mk_harmony("TK-A")).unwrap();
-        push.subscribe("ch", mk_harmony("TK-B")).unwrap();
-        push.subscribe("ch", mk_harmony("TK-A")).unwrap(); // duplicate token
+        push.subscribe("ch", mk_harmony("OID-A")).unwrap();
+        push.subscribe("ch", mk_harmony("OID-B")).unwrap();
+        push.subscribe("ch", mk_harmony("OID-A")).unwrap(); // duplicate openId
         assert_eq!(push.subscription_count("ch"), 2);
     }
 
@@ -296,12 +298,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let push = mk_push(dir.path());
         push.subscribe("ch", mk_sub("https://push/a")).unwrap();
-        push.subscribe("ch", mk_harmony("TK-A")).unwrap();
+        push.subscribe("ch", mk_harmony("OID-A")).unwrap();
         assert_eq!(push.subscription_count("ch"), 2);
     }
 
     #[test]
-    fn subscribe_rejects_harmony_without_token() {
+    fn subscribe_rejects_harmony_without_open_id() {
         let dir = tempfile::tempdir().unwrap();
         let push = mk_push(dir.path());
         assert!(push.subscribe("ch", json!({ "platform": "harmony" })).is_err());
