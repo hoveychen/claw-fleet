@@ -540,7 +540,6 @@
     "welcome": "Welcome to Claw Fleet",
     "subtitle": "Monitor your AI coding agents, get daily AI summaries, and turn mistakes into knowledge",
     "checking": "Checking setup...",
-    "skip": "Skip",
     "dismiss": "Got it, let's go",
     "recheck": "Re-check",
     "no_claude_at_all": {
@@ -591,12 +590,6 @@
         "step2": "2. Sign in with your Anthropic account when prompted."
       }
     },
-    "waiting": {
-      "title": "Waiting for first session...",
-      "description": "Everything looks good! Start a Claude Code session anywhere and it will appear here automatically.",
-      "hint_terminal": "Terminal: run \"claude\" to start a session",
-      "hint_ide": "IDE: use the Claude Code extension in VS Code, JetBrains, or any supported editor"
-    },
     "celebration": {
       "title": "First session detected!",
       "description": "Congratulations! Claw Fleet is now monitoring your sessions. Enjoy the dashboard!"
@@ -614,6 +607,10 @@
     "all_good": {
       "title": "All set!",
       "description": "Claude Code is installed, you're logged in, and sessions are being monitored."
+    },
+    "ready": {
+      "title": "You're all set!",
+      "description": "Environment checks passed. Start a Claude Code session in any project directory and Fleet will pick it up automatically."
     },
     "features": {
       "title": "What you can do",

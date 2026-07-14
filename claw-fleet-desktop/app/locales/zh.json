@@ -537,7 +537,6 @@
     "welcome": "欢迎使用 Claw Fleet",
     "subtitle": "监控你的 AI 编程 Agent，获取每日 AI 摘要，将失误转化为知识",
     "checking": "正在检查环境...",
-    "skip": "跳过",
     "dismiss": "好的，开始使用",
     "recheck": "重新检查",
     "no_claude_at_all": {
@@ -588,12 +587,6 @@
         "step2": "2. 按照提示使用你的 Anthropic 账户登录。"
       }
     },
-    "waiting": {
-      "title": "等待第一个会话...",
-      "description": "一切就绪！在任何地方启动一个 Claude Code 会话，它将自动出现在这里。",
-      "hint_terminal": "终端：运行 \"claude\" 即可启动会话",
-      "hint_ide": "IDE：在 VS Code、JetBrains 或任何支持的编辑器中使用 Claude Code 扩展"
-    },
     "celebration": {
       "title": "首个会话已检测到！",
       "description": "恭喜！Claw Fleet 已开始监控你的会话。尽情享受仪表盘吧！"
@@ -611,6 +604,10 @@
     "all_good": {
       "title": "一切就绪！",
       "description": "Claude Code 已安装，你已登录，会话正在被监控。"
+    },
+    "ready": {
+      "title": "一切就绪！",
+      "description": "环境检查通过。在任意项目目录里启动一次 Claude Code 会话，Fleet 就会自动发现并展示它。"
     },
     "features": {
       "title": "你可以做什么",
