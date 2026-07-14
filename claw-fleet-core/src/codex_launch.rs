@@ -54,16 +54,43 @@ use crate::session_launch::{
 /// ceiling covers a cold binary / slow disk without hanging session launch.
 const THREAD_STARTED_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Codex rollout `originator` value stamped on sessions Fleet launches itself
+/// (new spawn + resume), via the `CODEX_INTERNAL_ORIGINATOR_OVERRIDE` env below.
+/// This is Codex's analogue of Claude's [`crate::session_launch::NEW_SESSION_ENTRYPOINT`]:
+/// the scanner reads `session_meta.payload.originator` back off the rollout and
+/// classifies `originator == "fleet"` as Fleet-owned (see
+/// [`crate::codex_source`] and [`crate::session_launch::is_fleet_owned_entrypoint`]).
+///
+/// Verified 2026-07-14: `CODEX_INTERNAL_ORIGINATOR_OVERRIDE=fleet codex exec …`
+/// writes `"originator":"fleet"` into the rollout's first `session_meta` line
+/// (the SQLite `source` column stays `exec` — only the rollout carries it).
+pub const CODEX_FLEET_ORIGINATOR: &str = "fleet";
+
+/// Env value Fleet stamps on Codex children so in-session tooling (e.g.
+/// `fleet handoff`) knows its own agent source without scanning. Read back by
+/// the CLI as `FLEET_AGENT_SOURCE`; absent → assume Claude (the historical
+/// default). Uses Codex's config/`agent_source` name, not the api name.
+pub const FLEET_AGENT_SOURCE_CODEX: &str = "codex";
+
 /// Pin `HOME` + augment `PATH` exactly like the Claude spawn, so a
 /// launchd-minimal `PATH` doesn't strand the child's tools. Shared by the
 /// new-session spawn and the resume launcher. See
 /// `session_launch::spawn_claude_detached_with_envs`.
+///
+/// Also stamps the Fleet-owned markers on every Codex process Fleet starts:
+/// `CODEX_INTERNAL_ORIGINATOR_OVERRIDE` writes [`CODEX_FLEET_ORIGINATOR`] into
+/// the rollout so the scanner can recognise the session as Fleet-launched, and
+/// `FLEET_AGENT_SOURCE` lets in-session tooling identify its own source. Both
+/// spawn and resume go through here, so self-spawned and self-resumed Codex
+/// sessions are marked identically.
 fn apply_codex_launch_env(cmd: &mut std::process::Command) {
     if let Some(home) = crate::session::real_home_dir() {
         cmd.env("HOME", home);
     }
     let front: Vec<std::path::PathBuf> = crate::fleet_cli::fleet_bin_dir().into_iter().collect();
     cmd.env("PATH", augmented_path_with_front(&front));
+    cmd.env("CODEX_INTERNAL_ORIGINATOR_OVERRIDE", CODEX_FLEET_ORIGINATOR);
+    cmd.env("FLEET_AGENT_SOURCE", FLEET_AGENT_SOURCE_CODEX);
 }
 
 /// Build the `codex exec` argv for a headless spawn.
