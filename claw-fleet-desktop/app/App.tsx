@@ -42,8 +42,10 @@ function App() {
   useDecisionPeerSync();
 
   // Bridge: pop the floating decision window when the user can't see the in-app
-  // DecisionPanel — either because the main window is minimized, or because the
-  // user toggled "always use the standalone window" in Settings.
+  // DecisionPanel — either because the main window is minimized, because the
+  // user toggled "always use the standalone window" in Settings, or because
+  // we're in lite mode (lite renders no in-window decision card by design —
+  // decisions always pop out as the standalone float instead).
   const [mainMinimized, setMainMinimized] = useState(false);
   const decisions = useDecisionStore((s) => s.decisions);
   const floatingDecisionPanel = useUIStore((s) => s.floatingDecisionPanel);
@@ -75,14 +77,15 @@ function App() {
 
   useEffect(() => {
     const shouldShow =
-      (mainMinimized || floatingDecisionPanel) && decisions.length > 0;
+      (mainMinimized || floatingDecisionPanel || liteMode) &&
+      decisions.length > 0;
     if (shouldShow && !prevShouldShow.current) {
       invoke("show_decision_float", { snapshot: decisions }).catch(() => {});
     } else if (!shouldShow && prevShouldShow.current) {
       invoke("hide_decision_float").catch(() => {});
     }
     prevShouldShow.current = shouldShow;
-  }, [mainMinimized, floatingDecisionPanel, decisions]);
+  }, [mainMinimized, floatingDecisionPanel, liteMode, decisions]);
 
   const [onboardingMode, setOnboardingMode] = useState<OnboardingMode | null>(() => {
     const dismissed = !!getItem(ONBOARDING_DISMISSED_KEY);
