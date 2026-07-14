@@ -217,10 +217,17 @@ impl ReportStore {
         )
         .map_err(|e| format!("sqlite schema: {e}"))?;
 
-        // Migrations: add lessons columns if they don't exist yet
-        let _ = conn.execute_batch(
-            "ALTER TABLE daily_reports ADD COLUMN lessons TEXT;
-             ALTER TABLE daily_reports ADD COLUMN lessons_generated_at INTEGER;",
+        // Migrations: add lessons columns if they don't exist yet. Each ALTER
+        // is its own statement, NOT one `execute_batch`: SQLite aborts a batch
+        // at the first statement's error, so a db that already has `lessons`
+        // (older / partially-migrated schema) would fail the first ALTER as
+        // "duplicate column" and never run the second — leaving
+        // `lessons_generated_at` missing and every save dying on it. Ignoring
+        // each error independently makes the migration idempotent per column.
+        let _ = conn.execute("ALTER TABLE daily_reports ADD COLUMN lessons TEXT;", []);
+        let _ = conn.execute(
+            "ALTER TABLE daily_reports ADD COLUMN lessons_generated_at INTEGER;",
+            [],
         );
 
         Ok(Self { conn })
@@ -2135,6 +2142,47 @@ mod tests {
         let lessons = loaded.lessons.unwrap();
         assert_eq!(lessons.len(), 1);
         assert_eq!(lessons[0].content, "Always test first");
+        assert_eq!(loaded.lessons_generated_at, Some(9999));
+
+        let _ = std::fs::remove_file(&db_path);
+    }
+
+    /// A db already carrying `lessons` but not `lessons_generated_at` (an old /
+    /// partially-migrated schema) must still gain the missing column on open.
+    /// Regression guard for the migration running both `ADD COLUMN`s in a single
+    /// `execute_batch`: SQLite aborts the whole batch at the first statement's
+    /// error, so once `ADD COLUMN lessons` fails as "duplicate column" the
+    /// second `ADD COLUMN lessons_generated_at` never ran — and every later
+    /// save died with "table daily_reports has no column named
+    /// lessons_generated_at". The two ALTERs must be independent.
+    #[test]
+    fn open_at_heals_db_missing_only_the_second_lessons_column() {
+        let db_path = temp_db_path();
+        // Seed the stuck state: base table + only the first lessons column.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE daily_reports (
+                     date TEXT PRIMARY KEY,
+                     timezone TEXT NOT NULL,
+                     generated_at INTEGER NOT NULL,
+                     metrics TEXT NOT NULL,
+                     ai_summary TEXT,
+                     ai_summary_generated_at INTEGER,
+                     session_ids TEXT NOT NULL
+                 );
+                 ALTER TABLE daily_reports ADD COLUMN lessons TEXT;",
+            )
+            .unwrap();
+        }
+
+        // open_at must add the missing column despite the first ALTER erroring.
+        let store = ReportStore::open_at(&db_path).unwrap();
+        let mut report = make_test_report("2026-03-31");
+        report.lessons_generated_at = Some(9999);
+        store.save_report(&report).unwrap();
+
+        let loaded = store.get_report("2026-03-31").unwrap().unwrap();
         assert_eq!(loaded.lessons_generated_at, Some(9999));
 
         let _ = std::fs::remove_file(&db_path);
