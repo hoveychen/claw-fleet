@@ -34,8 +34,7 @@ type ToolTab = "cli" | "vscode" | "jetbrains" | "desktop";
 
 type Issue =
   | "no_claude_at_all"
-  | "not_logged_in"
-  | "credentials_invalid";
+  | "not_logged_in";
 
 interface HookSetupPlan {
   toAdd: string[];
@@ -282,45 +281,6 @@ function NoClaudeAtAllCard() {
   );
 }
 
-function CredentialsInvalidCard() {
-  const { t } = useTranslation();
-  return (
-    <div className={`${styles.card} ${styles.card_warn}`}>
-      <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x1F504;</span>
-        <span className={styles.card_title}>{t("onboarding.credentials_invalid.title")}</span>
-      </div>
-      <p className={styles.card_description}>{t("onboarding.credentials_invalid.description")}</p>
-      <div className={styles.solutions}>
-        <div className={styles.solution}>
-          <CopyableCommand cmd={t("onboarding.credentials_invalid.relogin_cmd")} />
-          <p className={styles.hint}>{t("onboarding.credentials_invalid.relogin_hint")}</p>
-        </div>
-        <p className={styles.hint}>{t("onboarding.credentials_invalid.check_network")}</p>
-        <p className={styles.hint}>{t("onboarding.credentials_invalid.still_works")}</p>
-      </div>
-    </div>
-  );
-}
-
-// ── Waiting for first session ────────────────────────────────────────────────
-
-function WaitingForSession() {
-  const { t } = useTranslation();
-  return (
-    <div className={styles.waiting}>
-      <div className={styles.pulse_ring} />
-      <div className={styles.waiting_icon}>&#x1F50D;</div>
-      <h3 className={styles.waiting_title}>{t("onboarding.waiting.title")}</h3>
-      <p className={styles.waiting_description}>{t("onboarding.waiting.description")}</p>
-      <div className={styles.waiting_hints}>
-        <p className={styles.hint}>{t("onboarding.waiting.hint_terminal")}</p>
-        <p className={styles.hint}>{t("onboarding.waiting.hint_ide")}</p>
-      </div>
-    </div>
-  );
-}
-
 function CelebrationView({ onDismiss }: { onDismiss: () => void }) {
   const { t } = useTranslation();
   const soundPlayed = useRef(false);
@@ -347,43 +307,25 @@ function CelebrationView({ onDismiss }: { onDismiss: () => void }) {
   );
 }
 
-// ── Feature highlights card ──────────────────────────────────────────────
+// ── Header feature highlights ─────────────────────────────────────────────
+// Compressed from the old full-width FeaturesCard: three pills under the
+// welcome subtitle instead of a scroll-eating card.
 
-interface FeatureItem {
-  icon: string;
-  titleKey: string;
-  descKey: string;
-}
-
-const FEATURES: FeatureItem[] = [
-  { icon: "\u{1F4CA}", titleKey: "onboarding.features.ai_summary_title", descKey: "onboarding.features.ai_summary_desc" },
-  { icon: "\u{1F9E0}", titleKey: "onboarding.features.lessons_title", descKey: "onboarding.features.lessons_desc" },
-  { icon: "\u{1F6A6}", titleKey: "onboarding.features.live_status_title", descKey: "onboarding.features.live_status_desc" },
-  { icon: "\u{1F6E1}", titleKey: "onboarding.features.audit_title", descKey: "onboarding.features.audit_desc" },
-  { icon: "\u{1F4DD}", titleKey: "onboarding.features.memory_title", descKey: "onboarding.features.memory_desc" },
+const HIGHLIGHTS = [
+  { icon: "\u{1F4CA}", titleKey: "onboarding.features.ai_summary_title" },
+  { icon: "\u{1F6A6}", titleKey: "onboarding.features.live_status_title" },
+  { icon: "\u{1F6E1}", titleKey: "onboarding.features.audit_title" },
 ];
 
-function FeaturesCard() {
+function HeaderHighlights() {
   const { t } = useTranslation();
-
   return (
-    <div className={`${styles.card} ${styles.card_info}`}>
-      <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x2728;</span>
-        <span className={styles.card_title}>{t("onboarding.features.title")}</span>
-      </div>
-      <p className={styles.card_description}>{t("onboarding.features.description")}</p>
-      <div className={styles.feature_list}>
-        {FEATURES.map((f, i) => (
-          <div key={i} className={styles.feature_item}>
-            <span className={styles.feature_icon}>{f.icon}</span>
-            <div className={styles.feature_text}>
-              <span className={styles.feature_title}>{t(f.titleKey)}</span>
-              <span className={styles.hint}>{t(f.descKey)}</span>
-            </div>
-          </div>
-        ))}
-      </div>
+    <div className={styles.highlights}>
+      {HIGHLIGHTS.map((h) => (
+        <span key={h.titleKey} className={styles.highlight}>
+          <span aria-hidden>{h.icon}</span> {t(h.titleKey)}
+        </span>
+      ))}
     </div>
   );
 }
@@ -954,9 +896,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [loading, setLoading] = useState(mode === "full");
-  const [accountError, setAccountError] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [checkTimedOut, setCheckTimedOut] = useState(false);
   const prevSessionCount = useRef(0);
 
   // Compute which features are unseen (used in whats_new mode to filter cards).
@@ -1135,17 +1077,18 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     () => (getItem("notification-mode") as NotificationMode) || "user_action",
   );
 
+  // OS notification permission is requested only when the user opts into a
+  // notifying mode — never on mount, so the first launch isn't interrupted
+  // by a system dialog before the user knows what the app does.
   const handleNotifModeChange = useCallback((mode: NotificationMode) => {
     setNotifMode(mode);
     setItem("notification-mode", mode);
     invoke("set_notification_mode", { mode }).catch(() => {});
-  }, []);
-
-  // Request notification permission on mount if not granted
-  useEffect(() => {
-    isPermissionGranted().then((granted) => {
-      if (!granted) requestPermission().catch(() => {});
-    }).catch(() => {});
+    if (mode !== "none") {
+      isPermissionGranted().then((granted) => {
+        if (!granted) requestPermission().catch(() => {});
+      }).catch(() => {});
+    }
   }, []);
 
   // ── TTS / chime state ──────────────────────────────────────────────────
@@ -1212,22 +1155,14 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, [onDismiss, guardEnabled, elicitationEnabled]);
 
+  // Environment detection runs in the background and streams into the
+  // diagnostics area — it must never block the first paint. Credential
+  // validation (a network call) deliberately does NOT happen here: offline
+  // users would see a false "credentials invalid" scare, and the account
+  // panel in the main UI surfaces real credential problems anyway.
   const check = useCallback(async () => {
-    setLoading(true);
     try {
       const s = await invoke<SetupStatus>("check_setup_status");
-
-      if (s.logged_in) {
-        try {
-          await invoke("get_account_info");
-          s.credentials_valid = true;
-          setAccountError(false);
-        } catch {
-          s.credentials_valid = false;
-          setAccountError(true);
-        }
-      }
-
       s.has_sessions = s.has_sessions || sessions.length > 0;
       setStatus(s);
     } catch {
@@ -1240,8 +1175,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
         has_sessions: false,
         credentials_valid: null,
       });
-    } finally {
-      setLoading(false);
     }
   }, [sessions.length]);
 
@@ -1249,12 +1182,25 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     check();
   }, []);
 
+  // Degrade the diagnostics spinner after 5s so a pathological environment
+  // (hung subprocess, dead backend) never shows an endless spinner. The card
+  // is informational only — the primary button stays clickable throughout.
+  useEffect(() => {
+    if (status !== null) return;
+    const timer = setTimeout(() => setCheckTimedOut(true), 5000);
+    return () => clearTimeout(timer);
+  }, [status]);
+
+  const retryCheck = useCallback(() => {
+    setCheckTimedOut(false);
+    check();
+  }, [check]);
+
   // Watch for first session appearing → trigger celebration.
   // Only celebrate if the backend also confirmed there were no sessions before
   // (avoids false celebration for existing users whose sessions loaded after the check).
   useEffect(() => {
     if (
-      !loading &&
       !celebrating &&
       sessions.length > 0 &&
       prevSessionCount.current === 0 &&
@@ -1264,7 +1210,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
       setCelebrating(true);
     }
     prevSessionCount.current = sessions.length;
-  }, [sessions.length, loading, celebrating, status]);
+  }, [sessions.length, celebrating, status]);
 
   // Determine issues
   const issues: Issue[] = [];
@@ -1277,12 +1223,9 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
       issues.push("no_claude_at_all");
     } else {
       if (!status.logged_in) issues.push("not_logged_in");
-      if (status.logged_in && accountError) issues.push("credentials_invalid");
     }
   }
 
-  const noIssues = status && issues.length === 0;
-  const showWaiting = noIssues && !status?.has_sessions && !celebrating;
 
   // Show hooks setup when Claude Code is among the detected tools
   const hasClaudeCode = status && (
@@ -1390,119 +1333,151 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
               <img src="/app-icon.png" className={styles.logo} alt="Claw Fleet" />
               <h1 className={styles.title}>{t("onboarding.welcome")}</h1>
               <p className={styles.subtitle}>{t("onboarding.subtitle")}</p>
+              <HeaderHighlights />
             </div>
 
-            {loading ? (
-              <div className={styles.loading}>
-                <div className={styles.spinner} />
-                <span className={styles.loading_text}>{t("onboarding.checking")}</span>
-              </div>
-            ) : (
-              <>
-                {issues.length > 0 && (
-                  <div className={styles.cards}>
-                    {issues.includes("no_claude_at_all") && <NoClaudeAtAllCard />}
-                    {issues.includes("not_logged_in") && status && (
-                      <NotLoggedInCard tools={status.detected_tools} />
-                    )}
-                    {issues.includes("credentials_invalid") && <CredentialsInvalidCard />}
-                  </div>
-                )}
-
+            {/* Diagnostics area: a local spinner while detection runs, issue
+                cards when something needs fixing, a green card when the
+                environment is healthy — never a full-page gate. */}
+            {status === null ? (
+              checkTimedOut ? (
                 <div className={styles.cards}>
-                  <FeaturesCard />
-                </div>
-
-                <div className={styles.cards}>
-                  <AppearanceCard />
-                </div>
-
-                {hasMultipleSources && sources.length > 0 && (
-                  <div className={styles.cards}>
-                    <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
-                  </div>
-                )}
-
-                {noIssues && (
-                  <div className={styles.cards}>
-                    <NotificationSettingsCard
-                      notifMode={notifMode}
-                      onNotifModeChange={handleNotifModeChange}
-                      ttsMode={ttsMode}
-                      onTtsModeChange={handleTtsModeChange}
-                      chimePreset={chimePreset}
-                      onChimeChange={handleChimeChange}
-                      personalizedMascot={personalizedMascot}
-                      onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
-                      userTitle={userTitle}
-                      onUserTitleChange={handleUserTitleChange}
-                    />
-                    {hasClaudeCode && hooksPlan && (
-                      <HooksSetupCard
-                        hooksPlan={hooksPlan}
-                        onInstall={handleInstallHooks}
-                        status={hooksStatus}
-                        errorMsg={hooksError}
-                        guardEnabled={guardEnabled}
-                        onToggleGuard={handleToggleGuard}
-                        elicitationEnabled={elicitationEnabled}
-                        onToggleElicitation={handleToggleElicitation}
-                        planApprovalEnabled={planApprovalEnabled}
-                        onTogglePlanApproval={handleTogglePlanApproval}
-                      />
-                    )}
-                    {hasClaudeCode && (
-                      <InteractionModeCard
-                        enabled={interactionModeEnabled}
-                        onToggle={handleToggleInteractionMode}
-                        elicitationEnabled={elicitationEnabled}
-                      />
-                    )}
-                    {hasClaudeCode && (
-                      <PrdModeCard
-                        enabled={prdModeEnabled}
-                        onToggle={handleTogglePrdMode}
-                      />
-                    )}
-                    {hasClaudeCode && (
-                      <WikiGuidanceCard
-                        enabled={wikiGuidanceEnabled}
-                        onToggle={handleToggleWikiGuidance}
-                      />
-                    )}
-                  </div>
-                )}
-
-                {showWaiting && <WaitingForSession />}
-
-                {noIssues && status?.has_sessions && !celebrating && (
-                  <div className={styles.cards}>
-                    <div className={`${styles.card} ${styles.card_ok}`}>
-                      <div className={styles.card_header}>
-                        <span className={styles.card_icon}>&#x2705;</span>
-                        <span className={styles.card_title}>{t("onboarding.all_good.title")}</span>
-                      </div>
-                      <p className={styles.card_description}>{t("onboarding.all_good.description")}</p>
+                  <div className={`${styles.card} ${styles.card_info}`}>
+                    <div className={styles.card_header}>
+                      <span className={styles.card_icon}>&#x23F3;</span>
+                      <span className={styles.card_title}>{t("onboarding.check_timeout.title")}</span>
+                    </div>
+                    <p className={styles.card_description}>{t("onboarding.check_timeout.description")}</p>
+                    <div className={styles.hooks_actions}>
+                      <button
+                        className={styles.btn_secondary}
+                        onClick={retryCheck}
+                        style={{ padding: "8px 20px", fontSize: 12 }}
+                      >
+                        {t("onboarding.recheck")}
+                      </button>
                     </div>
                   </div>
+                </div>
+              ) : (
+                <div className={styles.loading}>
+                  <div className={styles.spinner} />
+                  <span className={styles.loading_text}>{t("onboarding.checking")}</span>
+                </div>
+              )
+            ) : issues.length > 0 ? (
+              <div className={styles.cards}>
+                {issues.includes("no_claude_at_all") && <NoClaudeAtAllCard />}
+                {issues.includes("not_logged_in") && (
+                  <NotLoggedInCard tools={status.detected_tools} />
                 )}
-              </>
+              </div>
+            ) : (
+              // Environment is fine. Without a session yet the green card
+              // doubles as the "go run your first session" nudge — the main
+              // UI's SessionEmptyState takes over after dismiss.
+              <div className={styles.cards}>
+                <div className={`${styles.card} ${styles.card_ok}`}>
+                  <div className={styles.card_header}>
+                    <span className={styles.card_icon}>&#x2705;</span>
+                    <span className={styles.card_title}>
+                      {t(status.has_sessions ? "onboarding.all_good.title" : "onboarding.ready.title")}
+                    </span>
+                  </div>
+                  <p className={styles.card_description}>
+                    {t(status.has_sessions ? "onboarding.all_good.description" : "onboarding.ready.description")}
+                  </p>
+                  {!status.has_sessions && <CopyableCommand cmd="claude" />}
+                </div>
+              </div>
             )}
 
-            <div className={styles.footer}>
-              <button className={styles.btn_secondary} onClick={handleDismiss}>
-                {t("onboarding.skip")}
+            <div className={styles.cards}>
+              <AppearanceCard />
+            </div>
+
+            {/* Everything below has sensible defaults — collapsed by default
+                so the first screen stays scannable. Also reachable later via
+                Settings. */}
+            <div className={styles.advanced}>
+              <button
+                type="button"
+                className={styles.advanced_toggle}
+                onClick={() => setAdvancedOpen((v) => !v)}
+                aria-expanded={advancedOpen}
+              >
+                <span className={styles.advanced_title}>{t("onboarding.advanced.title")}</span>
+                <span className={styles.advanced_hint}>{t("onboarding.advanced.description")}</span>
+                <span
+                  className={`${styles.advanced_chevron} ${advancedOpen ? styles.advanced_chevron_open : ""}`}
+                  aria-hidden
+                >
+                  &#x25BE;
+                </span>
               </button>
-              {!loading && issues.length > 0 && (
+              {advancedOpen && (
+                <div className={styles.cards}>
+                  {hasMultipleSources && sources.length > 0 && (
+                    <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
+                  )}
+                  <NotificationSettingsCard
+                    notifMode={notifMode}
+                    onNotifModeChange={handleNotifModeChange}
+                    ttsMode={ttsMode}
+                    onTtsModeChange={handleTtsModeChange}
+                    chimePreset={chimePreset}
+                    onChimeChange={handleChimeChange}
+                    personalizedMascot={personalizedMascot}
+                    onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
+                    userTitle={userTitle}
+                    onUserTitleChange={handleUserTitleChange}
+                  />
+                  {hasClaudeCode && hooksPlan && (
+                    <HooksSetupCard
+                      hooksPlan={hooksPlan}
+                      onInstall={handleInstallHooks}
+                      status={hooksStatus}
+                      errorMsg={hooksError}
+                      guardEnabled={guardEnabled}
+                      onToggleGuard={handleToggleGuard}
+                      elicitationEnabled={elicitationEnabled}
+                      onToggleElicitation={handleToggleElicitation}
+                      planApprovalEnabled={planApprovalEnabled}
+                      onTogglePlanApproval={handleTogglePlanApproval}
+                    />
+                  )}
+                  {hasClaudeCode && (
+                    <InteractionModeCard
+                      enabled={interactionModeEnabled}
+                      onToggle={handleToggleInteractionMode}
+                      elicitationEnabled={elicitationEnabled}
+                    />
+                  )}
+                  {hasClaudeCode && (
+                    <PrdModeCard
+                      enabled={prdModeEnabled}
+                      onToggle={handleTogglePrdMode}
+                    />
+                  )}
+                  {hasClaudeCode && (
+                    <WikiGuidanceCard
+                      enabled={wikiGuidanceEnabled}
+                      onToggle={handleToggleWikiGuidance}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className={styles.footer}>
+              {status !== null && issues.length > 0 && (
                 <button className={styles.btn_secondary} onClick={check}>
                   {t("onboarding.recheck")}
                 </button>
               )}
-              {noIssues && status?.has_sessions && (
-                <button className={styles.btn_primary} onClick={handleDismiss}>
-                  {t("onboarding.dismiss")}
-                </button>
-              )}
+              <button className={styles.btn_primary} onClick={handleDismiss}>
+                {t("onboarding.dismiss")}
+              </button>
             </div>
           </>
         )}
