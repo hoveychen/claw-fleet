@@ -5,6 +5,7 @@ import { enablePush, pushState, resyncPush, type PushState } from "./push";
 import { deviceLabel } from "./deviceLabel";
 import { getClientId } from "./clientId";
 import { RelayClient, gzipSupported, binarySupported } from "./relay";
+import { reconcileDecisions } from "./decisionReconcile";
 import { MockRelayClient, isMockMode } from "./mock/relay";
 import type {
   DecisionKind,
@@ -113,6 +114,10 @@ export function App() {
   const [showNewSession, setShowNewSession] = useState(false);
   const [exitArmed, setExitArmed] = useState(false);
   const clientRef = useRef<RelayClient | null>(null);
+  // ids answered on THIS device whose answer is still in flight → timestamp.
+  // Suppresses the just-answered card from flickering back when a fallback
+  // `pending_snapshot` (which lags the send on a slow link) still lists it.
+  const answeredRef = useRef<Map<string, number>>(new Map());
 
   // 栈底（主页 tab、无浮层）按返回：先拦一次给「再按一次退出」，再按才真走。
   // beforeunload 只覆盖刷新/关标签/地址栏跳走这些非返回路径——mock 模式不装，
@@ -145,7 +150,18 @@ export function App() {
     });
   }, []);
 
+  // Local answer sent from this device: drop the card now (optimistic) and
+  // remember the id so a lagging snapshot can't resurrect it before the desktop
+  // confirms. ANSWER_GRACE_MS is the fallback ceiling for a lost answer frame.
+  const markAnswered = useCallback((id: string) => {
+    answeredRef.current.set(id, Date.now());
+    setDecisions((prev) => prev.filter((d) => d.id !== id));
+  }, []);
+
   const removeDecision = useCallback((_kind: DecisionKind, id: string) => {
+    // Authoritative resolution (desktop/another device) — the in-flight-answer
+    // bookkeeping for this id is moot, clear it so it can't linger.
+    answeredRef.current.delete(id);
     setDecisions((prev) => prev.filter((d) => d.id !== id));
   }, []);
 
@@ -166,12 +182,18 @@ export function App() {
           fresh.push({ kind, id: request.id, request, arrivedAt: Date.now() });
         }
       }
-      // Snapshot is authoritative: replaces the list (dismissals included).
-      // Keep the original arrival stamp for ids we already had, so refreshes
-      // don't reshuffle the card order.
+      // Snapshot is authoritative, but a card answered on this device whose
+      // answer is still in flight must not pop back in (reconcileDecisions
+      // suppresses it until confirmed gone, or the grace window lapses).
       setDecisions((prev) => {
-        const seen = new Map(prev.map((d) => [d.id, d.arrivedAt]));
-        return fresh.map((d) => ({ ...d, arrivedAt: seen.get(d.id) ?? d.arrivedAt }));
+        const { decisions, answeredAt } = reconcileDecisions({
+          prev,
+          fresh,
+          answeredAt: answeredRef.current,
+          now: Date.now(),
+        });
+        answeredRef.current = answeredAt;
+        return decisions;
       });
     } catch {
       // agent offline — live events will catch us up later
@@ -471,7 +493,7 @@ export function App() {
             client={clientRef.current}
             agentOnline={agentOnline}
             workspaceOf={workspaceOf}
-            onAnswered={(id) => setDecisions((prev) => prev.filter((d) => d.id !== id))}
+            onAnswered={markAnswered}
             onOpenSession={setDetailSessionId}
           />
         ) : tab === "tasks" ? (
