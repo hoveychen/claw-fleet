@@ -948,11 +948,66 @@ fn collect_existing_rules(workspace_paths: &[String]) -> String {
     sections.join("\n\n")
 }
 
-fn build_lessons_prompt(pairs: &[ConversationPair], locale: &str, existing_rules: &str) -> String {
+/// Render the day's "Other"-answered / rejected decision cards as a prompt
+/// section. Returns an empty string when there are none.
+fn build_decision_signals_section(
+    other_picks: &[crate::decision_history::OtherPickContext],
+) -> String {
+    if other_picks.is_empty() {
+        return String::new();
+    }
+    let mut body = String::new();
+    for (i, ctx) in other_picks.iter().enumerate() {
+        body.push_str(&format!(
+            "--- Card {} [{}] (workspace: {}, session: {}) ---\n",
+            i + 1,
+            ctx.card_type,
+            ctx.workspace_name,
+            ctx.session_id,
+        ));
+        let question: String = ctx.question.chars().take(500).collect();
+        body.push_str(&format!("  AI raised: {question}\n"));
+        if !ctx.options.is_empty() {
+            body.push_str("  Options the AI offered:\n");
+            for opt in &ctx.options {
+                let opt: String = opt.chars().take(200).collect();
+                body.push_str(&format!("    - {opt}\n"));
+            }
+        }
+        if ctx.user_choice.trim().is_empty() {
+            body.push_str("  User REJECTED the AI's proposal.\n\n");
+        } else {
+            let choice: String = ctx.user_choice.chars().take(400).collect();
+            body.push_str(&format!("  User instead answered (\"Other\"): {choice}\n\n"));
+        }
+    }
+
+    format!(
+        "DECISION-CARD SIGNALS — On this day the user declined the AI's offered \
+         choices in the cards below: they typed their own answer via the \"Other\" \
+         escape hatch instead of picking an option (or rejected a proposed plan). \
+         Each is strong evidence the AI misframed the decision — offered the wrong \
+         options, recommended the wrong thing, missed the obvious choice, or asked \
+         when it should have just acted. Treat these as candidate evidence for \
+         lessons, held to the SAME critical filter below (general, transferable, \
+         explains WHY). When the mismatch is only project-specific, skip it.\n\
+         \n\
+         <decision_signals>\n\
+         {body}</decision_signals>\n\n"
+    )
+}
+
+fn build_lessons_prompt(
+    pairs: &[ConversationPair],
+    locale: &str,
+    existing_rules: &str,
+    other_picks: &[crate::decision_history::OtherPickContext],
+) -> String {
     let lang_instruction = match locale {
         "zh" => "请用中文撰写输出。",
         _ => "Write the output in English.",
     };
+    let decision_signals = build_decision_signals_section(other_picks);
 
     let dedup_section = if existing_rules.is_empty() {
         String::new()
@@ -985,10 +1040,16 @@ fn build_lessons_prompt(pairs: &[ConversationPair], locale: &str, existing_rules
     }
 
     format!(
-        "Below are conversation turns between an AI coding assistant and a user. \
-         Each turn shows what the AI said, followed by the user's reply.\n\n\
-         Your task: identify cases where the user corrected the AI, rejected an approach, \
-         pointed out a mistake, or repeated a requirement the AI ignored.\n\n\
+        "Below are two kinds of evidence from a day of AI-coding sessions. \
+         First, conversation turns: what the AI said, followed by the user's reply. \
+         Second (when present), DECISION-CARD SIGNALS: decision cards where the user \
+         declined the AI's offered options and answered via \"Other\", or rejected a \
+         proposed plan.\n\n\
+         Your task: across BOTH kinds of evidence, identify cases where the user \
+         corrected the AI, rejected an approach, pointed out a mistake, repeated a \
+         requirement the AI ignored, or — in the decision cards — was offered the \
+         wrong choices / a wrong recommendation / a decision that should not have \
+         been asked at all.\n\n\
          CRITICAL FILTER — only include a lesson if ALL of these are true:\n\
          1. It is a GENERAL principle applicable to any project, not a fix specific to this codebase \
             (e.g. \"wrong config value for Tauri\" or \"wrong CSS class name\" are project-specific — skip them).\n\
@@ -1012,6 +1073,7 @@ fn build_lessons_prompt(pairs: &[ConversationPair], locale: &str, existing_rules
          SESSION: <session id>\n\n\
          If no qualifying lessons exist, output NONE.\n\n\
          {lang_instruction}\n\n\
+         {decision_signals}\
          ---\n\
          {sections}",
     )
@@ -1093,8 +1155,15 @@ pub fn generate_lessons(
         }
     }
 
-    if all_pairs.is_empty() {
-        log_debug("[daily_report] no conversation pairs found for lessons");
+    // Decision cards where the user overrode the AI's offered choices are an
+    // independent evidence source — collect them even when there are no
+    // conversation pairs (a session can be all decision cards, no chat).
+    const MAX_DECISION_SIGNALS: usize = 40;
+    let other_picks =
+        crate::decision_history::collect_other_picks_for_date(&report.date, MAX_DECISION_SIGNALS);
+
+    if all_pairs.is_empty() && other_picks.is_empty() {
+        log_debug("[daily_report] no conversation pairs or decision signals found for lessons");
         return Some(vec![]);
     }
 
@@ -1106,7 +1175,7 @@ pub fn generate_lessons(
         .collect();
     let existing_rules = collect_existing_rules(&workspace_paths);
 
-    let prompt = build_lessons_prompt(&all_pairs, locale, &existing_rules);
+    let prompt = build_lessons_prompt(&all_pairs, locale, &existing_rules, &other_picks);
 
     let raw = match crate::llm_usage::complete_accounted(
         provider,
@@ -1630,6 +1699,45 @@ mod tests {
             lessons: None,
             lessons_generated_at: None,
         }
+    }
+
+    #[test]
+    fn decision_signals_section_empty_when_no_picks() {
+        assert!(build_decision_signals_section(&[]).is_empty());
+    }
+
+    #[test]
+    fn decision_signals_section_renders_question_options_and_choice() {
+        use crate::decision_history::OtherPickContext;
+        let picks = vec![
+            OtherPickContext {
+                card_type: "elicitation".into(),
+                workspace_name: "claude-fleet".into(),
+                session_id: "s1".into(),
+                question: "Which approach?".into(),
+                options: vec![
+                    "Do it inline (Recommended) — fast".into(),
+                    "Refactor first — clean".into(),
+                ],
+                user_choice: "just rewrite it".into(),
+            },
+            OtherPickContext {
+                card_type: "plan-approval".into(),
+                workspace_name: "claude-fleet".into(),
+                session_id: "s2".into(),
+                question: "Proposed plan (rejected):\ndelete everything".into(),
+                options: vec![],
+                user_choice: String::new(),
+            },
+        ];
+        let out = build_decision_signals_section(&picks);
+        assert!(out.contains("DECISION-CARD SIGNALS"));
+        assert!(out.contains("Which approach?"));
+        assert!(out.contains("Do it inline (Recommended) — fast"));
+        assert!(out.contains("just rewrite it"));
+        // Plan rejection with no free-text feedback renders the REJECTED marker.
+        assert!(out.contains("User REJECTED the AI's proposal."));
+        assert!(out.contains("[plan-approval]"));
     }
 
     fn temp_db_path() -> std::path::PathBuf {
