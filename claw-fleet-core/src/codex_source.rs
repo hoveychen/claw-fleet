@@ -207,6 +207,95 @@ fn read_rollout_originator(rollout_path: &Path) -> Option<String> {
         .map(str::to_string)
 }
 
+/// Read a rollout's first `session_meta` payload (only line 1). Same read shape
+/// as [`read_rollout_originator`], but returns the whole payload so callers can
+/// pull `id` / `cwd` / `originator` together.
+fn read_rollout_meta_payload(rollout_path: &Path) -> Option<Value> {
+    use std::io::{BufRead, BufReader};
+    let file = fs::File::open(rollout_path).ok()?;
+    let mut first_line = String::new();
+    BufReader::new(file).read_line(&mut first_line).ok()?;
+    let v: Value = serde_json::from_str(first_line.trim()).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
+        return None;
+    }
+    v.get("payload").cloned()
+}
+
+/// SQLite index lookup: a single thread's `(rollout_path, cwd)` by id. `None`
+/// when there is no SQLite DB or no matching row.
+fn lookup_thread_rollout_cwd(thread_id: &str) -> Option<(String, String)> {
+    let db_path = get_sqlite_path()?;
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    let mut stmt = conn
+        .prepare("SELECT rollout_path, cwd FROM threads WHERE id = ?1 LIMIT 1")
+        .ok()?;
+    stmt.query_row([thread_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })
+    .ok()
+}
+
+/// For a Fleet-owned Codex session identified by `thread_id`, the workspace it
+/// was launched in; `None` if the thread is unknown or not Fleet-owned.
+///
+/// Codex's analogue of `session_entrypoint` + `resolve_session_cwd` folded into
+/// one: those read a `~/.claude` transcript and return `None` for every Codex
+/// thread, so the enqueue gate (`pending_message`) and drain belt-and-braces
+/// would reject Codex sessions outright (M5 P15). Ownership is the rollout
+/// `originator == "fleet"` marker ([`crate::codex_launch::CODEX_FLEET_ORIGINATOR`]);
+/// cwd comes from the SQLite row, or the rollout's own `session_meta` when SQLite
+/// is unavailable.
+pub fn codex_fleet_owned_cwd(thread_id: &str) -> Option<String> {
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        return None;
+    }
+    // Preferred: SQLite maps thread id → rollout path + cwd directly.
+    if let Some((rollout_path, cwd)) = lookup_thread_rollout_cwd(thread_id) {
+        let originator = read_rollout_originator(Path::new(&rollout_path));
+        if crate::session_launch::is_fleet_owned_entrypoint(originator.as_deref()) {
+            let cwd = cwd.trim();
+            if !cwd.is_empty() {
+                return Some(cwd.to_string());
+            }
+        }
+        return None;
+    }
+    // Fallback (no SQLite): find the rollout whose session_meta id matches and
+    // read ownership + cwd from its first line.
+    let sessions_dir = get_sessions_dir()?;
+    if !sessions_dir.is_dir() {
+        return None;
+    }
+    for path in find_rollout_files(&sessions_dir) {
+        let Some(payload) = read_rollout_meta_payload(&path) else {
+            continue;
+        };
+        if payload.get("id").and_then(|v| v.as_str()) != Some(thread_id) {
+            continue;
+        }
+        let originator = payload.get("originator").and_then(|v| v.as_str());
+        if !crate::session_launch::is_fleet_owned_entrypoint(originator) {
+            return None;
+        }
+        return payload
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string);
+    }
+    None
+}
+
 /// Extract the model name from turn_context lines.
 fn extract_model(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
@@ -1026,6 +1115,52 @@ mod tests {
         assert!(!codex_proc_alive(&[], "t-alive"));
     }
 
+    /// A freshly spawned `codex exec` mints its thread id *after* launch, so that
+    /// id is in no argv while its first turn runs — the argv match above reads it
+    /// as dead. The spawn-pid note closes that gap: liveness falls back to "the
+    /// pid Fleet recorded at spawn is still a live Codex process". Without this,
+    /// the enqueue-drain gate fires a second `resume` on a still-running new
+    /// session and corrupts its transcript (M5 P15).
+    #[test]
+    fn codex_proc_alive_recognises_running_spawn_via_pid_note() {
+        use super::{codex_proc_alive, CodexProcess};
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-spawnpid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &tmp);
+
+        crate::codex_launch::record_spawn_pid("t-new", 4242);
+
+        // The live Codex set has that pid but no thread id in argv — exactly what
+        // a mid-first-turn `codex exec` looks like.
+        let running = vec![CodexProcess { pid: 4242, cwd: "/ws".into(), thread_id: None }];
+        assert!(
+            codex_proc_alive(&running, "t-new"),
+            "a running new spawn must read as alive via its recorded pid"
+        );
+        // The pid leaving the live Codex set (session exited) makes it drainable.
+        assert!(
+            !codex_proc_alive(&[], "t-new"),
+            "spawn pid no longer live => not alive"
+        );
+        // A thread with no note must not borrow another session's liveness.
+        assert!(!codex_proc_alive(&running, "t-unknown"));
+
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
     #[test]
     fn read_rollout_originator_none_without_meta_or_field() {
         use std::io::Write;
@@ -1189,17 +1324,37 @@ fn determine_status_from_age(age_secs: f64) -> SessionStatus {
 /// sibling session's process the way a cwd match can (see the pid-per-session
 /// caveat in `resolve_pid`).
 ///
-/// Limitation: only *resumed* sessions carry their thread id in argv. A freshly
-/// spawned `codex exec` does not — Codex mints the id after launch — so a new
-/// session mid-first-turn is not detectable this way and reports
-/// `proc_alive == false` while still running. That gap matters only for the
-/// enqueue-drain gate (`pending_message`, M5 P15); interrupt/kill key off
-/// `SessionInfo.pid` + Fleet-owned entrypoint, not `proc_alive`. P15 addresses
-/// new-spawn liveness when it wires Codex drain.
+/// Only *resumed* sessions carry their thread id in argv. A freshly spawned
+/// `codex exec` does not — Codex mints the id after launch — so a new session
+/// mid-first-turn is invisible to the argv match. For those, Fleet's spawn-pid
+/// note (`codex_launch::record_spawn_pid`) closes the gap: liveness falls back
+/// to "the pid recorded at spawn is still a live Codex process". Matching that
+/// pid against `processes` (the live Codex set) makes it immune to pid reuse — a
+/// recycled pid owned by some other process simply is not in the set. Without
+/// this, the enqueue-drain gate (`pending_message`, M5 P15) reads a still-running
+/// new session as idle and fires a second `resume` on it, corrupting the
+/// transcript.
 fn codex_proc_alive(processes: &[CodexProcess], thread_id: &str) -> bool {
-    processes
+    // Resumed sessions: exact thread-id argv match.
+    if processes
         .iter()
         .any(|p| p.thread_id.as_deref() == Some(thread_id))
+    {
+        return true;
+    }
+    // Freshly-spawned sessions: the recorded spawn pid still in the live set.
+    if let Some(pid) = crate::codex_launch::resolve_spawn_pid(thread_id) {
+        return processes.iter().any(|p| p.pid == pid);
+    }
+    false
+}
+
+/// A fresh liveness check for one Codex thread: scans the live Codex process set
+/// and applies [`codex_proc_alive`]. Used as the drain gate's belt-and-braces —
+/// the `SessionInfo.proc_alive` snapshot the gate is handed can lag a turn that
+/// started since the scan, so this re-checks against the current process table.
+pub fn codex_session_alive(thread_id: &str) -> bool {
+    codex_proc_alive(&scan_codex_processes(), thread_id)
 }
 
 fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Option<u32>, bool) {

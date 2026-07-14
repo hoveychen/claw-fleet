@@ -220,8 +220,16 @@ where
         return;
     }
     // Belt-and-braces against the proc_alive scan lagging a still-live turn:
-    // never put a second claude on the transcript.
-    if crate::parked::session_pid(&session.id).is_some() {
+    // never put a second process on the transcript. Re-check liveness against the
+    // *current* process table by source — a Codex session's identity is a live
+    // `codex` process, not a `claude` one, so the Claude-only `session_pid` check
+    // would miss a still-running Codex turn and fire a corrupting second resume.
+    let still_live = if session.agent_source == crate::codex_launch::FLEET_AGENT_SOURCE_CODEX {
+        crate::codex_source::codex_session_alive(&session.id)
+    } else {
+        crate::parked::session_pid(&session.id).is_some()
+    };
+    if still_live {
         return;
     }
 
@@ -386,6 +394,34 @@ mod tests {
             drain_if_idle(&s, recording_spawn(&log));
             assert!(log.borrow().is_empty(), "rate-limited => auto_resume owns it");
             assert!(get("sess-rl").is_some(), "queue must survive rate-limit");
+        });
+    }
+
+    /// A Codex session whose turn is over must still drain: the belt-and-braces
+    /// liveness recheck is source-routed, so a Codex session takes the
+    /// `codex_session_alive` path (no live `codex` process for this fake id) and
+    /// is NOT blocked by the Claude-only `session_pid` check (M5 P15).
+    #[test]
+    fn codex_session_drains_when_idle() {
+        with_temp_home(|| {
+            let path = queue_path("sess-codex-idle").unwrap();
+            write_queue(
+                &path,
+                &PendingQueue {
+                    session_id: "sess-codex-idle".into(),
+                    workspace_path: "/ws".into(),
+                    messages: vec!["follow up".into()],
+                },
+            )
+            .unwrap();
+            let log = std::cell::RefCell::new(Vec::new());
+            let mut s = base_session("sess-codex-idle", SessionStatus::WaitingInput, false);
+            s.agent_source = "codex".into();
+            drain_if_idle(&s, recording_spawn(&log));
+            let fired = log.borrow();
+            assert_eq!(fired.len(), 1, "idle codex session must drain its queue");
+            assert_eq!(fired[0].0, "sess-codex-idle");
+            assert!(get("sess-codex-idle").is_none(), "queue cleared after firing");
         });
     }
 
