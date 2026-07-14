@@ -28,7 +28,7 @@ pub struct IdeSession {
 
 // ── Exported types ───────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum SessionStatus {
@@ -39,6 +39,7 @@ pub enum SessionStatus {
     Processing,   // last stop_reason = tool_use, recent activity (waiting for tool result)
     WaitingInput, // last stop_reason = end_turn
     Active,       // file written < 30s ago
+    #[default]
     Idle,         // no recent activity
     RateLimited,  // last assistant message was isApiErrorMessage + error=rate_limit;
                   // details (resets_at, limit_type) live on SessionInfo.rate_limit
@@ -61,7 +62,7 @@ pub struct RateLimitState {
     pub error_timestamp: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
