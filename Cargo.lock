@@ -1040,6 +1040,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "qrcode",
+ "regex",
  "reqwest 0.12.28",
  "rusqlite",
  "serde",
