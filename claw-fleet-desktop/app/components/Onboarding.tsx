@@ -281,24 +281,6 @@ function NoClaudeAtAllCard() {
   );
 }
 
-// ── Waiting for first session ────────────────────────────────────────────────
-
-function WaitingForSession() {
-  const { t } = useTranslation();
-  return (
-    <div className={styles.waiting}>
-      <div className={styles.pulse_ring} />
-      <div className={styles.waiting_icon}>&#x1F50D;</div>
-      <h3 className={styles.waiting_title}>{t("onboarding.waiting.title")}</h3>
-      <p className={styles.waiting_description}>{t("onboarding.waiting.description")}</p>
-      <div className={styles.waiting_hints}>
-        <p className={styles.hint}>{t("onboarding.waiting.hint_terminal")}</p>
-        <p className={styles.hint}>{t("onboarding.waiting.hint_ide")}</p>
-      </div>
-    </div>
-  );
-}
-
 function CelebrationView({ onDismiss }: { onDismiss: () => void }) {
   const { t } = useTranslation();
   const soundPlayed = useRef(false);
@@ -1246,7 +1228,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   }
 
   const noIssues = status && issues.length === 0;
-  const showWaiting = noIssues && !status?.has_sessions && !celebrating;
 
   // Show hooks setup when Claude Code is among the detected tools
   const hasClaudeCode = status && (
@@ -1436,34 +1417,35 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
               </div>
             )}
 
-            {showWaiting && <WaitingForSession />}
-
-            {noIssues && status?.has_sessions && !celebrating && (
+            {/* Environment is fine: green card. Without a session yet it
+                doubles as the "go run your first session" nudge — the main
+                UI's SessionEmptyState takes over after dismiss. */}
+            {noIssues && !celebrating && (
               <div className={styles.cards}>
                 <div className={`${styles.card} ${styles.card_ok}`}>
                   <div className={styles.card_header}>
                     <span className={styles.card_icon}>&#x2705;</span>
-                    <span className={styles.card_title}>{t("onboarding.all_good.title")}</span>
+                    <span className={styles.card_title}>
+                      {t(status?.has_sessions ? "onboarding.all_good.title" : "onboarding.ready.title")}
+                    </span>
                   </div>
-                  <p className={styles.card_description}>{t("onboarding.all_good.description")}</p>
+                  <p className={styles.card_description}>
+                    {t(status?.has_sessions ? "onboarding.all_good.description" : "onboarding.ready.description")}
+                  </p>
+                  {!status?.has_sessions && <CopyableCommand cmd="claude" />}
                 </div>
               </div>
             )}
 
             <div className={styles.footer}>
-              <button className={styles.btn_secondary} onClick={handleDismiss}>
-                {t("onboarding.skip")}
-              </button>
               {status !== null && issues.length > 0 && (
                 <button className={styles.btn_secondary} onClick={check}>
                   {t("onboarding.recheck")}
                 </button>
               )}
-              {noIssues && status?.has_sessions && (
-                <button className={styles.btn_primary} onClick={handleDismiss}>
-                  {t("onboarding.dismiss")}
-                </button>
-              )}
+              <button className={styles.btn_primary} onClick={handleDismiss}>
+                {t("onboarding.dismiss")}
+              </button>
             </div>
           </>
         )}
