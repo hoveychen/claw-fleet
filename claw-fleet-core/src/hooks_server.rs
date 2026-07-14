@@ -523,7 +523,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         let json_header: tiny_http::Header = "Content-Type: application/json".parse().unwrap();
 
         match path {
-            "/health" => {
+            crate::routes::HEALTH => {
                 let body = format!(
                     r#"{{"version":"{}","status":"ok"}}"#,
                     env!("CARGO_PKG_VERSION")
@@ -731,7 +731,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/usage_summaries" => {
+            crate::routes::USAGE_SUMMARIES => {
                 let summaries = crate::agent_source::fetch_usage_summaries_from_sources(&sources);
                 let body = serde_json::to_string(&summaries).unwrap_or_default();
                 let _ = request.respond(
@@ -1189,7 +1189,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/plugins/set_enabled" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PLUGINS_SET_ENABLED
+                if request.method() == &tiny_http::Method::Post =>
+            {
                 #[derive(serde::Deserialize)]
                 struct Body {
                     plugin_id: String,
