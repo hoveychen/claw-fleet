@@ -2154,7 +2154,8 @@ fn connect_remote_start_probe(
                                 effort: None,
                                 permission_mode: None,
                             };
-                            match probe2.post_json_ok("/resume_session", &req) {
+                            match probe2.post_json_ok(claw_fleet_core::routes::RESUME_SESSION, &req)
+                            {
                                 Ok(()) => crate::log_debug(&format!(
                                     "remote auto_resume: fired {session_id}"
                                 )),
