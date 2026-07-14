@@ -5,6 +5,7 @@ import { Blocks } from "lucide-react";
 import { useConnectionStore } from "../store";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
+import { SkillsSourceTabs } from "./SkillsSourceTabs";
 import styles from "./MemoryView.module.css";
 import pluginStyles from "./PluginsView.module.css";
 
@@ -278,7 +279,8 @@ export function PluginsView() {
         onChange: setQuery,
         placeholder: t("plugins.filter_placeholder"),
       }}
-      bannerCenter={
+      bannerCenter={<SkillsSourceTabs />}
+      subBar={
         <MarketplaceBar
           marketplaces={marketplaces}
           onChanged={() => setLoaded(false)}
