@@ -1789,11 +1789,49 @@ pub struct CodexUsageItem {
     pub credits: Option<CodexCreditsSnapshot>,
 }
 
-/// Locate the Codex binary shipped inside the OpenAI ChatGPT VSCode extension.
-fn find_codex_binary() -> Option<std::path::PathBuf> {
+/// Locate a runnable Codex binary.
+///
+/// Search order (first hit wins):
+///   1. The **standalone auto-update install** at
+///      `<CODEX_HOME>/packages/standalone/current/bin/codex` — the binary the
+///      `codex` CLI's own updater manages and the one the interactive TUI runs.
+///      Its `current` symlink always points at the newest installed release.
+///   2. The Codex binary shipped inside the OpenAI ChatGPT VSCode extension
+///      (`~/.vscode/extensions/openai.chatgpt-*/bin/<platform>/codex`), newest
+///      version first.
+///   3. Bare `codex` on `PATH`.
+///
+/// The standalone install is tried first deliberately: on machines where the
+/// only thing on `PATH` is a broken npm/homebrew `codex` wrapper (a JS shim
+/// whose vendored binary is missing → `ENOENT` on exec), the `which codex`
+/// fallback would hand back that broken shim. The standalone `current` binary
+/// is a real executable, so preferring it fixes both the usage probe and
+/// (P1+) session spawning without a per-call liveness check.
+///
+/// Shared by the rate-limit usage probe and the Codex session launcher
+/// (`codex_launch`), so both agree on which binary to run.
+pub fn find_codex_binary() -> Option<std::path::PathBuf> {
     let home = crate::session::real_home_dir()?;
 
-    // Check VSCode extension directories
+    #[cfg(windows)]
+    let exe = "codex.exe";
+    #[cfg(not(windows))]
+    let exe = "codex";
+
+    // 1. Standalone auto-update install (`current` → newest release).
+    if let Some(codex_dir) = get_codex_dir() {
+        let standalone = codex_dir
+            .join("packages")
+            .join("standalone")
+            .join("current")
+            .join("bin")
+            .join(exe);
+        if standalone.exists() {
+            return Some(standalone);
+        }
+    }
+
+    // 2. Check VSCode extension directories
     let ext_dirs = [
         home.join(".vscode").join("extensions"),
         home.join(".vscode-insiders").join("extensions"),
