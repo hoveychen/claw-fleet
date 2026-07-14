@@ -1383,12 +1383,16 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(claw_fleet_core::routes::MOBILE_RELAY_STATUS)
     }
 
-    fn mobile_relay_qr_svg(&self) -> Result<String, String> {
+    fn mobile_relay_qr_svg(&self, lang: Option<&str>) -> Result<String, String> {
         #[derive(serde::Deserialize)]
         struct QrEnvelope {
             svg: String,
         }
-        let env: QrEnvelope = self.probe.get(claw_fleet_core::routes::MOBILE_RELAY_QR)?;
+        let endpoint = match lang {
+            Some(l) => format!("{}?lang={}", claw_fleet_core::routes::MOBILE_RELAY_QR, l),
+            None => claw_fleet_core::routes::MOBILE_RELAY_QR.to_string(),
+        };
+        let env: QrEnvelope = self.probe.get(&endpoint)?;
         Ok(env.svg)
     }
 }
