@@ -882,6 +882,7 @@ fn build_session_from_sqlite(
 
     // PID resolution: prefer thread-id match, fall back to workspace path match.
     let (pid, pid_precise) = resolve_pid(codex_processes, &thread.id, &thread.cwd);
+    let proc_alive = codex_proc_alive(codex_processes, &thread.id);
 
     // Prefer: source-embedded nickname > SQLite agent_nickname > title
     let ai_title = source_info
@@ -936,13 +937,10 @@ fn build_session_from_sqlite(
         thinking_level,
         pid,
         pid_precise,
-        // Liveness is not yet stamped for Codex: `apply_pid_liveness` runs only
-        // in the Claude scan path. `pid_precise` already carries the "a live
-        // codex process matches this thread id" signal; promoting it to
-        // `proc_alive` (the interrupt / enqueue gate) is M4 (P12). Until then a
-        // Fleet-owned Codex session is auto-resumable (source-agnostic gate) but
-        // not yet interruptible / enqueue-drainable.
-        proc_alive: false,
+        // Definitive liveness for Codex: a live process resuming exactly this
+        // thread (see `codex_proc_alive`). `apply_pid_liveness` runs only in the
+        // Claude scan path, so Codex stamps its own here.
+        proc_alive,
         pending_tool_batch: false,
         last_skill: None,
         context_percent,
@@ -986,6 +984,20 @@ mod tests {
             Some("fleet"),
             "must read originator from the first session_meta line"
         );
+    }
+
+    #[test]
+    fn codex_proc_alive_only_on_exact_thread_match() {
+        use super::{codex_proc_alive, CodexProcess};
+        let procs = vec![
+            CodexProcess { pid: 10, cwd: "/ws".into(), thread_id: Some("t-alive".into()) },
+            // Same cwd, different thread — must NOT make t-dead look alive (the
+            // pid-per-session hazard a cwd match would fall into).
+            CodexProcess { pid: 11, cwd: "/ws".into(), thread_id: None },
+        ];
+        assert!(codex_proc_alive(&procs, "t-alive"));
+        assert!(!codex_proc_alive(&procs, "t-dead"));
+        assert!(!codex_proc_alive(&[], "t-alive"));
     }
 
     #[test]
@@ -1144,6 +1156,26 @@ fn determine_status_from_age(age_secs: f64) -> SessionStatus {
 }
 
 /// Resolve PID for a session: prefer exact thread-id match, fall back to cwd match.
+/// Whether a live Codex process is definitively running this thread — an exact
+/// thread-id match on a running `codex exec resume <thread-id>` argv. This is
+/// Codex's analogue of Claude's `exact_proc_alive` ("a live process whose argv
+/// names exactly this session id"): unambiguous, so it never mis-attributes a
+/// sibling session's process the way a cwd match can (see the pid-per-session
+/// caveat in `resolve_pid`).
+///
+/// Limitation: only *resumed* sessions carry their thread id in argv. A freshly
+/// spawned `codex exec` does not — Codex mints the id after launch — so a new
+/// session mid-first-turn is not detectable this way and reports
+/// `proc_alive == false` while still running. That gap matters only for the
+/// enqueue-drain gate (`pending_message`, M5 P15); interrupt/kill key off
+/// `SessionInfo.pid` + Fleet-owned entrypoint, not `proc_alive`. P15 addresses
+/// new-spawn liveness when it wires Codex drain.
+fn codex_proc_alive(processes: &[CodexProcess], thread_id: &str) -> bool {
+    processes
+        .iter()
+        .any(|p| p.thread_id.as_deref() == Some(thread_id))
+}
+
 fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Option<u32>, bool) {
     // First: exact thread-id match (most precise).
     for p in processes {
@@ -1281,6 +1313,7 @@ fn parse_codex_session(
 
     // PID resolution: prefer thread-id match, fall back to workspace path.
     let (pid, pid_precise) = resolve_pid(codex_processes, &session_id, &workspace_path);
+    let proc_alive = codex_proc_alive(codex_processes, &session_id);
 
     // Prefer source-embedded nickname > rollout meta nickname
     let ai_title = source_info
@@ -1332,13 +1365,10 @@ fn parse_codex_session(
         thinking_level,
         pid,
         pid_precise,
-        // Liveness is not yet stamped for Codex: `apply_pid_liveness` runs only
-        // in the Claude scan path. `pid_precise` already carries the "a live
-        // codex process matches this thread id" signal; promoting it to
-        // `proc_alive` (the interrupt / enqueue gate) is M4 (P12). Until then a
-        // Fleet-owned Codex session is auto-resumable (source-agnostic gate) but
-        // not yet interruptible / enqueue-drainable.
-        proc_alive: false,
+        // Definitive liveness for Codex: a live process resuming exactly this
+        // thread (see `codex_proc_alive`). `apply_pid_liveness` runs only in the
+        // Claude scan path, so Codex stamps its own here.
+        proc_alive,
         pending_tool_batch: false,
         last_skill: None,
         context_percent,
