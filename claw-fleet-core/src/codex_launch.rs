@@ -331,6 +331,50 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ws);
     }
 
+    /// Live end-to-end (M1 acceptance): route a spawn through the tool
+    /// dispatcher with tool="codex", then confirm the scanner surfaces the
+    /// just-spawned session as a `codex` source with the captured thread id.
+    /// Exercises P1 (launcher) + P2 (AgentSource::spawn dispatch) + the codex
+    /// scan integration. Ignored — invokes the real codex binary + model.
+    ///   `cargo test -p claw-fleet-core codex_launch::tests::live_dispatch -- --ignored`
+    #[test]
+    #[ignore = "spawns a real codex session; run manually with --ignored"]
+    fn live_dispatch_spawn_appears_as_codex_in_scan() {
+        use crate::agent_source::{AgentSource, SpawnSpec};
+
+        let ws = std::env::temp_dir().join(format!("fleet-codex-e2e-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+
+        let spec = SpawnSpec {
+            workspace_path: ws.to_string_lossy().into_owned(),
+            prompt: "reply with exactly: OK".to_string(),
+            ..Default::default()
+        };
+        let resp = crate::agent_source::spawn_session("codex", &spec)
+            .expect("dispatcher should route codex spawn");
+        let sid = resp.session_id.expect("codex thread id captured");
+
+        // Poll the scanner: the rollout + sqlite row land within a moment of
+        // thread.started. Give it a few tries rather than a fixed sleep.
+        let source = crate::codex_source::CodexSource::new();
+        let mut found = None;
+        for _ in 0..40 {
+            if let Some(s) = source
+                .scan_sessions()
+                .into_iter()
+                .find(|s| s.id == sid)
+            {
+                found = Some(s);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(250));
+        }
+        let session = found.unwrap_or_else(|| panic!("session {sid} not found in codex scan"));
+        assert_eq!(session.agent_source, "codex", "scanned as codex source");
+        assert_eq!(session.id, sid, "thread id correlates");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
     #[test]
     fn ignores_non_thread_started_lines() {
         assert_eq!(parse_thread_started(r#"{"type":"turn.started"}"#), None);
