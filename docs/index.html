@@ -4,9 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claw Fleet — Mission Control for AI Coding Agents</title>
-  <meta name="description" content="See every agent, approve every decision, dispatch tasks, and run the whole fleet from your phone. Open-source command tower for Claude Code, Cursor, OpenClaw, and Codex.">
+  <meta name="description" content="Not a team of agents to manage — a task that won't quit. Claw Fleet keeps one long task alive across context windows, restarts, and machines by relaying it agent to agent automatically, while every decision that needs you lands in one inbox you can answer from your phone. Open-source, for Claude Code, Cursor, OpenClaw, and Codex.">
   <meta property="og:title" content="Claw Fleet — Mission Control for AI Coding Agents">
-  <meta property="og:description" content="See every agent, approve every decision, dispatch tasks — from your desk or your phone. Free &amp; open-source.">
+  <meta property="og:description" content="Not a team of agents to manage — a task that won't quit. Automatic session-to-session relay, every decision in one inbox, from your desk or your phone. Free &amp; open-source.">
   <meta property="og:image" content="https://hoveychen.github.io/claw-fleet/hero.png">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
@@ -323,11 +323,12 @@
   <header class="hero">
     <div>
       <span class="hero-eyebrow">open-source · AGPL-3.0 · no API key</span>
-      <h1>Your agents write the code. <em>You</em> run the fleet.</h1>
+      <h1>Your agents write the code. <em>The task</em> never dies on your watch.</h1>
       <p class="hero-sub">
-        Claw Fleet is the command tower for Claude Code, Cursor, OpenClaw, and Codex:
-        live status and real USD spend for every session, one inbox for every decision
-        your agents need from you, and a phone app so the fleet never waits for you to be at your desk.
+        Everyone else hands you a team of AI personas to manage. Claw Fleet keeps a single
+        long task alive across context windows, restarts, and machines — relaying it from
+        agent to agent automatically — while every decision that needs you lands in one
+        inbox you can answer from your phone. For Claude Code, Cursor, OpenClaw, and Codex.
       </p>
       <div class="hero-actions">
         <a href="#download" class="btn-primary" id="hero-download-btn">
@@ -463,10 +464,15 @@
     <div class="two-col">
       <div class="reveal">
         <span class="kicker">dispatch &amp; relay</span>
-        <h2>Launch, hand off, loop — agents that outlive a context window</h2>
+        <h2>One task, no expiry date</h2>
+        <p class="section-desc">
+          Everyone else hands you a team of AI personas to manage. Fleet does the opposite:
+          it keeps a <em>single</em> task alive across context limits, restarts, and machines —
+          and asks for you only when it must.
+        </p>
         <ul class="feature-list">
+          <li><b>Autonomous relay</b>An agent near its context limit leaves a note; Fleet itself spawns the successor — no human, no API — in the same workspace, with the note as its opening brief and the <code style="font-family:var(--font-mono);font-size:13px">TASKS.md</code> plan re-injected. The chain stays visible as <span style="font-family:var(--font-mono);font-size:13px">接力 n/N</span> — the task is the unit of work, not the agent.</li>
           <li><b>Launch from the app</b>Pick a workspace, model, effort, and permission mode; attach context files; manage sessions in launchpad tabs. Works from the phone too.</li>
-          <li><b>Handoff chains</b>When context runs long, an agent leaves a note and Fleet spawns a successor that picks up the work — the relay chain stays visible on every card.</li>
           <li><b>Reliable loops</b><code style="font-family:var(--font-mono);font-size:13px">fleet loop</code> re-runs a prompt on schedule, each iteration a fresh detached session.</li>
           <li><b>Agents managing agents</b>The Fleet skill teaches agents the CLI: check load, watch peers, stop runaways. Installs into Claude Code, Copilot, and Gemini CLI.</li>
         </ul>

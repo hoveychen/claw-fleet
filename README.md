@@ -4,8 +4,8 @@
 
 # Claw Fleet
 
-**Mission control for your AI coding agents.**
-Watch every session, approve every risky decision, launch and relay tasks, and carry the whole cockpit in your pocket.
+**Your agents write the code. The task never dies on your watch.**
+Everyone else hands you a team of AI personas to manage. Claw Fleet keeps a single long task alive across context windows, restarts, and machines — relaying it from agent to agent automatically — while every decision that needs you lands in one inbox you can answer from your phone.
 Supports **Claude Code**, **Cursor**, **OpenClaw**, and **Codex**.
 
 **[▶ Watch the 66-second field guide](https://hoveychen.github.io/claw-fleet/#demo)** — Captain Claw walks all nine tips.
@@ -38,6 +38,8 @@ When you run AI coding agents across multiple projects — or lean on multi-agen
 
 No server required, no API key needed beyond what your agents already use.
 
+**The core bet:** most tools anthropomorphize — a *team* of agent personas you orchestrate and babysit. Fleet's unit of work is the **task**, not the agent. A task outlives any single context window through automatic session-to-session **relay**; its plan and progress live on disk (`TASKS.md`, handoff chains, wiki, memory) rather than in a conversation that gets compacted away; and you step in only for the decisions that genuinely need a human. You govern by exception — the fleet does the rest.
+
 > **Meet Captain Claw** 🦀 — our mascot. A battle-hardened crab commander who keeps every agent in formation.
 
 ---
@@ -53,7 +55,7 @@ The [66-second field guide](https://hoveychen.github.io/claw-fleet/#demo) in one
 | 3 | **No unsupervised sudo on my ship** | Guard intercepts risky commands, LLM risk analysis → [Approve anything](#approve-anything--the-decision-panel) |
 | 4 | **Answer with a click, not an essay** | One decision queue: questions, plans, permissions → [Approve anything](#approve-anything--the-decision-panel) |
 | 5 | **Dispatch the whole fleet from one place** | Launch detached sessions from a composer → [Dispatch and relay](#dispatch-and-relay) |
-| 6 | **Long task? Pass the baton** | Handoff chains outlive context windows → [Dispatch and relay](#dispatch-and-relay) |
+| 6 | **Long task? The task never dies** | Autonomous agent→agent relay outlives any context window → [Dispatch and relay](#dispatch-and-relay) |
 | 7 | **Your phone is the bridge now** | Mobile web app + push, full remote → [From anywhere](#from-anywhere) |
 | 8 | **The standup writes itself** | AI daily reports, copy as Markdown → [See everything](#see-everything) |
 | 9 | **Research it once, cite it forever** | The wiki: versioned, searchable, `[[slug]]`-linked → [The platform around it](#the-platform-around-it) |
@@ -150,7 +152,7 @@ A **floating decision window** pops cards up even when the main window is minimi
 
 **Launch sessions from the app.** Pick a workspace, write the prompt, choose model / reasoning effort / permission mode, attach context files — Fleet spawns a detached headless session and the launchpad manages them in tabs. Works from the phone too.
 
-**Handoff — long tasks outlive context windows.** When context runs long, an agent registers `fleet handoff --note "..."` and Fleet automatically spawns a successor session that picks up where it left off. The full relay chain stays visible (`接力 n/N`) on every card.
+**Autonomous relay — the task is the unit, not the agent.** When context runs long, an agent registers `fleet handoff --note "..."` and Fleet itself — no human, no API — spawns a successor in the same workspace, handing it the note as an opening brief and re-injecting the `TASKS.md` plan. One long task survives across any number of context windows this way; the full relay chain stays visible (`接力 n/N`) on every card. It's context-engineering as infrastructure, not a team of personas to manage.
 
 **Loops that actually survive.** `fleet loop create --interval 30m --prompt "..."` re-runs a prompt on schedule, each iteration a fresh detached session — reliable where in-session timers die with the turn.
 
