@@ -530,7 +530,9 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn usage_summaries(&self) -> Vec<crate::backend::SourceUsageSummary> {
-        self.probe.get("/usage_summaries").unwrap_or_default()
+        self.probe
+            .get(claw_fleet_core::routes::USAGE_SUMMARIES)
+            .unwrap_or_default()
     }
 
     fn today_usage(&self) -> crate::today_usage::TodayUsage {
@@ -811,7 +813,10 @@ impl crate::backend::Backend for RemoteBackend {
             enabled: bool,
         }
         self.probe
-            .post_json_ok("/plugins/set_enabled", &Req { plugin_id, enabled })
+            .post_json_ok(
+                claw_fleet_core::routes::PLUGINS_SET_ENABLED,
+                &Req { plugin_id, enabled },
+            )
     }
 
     fn install_plugin(&self, plugin_id: &str) -> Result<(), String> {

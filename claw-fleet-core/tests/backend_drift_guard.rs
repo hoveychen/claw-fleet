@@ -30,7 +30,7 @@
 //! acceptance criterion for the route-table unification (arch-extensibility P2).
 
 use regex::Regex;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,6 +38,7 @@ use std::path::{Path, PathBuf};
 const BACKEND_RS: &str = "src/backend.rs";
 const HOOKS_SERVER_RS: &str = "src/hooks_server.rs";
 const MOBILE_RELAY_RS: &str = "src/mobile_relay.rs";
+const ROUTES_RS: &str = "src/routes.rs";
 const LOCAL_BACKEND_RS: &str = "../claw-fleet-desktop/src/local_backend.rs";
 const REMOTE_RS: &str = "../claw-fleet-desktop/src/remote.rs";
 const MOBILE_WEB_SRC: &str = "../mobile-web/src";
@@ -360,16 +361,32 @@ fn norm_path(p: &str) -> String {
     }
 }
 
-/// HTTP path prefixes the RemoteBackend client calls (literal + `format!`).
+/// Map of route CONST_NAME -> path string, parsed from the shared `routes`
+/// module (`src/routes.rs`). P2 migrates path literals on both the client and
+/// server to reference these constants; the extractors below resolve a
+/// `routes::NAME` reference back to its path so the guard sees migrated and
+/// un-migrated routes uniformly (a partial migration stays correctly checked).
+fn route_consts() -> HashMap<String, String> {
+    let src = read(ROUTES_RS);
+    let re = Regex::new(r#"pub const ([A-Z][A-Z0-9_]*): &str = "([^"]*)";"#).unwrap();
+    re.captures_iter(&src)
+        .map(|c| (c[1].to_string(), c[2].to_string()))
+        .collect()
+}
+
+/// HTTP path prefixes the RemoteBackend client calls — string literals,
+/// `format!("/…")`, and `routes::CONST` references all resolved to the path.
 fn remote_endpoints() -> HashSet<String> {
     let src = read(REMOTE_RS);
+    let consts = route_consts();
     let calls = "get|get_bytes|get_ok|post_ok|post_json_ok|post_json|get_value|post_bytes";
-    let lit = Regex::new(&format!(
-        r#"\.(?:{calls})(?:::<[^>]*>)?\(\s*"(/[^"]*)""#
-    ))
-    .unwrap();
-    let fmt = Regex::new(&format!(
-        r#"\.(?:{calls})(?:::<[^>]*>)?\(\s*&?\s*format!\(\s*"(/[^"{{?]*)"#
+    let lit = Regex::new(&format!(r#"\.(?:{calls})(?:::<[^>]*>)?\(\s*"(/[^"]*)""#)).unwrap();
+    let fmt =
+        Regex::new(&format!(r#"\.(?:{calls})(?:::<[^>]*>)?\(\s*&?\s*format!\(\s*"(/[^"{{?]*)"#))
+            .unwrap();
+    // `.get(claw_fleet_core::routes::NAME` / `.post_json_ok(routes::NAME, …)`
+    let cref = Regex::new(&format!(
+        r#"\.(?:{calls})(?:::<[^>]*>)?\(\s*(?:claw_fleet_core::)?routes::([A-Z][A-Z0-9_]*)"#
     ))
     .unwrap();
     let mut out = HashSet::new();
@@ -379,12 +396,19 @@ fn remote_endpoints() -> HashSet<String> {
     for c in fmt.captures_iter(&src) {
         out.insert(norm_path(&c[1]));
     }
+    for c in cref.captures_iter(&src) {
+        if let Some(p) = consts.get(&c[1]) {
+            out.insert(norm_path(p));
+        }
+    }
     out
 }
 
-/// Exact route literals + `starts_with` prefixes served by `hooks_server`.
+/// Exact route literals + `starts_with` prefixes served by `hooks_server` —
+/// string literals and `routes::CONST` arm patterns both resolved to the path.
 fn hooks_server_routes() -> (HashSet<String>, Vec<String>) {
     let src = read(HOOKS_SERVER_RS);
+    let consts = route_consts();
     // A route literal is a "/..." string immediately followed (after optional
     // whitespace) by `=>`, an `if`-guard, or a `|` alternation.
     let arm = Regex::new(r#""(/[^"]*)"\s*(?:=>|if\b|\|)"#).unwrap();
@@ -393,7 +417,19 @@ fn hooks_server_routes() -> (HashSet<String>, Vec<String>) {
         routes.insert(norm_path(&c[1]));
     }
     let pre = Regex::new(r#"starts_with\(\s*"(/[^"]*)""#).unwrap();
-    let prefixes: Vec<String> = pre.captures_iter(&src).map(|c| c[1].to_string()).collect();
+    let mut prefixes: Vec<String> = pre.captures_iter(&src).map(|c| c[1].to_string()).collect();
+    // `crate::routes::NAME =>` / `routes::NAME if … =>` arm patterns.
+    let cref = Regex::new(r#"(?:crate::)?routes::([A-Z][A-Z0-9_]*)\s*(?:=>|if\b|\|)"#).unwrap();
+    for c in cref.captures_iter(&src) {
+        if let Some(p) = consts.get(&c[1]) {
+            // SOURCES_PREFIX is matched by prefix, not as an exact route.
+            if p.ends_with('/') {
+                prefixes.push(p.clone());
+            } else {
+                routes.insert(norm_path(p));
+            }
+        }
+    }
     (routes, prefixes)
 }
 
