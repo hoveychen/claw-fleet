@@ -180,6 +180,33 @@ fn extract_session_meta(lines: &[Value]) -> Option<&Value> {
         .and_then(|v| v.get("payload"))
 }
 
+/// Read the rollout `originator` (`session_meta.payload.originator`) from a
+/// rollout file, reading **only the first line** — `session_meta` is always
+/// line 1, so this stays a few-hundred-byte read even for a huge transcript.
+///
+/// This is Codex's Fleet-ownership signal: Fleet stamps
+/// [`crate::codex_launch::CODEX_FLEET_ORIGINATOR`] via
+/// `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`, and it lands here (the SQLite `source`
+/// column does not carry it). Surfaced on [`SessionInfo::entrypoint`] so
+/// [`crate::session_launch::is_fleet_owned_entrypoint`] classifies the session
+/// uniformly with Claude. `None` when the file is unreadable or the line has no
+/// originator (e.g. an older rollout format).
+fn read_rollout_originator(rollout_path: &Path) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+    let file = fs::File::open(rollout_path).ok()?;
+    let mut first_line = String::new();
+    BufReader::new(file).read_line(&mut first_line).ok()?;
+    let v: Value = serde_json::from_str(first_line.trim()).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
+        return None;
+    }
+    v.get("payload")
+        .and_then(|p| p.get("originator"))
+        .and_then(|o| o.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
 /// Extract the model name from turn_context lines.
 fn extract_model(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
@@ -872,6 +899,11 @@ fn build_session_from_sqlite(
         .agent_role
         .or_else(|| thread.agent_role.clone());
 
+    // Fleet-ownership marker: the rollout `originator` (see
+    // `read_rollout_originator`). Fleet-launched Codex sessions carry
+    // `originator == "fleet"`, which `is_fleet_owned_entrypoint` recognises.
+    let entrypoint = read_rollout_originator(&rollout_path);
+
     let uri = build_uri(&rollout_path)?;
 
     Some(SessionInfo {
@@ -879,7 +911,7 @@ fn build_session_from_sqlite(
         workspace_path: thread.cwd.clone(),
         workspace_name,
         ide_name: source_info.ide_name,
-        entrypoint: None,
+        entrypoint,
         is_subagent: source_info.is_subagent,
         parent_session_id: source_info.parent_thread_id,
         agent_type,
@@ -904,7 +936,12 @@ fn build_session_from_sqlite(
         thinking_level,
         pid,
         pid_precise,
-        // Codex sessions are never Fleet-spawned, so no argv carries their id.
+        // Liveness is not yet stamped for Codex: `apply_pid_liveness` runs only
+        // in the Claude scan path. `pid_precise` already carries the "a live
+        // codex process matches this thread id" signal; promoting it to
+        // `proc_alive` (the interrupt / enqueue gate) is M4 (P12). Until then a
+        // Fleet-owned Codex session is auto-resumable (source-agnostic gate) but
+        // not yet interruptible / enqueue-drainable.
         proc_alive: false,
         pending_tool_batch: false,
         last_skill: None,
@@ -926,9 +963,44 @@ fn build_session_from_sqlite(
 mod tests {
     use super::{
         codex_rate_limit_state_from_usage, compute_token_stats, extract_context_percent,
-        CodexRateLimitWindow, CodexUsageItem,
+        read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
     };
     use serde_json::json;
+
+    /// The scanner's Fleet-ownership signal: the rollout's first `session_meta`
+    /// line carries `originator`, and Fleet stamps `"fleet"` there via
+    /// `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`. `read_rollout_originator` must pull
+    /// exactly that value (and only from a real `session_meta` line).
+    #[test]
+    fn read_rollout_originator_pulls_session_meta_originator() {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","payload":{{"id":"t1","originator":"fleet","source":"exec"}}}}"#
+        )
+        .unwrap();
+        writeln!(f, r#"{{"type":"turn_context","payload":{{"model":"gpt-5"}}}}"#).unwrap();
+        assert_eq!(
+            read_rollout_originator(f.path()).as_deref(),
+            Some("fleet"),
+            "must read originator from the first session_meta line"
+        );
+    }
+
+    #[test]
+    fn read_rollout_originator_none_without_meta_or_field() {
+        use std::io::Write;
+        // First line is not session_meta → None (we only trust line 1).
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"type":"turn_context","payload":{{"model":"gpt-5"}}}}"#).unwrap();
+        assert_eq!(read_rollout_originator(f.path()), None);
+
+        // session_meta without an originator field → None.
+        let mut g = tempfile::NamedTempFile::new().unwrap();
+        writeln!(g, r#"{{"type":"session_meta","payload":{{"id":"t2"}}}}"#).unwrap();
+        assert_eq!(read_rollout_originator(g.path()), None);
+    }
 
     fn window(used_percent: i32, window_mins: i64, resets_at_secs: i64) -> CodexRateLimitWindow {
         CodexRateLimitWindow {
@@ -1220,6 +1292,14 @@ fn parse_codex_session(
             .map(|s| s.to_string())
     });
 
+    // Fleet-ownership marker: rollout `originator` (already in the parsed
+    // `session_meta` here, so no extra read). Fleet-launched Codex sessions
+    // carry `originator == "fleet"`, recognised by `is_fleet_owned_entrypoint`.
+    let entrypoint = meta
+        .and_then(|m| m.get("originator").and_then(|o| o.as_str()))
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
     let uri = build_uri(rollout_path)?;
 
     Some(SessionInfo {
@@ -1227,7 +1307,7 @@ fn parse_codex_session(
         workspace_path,
         workspace_name,
         ide_name: source_info.ide_name,
-        entrypoint: None,
+        entrypoint,
         is_subagent: source_info.is_subagent,
         parent_session_id: source_info.parent_thread_id,
         agent_type,
@@ -1252,7 +1332,12 @@ fn parse_codex_session(
         thinking_level,
         pid,
         pid_precise,
-        // Codex sessions are never Fleet-spawned, so no argv carries their id.
+        // Liveness is not yet stamped for Codex: `apply_pid_liveness` runs only
+        // in the Claude scan path. `pid_precise` already carries the "a live
+        // codex process matches this thread id" signal; promoting it to
+        // `proc_alive` (the interrupt / enqueue gate) is M4 (P12). Until then a
+        // Fleet-owned Codex session is auto-resumable (source-agnostic gate) but
+        // not yet interruptible / enqueue-drainable.
         proc_alive: false,
         pending_tool_batch: false,
         last_skill: None,

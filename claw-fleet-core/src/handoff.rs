@@ -67,6 +67,18 @@ pub struct PendingHandoff {
     pub hop: u32,
     /// Epoch ms of registration — consumption past `EXPIRY_MS` is refused.
     pub created: u64,
+    /// Agent source of the predecessor, so the successor is spawned with the
+    /// same tool (`claude` handoffs relay to `claude`, `codex` to `codex`).
+    /// Uses config/`agent_source` names ("claude-code" / "codex"). Defaults to
+    /// "claude-code" for records written before this field existed.
+    #[serde(default = "default_agent_source")]
+    pub agent_source: String,
+}
+
+/// Serde default for [`PendingHandoff::agent_source`]: pending files written
+/// before Codex support relayed only Claude sessions.
+fn default_agent_source() -> String {
+    "claude-code".to_string()
 }
 
 /// One consumed relay step: `from` yielded its turn and `to` was spawned.
@@ -168,6 +180,7 @@ fn now_ms() -> u64 {
 /// registration by the same session. Fails when the chain the session sits on
 /// has already reached `MAX_CHAIN_HOPS`.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments)]
 pub fn register(
     session_id: &str,
     workspace_path: &str,
@@ -177,6 +190,7 @@ pub fn register(
     next_task: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
+    agent_source: &str,
 ) -> Result<PendingHandoff, String> {
     let pdir = pending_dir().ok_or("cannot determine home dir")?;
     let cdir = chain_dir().ok_or("cannot determine home dir")?;
@@ -191,6 +205,7 @@ pub fn register(
         next_task,
         model,
         effort,
+        agent_source,
         now_ms(),
     )
 }
@@ -207,6 +222,7 @@ fn register_in(
     next_task: Option<&str>,
     model: Option<&str>,
     effort: Option<&str>,
+    agent_source: &str,
     now: u64,
 ) -> Result<PendingHandoff, String> {
     let note = note.trim();
@@ -243,6 +259,14 @@ fn register_in(
         chain_id,
         hop,
         created: now,
+        agent_source: {
+            let s = agent_source.trim();
+            if s.is_empty() {
+                default_agent_source()
+            } else {
+                s.to_string()
+            }
+        },
     };
     fs::create_dir_all(pending_dir).map_err(|e| format!("create pending dir: {e}"))?;
     let path = pending_dir.join(format!("{session_id}.json"));
@@ -504,13 +528,44 @@ pub fn consume_and_spawn(session_id: &str) -> Result<Option<String>, String> {
         progress.as_deref(),
         session_id,
         now_ms(),
-        crate::session_launch::spawn_new_session_with_entrypoint,
+        spawn_successor_by_source,
+    )
+}
+
+/// Real successor spawner: routes to the predecessor's agent source via
+/// [`crate::agent_source::spawn_session`], so a Claude handoff relays to
+/// `claude` and a Codex handoff to `codex`. The [`HANDOFF_ENTRYPOINT`] stamp is
+/// honoured by the Claude source (`CLAUDE_CODE_ENTRYPOINT`); the Codex source
+/// ignores it and instead carries its Fleet-owned marker via the launch env
+/// (see `codex_launch`).
+fn spawn_successor_by_source(
+    agent_source: &str,
+    workspace_path: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    permission_mode: Option<&str>,
+    entrypoint: &str,
+) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    crate::agent_source::spawn_session(
+        agent_source,
+        &crate::agent_source::SpawnSpec {
+            workspace_path: workspace_path.to_string(),
+            prompt: prompt.to_string(),
+            model: model.map(str::to_string),
+            effort: effort.map(str::to_string),
+            permission_mode: permission_mode.map(str::to_string),
+            session_id: None,
+            entrypoint: entrypoint.to_string(),
+        },
     )
 }
 
 /// `consume_and_spawn` against explicit record dirs and an injectable spawner,
 /// so tests can observe exactly which launch flags the successor receives
-/// without starting a real `claude` process.
+/// without starting a real `claude` process. The spawner's first argument is
+/// the predecessor's `agent_source`, so tests can assert the relay routes to
+/// the right tool.
 fn consume_and_spawn_in<S>(
     pending_dir: &Path,
     chain_dir: &Path,
@@ -521,6 +576,7 @@ fn consume_and_spawn_in<S>(
 ) -> Result<Option<String>, String>
 where
     S: FnOnce(
+        &str,
         &str,
         &str,
         Option<&str>,
@@ -538,6 +594,7 @@ where
     // would silently switch models mid-plan. `permission_mode` is deliberately
     // left to the default: a relay should not inherit an elevated mode.
     let resp = spawn(
+        &pending.agent_source,
         &pending.workspace_path,
         &prompt,
         pending.model.as_deref(),
@@ -603,6 +660,7 @@ mod tests {
             Some("P4"),
             None,
             None,
+            "claude-code",
             now,
         )
     }
@@ -611,6 +669,7 @@ mod tests {
     /// the successor would actually have been started with.
     #[derive(Default)]
     struct SpawnSpy {
+        agent_source: Option<String>,
         model: Option<String>,
         effort: Option<String>,
     }
@@ -634,6 +693,7 @@ mod tests {
             None,
             Some("claude-fable-5"),
             Some("high"),
+            "claude-code",
             1000,
         )
         .unwrap();
@@ -645,9 +705,10 @@ mod tests {
             None,
             "s1",
             1001,
-            |_ws, _prompt, model, effort, _perm, entrypoint| {
+            |agent_source, _ws, _prompt, model, effort, _perm, entrypoint| {
                 assert_eq!(entrypoint, HANDOFF_ENTRYPOINT);
                 let mut s = spy.borrow_mut();
+                s.agent_source = Some(agent_source.to_string());
                 s.model = model.map(str::to_string);
                 s.effort = effort.map(str::to_string);
                 Ok(crate::session_launch::SpawnSessionResponse {
@@ -666,7 +727,60 @@ mod tests {
             "successor must inherit the predecessor's model, not the CLI default"
         );
         assert_eq!(spy.effort.as_deref(), Some("high"));
+        assert_eq!(
+            spy.agent_source.as_deref(),
+            Some("claude-code"),
+            "successor must be relayed on the predecessor's agent source"
+        );
         let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A Codex handoff must relay to Codex, not fall back to the Claude spawner.
+    /// The predecessor's `agent_source` recorded at registration decides which
+    /// tool the successor is launched with.
+    #[test]
+    fn codex_handoff_relays_on_codex() {
+        let (root, pdir, cdir) = fresh_dirs("codex-relay");
+        register_in(
+            &pdir, &cdir, "t1", "/ws", None, "note", None, None, None, None, "codex", 1000,
+        )
+        .unwrap();
+
+        let spy = std::cell::RefCell::new(SpawnSpy::default());
+        consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            "t1",
+            1001,
+            |agent_source, _ws, _prompt, _model, _effort, _perm, _entrypoint| {
+                spy.borrow_mut().agent_source = Some(agent_source.to_string());
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 7,
+                    session_id: Some("t2".to_string()),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(spy.into_inner().agent_source.as_deref(), Some("codex"));
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A pending record written before the `agent_source` field existed must
+    /// deserialize to the Claude default, so old handoffs still relay correctly.
+    #[test]
+    fn legacy_pending_without_source_defaults_to_claude() {
+        let legacy = r#"{
+            "fromSessionId": "s1",
+            "workspacePath": "/ws",
+            "note": "n",
+            "chainId": "c1",
+            "hop": 1,
+            "created": 1
+        }"#;
+        let rec: PendingHandoff = serde_json::from_str(legacy).unwrap();
+        assert_eq!(rec.agent_source, "claude-code");
     }
 
     /// A relay registered without a model (old pending files, or a session whose
@@ -677,15 +791,22 @@ mod tests {
         register_simple(&pdir, &cdir, "s1", "note", 1000).unwrap();
 
         let spy = std::cell::RefCell::new(SpawnSpy::default());
-        consume_and_spawn_in(&pdir, &cdir, None, "s1", 1001, |_w, _p, model, effort, _pm, _e| {
-            let mut s = spy.borrow_mut();
-            s.model = model.map(str::to_string);
-            s.effort = effort.map(str::to_string);
-            Ok(crate::session_launch::SpawnSessionResponse {
-                pid: 1,
-                session_id: Some("s2".to_string()),
-            })
-        })
+        consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            "s1",
+            1001,
+            |_src, _w, _p, model, effort, _pm, _e| {
+                let mut s = spy.borrow_mut();
+                s.model = model.map(str::to_string);
+                s.effort = effort.map(str::to_string);
+                Ok(crate::session_launch::SpawnSessionResponse {
+                    pid: 1,
+                    session_id: Some("s2".to_string()),
+                })
+            },
+        )
         .unwrap();
 
         let spy = spy.into_inner();
@@ -708,6 +829,7 @@ mod tests {
             chain_id: "c1".into(),
             hop: 1,
             created: 1,
+            agent_source: "claude-code".into(),
         }
     }
 
@@ -948,6 +1070,7 @@ mod tests {
             chain_id: "c1".into(),
             hop: 2,
             created: 1,
+            agent_source: "claude-code".into(),
         };
         let prompt = compose_successor_prompt(&p);
         assert!(prompt.contains("第 3 棒"));
