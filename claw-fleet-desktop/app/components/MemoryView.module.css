@@ -9,6 +9,18 @@
    Drop the class from one of them and its badges lose the declaration's host:
    rgb(var(--mem-user)) becomes an invalid value and the badge silently renders
    colourless. No gate catches that — the token IS defined, just not in scope. */
+/* Workspace filter dropdown in the banner (mirrors WikiView's .ws_select). */
+.ws_select {
+  background: var(--color-bg-field);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--color-text);
+  outline: none;
+  max-width: 200px;
+}
+
 .mem_scope {
   --mem-user: 16 185 129;     /* emerald */
   --mem-feedback: 245 158 11; /* amber */

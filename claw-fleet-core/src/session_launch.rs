@@ -16,51 +16,73 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Build an augmented PATH that includes common Node.js installation directories.
+/// Build an augmented PATH that includes common Node.js installation directories,
+/// with `front` dirs placed ahead of everything — used by
+/// [`spawn_claude_detached_with_envs`] to lead with `~/.claude/fleet/bin`.
+///
 /// GUI apps (like Tauri) launched by launchd carry a minimal PATH
 /// (`/usr/bin:/bin:/usr/sbin:/sbin`); a spawned `claude` child inheriting it
 /// can't find user-installed binaries (fleet, cws, node) from its Bash tool.
 /// Prepend the common Node/global install dirs so those tools resolve; the
 /// existing PATH stays at the tail so nothing is lost.
-pub(crate) fn augmented_path() -> String {
-    let mut dirs: Vec<String> = vec![
-        "/opt/homebrew/bin".to_string(),
-        "/usr/local/bin".to_string(),
-    ];
+///
+/// The entries are joined with [`std::env::join_paths`], which uses the
+/// platform's PATH separator. The old body joined with a hardcoded `":"`, which
+/// on Windows (separator `;`) handed every spawned agent an unparseable PATH —
+/// so its Bash tool, and every `git`/`node`/`fleet` it shelled out to, saw a
+/// single garbage entry. The existing PATH is split via `split_paths` first;
+/// feeding it in whole would make `join_paths` reject it (an element may not
+/// contain the separator).
+pub(crate) fn augmented_path_with_front(front: &[PathBuf]) -> String {
+    let mut dirs: Vec<PathBuf> = front.to_vec();
+    dirs.push(PathBuf::from("/opt/homebrew/bin"));
+    dirs.push(PathBuf::from("/usr/local/bin"));
     if let Some(home) = crate::session::real_home_dir() {
-        let h = home.display().to_string();
         // nvm
         if let Ok(nvm_dir) = std::env::var("NVM_DIR") {
             // Try to find the default node version
-            let default_path = std::path::PathBuf::from(&nvm_dir).join("alias/default");
+            let default_path = PathBuf::from(&nvm_dir).join("alias/default");
             if let Ok(version) = std::fs::read_to_string(&default_path) {
                 let version = version.trim();
-                let nvm_bin = format!("{nvm_dir}/versions/node/v{version}/bin");
-                if std::path::Path::new(&nvm_bin).is_dir() {
+                let nvm_bin = PathBuf::from(&nvm_dir)
+                    .join("versions/node")
+                    .join(format!("v{version}"))
+                    .join("bin");
+                if nvm_bin.is_dir() {
                     dirs.push(nvm_bin);
                 }
             }
             // Also try current symlink
-            let current = format!("{nvm_dir}/current/bin");
-            if std::path::Path::new(&current).is_dir() {
+            let current = PathBuf::from(&nvm_dir).join("current/bin");
+            if current.is_dir() {
                 dirs.push(current);
             }
         }
         // fnm
-        dirs.push(format!("{h}/Library/Application Support/fnm/aliases/default/bin"));
-        dirs.push(format!("{h}/.local/share/fnm/aliases/default/bin"));
+        dirs.push(home.join("Library/Application Support/fnm/aliases/default/bin"));
+        dirs.push(home.join(".local/share/fnm/aliases/default/bin"));
         // volta
-        dirs.push(format!("{h}/.volta/bin"));
+        dirs.push(home.join(".volta/bin"));
         // Common global install paths
-        dirs.push(format!("{h}/.local/bin"));
-        dirs.push(format!("{h}/.npm-global/bin"));
-        dirs.push(format!("{h}/.cargo/bin"));
+        dirs.push(home.join(".local/bin"));
+        dirs.push(home.join(".npm-global/bin"));
+        dirs.push(home.join(".cargo/bin"));
     }
-    // Append the existing PATH so we don't lose anything
-    if let Ok(existing) = std::env::var("PATH") {
-        dirs.push(existing);
+    // Append the existing PATH so we don't lose anything.
+    if let Some(existing) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&existing));
     }
-    dirs.join(":")
+    std::env::join_paths(&dirs)
+        .map(|os| os.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| {
+            // An element contained the separator — should not happen for the
+            // dirs above, but fall back to a manual join rather than losing PATH.
+            let sep = if cfg!(windows) { ";" } else { ":" };
+            dirs.iter()
+                .map(|p| p.to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join(sep)
+        })
 }
 
 /// Request body for the remote `/spawn_session` endpoint.
@@ -356,15 +378,8 @@ pub fn spawn_claude_detached_with_envs(
     // user-installed binaries (fleet, cws, node) from its Bash tool.
     // Prepend ~/.claude/fleet/bin (populated by fleet_cli::ensure_fleet_cli_link)
     // and the common install dirs; the parent's PATH stays at the tail.
-    let mut path = augmented_path();
-    if let Some(home) = crate::session::real_home_dir() {
-        path = format!(
-            "{}:{}",
-            home.join(".claude").join("fleet").join("bin").display(),
-            path
-        );
-    }
-    cmd.env("PATH", path);
+    let front: Vec<PathBuf> = crate::fleet_cli::fleet_bin_dir().into_iter().collect();
+    cmd.env("PATH", augmented_path_with_front(&front));
     // Fleet sessions are headless `claude -p`: after the final result the CLI
     // waits for still-running background subagents/workflows, but by default
     // only up to CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS (10 min, CC v2.1.182+) —
@@ -933,5 +948,34 @@ mod fleet_owned_tests {
         assert!(!is_fleet_owned_entrypoint(Some("claude-vscode")));
         assert!(!is_fleet_owned_entrypoint(Some("sdk-py")));
         assert!(!is_fleet_owned_entrypoint(None));
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    /// The joined PATH must split back into the same entries via
+    /// `std::env::split_paths`. This is the invariant a hardcoded `":"` join
+    /// broke on Windows (separator `;`): the whole string collapsed into one
+    /// unparseable entry. The test can't run on Windows in CI, but it locks the
+    /// join against regressing to manual `:`-concatenation on any platform.
+    #[test]
+    fn augmented_path_front_dir_leads_and_stays_a_separate_entry() {
+        let _guard = crate::session::fleet_home_lock();
+        let front = vec![PathBuf::from("/xyzzy-front/bin")];
+        let joined = augmented_path_with_front(&front);
+        let entries: Vec<PathBuf> = std::env::split_paths(&joined).collect();
+        assert_eq!(
+            entries.first(),
+            Some(&PathBuf::from("/xyzzy-front/bin")),
+            "front dir must be the first PATH entry, got {joined:?}"
+        );
+        // /usr/local/bin is always injected; it must survive as its own entry,
+        // not glued onto a neighbour by a wrong separator.
+        assert!(
+            entries.iter().any(|p| p == &PathBuf::from("/usr/local/bin")),
+            "injected dirs must each be a separate entry, got {joined:?}"
+        );
     }
 }

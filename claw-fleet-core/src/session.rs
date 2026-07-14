@@ -91,6 +91,14 @@ pub struct SessionInfo {
     /// reconciles with the global aggregate.
     pub agent_token_speed: f64,
     pub total_output_tokens: u64,
+    /// Last finalized turn's total input tokens (`input_tokens +
+    /// cache_creation_input_tokens + cache_read_input_tokens`) — i.e. the current
+    /// context-window size, reset by each compaction. Matches the per-session
+    /// `total_input_tokens` the daily report derives (`daily_report.rs`), so
+    /// "today's cumulative" can sum input on the same口径. `0` when no usage seen
+    /// yet or for sources (e.g. Codex) that don't track it.
+    #[serde(default)]
+    pub total_input_tokens: u64,
     /// Cumulative USD cost for this session alone (main or subagent).
     pub total_cost_usd: f64,
     /// Cost of this session + all its subagents' costs (main sessions only).
@@ -496,8 +504,48 @@ fn decode_workspace_path(encoded: &str) -> String {
     decode_workspace_path_with_parts(&parts)
 }
 
+/// Detect a Windows drive-letter prefix among dash-split path parts. Claude's
+/// `sanitizePath` maps both `:` and `\` to `-`, so `C:\Users\foo` encodes as
+/// `C--Users-foo`, which `split('-')` yields as `["C", "", "Users", "foo"]` —
+/// a single ASCII-letter head followed by an empty part (the `--`). Returns the
+/// drive letter and the remaining parts (empties inside the path are kept; the
+/// fs walk disambiguates them exactly as it does on unix).
+///
+/// Call site is unix-gated: on unix the same `["x", "", …]` shape is a real
+/// directory whose two chars collapsed (e.g. `/foo/_bar` → `foo--bar`), so this
+/// must NOT fire there. `test` cfg lets the pure logic be unit-tested on macOS.
+#[cfg(any(not(unix), test))]
+fn windows_drive_split<'a>(parts: &'a [&'a str]) -> Option<(&'a str, &'a [&'a str])> {
+    let first = parts.first()?;
+    if first.len() == 1
+        && first.as_bytes()[0].is_ascii_alphabetic()
+        && parts.get(1) == Some(&"")
+    {
+        Some((first, &parts[2..]))
+    } else {
+        None
+    }
+}
+
 pub fn decode_workspace_path_with_parts(parts: &[&str]) -> String {
-    let mut current = String::new(); // built path so far (e.g. "/Users/hoveychen")
+    // Windows: a drive path "C:\Users\foo" encodes as "C--Users-foo" (both `:`
+    // and `\` collapse to `-`) → ["C","","Users","foo"]. Start the walk at the
+    // drive root ("C:") instead of the unix filesystem root. Unix-gated: the
+    // same shape is a legitimate collapsed name there.
+    #[cfg(not(unix))]
+    if let Some((drive, rest)) = windows_drive_split(parts) {
+        return decode_walk(format!("{drive}:"), rest);
+    }
+    decode_walk(String::new(), parts)
+}
+
+/// Greedy filesystem-guided decode: at each level try the longest remaining
+/// dash-joined segment that names a real directory, shortening until one
+/// matches; fall back to a single part when nothing exists on disk. `start` is
+/// the already-decoded prefix — `""` for the unix root `/`, or `"C:"` for a
+/// Windows drive root.
+fn decode_walk(start: String, parts: &[&str]) -> String {
+    let mut current = start; // built path so far (e.g. "/Users/hoveychen")
     let mut i = 0;
     while i < parts.len() {
         // Build a map of (encoded dir name) → (real dir name) for the current
@@ -528,12 +576,14 @@ pub fn decode_workspace_path_with_parts(parts: &[&str]) -> String {
     current
 }
 
-/// Re-encode a single directory entry name the way Claude Code encodes paths:
-/// `/`, `.`, and `_` all collapse to `-`. (An entry name never contains `/`,
-/// but `.` and `_` are common.)
+/// Re-encode a single directory entry name the way Claude Code encodes paths.
+/// Claude's `sanitizePath` (claude-code-fork `src/utils/sessionStoragePortable.ts`)
+/// maps EVERY non-alphanumeric character to `-` — not just `/`, `.`, `_`. An
+/// entry name never contains `/`, but `.`, `_`, spaces, `+`, etc. are all
+/// collapsed, so matching only `.`/`_` missed real names like `a b` or `a+b`.
 fn encode_path_segment(name: &str) -> String {
     name.chars()
-        .map(|c| if c == '.' || c == '_' { '-' } else { c })
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
 }
 
@@ -547,7 +597,21 @@ fn encode_path_segment(name: &str) -> String {
 /// only followed when their target is not TCC-protected.
 fn read_level_dirs(parent: &str) -> std::collections::HashMap<String, String> {
     let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let dir = if parent.is_empty() { "/" } else { parent };
+    // A bare "C:" is drive-relative on Windows (it means "cwd on C"), so the
+    // drive ROOT needs the separator appended. Unix never builds a "C:"-shaped
+    // prefix (its walk starts at "" → "/…"), so this branch is inert there.
+    let drive_root;
+    let dir = if parent.is_empty() {
+        "/"
+    } else if parent.len() == 2
+        && parent.as_bytes()[1] == b':'
+        && parent.as_bytes()[0].is_ascii_alphabetic()
+    {
+        drive_root = format!("{parent}\\");
+        drive_root.as_str()
+    } else {
+        parent
+    };
     let dir_path = std::path::Path::new(dir);
     if crate::tcc::is_tcc_protected(dir_path) {
         return map;
@@ -582,8 +646,21 @@ fn read_level_dirs(parent: &str) -> std::collections::HashMap<String, String> {
 }
 
 pub(crate) fn encode_workspace_path(path: &str) -> String {
-    // "/Users/foo/bar-baz" → "-Users-foo-bar-baz"  (inverse of decode, but lossless for matching)
-    path.replace('/', "-")
+    // Mirror Claude Code's `sanitizePath`: EVERY non-alphanumeric char → `-`
+    // (claude-code-fork `src/utils/sessionStoragePortable.ts`). This is the key
+    // Fleet matches against both the `~/.claude/projects/<dir>` name and CC's
+    // scratchpad slug (`getProjectTempDir = join(tmp, sanitizePath(cwd))`).
+    // On Windows a drive path `C:\Users\foo` → `C--Users-foo` (`:` and `\` both
+    // collapse). Replacing only `/` broke every path containing `.`/`_`/space
+    // (all platforms) and every Windows path (no `/` at all).
+    //
+    // Not reproduced here: CC truncates + hashes names over 200 chars
+    // (`MAX_SANITIZED_LENGTH`), and the hash differs between its Bun and Node
+    // runtimes — irreproducible without knowing which ran, so deep (>200-char)
+    // paths fall through to the lossy fs-walk decode instead of a fast match.
+    path.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 /// Human-facing name for a workspace path. Shared with the memory module so
@@ -594,7 +671,7 @@ pub(crate) fn workspace_name(path: &str) -> String {
     if crate::chat_workspace::is_chat_workspace(path) {
         return crate::chat_workspace::CHAT_WORKSPACE_NAME.to_string();
     }
-    let segments: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let segments: Vec<&str> = path.split(['/', '\\']).filter(|s| !s.is_empty()).collect();
     // Fleet develops plans inside `<repo-root>/.worktrees/<task-id>` (see the
     // worktree workflow). Such a checkout belongs to the repo, so name it after
     // the segment before `.worktrees` rather than the task-id leaf.
@@ -608,6 +685,23 @@ pub(crate) fn workspace_name(path: &str) -> String {
         .copied()
         .unwrap_or(path)
         .to_string()
+}
+
+#[cfg(test)]
+mod workspace_name_win_tests {
+    use super::workspace_name;
+
+    #[test]
+    fn windows_backslash_path_yields_basename() {
+        // A real Windows path reaches here from lock files / browsed dirs.
+        // Splitting on '/' only leaves the whole `C:\...\proj` as the name.
+        assert_eq!(workspace_name("C:\\Users\\foo\\proj"), "proj");
+    }
+
+    #[test]
+    fn windows_worktree_uses_repo_name() {
+        assert_eq!(workspace_name("C:\\code\\repo\\.worktrees\\task-1"), "repo");
+    }
 }
 
 // ── CLI process scanning ─────────────────────────────────────────────────────
@@ -2321,8 +2415,11 @@ pub fn parse_session_info(
     // gate is applied later in `apply_pid_liveness`.
     let pending_tool_batch = has_pending_noninteractive_tool_batch(&last_n);
     let stats = acc.stats();
-    let context_percent = acc
-        .context_usage()
+    let ctx_usage = acc.context_usage();
+    // Last-turn total input (input + cache_creation + cache_read) — the current
+    // context-window size, same value the daily report sums per session.
+    let total_input_tokens = ctx_usage.as_ref().map(|(used, _, _)| *used).unwrap_or(0);
+    let context_percent = ctx_usage
         .and_then(|(used, model, max)| compute_context_percent(used, Some(&model), max));
     let last_message_preview = extract_last_text(&last_n);
 
@@ -2365,6 +2462,7 @@ pub fn parse_session_info(
         token_speed: stats.token_speed,
         agent_token_speed: stats.token_speed,
         total_output_tokens: stats.total_output_tokens,
+        total_input_tokens,
         total_cost_usd: stats.total_cost_usd,
         agent_total_cost_usd: stats.total_cost_usd,
         cost_speed_usd_per_min: stats.cost_speed_usd_per_min,
@@ -3121,6 +3219,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         token_speed: 0.0,
         agent_token_speed: 0.0,
         total_output_tokens: 0,
+        total_input_tokens: 0,
         total_cost_usd: 0.0,
         agent_total_cost_usd: 0.0,
         cost_speed_usd_per_min: 0.0,
@@ -3428,6 +3527,7 @@ mod tests {
             token_speed: 10.0,
             agent_token_speed: 10.0,
             total_output_tokens: 500,
+            total_input_tokens: 0,
             total_cost_usd: 0.0,
             agent_total_cost_usd: 0.0,
             cost_speed_usd_per_min: 0.0,
@@ -5091,6 +5191,57 @@ mod tests {
         assert_eq!(decoded, original);
     }
 
+    #[test]
+    fn encode_workspace_path_matches_claude_sanitize_all_non_alnum() {
+        // Claude Code's sanitizePath (sessionStoragePortable.ts) maps EVERY
+        // non-alphanumeric char to '-', not just '/'. Fleet uses this encode
+        // both to match the `~/.claude/projects/<dir>` name AND to locate CC's
+        // scratchpad slug (`getProjectTempDir = join(tmp, sanitizePath(cwd))`).
+        // Replacing only '/' left '.'/'_'/spaces intact, so those workspaces
+        // never matched — a cross-platform bug, not Windows-specific.
+        assert_eq!(
+            encode_workspace_path("/Users/foo/my_app.v2"),
+            "-Users-foo-my-app-v2"
+        );
+        assert_eq!(encode_workspace_path("/a b/c"), "-a-b-c");
+        // A Windows drive path: ':' and '\' both collapse to '-'.
+        assert_eq!(
+            encode_workspace_path("C:\\Users\\foo\\proj"),
+            "C--Users-foo-proj"
+        );
+    }
+
+    #[test]
+    fn encode_path_segment_collapses_all_non_alnum() {
+        // Mirrors sanitizePath at the single-segment level so read_level_dirs
+        // re-encodes on-disk names the way CC encoded them.
+        assert_eq!(encode_path_segment("my_app.v2"), "my-app-v2");
+        assert_eq!(encode_path_segment("a b"), "a-b");
+        assert_eq!(encode_path_segment("plain"), "plain");
+    }
+
+    #[test]
+    fn windows_drive_split_recognizes_drive_letter_prefix() {
+        // "C:\Users\foo" → sanitizePath → "C--Users-foo" → split → these parts.
+        // The single-letter head + empty second part is the `--` from `:`+`\`.
+        assert_eq!(
+            super::windows_drive_split(&["C", "", "Users", "foo"]),
+            Some(("C", &["Users", "foo"][..]))
+        );
+        // Empties inside the path are preserved for the fs walk to disambiguate.
+        assert_eq!(
+            super::windows_drive_split(&["D", "", "a", "", "b"]),
+            Some(("D", &["a", "", "b"][..]))
+        );
+        // A unix-style leading-dash encoding ("-Users-foo" → ["Users","foo"])
+        // has no empty second part → not a drive.
+        assert_eq!(super::windows_drive_split(&["Users", "foo"]), None);
+        // A two-char head is not a drive letter.
+        assert_eq!(super::windows_drive_split(&["ab", "", "x"]), None);
+        // Single letter but no empty second part (a real 1-char dir) → not a drive.
+        assert_eq!(super::windows_drive_split(&["a", "b"]), None);
+    }
+
     // ── age_out_status tests ────────────────────────────────────────────────
 
     #[test]
@@ -6008,6 +6159,43 @@ pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
     kill_pid_tree(pid, false)
 }
 
+/// Build `taskkill` arguments to force-kill whole process trees. `None` when
+/// there are no pids — the caller must NOT spawn a bare `taskkill /F /T /PID`,
+/// which is a syntax error. Each pid needs its OWN `/PID`: `taskkill /F /T /PID
+/// a b c` is rejected by taskkill, so the pre-fix multi-pid workspace kill
+/// silently no-oped while still reporting success.
+#[cfg(any(not(unix), test))]
+fn build_taskkill_tree_args(pids: &[u32]) -> Option<Vec<String>> {
+    if pids.is_empty() {
+        return None;
+    }
+    let mut args = vec!["/F".to_string(), "/T".to_string()];
+    for &p in pids {
+        args.push("/PID".to_string());
+        args.push(p.to_string());
+    }
+    Some(args)
+}
+
+#[cfg(test)]
+mod taskkill_tests {
+    use super::build_taskkill_tree_args;
+
+    #[test]
+    fn each_pid_gets_its_own_pid_flag_and_empty_is_none() {
+        // Zero pids: caller must skip taskkill entirely, not emit `/F /T /PID`.
+        assert!(
+            build_taskkill_tree_args(&[]).is_none(),
+            "empty pid set must yield None, not a bare `taskkill /F /T /PID`"
+        );
+        // Multiple pids: taskkill needs `/PID a /PID b`, never `/PID a b`.
+        let args = build_taskkill_tree_args(&[100, 200]).expect("non-empty must be Some");
+        let pid_flags = args.iter().filter(|a| a.as_str() == "/PID").count();
+        assert_eq!(pid_flags, 2, "each pid needs its own /PID, got {args:?}");
+        assert!(args.contains(&"/F".to_string()) && args.contains(&"/T".to_string()));
+    }
+}
+
 /// Kill `pid` **and every descendant**. Signalling the root alone leaves the
 /// agent's tool children — a build, a test run, a dev server — reparented to
 /// init and still burning CPU after the agent itself is gone.
@@ -6103,17 +6291,26 @@ pub fn kill_workspace_impl(workspace_path: &str) -> Result<(), String> {
 
     #[cfg(not(unix))]
     {
-        crate::process_util::command("taskkill")
-            .args(["/F", "/T", "/PID"])
-            .args(
-                scan_cli_processes()
-                    .iter()
-                    .filter(|p| p.cwd == workspace_path)
-                    .map(|p| p.pid.to_string())
-                    .collect::<Vec<_>>(),
-            )
+        let pids: Vec<u32> = scan_cli_processes()
+            .iter()
+            .filter(|p| p.cwd == workspace_path)
+            .map(|p| p.pid)
+            .collect();
+        // Match the unix branch: an empty workspace is an explicit error, not a
+        // bare `taskkill /F /T /PID` that spawn-succeeds, syntax-errors, and is
+        // then reported as success. `build_taskkill_tree_args` also gives each
+        // pid its own `/PID` (`/PID a b c` is rejected by taskkill).
+        let Some(args) = build_taskkill_tree_args(&pids) else {
+            return Err(format!("No agent processes found in {}", workspace_path));
+        };
+        let status = crate::process_util::command("taskkill")
+            .args(&args)
             .status()
             .map_err(|e| format!("taskkill failed: {e}"))?;
+        crate::log_debug(&format!(
+            "kill_workspace: taskkill {:?} for '{}' -> {}",
+            args, workspace_path, status
+        ));
         Ok(())
     }
 }
