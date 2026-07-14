@@ -79,17 +79,26 @@ pub(crate) fn cmd_session_resume() {
 }
 
 /// The current session's id, for attributing `fleet plan` / `fleet session`
-/// actions. Prefers `FLEET_SESSION_ID` (set by the Fleet supervisor) and falls
-/// back to `CLAUDE_CODE_SESSION_ID` (set by Claude Code for *every* session,
-/// Fleet-managed or not). Both carry the same value under Fleet — the supervisor
-/// launches claude with `--session-id <id>` and exports `FLEET_SESSION_ID=<id>`,
-/// and that id equals the session's jsonl stem (i.e. `SessionInfo.id`), so the
-/// side-channel key always matches what the card looks up.
+/// actions. Prefers `FLEET_SESSION_ID` (set by the Fleet supervisor and by the
+/// Codex resume launcher) and falls back to `CLAUDE_CODE_SESSION_ID` (set by
+/// Claude Code for *every* session, Fleet-managed or not). For a Fleet-spawned
+/// **new** Codex session neither is set — Codex exposes no session-id env and
+/// mints its thread id after spawn — so a third fallback resolves the
+/// `FLEET_CODEX_LAUNCH_TOKEN` the spawn stamped back to the thread id Fleet
+/// recorded once `thread.started` landed. The resolved id equals the session's
+/// rollout id (i.e. `SessionInfo.id`), so the side-channel key always matches
+/// what the card looks up.
 pub(crate) fn read_fleet_session_id() -> Option<String> {
     resolve_session_id(
         std::env::var("FLEET_SESSION_ID").ok(),
         std::env::var("CLAUDE_CODE_SESSION_ID").ok(),
     )
+    .or_else(|| {
+        std::env::var("FLEET_CODEX_LAUNCH_TOKEN")
+            .ok()
+            .filter(|t| !t.is_empty())
+            .and_then(|t| claw_fleet_core::codex_launch::resolve_launch_token(&t))
+    })
 }
 
 /// Pure resolution: first non-empty of (`FLEET_SESSION_ID`, `CLAUDE_CODE_SESSION_ID`).
