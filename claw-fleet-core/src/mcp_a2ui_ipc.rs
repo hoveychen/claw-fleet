@@ -117,6 +117,10 @@ pub fn poll_response(id: &str, timeout: Duration) -> Option<A2uiRenderResponse> 
 /// Write a response file. Called by the desktop / fleet serve after the user
 /// resolves the rendered A2UI surface.
 pub fn write_response(resp: &A2uiRenderResponse) -> Result<(), String> {
+    // Only a live pending request may be answered — see guard::write_response.
+    if !request_path(&resp.id).map(|p| p.exists()).unwrap_or(false) {
+        return Err(format!("no pending request for id {}", resp.id));
+    }
     let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write fleet-render-a2ui response: {e}"))
