@@ -504,8 +504,48 @@ fn decode_workspace_path(encoded: &str) -> String {
     decode_workspace_path_with_parts(&parts)
 }
 
+/// Detect a Windows drive-letter prefix among dash-split path parts. Claude's
+/// `sanitizePath` maps both `:` and `\` to `-`, so `C:\Users\foo` encodes as
+/// `C--Users-foo`, which `split('-')` yields as `["C", "", "Users", "foo"]` —
+/// a single ASCII-letter head followed by an empty part (the `--`). Returns the
+/// drive letter and the remaining parts (empties inside the path are kept; the
+/// fs walk disambiguates them exactly as it does on unix).
+///
+/// Call site is unix-gated: on unix the same `["x", "", …]` shape is a real
+/// directory whose two chars collapsed (e.g. `/foo/_bar` → `foo--bar`), so this
+/// must NOT fire there. `test` cfg lets the pure logic be unit-tested on macOS.
+#[cfg(any(not(unix), test))]
+fn windows_drive_split<'a>(parts: &'a [&'a str]) -> Option<(&'a str, &'a [&'a str])> {
+    let first = parts.first()?;
+    if first.len() == 1
+        && first.as_bytes()[0].is_ascii_alphabetic()
+        && parts.get(1) == Some(&"")
+    {
+        Some((first, &parts[2..]))
+    } else {
+        None
+    }
+}
+
 pub fn decode_workspace_path_with_parts(parts: &[&str]) -> String {
-    let mut current = String::new(); // built path so far (e.g. "/Users/hoveychen")
+    // Windows: a drive path "C:\Users\foo" encodes as "C--Users-foo" (both `:`
+    // and `\` collapse to `-`) → ["C","","Users","foo"]. Start the walk at the
+    // drive root ("C:") instead of the unix filesystem root. Unix-gated: the
+    // same shape is a legitimate collapsed name there.
+    #[cfg(not(unix))]
+    if let Some((drive, rest)) = windows_drive_split(parts) {
+        return decode_walk(format!("{drive}:"), rest);
+    }
+    decode_walk(String::new(), parts)
+}
+
+/// Greedy filesystem-guided decode: at each level try the longest remaining
+/// dash-joined segment that names a real directory, shortening until one
+/// matches; fall back to a single part when nothing exists on disk. `start` is
+/// the already-decoded prefix — `""` for the unix root `/`, or `"C:"` for a
+/// Windows drive root.
+fn decode_walk(start: String, parts: &[&str]) -> String {
+    let mut current = start; // built path so far (e.g. "/Users/hoveychen")
     let mut i = 0;
     while i < parts.len() {
         // Build a map of (encoded dir name) → (real dir name) for the current
@@ -536,12 +576,14 @@ pub fn decode_workspace_path_with_parts(parts: &[&str]) -> String {
     current
 }
 
-/// Re-encode a single directory entry name the way Claude Code encodes paths:
-/// `/`, `.`, and `_` all collapse to `-`. (An entry name never contains `/`,
-/// but `.` and `_` are common.)
+/// Re-encode a single directory entry name the way Claude Code encodes paths.
+/// Claude's `sanitizePath` (claude-code-fork `src/utils/sessionStoragePortable.ts`)
+/// maps EVERY non-alphanumeric character to `-` — not just `/`, `.`, `_`. An
+/// entry name never contains `/`, but `.`, `_`, spaces, `+`, etc. are all
+/// collapsed, so matching only `.`/`_` missed real names like `a b` or `a+b`.
 fn encode_path_segment(name: &str) -> String {
     name.chars()
-        .map(|c| if c == '.' || c == '_' { '-' } else { c })
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
 }
 
@@ -555,7 +597,21 @@ fn encode_path_segment(name: &str) -> String {
 /// only followed when their target is not TCC-protected.
 fn read_level_dirs(parent: &str) -> std::collections::HashMap<String, String> {
     let mut map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-    let dir = if parent.is_empty() { "/" } else { parent };
+    // A bare "C:" is drive-relative on Windows (it means "cwd on C"), so the
+    // drive ROOT needs the separator appended. Unix never builds a "C:"-shaped
+    // prefix (its walk starts at "" → "/…"), so this branch is inert there.
+    let drive_root;
+    let dir = if parent.is_empty() {
+        "/"
+    } else if parent.len() == 2
+        && parent.as_bytes()[1] == b':'
+        && parent.as_bytes()[0].is_ascii_alphabetic()
+    {
+        drive_root = format!("{parent}\\");
+        drive_root.as_str()
+    } else {
+        parent
+    };
     let dir_path = std::path::Path::new(dir);
     if crate::tcc::is_tcc_protected(dir_path) {
         return map;
@@ -590,8 +646,21 @@ fn read_level_dirs(parent: &str) -> std::collections::HashMap<String, String> {
 }
 
 pub(crate) fn encode_workspace_path(path: &str) -> String {
-    // "/Users/foo/bar-baz" → "-Users-foo-bar-baz"  (inverse of decode, but lossless for matching)
-    path.replace('/', "-")
+    // Mirror Claude Code's `sanitizePath`: EVERY non-alphanumeric char → `-`
+    // (claude-code-fork `src/utils/sessionStoragePortable.ts`). This is the key
+    // Fleet matches against both the `~/.claude/projects/<dir>` name and CC's
+    // scratchpad slug (`getProjectTempDir = join(tmp, sanitizePath(cwd))`).
+    // On Windows a drive path `C:\Users\foo` → `C--Users-foo` (`:` and `\` both
+    // collapse). Replacing only `/` broke every path containing `.`/`_`/space
+    // (all platforms) and every Windows path (no `/` at all).
+    //
+    // Not reproduced here: CC truncates + hashes names over 200 chars
+    // (`MAX_SANITIZED_LENGTH`), and the hash differs between its Bun and Node
+    // runtimes — irreproducible without knowing which ran, so deep (>200-char)
+    // paths fall through to the lossy fs-walk decode instead of a fast match.
+    path.chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+        .collect()
 }
 
 /// Human-facing name for a workspace path. Shared with the memory module so
@@ -5120,6 +5189,57 @@ mod tests {
         assert_eq!(encoded, "-Users-foo-bar");
         let decoded = decode_workspace_path(&encoded);
         assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn encode_workspace_path_matches_claude_sanitize_all_non_alnum() {
+        // Claude Code's sanitizePath (sessionStoragePortable.ts) maps EVERY
+        // non-alphanumeric char to '-', not just '/'. Fleet uses this encode
+        // both to match the `~/.claude/projects/<dir>` name AND to locate CC's
+        // scratchpad slug (`getProjectTempDir = join(tmp, sanitizePath(cwd))`).
+        // Replacing only '/' left '.'/'_'/spaces intact, so those workspaces
+        // never matched — a cross-platform bug, not Windows-specific.
+        assert_eq!(
+            encode_workspace_path("/Users/foo/my_app.v2"),
+            "-Users-foo-my-app-v2"
+        );
+        assert_eq!(encode_workspace_path("/a b/c"), "-a-b-c");
+        // A Windows drive path: ':' and '\' both collapse to '-'.
+        assert_eq!(
+            encode_workspace_path("C:\\Users\\foo\\proj"),
+            "C--Users-foo-proj"
+        );
+    }
+
+    #[test]
+    fn encode_path_segment_collapses_all_non_alnum() {
+        // Mirrors sanitizePath at the single-segment level so read_level_dirs
+        // re-encodes on-disk names the way CC encoded them.
+        assert_eq!(encode_path_segment("my_app.v2"), "my-app-v2");
+        assert_eq!(encode_path_segment("a b"), "a-b");
+        assert_eq!(encode_path_segment("plain"), "plain");
+    }
+
+    #[test]
+    fn windows_drive_split_recognizes_drive_letter_prefix() {
+        // "C:\Users\foo" → sanitizePath → "C--Users-foo" → split → these parts.
+        // The single-letter head + empty second part is the `--` from `:`+`\`.
+        assert_eq!(
+            super::windows_drive_split(&["C", "", "Users", "foo"]),
+            Some(("C", &["Users", "foo"][..]))
+        );
+        // Empties inside the path are preserved for the fs walk to disambiguate.
+        assert_eq!(
+            super::windows_drive_split(&["D", "", "a", "", "b"]),
+            Some(("D", &["a", "", "b"][..]))
+        );
+        // A unix-style leading-dash encoding ("-Users-foo" → ["Users","foo"])
+        // has no empty second part → not a drive.
+        assert_eq!(super::windows_drive_split(&["Users", "foo"]), None);
+        // A two-char head is not a drive letter.
+        assert_eq!(super::windows_drive_split(&["ab", "", "x"]), None);
+        // Single letter but no empty second part (a real 1-char dir) → not a drive.
+        assert_eq!(super::windows_drive_split(&["a", "b"]), None);
     }
 
     // ── age_out_status tests ────────────────────────────────────────────────
