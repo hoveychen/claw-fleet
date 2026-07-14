@@ -1076,17 +1076,18 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     () => (getItem("notification-mode") as NotificationMode) || "user_action",
   );
 
+  // OS notification permission is requested only when the user opts into a
+  // notifying mode — never on mount, so the first launch isn't interrupted
+  // by a system dialog before the user knows what the app does.
   const handleNotifModeChange = useCallback((mode: NotificationMode) => {
     setNotifMode(mode);
     setItem("notification-mode", mode);
     invoke("set_notification_mode", { mode }).catch(() => {});
-  }, []);
-
-  // Request notification permission on mount if not granted
-  useEffect(() => {
-    isPermissionGranted().then((granted) => {
-      if (!granted) requestPermission().catch(() => {});
-    }).catch(() => {});
+    if (mode !== "none") {
+      isPermissionGranted().then((granted) => {
+        if (!granted) requestPermission().catch(() => {});
+      }).catch(() => {});
+    }
   }, []);
 
   // ── TTS / chime state ──────────────────────────────────────────────────
