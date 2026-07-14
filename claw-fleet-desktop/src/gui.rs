@@ -666,9 +666,7 @@ async fn get_source_usage(
     // background refresh thread is no longer needed.
     {
         let summary = match source.as_str() {
-            "cursor" => Some(backend::SourceUsageSummary::from_cursor(&val)),
             "codex" => Some(backend::SourceUsageSummary::from_codex(&val)),
-            "openclaw" => Some(backend::SourceUsageSummary::from_openclaw(&val)),
             _ => None,
         };
         if let Some(summary) = summary {
@@ -1861,7 +1859,7 @@ fn install_fleet_skill() -> Result<SkillInstallResult, String> {
 
     if installed.is_empty() && errors.is_empty() {
         errors.push(
-            "No supported AI tools detected. Install Claude Code, Cursor, GitHub Copilot, or Gemini CLI first.".to_string(),
+            "No supported AI tools detected. Install Claude Code, Codex, GitHub Copilot, or Gemini CLI first.".to_string(),
         );
     }
 
@@ -3329,9 +3327,7 @@ fn build_tray_menu(
                 .collect();
             let source_label = match summary.source.as_str() {
                 "claude" => "Claude",
-                "cursor" => "Cursor",
                 "codex" => "Codex",
-                "openclaw" => "OpenClaw",
                 other => other,
             };
             let line = format!("{}\t{}", source_label, parts.join("\t"));
