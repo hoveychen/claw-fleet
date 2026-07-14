@@ -268,6 +268,17 @@ export function LiteApp() {
                 {t("history.only_active", "仅活跃")}
                 <span className={styles.active_count}>{activeCount}</span>
               </button>
+              {unreadSessions.length > 0 && (
+                <button
+                  type="button"
+                  className={styles.mark_all_read}
+                  onClick={() => markManyRead(unreadSessions)}
+                  title={t("history.mark_all_read", "全部已读") + ` (${unreadSessions.length})`}
+                >
+                  <CheckCheck size={14} strokeWidth={1.8} />
+                  <span className={styles.mark_all_read_count}>{unreadSessions.length}</span>
+                </button>
+              )}
             </div>
 
             <div className={styles.segments}>
@@ -282,18 +293,6 @@ export function LiteApp() {
                 </button>
               ))}
             </div>
-
-            {unreadSessions.length > 0 && (
-              <button
-                type="button"
-                className={styles.mark_all_read}
-                onClick={() => markManyRead(unreadSessions)}
-                title={t("history.mark_all_read_tip", "把所有未读会话标记为已读")}
-              >
-                <CheckCheck size={13} strokeWidth={1.8} />
-                {t("history.mark_all_read", "全部已读")} ({unreadSessions.length})
-              </button>
-            )}
           </div>
 
           {/* New session — the primary action. */}

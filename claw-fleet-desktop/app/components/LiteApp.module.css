@@ -183,13 +183,15 @@
   color: var(--color-text);
 }
 
-/* Mark-all-read shortcut, shown only when there are unread tasks. */
+/* Mark-all-read shortcut — a compact icon+count button sharing the filter row
+   with the active toggle, shown only when there are unread tasks. */
 .mark_all_read {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  gap: 5px;
+  gap: 3px;
   height: 26px;
+  padding: 0 7px;
+  flex-shrink: 0;
   border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
   border-radius: var(--radius-sm, 6px);
   background: transparent;
@@ -202,6 +204,11 @@
 .mark_all_read:hover {
   background: var(--color-bg-hover);
   color: var(--color-text);
+}
+
+.mark_all_read_count {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
 .segments {
