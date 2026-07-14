@@ -3,16 +3,15 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   openSettingsWindow,
-  useDecisionStore,
   useDetailStore,
   useSessionsStore,
   useUIStore,
   useWaitingAlertsStore,
 } from "../store";
 import type { SessionInfo } from "../types";
+import { isWorkflowAgent } from "../workflowAgent";
 import { getItem, setItem } from "../storage";
 import { CostSpeedChart } from "./CostSpeedChart";
-import { DecisionPanel } from "./DecisionPanel";
 import { LiteDecisionHistory } from "./LiteDecisionHistory";
 import { LiteSessionCard } from "./LiteSessionCard";
 import { MascotAlertBubble } from "./MascotAlertBubble";
@@ -33,6 +32,20 @@ const ACTIVE_STATUSES = [
   "delegating",
 ] as const;
 
+/**
+ * Lite mode = a phone-shaped portrait strip that mirrors the desktop's task
+ * page in a mobile form factor:
+ *
+ *   • List page  — a top overview strip (charts + mascot/usage ring) followed
+ *     by the full session list (active + recent). The whole page scrolls, so
+ *     scrolling down past the overview reveals the complete task list.
+ *   • Detail page — tapping a task pushes SessionDetail over the full window;
+ *     SessionDetail's own close button (rendered because `lite && !inline`)
+ *     acts as the back affordance.
+ *
+ * Decision cards are NOT rendered here — in lite mode they always pop out as
+ * the standalone `decision-float` window (see App.tsx's float bridge).
+ */
 export function LiteApp() {
   const { t } = useTranslation();
   const { sessions, setSessions, refresh } = useSessionsStore();
@@ -42,7 +55,6 @@ export function LiteApp() {
     liteDecisionHistorySessionId,
     mascotVisible,
   } = useUIStore();
-  const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
   const hasAlerts = useWaitingAlertsStore(
     (s) => s.alerts.some((a) => !s.dismissedIds.has(a.sessionId)),
   );
@@ -67,14 +79,31 @@ export function LiteApp() {
     };
   }, [setSessions, refresh]);
 
-  const active = sessions.filter((s) =>
+  // Task list mirrors the desktop task page: active sessions first, then the
+  // most recent idle ones. Workflow agents are hidden (opened via DAG node).
+  const visible = sessions.filter((s) => !isWorkflowAgent(s));
+  const active = visible.filter((s) =>
     ACTIVE_STATUSES.includes(s.status as typeof ACTIVE_STATUSES[number]),
   );
+  const idle = visible
+    .filter((s) => s.status === "idle")
+    .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
 
-  const openSession = (s: typeof active[number]) => {
-    // Stay in lite mode — render SessionDetail inline instead of the drawer.
+  const openSession = (s: SessionInfo) => {
+    // Push the detail over the full window; SessionDetail's close button
+    // brings us back to the list.
     open(s).catch(() => {});
   };
+
+  const renderGroup = (list: SessionInfo[]) =>
+    list.map((s, i) => (
+      <LiteSessionCard
+        key={s.jsonlPath}
+        session={s}
+        nextIsSubagent={list[i + 1]?.isSubagent === true}
+        onClick={() => openSession(s)}
+      />
+    ));
 
   return (
     <div className={styles.lite}>
@@ -140,49 +169,58 @@ export function LiteApp() {
         <div className={styles.detail_area}>
           <LiteDecisionHistory sessionId={liteDecisionHistorySessionId} />
         </div>
-      ) : hasDecision ? (
-        <DecisionPanel compact />
       ) : openedSession ? (
         <div className={styles.detail_area}>
           <SessionDetail lite />
         </div>
       ) : (
         <div className={styles.body}>
-          <div className={styles.monitor}>
-            <TokenSpeedChart compact />
-            <CostSpeedChart compact />
-          </div>
+          {/* Overview strip — kept from the old dashboard, now anchored at the
+              top of the scrolling list page. */}
+          <div className={styles.overview}>
+            <div className={styles.monitor}>
+              <TokenSpeedChart compact />
+              <CostSpeedChart compact />
+            </div>
 
-          <div className={styles.list}>
-            {active.length > 0 ? (
-              active.map((s, i) => (
-                <LiteSessionCard
-                  key={s.jsonlPath}
-                  session={s}
-                  nextIsSubagent={active[i + 1]?.isSubagent === true}
-                  onClick={() => openSession(s)}
+            {mascotVisible && (
+              <div className={styles.mascot_slot}>
+                <MascotAlertBubble />
+                <MascotEyes
+                  suppressQuip={hasAlerts}
+                  dashboardMode
+                  usageRing={usageRing ? {
+                    percent: usageRing.overall,
+                    topSource: usageRing.topSource,
+                    sources: usageRing.sources,
+                    onClick: () => setShowUsage(true),
+                  } : null}
                 />
-              ))
-            ) : (
-              <p className={styles.empty}>{t("no_sessions")}</p>
+              </div>
             )}
           </div>
 
-          {mascotVisible && (
-            <div className={styles.mascot_slot}>
-              <MascotAlertBubble />
-              <MascotEyes
-                suppressQuip={hasAlerts}
-                dashboardMode
-                usageRing={usageRing ? {
-                  percent: usageRing.overall,
-                  topSource: usageRing.topSource,
-                  sources: usageRing.sources,
-                  onClick: () => setShowUsage(true),
-                } : null}
-              />
-            </div>
-          )}
+          {/* Task list — the sidebar, mobile-style. */}
+          <div className={styles.list}>
+            {active.length === 0 && idle.length === 0 ? (
+              <p className={styles.empty}>{t("no_sessions")}</p>
+            ) : (
+              <>
+                {active.length > 0 && (
+                  <section className={styles.group}>
+                    <div className={styles.group_label}>{t("active")}</div>
+                    {renderGroup(active)}
+                  </section>
+                )}
+                {idle.length > 0 && (
+                  <section className={styles.group}>
+                    <div className={styles.group_label}>{t("recent")}</div>
+                    {renderGroup(idle)}
+                  </section>
+                )}
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
