@@ -72,6 +72,65 @@ pub const CODEX_FLEET_ORIGINATOR: &str = "fleet";
 /// default). Uses Codex's config/`agent_source` name, not the api name.
 pub const FLEET_AGENT_SOURCE_CODEX: &str = "codex";
 
+/// Env var Fleet stamps on a **new** Codex spawn carrying a launch token.
+///
+/// Codex mints its own thread id *after* spawn and — unlike Claude's
+/// `CLAUDE_CODE_SESSION_ID` — exposes no session-id env to its shell tools, so
+/// a Codex child has no way to learn its own id. Fleet can't inject the thread
+/// id at spawn (it isn't known yet), so instead it injects a token it *does*
+/// know up front, and writes a `token → thread-id` note the moment
+/// `thread.started` arrives. In-session tooling (`fleet handoff`, `fleet plan`)
+/// resolves the token back to the thread id via [`resolve_launch_token`], the
+/// third fallback in the CLI's `read_fleet_session_id`. The resume path needs
+/// none of this — it already knows the thread id and stamps `FLEET_SESSION_ID`
+/// directly.
+pub const FLEET_CODEX_LAUNCH_TOKEN_ENV: &str = "FLEET_CODEX_LAUNCH_TOKEN";
+
+/// Directory holding the `token → thread-id` notes (`<token>` file whose
+/// contents are the Codex thread id). Lives under the Fleet dir alongside
+/// `launch-spec`.
+fn launch_token_dir() -> Option<std::path::PathBuf> {
+    crate::session::get_fleet_dir().map(|d| d.join("codex-launch-tokens"))
+}
+
+fn launch_token_path(token: &str) -> Option<std::path::PathBuf> {
+    // Tokens are Fleet-minted uuids; reject anything that could escape the dir.
+    if token.is_empty()
+        || token.contains('/')
+        || token.contains('\\')
+        || token.contains("..")
+    {
+        return None;
+    }
+    launch_token_dir().map(|d| d.join(token))
+}
+
+/// Record that the Codex spawn tagged with `token` produced thread `thread_id`,
+/// so the child can resolve its own session id from the token env.
+pub fn record_launch_token(token: &str, thread_id: &str) {
+    let Some(path) = launch_token_path(token) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            crate::log_debug(&format!("codex_launch: create token dir: {e}"));
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(&path, thread_id) {
+        crate::log_debug(&format!("codex_launch: write token {token}: {e}"));
+    }
+}
+
+/// Resolve a Codex launch token to the thread id Fleet recorded for it, or
+/// `None` if the token is unknown (thread.started hasn't landed yet, or this is
+/// not a Fleet spawn).
+pub fn resolve_launch_token(token: &str) -> Option<String> {
+    let path = launch_token_path(token)?;
+    let id = std::fs::read_to_string(&path).ok()?.trim().to_string();
+    (!id.is_empty()).then_some(id)
+}
+
 /// Pin `HOME` + augment `PATH` exactly like the Claude spawn, so a
 /// launchd-minimal `PATH` doesn't strand the child's tools. Shared by the
 /// new-session spawn and the resume launcher. See
@@ -186,12 +245,17 @@ pub fn spawn_new_codex_session(
 
     let args = build_codex_exec_args(&workspace_path, prompt, model, effort);
 
+    // Token the child reads back (via `FLEET_CODEX_LAUNCH_TOKEN`) to learn its
+    // own thread id once `thread.started` lands and we write the note below.
+    let launch_token = uuid::Uuid::new_v4().to_string();
+
     crate::log_debug(&format!(
-        "new_codex_session: {} exec … (cwd={}, model={:?}, effort={:?})",
+        "new_codex_session: {} exec … (cwd={}, model={:?}, effort={:?}, token={})",
         codex.display(),
         workspace_path,
         model,
-        effort
+        effort,
+        launch_token,
     ));
 
     {
@@ -221,6 +285,7 @@ pub fn spawn_new_codex_session(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::from(stderr_file));
     apply_codex_launch_env(&mut cmd);
+    cmd.env(FLEET_CODEX_LAUNCH_TOKEN_ENV, &launch_token);
 
     let mut child = cmd
         .spawn()
@@ -284,6 +349,9 @@ pub fn spawn_new_codex_session(
             // paths (resume / handoff) inherit the same model/effort — the same
             // note Claude spawns write, keyed by session id.
             crate::launch_spec::record(&thread_id, model, effort);
+            // Resolve the launch token to this thread id so the child's
+            // `fleet handoff` / `fleet plan` can learn its own session id.
+            record_launch_token(&launch_token, &thread_id);
             Some(thread_id)
         }
         Err(_) => {
@@ -422,6 +490,10 @@ pub fn resume_codex_session(
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::from(stderr_file));
     apply_codex_launch_env(&mut cmd);
+    // Resume knows the thread id up front (it *is* the one being resumed), so
+    // stamp it directly — no launch-token indirection needed. The child's
+    // `read_fleet_session_id` reads this as its session id.
+    cmd.env("FLEET_SESSION_ID", session_id);
 
     let mut child = cmd
         .spawn()
@@ -483,6 +555,67 @@ pub fn resume_codex_session(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pin `FLEET_HOME` to a temp dir so the token store writes there, not the
+    /// real `~/.fleet`. Mirrors `launch_spec`'s test harness.
+    struct TmpHome {
+        dir: std::path::PathBuf,
+        prev: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl TmpHome {
+        fn new(tag: &str) -> Self {
+            let lock = crate::session::fleet_home_lock();
+            let dir = std::env::temp_dir().join(format!(
+                "fleet-codextok-{}-{}-{}",
+                tag,
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos()
+            ));
+            std::fs::create_dir_all(&dir).unwrap();
+            let prev = std::env::var_os("FLEET_HOME");
+            unsafe { std::env::set_var("FLEET_HOME", &dir) };
+            Self { dir, prev, _lock: lock }
+        }
+    }
+
+    impl Drop for TmpHome {
+        fn drop(&mut self) {
+            unsafe {
+                match self.prev.take() {
+                    Some(p) => std::env::set_var("FLEET_HOME", p),
+                    None => std::env::remove_var("FLEET_HOME"),
+                }
+            }
+            let _ = std::fs::remove_dir_all(&self.dir);
+        }
+    }
+
+    #[test]
+    fn launch_token_roundtrip_resolves_thread_id() {
+        let _home = TmpHome::new("token-rt");
+        // Unknown token before any spawn recorded it.
+        assert_eq!(resolve_launch_token("tok-1"), None);
+        record_launch_token("tok-1", "019f-thread-abc");
+        assert_eq!(
+            resolve_launch_token("tok-1").as_deref(),
+            Some("019f-thread-abc")
+        );
+    }
+
+    #[test]
+    fn launch_token_rejects_path_traversal() {
+        let _home = TmpHome::new("token-traversal");
+        // A token that could escape the store dir must resolve to nothing and
+        // write nothing (no panic, no file outside the dir).
+        record_launch_token("../evil", "x");
+        assert_eq!(resolve_launch_token("../evil"), None);
+        assert_eq!(resolve_launch_token(""), None);
+    }
 
     #[test]
     fn arg_builder_minimal_has_exec_json_cwd_and_prompt_after_dashdash() {
@@ -552,6 +685,44 @@ mod tests {
         assert!(
             sid.len() >= 8 && sid.contains('-'),
             "thread id looks like a uuid: {sid}"
+        );
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// Live end-to-end (M3 P10 acceptance): a Fleet-spawned Codex session must
+    /// be resolvable back to its thread id from the launch token alone — the
+    /// exact path a Codex child's `fleet handoff` / `fleet plan` takes, since
+    /// Codex exposes no session-id env of its own. Spawn a real session, find
+    /// the token note Fleet wrote for its thread id, then prove
+    /// `read_fleet_session_id`'s resolver (`resolve_launch_token`) round-trips
+    /// the token back to that id.
+    ///   `cargo test -p claw-fleet-core codex_launch::tests::live_fleet_session_id -- --ignored`
+    #[test]
+    #[ignore = "spawns a real codex session; run manually with --ignored"]
+    fn live_fleet_session_id_resolves_from_launch_token() {
+        let ws = std::env::temp_dir().join(format!("fleet-codex-tok-live-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let resp = spawn_new_codex_session(ws.to_str().unwrap(), "reply with exactly: OK", None, None)
+            .expect("spawn should succeed");
+        let sid = resp.session_id.expect("thread id captured");
+
+        // Find the token whose note points at this thread id (the spawn just
+        // wrote it once `thread.started` landed).
+        let dir = launch_token_dir().expect("token dir");
+        let mut found_token = None;
+        for entry in std::fs::read_dir(&dir).expect("token dir readable").flatten() {
+            let content = std::fs::read_to_string(entry.path()).unwrap_or_default();
+            if content.trim() == sid {
+                found_token = entry.file_name().to_str().map(str::to_string);
+                break;
+            }
+        }
+        let token = found_token.expect("a launch-token note maps to the spawned thread id");
+        // This is exactly what the child does: token env → thread id.
+        assert_eq!(
+            resolve_launch_token(&token).as_deref(),
+            Some(sid.as_str()),
+            "launch token must resolve to the session's own thread id"
         );
         let _ = std::fs::remove_dir_all(&ws);
     }
