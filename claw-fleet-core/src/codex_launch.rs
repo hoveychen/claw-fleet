@@ -131,6 +131,78 @@ pub fn resolve_launch_token(token: &str) -> Option<String> {
     (!id.is_empty()).then_some(id)
 }
 
+// ── Spawn-pid notes (new-session liveness) ───────────────────────────────────
+//
+// A freshly spawned `codex exec` does NOT carry its thread id in argv — Codex
+// mints the id after launch — so a new session mid-first-turn is invisible to
+// the argv-based liveness check (`codex_source::codex_proc_alive`). Left
+// unpatched, the enqueue-drain gate reads a still-running new session as idle
+// and fires a *second* `codex exec resume` on it, corrupting the transcript
+// (the exact hazard `pending_message` exists to avoid).
+//
+// So at spawn time — the one moment Fleet holds both the freshly-minted thread
+// id and the child pid — we drop a `thread-id → pid` note. Liveness then means
+// "that pid is still a live Codex process" (checked against the scanned live
+// set, so a recycled pid belonging to some other process never reads as alive).
+// The note is deleted when the child exits, so a finished session is drainable.
+
+/// Directory holding `thread-id → spawn-pid` notes (`<thread-id>` file whose
+/// contents are the decimal pid). Lives under the Fleet dir alongside
+/// `codex-launch-tokens`.
+fn spawn_pid_dir() -> Option<std::path::PathBuf> {
+    crate::session::get_fleet_dir().map(|d| d.join("codex-spawn-pids"))
+}
+
+fn spawn_pid_path(thread_id: &str) -> Option<std::path::PathBuf> {
+    // Thread ids are Codex-minted uuids; reject anything that could escape the dir.
+    if thread_id.is_empty()
+        || thread_id.contains('/')
+        || thread_id.contains('\\')
+        || thread_id.contains("..")
+    {
+        return None;
+    }
+    spawn_pid_dir().map(|d| d.join(thread_id))
+}
+
+/// Record that Fleet spawned Codex thread `thread_id` as OS process `pid`, so the
+/// new-session liveness check can recognise it while its thread id is not yet in
+/// any argv.
+pub fn record_spawn_pid(thread_id: &str, pid: u32) {
+    let Some(path) = spawn_pid_path(thread_id) else {
+        return;
+    };
+    if let Some(parent) = path.parent() {
+        if let Err(e) = std::fs::create_dir_all(parent) {
+            crate::log_debug(&format!("codex_launch: create spawn-pid dir: {e}"));
+            return;
+        }
+    }
+    if let Err(e) = std::fs::write(&path, pid.to_string()) {
+        crate::log_debug(&format!("codex_launch: write spawn-pid {thread_id}: {e}"));
+    }
+}
+
+/// The pid Fleet recorded for a spawned Codex thread, or `None` if unknown (not a
+/// Fleet spawn, or the session has already exited and its note was cleared).
+pub fn resolve_spawn_pid(thread_id: &str) -> Option<u32> {
+    let path = spawn_pid_path(thread_id)?;
+    std::fs::read_to_string(&path).ok()?.trim().parse().ok()
+}
+
+/// Drop a spawned Codex thread's pid note (called when the child exits).
+/// Idempotent — a missing note is success.
+pub fn clear_spawn_pid(thread_id: &str) {
+    let Some(path) = spawn_pid_path(thread_id) else {
+        return;
+    };
+    match std::fs::remove_file(&path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => crate::log_debug(&format!("codex_launch: clear spawn-pid {thread_id}: {e}")),
+    }
+}
+
 /// Pin `HOME` + augment `PATH` exactly like the Claude spawn, so a
 /// launchd-minimal `PATH` doesn't strand the child's tools. Shared by the
 /// new-session spawn and the resume launcher. See
@@ -305,10 +377,17 @@ pub fn spawn_new_codex_session(
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         let mut tx = Some(tx);
+        // Thread id captured from `thread.started`, kept so we can drop its
+        // spawn-pid note once the child exits below.
+        let mut spawned_thread: Option<String> = None;
         for line in reader.lines() {
             let Ok(line) = line else { break };
             if let Some(sender) = tx.as_ref() {
                 if let Some(thread_id) = parse_thread_started(&line) {
+                    // Note the spawn pid so new-session liveness can recognise
+                    // this still-running session before its id lands in any argv.
+                    record_spawn_pid(&thread_id, pid);
+                    spawned_thread = Some(thread_id.clone());
                     let _ = sender.send(thread_id);
                     tx = None; // fire once
                 }
@@ -317,6 +396,11 @@ pub fn spawn_new_codex_session(
         }
         // stdout closed → reap the child and log its exit.
         let result = child.wait();
+        // Session is gone: drop the spawn-pid note so a later pid reuse can never
+        // read this dead session as alive.
+        if let Some(tid) = spawned_thread.take() {
+            clear_spawn_pid(&tid);
+        }
         if let Ok(mut f) = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
