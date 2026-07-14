@@ -247,11 +247,15 @@ pub trait Backend: Send + Sync {
     fn interrupt_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_pid(&self, pid: u32) -> Result<(), String>;
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String>;
-    /// Headlessly resume a session: spawns `claude --resume <session_id>
-    /// -p <prompt> [--model <m>] [--effort <e>] [--permission-mode <pm>]`
-    /// detached in the given workspace directory. `prompt` of `None`/empty
-    /// means "continue" (the rate-limit auto-resume shape); the history panel
-    /// passes the user's follow-up text plus optional per-turn overrides.
+    /// Headlessly resume a session, routing by `agent_source`: a claude-code
+    /// session spawns `claude --resume <session_id> -p <prompt> [--model <m>]
+    /// [--effort <e>] [--permission-mode <pm>]`, a codex session spawns
+    /// `codex exec resume <session_id> --json -- <prompt>`, both detached in the
+    /// given workspace directory. `prompt` of `None`/empty means "continue"
+    /// (the rate-limit auto-resume shape); the history panel passes the user's
+    /// follow-up text plus optional per-turn overrides. `agent_source` is the
+    /// session's `SessionInfo::agent_source` ("claude-code" / "codex"); blank
+    /// defaults to claude for older callers.
     fn resume_session(
         &self,
         session_id: String,
@@ -260,6 +264,7 @@ pub trait Backend: Send + Sync {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
+        agent_source: String,
     ) -> Result<(), String>;
     /// Queue a follow-up message for a session that is still mid-turn. Fleet
     /// sessions are one-shot `-p` processes with no live stdin, so a message

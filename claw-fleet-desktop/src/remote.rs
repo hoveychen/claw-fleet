@@ -378,6 +378,7 @@ impl crate::backend::Backend for RemoteBackend {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
+        agent_source: String,
     ) -> Result<(), String> {
         let req = claw_fleet_core::auto_resume::ResumeSessionRequest {
             session_id,
@@ -386,6 +387,7 @@ impl crate::backend::Backend for RemoteBackend {
             model,
             effort,
             permission_mode,
+            agent_source,
         };
         self.probe.post_json_ok(claw_fleet_core::routes::RESUME_SESSION, &req)
     }
@@ -2150,6 +2152,14 @@ fn connect_remote_start_probe(
                         );
                         for (session_id, workspace_path) in candidates {
                             ar_last_fire.insert(session_id.clone(), std::time::Instant::now());
+                            // Route by source so the probe resumes a codex session
+                            // via `codex exec resume`; look it up from the same
+                            // locked snapshot.
+                            let agent_source = s
+                                .iter()
+                                .find(|sess| sess.id == session_id)
+                                .map(|sess| sess.agent_source.clone())
+                                .unwrap_or_else(|| "claude-code".to_string());
                             let req = claw_fleet_core::auto_resume::ResumeSessionRequest {
                                 session_id: session_id.clone(),
                                 workspace_path,
@@ -2157,6 +2167,7 @@ fn connect_remote_start_probe(
                                 model: None,
                                 effort: None,
                                 permission_mode: None,
+                                agent_source,
                             };
                             match probe2.post_json_ok(claw_fleet_core::routes::RESUME_SESSION, &req)
                             {

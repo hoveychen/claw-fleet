@@ -57,6 +57,7 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
       await invoke("resume_rate_limited_session", {
         sessionId: session.id,
         workspacePath: session.workspacePath,
+        agentSource: session.agentSource,
       });
     } catch (err) {
       console.error("resume failed", err);

@@ -941,6 +941,7 @@ export function SessionDetail({
                   <ResumeComposer
                     sessionId={liveSession.id}
                     workspacePath={liveSession.workspacePath}
+                    agentSource={liveSession.agentSource}
                     onResumed={() => {}}
                     mode={canEnqueue ? "enqueue" : "resume"}
                     pendingMessages={liveSession.pendingMessages ?? []}

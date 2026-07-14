@@ -28,13 +28,18 @@ pub(crate) fn resume_rate_limited_session(
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<String>,
+    agent_source: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state
-        .backend
-        .read()
-        .unwrap()
-        .resume_session(session_id, workspace_path, prompt, model, effort, permission_mode)
+    state.backend.read().unwrap().resume_session(
+        session_id,
+        workspace_path,
+        prompt,
+        model,
+        effort,
+        permission_mode,
+        agent_source.unwrap_or_default(),
+    )
 }
 
 /// Queue a follow-up message for a session that is still mid-turn. The message

@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::agent_source::{AgentSource, WatchStrategy};
+use crate::agent_source::{AgentSource, ResumeSpec, WatchStrategy};
 use crate::backend::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::{get_claude_dir, SessionInfo};
@@ -140,6 +140,22 @@ impl AgentSource for ClaudeCodeSource {
             spec.permission_mode.as_deref(),
             spec.session_id.as_deref(),
             entrypoint,
+        )
+    }
+
+    fn resume(
+        &self,
+        spec: &ResumeSpec,
+        on_exit: Box<dyn FnOnce(bool) + Send>,
+    ) -> Result<(), String> {
+        crate::auto_resume::spawn_resume_tracked_prompt(
+            &spec.session_id,
+            &spec.workspace_path,
+            &spec.prompt,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+            spec.permission_mode.as_deref(),
+            on_exit,
         )
     }
 }

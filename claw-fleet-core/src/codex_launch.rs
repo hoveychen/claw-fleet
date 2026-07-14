@@ -22,6 +22,16 @@
 //!    same id). This is the analogue of Claude's pre-assigned `--session-id`,
 //!    just learned a few milliseconds *after* spawn instead of chosen before.
 //!
+//! 3. **Resume is `codex exec resume <thread-id>` (verified 2026-07-14,
+//!    codex-cli 0.144.4).** `codex exec resume [SESSION_ID] [PROMPT]` takes the
+//!    thread id as its first positional and supports `--json`,
+//!    `--skip-git-repo-check`, `-m`, `-c` — but **not** `-C` (resume filters by
+//!    cwd, and an explicit UUID takes precedence, so the child's `current_dir`
+//!    is what scopes it). stdin must still be `/dev/null`, and the resumed run
+//!    re-emits the same `thread.started` id on its first stdout line, then the
+//!    turn events, ending in `turn.completed` with exit code 0. See
+//!    [`build_codex_resume_args`] / [`resume_codex_session`].
+//!
 //! The transcript itself is NOT read from stdout here — `CodexSource` already
 //! reads the on-disk rollout (`~/.codex/sessions/.../rollout-*.jsonl[.zst]`),
 //! whose schema differs from the `--json` event stream. After the thread id is
@@ -43,6 +53,18 @@ use crate::session_launch::{
 /// up on id correlation. Codex prints it within a few ms of spawn; a generous
 /// ceiling covers a cold binary / slow disk without hanging session launch.
 const THREAD_STARTED_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Pin `HOME` + augment `PATH` exactly like the Claude spawn, so a
+/// launchd-minimal `PATH` doesn't strand the child's tools. Shared by the
+/// new-session spawn and the resume launcher. See
+/// `session_launch::spawn_claude_detached_with_envs`.
+fn apply_codex_launch_env(cmd: &mut std::process::Command) {
+    if let Some(home) = crate::session::real_home_dir() {
+        cmd.env("HOME", home);
+    }
+    let front: Vec<std::path::PathBuf> = crate::fleet_cli::fleet_bin_dir().into_iter().collect();
+    cmd.env("PATH", augmented_path_with_front(&front));
+}
 
 /// Build the `codex exec` argv for a headless spawn.
 ///
@@ -171,13 +193,7 @@ pub fn spawn_new_codex_session(
         // Piped so we can read the `thread.started` line; drained afterward.
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::from(stderr_file));
-    // Pin HOME + augment PATH exactly like the Claude spawn, so a launchd-minimal
-    // PATH doesn't strand the child's tools. See `spawn_claude_detached_with_envs`.
-    if let Some(home) = crate::session::real_home_dir() {
-        cmd.env("HOME", home);
-    }
-    let front: Vec<std::path::PathBuf> = crate::fleet_cli::fleet_bin_dir().into_iter().collect();
-    cmd.env("PATH", augmented_path_with_front(&front));
+    apply_codex_launch_env(&mut cmd);
 
     let mut child = cmd
         .spawn()
@@ -253,6 +269,188 @@ pub fn spawn_new_codex_session(
     };
 
     Ok(SpawnSessionResponse { pid, session_id })
+}
+
+/// Build the `codex exec resume` argv for headlessly resuming a thread.
+///
+/// Shape (verified against codex-cli 0.144.4):
+/// `codex exec resume <thread-id> --json --skip-git-repo-check
+/// [-m <model>] [-c model_reasoning_effort=<e>] -- <prompt>`.
+///
+/// The thread id is `resume`'s first positional; the prompt goes after `--`
+/// (so a prompt starting with `-` is never parsed as a flag). Unlike the spawn
+/// builder there is **no `-C`** — `codex exec resume` has no working-dir flag;
+/// it scopes by the child's cwd, and the explicit thread id takes precedence
+/// over cwd filtering anyway. Blank model/effort are dropped.
+pub fn build_codex_resume_args(
+    session_id: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "exec".to_string(),
+        "resume".to_string(),
+        session_id.to_string(),
+        "--json".to_string(),
+        "--skip-git-repo-check".to_string(),
+    ];
+    if let Some(m) = model.map(str::trim).filter(|m| !m.is_empty()) {
+        args.push("-m".to_string());
+        args.push(m.to_string());
+    }
+    if let Some(e) = effort.map(str::trim).filter(|e| !e.is_empty()) {
+        args.push("-c".to_string());
+        args.push(format!("model_reasoning_effort={e}"));
+    }
+    args.push("--".to_string());
+    args.push(prompt.to_string());
+    args
+}
+
+/// Headlessly resume an existing Codex thread: spawns
+/// `codex exec resume <thread-id> --json … -- "<prompt>"` detached in
+/// `workspace_path`, then returns once the child is launched. The Codex
+/// analogue of [`crate::auto_resume::spawn_resume_tracked_prompt`].
+///
+/// `on_exit(success)` is invoked from the reaper thread when the resume process
+/// exits, so the auto-resume scheduler can free its concurrency slot and record
+/// backoff. Blank `prompt` falls back to "continue" (matching the Claude
+/// resume). stdin is `/dev/null` (Codex otherwise blocks reading stdin); the
+/// resumed process's stdout is drained-and-discarded (the on-disk rollout is
+/// what the scanner reads).
+pub fn resume_codex_session(
+    session_id: &str,
+    workspace_path: &str,
+    prompt: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+    on_exit: Box<dyn FnOnce(bool) + Send>,
+) -> Result<(), String> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return Err("session_id is required".to_string());
+    }
+    let prompt = prompt.trim();
+    let prompt = if prompt.is_empty() { "continue" } else { prompt };
+    let workspace_path = normalize_workspace_path(workspace_path)?;
+    if !Path::new(&workspace_path).is_dir() {
+        return Err(format!("Workspace directory not found: {workspace_path}"));
+    }
+
+    let codex = crate::codex_source::find_codex_binary()
+        .ok_or_else(|| "Codex CLI not found (no standalone install, VSCode extension, or `codex` on PATH)".to_string())?;
+
+    let stderr_log = crate::session::get_fleet_dir()
+        .map(|d| d.join("codex_resume_stderr.log"))
+        .ok_or_else(|| "no fleet dir".to_string())?;
+    if let Some(parent) = stderr_log.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create stderr log dir {}: {e}", parent.display()))?;
+    }
+
+    let args = build_codex_resume_args(session_id, prompt, model, effort);
+
+    // A resume may carry its own `--model` / `--effort`; record them so the
+    // launch note describes what the session is running *now* (same as the
+    // Claude resume path). No overrides → leaves the original note standing.
+    crate::launch_spec::record(session_id, model, effort);
+
+    crate::log_debug(&format!(
+        "resume_codex_session: {} exec resume {} (cwd={}, prompt=<{} chars>, model={:?}, effort={:?})",
+        codex.display(),
+        session_id,
+        workspace_path,
+        prompt.len(),
+        model,
+        effort
+    ));
+
+    {
+        let mut header = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stderr_log)
+            .map_err(|e| format!("open stderr log {}: {e}", stderr_log.display()))?;
+        let _ = writeln!(
+            header,
+            "[{}] codex_resume spawn session={} cwd={}",
+            chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+            session_id,
+            workspace_path
+        );
+    }
+    let stderr_file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(&stderr_log)
+        .map_err(|e| format!("reopen stderr log {}: {e}", stderr_log.display()))?;
+
+    let mut cmd = crate::process_util::command(&codex);
+    cmd.args(&args)
+        .current_dir(&workspace_path)
+        // MUST be null: `codex exec` otherwise blocks reading stdin forever.
+        .stdin(std::process::Stdio::null())
+        // Piped so the reader thread can drain it; the transcript is read from
+        // the on-disk rollout, not this stream.
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::from(stderr_file));
+    apply_codex_launch_env(&mut cmd);
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn codex resume failed: {e}"))?;
+    let pid = child.id();
+
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "codex resume child stdout unavailable".to_string())?;
+
+    // Reader/reaper thread: drain stdout to EOF (so the pipe never fills and
+    // blocks the child), reap the child, log its exit, and invoke `on_exit`.
+    let stderr_log_owned = stderr_log.clone();
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stdout);
+        for line in reader.lines() {
+            if line.is_err() {
+                break;
+            }
+            // Drained-and-discarded on purpose (see module doc).
+        }
+        let result = child.wait();
+        let success = matches!(&result, Ok(status) if status.success());
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&stderr_log_owned)
+        {
+            match result {
+                Ok(status) => {
+                    let _ = writeln!(
+                        f,
+                        "[{}] codex_resume exit code={:?} success={}",
+                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f"),
+                        status.code(),
+                        status.success()
+                    );
+                }
+                Err(e) => {
+                    let _ = writeln!(
+                        f,
+                        "[{}] codex_resume wait_err err={e}",
+                        chrono::Utc::now().format("%Y-%m-%d %H:%M:%S%.3f")
+                    );
+                }
+            }
+        }
+        on_exit(success);
+    });
+
+    crate::log_debug(&format!(
+        "resume_codex_session: spawned pid {} for thread {}",
+        pid, session_id
+    ));
+    Ok(())
 }
 
 #[cfg(test)]
@@ -372,6 +570,89 @@ mod tests {
         let session = found.unwrap_or_else(|| panic!("session {sid} not found in codex scan"));
         assert_eq!(session.agent_source, "codex", "scanned as codex source");
         assert_eq!(session.id, sid, "thread id correlates");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    #[test]
+    fn resume_arg_builder_minimal_has_exec_resume_id_and_prompt_after_dashdash() {
+        let args = build_codex_resume_args("019f-abc", "keep going", None, None);
+        assert_eq!(args[0], "exec");
+        assert_eq!(args[1], "resume");
+        assert_eq!(args[2], "019f-abc", "thread id is resume's first positional");
+        assert!(args.contains(&"--json".to_string()));
+        assert!(args.contains(&"--skip-git-repo-check".to_string()));
+        // prompt is the final arg, preceded by `--`
+        assert_eq!(args.last().unwrap(), "keep going");
+        let dd = args.iter().position(|a| a == "--").expect("has --");
+        assert_eq!(dd, args.len() - 2, "-- immediately precedes the prompt");
+        // resume has no -C working-dir flag.
+        assert!(!args.contains(&"-C".to_string()));
+        assert!(!args.contains(&"-m".to_string()));
+    }
+
+    #[test]
+    fn resume_arg_builder_maps_model_and_effort() {
+        let args = build_codex_resume_args("tid", "hi", Some("gpt-5.6-sol"), Some("high"));
+        let mi = args.iter().position(|a| a == "-m").expect("has -m");
+        assert_eq!(args[mi + 1], "gpt-5.6-sol");
+        let ci = args
+            .iter()
+            .position(|a| a == "model_reasoning_effort=high")
+            .expect("has effort config");
+        assert_eq!(args[ci - 1], "-c");
+    }
+
+    #[test]
+    fn resume_arg_builder_drops_blank_model_and_effort() {
+        let args = build_codex_resume_args("tid", "hi", Some(" "), Some(""));
+        assert!(!args.contains(&"-m".to_string()));
+        assert!(!args.iter().any(|a| a.starts_with("model_reasoning_effort=")));
+    }
+
+    /// Live smoke (M2 P6 acceptance): spawn a real Codex session, then resume it
+    /// with a follow-up prompt and confirm the resume process exits successfully
+    /// (exit code 0 → `on_exit(true)`). Exercises the resume argv + stdin=null +
+    /// drain/reap/on_exit path against the real binary. Ignored by default.
+    ///   `cargo test -p claw-fleet-core codex_launch::tests::live_resume -- --ignored`
+    #[test]
+    #[ignore = "spawns + resumes a real codex session; run manually with --ignored"]
+    fn live_resume_continues_and_exits_ok() {
+        let ws = std::env::temp_dir().join(format!("fleet-codex-resume-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let resp = spawn_new_codex_session(
+            ws.to_str().unwrap(),
+            "reply with exactly: FIRST",
+            None,
+            None,
+        )
+        .expect("initial spawn should succeed");
+        let tid = resp.session_id.expect("thread id captured");
+
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done_cb = done.clone();
+        let ok_cb = ok.clone();
+        resume_codex_session(
+            &tid,
+            ws.to_str().unwrap(),
+            "reply with exactly: SECOND",
+            None,
+            None,
+            Box::new(move |success| {
+                ok_cb.store(success, std::sync::atomic::Ordering::SeqCst);
+                done_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("resume should spawn");
+
+        // Wait up to 90s for the resumed turn to complete + reaper to fire.
+        let mut waited = Duration::ZERO;
+        while waited < Duration::from_secs(90) && !done.load(std::sync::atomic::Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(500));
+            waited += Duration::from_millis(500);
+        }
+        assert!(done.load(std::sync::atomic::Ordering::SeqCst), "resume on_exit never fired");
+        assert!(ok.load(std::sync::atomic::Ordering::SeqCst), "resume exited non-zero");
         let _ = std::fs::remove_dir_all(&ws);
     }
 
