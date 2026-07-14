@@ -34,6 +34,11 @@ const ACTIVE_STATUSES = new Set([
   "waitingInput", "active", "delegating",
 ]);
 
+/** Max subagent tabs in the segmented strip. Active ones win the slots first,
+ *  then the most-recently-active finished ones; the wrap scrolls past this. A
+ *  parent that fanned out hundreds of subagents would otherwise flood the bar. */
+const SUBAGENT_TAB_CAP = 12;
+
 /** Standalone-mode live tail: re-pull the transcript tail at this cadence
  *  while the session is in an active status. */
 const LIVE_TAIL_POLL_MS = 1500;
@@ -532,10 +537,31 @@ export function SessionDetail({
       );
     }
 
-    const activeSubagents = subagents.filter((s) => ACTIVE_STATUSES.has(s.status));
-    if (activeSubagents.length === 0) return [];
+    if (subagents.length === 0) return [];
 
-    return mainSession ? [mainSession, ...activeSubagents] : activeSubagents;
+    // Show finished subagents too, not just the running one: once a subagent
+    // goes Idle (or stalls at RateLimited) it used to vanish from this strip,
+    // leaving the only way back into its transcript the "open subagent" button
+    // buried in its Agent card. Order active first, then most-recently-active
+    // finished ones, and cap the strip — a parent that fanned out dozens/hundreds
+    // of subagents would otherwise overflow the tab bar. The wrap scrolls
+    // horizontally (see .agent_seg_wrap) so the capped set stays reachable.
+    const active = subagents.filter((s) => ACTIVE_STATUSES.has(s.status));
+    const finished = subagents
+      .filter((s) => !ACTIVE_STATUSES.has(s.status))
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+    let ordered = [...active, ...finished].slice(0, SUBAGENT_TAB_CAP);
+
+    // Never drop the subagent currently being viewed, even if more-recent
+    // siblings pushed it past the cap — its tab must stay selectable.
+    if (
+      liveSession.isSubagent &&
+      !ordered.some((s) => s.id === liveSession.id)
+    ) {
+      ordered = [liveSession, ...ordered.slice(0, SUBAGENT_TAB_CAP - 1)];
+    }
+
+    return mainSession ? [mainSession, ...ordered] : ordered;
   }, [liveSession, sessions]);
 
   return (

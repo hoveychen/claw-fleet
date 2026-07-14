@@ -189,7 +189,13 @@
   padding: 3px;
   margin-bottom: 6px;
   flex-shrink: 0;
+  /* Cap the strip and scroll it internally so a long list of finished-subagent
+     tabs doesn't push the view tabs (对话/决策/…) off the right edge. */
+  max-width: 60%;
+  overflow-x: auto;
+  scrollbar-width: none;
 }
+.agent_seg_wrap::-webkit-scrollbar { display: none; }
 
 .agent_seg {
   display: flex;
