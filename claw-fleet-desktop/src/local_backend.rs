@@ -475,6 +475,7 @@ impl LocalBackend {
                         &llm_config2,
                     );
                     maybe_fire_auto_resume(&sess2, &ar2, &arif2, &arfail2);
+                    maybe_drain_pending_messages(&sess2);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
                     last_rescan = Instant::now();
@@ -586,6 +587,7 @@ impl LocalBackend {
                         &llm_config3,
                     );
                     maybe_fire_auto_resume(&sess3, &ar3, &arif3, &arfail3);
+                    maybe_drain_pending_messages(&sess3);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
                 }
@@ -608,6 +610,7 @@ impl LocalBackend {
                     break;
                 }
                 maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar);
+                maybe_drain_pending_messages(&sess_ar);
             });
         }
 
@@ -1447,6 +1450,24 @@ const AUTO_RESUME_FAILURE_BACKOFF: u32 = 3;
 /// - **Concurrency cap**: at most `AUTO_RESUME_MAX_CONCURRENT` resume processes
 ///   run at once. A tick that finds 300 eligible sessions fires only enough to
 ///   fill the free slots; `in_flight` is decremented by each process's reaper.
+/// Deliver any queued follow-up message to a session whose turn just ended.
+///
+/// Runs on the same session-refresh ticks as [`maybe_fire_auto_resume`]. Each
+/// session snapshot carries a fresh `proc_alive`, which is the gate
+/// [`claw_fleet_core::pending_message::drain_if_idle`] uses to know the turn is
+/// over — so a message typed while the session was running is fired here, on the
+/// first tick after the `claude` process exits. Independent of the auto-resume
+/// enabled toggle: queuing a follow-up is a direct user action, not the
+/// rate-limit recovery policy.
+fn maybe_drain_pending_messages(sessions: &Arc<Mutex<Vec<SessionInfo>>>) {
+    // Snapshot under the lock, then drain without holding it — draining spawns a
+    // detached `claude`, which must not run inside the sessions mutex.
+    let snapshot: Vec<SessionInfo> = { sessions.lock().unwrap().clone() };
+    for session in &snapshot {
+        claw_fleet_core::pending_message::maybe_drain(session);
+    }
+}
+
 fn maybe_fire_auto_resume(
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     last_fire: &Arc<Mutex<HashMap<String, Instant>>>,
