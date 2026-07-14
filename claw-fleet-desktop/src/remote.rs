@@ -390,6 +390,21 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::RESUME_SESSION, &req)
     }
 
+    fn enqueue_message(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        text: String,
+    ) -> Result<(), String> {
+        let req = claw_fleet_core::pending_message::EnqueueMessageRequest {
+            session_id,
+            workspace_path,
+            text,
+        };
+        self.probe
+            .post_json_ok(claw_fleet_core::routes::ENQUEUE_MESSAGE, &req)
+    }
+
     fn spawn_new_session(
         &self,
         workspace_path: String,

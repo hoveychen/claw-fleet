@@ -37,6 +37,7 @@ pub const DAILY_REPORT_GENERATE: &str = "/daily_report/generate";
 pub const DAILY_REPORT_LESSONS: &str = "/daily_report/lessons";
 pub const DAILY_REPORT_STATS: &str = "/daily_report_stats";
 pub const DECISION_ASSET: &str = "/decision_asset";
+pub const ENQUEUE_MESSAGE: &str = "/enqueue_message";
 pub const ELICITATION_PENDING: &str = "/elicitation/pending";
 pub const ELICITATION_RESPOND: &str = "/elicitation/respond";
 pub const ELICITATION_UPLOAD: &str = "/elicitation/upload";

@@ -672,6 +672,10 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // via the scanner as the JSONL grows.
             crate::routes::RESUME_SESSION if request.method() == &tiny_http::Method::Post => route_resume_session(ctx, request, &query, json_header, path),
 
+            // Queue a follow-up message for a session still mid-turn; the
+            // desktop tick delivers it via `claude --resume` when the turn ends.
+            crate::routes::ENQUEUE_MESSAGE if request.method() == &tiny_http::Method::Post => route_enqueue_message(ctx, request, &query, json_header, path),
+
             // Absolute path of this host's pure-chat workspace, created on
             // demand. The remote desktop pins it in its launcher but cannot
             // derive it — the path is under *this* host's home.
