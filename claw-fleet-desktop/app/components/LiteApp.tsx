@@ -1,24 +1,28 @@
 import { listen } from "@tauri-apps/api/event";
-import { Plus, Search } from "lucide-react";
+import { CheckCheck, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   openSettingsWindow,
   useDetailStore,
+  useReadStore,
   useSessionsStore,
   useUIStore,
   type MarkFilter,
 } from "../store";
 import type { SessionInfo } from "../types";
-import { LIVE_STATUSES, isFleetOwnedEntrypoint } from "../types";
+import { LIVE_STATUSES, isFleetOwnedEntrypoint, sessionUnread } from "../types";
 import { useSessionSearch } from "../hooks/useSessionSearch";
+import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { getItem, setItem } from "../storage";
+import { CHAT_HIDDEN, CHAT_ONLY, matchesWorkspaceFilter } from "./HistoryView";
 import { LiteDecisionHistory } from "./LiteDecisionHistory";
 import { LiteSessionCard } from "./LiteSessionCard";
 import { MarkControl } from "./MarkControl";
 import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import { StopControl, canControl } from "./StopControl";
+import { TodayUsageBadge } from "./TodayUsageBadge";
 import styles from "./LiteApp.module.css";
 
 const MARK_SEGMENTS: MarkFilter[] = ["all", "pending", "done"];
@@ -40,8 +44,10 @@ function showsControl(s: SessionInfo): boolean {
  *
  *   • Task list  — the launchpad's `adhocSessions` (sessions Fleet itself
  *     spawned via the "新会话" button, i.e. `isFleetOwnedEntrypoint`), with the
- *     same search + all/pending/done mark filter and inline stop/mark controls
- *     as the desktop task page. NOT the full session list (that's the "会话页").
+ *     same filter bar as the desktop/mobile task page: search + workspace
+ *     filter + active-only toggle + all/pending/done mark segments, plus inline
+ *     stop/mark controls and a mark-all-read shortcut. NOT the full session
+ *     list (that's the "会话页").
  *   • New session — a prominent "+ 新会话" button opens the shared
  *     `NewSessionForm` full-window; the spawned session opens automatically.
  *   • Detail page — tapping a task pushes SessionDetail over the full window;
@@ -55,11 +61,16 @@ export function LiteApp() {
   const { sessions, setSessions, refresh } = useSessionsStore();
   const { open, session: openedSession } = useDetailStore();
   const { setLiteMode, liteDecisionHistorySessionId } = useUIStore();
+  const readOverrides = useReadStore((s) => s.overrides);
+  const markManyRead = useReadStore((s) => s.markManyRead);
+  const chatPath = useChatWorkspace();
   const [ttsMuted, setTtsMuted] = useState(() => getItem("tts-muted") === "true");
   // Local (lite-scoped) filters — independent from the desktop task page's
   // persisted history* filters so toggling one window doesn't move the other.
   const [query, setQuery] = useState("");
   const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
+  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
+  const [activeOnly, setActiveOnly] = useState(false);
   // New-session composer + auto-open of the freshly spawned session.
   const [composing, setComposing] = useState(false);
   const [spawnedId, setSpawnedId] = useState<string | null>(null);
@@ -95,31 +106,51 @@ export function LiteApp() {
   const { ftsMatchPaths } = useSessionSearch(query);
 
   // Task list = launchpad adhoc sessions, filtered/sorted exactly like the
-  // desktop task page (HistoryView).
-  const { rows, markCounts } = useMemo(() => {
+  // desktop task page (HistoryView): workspace → active-only → search → mark.
+  const { rows, markCounts, workspaces, activeCount, unreadSessions } = useMemo(() => {
     const adhoc = sessions.filter(
       (s) => !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint),
     );
+    // Workspace dropdown options (chat workspace is pinned separately below).
+    const byPath = new Map<string, string>();
+    for (const s of adhoc) {
+      if (s.workspacePath === chatPath) continue;
+      byPath.set(s.workspacePath, s.workspaceName);
+    }
+    const workspaces = [...byPath.entries()].sort((a, b) => a[1].localeCompare(b[1]));
+    const activeCount = adhoc.filter((s) => LIVE_STATUSES.has(s.status)).length;
+    const unreadSessions = adhoc.filter((s) => sessionUnread(s, readOverrides[s.id]));
     const q = query.trim().toLowerCase();
-    const preMark = adhoc.filter((s) => {
-      if (!q) return true;
-      const clientMatch =
-        (s.aiTitle?.toLowerCase().includes(q) ?? false) ||
-        (s.slug?.toLowerCase().includes(q) ?? false) ||
-        (s.lastMessagePreview?.toLowerCase().includes(q) ?? false) ||
-        s.workspaceName.toLowerCase().includes(q) ||
-        (s.taskPlan?.planId?.toLowerCase().includes(q) ?? false) ||
-        (s.taskPlan?.currentPlan?.toLowerCase().includes(q) ?? false) ||
-        (s.taskPlan?.currentTask?.toLowerCase().includes(q) ?? false);
-      return clientMatch || ftsMatchPaths.has(s.jsonlPath);
-    });
+    const preMark = adhoc
+      .filter((s) => matchesWorkspaceFilter(s, workspaceFilter, chatPath))
+      .filter((s) => !activeOnly || LIVE_STATUSES.has(s.status))
+      .filter((s) => {
+        if (!q) return true;
+        const clientMatch =
+          (s.aiTitle?.toLowerCase().includes(q) ?? false) ||
+          (s.slug?.toLowerCase().includes(q) ?? false) ||
+          (s.lastMessagePreview?.toLowerCase().includes(q) ?? false) ||
+          s.workspaceName.toLowerCase().includes(q) ||
+          (s.taskPlan?.planId?.toLowerCase().includes(q) ?? false) ||
+          (s.taskPlan?.currentPlan?.toLowerCase().includes(q) ?? false) ||
+          (s.taskPlan?.currentTask?.toLowerCase().includes(q) ?? false);
+        return clientMatch || ftsMatchPaths.has(s.jsonlPath);
+      });
     const counts: Record<MarkFilter, number> = { all: preMark.length, pending: 0, done: 0 };
     for (const s of preMark) counts[markBucket(s)] += 1;
     const rows = preMark
       .filter((s) => markFilter === "all" || markBucket(s) === markFilter)
       .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
-    return { rows, markCounts: counts };
-  }, [sessions, query, ftsMatchPaths, markFilter]);
+    return { rows, markCounts: counts, workspaces, activeCount, unreadSessions };
+  }, [sessions, query, ftsMatchPaths, markFilter, workspaceFilter, activeOnly, chatPath, readOverrides]);
+
+  // A workspace filter naming a directory whose sessions have all aged out would
+  // strand an empty list behind a blank select — fall back to "all".
+  useEffect(() => {
+    if (workspaceFilter === "all" || workspaceFilter === CHAT_ONLY || workspaceFilter === CHAT_HIDDEN) return;
+    if (workspaceFilter === chatPath) return;
+    if (!workspaces.some(([path]) => path === workspaceFilter)) setWorkspaceFilter("all");
+  }, [workspaces, workspaceFilter, chatPath]);
 
   const onCreated = (info: NewSessionCreated) => {
     setComposing(false);
@@ -139,6 +170,7 @@ export function LiteApp() {
         <span className={styles.drag_title} data-tauri-drag-region>
           {t("title")}
         </span>
+        <TodayUsageBadge inline />
         <button
           className={styles.icon_btn}
           title={t(ttsMuted ? "lite.unmute" : "lite.mute")}
@@ -194,7 +226,7 @@ export function LiteApp() {
         </div>
       ) : (
         <div className={styles.body}>
-          {/* Toolbar — search + all/pending/done mark filter (mobile task page). */}
+          {/* Toolbar — search + workspace/active filters + mark segments. */}
           <div className={styles.toolbar}>
             <label className={styles.search}>
               <Search size={13} strokeWidth={1.6} className={styles.search_icon} />
@@ -206,6 +238,49 @@ export function LiteApp() {
                 placeholder={t("history.search_placeholder", "搜索标题、计划、全文…")}
               />
             </label>
+
+            <div className={styles.filter_row}>
+              <select
+                className={styles.ws_select}
+                value={workspaceFilter}
+                onChange={(e) => setWorkspaceFilter(e.target.value)}
+                title={t("history.filter_workspace", "按工作目录筛选")}
+              >
+                <option value="all">{t("history.all_workspaces", "全部目录")}</option>
+                {chatPath && (
+                  <>
+                    <option value={CHAT_ONLY}>{t("history.chat_only", "💬 仅聊天")}</option>
+                    <option value={CHAT_HIDDEN}>{t("history.chat_hidden", "🚫 隐藏聊天")}</option>
+                  </>
+                )}
+                {workspaces.map(([path, name]) => (
+                  <option key={path} value={path} title={path}>{name}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className={`${styles.active_toggle} ${activeOnly ? styles.active_toggle_on : ""}`}
+                aria-pressed={activeOnly}
+                onClick={() => setActiveOnly((v) => !v)}
+                title={t("history.filter_active_tip", "只显示仍在运行或等待输入的会话")}
+              >
+                <span className={styles.active_dot} />
+                {t("history.only_active", "仅活跃")}
+                <span className={styles.active_count}>{activeCount}</span>
+              </button>
+              {unreadSessions.length > 0 && (
+                <button
+                  type="button"
+                  className={styles.mark_all_read}
+                  onClick={() => markManyRead(unreadSessions)}
+                  title={t("history.mark_all_read", "全部已读") + ` (${unreadSessions.length})`}
+                >
+                  <CheckCheck size={14} strokeWidth={1.8} />
+                  <span className={styles.mark_all_read_count}>{unreadSessions.length}</span>
+                </button>
+              )}
+            </div>
+
             <div className={styles.segments}>
               {MARK_SEGMENTS.map((seg) => (
                 <button
