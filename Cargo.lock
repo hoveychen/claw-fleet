@@ -1026,6 +1026,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 name = "claw-fleet-core"
 version = "0.0.0"
 dependencies = [
+ "aes-gcm",
  "base64 0.22.1",
  "chrono",
  "chrono-tz",
@@ -1036,6 +1037,7 @@ dependencies = [
  "flate2",
  "futures",
  "git2",
+ "hkdf",
  "image",
  "lark-websocket-protobuf",
  "libc",
