@@ -162,7 +162,8 @@ updatedSecsAgo: number, };
 
 export type AuditRiskLevel = "medium" | "high" | "critical";
 
-export type AuditEvent = { sessionId: string, workspaceName: string, agentSource: string, toolName: string, commandSummary: string, fullCommand: string, riskLevel: AuditRiskLevel, riskTags: Array<string>, timestamp: string, jsonlPath: string, };
+export type AuditEvent = { sessionId: string, workspaceName: string, 
+workspacePath: string, agentSource: string, toolName: string, commandSummary: string, fullCommand: string, riskLevel: AuditRiskLevel, riskTags: Array<string>, timestamp: string, jsonlPath: string, };
 
 export type AuditSummary = { events: Array<AuditEvent>, totalSessionsScanned: number, };
 
