@@ -31,6 +31,7 @@ import {
   MOCK_WAITING_ALERTS,
   MOCK_SKILL_HISTORY,
   MOCK_AUDIT_SUMMARY,
+  MOCK_AUDIT_RULES,
   MOCK_DAILY_REPORT,
   MOCK_HANDOFF_CHAINS,
   MOCK_HEATMAP_STATS,
@@ -242,6 +243,8 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     }
     case "get_audit_events":
       return MOCK_AUDIT_SUMMARY;
+    case "get_audit_rules":
+      return MOCK_AUDIT_RULES;
     case "detect_ai_tools":
       return MOCK_DETECTED_TOOLS;
     case "get_log_path":
