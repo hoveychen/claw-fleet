@@ -3217,7 +3217,7 @@ fn plan_create(cwd: &std::path::Path, plan_id: &str, title: &str) -> Result<(), 
     use claw_fleet_core::prd_tasks as pt;
     let path = workspace_tasks_path(cwd);
     let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let updated = pt::create_plan(&content, plan_id, title)?;
+    let updated = pt::create_plan(&content, plan_id, title, None)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
     // Writing a plan is starting it: the agent authoring the block is the agent
     // about to execute it. Claiming focus here spares it a separate `resume`.

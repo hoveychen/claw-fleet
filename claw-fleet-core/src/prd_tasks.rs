@@ -23,6 +23,11 @@ pub struct PrdBlock {
     /// Schema version from the begin sentinel's `v="..."` attribute: `2` for
     /// v2, `1` for legacy blocks with no `v` attribute.
     pub version: u8,
+    /// `id` of the plan this one is a child of, from the begin sentinel's
+    /// `parent="..."` attribute. `None` for a top-level plan. A child plan is
+    /// side work spawned mid-parent; when it completes, Fleet points the agent
+    /// back at the nearest ancestor that still has pending P-tasks.
+    pub parent: Option<String>,
 }
 
 /// Attributes parsed off a sentinel comment (`<!-- fleet:prd:begin id="x" v="2" -->`).
@@ -30,6 +35,9 @@ pub struct PrdBlock {
 pub struct SentinelAttrs {
     pub id: Option<String>,
     pub version: u8,
+    /// `parent="..."` slot — the id of this plan's parent, if any. Only
+    /// meaningful on a `begin` sentinel; ignored (and typically absent) on `end`.
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -227,26 +235,31 @@ pub fn extract_prd_blocks(content: &str) -> Vec<PrdBlock> {
 pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<SentinelProblem>) {
     let mut out = Vec::new();
     let mut problems = Vec::new();
-    // (id, version, body)
-    let mut current: Option<(Option<String>, u8, String)> = None;
+    // (id, version, parent, body)
+    let mut current: Option<(Option<String>, u8, Option<String>, String)> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(attrs) = parse_sentinel(trimmed, "begin") {
             // A second `begin` while one is already open means the previous
             // block was never closed — drop it and start fresh.
-            if let Some((open_id, _, _)) = current.take() {
+            if let Some((open_id, _, _, _)) = current.take() {
                 problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
             }
-            current = Some((attrs.id, attrs.version, String::new()));
+            current = Some((attrs.id, attrs.version, attrs.parent, String::new()));
             continue;
         }
         if let Some(attrs) = parse_sentinel(trimmed, "end") {
             let id = attrs.id;
             match current.take() {
-                Some((open_id, version, body)) => {
+                Some((open_id, version, parent, body)) => {
                     if open_id == id {
-                        out.push(PrdBlock { id: open_id, body, version });
+                        out.push(PrdBlock {
+                            id: open_id,
+                            body,
+                            version,
+                            parent,
+                        });
                     } else {
                         // id mismatch → discard the dangling block; do not start
                         // a new one from the `end` line.
@@ -269,12 +282,12 @@ pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<Se
                 line: trimmed.to_string(),
             });
         }
-        if let Some((_, _, body)) = current.as_mut() {
+        if let Some((_, _, _, body)) = current.as_mut() {
             body.push_str(line);
             body.push('\n');
         }
     }
-    if let Some((open_id, _, _)) = current.take() {
+    if let Some((open_id, _, _, _)) = current.take() {
         problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
     }
     (out, problems)
@@ -315,7 +328,16 @@ pub fn parse_sentinel(line: &str, kind: &str) -> Option<SentinelAttrs> {
         Some("2") => 2,
         _ => 1,
     };
-    Some(SentinelAttrs { id, version })
+    let parent = attrs
+        .iter()
+        .find(|(k, _)| k == "parent")
+        .map(|(_, v)| v.clone())
+        .filter(|v| !v.is_empty());
+    Some(SentinelAttrs {
+        id,
+        version,
+        parent,
+    })
 }
 
 /// Parse the inner text of a sentinel into ordered `key="value"` pairs.
@@ -398,6 +420,16 @@ pub fn plan_body(content: &str, plan_id: &str) -> Option<String> {
         .into_iter()
         .find(|b| b.id.as_deref() == Some(plan_id))
         .map(|b| b.body)
+}
+
+/// Return the `parent` id declared on the plan block with `plan_id`, if the
+/// block exists and carries a non-empty `parent="..."`. `None` when the plan is
+/// top-level or absent from this content.
+pub fn plan_parent(content: &str, plan_id: &str) -> Option<String> {
+    extract_prd_blocks(content)
+        .into_iter()
+        .find(|b| b.id.as_deref() == Some(plan_id))
+        .and_then(|b| b.parent)
 }
 
 /// Set the `[ ]`/`[x]` state of the top-level task matching `p_label` (matched
@@ -485,15 +517,26 @@ pub fn add_task(
 }
 
 /// Append a fresh empty v2 plan block. Errors when `plan_id` already exists.
-pub fn create_plan(content: &str, plan_id: &str, title: &str) -> Result<String, String> {
+/// `parent` records a `parent="..."` attribute so the block is a child plan —
+/// side work spawned mid-parent that Fleet backtracks from on completion.
+pub fn create_plan(
+    content: &str,
+    plan_id: &str,
+    title: &str,
+    parent: Option<&str>,
+) -> Result<String, String> {
     if extract_prd_blocks(content)
         .iter()
         .any(|b| b.id.as_deref() == Some(plan_id))
     {
         return Err(format!("plan '{plan_id}' already exists"));
     }
+    let parent_attr = match parent {
+        Some(p) if !p.trim().is_empty() => format!(" parent=\"{}\"", p.trim()),
+        _ => String::new(),
+    };
     let block = format!(
-        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\" -->\n\n**Plan:** {title}\n\n<!-- fleet:prd:end id=\"{plan_id}\" -->\n"
+        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\"{parent_attr} -->\n\n**Plan:** {title}\n\n<!-- fleet:prd:end id=\"{plan_id}\" -->\n"
     );
     let mut out = content.to_string();
     if out.is_empty() {
@@ -1444,14 +1487,51 @@ trailing notes outside\n";
 
     #[test]
     fn create_plan_appends_v2_block_and_rejects_dupes() {
-        let out = create_plan(TWO_PLAN, "c", "Gamma").unwrap();
+        let out = create_plan(TWO_PLAN, "c", "Gamma", None).unwrap();
         assert!(out.contains("<!-- fleet:prd:begin id=\"c\" v=\"2\" -->"));
         assert!(out.contains("**Plan:** Gamma"));
-        assert!(create_plan(&out, "c", "again").is_err());
+        assert!(create_plan(&out, "c", "again", None).is_err());
         // create into empty content seeds a header
-        let fresh = create_plan("", "x", "X").unwrap();
+        let fresh = create_plan("", "x", "X", None).unwrap();
         assert!(fresh.starts_with("# TASKS"));
         assert!(fresh.contains("id=\"x\" v=\"2\""));
+    }
+
+    #[test]
+    fn create_plan_with_parent_writes_parent_attr_and_is_parseable() {
+        let out = create_plan("", "child", "Child", Some("root")).unwrap();
+        assert!(
+            out.contains("id=\"child\" v=\"2\" parent=\"root\" -->"),
+            "parent attribute must land on the begin sentinel: {out}"
+        );
+        // round-trips back out through the parser
+        assert_eq!(plan_parent(&out, "child").as_deref(), Some("root"));
+        // blank parent degrades to a top-level plan (no attr written)
+        let blank = create_plan("", "x", "X", Some("   ")).unwrap();
+        assert!(!blank.contains("parent="));
+        assert_eq!(plan_parent(&blank, "x"), None);
+    }
+
+    #[test]
+    fn parse_sentinel_reads_parent_slot_any_order() {
+        // parent alongside id+v, order-independent, empty parent ignored
+        let a = parse_sentinel(
+            "<!-- fleet:prd:begin id=\"c\" v=\"2\" parent=\"p\" -->",
+            "begin",
+        )
+        .unwrap();
+        assert_eq!(a.parent.as_deref(), Some("p"));
+        let b = parse_sentinel(
+            "<!-- fleet:prd:begin parent=\"p\" id=\"c\" v=\"2\" -->",
+            "begin",
+        )
+        .unwrap();
+        assert_eq!(b.parent.as_deref(), Some("p"));
+        let none = parse_sentinel("<!-- fleet:prd:begin id=\"c\" v=\"2\" -->", "begin").unwrap();
+        assert_eq!(none.parent, None);
+        let empty =
+            parse_sentinel("<!-- fleet:prd:begin id=\"c\" parent=\"\" -->", "begin").unwrap();
+        assert_eq!(empty.parent, None, "empty parent slot is treated as absent");
     }
 
     #[test]
