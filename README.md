@@ -6,7 +6,7 @@
 
 **Your agents write the code. The task never dies on your watch.**
 Everyone else hands you a team of AI personas to manage. Claw Fleet keeps a single long task alive across context windows, restarts, and machines — relaying it from agent to agent automatically — while every decision that needs you lands in one inbox you can answer from your phone.
-Supports **Claude Code**, **Cursor**, **OpenClaw**, and **Codex**.
+Supports **Claude Code** and **Codex**.
 
 **[▶ Watch the 66-second field guide](https://hoveychen.github.io/claw-fleet/#demo)** — Captain Claw walks all nine tips.
 
@@ -67,8 +67,6 @@ The [66-second field guide](https://hoveychen.github.io/claw-fleet/#demo) in one
 | | Agent | Status |
 |---|---|---|
 | <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/claude.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/claude-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/claude-dark.svg" width="24" height="24"></picture> | **Claude Code** | Fully supported — monitoring, decisions, orchestration |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/cursor.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/cursor-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/cursor-dark.svg" width="24" height="24"></picture> | **Cursor** | Monitoring supported — opt-in via Settings |
-| <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/openclaw.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/openclaw-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/openclaw-dark.svg" width="24" height="24"></picture> | **OpenClaw** | Monitoring supported |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="claw-fleet-desktop/app/assets/icons/codex.svg"><source media="(prefers-color-scheme: light)" srcset="claw-fleet-desktop/app/assets/icons/codex-dark.svg"><img src="claw-fleet-desktop/app/assets/icons/codex-dark.svg" width="24" height="24"></picture> | **Codex** | Monitoring supported |
 
 > Decision routing, plan approval, and orchestration features are built on Claude Code's hooks & MCP; monitoring works for all sources. Claw Fleet auto-detects which tools are installed.
@@ -204,7 +202,7 @@ The mobile app needs no install — enable **Mobile** in the desktop app and sca
 
 ### Prerequisites
 
-Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You need Claude Code installed and at least one session run before anything shows up. Cursor, OpenClaw, and Codex sources can be enabled in Settings.
+Claw Fleet reads session data written by **Claude Code** (`claude` CLI). You need Claude Code installed and at least one session run before anything shows up. The Codex source can be enabled in Settings.
 
 ---
 
@@ -244,7 +242,7 @@ The output binary and installer are placed under `target/release/bundle/`.
 **Remote & mobile:** an SSH-bootstrapped `fleet serve` probe exposes the same data plane for remote machines; for mobile, the desktop dials out to a content-agnostic relay over WebSocket, and your phone joins the channel with the shared key from the QR code.
 
 ```
-agents (Claude Code / Cursor / OpenClaw / Codex)
+agents (Claude Code / Codex)
    │  JSONL + lock files            hooks + MCP
    ▼                                    ▼
  file watcher ──────────────► Fleet core (Rust)
