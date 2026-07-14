@@ -727,6 +727,34 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ws);
     }
 
+    /// Live (M4 P13 acceptance): the Fleet kill path must tear down a real Codex
+    /// process. Spawn one, then `kill_pid_impl` its pid (the same tree-SIGTERM
+    /// the `Backend::kill_pid` command runs) and confirm the pid is gone. The
+    /// kill is source-agnostic — `CodexSource::kill_pid` and the Claude source
+    /// both delegate to this function — so this exercises the codex process
+    /// shape end-to-end. (Interrupt→resume *turn continuation* additionally
+    /// needs a working Codex model; on a box where `codex exec` turns 400 on the
+    /// model, only the signal/lifecycle half is observable — which is all the
+    /// kill path depends on.)
+    ///   `cargo test -p claw-fleet-core codex_launch::tests::live_kill -- --ignored`
+    #[test]
+    #[ignore = "spawns a real codex session; run manually with --ignored"]
+    fn live_kill_tears_down_codex_process() {
+        let ws = std::env::temp_dir().join(format!("fleet-codex-kill-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let resp = spawn_new_codex_session(ws.to_str().unwrap(), "wait quietly", None, None)
+            .expect("spawn should succeed");
+        let pid = resp.pid;
+        crate::session::kill_pid_impl(pid).expect("kill should not error");
+        // Give the tree-SIGTERM a moment to land, then confirm the pid is dead.
+        std::thread::sleep(Duration::from_millis(800));
+        assert!(
+            !crate::session::is_process_alive(pid),
+            "codex pid {pid} must be dead after kill_pid_impl"
+        );
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
     /// Live end-to-end (M1 acceptance): route a spawn through the tool
     /// dispatcher with tool="codex", then confirm the scanner surfaces the
     /// just-spawned session as a `codex` source with the captured thread id.

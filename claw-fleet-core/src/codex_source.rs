@@ -624,7 +624,13 @@ fn extract_thread_id_from_args(args: &[String]) -> Option<String> {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--thread" | "--resume" | "-t" => {
+            // `--thread <id>` / `--resume <id>` / `-t <id>` flags, and the
+            // `resume` subcommand positional — `codex exec resume <id> …`, the
+            // exact shape Fleet's own resume launcher builds
+            // (`build_codex_resume_args`). Without the positional case a live
+            // Fleet resume wouldn't be thread-matched, so `proc_alive` stayed
+            // false for it.
+            "--thread" | "--resume" | "-t" | "resume" => {
                 if let Some(id) = iter.next() {
                     if !id.starts_with('-') {
                         return Some(id.clone());
@@ -984,6 +990,26 @@ mod tests {
             Some("fleet"),
             "must read originator from the first session_meta line"
         );
+    }
+
+    #[test]
+    fn extract_thread_id_handles_exec_resume_positional() {
+        use super::extract_thread_id_from_args;
+        // Fleet's own resume argv (build_codex_resume_args): the thread id is a
+        // positional after the `resume` subcommand, not a `--resume` flag. This
+        // is the shape a live Fleet auto-resume / handoff-resume process has, so
+        // proc_alive depends on parsing it.
+        let argv: Vec<String> = ["exec", "resume", "019f-thread-xyz", "--json", "--skip-git-repo-check", "--", "hi"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            extract_thread_id_from_args(&argv).as_deref(),
+            Some("019f-thread-xyz")
+        );
+        // The flag forms must keep working.
+        let flagged: Vec<String> = ["--resume", "abc"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(extract_thread_id_from_args(&flagged).as_deref(), Some("abc"));
     }
 
     #[test]
