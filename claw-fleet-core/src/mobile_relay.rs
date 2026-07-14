@@ -540,48 +540,89 @@ const SNAPSHOT_FIELDS: &[&str] = &[
     "handoff",
 ];
 
-/// Decision-asset images at or below this size are sent to the mobile client
-/// verbatim; larger ones are downscaled so the WS frame stays small (the relay
-/// hop can't be assumed to carry a full-res 3-5 MiB AI preview).
-const DECISION_ASSET_SOFT_CAP: usize = 2 * 1024 * 1024;
-/// Longest edge (px) a downscaled decision image is fit within — comfortably
-/// beyond any phone screen, so the shrink is visually lossless in practice.
-const DECISION_ASSET_MAX_DIM: u32 = 2048;
+/// Byte size a re-encoded decision-asset image is squeezed toward. Every image
+/// the mobile client displays is pushed under this so the relay hop stays cheap
+/// regardless of the source size (a full-res 3-5 MiB AI preview can't be assumed
+/// to cross the relay).
+const DECISION_ASSET_TARGET_BYTES: usize = 50 * 1024;
+/// Hard ceiling we never want a re-encoded asset to exceed. In practice the
+/// shrink loop reaches [`DECISION_ASSET_TARGET_BYTES`] long before this; it only
+/// documents the worst-case guarantee for a pathologically incompressible image.
+const DECISION_ASSET_HARD_CAP_BYTES: usize = 100 * 1024;
+/// JPEG quality steps, tried high→low at each resolution before shrinking.
+const DECISION_ASSET_QUALITY_LADDER: [u8; 7] = [90, 80, 70, 60, 50, 40, 30];
+/// Never shrink the longest edge below this — past it the asset is too small to
+/// be worth showing and further shrinking buys almost nothing.
+const DECISION_ASSET_MIN_DIM: u32 = 320;
 
-/// Shrink an oversized decision-asset image so it survives the mobile relay
-/// hop, returning `(bytes, mime)`. Assets already within
-/// [`DECISION_ASSET_SOFT_CAP`] pass through byte-for-byte; larger raster images
-/// are resized to fit [`DECISION_ASSET_MAX_DIM`] and re-encoded as JPEG.
+/// Squeeze a decision-asset image toward [`DECISION_ASSET_TARGET_BYTES`] so it
+/// survives the mobile relay hop, returning `(bytes, mime)`. Unlike a simple
+/// cap, *every* decodable image is re-encoded — small ones too — because the
+/// relay frame budget cares about absolute size, not how large the source was.
+///
+/// Strategy: at the source resolution, step JPEG quality high→low until an
+/// encode fits the target; if even the lowest quality overshoots, shrink the
+/// longest edge ~20% and retry, down to [`DECISION_ASSET_MIN_DIM`]. If we bottom
+/// out without hitting the target, the smallest encode produced is returned
+/// (best effort — a 320px JPEG at the lowest quality is far under the hard cap).
 /// Anything that fails to decode (unknown/vector format) is returned untouched
 /// so the caller's frame guard still applies.
 fn downscale_decision_asset(bytes: Vec<u8>, mime: &str) -> (Vec<u8>, String) {
-    if bytes.len() <= DECISION_ASSET_SOFT_CAP {
-        return (bytes, mime.to_string());
-    }
     let Ok(img) = image::load_from_memory(&bytes) else {
-        // Undecodable (e.g. a vector/unknown format) — nothing to resize; hand
+        // Undecodable (e.g. a vector/unknown format) — nothing to re-encode; hand
         // the original back and let the caller's frame guard decide.
         return (bytes, mime.to_string());
     };
-    // Fit within DECISION_ASSET_MAX_DIM on the longest edge (no-op when already
-    // smaller); JPEG can't carry alpha, so flatten to RGB before encoding.
-    let resized = if img.width() > DECISION_ASSET_MAX_DIM || img.height() > DECISION_ASSET_MAX_DIM {
-        img.resize(
-            DECISION_ASSET_MAX_DIM,
-            DECISION_ASSET_MAX_DIM,
-            image::imageops::FilterType::Lanczos3,
-        )
-    } else {
-        img
-    };
-    let mut out = Vec::new();
-    match image::DynamicImage::ImageRgb8(resized.to_rgb8())
-        .write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Jpeg)
-    {
-        Ok(()) => (out, "image/jpeg".to_string()),
-        // Re-encode failed for some reason — fall back to the original bytes.
-        Err(_) => (bytes, mime.to_string()),
+    let mut work = img;
+    // Smallest encode seen so far — returned if no resolution/quality combo
+    // reaches the target. Never stays None: the ladder runs at least once.
+    let mut best: Option<Vec<u8>> = None;
+    loop {
+        for &quality in &DECISION_ASSET_QUALITY_LADDER {
+            let Some(encoded) = encode_jpeg(&work, quality) else { continue };
+            if best.as_ref().map_or(true, |b| encoded.len() < b.len()) {
+                best = Some(encoded.clone());
+            }
+            if encoded.len() <= DECISION_ASSET_TARGET_BYTES {
+                return (encoded, "image/jpeg".to_string());
+            }
+        }
+        // Even the lowest quality overshot the target at this resolution. Stop
+        // once we're below the min dimension *and* under the hard cap; but if a
+        // pathological image is still over the hard cap, keep shrinking past the
+        // floor until it fits, so the 100 KB guarantee always holds.
+        let longest = work.width().max(work.height());
+        let under_cap = best
+            .as_ref()
+            .map_or(false, |b| b.len() <= DECISION_ASSET_HARD_CAP_BYTES);
+        if (longest <= DECISION_ASSET_MIN_DIM && under_cap) || longest <= 1 {
+            break;
+        }
+        let nw = (work.width() * 4 / 5).max(1);
+        let nh = (work.height() * 4 / 5).max(1);
+        work = work.resize(nw, nh, image::imageops::FilterType::Lanczos3);
     }
+    match best {
+        Some(out) => (out, "image/jpeg".to_string()),
+        // encode_jpeg never succeeded (should not happen) — fall back to original.
+        None => (bytes, mime.to_string()),
+    }
+}
+
+/// Re-encode `img` as an opaque RGB JPEG at `quality` (0-100). JPEG can't carry
+/// alpha, so the image is flattened to RGB first. Returns None only on an
+/// encoder error.
+fn encode_jpeg(img: &image::DynamicImage, quality: u8) -> Option<Vec<u8>> {
+    let rgb = img.to_rgb8();
+    let mut out = Vec::new();
+    let mut encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(
+        std::io::Cursor::new(&mut out),
+        quality,
+    );
+    encoder
+        .encode(rgb.as_raw(), rgb.width(), rgb.height(), image::ExtendedColorType::Rgb8)
+        .ok()?;
+    Some(out)
 }
 
 /// Most-recently-active sessions kept in the mobile snapshot. Sized comfortably
@@ -1134,11 +1175,11 @@ fn serve_decision_asset(params: &Value) -> Result<Value, String> {
     let qidx = params.get("qidx").and_then(Value::as_str).ok_or("missing qidx")?;
     let rel = params.get("rel").and_then(Value::as_str).ok_or("missing rel")?;
     let asset = crate::mcp_ipc::read_decision_asset(id, qidx, rel)?;
-    // Oversized images are downscaled so the WS frame stays small
-    // enough to cross the relay; small ones pass through untouched.
+    // Every image is squeezed toward the target size so the WS frame stays
+    // small enough to cross the relay, regardless of the source size.
     let (bytes, mime) = downscale_decision_asset(asset.bytes, &asset.mime);
-    // Defensive ceiling: a downscaled 2048px JPEG is well under this, so
-    // this only trips on a pathological asset we couldn't shrink.
+    // Defensive ceiling: a target-squeezed JPEG is far under this, so this only
+    // trips on a pathological asset we could neither decode nor shrink.
     const MAX_ASSET_BYTES: usize = 12 * 1024 * 1024;
     if bytes.len() > MAX_ASSET_BYTES {
         return Err(format!("asset too large: {} bytes", bytes.len()));
@@ -3230,12 +3271,42 @@ mod tests {
         );
     }
 
+    /// Encode `buf` as a PNG — the fixture format decision assets arrive in.
+    fn png_of(buf: image::RgbImage) -> Vec<u8> {
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgb8(buf)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .unwrap();
+        png
+    }
+
     #[test]
-    fn downscale_shrinks_oversized_decision_image() {
-        // A 4000x3000 opaque image with a high-frequency (poorly compressible)
-        // pattern → PNG well over the 2 MiB cap, standing in for a real AI
-        // preview asset the mobile client currently can't open.
-        let (w, h) = (4000u32, 3000u32);
+    fn downscale_hits_target_for_typical_image() {
+        // A large but smoothly-varying (highly compressible) image — the common
+        // case for a screenshot or chart. JPEG should reach the ≤50 KB target.
+        let (w, h) = (2000u32, 1500u32);
+        let mut buf = image::RgbImage::new(w, h);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgb([(x / 16) as u8, (y / 16) as u8, ((x + y) / 32) as u8]);
+        }
+        let png = png_of(buf);
+
+        let (out, mime) = downscale_decision_asset(png, "image/png");
+        assert_eq!(mime, "image/jpeg");
+        assert!(
+            out.len() <= DECISION_ASSET_TARGET_BYTES,
+            "typical image must reach the target, got {}",
+            out.len()
+        );
+        image::load_from_memory(&out).expect("output must decode");
+    }
+
+    #[test]
+    fn downscale_stays_under_hard_cap_for_incompressible_noise() {
+        // A high-frequency (poorly compressible) pattern is the worst case: the
+        // quality ladder can't reach the target at full res, so the loop shrinks
+        // resolution. The result must still land under the hard cap.
+        let (w, h) = (2000u32, 1500u32);
         let mut buf = image::RgbImage::new(w, h);
         for (x, y, px) in buf.enumerate_pixels_mut() {
             *px = image::Rgb([
@@ -3244,41 +3315,54 @@ mod tests {
                 (x.wrapping_add(y)) as u8,
             ]);
         }
-        let mut png = Vec::new();
-        image::DynamicImage::ImageRgb8(buf)
-            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
-            .unwrap();
-        assert!(
-            png.len() > DECISION_ASSET_SOFT_CAP,
-            "fixture must exceed the cap, got {}",
-            png.len()
-        );
+        let png = png_of(buf);
 
         let (out, mime) = downscale_decision_asset(png.clone(), "image/png");
-        // Fits a single WS frame comfortably, shrank in dimension, re-encoded.
+        assert_eq!(mime, "image/jpeg");
+        assert!(out.len() < png.len(), "must shrink vs the source PNG");
         assert!(
-            out.len() < DECISION_ASSET_SOFT_CAP,
-            "downscaled asset must be under the cap, got {}",
+            out.len() <= DECISION_ASSET_HARD_CAP_BYTES,
+            "even incompressible noise must stay under the hard cap, got {}",
             out.len()
         );
-        assert_eq!(mime, "image/jpeg");
-        let decoded = image::load_from_memory(&out).expect("downscaled bytes must decode");
-        assert!(
-            decoded.width() <= DECISION_ASSET_MAX_DIM && decoded.height() <= DECISION_ASSET_MAX_DIM,
-            "downscaled dims {}x{} must fit within {}",
-            decoded.width(),
-            decoded.height(),
-            DECISION_ASSET_MAX_DIM
-        );
+        image::load_from_memory(&out).expect("output must decode");
     }
 
     #[test]
-    fn downscale_passes_small_assets_through_untouched() {
-        // Under the cap → returned byte-for-byte with its original mime, even
-        // when the bytes are not a decodable image.
-        let small = vec![0x89, b'P', b'N', b'G', 1, 2, 3, 4];
-        let (out, mime) = downscale_decision_asset(small.clone(), "image/png");
-        assert_eq!(out, small);
+    fn downscale_reencodes_small_image_keeping_resolution() {
+        // "Compress every image" — a small image already under the target is
+        // still re-encoded to JPEG, but at its original resolution (no upscaling,
+        // no needless shrinking).
+        let mut buf = image::RgbImage::new(100, 80);
+        for (x, y, px) in buf.enumerate_pixels_mut() {
+            *px = image::Rgb([(x * 2) as u8, (y * 2) as u8, 128]);
+        }
+        let png = png_of(buf);
+
+        let (out, mime) = downscale_decision_asset(png, "image/png");
+        assert_eq!(mime, "image/jpeg");
+        assert!(out.len() <= DECISION_ASSET_TARGET_BYTES);
+        let decoded = image::load_from_memory(&out).expect("output must decode");
+        assert_eq!((decoded.width(), decoded.height()), (100, 80));
+    }
+
+    #[test]
+    fn downscale_passes_through_undecodable_bytes() {
+        // A non-image payload (e.g. an SVG) can't be re-encoded — it is returned
+        // untouched with its original mime so the caller's frame guard applies.
+        let svg = b"<svg xmlns='http://www.w3.org/2000/svg'></svg>".to_vec();
+        let (out, mime) = downscale_decision_asset(svg.clone(), "image/svg+xml");
+        assert_eq!(out, svg);
+        assert_eq!(mime, "image/svg+xml");
+    }
+
+    #[test]
+    fn downscale_passes_truncated_image_through_untouched() {
+        // A PNG magic header followed by garbage can't be decoded, so it is
+        // returned byte-for-byte with its original mime rather than mangled.
+        let broken = vec![0x89, b'P', b'N', b'G', 1, 2, 3, 4];
+        let (out, mime) = downscale_decision_asset(broken.clone(), "image/png");
+        assert_eq!(out, broken);
         assert_eq!(mime, "image/png");
     }
 
