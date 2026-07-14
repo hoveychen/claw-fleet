@@ -25,7 +25,6 @@ use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
-use base64::Engine as _;
 use flate2::{write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -184,16 +183,16 @@ pub struct MobileClientInfo {
     pub push_subscribed: bool,
     pub connected_at_ms: u64,
     pub last_seen_ms: u64,
-    /// Whether this client can inflate a gzipped `sessions` snapshot (native
-    /// `DecompressionStream`). Old PWAs omit the flag in their `client_hello`,
-    /// so it defaults to `false` and they keep receiving plaintext snapshots.
+    /// Whether this client can inflate a gzipped payload (native
+    /// `DecompressionStream`). Gates whether `encode_payload` gzips *before*
+    /// sealing: a single client that can't inflate forces uncompressed sealing
+    /// for the whole channel. Absent in a hello → `false`.
     #[serde(default)]
     pub supports_gzip: bool,
-    /// Whether this client runs the generic-compression codec: it decodes both
-    /// raw binary `msg` frames and the `{enc:"gzip",data}` text envelope. Old
-    /// PWAs omit it, so it defaults to `false` and they get plaintext (never a
-    /// shape they can't parse). Gates *all* generic compression — see
-    /// `encode_payload`.
+    /// Vestigial: under end-to-end encryption every `msg` payload ships as a
+    /// sealed `{enc:"box"}` text envelope, so the old raw-binary transport this
+    /// flag once gated is gone. Still parsed from `client_hello` and surfaced in
+    /// status for backward compatibility; no code path reads it for transport.
     #[serde(default)]
     pub supports_binary: bool,
 }
@@ -330,22 +329,23 @@ fn live_devices() -> Vec<MobileClientInfo> {
 static WS_STARTED: AtomicBool = AtomicBool::new(false);
 static CONNECTED: AtomicBool = AtomicBool::new(false);
 static CLIENTS: AtomicUsize = AtomicUsize::new(0);
-/// Whether the currently-connected relay advertised `binary:true` in its
-/// `authed` frame — i.e. it forwards WebSocket binary frames verbatim. Reset to
-/// `false` on every disconnect so a downgrade to an older relay is observed.
-static RELAY_BINARY: AtomicBool = AtomicBool::new(false);
 /// Bumped on every config save; the connect loop drops the current socket
 /// when it observes a stale generation (secret rotation, disable, URL edit).
 static CONFIG_GEN: AtomicU64 = AtomicU64::new(0);
 static OUT_TX: Mutex<Option<tokio::sync::mpsc::UnboundedSender<Outbound>>> = Mutex::new(None);
+/// The AES-256-GCM key derived (via `relay_crypto::derive_keys`) from the
+/// pairing secret at connect time and used to seal/open every `msg` payload.
+/// Set in `ws_connect_once`, cleared on disconnect. `encode_payload` falls back
+/// to deriving from the config file when this is unset (a send racing connect).
+static ENC_KEY: Mutex<Option<[u8; 32]>> = Mutex::new(None);
 
-/// A frame queued for the relay: a JSON text frame (the `{type,payload}`
-/// envelope) or an opaque binary blob (a gzipped `msg` payload the relay
-/// forwards verbatim to mobile clients).
+/// A frame queued for the relay. Always a JSON text frame `{type,payload}`;
+/// under end-to-end encryption every `msg` payload is a sealed `{enc:"box",…}`
+/// envelope, so the raw-binary transport the relay could forward verbatim is no
+/// longer used (a gzip blob is not ciphertext — it would leak to the relay).
 #[derive(Debug, Clone)]
 enum Outbound {
     Text(String),
-    Binary(Vec<u8>),
 }
 static SESSIONS_LAST_SENT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
@@ -400,56 +400,72 @@ fn build_msg_frame(payload: Value) -> String {
     json!({ "type": "msg", "payload": payload }).to_string()
 }
 
-/// The transport encoding chosen for one `msg` payload. Pure decision output of
-/// `choose_encoding`, kept separate from the (globals-reading) `encode_payload`
-/// so the branch logic is unit-testable without the client registry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Encoding {
-    /// Plaintext `{type:msg,payload}` — the legacy shape every client parses.
-    Plain,
-    /// gzipped raw bytes in a WebSocket binary frame.
-    GzipBinary,
-    /// gzip+base64 under a generic `{enc:"gzip",data}` text envelope.
-    GzipBase64,
+/// The AES-256-GCM key for this connection. Uses the key cached at connect time;
+/// falls back to deriving from the config file for the rare case of a send that
+/// races the connect handshake (the frame is dropped by `send_out` anyway when
+/// the socket isn't up, so the fallback only ever seals a frame that lands).
+fn relay_enc_key() -> [u8; 32] {
+    if let Some(k) = *ENC_KEY.lock().unwrap() {
+        return k;
+    }
+    crate::relay_crypto::derive_keys(&load_config().secret).enc_key
 }
 
-/// Choose the cheapest transport every live client can decode. Small payloads
-/// ship plaintext (compression would cost more than it saves). Large ones go
-/// binary when the relay forwards binary and every client runs the new codec;
-/// else base64-in-JSON (still works through an older relay); else plaintext (an
-/// older client is present that understands neither).
-fn choose_encoding(raw_len: usize, new_codec: bool, relay_binary: bool) -> Encoding {
-    if raw_len < SESSIONS_COMPRESS_MIN_BYTES {
-        return Encoding::Plain;
-    }
-    match (new_codec, relay_binary) {
-        (true, true) => Encoding::GzipBinary,
-        (true, false) => Encoding::GzipBase64,
-        (false, _) => Encoding::Plain,
-    }
+/// Whether to gzip a `msg` payload before sealing it: only when it's big enough
+/// to be worth it AND every live client can inflate (native `DecompressionStream`).
+/// Compression must happen *before* encryption — ciphertext does not compress.
+fn should_gzip(raw_len: usize, all_support_gzip: bool) -> bool {
+    raw_len >= SESSIONS_COMPRESS_MIN_BYTES && all_support_gzip
 }
 
-/// Encode a `msg` payload for the wire. The dedup/hash concerns of callers run
-/// on the uncompressed payload, so this stays a pure transport concern. Falls
-/// back to plaintext if gzip itself fails.
+/// Encode a `msg` payload for the wire: (optionally) gzip, then seal under the
+/// connection's AES-256-GCM key into the `{enc:"box",iv,ct,z?}` envelope the
+/// relay forwards verbatim without ever seeing the plaintext. `z:true` marks a
+/// payload that was gzipped before sealing, so the peer inflates after opening.
+/// The dedup/hash concerns of callers run on the uncompressed payload, so this
+/// stays a pure transport concern. Falls back to sealing the raw bytes if gzip
+/// itself fails — never to plaintext (that would defeat the encryption).
 fn encode_payload(payload: &Value) -> Outbound {
     let raw = payload.to_string();
-    let enc = choose_encoding(
-        raw.len(),
-        all_clients_support_binary(),
-        RELAY_BINARY.load(Ordering::SeqCst),
-    );
-    match enc {
-        Encoding::GzipBinary => match gzip_bytes(raw.as_bytes()) {
-            Some(gz) => Outbound::Binary(gz),
-            None => Outbound::Text(build_msg_frame(payload.clone())),
-        },
-        Encoding::GzipBase64 => match gzip_base64(raw.as_bytes()) {
-            Some(b64) => Outbound::Text(build_msg_frame(json!({ "enc": "gzip", "data": b64 }))),
-            None => Outbound::Text(build_msg_frame(payload.clone())),
-        },
-        Encoding::Plain => Outbound::Text(build_msg_frame(payload.clone())),
+    let (bytes, gz) = if should_gzip(raw.len(), all_clients_support_gzip()) {
+        match gzip_bytes(raw.as_bytes()) {
+            Some(gz) => (gz, true),
+            None => (raw.into_bytes(), false),
+        }
+    } else {
+        (raw.into_bytes(), false)
+    };
+    let sealed = crate::relay_crypto::seal(&relay_enc_key(), &bytes);
+    let mut env = json!({ "enc": "box", "iv": sealed.iv, "ct": sealed.ct });
+    if gz {
+        env["z"] = Value::Bool(true);
     }
+    Outbound::Text(build_msg_frame(env))
+}
+
+/// Decode an inbound `msg` payload: open the sealed `{enc:"box",…}` envelope,
+/// inflate if `z`, and parse the JSON business payload. Returns `None` (frame
+/// dropped) for anything that isn't a well-formed sealed envelope — under the
+/// hard cutover a peer that can't encrypt simply can't talk to us, so there is
+/// no plaintext fallback to be downgraded to.
+fn decode_inbound_payload(payload: &Value) -> Option<Value> {
+    let sealed: crate::relay_crypto::SealedBox = serde_json::from_value(payload.clone()).ok()?;
+    if sealed.enc != "box" {
+        return None;
+    }
+    let plain = match crate::relay_crypto::open(&relay_enc_key(), &sealed) {
+        Ok(p) => p,
+        Err(e) => {
+            crate::log_debug(&format!("[mobile-relay] drop unopenable msg: {e}"));
+            return None;
+        }
+    };
+    let json = if payload.get("z").and_then(Value::as_bool).unwrap_or(false) {
+        gunzip_bytes(&plain)?
+    } else {
+        plain
+    };
+    serde_json::from_slice(&json).ok()
 }
 
 fn build_notify_frame(title: &str, body: &str, tag: &str) -> String {
@@ -741,32 +757,36 @@ fn snapshot_hash(v: &Value) -> u64 {
     h.finish() | 1
 }
 
-/// Below this serialized size, gzip+base64 costs more (base64 ×4/3 inflation,
-/// per-frame gzip header) than it saves, so small snapshots ship as plaintext.
+/// Below this serialized size, gzip costs more (per-frame gzip header) than it
+/// saves, so small payloads are sealed uncompressed.
 const SESSIONS_COMPRESS_MIN_BYTES: usize = 4096;
 
-/// Whether every live client runs the generic-compression codec (`supportsBinary`).
-/// A single legacy client (or an empty registry) forces plaintext for the whole
-/// channel — the relay broadcasts one frame to all clients, so we can't compress
-/// for some only.
-fn all_clients_support_binary() -> bool {
+/// Whether every live client can inflate a gzipped payload (native
+/// `DecompressionStream`, reported as `supportsGzip` in `client_hello`). A
+/// single client that can't (or an empty registry) forces uncompressed sealing
+/// for the whole channel — the relay broadcasts one frame to all clients, so we
+/// can't compress for some only.
+fn all_clients_support_gzip() -> bool {
     let devices = live_devices();
-    !devices.is_empty() && devices.iter().all(|d| d.supports_binary)
+    !devices.is_empty() && devices.iter().all(|d| d.supports_gzip)
 }
 
-/// gzip a byte slice and base64-encode it for transport inside a JSON string.
-/// Returns `None` if compression itself fails (then the caller ships plaintext).
-fn gzip_base64(bytes: &[u8]) -> Option<String> {
-    Some(base64::engine::general_purpose::STANDARD.encode(gzip_bytes(bytes)?))
-}
-
-/// gzip a byte slice to raw bytes for a WebSocket binary frame.
-/// Returns `None` if compression itself fails (then the caller ships plaintext).
+/// gzip a byte slice to raw bytes (compressed *before* encryption).
+/// Returns `None` if compression itself fails (then the caller seals raw bytes).
 fn gzip_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
     use std::io::Write as _;
     let mut enc = GzEncoder::new(Vec::new(), Compression::default());
     enc.write_all(bytes).ok()?;
     enc.finish().ok()
+}
+
+/// Inflate raw gzip bytes (the plaintext of a sealed payload that was gzipped
+/// before encryption). Returns `None` on malformed gzip (the frame is dropped).
+fn gunzip_bytes(bytes: &[u8]) -> Option<Vec<u8>> {
+    use std::io::Read as _;
+    let mut out = Vec::new();
+    flate2::read::GzDecoder::new(bytes).read_to_end(&mut out).ok()?;
+    Some(out)
 }
 
 /// Push a sessions snapshot. Skipped when no client is online (Web Push is
@@ -1628,8 +1648,8 @@ async fn ws_run_loop() {
         }
         CONNECTED.store(false, Ordering::SeqCst);
         CLIENTS.store(0, Ordering::SeqCst);
-        RELAY_BINARY.store(false, Ordering::SeqCst);
         *OUT_TX.lock().unwrap() = None;
+        *ENC_KEY.lock().unwrap() = None;
         tokio::time::sleep(Duration::from_secs(5)).await;
     }
 }
@@ -1644,8 +1664,14 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
         .map_err(|e| format!("connect {url}: {e}"))?;
     let (mut sink, mut stream) = ws.split();
 
-    // auth as agent
-    let auth = json!({ "type": "auth", "role": "agent", "secret": cfg.secret }).to_string();
+    // auth as agent. We send the HKDF-derived channel token, NOT the raw
+    // pairing secret: the relay routes by a one-way function of the secret and
+    // can no longer recover it (and thus can't derive `enc_key`). The AEAD key
+    // is cached for `encode_payload`/`decode_inbound_payload` to seal/open with.
+    let keys = crate::relay_crypto::derive_keys(&cfg.secret);
+    *ENC_KEY.lock().unwrap() = Some(keys.enc_key);
+    let auth =
+        json!({ "type": "auth", "role": "agent", "secret": keys.channel_token }).to_string();
     sink.send(Message::Text(auth.into()))
         .await
         .map_err(|e| format!("auth send: {e}"))?;
@@ -1670,11 +1696,6 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                 match frame.get("type").and_then(Value::as_str) {
                     Some("authed") => {
                         CONNECTED.store(true, Ordering::SeqCst);
-                        // Older relays omit `binary`; absence → false → text transport.
-                        RELAY_BINARY.store(
-                            frame.get("binary").and_then(Value::as_bool).unwrap_or(false),
-                            Ordering::SeqCst,
-                        );
                         if let Some(n) = frame.get("clients").and_then(Value::as_u64) {
                             CLIENTS.store(n as usize, Ordering::SeqCst);
                         }
@@ -1712,10 +1733,14 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
                         }
                     }
                     Some("msg") => {
-                        if let Some(payload) = frame.get("payload") {
+                        // Every `msg` payload is a sealed `{enc:"box",…}` envelope;
+                        // open it (and inflate if it was gzipped) before dispatch. A
+                        // payload we can't open is dropped — there is no plaintext
+                        // path under the hard cutover.
+                        if let Some(payload) = frame.get("payload").and_then(decode_inbound_payload)
+                        {
                             // Blocking file IO (write_response / pending scans)
                             // must not run on the ws runtime thread.
-                            let payload = payload.clone();
                             let reply = tokio::task::spawn_blocking(move || {
                                 handle_client_payload(&payload)
                             })
@@ -1735,11 +1760,8 @@ async fn ws_connect_once(cfg: &MobileRelayConfig, gen: u64) -> Result<(), String
             }
             outbound = rx.recv() => {
                 let Some(out) = outbound else { return Ok(()) };
-                let msg = match out {
-                    Outbound::Text(s) => Message::Text(s.into()),
-                    Outbound::Binary(b) => Message::Binary(b.into()),
-                };
-                sink.send(msg).await.map_err(|e| format!("send: {e}"))?;
+                let Outbound::Text(s) = out;
+                sink.send(Message::Text(s.into())).await.map_err(|e| format!("send: {e}"))?;
             }
             _ = ping.tick() => {
                 if sink.send(Message::Ping(Vec::new().into())).await.is_err() {
@@ -3194,15 +3216,16 @@ mod tests {
         clear_clients();
         assert!(live_devices().is_empty(), "clear wiped the registry");
 
-        // binary/compression capability gate — folded in here because it shares
-        // the global CLIENTS_REGISTRY and would race a separate #[test].
-        assert!(!all_clients_support_binary(), "empty registry → never compress");
-        handle_client_payload(&hello_binary("g1", true));
-        assert!(all_clients_support_binary(), "sole new-codec client → compress");
-        // A legacy client (omits the flag → default false) vetoes compression
-        // for the whole channel: the relay broadcasts one frame to everyone.
+        // gzip compression gate — folded in here because it shares the global
+        // CLIENTS_REGISTRY and would race a separate #[test].
+        assert!(!all_clients_support_gzip(), "empty registry → never compress");
+        handle_client_payload(&hello_gzip("g1", true));
+        assert!(all_clients_support_gzip(), "sole gzip-capable client → compress");
+        // A client that can't inflate (omits the flag → default false) vetoes
+        // compression for the whole channel: the relay broadcasts one frame to
+        // everyone, so we can't gzip for some clients only.
         handle_client_payload(&hello("g2", "old PWA", false));
-        assert!(!all_clients_support_binary(), "one legacy client forces plaintext");
+        assert!(!all_clients_support_gzip(), "one non-gzip client forces uncompressed");
         clear_clients();
     }
 
@@ -3217,25 +3240,23 @@ mod tests {
         assert!(old.devices.is_empty());
     }
 
-    /// Inflate a gzip+base64 string the way the mobile `DecompressionStream`
-    /// does, so the roundtrip test asserts against real bytes, not a re-encode.
-    fn gunzip_base64(b64: &str) -> String {
-        use std::io::Read as _;
-        let gz = base64::engine::general_purpose::STANDARD.decode(b64).expect("valid base64");
-        let mut out = String::new();
-        flate2::read::GzDecoder::new(&gz[..]).read_to_string(&mut out).expect("valid gzip");
-        out
+    /// Open a sealed outbound frame the way a paired phone would: parse the
+    /// `{type:msg,payload}` envelope and decrypt (and inflate) the payload. Used
+    /// by tests that assert on what a phone actually receives.
+    fn decode_out(text: &str) -> Value {
+        let frame: Value = serde_json::from_str(text).expect("valid frame");
+        assert_eq!(frame["type"], "msg", "outbound business frames are msg frames");
+        decode_inbound_payload(&frame["payload"]).expect("sealed payload opens")
     }
 
-    fn hello_binary(client_id: &str, supports_binary: bool) -> Value {
+    fn hello_gzip(client_id: &str, supports_gzip: bool) -> Value {
         json!({
             "event": "client_hello",
             "clientId": client_id,
             "label": "x",
             "platform": "ios",
             "pushSubscribed": false,
-            "supportsGzip": true,
-            "supportsBinary": supports_binary,
+            "supportsGzip": supports_gzip,
         })
     }
 
@@ -3360,51 +3381,86 @@ mod tests {
         assert!(v["sources"].is_array(), "sources is always an array");
     }
 
-    /// The pure transport-decision matrix — no global state, safe to run alone.
+    /// The pure gzip-gate decision — no global state, safe to run alone.
     #[test]
-    fn choose_encoding_matrix() {
+    fn should_gzip_matrix() {
         let big = SESSIONS_COMPRESS_MIN_BYTES;
         let small = SESSIONS_COMPRESS_MIN_BYTES - 1;
-        // Below threshold → always plaintext regardless of capabilities.
-        assert_eq!(choose_encoding(small, true, true), Encoding::Plain);
-        // Large + new codec + relay binary → raw binary.
-        assert_eq!(choose_encoding(big, true, true), Encoding::GzipBinary);
-        // Large + new codec + old relay → base64-in-JSON (still compresses).
-        assert_eq!(choose_encoding(big, true, false), Encoding::GzipBase64);
-        // Large but a legacy client present → plaintext (never an unparseable shape).
-        assert_eq!(choose_encoding(big, false, true), Encoding::Plain);
-        assert_eq!(choose_encoding(big, false, false), Encoding::Plain);
+        // Below threshold → never gzip, regardless of client support.
+        assert!(!should_gzip(small, true));
+        // Large + all clients can inflate → gzip.
+        assert!(should_gzip(big, true));
+        // Large but a client can't inflate → seal uncompressed.
+        assert!(!should_gzip(big, false));
     }
 
-    /// Both compression codecs must round-trip a large payload back to the exact
-    /// bytes and actually shrink it. Uses the gzip helpers directly, so no global
-    /// registry state is touched (avoids racing sibling tests).
+    /// A small payload seals into an opaque `{enc:"box"}` envelope that leaks no
+    /// plaintext to the relay, yet a paired peer opens it back to the original.
     #[test]
-    fn gzip_codecs_roundtrip_and_shrink() {
+    fn encode_payload_seals_and_roundtrips_small() {
+        // ENC_KEY is a process global the ws thread owns in production; pin it
+        // under the shared lock so parallel encode-exercising tests don't race
+        // it between this test's seal and open.
+        let _guard = fleet_home_lock();
+        *ENC_KEY.lock().unwrap() = Some([7u8; 32]);
+        let payload = json!({ "event": "reply", "req_id": "r1", "ok": true, "data": 42 });
+        let Outbound::Text(text) = encode_payload(&payload);
+        // The wire carries no business fields — only the sealed envelope.
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(frame["payload"]["enc"], "box");
+        assert!(frame["payload"].get("event").is_none(), "no plaintext event on the wire");
+        assert!(!text.contains("\"reply\""), "no plaintext leaks into the frame");
+        assert!(frame["payload"].get("z").is_none(), "small payload not gzipped");
+        // A peer with the same key opens it back to the original.
+        assert_eq!(decode_out(&text), payload);
+        *ENC_KEY.lock().unwrap() = None;
+    }
+
+    /// A large payload is gzipped before sealing (`z:true`) and still opens back
+    /// to the exact original — proving compress-then-encrypt round-trips.
+    #[test]
+    fn encode_payload_gzips_then_seals_large() {
+        let _guard = fleet_home_lock();
+        *ENC_KEY.lock().unwrap() = Some([7u8; 32]);
+        clear_clients();
+        // A gzip-capable client on the channel unlocks compression.
+        handle_client_payload(&hello_gzip("g1", true));
+
         use crate::session_launch::NEW_SESSION_ENTRYPOINT;
-        use std::io::Read as _;
         let many: Vec<Value> = (0..200)
             .map(|i| json!({"id": format!("session-{i}"), "isSubagent": false,
                             "lastActivityMs": i, "workspaceName": "some-workspace-name",
                             "entrypoint": NEW_SESSION_ENTRYPOINT}))
             .collect();
         let slim = slim_sessions_snapshot(&Value::Array(many));
-        let raw = json!({ "event": "sessions", "sessions": slim }).to_string();
-        assert!(raw.len() >= SESSIONS_COMPRESS_MIN_BYTES, "test data must exceed threshold");
+        let payload = json!({ "event": "sessions", "sessions": slim });
+        assert!(
+            payload.to_string().len() >= SESSIONS_COMPRESS_MIN_BYTES,
+            "test data must exceed the gzip threshold"
+        );
 
-        // Binary codec: gzip bytes → gunzip → original.
+        let Outbound::Text(text) = encode_payload(&payload);
+        let frame: Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(frame["payload"]["enc"], "box");
+        assert_eq!(frame["payload"]["z"], true, "large payload gzipped before sealing");
+        // Ciphertext is far smaller than the plaintext JSON despite base64.
+        assert!(
+            text.len() < payload.to_string().len(),
+            "gzip-then-seal must shrink a large snapshot"
+        );
+        // Opens back to the exact original after inflate.
+        assert_eq!(decode_out(&text), payload);
+        clear_clients();
+        *ENC_KEY.lock().unwrap() = None;
+    }
+
+    /// The gzip roundtrip helpers used by the transport layer round-trip bytes.
+    #[test]
+    fn gzip_bytes_roundtrips() {
+        let raw = "x".repeat(10_000);
         let gz = gzip_bytes(raw.as_bytes()).expect("gzip");
-        assert!(gz.len() < raw.len(), "binary gzip must shrink");
-        let mut out = String::new();
-        flate2::read::GzDecoder::new(&gz[..])
-            .read_to_string(&mut out)
-            .expect("valid gzip");
-        assert_eq!(out, raw, "binary codec round-trips");
-
-        // Base64 codec: gzip+base64 → gunzip_base64 → original, still smaller.
-        let b64 = gzip_base64(raw.as_bytes()).expect("gzip+base64");
-        assert_eq!(gunzip_base64(&b64), raw, "base64 codec round-trips");
-        assert!(b64.len() < raw.len(), "gzip+base64 must shrink");
+        assert!(gz.len() < raw.len(), "gzip must shrink repetitive data");
+        assert_eq!(gunzip_bytes(&gz).expect("gunzip"), raw.as_bytes());
     }
 
     #[test]
@@ -3412,6 +3468,8 @@ mod tests {
         use crate::session_launch::NEW_SESSION_ENTRYPOINT;
 
         // Observable outbound channel so send_out's frames can be inspected.
+        let _guard = fleet_home_lock();
+        *ENC_KEY.lock().unwrap() = Some([7u8; 32]);
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Outbound>();
         *OUT_TX.lock().unwrap() = Some(tx);
         // Simulate an authed channel with one phone attached, freshly connected:
@@ -3438,14 +3496,14 @@ mod tests {
         });
         push_snapshot_on_connect();
         let out = rx.try_recv().expect("on-connect push emitted a frame");
-        let Outbound::Text(text) = out else { panic!("small snapshot must be plaintext text") };
-        let frame: Value = serde_json::from_str(&text).expect("valid frame");
-        assert_eq!(frame["type"], "msg");
-        assert_eq!(frame["payload"]["event"], "sessions");
+        let Outbound::Text(text) = out;
+        // The payload crosses the relay sealed; a paired peer opens it.
+        assert_eq!(decode_out(&text)["event"], "sessions");
 
         // Reset shared globals so sibling tests start from a known state.
         *SNAPSHOT_PROVIDER.lock().unwrap() = None;
         *OUT_TX.lock().unwrap() = None;
+        *ENC_KEY.lock().unwrap() = None;
         CONNECTED.store(false, Ordering::SeqCst);
         CLIENTS.store(0, Ordering::SeqCst);
         SESSIONS_LAST_HASH.store(0, Ordering::SeqCst);
