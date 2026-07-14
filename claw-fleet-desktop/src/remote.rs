@@ -2068,6 +2068,13 @@ fn connect_remote_start_probe(
 
             let mut prev_statuses: HashMap<String, SessionStatus> = HashMap::new();
             let analyzing: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+            // Desktop-driven auto-resume scheduler state (this poller thread is
+            // the only writer, so plain maps suffice — no locking needed). We
+            // can't reap the probe-side resume process, so `ar_last_fire`
+            // debounces re-fires and `ar_failures` backs off resumes whose
+            // /resume_session POST keeps failing.
+            let mut ar_last_fire: HashMap<String, std::time::Instant> = HashMap::new();
+            let mut ar_failures: HashMap<String, u32> = HashMap::new();
             let busy_statuses = [
                 SessionStatus::Thinking,
                 SessionStatus::Executing,
@@ -2098,6 +2105,71 @@ fn connect_remote_start_probe(
                 *sess2.lock().unwrap() = s.clone();
                 let _ = app2.emit("sessions-updated", &s);
                 crate::update_tray(&app2, &s);
+
+                // ── Auto-resume scheduler (desktop-driven, remote sessions) ──
+                // Mirror of the LocalBackend scan-thread scheduler
+                // (`maybe_fire_auto_resume`), but the resume is fired on the
+                // *probe* host via `/resume_session` instead of a local spawn —
+                // the sessions and their `claude --resume` live there. Config
+                // stays desktop-local, matching `get_auto_resume_config`.
+                {
+                    const AR_DEBOUNCE: Duration = Duration::from_secs(120);
+                    const AR_MAX_PER_TICK: usize = 4;
+                    const AR_FAILURE_BACKOFF: u32 = 3;
+                    let config = claw_fleet_core::auto_resume::AutoResumeConfig::load();
+                    if config.enabled {
+                        let now = chrono::Utc::now();
+                        // Keep the debounce map bounded for churny hosts.
+                        ar_last_fire.retain(|_, t| t.elapsed() < AR_DEBOUNCE * 10);
+                        let candidates = claw_fleet_core::auto_resume::select_resume_candidates(
+                            &s,
+                            &config,
+                            now,
+                            // The usage snapshot lives on the probe host, not this
+                            // desktop, so pass None and let selection fall back to
+                            // each session's hinted `resets_at` gate.
+                            None,
+                            |id| {
+                                ar_last_fire.get(id).is_some_and(|t| t.elapsed() < AR_DEBOUNCE)
+                                    || claw_fleet_core::auto_resume::is_backed_off(
+                                        &ar_failures,
+                                        id,
+                                        AR_FAILURE_BACKOFF,
+                                    )
+                            },
+                            AR_MAX_PER_TICK,
+                        );
+                        for (session_id, workspace_path) in candidates {
+                            ar_last_fire.insert(session_id.clone(), std::time::Instant::now());
+                            let req = claw_fleet_core::auto_resume::ResumeSessionRequest {
+                                session_id: session_id.clone(),
+                                workspace_path,
+                                prompt: None,
+                                model: None,
+                                effort: None,
+                                permission_mode: None,
+                            };
+                            match probe2.post_json_ok("/resume_session", &req) {
+                                Ok(()) => crate::log_debug(&format!(
+                                    "remote auto_resume: fired {session_id}"
+                                )),
+                                Err(e) => {
+                                    // Can't reap the remote process, so a POST
+                                    // failure is the only failure signal we get;
+                                    // feed it to the backoff gate.
+                                    claw_fleet_core::auto_resume::record_resume_outcome(
+                                        &mut ar_failures,
+                                        &session_id,
+                                        false,
+                                    );
+                                    crate::log_debug(&format!(
+                                        "remote auto_resume: fire failed {session_id}: {e}"
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
 
                 // ── Waiting-input detection & outcome analysis ───────────────
                 let mut alerts_changed = false;
