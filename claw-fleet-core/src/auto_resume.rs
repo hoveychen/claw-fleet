@@ -875,4 +875,126 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&tmp);
     }
+
+    // ── M2 P8: live end-to-end codex resume validation ──────────────────────
+    //
+    // These spawn a real `codex` session + model, so they are ignored by
+    // default. Run manually:
+    //   cargo test -p claw-fleet-core auto_resume::tests::live_codex -- --ignored
+
+    /// Manual resume of a codex session through the real dispatcher
+    /// (`agent_source::resume_session("codex", …)`) continues the thread and the
+    /// resumed process exits 0. Validates the whole manual-resume path a user
+    /// hits from the resume composer / rate-limit button.
+    #[test]
+    #[ignore = "spawns + resumes a real codex session; run manually with --ignored"]
+    fn live_codex_manual_resume_via_dispatcher_continues() {
+        let ws = std::env::temp_dir().join(format!("fleet-codex-p8-manual-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let resp = crate::codex_launch::spawn_new_codex_session(
+            ws.to_str().unwrap(),
+            "reply with exactly: FIRST",
+            None,
+            None,
+        )
+        .expect("initial codex spawn");
+        let tid = resp.session_id.expect("thread id");
+
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok_cb = ok.clone();
+        let done_cb = done.clone();
+        crate::agent_source::resume_session(
+            "codex",
+            &crate::agent_source::ResumeSpec {
+                session_id: tid.clone(),
+                workspace_path: ws.to_string_lossy().into_owned(),
+                prompt: "reply with exactly: SECOND".to_string(),
+                ..Default::default()
+            },
+            Box::new(move |success| {
+                ok_cb.store(success, std::sync::atomic::Ordering::SeqCst);
+                done_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("dispatcher should route codex resume");
+
+        let mut waited = std::time::Duration::ZERO;
+        while waited < std::time::Duration::from_secs(90)
+            && !done.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            waited += std::time::Duration::from_millis(500);
+        }
+        assert!(done.load(std::sync::atomic::Ordering::SeqCst), "resume never exited");
+        assert!(ok.load(std::sync::atomic::Ordering::SeqCst), "resume exited non-zero");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// Auto-resume end-to-end with a *constructed* codex rate limit (a live limit
+    /// can't be triggered at low usage). Spawns a real codex thread, marks a
+    /// SessionInfo RateLimited with a codex secondary-window state whose reset has
+    /// passed, confirms `select_resume_candidates` picks it, then fires the resume
+    /// via the same source-routed dispatcher the scheduler uses and confirms it
+    /// continues (exit 0). The only piece NOT exercised here is the scanner
+    /// *populating* that rate_limit onto a live rate-limited codex session, which
+    /// depends on the Fleet-owned marking (M3 P9).
+    #[test]
+    #[ignore = "spawns + resumes a real codex session; run manually with --ignored"]
+    fn live_codex_auto_resume_selects_and_fires() {
+        let ws = std::env::temp_dir().join(format!("fleet-codex-p8-auto-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let resp = crate::codex_launch::spawn_new_codex_session(
+            ws.to_str().unwrap(),
+            "reply with exactly: FIRST",
+            None,
+            None,
+        )
+        .expect("initial codex spawn");
+        let tid = resp.session_id.expect("thread id");
+
+        // Construct the rate-limited codex session the scanner will build in P9.
+        let mut s = mk_session(SessionStatus::RateLimited, None);
+        s.id = tid.clone();
+        s.workspace_path = ws.to_string_lossy().into_owned();
+        s.agent_source = "codex".into();
+        s.rate_limit = Some(codex_state("secondary", 300, Utc::now() - Duration::minutes(2)));
+
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let picked =
+            select_resume_candidates(std::slice::from_ref(&s), &cfg, Utc::now(), None, |_| false, 4);
+        assert_eq!(picked.len(), 1, "constructed codex rate-limit must be selected");
+        assert_eq!(picked[0].0, tid, "selected the codex session");
+
+        // Fire the resume exactly as the scheduler does — routed by source.
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok_cb = ok.clone();
+        let done_cb = done.clone();
+        crate::agent_source::resume_session(
+            &s.agent_source,
+            &crate::agent_source::ResumeSpec {
+                session_id: picked[0].0.clone(),
+                workspace_path: picked[0].1.clone(),
+                prompt: "continue".to_string(),
+                ..Default::default()
+            },
+            Box::new(move |success| {
+                ok_cb.store(success, std::sync::atomic::Ordering::SeqCst);
+                done_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("scheduler-shaped codex resume should fire");
+
+        let mut waited = std::time::Duration::ZERO;
+        while waited < std::time::Duration::from_secs(90)
+            && !done.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            waited += std::time::Duration::from_millis(500);
+        }
+        assert!(done.load(std::sync::atomic::Ordering::SeqCst), "auto-resume never exited");
+        assert!(ok.load(std::sync::atomic::Ordering::SeqCst), "auto-resume exited non-zero");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
 }
