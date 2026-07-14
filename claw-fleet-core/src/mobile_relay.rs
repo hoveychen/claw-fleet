@@ -107,9 +107,15 @@ pub fn generate_secret() -> String {
 }
 
 /// The URL the mobile web app opens; the secret rides in the fragment so it
-/// never reaches server logs.
-pub fn pairing_url(cfg: &MobileRelayConfig) -> String {
-    format!("{}/#k={}", cfg.relay_url.trim_end_matches('/'), cfg.secret)
+/// never reaches server logs. When `lang` is `Some("zh"|"en")` it is appended
+/// to the fragment so a fresh scan brings the desktop's current UI language
+/// over to the phone (`#k=<secret>&lang=<lang>`); any other value is ignored.
+pub fn pairing_url(cfg: &MobileRelayConfig, lang: Option<&str>) -> String {
+    let base = format!("{}/#k={}", cfg.relay_url.trim_end_matches('/'), cfg.secret);
+    match lang {
+        Some(l @ ("zh" | "en")) => format!("{base}&lang={l}"),
+        _ => base,
+    }
 }
 
 /// Persist a config coming from the UI. An enabled config with an empty
@@ -136,13 +142,15 @@ pub fn rotate_secret() -> Result<MobileRelayConfig, String> {
     Ok(cfg)
 }
 
-/// Render the pairing URL as an SVG QR code for the 「移动端」 view.
-pub fn qr_svg() -> Result<String, String> {
+/// Render the pairing URL as an SVG QR code for the 「移动端」 view. `lang`
+/// carries the desktop's current UI language into the encoded URL (see
+/// [`pairing_url`]).
+pub fn qr_svg(lang: Option<&str>) -> Result<String, String> {
     let cfg = load_config();
     if cfg.secret.is_empty() {
         return Err("mobile relay secret not set".into());
     }
-    let code = qrcode::QrCode::new(pairing_url(&cfg).as_bytes())
+    let code = qrcode::QrCode::new(pairing_url(&cfg, lang).as_bytes())
         .map_err(|e| format!("qr encode: {e}"))?;
     Ok(code
         .render::<qrcode::render::svg::Color>()
@@ -2111,7 +2119,17 @@ mod tests {
             secret: "s".repeat(64),
         };
         assert_eq!(
-            pairing_url(&cfg),
+            pairing_url(&cfg, None),
+            format!("https://relay.example.com/#k={}", "s".repeat(64))
+        );
+        // A valid lang rides in the fragment after the secret.
+        assert_eq!(
+            pairing_url(&cfg, Some("zh")),
+            format!("https://relay.example.com/#k={}&lang=zh", "s".repeat(64))
+        );
+        // Unknown languages are dropped rather than trusted verbatim.
+        assert_eq!(
+            pairing_url(&cfg, Some("fr")),
             format!("https://relay.example.com/#k={}", "s".repeat(64))
         );
     }

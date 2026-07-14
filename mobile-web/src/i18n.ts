@@ -7,9 +7,31 @@ import { useSyncExternalStore } from "react";
 export type Lang = "zh" | "en";
 
 const LANG_KEY = "fleet-lang";
+// Set to "1" once the user picks a language by hand in the More tab. A manual
+// choice outranks the language a QR scan carries over, so re-scanning from a
+// desktop in a different language won't silently flip a deliberate pick.
+const LANG_MANUAL_KEY = "fleet-lang-manual";
+
+/** Language the desktop encoded into the pairing URL fragment (`&lang=zh|en`).
+ *  Read at module load, BEFORE loadSecretSync() scrubs the hash. */
+function langFromHash(): Lang | null {
+  const m = window.location.hash.match(/[#&]lang=(zh|en)\b/);
+  return m ? (m[1] as Lang) : null;
+}
 
 function initialLang(): Lang {
+  const manual = localStorage.getItem(LANG_MANUAL_KEY) === "1";
   const saved = localStorage.getItem(LANG_KEY);
+  // 1. A deliberate manual pick always wins, even across re-scans.
+  if (manual && (saved === "zh" || saved === "en")) return saved;
+  // 2. A fresh scan carries the desktop's current language — apply and persist
+  //    it (as non-manual) so it survives the hash scrub and later reopens.
+  const fromHash = langFromHash();
+  if (fromHash) {
+    localStorage.setItem(LANG_KEY, fromHash);
+    return fromHash;
+  }
+  // 3. A persisted value from an earlier scan, then the browser locale.
   if (saved === "zh" || saved === "en") return saved;
   return /^zh/i.test(navigator.language) ? "zh" : "en";
 }
@@ -27,6 +49,9 @@ export function getLang(): Lang {
 }
 
 export function setLang(next: Lang): void {
+  // Always record the manual flag: even when `next === lang` the user has now
+  // made an explicit pick that must outrank any future QR-carried language.
+  localStorage.setItem(LANG_MANUAL_KEY, "1");
   if (next === lang) return;
   lang = next;
   localStorage.setItem(LANG_KEY, next);

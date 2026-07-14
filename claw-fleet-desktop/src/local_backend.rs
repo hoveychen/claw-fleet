@@ -2970,8 +2970,8 @@ impl Backend for LocalBackend {
         Ok(claw_fleet_core::mobile_relay::status())
     }
 
-    fn mobile_relay_qr_svg(&self) -> Result<String, String> {
-        claw_fleet_core::mobile_relay::qr_svg()
+    fn mobile_relay_qr_svg(&self, lang: Option<&str>) -> Result<String, String> {
+        claw_fleet_core::mobile_relay::qr_svg(lang)
     }
 }
 
