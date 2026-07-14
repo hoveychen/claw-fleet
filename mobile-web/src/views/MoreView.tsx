@@ -6,6 +6,7 @@ import { useI18n, type Lang } from "../i18n";
 import type { PushState } from "../push";
 import { clearSecret } from "../secretStore";
 import { useTheme, type ThemeSetting } from "../theme";
+import { useWakeLock } from "../wakeLock";
 import styles from "./MoreView.module.css";
 
 const LANG_CHOICES: Array<[Lang, string]> = [
@@ -32,6 +33,7 @@ export function MoreView({
 }: Props) {
   const { lang, setLang, t } = useI18n();
   const { setting, setTheme } = useTheme();
+  const wakeLock = useWakeLock();
 
   const themeChoices: Array<[ThemeSetting, string]> = [
     ["system", t("跟随系统")],
@@ -111,6 +113,30 @@ export function MoreView({
               ))}
             </div>
           </div>
+          {wakeLock.supported && (
+            <>
+              <div className={styles.divider} />
+              <div className={styles.row}>
+                <span className={styles.rowLabel}>{t("屏幕常亮")}</span>
+                <div className={styles.segment}>
+                  <button
+                    className={styles.segmentButton}
+                    data-active={!wakeLock.enabled}
+                    onClick={() => wakeLock.setEnabled(false)}
+                  >
+                    {t("关")}
+                  </button>
+                  <button
+                    className={styles.segmentButton}
+                    data-active={wakeLock.enabled}
+                    onClick={() => wakeLock.setEnabled(true)}
+                  >
+                    {t("开")}
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
