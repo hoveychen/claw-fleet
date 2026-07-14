@@ -287,28 +287,28 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn get_messages(&self, path: &str) -> Result<Vec<serde_json::Value>, String> {
-        self.probe.get(&format!("/messages?path={}", encode_path(path)))
+        self.probe.get(&format!("{}?path={}", claw_fleet_core::routes::MESSAGES, encode_path(path)))
     }
 
     fn get_messages_tail(&self, path: &str, n: usize) -> Result<Vec<serde_json::Value>, String> {
         self.probe.get(&format!(
-            "/messages?path={}&tail={}",
+            "{}?path={}&tail={}", claw_fleet_core::routes::MESSAGES,
             encode_path(path),
             n
         ))
     }
 
     fn interrupt_pid(&self, pid: u32) -> Result<(), String> {
-        self.probe.get_ok(&format!("/interrupt?pid={}", pid))
+        self.probe.get_ok(&format!("{}?pid={}", claw_fleet_core::routes::INTERRUPT, pid))
     }
 
     fn kill_pid(&self, pid: u32) -> Result<(), String> {
-        self.probe.get_ok(&format!("/stop?pid={}&force=false", pid))
+        self.probe.get_ok(&format!("{}?pid={}&force=false", claw_fleet_core::routes::STOP, pid))
     }
 
     fn kill_workspace(&self, workspace_path: String) -> Result<(), String> {
         let encoded = workspace_path.replace('/', "%2F");
-        self.probe.get_ok(&format!("/stop_workspace?path={}", encoded))
+        self.probe.get_ok(&format!("{}?path={}", claw_fleet_core::routes::STOP_WORKSPACE, encoded))
     }
 
     fn resume_session(
@@ -328,7 +328,7 @@ impl crate::backend::Backend for RemoteBackend {
             effort,
             permission_mode,
         };
-        self.probe.post_json_ok("/resume_session", &req)
+        self.probe.post_json_ok(claw_fleet_core::routes::RESUME_SESSION, &req)
     }
 
     fn spawn_new_session(
@@ -353,7 +353,7 @@ impl crate::backend::Backend for RemoteBackend {
         // `session_id` deserializes to None when the probe is an older build
         // that only returns `pid`; the frontend then falls back to novelty
         // matching.
-        self.probe.post_json("/spawn_session", &req)
+        self.probe.post_json(claw_fleet_core::routes::SPAWN_SESSION, &req)
     }
 
     fn chat_workspace(&self) -> Result<String, String> {
@@ -364,7 +364,7 @@ impl crate::backend::Backend for RemoteBackend {
             path: String,
         }
         self.probe
-            .get::<Resp>("/chat_workspace")
+            .get::<Resp>(claw_fleet_core::routes::CHAT_WORKSPACE)
             .map(|r| r.path)
             .map_err(|e| format!("probe /chat_workspace failed: {e}"))
     }
@@ -377,8 +377,8 @@ impl crate::backend::Backend for RemoteBackend {
         // means "that host's home" — which only it can resolve, so send no
         // `path` param rather than substituting the desktop's own home.
         let endpoint = match path.as_deref().map(str::trim).filter(|p| !p.is_empty()) {
-            Some(p) => format!("/browse_dir?path={}", encode_path(p)),
-            None => "/browse_dir".to_string(),
+            Some(p) => format!("{}?path={}", claw_fleet_core::routes::BROWSE_DIR, encode_path(p)),
+            None => claw_fleet_core::routes::BROWSE_DIR.to_string(),
         };
         self.probe
             .get(&endpoint)
@@ -416,7 +416,7 @@ impl crate::backend::Backend for RemoteBackend {
             workspace_path,
             mark,
         };
-        self.probe.post_json_ok("/session_mark", &req)
+        self.probe.post_json_ok(claw_fleet_core::routes::SESSION_MARK, &req)
     }
 
     fn mark_sessions_read(
@@ -424,11 +424,11 @@ impl crate::backend::Backend for RemoteBackend {
         items: Vec<claw_fleet_core::session_read::SessionReadItem>,
     ) -> Result<(), String> {
         let req = claw_fleet_core::session_read::MarkSessionsReadRequest { items };
-        self.probe.post_json_ok("/session_read", &req)
+        self.probe.post_json_ok(claw_fleet_core::routes::SESSION_READ, &req)
     }
 
     fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
-        self.probe.get("/procs").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::PROCS).unwrap_or_default()
     }
 
     fn spawn_proc(
@@ -444,12 +444,12 @@ impl crate::backend::Backend for RemoteBackend {
             cols,
             rows,
         };
-        self.probe.post_json("/proc_run", &req)
+        self.probe.post_json(claw_fleet_core::routes::PROC_RUN, &req)
     }
 
     fn kill_proc(&self, id: String, force: bool) -> Result<(), String> {
         self.probe
-            .post_ok(&format!("/proc_kill?id={}&force={}", encode_path(&id), force))
+            .post_ok(&format!("{}?id={}&force={}", claw_fleet_core::routes::PROC_KILL, encode_path(&id), force))
     }
 
     fn proc_output(
@@ -457,7 +457,7 @@ impl crate::backend::Backend for RemoteBackend {
         id: String,
         offset: Option<u64>,
     ) -> Result<claw_fleet_core::proc_runner::ProcOutputChunk, String> {
-        let mut endpoint = format!("/proc_output?id={}", encode_path(&id));
+        let mut endpoint = format!("{}?id={}", claw_fleet_core::routes::PROC_OUTPUT, encode_path(&id));
         if let Some(off) = offset {
             endpoint.push_str(&format!("&offset={off}"));
         }
@@ -466,24 +466,24 @@ impl crate::backend::Backend for RemoteBackend {
 
     fn proc_input(&self, id: String, data_b64: String) -> Result<(), String> {
         let req = claw_fleet_core::proc_runner::ProcInputRequest { id, data_b64 };
-        self.probe.post_json_ok("/proc_input", &req)
+        self.probe.post_json_ok(claw_fleet_core::routes::PROC_INPUT, &req)
     }
 
     fn proc_resize(&self, id: String, cols: u16, rows: u16) -> Result<(), String> {
         let req = claw_fleet_core::proc_runner::ProcResizeRequest { id, cols, rows };
-        self.probe.post_json_ok("/proc_resize", &req)
+        self.probe.post_json_ok(claw_fleet_core::routes::PROC_RESIZE, &req)
     }
 
     fn clear_procs(&self, id: Option<String>, workspace_path: Option<String>) -> Result<u32, String> {
         let req = claw_fleet_core::proc_runner::ClearProcRequest { id, workspace_path };
-        let resp: serde_json::Value = self.probe.post_json("/proc_clear", &req)?;
+        let resp: serde_json::Value = self.probe.post_json(claw_fleet_core::routes::PROC_CLEAR, &req)?;
         Ok(resp["cleared"].as_u64().unwrap_or(0) as u32)
     }
 
     fn account_info(&self) -> crate::backend::AccountInfoFuture {
         let probe = self.probe.clone();
         Box::pin(async move {
-            probe.get("/sources/claude/account")
+            probe.get(claw_fleet_core::routes::SOURCES_CLAUDE_ACCOUNT)
         })
     }
 
@@ -494,7 +494,7 @@ impl crate::backend::Backend for RemoteBackend {
             return Box::pin(async move { Err(msg) });
         }
         let probe = self.probe.clone();
-        let endpoint = format!("/sources/{}/account", source);
+        let endpoint = format!("{}{}/account", claw_fleet_core::routes::SOURCES_PREFIX, source);
         Box::pin(async move {
             probe.get(&endpoint)
         })
@@ -507,14 +507,14 @@ impl crate::backend::Backend for RemoteBackend {
             return Box::pin(async move { Err(msg) });
         }
         let probe = self.probe.clone();
-        let endpoint = format!("/sources/{}/usage", source);
+        let endpoint = format!("{}{}/usage", claw_fleet_core::routes::SOURCES_PREFIX, source);
         Box::pin(async move {
             probe.get(&endpoint)
         })
     }
 
     fn check_setup(&self) -> crate::backend::SetupStatus {
-        self.probe.get::<crate::backend::SetupStatus>("/setup-status")
+        self.probe.get::<crate::backend::SetupStatus>(claw_fleet_core::routes::SETUP_STATUS)
             .unwrap_or_else(|e| {
                 crate::log_debug(&format!("remote check_setup failed: {e}"));
                 crate::backend::SetupStatus {
@@ -536,11 +536,11 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn today_usage(&self) -> crate::today_usage::TodayUsage {
-        self.probe.get("/today_usage").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::TODAY_USAGE).unwrap_or_default()
     }
 
     fn start_watch(&self, path: String) -> Result<u64, String> {
-        let file_size = self.probe.get_value(&format!("/file_size?path={}", encode_path(&path)))
+        let file_size = self.probe.get_value(&format!("{}?path={}", claw_fleet_core::routes::FILE_SIZE, encode_path(&path)))
             .ok()
             .and_then(|v| v["size"].as_u64())
             .unwrap_or(0);
@@ -562,11 +562,11 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn list_memories(&self) -> Vec<crate::memory::WorkspaceMemory> {
-        self.probe.get("/memories").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::MEMORIES).unwrap_or_default()
     }
 
     fn get_memory_content(&self, path: &str) -> Result<String, String> {
-        self.probe.get(&format!("/memory_content?path={}", encode_path(path)))
+        self.probe.get(&format!("{}?path={}", claw_fleet_core::routes::MEMORY_CONTENT, encode_path(path)))
     }
 
     fn read_live_thinking(
@@ -574,17 +574,17 @@ impl crate::backend::Backend for RemoteBackend {
         session_id: &str,
     ) -> Option<claw_fleet_core::live_thinking::LiveThinking> {
         self.probe
-            .get(&format!("/live_thinking?session_id={}", encode_path(session_id)))
+            .get(&format!("{}?session_id={}", claw_fleet_core::routes::LIVE_THINKING, encode_path(session_id)))
             .ok()
             .flatten()
     }
 
     fn get_memory_history(&self, path: &str) -> Vec<crate::memory::MemoryHistoryEntry> {
-        self.probe.get(&format!("/memory_history?path={}", encode_path(path))).unwrap_or_default()
+        self.probe.get(&format!("{}?path={}", claw_fleet_core::routes::MEMORY_HISTORY, encode_path(path))).unwrap_or_default()
     }
 
     fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc> {
-        self.probe.get("/wiki_docs").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::WIKI_DOCS).unwrap_or_default()
     }
 
     fn get_handoff_chain(
@@ -592,13 +592,13 @@ impl crate::backend::Backend for RemoteBackend {
         session_id: &str,
     ) -> Result<Option<crate::handoff::HandoffChain>, String> {
         self.probe.get(&format!(
-            "/handoff_chain?session={}",
+            "{}?session={}", claw_fleet_core::routes::HANDOFF_CHAIN,
             encode_path(session_id)
         ))
     }
 
     fn get_wiki_doc(&self, slug: &str) -> Result<crate::wiki::WikiDoc, String> {
-        self.probe.get(&format!("/wiki_doc?slug={}", encode_path(slug)))
+        self.probe.get(&format!("{}?slug={}", claw_fleet_core::routes::WIKI_DOC, encode_path(slug)))
     }
 
     fn get_wiki_file(
@@ -608,7 +608,7 @@ impl crate::backend::Backend for RemoteBackend {
         relpath: &str,
     ) -> Result<crate::wiki::WikiFileBytes, String> {
         let (bytes, mime) = self.probe.get_bytes(&format!(
-            "/wiki_file?slug={}&version={}&path={}",
+            "{}?slug={}&version={}&path={}", claw_fleet_core::routes::WIKI_FILE,
             encode_path(slug),
             encode_path(version),
             encode_path(relpath),
@@ -623,7 +623,7 @@ impl crate::backend::Backend for RemoteBackend {
         relpath: &str,
     ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String> {
         let (bytes, mime) = self.probe.get_bytes(&format!(
-            "/decision_asset?id={}&qidx={}&path={}",
+            "{}?id={}&qidx={}&path={}", claw_fleet_core::routes::DECISION_ASSET,
             encode_path(id),
             encode_path(qidx),
             encode_path(relpath),
@@ -632,34 +632,34 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn delete_wiki_doc(&self, slug: &str) -> Result<(), String> {
-        self.probe.post_ok(&format!("/wiki_delete?slug={}", encode_path(slug)))
+        self.probe.post_ok(&format!("{}?slug={}", claw_fleet_core::routes::WIKI_DELETE, encode_path(slug)))
     }
 
     fn delete_wiki_version(&self, slug: &str, version: &str) -> Result<(), String> {
         self.probe.post_ok(&format!(
-            "/wiki_delete?slug={}&version={}",
+            "{}?slug={}&version={}", claw_fleet_core::routes::WIKI_DELETE,
             encode_path(slug),
             encode_path(version),
         ))
     }
 
     fn move_wiki_doc(&self, from: &str, to: &str) -> Result<crate::wiki::WikiDoc, String> {
-        self.probe.post_json("/wiki_move", &WikiMoveReq { from, to })
+        self.probe.post_json(claw_fleet_core::routes::WIKI_MOVE, &WikiMoveReq { from, to })
     }
 
     fn move_wiki_folder(&self, from: &str, to: &str) -> Result<Vec<crate::wiki::WikiDoc>, String> {
-        self.probe.post_json("/wiki_move_folder", &WikiMoveReq { from, to })
+        self.probe.post_json(claw_fleet_core::routes::WIKI_MOVE_FOLDER, &WikiMoveReq { from, to })
     }
 
     fn delete_wiki_folder(&self, prefix: &str) -> Result<usize, String> {
         let resp: WikiDeleteFolderResp =
-            self.probe.post_json("/wiki_delete_folder", &WikiDeleteFolderReq { prefix })?;
+            self.probe.post_json(claw_fleet_core::routes::WIKI_DELETE_FOLDER, &WikiDeleteFolderReq { prefix })?;
         Ok(resp.deleted)
     }
 
     fn search_wiki_docs(&self, query: &str) -> Vec<crate::wiki::WikiSearchHit> {
         self.probe
-            .get(&format!("/wiki_search?q={}", encode_path(query)))
+            .get(&format!("{}?q={}", claw_fleet_core::routes::WIKI_SEARCH, encode_path(query)))
             .unwrap_or_default()
     }
 
@@ -667,7 +667,7 @@ impl crate::backend::Backend for RemoteBackend {
         // Filename derivation needs the doc's kind; bytes stream separately.
         let doc = self.get_wiki_doc(slug)?;
         let (bytes, mime) = self.probe.get_bytes(&format!(
-            "/wiki_export?slug={}&version={}",
+            "{}?slug={}&version={}", claw_fleet_core::routes::WIKI_EXPORT,
             encode_path(slug),
             encode_path(version),
         ))?;
@@ -683,7 +683,7 @@ impl crate::backend::Backend for RemoteBackend {
         workspace_path: &str,
         session_id: Option<&str>,
     ) -> Vec<crate::prd_tasks::TaskPlanDetail> {
-        let mut url = format!("/task_plans?path={}", encode_path(workspace_path));
+        let mut url = format!("{}?path={}", claw_fleet_core::routes::TASK_PLANS, encode_path(workspace_path));
         if let Some(sid) = session_id {
             url.push_str(&format!("&session={}", encode_path(sid)));
         }
@@ -695,7 +695,7 @@ impl crate::backend::Backend for RemoteBackend {
         workspace: &str,
     ) -> Result<Vec<crate::file_explorer::ExplorerRoot>, String> {
         self.probe
-            .get(&format!("/explorer_roots?ws={}", encode_path(workspace)))
+            .get(&format!("{}?ws={}", claw_fleet_core::routes::EXPLORER_ROOTS, encode_path(workspace)))
     }
 
     fn list_explorer_dir(
@@ -706,7 +706,7 @@ impl crate::backend::Backend for RemoteBackend {
         show_ignored: bool,
     ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String> {
         self.probe.get(&format!(
-            "/explorer_dir?ws={}&root={}&rel={}&ignored={}",
+            "{}?ws={}&root={}&rel={}&ignored={}", claw_fleet_core::routes::EXPLORER_DIR,
             encode_path(workspace),
             encode_path(root),
             encode_path(rel_path),
@@ -721,7 +721,7 @@ impl crate::backend::Backend for RemoteBackend {
         rel_path: &str,
     ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
         self.probe.get(&format!(
-            "/explorer_file?ws={}&root={}&rel={}",
+            "{}?ws={}&root={}&rel={}", claw_fleet_core::routes::EXPLORER_FILE,
             encode_path(workspace),
             encode_path(root),
             encode_path(rel_path),
@@ -735,7 +735,7 @@ impl crate::backend::Backend for RemoteBackend {
         rel_path: &str,
     ) -> Result<Vec<crate::file_explorer::ExplorerEntry>, String> {
         self.probe.get(&format!(
-            "/scratchpad_dir?ws={}&session={}&rel={}",
+            "{}?ws={}&session={}&rel={}", claw_fleet_core::routes::SCRATCHPAD_DIR,
             encode_path(workspace),
             encode_path(session_id),
             encode_path(rel_path),
@@ -749,7 +749,7 @@ impl crate::backend::Backend for RemoteBackend {
         rel_path: &str,
     ) -> Result<crate::file_explorer::ExplorerFileContent, String> {
         self.probe.get(&format!(
-            "/scratchpad_file?ws={}&session={}&rel={}",
+            "{}?ws={}&session={}&rel={}", claw_fleet_core::routes::SCRATCHPAD_FILE,
             encode_path(workspace),
             encode_path(session_id),
             encode_path(rel_path),
@@ -762,7 +762,7 @@ impl crate::backend::Backend for RemoteBackend {
         root: &str,
     ) -> Result<crate::git_ops::GitStatus, String> {
         self.probe.get(&format!(
-            "/git_status?ws={}&root={}",
+            "{}?ws={}&root={}", claw_fleet_core::routes::GIT_STATUS,
             encode_path(workspace),
             encode_path(root),
         ))
@@ -775,7 +775,7 @@ impl crate::backend::Backend for RemoteBackend {
     ) -> Result<crate::git_ops::GitOpResult, String> {
         self.probe.post_json(
             &format!(
-                "/git_push?ws={}&root={}",
+                "{}?ws={}&root={}", claw_fleet_core::routes::GIT_PUSH,
                 encode_path(workspace),
                 encode_path(root),
             ),
@@ -790,7 +790,7 @@ impl crate::backend::Backend for RemoteBackend {
     ) -> Result<crate::git_ops::GitOpResult, String> {
         self.probe.post_json(
             &format!(
-                "/git_pull?ws={}&root={}",
+                "{}?ws={}&root={}", claw_fleet_core::routes::GIT_PULL,
                 encode_path(workspace),
                 encode_path(root),
             ),
@@ -799,11 +799,11 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
-        self.probe.get("/skills").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::SKILLS).unwrap_or_default()
     }
 
     fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
-        self.probe.get("/plugins").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::PLUGINS).unwrap_or_default()
     }
 
     fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String> {
@@ -825,7 +825,7 @@ impl crate::backend::Backend for RemoteBackend {
             plugin_id: &'a str,
         }
         self.probe
-            .post_json_ok("/plugins/install", &Req { plugin_id })
+            .post_json_ok(claw_fleet_core::routes::PLUGINS_INSTALL, &Req { plugin_id })
     }
 
     fn uninstall_plugin(&self, plugin_id: &str) -> Result<(), String> {
@@ -834,11 +834,11 @@ impl crate::backend::Backend for RemoteBackend {
             plugin_id: &'a str,
         }
         self.probe
-            .post_json_ok("/plugins/uninstall", &Req { plugin_id })
+            .post_json_ok(claw_fleet_core::routes::PLUGINS_UNINSTALL, &Req { plugin_id })
     }
 
     fn list_marketplaces(&self) -> Vec<claw_fleet_core::claude_cli::CliMarketplace> {
-        self.probe.get("/plugins/marketplaces").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::PLUGINS_MARKETPLACES).unwrap_or_default()
     }
 
     fn add_marketplace(&self, source: &str) -> Result<(), String> {
@@ -847,7 +847,7 @@ impl crate::backend::Backend for RemoteBackend {
             source: &'a str,
         }
         self.probe
-            .post_json_ok("/plugins/marketplaces/add", &Req { source })
+            .post_json_ok(claw_fleet_core::routes::PLUGINS_MARKETPLACES_ADD, &Req { source })
     }
 
     fn remove_marketplace(&self, name: &str) -> Result<(), String> {
@@ -856,11 +856,11 @@ impl crate::backend::Backend for RemoteBackend {
             name: &'a str,
         }
         self.probe
-            .post_json_ok("/plugins/marketplaces/remove", &Req { name })
+            .post_json_ok(claw_fleet_core::routes::PLUGINS_MARKETPLACES_REMOVE, &Req { name })
     }
 
     fn get_skill_content(&self, path: &str) -> Result<String, String> {
-        self.probe.get(&format!("/skill_content?path={}", encode_path(path)))
+        self.probe.get(&format!("{}?path={}", claw_fleet_core::routes::SKILL_CONTENT, encode_path(path)))
     }
 
     fn list_skill_files(
@@ -868,7 +868,7 @@ impl crate::backend::Backend for RemoteBackend {
         skill_path: &str,
     ) -> Result<Vec<crate::skills::SkillFileEntry>, String> {
         self.probe.get(&format!(
-            "/skill_files?path={}",
+            "{}?path={}", claw_fleet_core::routes::SKILL_FILES,
             encode_path(skill_path)
         ))
     }
@@ -879,7 +879,7 @@ impl crate::backend::Backend for RemoteBackend {
             skill_path: &'a str,
         }
         self.probe
-            .post_json_ok("/skill_delete", &Req { skill_path })
+            .post_json_ok(claw_fleet_core::routes::SKILL_DELETE, &Req { skill_path })
     }
 
     fn get_skill_history(
@@ -887,7 +887,7 @@ impl crate::backend::Backend for RemoteBackend {
         jsonl_path: &str,
     ) -> Result<Vec<claw_fleet_core::skill_history::SkillInvocation>, String> {
         self.probe
-            .get(&format!("/skill_history?path={}", encode_path(jsonl_path)))
+            .get(&format!("{}?path={}", claw_fleet_core::routes::SKILL_HISTORY, encode_path(jsonl_path)))
     }
 
     fn get_workflow_trees(
@@ -895,7 +895,7 @@ impl crate::backend::Backend for RemoteBackend {
         jsonl_path: &str,
     ) -> Result<Vec<claw_fleet_core::workflow::WorkflowTree>, String> {
         self.probe
-            .get(&format!("/workflow_trees?path={}", encode_path(jsonl_path)))
+            .get(&format!("{}?path={}", claw_fleet_core::routes::WORKFLOW_TREES, encode_path(jsonl_path)))
     }
 
     fn get_task_token_breakdown(
@@ -903,7 +903,7 @@ impl crate::backend::Backend for RemoteBackend {
         main_jsonl_path: &str,
         project_root: Option<&str>,
     ) -> Result<claw_fleet_core::token_analysis::TaskTokenBreakdown, String> {
-        let mut url = format!("/token_breakdown?path={}", encode_path(main_jsonl_path));
+        let mut url = format!("{}?path={}", claw_fleet_core::routes::TOKEN_BREAKDOWN, encode_path(main_jsonl_path));
         if let Some(root) = project_root {
             url.push_str(&format!("&project_root={}", encode_path(root)));
         }
@@ -915,7 +915,7 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn get_hooks_plan(&self) -> crate::hooks::HookSetupPlan {
-        self.probe.get("/hooks_plan").unwrap_or(crate::hooks::HookSetupPlan {
+        self.probe.get(claw_fleet_core::routes::HOOKS_PLAN).unwrap_or(crate::hooks::HookSetupPlan {
             to_add: vec![],
             hooks_globally_disabled: false,
             already_installed: true,
@@ -931,19 +931,19 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn apply_hooks(&self) -> Result<(), String> {
-        self.probe.post_ok("/apply_hooks")
+        self.probe.post_ok(claw_fleet_core::routes::APPLY_HOOKS)
     }
 
     fn remove_hooks(&self) -> Result<(), String> {
-        self.probe.post_ok("/remove_hooks")
+        self.probe.post_ok(claw_fleet_core::routes::REMOVE_HOOKS)
     }
 
     fn apply_guard_hook(&self) -> Result<(), String> {
-        self.probe.post_ok("/apply_guard_hook")
+        self.probe.post_ok(claw_fleet_core::routes::APPLY_GUARD_HOOK)
     }
 
     fn remove_guard_hook(&self) -> Result<(), String> {
-        self.probe.post_ok("/remove_guard_hook")
+        self.probe.post_ok(claw_fleet_core::routes::REMOVE_GUARD_HOOK)
     }
 
     fn respond_to_guard(
@@ -960,7 +960,7 @@ impl crate::backend::Backend for RemoteBackend {
             always_allow: if allow { always_allow } else { None },
             reason: if allow { None } else { reason },
         };
-        self.probe.post_json_ok("/guard/respond", &payload)
+        self.probe.post_json_ok(claw_fleet_core::routes::GUARD_RESPOND, &payload)
     }
 
     fn analyze_guard_command(&self, command: &str, context: &str, lang: &str) -> Result<String, String> {
@@ -968,28 +968,28 @@ impl crate::backend::Backend for RemoteBackend {
         struct Req<'a> { command: &'a str, context: &'a str, lang: &'a str }
         #[derive(serde::Deserialize)]
         struct Resp { analysis: String }
-        let resp: Resp = self.probe.post_json("/guard/analyze", &Req { command, context, lang })?;
+        let resp: Resp = self.probe.post_json(claw_fleet_core::routes::GUARD_ANALYZE, &Req { command, context, lang })?;
         Ok(resp.analysis)
     }
 
     fn list_guard_allow_rules(&self) -> Vec<claw_fleet_core::audit::GuardAllowRule> {
         self.probe
-            .get::<Vec<claw_fleet_core::audit::GuardAllowRule>>("/guard/allow-rules")
+            .get::<Vec<claw_fleet_core::audit::GuardAllowRule>>(claw_fleet_core::routes::GUARD_ALLOW_RULES)
             .unwrap_or_default()
     }
 
     fn remove_guard_allow_rule(&self, id: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Req<'a> { id: &'a str }
-        self.probe.post_json_ok("/guard/allow-rules/remove", &Req { id })
+        self.probe.post_json_ok(claw_fleet_core::routes::GUARD_ALLOW_RULES_REMOVE, &Req { id })
     }
 
     fn apply_elicitation_hook(&self) -> Result<(), String> {
-        self.probe.post_ok("/apply_elicitation_hook")
+        self.probe.post_ok(claw_fleet_core::routes::APPLY_ELICITATION_HOOK)
     }
 
     fn remove_elicitation_hook(&self) -> Result<(), String> {
-        self.probe.post_ok("/remove_elicitation_hook")
+        self.probe.post_ok(claw_fleet_core::routes::REMOVE_ELICITATION_HOOK)
     }
 
     fn respond_to_elicitation(
@@ -1003,7 +1003,7 @@ impl crate::backend::Backend for RemoteBackend {
             declined,
             answers,
         };
-        self.probe.post_json_ok("/elicitation/respond", &resp)
+        self.probe.post_json_ok(claw_fleet_core::routes::ELICITATION_RESPOND, &resp)
     }
 
     fn respond_to_fleet_ask(
@@ -1017,7 +1017,7 @@ impl crate::backend::Backend for RemoteBackend {
             answers,
             cancelled,
         };
-        self.probe.post_json_ok("/fleet-ask/respond", &resp)
+        self.probe.post_json_ok(claw_fleet_core::routes::FLEET_ASK_RESPOND, &resp)
     }
 
     fn respond_to_a2ui_render(
@@ -1033,7 +1033,7 @@ impl crate::backend::Backend for RemoteBackend {
             action_context,
             cancelled,
         };
-        self.probe.post_json_ok("/a2ui-render/respond", &resp)
+        self.probe.post_json_ok(claw_fleet_core::routes::A2UI_RENDER_RESPOND, &resp)
     }
 
     fn respond_to_permission_prompt(
@@ -1051,33 +1051,33 @@ impl crate::backend::Backend for RemoteBackend {
             },
             reason,
         };
-        self.probe.post_json_ok("/permission-prompt/respond", &resp)
+        self.probe.post_json_ok(claw_fleet_core::routes::PERMISSION_PROMPT_RESPOND, &resp)
     }
 
     fn apply_plan_approval_hook(&self) -> Result<(), String> {
-        self.probe.post_ok("/apply_plan_approval_hook")
+        self.probe.post_ok(claw_fleet_core::routes::APPLY_PLAN_APPROVAL_HOOK)
     }
 
     fn remove_plan_approval_hook(&self) -> Result<(), String> {
-        self.probe.post_ok("/remove_plan_approval_hook")
+        self.probe.post_ok(claw_fleet_core::routes::REMOVE_PLAN_APPROVAL_HOOK)
     }
 
     fn list_pending_plan_approvals(&self) -> Vec<claw_fleet_core::plan_approval::PlanApprovalRequest> {
-        self.probe.get("/plan-approval/pending").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::PLAN_APPROVAL_PENDING).unwrap_or_default()
     }
 
     fn list_pending_decisions(&self) -> claw_fleet_core::backend::PendingDecisions {
         // Same six `/…/pending` endpoints the live poller threads consume,
         // aggregated into one snapshot for the frontend's mount catch-up.
         let mut pending = claw_fleet_core::backend::PendingDecisions {
-            guard: self.probe.get("/guard/pending").unwrap_or_default(),
-            elicitation: self.probe.get("/elicitation/pending").unwrap_or_default(),
-            fleet_ask: self.probe.get("/fleet-ask/pending").unwrap_or_default(),
-            a2ui_render: self.probe.get("/a2ui-render/pending").unwrap_or_default(),
-            plan_approval: self.probe.get("/plan-approval/pending").unwrap_or_default(),
+            guard: self.probe.get(claw_fleet_core::routes::GUARD_PENDING).unwrap_or_default(),
+            elicitation: self.probe.get(claw_fleet_core::routes::ELICITATION_PENDING).unwrap_or_default(),
+            fleet_ask: self.probe.get(claw_fleet_core::routes::FLEET_ASK_PENDING).unwrap_or_default(),
+            a2ui_render: self.probe.get(claw_fleet_core::routes::A2UI_RENDER_PENDING).unwrap_or_default(),
+            plan_approval: self.probe.get(claw_fleet_core::routes::PLAN_APPROVAL_PENDING).unwrap_or_default(),
             permission_prompt: self
                 .probe
-                .get("/permission-prompt/pending")
+                .get(claw_fleet_core::routes::PERMISSION_PROMPT_PENDING)
                 .unwrap_or_default(),
         };
         let sessions = self.list_sessions();
@@ -1098,7 +1098,7 @@ impl crate::backend::Backend for RemoteBackend {
             edited_plan,
             feedback,
         };
-        self.probe.post_json_ok("/plan-approval/respond", &resp)
+        self.probe.post_json_ok(claw_fleet_core::routes::PLAN_APPROVAL_RESPOND, &resp)
     }
 
     fn list_session_decisions(
@@ -1118,9 +1118,9 @@ impl crate::backend::Backend for RemoteBackend {
                     percent_encoding::NON_ALPHANUMERIC,
                 )
                 .to_string();
-                format!("/session_decisions?session_id={encoded_id}&jsonl_path={encoded_path}")
+                format!("{}?session_id={encoded_id}&jsonl_path={encoded_path}", claw_fleet_core::routes::SESSION_DECISIONS)
             }
-            None => format!("/session_decisions?session_id={encoded_id}"),
+            None => format!("{}?session_id={encoded_id}", claw_fleet_core::routes::SESSION_DECISIONS),
         };
         self.probe.get(&url).unwrap_or_default()
     }
@@ -1128,73 +1128,73 @@ impl crate::backend::Backend for RemoteBackend {
     fn apply_interaction_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Req<'a> { user_title: &'a str, locale: &'a str }
-        self.probe.post_json_ok("/apply_interaction_mode", &Req { user_title, locale })
+        self.probe.post_json_ok(claw_fleet_core::routes::APPLY_INTERACTION_MODE, &Req { user_title, locale })
     }
 
     fn remove_interaction_mode(&self) -> Result<(), String> {
-        self.probe.post_ok("/remove_interaction_mode")
+        self.probe.post_ok(claw_fleet_core::routes::REMOVE_INTERACTION_MODE)
     }
 
     fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Req<'a> { locale: &'a str }
-        self.probe.post_json_ok("/apply_wiki_guidance", &Req { locale })
+        self.probe.post_json_ok(claw_fleet_core::routes::APPLY_WIKI_GUIDANCE, &Req { locale })
     }
 
     fn remove_wiki_guidance(&self) -> Result<(), String> {
-        self.probe.post_ok("/remove_wiki_guidance")
+        self.probe.post_ok(claw_fleet_core::routes::REMOVE_WIKI_GUIDANCE)
     }
 
     fn interaction_diagnostics(
         &self,
     ) -> Vec<claw_fleet_core::interaction_mode_diagnostics::DiagnosticCheck> {
         self.probe
-            .get("/interaction_diagnostics")
+            .get(claw_fleet_core::routes::INTERACTION_DIAGNOSTICS)
             .unwrap_or_default()
     }
 
     fn test_decision_end_to_end(
         &self,
     ) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
-        self.probe.post_json("/test_decision_end_to_end", &())
+        self.probe.post_json(claw_fleet_core::routes::TEST_DECISION_END_TO_END, &())
     }
 
     fn test_decision_via_claude_cli(
         &self,
     ) -> Result<claw_fleet_core::interaction_mode_test::TestRunResult, String> {
-        self.probe.post_json("/test_decision_via_claude_cli", &())
+        self.probe.post_json(claw_fleet_core::routes::TEST_DECISION_VIA_CLAUDE_CLI, &())
     }
 
     fn apply_prd_mode(&self, user_title: &str, locale: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Req<'a> { user_title: &'a str, locale: &'a str }
-        self.probe.post_json_ok("/apply_prd_mode", &Req { user_title, locale })
+        self.probe.post_json_ok(claw_fleet_core::routes::APPLY_PRD_MODE, &Req { user_title, locale })
     }
 
     fn remove_prd_mode(&self) -> Result<(), String> {
-        self.probe.post_ok("/remove_prd_mode")
+        self.probe.post_ok(claw_fleet_core::routes::REMOVE_PRD_MODE)
     }
 
     fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
-        self.probe.get("/sources_config").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::SOURCES_CONFIG).unwrap_or_default()
     }
 
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
         self.probe.post_ok(&format!(
-            "/set_source_enabled?name={}&enabled={}",
+            "{}?name={}&enabled={}", claw_fleet_core::routes::SET_SOURCE_ENABLED,
             name, enabled
         ))
     }
 
     fn list_claude_binaries(&self) -> Vec<crate::claude_binary::ClaudeBinary> {
-        self.probe.get("/list_claude_binaries").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::LIST_CLAUDE_BINARIES).unwrap_or_default()
     }
 
     fn get_claude_binary_override(&self) -> Option<String> {
         #[derive(serde::Deserialize)]
         struct Resp { path: Option<String> }
         self.probe
-            .get::<Resp>("/claude_binary_override")
+            .get::<Resp>(claw_fleet_core::routes::CLAUDE_BINARY_OVERRIDE)
             .ok()
             .and_then(|r| r.path)
     }
@@ -1202,19 +1202,19 @@ impl crate::backend::Backend for RemoteBackend {
     fn set_claude_binary_override(&self, path: Option<String>) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Body { path: Option<String> }
-        self.probe.post_json_ok("/claude_binary_override", &Body { path })
+        self.probe.post_json_ok(claw_fleet_core::routes::CLAUDE_BINARY_OVERRIDE, &Body { path })
     }
 
     fn search_sessions(&self, query: &str, limit: usize) -> Vec<crate::search_index::SearchHit> {
         let encoded_q = percent_encoding::utf8_percent_encode(query, percent_encoding::NON_ALPHANUMERIC).to_string();
         self.probe
-            .get(&format!("/search?q={}&limit={}", encoded_q, limit))
+            .get(&format!("{}?q={}&limit={}", claw_fleet_core::routes::SEARCH, encoded_q, limit))
             .unwrap_or_default()
     }
 
     fn get_audit_events(&self) -> crate::audit::AuditSummary {
         self.probe
-            .get("/audit")
+            .get(claw_fleet_core::routes::AUDIT)
             .unwrap_or_else(|_| crate::audit::AuditSummary {
                 events: vec![],
                 total_sessions_scanned: 0,
@@ -1222,70 +1222,70 @@ impl crate::backend::Backend for RemoteBackend {
     }
 
     fn get_audit_rules(&self) -> Vec<crate::audit::AuditRuleInfo> {
-        self.probe.get("/audit/rules").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::AUDIT_RULES).unwrap_or_default()
     }
 
     fn set_audit_rule_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Body { id: String, enabled: bool }
-        self.probe.post_json_ok("/audit/rules/toggle", &Body { id: id.to_string(), enabled })
+        self.probe.post_json_ok(claw_fleet_core::routes::AUDIT_RULES_TOGGLE, &Body { id: id.to_string(), enabled })
     }
 
     fn save_custom_audit_rule(&self, rule: crate::audit::AuditRuleInfo) -> Result<(), String> {
-        self.probe.post_json_ok("/audit/rules/save", &rule)
+        self.probe.post_json_ok(claw_fleet_core::routes::AUDIT_RULES_SAVE, &rule)
     }
 
     fn delete_custom_audit_rule(&self, id: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
         struct Body { id: String }
-        self.probe.post_json_ok("/audit/rules/delete", &Body { id: id.to_string() })
+        self.probe.post_json_ok(claw_fleet_core::routes::AUDIT_RULES_DELETE, &Body { id: id.to_string() })
     }
 
     fn suggest_audit_rules(&self, concern: &str, lang: &str) -> Result<Vec<crate::audit::SuggestedRule>, String> {
         #[derive(serde::Serialize)]
         struct Body { concern: String, lang: String }
-        self.probe.post_json("/audit/rules/suggest", &Body { concern: concern.to_string(), lang: lang.to_string() })
+        self.probe.post_json(claw_fleet_core::routes::AUDIT_RULES_SUGGEST, &Body { concern: concern.to_string(), lang: lang.to_string() })
     }
 
     fn get_daily_report(&self, date: &str) -> Result<Option<crate::daily_report::DailyReport>, String> {
         let encoded = encode_path(date);
-        self.probe.get(&format!("/daily_report?date={}", encoded))
+        self.probe.get(&format!("{}?date={}", claw_fleet_core::routes::DAILY_REPORT, encoded))
     }
 
     fn list_daily_report_stats(&self, from: &str, to: &str) -> Vec<crate::daily_report::DailyReportStats> {
         let encoded_from = encode_path(from);
         let encoded_to = encode_path(to);
         self.probe
-            .get(&format!("/daily_report_stats?from={}&to={}", encoded_from, encoded_to))
+            .get(&format!("{}?from={}&to={}", claw_fleet_core::routes::DAILY_REPORT_STATS, encoded_from, encoded_to))
             .unwrap_or_default()
     }
 
     fn generate_daily_report(&self, date: &str) -> Result<crate::daily_report::DailyReport, String> {
-        self.probe.get(&format!("/daily_report/generate?date={}", encode_path(date)))
+        self.probe.get(&format!("{}?date={}", claw_fleet_core::routes::DAILY_REPORT_GENERATE, encode_path(date)))
     }
 
     fn generate_daily_report_ai_summary(&self, date: &str) -> Result<String, String> {
-        self.probe.get(&format!("/daily_report/ai_summary?date={}", encode_path(date)))
+        self.probe.get(&format!("{}?date={}", claw_fleet_core::routes::DAILY_REPORT_AI_SUMMARY, encode_path(date)))
     }
 
     fn generate_daily_report_lessons(&self, date: &str) -> Result<Vec<crate::daily_report::Lesson>, String> {
-        self.probe.get(&format!("/daily_report/lessons?date={}", encode_path(date)))
+        self.probe.get(&format!("{}?date={}", claw_fleet_core::routes::DAILY_REPORT_LESSONS, encode_path(date)))
     }
 
     fn append_lesson_to_claude_md(&self, lesson: &crate::daily_report::Lesson) -> Result<(), String> {
-        self.probe.post_json_ok("/daily_report/append_lesson", lesson)
+        self.probe.post_json_ok(claw_fleet_core::routes::DAILY_REPORT_APPEND_LESSON, lesson)
     }
 
     fn list_llm_providers(&self) -> Vec<crate::llm_provider::LlmProviderInfo> {
-        self.probe.get("/llm/providers").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::LLM_PROVIDERS).unwrap_or_default()
     }
 
     fn get_llm_config(&self) -> crate::llm_provider::LlmConfig {
-        self.probe.get("/llm/config").unwrap_or_default()
+        self.probe.get(claw_fleet_core::routes::LLM_CONFIG).unwrap_or_default()
     }
 
     fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {
-        self.probe.post_json_ok("/llm/config", &config)
+        self.probe.post_json_ok(claw_fleet_core::routes::LLM_CONFIG, &config)
     }
 
     fn list_fleet_llm_usage_daily(
@@ -1295,7 +1295,7 @@ impl crate::backend::Backend for RemoteBackend {
     ) -> Vec<crate::llm_usage::FleetLlmUsageDailyBucket> {
         self.probe
             .get(&format!(
-                "/fleet_llm_usage/daily?from_ms={from_ms}&to_ms={to_ms}"
+                "{}?from_ms={from_ms}&to_ms={to_ms}", claw_fleet_core::routes::FLEET_LLM_USAGE_DAILY
             ))
             .unwrap_or_default()
     }
@@ -1306,7 +1306,7 @@ impl crate::backend::Backend for RemoteBackend {
         to_ms: i64,
     ) -> Vec<crate::account::UsageHistoryPoint> {
         self.probe
-            .get(&format!("/usage_history?from_ms={from_ms}&to_ms={to_ms}"))
+            .get(&format!("{}?from_ms={from_ms}&to_ms={to_ms}", claw_fleet_core::routes::USAGE_HISTORY))
             .unwrap_or_default()
     }
 
@@ -1337,7 +1337,7 @@ impl crate::backend::Backend for RemoteBackend {
         #[derive(serde::Deserialize)]
         struct Resp { path: String }
         let resp: Resp = self.probe.post_bytes(
-            &format!("/elicitation/upload?name={encoded}&from_clipboard={clip}"),
+            &format!("{}?name={encoded}&from_clipboard={clip}", claw_fleet_core::routes::ELICITATION_UPLOAD),
             bytes,
         )?;
         Ok(resp.path)
@@ -1349,7 +1349,7 @@ impl crate::backend::Backend for RemoteBackend {
         name: &str,
     ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String> {
         let (bytes, mime) = self.probe.get_bytes(&format!(
-            "/user_attachment?key={}&name={}",
+            "{}?key={}&name={}", claw_fleet_core::routes::USER_ATTACHMENT,
             encode_path(key),
             encode_path(name),
         ))?;
@@ -1359,26 +1359,26 @@ impl crate::backend::Backend for RemoteBackend {
     fn get_mobile_relay_config(
         &self,
     ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
-        self.probe.get("/mobile-relay/config")
+        self.probe.get(claw_fleet_core::routes::MOBILE_RELAY_CONFIG)
     }
 
     fn set_mobile_relay_config(
         &self,
         cfg: claw_fleet_core::mobile_relay::MobileRelayConfig,
     ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
-        self.probe.post_json("/mobile-relay/config", &cfg)
+        self.probe.post_json(claw_fleet_core::routes::MOBILE_RELAY_CONFIG, &cfg)
     }
 
     fn rotate_mobile_relay_secret(
         &self,
     ) -> Result<claw_fleet_core::mobile_relay::MobileRelayConfig, String> {
-        self.probe.post_json("/mobile-relay/rotate", &serde_json::json!({}))
+        self.probe.post_json(claw_fleet_core::routes::MOBILE_RELAY_ROTATE, &serde_json::json!({}))
     }
 
     fn mobile_relay_status(
         &self,
     ) -> Result<claw_fleet_core::mobile_relay::MobileRelayStatus, String> {
-        self.probe.get("/mobile-relay/status")
+        self.probe.get(claw_fleet_core::routes::MOBILE_RELAY_STATUS)
     }
 
     fn mobile_relay_qr_svg(&self) -> Result<String, String> {
@@ -1386,7 +1386,7 @@ impl crate::backend::Backend for RemoteBackend {
         struct QrEnvelope {
             svg: String,
         }
-        let env: QrEnvelope = self.probe.get("/mobile-relay/qr")?;
+        let env: QrEnvelope = self.probe.get(claw_fleet_core::routes::MOBILE_RELAY_QR)?;
         Ok(env.svg)
     }
 }
@@ -2012,7 +2012,7 @@ fn connect_remote_start_probe(
         if i > 0 {
             std::thread::sleep(Duration::from_millis(500));
         }
-        probe.get_ok("/health").is_ok()
+        probe.get_ok(claw_fleet_core::routes::HEALTH).is_ok()
     });
 
     if !ready {
@@ -2048,7 +2048,7 @@ fn connect_remote_start_probe(
     let session_outcomes: Arc<Mutex<std::collections::HashMap<String, Vec<String>>>> =
         Arc::new(Mutex::new(std::collections::HashMap::new()));
     // Do an initial synchronous fetch so list_sessions() is populated immediately.
-    if let Ok(s) = probe.get::<Vec<SessionInfo>>("/sessions") {
+    if let Ok(s) = probe.get::<Vec<SessionInfo>>(claw_fleet_core::routes::SESSIONS) {
         *sessions.lock().unwrap() = s.clone();
         let _ = app.emit("sessions-updated", &s);
         let _ = app.emit("scan-ready", true);
@@ -2086,7 +2086,7 @@ fn connect_remote_start_probe(
                 if !*pr.lock().unwrap() {
                     break;
                 }
-                let Ok(mut s) = probe2.get::<Vec<SessionInfo>>("/sessions") else {
+                let Ok(mut s) = probe2.get::<Vec<SessionInfo>>(claw_fleet_core::routes::SESSIONS) else {
                     continue;
                 };
 
@@ -2148,7 +2148,7 @@ fn connect_remote_start_probe(
                                 user_title: title,
                             };
                             let result: Option<crate::claude_analyze::AnalysisResult> =
-                                probe_bg.post_json("/analyze", &req).ok();
+                                probe_bg.post_json(claw_fleet_core::routes::ANALYZE, &req).ok();
                             an.lock().unwrap().remove(&session_id);
 
                             if let Some(ref result) = result {
@@ -2249,7 +2249,7 @@ fn connect_remote_start_probe(
                 if !*pr_guard.lock().unwrap() {
                     break;
                 }
-                let Ok(pending) = probe_guard.get::<Vec<claw_fleet_core::guard::GuardRequest>>("/guard/pending") else {
+                let Ok(pending) = probe_guard.get::<Vec<claw_fleet_core::guard::GuardRequest>>(claw_fleet_core::routes::GUARD_PENDING) else {
                     continue;
                 };
                 let pending_ids: std::collections::HashSet<String> =
@@ -2286,7 +2286,7 @@ fn connect_remote_start_probe(
                 if !*pr_elicit.lock().unwrap() {
                     break;
                 }
-                let Ok(pending) = probe_elicit.get::<Vec<claw_fleet_core::elicitation::ElicitationRequest>>("/elicitation/pending") else {
+                let Ok(pending) = probe_elicit.get::<Vec<claw_fleet_core::elicitation::ElicitationRequest>>(claw_fleet_core::routes::ELICITATION_PENDING) else {
                     continue;
                 };
                 let pending_ids: std::collections::HashSet<String> =
@@ -2333,7 +2333,7 @@ fn connect_remote_start_probe(
                 if !*pr_ask.lock().unwrap() {
                     break;
                 }
-                let Ok(pending) = probe_ask.get::<Vec<claw_fleet_core::mcp_ipc::FleetAskRequest>>("/fleet-ask/pending") else {
+                let Ok(pending) = probe_ask.get::<Vec<claw_fleet_core::mcp_ipc::FleetAskRequest>>(claw_fleet_core::routes::FLEET_ASK_PENDING) else {
                     continue;
                 };
                 let pending_ids: std::collections::HashSet<String> =
@@ -2379,7 +2379,7 @@ fn connect_remote_start_probe(
                 if !*pr_pp.lock().unwrap() {
                     break;
                 }
-                let Ok(pending) = probe_pp.get::<Vec<claw_fleet_core::permission_prompt_ipc::PermissionPromptRequest>>("/permission-prompt/pending") else {
+                let Ok(pending) = probe_pp.get::<Vec<claw_fleet_core::permission_prompt_ipc::PermissionPromptRequest>>(claw_fleet_core::routes::PERMISSION_PROMPT_PENDING) else {
                     continue;
                 };
                 let pending_ids: std::collections::HashSet<String> =
@@ -2419,7 +2419,7 @@ fn connect_remote_start_probe(
                 if !*pr_a2ui.lock().unwrap() {
                     break;
                 }
-                let Ok(pending) = probe_a2ui.get::<Vec<claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest>>("/a2ui-render/pending") else {
+                let Ok(pending) = probe_a2ui.get::<Vec<claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest>>(claw_fleet_core::routes::A2UI_RENDER_PENDING) else {
                     continue;
                 };
                 let pending_ids: std::collections::HashSet<String> =
@@ -2464,7 +2464,7 @@ fn connect_remote_start_probe(
                 if !*pr_plan.lock().unwrap() {
                     break;
                 }
-                let Ok(pending) = probe_plan.get::<Vec<claw_fleet_core::plan_approval::PlanApprovalRequest>>("/plan-approval/pending") else {
+                let Ok(pending) = probe_plan.get::<Vec<claw_fleet_core::plan_approval::PlanApprovalRequest>>(claw_fleet_core::routes::PLAN_APPROVAL_PENDING) else {
                     continue;
                 };
                 let pending_ids: std::collections::HashSet<String> =
@@ -2558,7 +2558,7 @@ fn start_remote_tail(
         while *tail_running.lock().unwrap() {
             std::thread::sleep(Duration::from_millis(500));
             let endpoint = format!(
-                "/tail?path={}&offset={}",
+                "{}?path={}&offset={}", claw_fleet_core::routes::TAIL,
                 encode_path(&jsonl_path),
                 offset
             );
@@ -2682,14 +2682,14 @@ mod tests {
     fn health_answers_and_bad_token_is_rejected() {
         let fx = boot();
 
-        let health: serde_json::Value = fx.probe.get("/health").unwrap();
+        let health: serde_json::Value = fx.probe.get(claw_fleet_core::routes::HEALTH).unwrap();
         assert_eq!(health["status"], "ok", "server is up");
 
         // The auth gate is the reason every other test's requests are trusted.
         let base = fx.probe.base_url.clone();
         let wrong = ProbeClient::new(base, "not-the-token");
         assert!(
-            wrong.get::<serde_json::Value>("/health").is_err(),
+            wrong.get::<serde_json::Value>(claw_fleet_core::routes::HEALTH).is_err(),
             "a bad bearer token must be rejected"
         );
     }
@@ -2703,7 +2703,7 @@ mod tests {
 
         let doc: claw_fleet_core::wiki::WikiDoc = fx
             .probe
-            .post_json("/wiki_move", &super::WikiMoveReq { from: "overview", to: "Arch/Overview" })
+            .post_json(claw_fleet_core::routes::WIKI_MOVE, &super::WikiMoveReq { from: "overview", to: "Arch/Overview" })
             .unwrap();
 
         // The server normalizes; the client gets the canonical slug back.
@@ -2720,7 +2720,7 @@ mod tests {
         let err = fx
             .probe
             .post_json::<_, claw_fleet_core::wiki::WikiDoc>(
-                "/wiki_move",
+                claw_fleet_core::routes::WIKI_MOVE,
                 &super::WikiMoveReq { from: "a", to: "b" },
             )
             .unwrap_err();
@@ -2741,7 +2741,7 @@ mod tests {
         fx.seed("keeper");
 
         fx.probe
-            .post_ok(&format!("/wiki_delete?slug={}", super::encode_path("arch/deep/overview")))
+            .post_ok(&format!("{}?slug={}", claw_fleet_core::routes::WIKI_DELETE, super::encode_path("arch/deep/overview")))
             .unwrap();
 
         assert_eq!(fx.slugs(), vec!["keeper"]);
@@ -2759,7 +2759,7 @@ mod tests {
 
         fx.probe
             .post_ok(&format!(
-                "/wiki_delete?slug=notes&version={}",
+                "{}?slug=notes&version={}", claw_fleet_core::routes::WIKI_DELETE,
                 super::encode_path(&old)
             ))
             .unwrap();
@@ -2781,7 +2781,7 @@ mod tests {
 
         let moved: Vec<claw_fleet_core::wiki::WikiDoc> = fx
             .probe
-            .post_json("/wiki_move_folder", &super::WikiMoveReq { from: "arch", to: "design" })
+            .post_json(claw_fleet_core::routes::WIKI_MOVE_FOLDER, &super::WikiMoveReq { from: "arch", to: "design" })
             .unwrap();
 
         assert_eq!(moved.len(), 2, "server returns exactly the docs it moved");
@@ -2798,7 +2798,7 @@ mod tests {
 
         let moved: Vec<claw_fleet_core::wiki::WikiDoc> = fx
             .probe
-            .post_json("/wiki_move_folder", &super::WikiMoveReq { from: "arch", to: "" })
+            .post_json(claw_fleet_core::routes::WIKI_MOVE_FOLDER, &super::WikiMoveReq { from: "arch", to: "" })
             .unwrap();
 
         assert_eq!(moved.len(), 2);
@@ -2817,7 +2817,7 @@ mod tests {
         let err = fx
             .probe
             .post_json::<_, Vec<claw_fleet_core::wiki::WikiDoc>>(
-                "/wiki_move_folder",
+                claw_fleet_core::routes::WIKI_MOVE_FOLDER,
                 &super::WikiMoveReq { from: "a", to: "b" },
             )
             .unwrap_err();
@@ -2840,7 +2840,7 @@ mod tests {
 
         let resp: super::WikiDeleteFolderResp = fx
             .probe
-            .post_json("/wiki_delete_folder", &super::WikiDeleteFolderReq { prefix: "a" })
+            .post_json(claw_fleet_core::routes::WIKI_DELETE_FOLDER, &super::WikiDeleteFolderReq { prefix: "a" })
             .unwrap();
 
         assert_eq!(resp.deleted, 2);
@@ -2855,7 +2855,7 @@ mod tests {
         let err = fx
             .probe
             .post_json::<_, super::WikiDeleteFolderResp>(
-                "/wiki_delete_folder",
+                claw_fleet_core::routes::WIKI_DELETE_FOLDER,
                 &super::WikiDeleteFolderReq { prefix: "nosuch" },
             )
             .unwrap_err();
@@ -2877,14 +2877,14 @@ mod tests {
         let err = fx
             .probe
             .post_json::<_, Vec<claw_fleet_core::wiki::WikiDoc>>(
-                "/wiki_move_folder",
+                claw_fleet_core::routes::WIKI_MOVE_FOLDER,
                 &Wrong { nonsense: "x" },
             )
             .unwrap_err();
         assert!(err.contains("bad /wiki_move_folder body"), "unexpected error: {err}");
 
         // The server is still alive and the wiki is untouched.
-        let health: serde_json::Value = fx.probe.get("/health").unwrap();
+        let health: serde_json::Value = fx.probe.get(claw_fleet_core::routes::HEALTH).unwrap();
         assert_eq!(health["status"], "ok");
         assert_eq!(fx.slugs(), vec!["a/x"]);
     }
