@@ -46,6 +46,8 @@ export function SessionList() {
     setViewMode,
     lastSessionViewMode,
     setLiteMode,
+    theme,
+    setTheme,
     sidebarCollapsed,
     setSidebarCollapsed,
     toggleSecondarySidebar,
@@ -391,6 +393,18 @@ export function SessionList() {
                     <rect x="1.5" y="2.5" width="13" height="11" rx="1.3" />
                     <rect x="8.5" y="7.5" width="5" height="4.5" rx="0.8" fill="currentColor" fillOpacity="0.4" />
                   </svg>
+                </button>
+                <button
+                  className={`${styles.footer_icon_btn} ${styles.footer_theme_btn}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Cycle light → dark → system → light. setTheme is global
+                    // and already re-skins the app + overlays, so no extra wiring.
+                    setTheme(theme === "light" ? "dark" : theme === "dark" ? "system" : "light");
+                  }}
+                  title={t(`theme.${theme}`)}
+                >
+                  {theme === "light" ? "☀" : theme === "dark" ? "☽" : "⊙"}
                 </button>
               </>
             )}
