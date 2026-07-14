@@ -225,13 +225,8 @@ impl LocalBackend {
         step!("DBs opened");
 
         // ── Startup zombie recovery ───────────────────────────────────────
-        // Start the outbound Feishu WS long-connection if credentials already
-        // exist (no-op otherwise). Idempotent. card.action.trigger arrives over
-        // this outbound socket, so no public webhook/tunnel is needed.
-        claw_fleet_core::feishu::ensure_ws_client();
-        // Same topology for the mobile relay channel (outbound WS to
-        // fleet-relay); no-op unless enabled with a secret in
-        // ~/.fleet/mobile-relay.json.
+        // Start the outbound mobile relay channel (outbound WS to fleet-relay);
+        // no-op unless enabled with a secret in ~/.fleet/mobile-relay.json.
         claw_fleet_core::mobile_relay::ensure_ws_client();
         step!("zombie recovery done");
 
@@ -697,7 +692,6 @@ impl LocalBackend {
                                     id, req.command_summary
                                 ));
                                 let _ = app_guard.emit("guard-request", &req);
-                                send_guard_card(&req);
                                 publish_mobile_decision(
                                     "guard",
                                     &req,
@@ -779,7 +773,6 @@ impl LocalBackend {
                                     req.questions.len()
                                 ));
                                 let _ = app_elicit.emit("elicitation-request", &req);
-                                send_elicitation_card(&req);
                                 publish_mobile_decision(
                                     "elicitation",
                                     &req,
@@ -1091,7 +1084,6 @@ impl LocalBackend {
                                     req.plan_content.len()
                                 ));
                                 let _ = app_plan.emit("plan-approval-request", &req);
-                                send_plan_card(&req);
                                 publish_mobile_decision(
                                     "plan-approval",
                                     &req,
@@ -1149,22 +1141,6 @@ fn sessions_to_index_request(sessions: &[SessionInfo]) -> IndexRequest {
     sessions.iter().map(|s| (s.jsonl_path.clone(), s.id.clone())).collect()
 }
 
-// ── Feishu card hooks ─────────────────────────────────────────────────────────
-//
-// These wrappers render Card 2.0 JSON for an incoming decision request and
-// hand it to `claw_fleet_core::feishu`.  When Feishu isn't connected the
-// `bound_open_id` check inside `notify_decision_created` short-circuits and
-// these become free no-ops.  Failures are logged and swallowed — a flaky
-// Feishu session must never block the local desktop watcher.
-//
-// Each `send_*_card` runs the actual HTTP POST on a detached thread so a
-// slow Feishu round-trip (up to FEISHU_HTTP_TIMEOUT) cannot stall the
-// pending-request poller.  Race window: if the user responds on desktop
-// before the send-thread completes, `resolve_feishu_card` finds no
-// mapping and the card stays in its un-resolved state.  Acceptable for
-// now — proper resolution on out-of-order events is tracked for the
-// webhook slice.
-
 /// Mirror a sessions snapshot onto the mobile relay channel. The relay side
 /// additionally throttles (≥2s between pushes) and skips when no mobile
 /// client is online; the `is_connected` gate here just avoids serializing
@@ -1179,8 +1155,8 @@ fn publish_mobile_sessions(sessions: &[claw_fleet_core::session::SessionInfo]) {
 }
 
 /// Mirror a new pending decision onto the mobile relay channel, alongside the
-/// Tauri emit and the Feishu card. Serialization is skipped entirely while
-/// the relay is disconnected.
+/// Tauri emit. Serialization is skipped entirely while the relay is
+/// disconnected.
 fn publish_mobile_decision<T: serde::Serialize>(kind: &str, req: &T, title: String, body: String) {
     if !claw_fleet_core::mobile_relay::is_connected() {
         return;
@@ -1191,102 +1167,6 @@ fn publish_mobile_decision<T: serde::Serialize>(kind: &str, req: &T, title: Stri
 }
 
 use claw_fleet_core::mobile_relay::{notify_preview, notify_workspace};
-
-fn send_guard_card(req: &claw_fleet_core::guard::GuardRequest) {
-    let req = req.clone();
-    std::thread::spawn(move || {
-        let card = claw_fleet_core::feishu::GuardCard {
-            workspace: req.workspace_name.clone(),
-            command: req.command.clone(),
-            risk_label: if req.risk_tags.is_empty() {
-                None
-            } else {
-                Some(req.risk_tags.join(", "))
-            },
-            llm_analysis: None,
-            decision_id: req.id.clone(),
-        };
-        if let Err(e) = claw_fleet_core::feishu::notify_decision_created(
-            &req.id,
-            claw_fleet_core::feishu::DecisionKind::Guard,
-            &card.to_card_json(),
-        ) {
-            crate::log_debug(&format!("[feishu] send guard card failed: {e}"));
-        }
-    });
-}
-
-fn send_elicitation_card(req: &claw_fleet_core::elicitation::ElicitationRequest) {
-    // Mirror every question onto a single Feishu card as one form; the
-    // user answers all of them and submits once (single/multi-select both
-    // supported). The webhook reassembles the answers map.
-    let req = req.clone();
-    std::thread::spawn(move || {
-        if req.questions.is_empty() {
-            return;
-        }
-        let questions = req
-            .questions
-            .iter()
-            .map(|q| claw_fleet_core::feishu::ElicitationQuestionCard {
-                question: q.question.clone(),
-                options: q
-                    .options
-                    .iter()
-                    .map(|o| claw_fleet_core::feishu::ElicitationOptionCard {
-                        label: o.label.clone(),
-                        description: if o.description.is_empty() {
-                            None
-                        } else {
-                            Some(o.description.clone())
-                        },
-                        value: o.label.clone(),
-                    })
-                    .collect(),
-                multi_select: q.multi_select,
-            })
-            .collect();
-        let card = claw_fleet_core::feishu::ElicitationCard {
-            workspace: req.workspace_name.clone(),
-            questions,
-            decision_id: req.id.clone(),
-        };
-        if let Err(e) = claw_fleet_core::feishu::notify_decision_created(
-            &req.id,
-            claw_fleet_core::feishu::DecisionKind::Elicitation,
-            &card.to_card_json(),
-        ) {
-            crate::log_debug(&format!("[feishu] send elicitation card failed: {e}"));
-        }
-    });
-}
-
-fn send_plan_card(req: &claw_fleet_core::plan_approval::PlanApprovalRequest) {
-    let req = req.clone();
-    std::thread::spawn(move || {
-        let card = claw_fleet_core::feishu::PlanCard {
-            workspace: req.workspace_name.clone(),
-            plan_markdown: req.plan_content.clone(),
-            decision_id: req.id.clone(),
-        };
-        if let Err(e) = claw_fleet_core::feishu::notify_decision_created(
-            &req.id,
-            claw_fleet_core::feishu::DecisionKind::PlanApproval,
-            &card.to_card_json(),
-        ) {
-            crate::log_debug(&format!("[feishu] send plan card failed: {e}"));
-        }
-    });
-}
-
-fn resolve_feishu_card(decision_id: &str, card: serde_json::Value) {
-    let decision_id = decision_id.to_string();
-    std::thread::spawn(move || {
-        if let Err(e) = claw_fleet_core::feishu::notify_decision_resolved(&decision_id, card) {
-            crate::log_debug(&format!("[feishu] resolve card failed: {e}"));
-        }
-    });
-}
 
 /// Dedicated indexer thread. Receives session lists via channel, coalesces
 /// rapid-fire requests, and runs incremental indexing without blocking scan threads.
@@ -2366,14 +2246,6 @@ impl Backend for LocalBackend {
             reason: if allow { None } else { reason },
         };
         let result = crate::guard::write_response(&resp);
-        let summary = if allow { "✅ Allow" } else { "🚫 Block" };
-        resolve_feishu_card(
-            id,
-            claw_fleet_core::feishu::resolved_card(
-                claw_fleet_core::feishu::DecisionKind::Guard,
-                summary,
-            ),
-        );
         result
     }
 
@@ -2481,10 +2353,6 @@ impl Backend for LocalBackend {
         declined: bool,
         answers: std::collections::HashMap<String, String>,
     ) -> Result<(), String> {
-        // Render the read-only Feishu card (questions + all options, pick(s)
-        // highlighted) before `answers` is moved into the response.
-        let resolved =
-            claw_fleet_core::feishu::resolved_elicitation_card(id, &answers, declined);
         let resp = crate::elicitation::ElicitationResponse {
             id: id.to_string(),
             declined,
@@ -2500,7 +2368,6 @@ impl Backend for LocalBackend {
             declined,
             crate::elicitation::write_response,
         );
-        resolve_feishu_card(id, resolved);
         result
     }
 
@@ -2637,14 +2504,6 @@ impl Backend for LocalBackend {
         edited_plan: Option<String>,
         feedback: Option<String>,
     ) -> Result<(), String> {
-        let summary = match decision {
-            "approve" => "✅ Approved".to_string(),
-            "reject" => match feedback.as_deref() {
-                Some(f) if !f.is_empty() => format!("🚫 Rejected — {f}"),
-                _ => "🚫 Rejected".to_string(),
-            },
-            other => format!("decision: {other}"),
-        };
         let resp = crate::plan_approval::PlanApprovalResponse {
             id: id.to_string(),
             decision: decision.to_string(),
@@ -2658,13 +2517,6 @@ impl Backend for LocalBackend {
             &resp,
             false,
             crate::plan_approval::write_response,
-        );
-        resolve_feishu_card(
-            id,
-            claw_fleet_core::feishu::resolved_card(
-                claw_fleet_core::feishu::DecisionKind::PlanApproval,
-                &summary,
-            ),
         );
         result
     }
@@ -3056,31 +2908,6 @@ impl Backend for LocalBackend {
         name: &str,
     ) -> Result<claw_fleet_core::mcp_ipc::DecisionAssetBytes, String> {
         claw_fleet_core::user_attachments::read_user_attachment(key, name)
-    }
-
-    fn start_feishu_oauth(&self) -> Result<claw_fleet_core::feishu::OauthHandle, String> {
-        claw_fleet_core::feishu::start_oauth()
-    }
-    fn poll_feishu_oauth(
-        &self,
-        state: &str,
-    ) -> Result<claw_fleet_core::feishu::OauthStatus, String> {
-        claw_fleet_core::feishu::poll_oauth(state)
-    }
-    fn feishu_status(&self) -> Result<claw_fleet_core::feishu::FeishuConnection, String> {
-        claw_fleet_core::feishu::status()
-    }
-    fn disconnect_feishu(&self) -> Result<(), String> {
-        claw_fleet_core::feishu::disconnect()
-    }
-    fn get_feishu_creds(&self) -> Result<claw_fleet_core::feishu::StoredCreds, String> {
-        Ok(claw_fleet_core::feishu::get_stored_creds())
-    }
-    fn set_feishu_creds(
-        &self,
-        creds: claw_fleet_core::feishu::StoredCreds,
-    ) -> Result<(), String> {
-        claw_fleet_core::feishu::set_stored_creds(creds)
     }
 
     fn get_mobile_relay_config(
