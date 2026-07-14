@@ -120,7 +120,7 @@ The [66-second field guide](https://hoveychen.github.io/claw-fleet/#demo) in one
 
 **Session detail that goes deep.** Full conversation timeline with thinking blocks, tool calls, and diffs; a **workflow DAG** that redraws multi-agent orchestration as a live graph; **handoff chains** showing how a long task relayed across sessions; skill invocation history; the session's scratchpad; its TODO progress.
 
-**AI daily summaries — the standup update you never write.** Each day's sessions distilled into a narrative: what got built, what completed, where agents got stuck. Copy as Markdown, paste into Slack.
+**AI daily summaries — the standup update you never write.** Each day's sessions distilled into a narrative: what got built, what completed, where agents got stuck. Copy as Markdown, paste anywhere.
 
 **Lessons learned — AI mistakes become team knowledge.** Claw Fleet scans logs for missteps and extracts concise lessons. One click adds them to your `CLAUDE.md`, so agents never repeat the same mistake.
 
