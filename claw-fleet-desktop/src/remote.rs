@@ -281,7 +281,66 @@ pub(crate) struct WikiDeleteFolderResp {
     pub deleted: usize,
 }
 
+/// Generates the trivial single-call `RemoteBackend` delegations. A `get` arm
+/// expands to `fn name(&self) -> Ret { probe.get(ROUTE).unwrap_or_default() }`
+/// (Ret must be `Default`); a `post` arm expands to
+/// `fn name(&self) -> Result<(), String> { probe.post_ok(ROUTE) }`. Only
+/// zero-arg methods with no query string and the default fallback qualify —
+/// anything with params, a bespoke fallback, or a Future stays hand-written in
+/// the impl below. The drift-guard (Check A) parses this table so macro-
+/// generated methods still count as real RemoteBackend overrides.
+macro_rules! remote_delegations {
+    (
+        get { $( $g_name:ident -> $g_ret:ty = $g_route:ident; )* }
+        post { $( $p_name:ident = $p_route:ident; )* }
+    ) => {
+        $(
+            fn $g_name(&self) -> $g_ret {
+                self.probe
+                    .get(claw_fleet_core::routes::$g_route)
+                    .unwrap_or_default()
+            }
+        )*
+        $(
+            fn $p_name(&self) -> Result<(), String> {
+                self.probe.post_ok(claw_fleet_core::routes::$p_route)
+            }
+        )*
+    };
+}
+
 impl crate::backend::Backend for RemoteBackend {
+    remote_delegations! {
+        get {
+            list_procs -> Vec<claw_fleet_core::proc_runner::ProcRecord> = PROCS;
+            today_usage -> crate::today_usage::TodayUsage = TODAY_USAGE;
+            list_memories -> Vec<crate::memory::WorkspaceMemory> = MEMORIES;
+            list_wiki_docs -> Vec<crate::wiki::WikiDoc> = WIKI_DOCS;
+            list_skills -> Vec<crate::skills::SkillItem> = SKILLS;
+            list_plugins -> Vec<crate::plugins::PluginItem> = PLUGINS;
+            list_marketplaces -> Vec<claw_fleet_core::claude_cli::CliMarketplace> = PLUGINS_MARKETPLACES;
+            list_pending_plan_approvals -> Vec<claw_fleet_core::plan_approval::PlanApprovalRequest> = PLAN_APPROVAL_PENDING;
+            get_sources_config -> Vec<crate::agent_source::SourceInfo> = SOURCES_CONFIG;
+            list_claude_binaries -> Vec<crate::claude_binary::ClaudeBinary> = LIST_CLAUDE_BINARIES;
+            get_audit_rules -> Vec<crate::audit::AuditRuleInfo> = AUDIT_RULES;
+            list_llm_providers -> Vec<crate::llm_provider::LlmProviderInfo> = LLM_PROVIDERS;
+            get_llm_config -> crate::llm_provider::LlmConfig = LLM_CONFIG;
+        }
+        post {
+            apply_hooks = APPLY_HOOKS;
+            remove_hooks = REMOVE_HOOKS;
+            apply_guard_hook = APPLY_GUARD_HOOK;
+            remove_guard_hook = REMOVE_GUARD_HOOK;
+            apply_elicitation_hook = APPLY_ELICITATION_HOOK;
+            remove_elicitation_hook = REMOVE_ELICITATION_HOOK;
+            apply_plan_approval_hook = APPLY_PLAN_APPROVAL_HOOK;
+            remove_plan_approval_hook = REMOVE_PLAN_APPROVAL_HOOK;
+            remove_interaction_mode = REMOVE_INTERACTION_MODE;
+            remove_wiki_guidance = REMOVE_WIKI_GUIDANCE;
+            remove_prd_mode = REMOVE_PRD_MODE;
+        }
+    }
+
     fn list_sessions(&self) -> Vec<crate::session::SessionInfo> {
         self.sessions.lock().unwrap().clone()
     }
@@ -427,9 +486,6 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::SESSION_READ, &req)
     }
 
-    fn list_procs(&self) -> Vec<claw_fleet_core::proc_runner::ProcRecord> {
-        self.probe.get(claw_fleet_core::routes::PROCS).unwrap_or_default()
-    }
 
     fn spawn_proc(
         &self,
@@ -535,9 +591,6 @@ impl crate::backend::Backend for RemoteBackend {
             .unwrap_or_default()
     }
 
-    fn today_usage(&self) -> crate::today_usage::TodayUsage {
-        self.probe.get(claw_fleet_core::routes::TODAY_USAGE).unwrap_or_default()
-    }
 
     fn start_watch(&self, path: String) -> Result<u64, String> {
         let file_size = self.probe.get_value(&format!("{}?path={}", claw_fleet_core::routes::FILE_SIZE, encode_path(&path)))
@@ -561,9 +614,6 @@ impl crate::backend::Backend for RemoteBackend {
         self.watch.clear();
     }
 
-    fn list_memories(&self) -> Vec<crate::memory::WorkspaceMemory> {
-        self.probe.get(claw_fleet_core::routes::MEMORIES).unwrap_or_default()
-    }
 
     fn get_memory_content(&self, path: &str) -> Result<String, String> {
         self.probe.get(&format!("{}?path={}", claw_fleet_core::routes::MEMORY_CONTENT, encode_path(path)))
@@ -583,9 +633,6 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.get(&format!("{}?path={}", claw_fleet_core::routes::MEMORY_HISTORY, encode_path(path))).unwrap_or_default()
     }
 
-    fn list_wiki_docs(&self) -> Vec<crate::wiki::WikiDoc> {
-        self.probe.get(claw_fleet_core::routes::WIKI_DOCS).unwrap_or_default()
-    }
 
     fn get_handoff_chain(
         &self,
@@ -798,13 +845,7 @@ impl crate::backend::Backend for RemoteBackend {
         )
     }
 
-    fn list_skills(&self) -> Vec<crate::skills::SkillItem> {
-        self.probe.get(claw_fleet_core::routes::SKILLS).unwrap_or_default()
-    }
 
-    fn list_plugins(&self) -> Vec<crate::plugins::PluginItem> {
-        self.probe.get(claw_fleet_core::routes::PLUGINS).unwrap_or_default()
-    }
 
     fn set_plugin_enabled(&self, plugin_id: &str, enabled: bool) -> Result<(), String> {
         #[derive(serde::Serialize)]
@@ -837,9 +878,6 @@ impl crate::backend::Backend for RemoteBackend {
             .post_json_ok(claw_fleet_core::routes::PLUGINS_UNINSTALL, &Req { plugin_id })
     }
 
-    fn list_marketplaces(&self) -> Vec<claw_fleet_core::claude_cli::CliMarketplace> {
-        self.probe.get(claw_fleet_core::routes::PLUGINS_MARKETPLACES).unwrap_or_default()
-    }
 
     fn add_marketplace(&self, source: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
@@ -930,21 +968,9 @@ impl crate::backend::Backend for RemoteBackend {
         })
     }
 
-    fn apply_hooks(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::APPLY_HOOKS)
-    }
 
-    fn remove_hooks(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::REMOVE_HOOKS)
-    }
 
-    fn apply_guard_hook(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::APPLY_GUARD_HOOK)
-    }
 
-    fn remove_guard_hook(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::REMOVE_GUARD_HOOK)
-    }
 
     fn respond_to_guard(
         &self,
@@ -984,13 +1010,7 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::GUARD_ALLOW_RULES_REMOVE, &Req { id })
     }
 
-    fn apply_elicitation_hook(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::APPLY_ELICITATION_HOOK)
-    }
 
-    fn remove_elicitation_hook(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::REMOVE_ELICITATION_HOOK)
-    }
 
     fn respond_to_elicitation(
         &self,
@@ -1054,17 +1074,8 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::PERMISSION_PROMPT_RESPOND, &resp)
     }
 
-    fn apply_plan_approval_hook(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::APPLY_PLAN_APPROVAL_HOOK)
-    }
 
-    fn remove_plan_approval_hook(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::REMOVE_PLAN_APPROVAL_HOOK)
-    }
 
-    fn list_pending_plan_approvals(&self) -> Vec<claw_fleet_core::plan_approval::PlanApprovalRequest> {
-        self.probe.get(claw_fleet_core::routes::PLAN_APPROVAL_PENDING).unwrap_or_default()
-    }
 
     fn list_pending_decisions(&self) -> claw_fleet_core::backend::PendingDecisions {
         // Same six `/…/pending` endpoints the live poller threads consume,
@@ -1131,9 +1142,6 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::APPLY_INTERACTION_MODE, &Req { user_title, locale })
     }
 
-    fn remove_interaction_mode(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::REMOVE_INTERACTION_MODE)
-    }
 
     fn apply_wiki_guidance(&self, locale: &str) -> Result<(), String> {
         #[derive(serde::Serialize)]
@@ -1141,9 +1149,6 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::APPLY_WIKI_GUIDANCE, &Req { locale })
     }
 
-    fn remove_wiki_guidance(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::REMOVE_WIKI_GUIDANCE)
-    }
 
     fn interaction_diagnostics(
         &self,
@@ -1171,13 +1176,7 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::APPLY_PRD_MODE, &Req { user_title, locale })
     }
 
-    fn remove_prd_mode(&self) -> Result<(), String> {
-        self.probe.post_ok(claw_fleet_core::routes::REMOVE_PRD_MODE)
-    }
 
-    fn get_sources_config(&self) -> Vec<crate::agent_source::SourceInfo> {
-        self.probe.get(claw_fleet_core::routes::SOURCES_CONFIG).unwrap_or_default()
-    }
 
     fn set_source_enabled(&self, name: &str, enabled: bool) -> Result<(), String> {
         self.probe.post_ok(&format!(
@@ -1186,9 +1185,6 @@ impl crate::backend::Backend for RemoteBackend {
         ))
     }
 
-    fn list_claude_binaries(&self) -> Vec<crate::claude_binary::ClaudeBinary> {
-        self.probe.get(claw_fleet_core::routes::LIST_CLAUDE_BINARIES).unwrap_or_default()
-    }
 
     fn get_claude_binary_override(&self) -> Option<String> {
         #[derive(serde::Deserialize)]
@@ -1221,9 +1217,6 @@ impl crate::backend::Backend for RemoteBackend {
             })
     }
 
-    fn get_audit_rules(&self) -> Vec<crate::audit::AuditRuleInfo> {
-        self.probe.get(claw_fleet_core::routes::AUDIT_RULES).unwrap_or_default()
-    }
 
     fn set_audit_rule_enabled(&self, id: &str, enabled: bool) -> Result<(), String> {
         #[derive(serde::Serialize)]
@@ -1276,13 +1269,7 @@ impl crate::backend::Backend for RemoteBackend {
         self.probe.post_json_ok(claw_fleet_core::routes::DAILY_REPORT_APPEND_LESSON, lesson)
     }
 
-    fn list_llm_providers(&self) -> Vec<crate::llm_provider::LlmProviderInfo> {
-        self.probe.get(claw_fleet_core::routes::LLM_PROVIDERS).unwrap_or_default()
-    }
 
-    fn get_llm_config(&self) -> crate::llm_provider::LlmConfig {
-        self.probe.get(claw_fleet_core::routes::LLM_CONFIG).unwrap_or_default()
-    }
 
     fn set_llm_config(&self, config: crate::llm_provider::LlmConfig) -> Result<(), String> {
         self.probe.post_json_ok(claw_fleet_core::routes::LLM_CONFIG, &config)
