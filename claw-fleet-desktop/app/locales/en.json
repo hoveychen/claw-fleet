@@ -1724,6 +1724,7 @@
   "view_files": "Repos",
   "files": {
     "panel_title": "Repos",
+    "add_path": "Add path",
     "tab_files": "Files",
     "no_workspaces_title": "No workspaces yet",
     "no_workspaces_subtitle": "Project directories appear here once sessions are running.",

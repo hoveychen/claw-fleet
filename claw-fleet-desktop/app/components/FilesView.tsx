@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
@@ -7,6 +8,7 @@ import {
   Check,
   FileDiff,
   FolderOpen,
+  FolderPlus,
   GitBranch,
   RefreshCw,
   Upload,
@@ -14,8 +16,11 @@ import {
 import { EmptyState } from "./EmptyState";
 import { CopyButton } from "./CopyButton";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { DirPickerDialog } from "./DirPickerDialog";
+import { isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
 import {
   runningProcCounts,
+  useConnectionStore,
   useProcStore,
   useSessionsStore,
   useUIStore,
@@ -75,6 +80,15 @@ function pickRoot(roots: ExplorerRoot[], absPath: string): ExplorerRoot | null {
   return best;
 }
 
+/** Last path segment, separator-agnostic. Used to name a workspace card when
+ *  the path was collapsed to a repo root (or added by hand) and no session's
+ *  `workspaceName` applies. */
+function basename(p: string): string {
+  const normalized = p.replace(/\\/g, "/").replace(/\/+$/, "");
+  const slash = normalized.lastIndexOf("/");
+  return slash >= 0 ? normalized.slice(slash + 1) : normalized;
+}
+
 
 // ── Root view: workspace picker + explorer ──────────────────────────────────
 
@@ -84,7 +98,16 @@ export function FilesView() {
   const fetchProcs = useProcStore((s) => s.fetchProcs);
   const procs = useProcStore((s) => s.procs);
   const fileNav = useUIStore((s) => s.fileNav);
+  const { connection } = useConnectionStore();
+  const isRemote = connection?.type === "remote";
   const [selected, setSelected] = useState<string | null>(null);
+  // Directories the user browsed to by hand this session. They have no sessions
+  // of their own, so they'd never surface from the session-derived list — we
+  // keep them here (most-recent first) and merge them in as zero-count cards.
+  const [extraPaths, setExtraPaths] = useState<string[]>([]);
+  // Remote-only: the backend-driven directory picker, since the native dialog
+  // would browse *this* desktop rather than the probe (mirrors NewSessionForm).
+  const [pickingDir, setPickingDir] = useState(false);
 
   // A path clicked in agent prose lands here: select its workspace, then hand
   // the request down so the explorer can expand to the file itself.
@@ -103,20 +126,67 @@ export function FilesView() {
     return () => clearInterval(timer);
   }, [fetchProcs]);
 
-  // Distinct workspaces across all known sessions, with a session count so
-  // the busiest projects surface naturally at the top.
+  // Distinct workspaces across all known sessions, with a session count so the
+  // busiest projects surface naturally at the top. Filtering mirrors the New
+  // Session launcher (see distinctWorkspaces): in-repo worktree checkouts fold
+  // onto their durable repo root, and OS temp/scratchpad cwds (the per-session
+  // `/private/tmp/claude-501/...` dirs) are dropped rather than listed as repos.
   const workspaces = useMemo(() => {
     const byPath = new Map<string, { path: string; name: string; count: number }>();
     for (const s of sessions) {
       if (!s.workspacePath) continue;
-      const existing = byPath.get(s.workspacePath);
+      const path = repoRootPath(s.workspacePath);
+      if (isTempWorkspacePath(path)) continue;
+      const existing = byPath.get(path);
       if (existing) existing.count += 1;
-      else byPath.set(s.workspacePath, { path: s.workspacePath, name: s.workspaceName, count: 1 });
+      else
+        byPath.set(path, {
+          path,
+          // Collapsed onto a repo root → the session's own name may be a
+          // worktree leaf; use the durable root's basename instead.
+          name: path === s.workspacePath ? s.workspaceName : basename(path),
+          count: 1,
+        });
     }
-    return [...byPath.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-  }, [sessions]);
+    const derived = [...byPath.values()].sort(
+      (a, b) => b.count - a.count || a.name.localeCompare(b.name),
+    );
+    // Hand-added dirs the session list doesn't already cover, newest first.
+    const extras = extraPaths
+      .filter((p) => !byPath.has(p))
+      .map((p) => ({ path: p, name: basename(p), count: 0 }));
+    return [...extras, ...derived];
+  }, [sessions, extraPaths]);
 
-  const active = workspaces.find((w) => w.path === selected) ?? null;
+  // Any selected path resolves to a browsable workspace even when it isn't a
+  // card — a raw worktree path from agent prose (the list only keeps repo
+  // roots) or a just-picked directory still opens in the explorer.
+  const active = useMemo(() => {
+    if (!selected) return null;
+    return (
+      workspaces.find((w) => w.path === selected) ?? {
+        path: selected,
+        name: basename(selected),
+        count: 0,
+      }
+    );
+  }, [workspaces, selected]);
+
+  const addPath = (path: string) => {
+    setExtraPaths((prev) => (prev.includes(path) ? prev : [path, ...prev]));
+    setSelected(path);
+  };
+
+  // Local: the native dialog is the better experience and browses the right
+  // machine. Remote: go through the backend picker instead (DirPickerDialog).
+  const browseWorkspace = async () => {
+    if (isRemote) {
+      setPickingDir(true);
+      return;
+    }
+    const picked = await openDialog({ multiple: false, directory: true });
+    if (typeof picked === "string") addPath(picked);
+  };
 
   return (
     <PageShell
@@ -124,6 +194,16 @@ export function FilesView() {
       className={styles.mem_scope}
       title={t("files.panel_title")}
       count={workspaces.length > 0 ? workspaces.length : null}
+      actions={
+        <button
+          className={fileStyles.add_ws_btn}
+          onClick={browseWorkspace}
+          title={t("files.add_path")}
+        >
+          <FolderPlus size={13} strokeWidth={1.7} />
+          <span>{t("files.add_path")}</span>
+        </button>
+      }
       secondary={
         <div className={styles.list_pane}>
           {workspaces.length === 0 && (
@@ -167,6 +247,16 @@ export function FilesView() {
         />
       ) : (
         <div className={styles.placeholder}>{t("files.select_workspace")}</div>
+      )}
+      {pickingDir && (
+        <DirPickerDialog
+          initialPath={selected ?? ""}
+          onPick={(path) => {
+            addPath(path);
+            setPickingDir(false);
+          }}
+          onCancel={() => setPickingDir(false)}
+        />
       )}
     </PageShell>
   );
