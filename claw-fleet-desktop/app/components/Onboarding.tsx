@@ -1211,7 +1211,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }
 
-  const noIssues = status && issues.length === 0;
 
   // Show hooks setup when Claude Code is among the detected tools
   const hasClaudeCode = status && (
@@ -1323,7 +1322,8 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
             </div>
 
             {/* Diagnostics area: a local spinner while detection runs, issue
-                cards when something needs fixing — never a full-page gate. */}
+                cards when something needs fixing, a green card when the
+                environment is healthy — never a full-page gate. */}
             {status === null ? (
               <div className={styles.loading}>
                 <div className={styles.spinner} />
@@ -1336,7 +1336,25 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                   <NotLoggedInCard tools={status.detected_tools} />
                 )}
               </div>
-            ) : null}
+            ) : (
+              // Environment is fine. Without a session yet the green card
+              // doubles as the "go run your first session" nudge — the main
+              // UI's SessionEmptyState takes over after dismiss.
+              <div className={styles.cards}>
+                <div className={`${styles.card} ${styles.card_ok}`}>
+                  <div className={styles.card_header}>
+                    <span className={styles.card_icon}>&#x2705;</span>
+                    <span className={styles.card_title}>
+                      {t(status.has_sessions ? "onboarding.all_good.title" : "onboarding.ready.title")}
+                    </span>
+                  </div>
+                  <p className={styles.card_description}>
+                    {t(status.has_sessions ? "onboarding.all_good.description" : "onboarding.ready.description")}
+                  </p>
+                  {!status.has_sessions && <CopyableCommand cmd="claude" />}
+                </div>
+              </div>
+            )}
 
             <div className={styles.cards}>
               <AppearanceCard />
@@ -1414,26 +1432,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 </div>
               )}
             </div>
-
-            {/* Environment is fine: green card. Without a session yet it
-                doubles as the "go run your first session" nudge — the main
-                UI's SessionEmptyState takes over after dismiss. */}
-            {noIssues && !celebrating && (
-              <div className={styles.cards}>
-                <div className={`${styles.card} ${styles.card_ok}`}>
-                  <div className={styles.card_header}>
-                    <span className={styles.card_icon}>&#x2705;</span>
-                    <span className={styles.card_title}>
-                      {t(status?.has_sessions ? "onboarding.all_good.title" : "onboarding.ready.title")}
-                    </span>
-                  </div>
-                  <p className={styles.card_description}>
-                    {t(status?.has_sessions ? "onboarding.all_good.description" : "onboarding.ready.description")}
-                  </p>
-                  {!status?.has_sessions && <CopyableCommand cmd="claude" />}
-                </div>
-              </div>
-            )}
 
             <div className={styles.footer}>
               {status !== null && issues.length > 0 && (

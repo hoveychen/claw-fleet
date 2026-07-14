@@ -1207,6 +1207,7 @@ export const MOCK_SOURCES_CONFIG = [
 export const MOCK_SETUP_STATUS = {
   cli_installed: true,
   claude_dir_exists: true,
+  logged_in: true,
   has_sessions: true,
   detected_tools: { cli: true, vscode: true, codex: true },
 };
