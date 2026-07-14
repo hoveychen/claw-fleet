@@ -24,7 +24,12 @@ import { LIVE_STATUSES, isFleetOwnedEntrypoint, rowBarColor, sessionUnread } fro
 import { useChatWorkspace } from "../hooks/useChatWorkspace";
 import { useSessionSearch } from "../hooks/useSessionSearch";
 import { PageShell } from "./PageShell";
-import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
+import {
+  NewSessionForm,
+  distinctWorkspaces,
+  repoRootPath,
+  type NewSessionCreated,
+} from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
 import { SessionTabs } from "./SessionTabs";
 import {
@@ -118,7 +123,9 @@ export function matchesWorkspaceFilter(
   if (filter === "all") return true;
   if (filter === CHAT_ONLY) return chatPath == null || s.workspacePath === chatPath;
   if (filter === CHAT_HIDDEN) return chatPath == null || s.workspacePath !== chatPath;
-  return s.workspacePath === filter;
+  // Options are collapsed to repo roots (see the dropdown's distinctWorkspaces),
+  // so a session inside `<repo>/.worktrees/<task>` matches its root's option.
+  return repoRootPath(s.workspacePath) === filter;
 }
 
 function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => string): string {
@@ -401,14 +408,17 @@ export function HistoryView() {
   // second time, alphabetised among the repos as plain "Chat".
   const chatPath = useChatWorkspace();
 
-  const workspaces = useMemo(() => {
-    const byPath = new Map<string, string>();
-    for (const s of adhocSessions) {
-      if (s.workspacePath === chatPath) continue;
-      byPath.set(s.workspacePath, s.workspaceName);
-    }
-    return [...byPath.entries()].sort((a, b) => a[1].localeCompare(b[1]));
-  }, [adhocSessions, chatPath]);
+  // Same derivation as the New Session launcher (distinctWorkspaces): temp
+  // scratchpad cwds dropped, in-repo worktree checkouts folded onto their repo
+  // root. No cap here — the filter should list every real directory — so the
+  // matcher above compares on repoRootPath to keep folded options selectable.
+  const workspaces = useMemo(
+    () =>
+      distinctWorkspaces(adhocSessions, Number.MAX_SAFE_INTEGER, chatPath)
+        .map((w) => [w.path, w.name] as [string, string])
+        .sort((a, b) => a[1].localeCompare(b[1])),
+    [adhocSessions, chatPath],
+  );
 
   // A filter persisted before the chat workspace got its own option is a raw
   // chat path; it no longer appears among the project options, so promote it to

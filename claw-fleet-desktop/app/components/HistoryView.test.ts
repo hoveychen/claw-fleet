@@ -144,6 +144,18 @@ describe("matchesWorkspaceFilter", () => {
     expect(matchesWorkspaceFilter(chatSession, "/Users/foo/repo", CHAT)).toBe(false);
   });
 
+  // The dropdown collapses in-repo worktree checkouts onto their repo root
+  // (via distinctWorkspaces), so the option value is the root. A session
+  // running inside `<repo>/.worktrees/<task>` must therefore match the root
+  // filter — an exact-path compare would silently omit it from the view.
+  it("matches a worktree-checkout session against its repo-root filter", () => {
+    const worktreeSession = {
+      ...base(),
+      workspacePath: "/Users/foo/repo/.worktrees/fix-bug",
+    } as SessionInfo;
+    expect(matchesWorkspaceFilter(worktreeSession, "/Users/foo/repo", CHAT)).toBe(true);
+  });
+
   it("degrades both chat pseudo-values to 'all' when the chat path is unknown", () => {
     for (const s of [chatSession, repoSession]) {
       expect(matchesWorkspaceFilter(s, CHAT_ONLY, null)).toBe(true);
