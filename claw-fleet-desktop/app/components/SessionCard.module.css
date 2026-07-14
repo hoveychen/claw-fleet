@@ -113,6 +113,13 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Something is actively running under this session (subagents or a workflow) —
+   lift the count out of the dim palette so the "still working" state reads at a
+   glance. Shared by the "+N sub · M▶" and "⚙ N wf · M▶" chips. */
+.gm_sub_count[data-running="true"] {
+  color: var(--color-success);
+}
+
 .gm_spacer {
   flex: 1 1 auto;
 }

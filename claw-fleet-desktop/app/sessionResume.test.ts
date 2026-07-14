@@ -29,6 +29,8 @@ function session(over: Partial<SessionInfo> = {}): SessionInfo {
     costSpeedUsdPerMin: 0,
     lastMessagePreview: null,
     lastActivityMs: 0,
+    agentLastActivityMs: 0,
+    runningSubagentCount: 0,
     createdAtMs: 0,
     jsonlPath: "/w/s1.jsonl",
     model: null,
