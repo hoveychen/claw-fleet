@@ -452,6 +452,10 @@ enum PlanCommands {
         plan_id: String,
         #[arg(long)]
         title: String,
+        /// Parent plan id. Marks this as a child (side-branch) plan: when it
+        /// completes, Fleet points you back at the parent to keep going.
+        #[arg(long)]
+        parent: Option<String>,
     },
     /// Append a pending task to a plan.
     Add {
@@ -3142,7 +3146,11 @@ fn cmd_plan(action: PlanCommands) {
             plan_mutate_checkbox(&cwd, &plan_id, &task, false)
         }
         PlanCommands::Resume { plan_id, task } => plan_resume(&cwd, &plan_id, task.as_deref()),
-        PlanCommands::Create { plan_id, title } => plan_create(&cwd, &plan_id, &title),
+        PlanCommands::Create {
+            plan_id,
+            title,
+            parent,
+        } => plan_create(&cwd, &plan_id, &title, parent.as_deref()),
         PlanCommands::Add { plan_id, task, text } => plan_add(&cwd, &plan_id, &task, &text),
         PlanCommands::Migrate { path } => plan_migrate(&cwd, path),
         PlanCommands::List => plan_list(&cwd),
@@ -3198,8 +3206,57 @@ fn plan_mutate_checkbox(
     let updated = pt::set_checkbox(&content, plan_id, task, done)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
     plan_record_focus(cwd, plan_id, &updated);
+    // Ticking the last box of a child plan: point the session back at the
+    // nearest ancestor that still has work, so the plan tree doesn't strand.
+    if done {
+        if let Some(msg) = backtrack_on_completion(cwd, plan_id, &updated) {
+            println!("{msg}");
+            return Ok(());
+        }
+    }
     println!("ok");
     Ok(())
+}
+
+/// When `plan_id` just became fully complete (no pending top-level task left)
+/// AND it is a child plan whose nearest pending ancestor still has work,
+/// re-attribute this session's focus to that ancestor and return a directive
+/// telling the agent to keep going there. Returns `None` when the plan still
+/// has pending tasks or there is nowhere to backtrack to (top-level plan, or
+/// every ancestor already complete).
+fn backtrack_on_completion(
+    cwd: &std::path::Path,
+    plan_id: &str,
+    content: &str,
+) -> Option<String> {
+    use claw_fleet_core::prd_tasks as pt;
+    let body = pt::plan_body(content, plan_id)?;
+    if body.lines().any(pt::is_pending_task_line) {
+        return None; // not fully complete yet
+    }
+    let target = pt::resolve_backtrack_target(cwd, plan_id)?;
+    // Re-point focus at the ancestor so the desktop card follows immediately,
+    // without waiting for the agent to run `fleet plan resume` itself.
+    if let Some(sid) = read_fleet_session_id() {
+        let ws = pt::discover_main_checkout_root(cwd).unwrap_or_else(|| cwd.to_path_buf());
+        if let Err(e) = claw_fleet_core::task_progress::set_current(
+            &sid,
+            &ws.to_string_lossy(),
+            &target.plan_id,
+            target.next_task.clone(),
+        ) {
+            eprintln!("warning: could not re-attribute focus to parent plan: {e}");
+        }
+    }
+    let next = target
+        .next_task
+        .as_deref()
+        .unwrap_or("第一个未完成的 P");
+    Some(format!(
+        "ok — 子 plan '{plan_id}' 已全部完成。其父 plan '{parent}' 尚有未完成任务,\
+         Fleet 已把你的焦点切回 '{parent}'。请从 {next} 继续执行,不要结束 turn。",
+        parent = target.plan_id,
+    ))
 }
 
 fn plan_resume(cwd: &std::path::Path, plan_id: &str, task: Option<&str>) -> Result<(), String> {
@@ -3213,16 +3270,30 @@ fn plan_resume(cwd: &std::path::Path, plan_id: &str, task: Option<&str>) -> Resu
     Ok(())
 }
 
-fn plan_create(cwd: &std::path::Path, plan_id: &str, title: &str) -> Result<(), String> {
+fn plan_create(
+    cwd: &std::path::Path,
+    plan_id: &str,
+    title: &str,
+    parent: Option<&str>,
+) -> Result<(), String> {
     use claw_fleet_core::prd_tasks as pt;
     let path = workspace_tasks_path(cwd);
     let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let updated = pt::create_plan(&content, plan_id, title)?;
+    let updated = pt::create_plan(&content, plan_id, title, parent)?;
     std::fs::write(&path, &updated).map_err(|e| format!("write {}: {e}", path.display()))?;
     // Writing a plan is starting it: the agent authoring the block is the agent
     // about to execute it. Claiming focus here spares it a separate `resume`.
     plan_record_focus(cwd, plan_id, &updated);
-    println!("created plan '{plan_id}' in {}", path.display());
+    match parent {
+        Some(p) if !p.trim().is_empty() => {
+            println!(
+                "created child plan '{plan_id}' (parent '{}') in {}",
+                p.trim(),
+                path.display()
+            );
+        }
+        _ => println!("created plan '{plan_id}' in {}", path.display()),
+    }
     Ok(())
 }
 
@@ -3300,6 +3371,37 @@ fn plan_get(cwd: &std::path::Path, plan_id: &str) -> Result<(), String> {
 /// versa). Plans are deduped by `id`; on conflict the source whose file was
 /// modified most recently wins. Legacy anonymous (no `id`) blocks are kept
 /// independently — they pre-date the multi-plan format.
+/// Backstop directive for the child→parent backtrack. Returns `Some(text)` when
+/// `session_id`'s attributed plan is a child that is now fully complete and its
+/// nearest ancestor still has pending work — the same condition `plan check`
+/// acts on, re-checked here every prompt in case focus was left on a completed
+/// child (hand-edited box, handoff successor, etc.). `None` in every other case:
+/// no session id, no focus record, focused plan absent from this workspace,
+/// focused plan still has pending tasks, or nowhere to backtrack to.
+fn backtrack_backstop(cwd: &std::path::Path, session_id: Option<&str>) -> Option<String> {
+    use claw_fleet_core::prd_tasks as pt;
+    let sid = session_id?;
+    let rec = claw_fleet_core::task_progress::read(sid)?;
+    let focused = rec.plan_id.as_str();
+    // Only fire once the focused plan is actually complete — while it still has
+    // pending tasks the agent should be finishing IT, and the hook already
+    // re-injects it among the active plans.
+    let src = pt::find_plan_source(cwd, focused)?;
+    let content = std::fs::read_to_string(&src).ok()?;
+    let body = pt::plan_body(&content, focused)?;
+    if body.lines().any(pt::is_pending_task_line) {
+        return None;
+    }
+    let target = pt::resolve_backtrack_target(cwd, focused)?;
+    let next = target.next_task.as_deref().unwrap_or("第一个未完成的 P");
+    Some(format!(
+        "⤴ 回溯提醒:你当前归属的子 plan `{focused}` 已全部完成,其父 plan `{parent}` \
+         尚有未完成任务。请运行 `fleet plan resume {parent}` 并从 {next} 继续执行,\
+         不要因为子 plan 完成就结束工作。",
+        parent = target.plan_id,
+    ))
+}
+
 fn cmd_prd_context() {
     use claw_fleet_core::prd_tasks::*;
     use std::io::Read;
@@ -3311,13 +3413,14 @@ fn cmd_prd_context() {
 
     // Prefer the `cwd` field from stdin (authoritative for this hook firing);
     // fall back to process cwd if parsing fails.
-    let cwd_from_stdin = serde_json::from_str::<serde_json::Value>(&input)
-        .ok()
-        .and_then(|v| {
-            v.get("cwd")
-                .and_then(|c| c.as_str())
-                .map(PathBuf::from)
-        });
+    let parsed = serde_json::from_str::<serde_json::Value>(&input).ok();
+    let cwd_from_stdin = parsed
+        .as_ref()
+        .and_then(|v| v.get("cwd").and_then(|c| c.as_str()).map(PathBuf::from));
+    let session_id = parsed
+        .as_ref()
+        .and_then(|v| v.get("session_id").and_then(|s| s.as_str()))
+        .map(|s| s.to_string());
     let cwd = cwd_from_stdin
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
@@ -3337,6 +3440,14 @@ fn cmd_prd_context() {
 
     let deduped = dedup_blocks_keep_latest_mtime(raw);
     let rendered = render_with_sources(&deduped, main_root.as_deref());
+
+    // Backstop for the P3 `plan check` backtrack: if this session is still
+    // attributed to a child plan that is now fully complete (e.g. the last box
+    // was hand-edited instead of ticked via `fleet plan check`, or a handoff
+    // successor inherited a completed child), nudge it back to the parent every
+    // turn until it moves. Advisory only — unlike `plan check`, the hook does
+    // not mutate focus.
+    let backtrack_note = backtrack_backstop(&cwd, session_id.as_deref());
 
     // Nothing to inject: no active plan parsed AND no problem detected → the
     // original silent no-op.
@@ -3367,6 +3478,10 @@ fn cmd_prd_context() {
             Some(w) => format!("\n\n{w}"),
             None => String::new(),
         };
+        let backtrack_block = match &backtrack_note {
+            Some(b) => format!("\n\n{b}"),
+            None => String::new(),
+        };
         format!(
             "<system-reminder>\n\
 The workspace `TASKS.md` (re-injected on every prompt by Fleet PRD \
@@ -3381,7 +3496,7 @@ file wins — keep a given `id` in exactly one file.\n\
 \n\
 Sources scanned:\n{sources_list}\n\
 \n\
-{rendered}{warn_block}\n\
+{rendered}{warn_block}{backtrack_block}\n\
 </system-reminder>",
         )
     };
