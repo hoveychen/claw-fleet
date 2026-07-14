@@ -15,7 +15,6 @@ pub mod cmd_ast;
 pub mod codex_source;
 pub mod console;
 pub mod consumer_heartbeat;
-pub mod cursor;
 pub mod daily_report;
 pub mod decision_history;
 pub mod decision_panel_config;
@@ -48,7 +47,6 @@ pub mod mcp_server;
 pub mod memory;
 pub mod mobile_relay;
 pub mod model_cost;
-pub mod openclaw_source;
 pub mod launch_spec;
 pub mod parked;
 pub mod pattern_update;
@@ -145,16 +143,6 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
         })
     });
 
-    let cursor = home.as_ref().map_or(false, |h| h.join(".cursor").is_dir());
-
-    let openclaw = home.as_ref().map_or(false, |h| h.join(".openclaw").is_dir())
-        || {
-            #[cfg(unix)]
-            { process_util::command("which").arg("openclaw").output().map_or(false, |o| o.status.success()) }
-            #[cfg(not(unix))]
-            { process_util::command("where").arg("openclaw").output().map_or(false, |o| o.status.success()) }
-        };
-
     let jetbrains = sessions.iter().any(|s| {
         s.ide_name.as_deref().map_or(false, |name| {
             let n = name.to_lowercase();
@@ -191,11 +179,9 @@ pub fn detect_installed_tools(sessions: &[SessionInfo]) -> backend::DetectedTool
     let vscode = vscode && claude_enabled;
     let jetbrains = jetbrains && claude_enabled;
     let desktop = desktop && claude_enabled;
-    let cursor = cursor && config.is_source_enabled("cursor");
-    let openclaw = openclaw && config.is_source_enabled("openclaw");
     let codex = codex && config.is_source_enabled("codex");
 
-    backend::DetectedTools { cli, vscode, jetbrains, desktop, cursor, openclaw, codex }
+    backend::DetectedTools { cli, vscode, jetbrains, desktop, codex }
 }
 
 /// Resolve the Claude CLI binary fleet should use, honouring the user override.
@@ -218,7 +204,5 @@ pub const FLEET_SKILL_MD: &str = include_str!("../../skills/fleet/SKILL.md");
 pub const SKILL_TARGETS: &[(&str, &str)] = &[
     ("Claude Code", ".claude"),
     ("GitHub Copilot", ".copilot"),
-    ("Cursor", ".cursor"),
     ("Gemini CLI", ".gemini"),
-    ("OpenClaw", ".openclaw"),
 ];

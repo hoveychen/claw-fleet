@@ -9,12 +9,12 @@
 //!
 //! Token accuracy: when the provider reports real usage (Claude CLI run with
 //! `--output-format json`), those numbers are written verbatim and entries are
-//! marked `tokenAccurate = true`. For providers that emit text only (Codex,
-//! Cursor), tokens fall back to character-count estimation (~4 chars/token)
+//! marked `tokenAccurate = true`. For providers that emit text only (Codex),
+//! tokens fall back to character-count estimation (~4 chars/token)
 //! and entries set `tokenAccurate = false` so the UI can badge the numbers.
 //!
 //! Cost accuracy: Claude-provider calls record the CLI's own `total_cost_usd`
-//! (which includes cache-creation pricing). Codex / Cursor entries set
+//! (which includes cache-creation pricing). Codex entries set
 //! `costAccurate = false` and `costUsd = 0.0`.
 
 use std::io::Write;
@@ -46,10 +46,10 @@ pub struct FleetLlmUsageEntry {
     pub timestamp_ms: u64,
     /// Scenario tag — one of the `SCENARIO_*` constants above.
     pub scenario: String,
-    /// Provider name: "claude", "codex", "cursor".
+    /// Provider name: "claude", "codex".
     pub provider: String,
     /// Model alias as passed to `provider.complete()` ("haiku", "sonnet", "opus",
-    /// or a codex/cursor model id).
+    /// or a codex model id).
     pub model: String,
     pub input_tokens: u64,
     pub output_tokens: u64,
