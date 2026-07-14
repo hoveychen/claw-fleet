@@ -51,9 +51,9 @@ export function stopMode(s: SessionInfo): StopMode {
   return "stop";
 }
 
-/** Subagents are driven by their parent; cursor sessions are not ours to signal. */
+/** Subagents are driven by their parent, so they are not ours to signal. */
 export function canControl(s: SessionInfo): boolean {
-  return !s.isSubagent && s.agentSource !== "cursor";
+  return !s.isSubagent;
 }
 
 export function StopControl({ session }: { session: SessionInfo }) {

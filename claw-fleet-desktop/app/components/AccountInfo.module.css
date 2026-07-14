@@ -530,33 +530,6 @@
   background: var(--color-bg-secondary);
 }
 
-/* ── Cursor daily stats table ──────────────────────────────────────────────── */
-
-.stats_table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 10px;
-}
-
-.stats_table th {
-  text-align: left;
-  font-weight: 600;
-  color: var(--color-text-dim);
-  padding: 3px 4px;
-  border-bottom: 1px solid var(--color-border);
-  white-space: nowrap;
-}
-
-.stats_table td {
-  color: var(--color-text);
-  padding: 3px 4px;
-  font-variant-numeric: tabular-nums;
-}
-
-.stats_table tr:not(:last-child) td {
-  border-bottom: 1px solid var(--color-border);
-}
-
 /* macOS vibrancy: semi-transparent backgrounds. (.container's top divider is
    var(--color-border) — softened platform-wide by the App.css redirect.) */
 :global([data-platform="macos"]) .bar_track {
