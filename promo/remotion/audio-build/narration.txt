@@ -1,0 +1,11 @@
+intro|Nine hard-won tips from a crab who has watched agents go very, very wrong.
+tip1|Three agents coding, one idle since lunch. Now you see every deckhand at a glance.
+tip2|Watch the bill, not the vibes. Four dollars a minute of apologies adds up fast.
+tip3|No unsupervised sudo on my ship. Every risky command waits for your say-so.
+tip4|It asks, you click, it sails on. Answer with a tap, not an essay.
+tip5|Dispatch the whole fleet from one composer. Three new hands, no terminal opened.
+tip6|Context window full? The mission is not. Pass the baton and sail on.
+tip7|Eight hours of fleet work, summarized before your coffee is cold.
+tip8|Your phone is the bridge now. Approve from the beach, the fleet never knew you left.
+tip9|Research it once, cite it forever. Every report goes in the ship's log.
+outro|Claw Fleet. Command your agents like a captain. Set sail.
