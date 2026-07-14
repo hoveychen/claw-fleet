@@ -41,7 +41,12 @@ import {
 
 // ── Dynamic session state (simulates live updates) ──────────────────────────
 
-let currentSessions: SessionInfo[] = structuredClone(MOCK_SESSIONS);
+// Test harnesses can seed `mock-no-sessions` in localStorage before boot to
+// simulate a machine that has never run an agent (onboarding ready-card path).
+let currentSessions: SessionInfo[] =
+  window.localStorage.getItem("mock-no-sessions") !== null
+    ? []
+    : structuredClone(MOCK_SESSIONS);
 
 /** Nudge token counts and speeds to simulate live activity */
 function tickSessions() {
@@ -211,8 +216,15 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
       return MOCK_MEMORY_HISTORY;
     case "get_sources_config":
       return MOCK_SOURCES_CONFIG;
-    case "check_setup_status":
-      return MOCK_SETUP_STATUS;
+    case "check_setup_status": {
+      // Harness override: seed `mock-setup-status` with a JSON object to merge
+      // over the default (e.g. {"cli_installed":false}) for onboarding-branch
+      // screenshots.
+      const override = window.localStorage.getItem("mock-setup-status");
+      return override
+        ? { ...MOCK_SETUP_STATUS, ...JSON.parse(override) }
+        : MOCK_SETUP_STATUS;
+    }
     case "get_hooks_setup_plan":
       return MOCK_HOOKS_PLAN;
     case "restart_app":
