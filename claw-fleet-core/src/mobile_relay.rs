@@ -986,524 +986,604 @@ fn known_workspaces() -> Vec<String> {
 
 fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
     match method {
-        // Same aggregation as `LocalBackend::list_pending_decisions`, minus
-        // the session-cache display enrichment — the mobile client resolves
-        // workspace/title labels from its own `sessions` snapshot.
-        "pending_snapshot" => {
-            // Parked cards are pending too — they just live in the parked store
-            // rather than the channel's request dir. The phone's snapshot is
-            // authoritative (it *replaces* the client's card list), so omitting
-            // them here would make a timed-out card vanish from the phone on the
-            // very next reconcile — the disappearance this whole mechanism exists
-            // to prevent, just on the other screen.
-            let read_all = |ids: Vec<String>,
-                            read: &dyn Fn(&str) -> Option<Value>,
-                            kind: crate::parked::ParkedKind|
-             -> Vec<Value> {
-                ids.iter()
-                    .filter_map(|id| read(id))
-                    .chain(crate::parked::list_requests::<Value>(kind))
-                    .collect()
-            };
-            // Guard and permission prompts are never parked (their timeout is a
-            // deny, not a pause), so they keep the plain live-only listing.
-            let read_live = |ids: Vec<String>, read: &dyn Fn(&str) -> Option<Value>| -> Vec<Value> {
-                ids.iter().filter_map(|id| read(id)).collect()
-            };
-            Ok(json!({
-                "guard": read_live(crate::guard::list_pending_requests(), &|id| {
-                    crate::guard::read_request(id).and_then(|r| serde_json::to_value(r).ok())
-                }),
-                "elicitation": read_all(
-                    crate::elicitation::list_pending_requests(),
-                    &|id| {
-                        crate::elicitation::read_request(id).and_then(|r| serde_json::to_value(r).ok())
-                    },
-                    crate::parked::ParkedKind::Elicitation,
-                ),
-                "fleetAsk": read_all(
-                    crate::mcp_ipc::list_pending_requests(),
-                    &|id| crate::mcp_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok()),
-                    crate::parked::ParkedKind::FleetAsk,
-                ),
-                "planApproval": read_all(
-                    crate::plan_approval::list_pending_requests(),
-                    &|id| {
-                        crate::plan_approval::read_request(id).and_then(|r| serde_json::to_value(r).ok())
-                    },
-                    crate::parked::ParkedKind::PlanApproval,
-                ),
-                "permissionPrompt": read_live(
-                    crate::permission_prompt_ipc::list_pending_requests(),
-                    &|id| {
-                        crate::permission_prompt_ipc::read_request(id)
-                            .and_then(|r| serde_json::to_value(r).ok())
-                    },
-                ),
-                "a2uiRender": read_all(
-                    crate::mcp_a2ui_ipc::list_pending_requests(),
-                    &|id| {
-                        crate::mcp_a2ui_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok())
-                    },
-                    crate::parked::ParkedKind::A2uiRender,
-                ),
-            }))
-        }
-        "task_plans" => {
-            let workspace = params
-                .get("workspacePath")
-                .and_then(Value::as_str)
-                .ok_or("missing workspacePath")?;
-            let session_id = params.get("sessionId").and_then(Value::as_str);
-            let plans =
-                crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace), session_id);
-            serde_json::to_value(plans).map_err(|e| e.to_string())
-        }
-        "session_decisions" => {
-            let session_id = params
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .ok_or("missing sessionId")?;
-            let jsonl = params.get("jsonlPath").and_then(Value::as_str).map(std::path::Path::new);
-            let records =
-                crate::decision_history::list_session_records_with_jsonl(session_id, jsonl);
-            serde_json::to_value(records).map_err(|e| e.to_string())
-        }
-        "decision_asset" => {
-            use base64::Engine as _;
-            let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
-            let qidx = params.get("qidx").and_then(Value::as_str).ok_or("missing qidx")?;
-            let rel = params.get("rel").and_then(Value::as_str).ok_or("missing rel")?;
-            let asset = crate::mcp_ipc::read_decision_asset(id, qidx, rel)?;
-            // Oversized images are downscaled so the WS frame stays small
-            // enough to cross the relay; small ones pass through untouched.
-            let (bytes, mime) = downscale_decision_asset(asset.bytes, &asset.mime);
-            // Defensive ceiling: a downscaled 2048px JPEG is well under this, so
-            // this only trips on a pathological asset we couldn't shrink.
-            const MAX_ASSET_BYTES: usize = 12 * 1024 * 1024;
-            if bytes.len() > MAX_ASSET_BYTES {
-                return Err(format!("asset too large: {} bytes", bytes.len()));
-            }
-            Ok(json!({
-                "mime": mime,
-                "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
-            }))
-        }
-        // Last `n` transcript messages — the mobile SessionDetail polls this
-        // (same model as the desktop HistoryView tab; no watcher push).
-        "tail" => {
-            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
-            let n = params.get("n").and_then(Value::as_u64).unwrap_or(200) as usize;
-            let sources = crate::agent_source::build_sources();
-            let source = crate::agent_source::find_source_for_path(&sources, path)
-                .ok_or_else(|| format!("no agent source for path: {path}"))?;
-            source
-                .get_messages_tail(path, n)
-                .map(|msgs| Value::Array(slim_tail_messages(msgs)))
-        }
-        // Byte-offset incremental tail (mirrors the `/tail` endpoint): the
-        // client polls with its last `newOffset` and receives only the lines
-        // appended since. Omitting `offset` locates the current end without
-        // reading the body — the cheap "start following from here" call.
-        "tail_delta" => {
-            use std::io::{Read as _, Seek as _};
-            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
-            let sources = crate::agent_source::build_sources();
-            let resolved = crate::agent_source::find_source_for_path(&sources, path)
-                .and_then(|s| s.resolve_file_path(path))
-                .ok_or_else(|| format!("cannot resolve path: {path}"))?;
-            let size = std::fs::metadata(&resolved).map_err(|e| e.to_string())?.len();
-            let offset = params.get("offset").and_then(Value::as_u64);
-            let Some(offset) = offset else {
-                return Ok(json!({ "lines": [], "newOffset": size }));
-            };
-            // Truncated/rotated file (offset past EOF): resync without lines.
-            if offset >= size {
-                return Ok(json!({ "lines": [], "newOffset": size }));
-            }
-            let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
-            file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
-            let mut buf = String::new();
-            file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
-            let lines: Vec<Value> = buf
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .filter_map(|l| serde_json::from_str(l).ok())
-                .collect();
-            Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": size }))
-        }
-        // Serializes to `null` when there's no live sidecar for this session.
-        "live_thinking" => {
-            let session_id = params
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .ok_or("missing sessionId")?;
-            serde_json::to_value(crate::live_thinking::read_live_thinking(session_id))
-                .map_err(|e| e.to_string())
-        }
-        // `null` when the session isn't on any relay chain.
-        "handoff_chain" => {
-            let session_id = params
-                .get("sessionId")
-                .and_then(Value::as_str)
-                .ok_or("missing sessionId")?;
-            serde_json::to_value(crate::handoff::chain_containing(session_id))
-                .map_err(|e| e.to_string())
-        }
-        "workflow_trees" => {
-            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
-            let trees =
-                crate::workflow::discover_workflow_trees(std::path::Path::new(path));
-            serde_json::to_value(trees).map_err(|e| e.to_string())
-        }
-        "token_breakdown" => {
-            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
-            let project_root = params.get("projectRoot").and_then(Value::as_str);
-            let breakdown = crate::token_analysis::aggregate_task(
-                std::path::Path::new(path),
-                project_root.map(std::path::Path::new),
-            )?;
-            serde_json::to_value(breakdown).map_err(|e| e.to_string())
-        }
-        // Today's cumulative token/cost counter for the mobile header (mirrors
-        // `LocalBackend::today_usage` / `/today_usage`).
-        "today_usage" => {
-            let sources = crate::agent_source::build_sources();
-            let sessions = crate::session::scan_all_sources(&sources);
-            let usage = crate::today_usage::today_usage(&sessions);
-            serde_json::to_value(usage).map_err(|e| e.to_string())
-        }
-        // Account + rate-limit usage for the mobile 「账号与用量」 page: the Claude
-        // account/plan with its 5h/7d bars, plus a normalised bar set for every
-        // other available source. Runs on a plain thread rather than this ws
-        // blocking task because every fetch inside builds its own tokio runtime
-        // (`fetch_account_info_blocking` and friends) — see `account_usage_payload`.
-        "account_usage" => std::thread::spawn(account_usage_payload)
-            .join()
-            .map_err(|_| "account/usage fetch panicked".to_string()),
-        // Occupancy time series behind the mobile page's 24h chart. Pure disk
-        // read of the snapshots the background sampler persists — no network, so
-        // it stays on this thread (unlike `account_usage` above). Values are the
-        // 0–1 fraction; the window defaults to the last 24h.
-        "usage_history" => {
-            let now_ms = chrono::Utc::now().timestamp_millis();
-            let from_ms = params
-                .get("fromMs")
-                .and_then(Value::as_i64)
-                .unwrap_or(now_ms - 24 * 3_600_000);
-            let to_ms = params.get("toMs").and_then(Value::as_i64).unwrap_or(now_ms);
-            let raw = crate::account::load_usage_history(from_ms, to_ms);
-            let points: Vec<Value> = downsample_history(&raw, HISTORY_BUCKET_MS)
-                .iter()
-                .map(|p| {
-                    json!({
-                        "ts": p.ts,
-                        "fiveHour": p.five_hour,
-                        "sevenDay": p.seven_day,
-                        "sevenDaySonnet": p.seven_day_sonnet,
-                    })
-                })
-                .collect();
-            Ok(Value::Array(points))
-        }
-        // Main-session invocations plus subagent sidecars, sorted by timestamp
-        // (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
-        "skill_history" => {
-            let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
-            let sources = crate::agent_source::build_sources();
-            let source = crate::agent_source::find_source_for_path(&sources, path)
-                .ok_or_else(|| format!("no agent source for path: {path}"))?;
-            use crate::skill_history;
-            let main_msgs = source.get_messages(path)?;
-            let mut out = skill_history::extract_from_messages(&main_msgs, false);
-            for sub in skill_history::subagent_jsonl_paths(std::path::Path::new(path)) {
-                let sub_str = sub.to_string_lossy().to_string();
-                // Best-effort: a broken subagent file shouldn't lose the rest.
-                let Ok(msgs) = source.get_messages(&sub_str) else { continue };
-                out.extend(skill_history::extract_from_messages(&msgs, true));
-            }
-            skill_history::sort_by_timestamp(&mut out);
-            serde_json::to_value(out).map_err(|e| e.to_string())
-        }
-        // LLM risk analysis for a guard card (mirrors `/guard/analyze` and the
-        // desktop's `analyze_guard_command`). Synchronous up to 30s — fine, we
-        // run inside `spawn_blocking` so other frames keep flowing.
-        "guard_analyze" => {
-            let command =
-                params.get("command").and_then(Value::as_str).ok_or("missing command")?;
-            let context = params.get("context").and_then(Value::as_str).unwrap_or("");
-            let lang = params.get("lang").and_then(Value::as_str).unwrap_or("zh");
-            let risk_tags = crate::audit::classify_bash_command_pub(command)
-                .map(|(_, tags)| tags)
-                .unwrap_or_default();
-            let prompt = crate::guard::build_analysis_prompt(command, &risk_tags, context, lang);
-            let cfg = crate::llm_provider::shared_config();
-            if cfg.provider == "none" {
-                return Err("LLM provider is disabled".into());
-            }
-            let provider = crate::llm_provider::resolve_provider(&cfg.provider)
-                .ok_or("LLM provider not available")?;
-            if !provider.is_available() {
-                return Err(format!("{} CLI not found", provider.display_name()));
-            }
-            let analysis = crate::llm_usage::complete_accounted(
-                provider.as_ref(),
-                &prompt,
-                &cfg.fast_model,
-                Duration::from_secs(30),
-                crate::llm_usage::SCENARIO_GUARD_COMMAND,
-            )
-            .ok_or("LLM analysis timed out or failed")?;
-            Ok(json!({ "analysis": analysis }))
-        }
-        // Full-text search over the local session index — the mobile task list
-        // wires this to the same FTS the desktop launchpad uses (search_sessions
-        // Tauri command → SearchIndex::search). Returns SearchHit rows
-        // (sessionId / jsonlPath / snippet with <mark> markers / rank); the
-        // client resolves them against its own sessions snapshot by jsonlPath.
-        "session_search" => {
-            let query = params.get("query").and_then(Value::as_str).unwrap_or("");
-            let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
-            if query.trim().len() < 2 {
-                return Ok(Value::Array(Vec::new()));
-            }
-            let index = crate::search_index::SearchIndex::open()?;
-            let hits = index.search(query, limit)?;
-            serde_json::to_value(hits).map_err(|e| e.to_string())
-        }
-        // Wiki knowledge base: every published doc, newest-updated first
-        // (mirrors the desktop's `list_wiki_docs` Tauri command).
-        "wiki_list" => {
-            serde_json::to_value(crate::wiki::list_docs()).map_err(|e| e.to_string())
-        }
-        // One file — entry or asset — from a wiki doc version, base64-framed so
-        // the mobile client can decode markdown/html text or blob-serve assets
-        // (imgs/css/js) referenced by an htmlDir doc. `version` defaults to the
-        // current one. The 16 MiB per-file cap keeps a single frame bounded even
-        // though a whole doc can reach 100 MiB.
-        "wiki_file" => {
-            use base64::Engine as _;
-            let slug = params.get("slug").and_then(Value::as_str).ok_or("missing slug")?;
-            let version =
-                params.get("version").and_then(Value::as_str).unwrap_or("current");
-            let relpath =
-                params.get("relpath").and_then(Value::as_str).ok_or("missing relpath")?;
-            let file = crate::wiki::get_file(slug, version, relpath)?;
-            const MAX_WIKI_FILE_BYTES: usize = 16 * 1024 * 1024;
-            if file.bytes.len() > MAX_WIKI_FILE_BYTES {
-                return Err(format!("wiki file too large: {} bytes", file.bytes.len()));
-            }
-            Ok(json!({
-                "mime": file.mime,
-                "base64": base64::engine::general_purpose::STANDARD.encode(&file.bytes),
-            }))
-        }
-        // Full-text search over every published doc's metadata + entry body
-        // (mirrors the desktop's `search_wiki_docs`). Returns WikiSearchHit rows
-        // (slug / field=meta|content / snippet). The <2-char guard matches the
-        // session_search arm so a single keystroke doesn't scan every doc.
-        "wiki_search" => {
-            let query = params.get("query").and_then(Value::as_str).unwrap_or("");
-            if query.trim().len() < 2 {
-                return Ok(Value::Array(Vec::new()));
-            }
-            serde_json::to_value(crate::wiki::search_docs(query)).map_err(|e| e.to_string())
-        }
-        // Export one doc as a downloadable artifact (single file for
-        // markdown/html, a store-only zip of the whole version dir for htmlDir),
-        // base64-framed. 64 MiB cap — a doc version can hold up to 100 MiB, but
-        // a single export frame stays bounded.
-        "wiki_export" => {
-            use base64::Engine as _;
-            let slug = params.get("slug").and_then(Value::as_str).ok_or("missing slug")?;
-            let version =
-                params.get("version").and_then(Value::as_str).unwrap_or("current");
-            let export = crate::wiki::export_doc(slug, version)?;
-            const MAX_WIKI_EXPORT_BYTES: usize = 64 * 1024 * 1024;
-            if export.bytes.len() > MAX_WIKI_EXPORT_BYTES {
-                return Err(format!("wiki export too large: {} bytes", export.bytes.len()));
-            }
-            Ok(json!({
-                "filename": export.filename,
-                "mime": export.mime,
-                "base64": base64::engine::general_purpose::STANDARD.encode(&export.bytes),
-            }))
-        }
-        // Absolute path of this host's pure-chat workspace, created on demand.
-        // The phone pins it in its new-session sheet; like the desktop it cannot
-        // derive the path itself (it's under the *desktop* host's home).
-        "chat_workspace" => {
-            let path = crate::chat_workspace::ensure_chat_workspace()?;
-            Ok(json!({ "path": path }))
-        }
-        // Directory picker for the new-session composer. Deliberately NOT gated
-        // on `known_workspaces` the way the explorer/git methods below are: the
-        // point is to reach a directory that has never had a session. It carries
-        // its own boundary instead (home + off-home known workspaces, canonical,
-        // directories only) — see `workspace_browse`.
-        "browse_dir" => {
-            let path = params.get("path").and_then(Value::as_str);
-            let resp = crate::workspace_browse::browse_dir(path, &known_workspaces())?;
-            serde_json::to_value(resp).map_err(|e| e.to_string())
-        }
+        // ── Read methods ─────────────────────────────────────────────────
+        "pending_snapshot" => serve_pending_snapshot(params),
+        "task_plans" => serve_task_plans(params),
+        "session_decisions" => serve_session_decisions(params),
+        "decision_asset" => serve_decision_asset(params),
+        "tail" => serve_tail(params),
+        "tail_delta" => serve_tail_delta(params),
+        "live_thinking" => serve_live_thinking(params),
+        "handoff_chain" => serve_handoff_chain(params),
+        "workflow_trees" => serve_workflow_trees(params),
+        "token_breakdown" => serve_token_breakdown(params),
+        "today_usage" => serve_today_usage(params),
+        "account_usage" => serve_account_usage(params),
+        "usage_history" => serve_usage_history(params),
+        "skill_history" => serve_skill_history(params),
+        "guard_analyze" => serve_guard_analyze(params),
+        "session_search" => serve_session_search(params),
+        "wiki_list" => serve_wiki_list(params),
+        "wiki_file" => serve_wiki_file(params),
+        "wiki_search" => serve_wiki_search(params),
+        "wiki_export" => serve_wiki_export(params),
+        "chat_workspace" => serve_chat_workspace(params),
+        "browse_dir" => serve_browse_dir(params),
         // ── Write methods ────────────────────────────────────────────────
-        // All of these run inside `spawn_blocking` (see ws_connect_once), so
-        // process spawns / kills / file writes never block the ws runtime.
-        "spawn_session" => {
-            let req: crate::session_launch::SpawnSessionRequest =
-                serde_json::from_value(params.clone())
-                    .map_err(|e| format!("bad spawn_session params: {e}"))?;
-            // Thread the phone-provided session id through so a dropped reply
-            // frame is still recoverable: the phone confirms success by finding
-            // this exact id in a later `sessions` snapshot (relay delivery is
-            // best-effort — see registry::forward).
-            let resp = crate::session_launch::spawn_new_session_with_id(
-                &req.workspace_path,
-                &req.prompt,
-                req.model.as_deref(),
-                req.effort.as_deref(),
-                req.permission_mode.as_deref(),
-                req.session_id.as_deref(),
-            )?;
-            serde_json::to_value(resp).map_err(|e| e.to_string())
-        }
-        "resume_session" => {
-            let req: crate::auto_resume::ResumeSessionRequest =
-                serde_json::from_value(params.clone())
-                    .map_err(|e| format!("bad resume_session params: {e}"))?;
-            crate::auto_resume::spawn_resume_prompt(
-                &req.session_id,
-                &req.workspace_path,
-                req.prompt.as_deref().unwrap_or("continue"),
-                req.model.as_deref(),
-                req.effort.as_deref(),
-                req.permission_mode.as_deref(),
-            )?;
-            Ok(json!({ "ok": true }))
-        }
-        // pid 0 would signal the desktop's own process group — reject before
-        // it ever reaches kill() (same guard as the `/interrupt` endpoint).
-        "interrupt" => {
-            let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
-            if pid == 0 {
-                return Err("missing or invalid pid".into());
-            }
-            crate::session::interrupt_pid_impl(pid)?;
-            Ok(json!({ "ok": true }))
-        }
-        "stop" => {
-            let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
-            if pid == 0 {
-                return Err("missing or invalid pid".into());
-            }
-            let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
-            #[cfg(unix)]
-            {
-                // Probe first so a stale pid errors; then take the whole tree,
-                // or the agent's tool children outlive it.
-                if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
-                    return Err(std::io::Error::last_os_error().to_string());
-                }
-                crate::session::kill_pid_tree(pid, force)?;
-                Ok(json!({ "ok": true }))
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = force;
-                Err("stop is not supported on this platform".into())
-            }
-        }
-        "stop_workspace" => {
-            let path = params
-                .get("workspacePath")
-                .and_then(Value::as_str)
-                .filter(|s| !s.is_empty())
-                .ok_or("missing workspacePath")?;
-            crate::session::kill_workspace_impl(path)?;
-            Ok(json!({ "ok": true }))
-        }
-        "session_mark" => {
-            let req: crate::session_mark::SetSessionMarkRequest =
-                serde_json::from_value(params.clone())
-                    .map_err(|e| format!("bad session_mark params: {e}"))?;
-            crate::session_mark::set_mark(&req.session_id, &req.workspace_path, req.mark)?;
-            Ok(json!({ "ok": true }))
-        }
-        // Mobile-side attachment bytes → the desktop's content-addressed
-        // user-attachments store. The returned absolute path is what the
-        // client splices into an answer (`@<path>`) or a new-session prompt —
-        // shared by the decision panel and the composer flows.
-        "upload_attachment" => {
-            use base64::Engine as _;
-            let name = params.get("name").and_then(Value::as_str).unwrap_or("attachment.bin");
-            let b64 = params.get("base64").and_then(Value::as_str).ok_or("missing base64")?;
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(b64)
-                .map_err(|e| format!("invalid base64: {e}"))?;
-            if bytes.len() as u64 > MAX_UPLOAD_BYTES {
-                return Err(format!(
-                    "attachment too large: {} bytes (max {MAX_UPLOAD_BYTES})",
-                    bytes.len()
-                ));
-            }
-            let stored = crate::user_attachments::ingest_bytes(&bytes, name)?;
-            Ok(json!({ "path": stored.to_string_lossy() }))
-        }
-        // Given a list of previously-uploaded attachment paths, return the
-        // subset still present in the user-attachments store. The mobile
-        // composer persists attachment chips across reloads and uses this to
-        // drop ones whose backing file has been cleared, so a restored draft
-        // never carries a `Context files:` path that no longer resolves.
-        "attachments_exist" => {
-            let paths = params.get("paths").and_then(Value::as_array).ok_or("missing paths")?;
-            let existing: Vec<String> = paths
-                .iter()
-                .filter_map(Value::as_str)
-                .filter(|p| {
-                    crate::user_attachments::exists_in_store(std::path::Path::new(p))
-                })
-                .map(str::to_string)
-                .collect();
-            Ok(json!({ "existing": existing }))
-        }
-        "session_read" => {
-            let req: crate::session_read::MarkSessionsReadRequest =
-                serde_json::from_value(params.clone())
-                    .map_err(|e| format!("bad session_read params: {e}"))?;
-            crate::session_read::mark_read(&req.items)?;
-            Ok(json!({ "ok": true }))
-        }
+        "spawn_session" => serve_spawn_session(params),
+        "resume_session" => serve_resume_session(params),
+        "interrupt" => serve_interrupt(params),
+        "stop" => serve_stop(params),
+        "stop_workspace" => serve_stop_workspace(params),
+        "session_mark" => serve_session_mark(params),
+        "upload_attachment" => serve_upload_attachment(params),
+        "attachments_exist" => serve_attachments_exist(params),
+        "session_read" => serve_session_read(params),
         // ── Repository "仓库" surface ─────────────────────────────────────
-        // A loose-ends view over every git repo reachable from a known session
-        // workspace: worktrees with commits not merged back into main, and the
-        // main branch ahead of its upstream (unpushed). Access envelope matches
-        // the read-only file explorer — `known` is the same session-workspace
-        // list `/git_status` builds. push/pull run real `git` here (network),
-        // which is fine: this whole handler runs inside `spawn_blocking`.
-        "repo_list" => {
-            let known = known_workspaces();
-            serde_json::to_value(crate::git_ops::list_repos(&known)).map_err(|e| e.to_string())
-        }
-        "repo_detail" => {
-            let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
-            let known = known_workspaces();
-            serde_json::to_value(crate::git_ops::repo_detail(root, &known))
-                .map_err(|e| e.to_string())
-        }
-        "repo_push" => {
-            let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
-            let known = known_workspaces();
-            serde_json::to_value(crate::git_ops::repo_push(root, &known))
-                .map_err(|e| e.to_string())
-        }
-        "repo_pull" => {
-            let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
-            let known = known_workspaces();
-            serde_json::to_value(crate::git_ops::repo_pull(root, &known))
-                .map_err(|e| e.to_string())
-        }
+        "repo_list" => serve_repo_list(params),
+        "repo_detail" => serve_repo_detail(params),
+        "repo_push" => serve_repo_push(params),
+        "repo_pull" => serve_repo_pull(params),
         other => Err(format!("unknown method: {other}")),
     }
+}
+
+// ── Per-method handlers ──────────────────────────────────────────────────
+// Each `serve_<name>` holds the verbatim body of its former `match` arm in
+// `serve_request` above; the match is now just a method-literal → handler
+// table. Handlers that ignore the request body take `_params`.
+
+// Same aggregation as `LocalBackend::list_pending_decisions`, minus
+// the session-cache display enrichment — the mobile client resolves
+// workspace/title labels from its own `sessions` snapshot.
+fn serve_pending_snapshot(_params: &Value) -> Result<Value, String> {
+    // Parked cards are pending too — they just live in the parked store
+    // rather than the channel's request dir. The phone's snapshot is
+    // authoritative (it *replaces* the client's card list), so omitting
+    // them here would make a timed-out card vanish from the phone on the
+    // very next reconcile — the disappearance this whole mechanism exists
+    // to prevent, just on the other screen.
+    let read_all = |ids: Vec<String>,
+                    read: &dyn Fn(&str) -> Option<Value>,
+                    kind: crate::parked::ParkedKind|
+     -> Vec<Value> {
+        ids.iter()
+            .filter_map(|id| read(id))
+            .chain(crate::parked::list_requests::<Value>(kind))
+            .collect()
+    };
+    // Guard and permission prompts are never parked (their timeout is a
+    // deny, not a pause), so they keep the plain live-only listing.
+    let read_live = |ids: Vec<String>, read: &dyn Fn(&str) -> Option<Value>| -> Vec<Value> {
+        ids.iter().filter_map(|id| read(id)).collect()
+    };
+    Ok(json!({
+        "guard": read_live(crate::guard::list_pending_requests(), &|id| {
+            crate::guard::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+        }),
+        "elicitation": read_all(
+            crate::elicitation::list_pending_requests(),
+            &|id| {
+                crate::elicitation::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+            },
+            crate::parked::ParkedKind::Elicitation,
+        ),
+        "fleetAsk": read_all(
+            crate::mcp_ipc::list_pending_requests(),
+            &|id| crate::mcp_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok()),
+            crate::parked::ParkedKind::FleetAsk,
+        ),
+        "planApproval": read_all(
+            crate::plan_approval::list_pending_requests(),
+            &|id| {
+                crate::plan_approval::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+            },
+            crate::parked::ParkedKind::PlanApproval,
+        ),
+        "permissionPrompt": read_live(
+            crate::permission_prompt_ipc::list_pending_requests(),
+            &|id| {
+                crate::permission_prompt_ipc::read_request(id)
+                    .and_then(|r| serde_json::to_value(r).ok())
+            },
+        ),
+        "a2uiRender": read_all(
+            crate::mcp_a2ui_ipc::list_pending_requests(),
+            &|id| {
+                crate::mcp_a2ui_ipc::read_request(id).and_then(|r| serde_json::to_value(r).ok())
+            },
+            crate::parked::ParkedKind::A2uiRender,
+        ),
+    }))
+}
+
+fn serve_task_plans(params: &Value) -> Result<Value, String> {
+    let workspace = params
+        .get("workspacePath")
+        .and_then(Value::as_str)
+        .ok_or("missing workspacePath")?;
+    let session_id = params.get("sessionId").and_then(Value::as_str);
+    let plans =
+        crate::prd_tasks::list_workspace_task_plans(std::path::Path::new(workspace), session_id);
+    serde_json::to_value(plans).map_err(|e| e.to_string())
+}
+
+fn serve_session_decisions(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    let jsonl = params.get("jsonlPath").and_then(Value::as_str).map(std::path::Path::new);
+    let records =
+        crate::decision_history::list_session_records_with_jsonl(session_id, jsonl);
+    serde_json::to_value(records).map_err(|e| e.to_string())
+}
+
+fn serve_decision_asset(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let id = params.get("id").and_then(Value::as_str).ok_or("missing id")?;
+    let qidx = params.get("qidx").and_then(Value::as_str).ok_or("missing qidx")?;
+    let rel = params.get("rel").and_then(Value::as_str).ok_or("missing rel")?;
+    let asset = crate::mcp_ipc::read_decision_asset(id, qidx, rel)?;
+    // Oversized images are downscaled so the WS frame stays small
+    // enough to cross the relay; small ones pass through untouched.
+    let (bytes, mime) = downscale_decision_asset(asset.bytes, &asset.mime);
+    // Defensive ceiling: a downscaled 2048px JPEG is well under this, so
+    // this only trips on a pathological asset we couldn't shrink.
+    const MAX_ASSET_BYTES: usize = 12 * 1024 * 1024;
+    if bytes.len() > MAX_ASSET_BYTES {
+        return Err(format!("asset too large: {} bytes", bytes.len()));
+    }
+    Ok(json!({
+        "mime": mime,
+        "base64": base64::engine::general_purpose::STANDARD.encode(&bytes),
+    }))
+}
+
+// Last `n` transcript messages — the mobile SessionDetail polls this
+// (same model as the desktop HistoryView tab; no watcher push).
+fn serve_tail(params: &Value) -> Result<Value, String> {
+    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let n = params.get("n").and_then(Value::as_u64).unwrap_or(200) as usize;
+    let sources = crate::agent_source::build_sources();
+    let source = crate::agent_source::find_source_for_path(&sources, path)
+        .ok_or_else(|| format!("no agent source for path: {path}"))?;
+    source
+        .get_messages_tail(path, n)
+        .map(|msgs| Value::Array(slim_tail_messages(msgs)))
+}
+
+// Byte-offset incremental tail (mirrors the `/tail` endpoint): the
+// client polls with its last `newOffset` and receives only the lines
+// appended since. Omitting `offset` locates the current end without
+// reading the body — the cheap "start following from here" call.
+fn serve_tail_delta(params: &Value) -> Result<Value, String> {
+    use std::io::{Read as _, Seek as _};
+    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let sources = crate::agent_source::build_sources();
+    let resolved = crate::agent_source::find_source_for_path(&sources, path)
+        .and_then(|s| s.resolve_file_path(path))
+        .ok_or_else(|| format!("cannot resolve path: {path}"))?;
+    let size = std::fs::metadata(&resolved).map_err(|e| e.to_string())?.len();
+    let offset = params.get("offset").and_then(Value::as_u64);
+    let Some(offset) = offset else {
+        return Ok(json!({ "lines": [], "newOffset": size }));
+    };
+    // Truncated/rotated file (offset past EOF): resync without lines.
+    if offset >= size {
+        return Ok(json!({ "lines": [], "newOffset": size }));
+    }
+    let mut file = std::fs::File::open(&resolved).map_err(|e| e.to_string())?;
+    file.seek(std::io::SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
+    let mut buf = String::new();
+    file.read_to_string(&mut buf).map_err(|e| e.to_string())?;
+    let lines: Vec<Value> = buf
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect();
+    Ok(json!({ "lines": slim_tail_messages(lines), "newOffset": size }))
+}
+
+// Serializes to `null` when there's no live sidecar for this session.
+fn serve_live_thinking(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    serde_json::to_value(crate::live_thinking::read_live_thinking(session_id))
+        .map_err(|e| e.to_string())
+}
+
+// `null` when the session isn't on any relay chain.
+fn serve_handoff_chain(params: &Value) -> Result<Value, String> {
+    let session_id = params
+        .get("sessionId")
+        .and_then(Value::as_str)
+        .ok_or("missing sessionId")?;
+    serde_json::to_value(crate::handoff::chain_containing(session_id))
+        .map_err(|e| e.to_string())
+}
+
+fn serve_workflow_trees(params: &Value) -> Result<Value, String> {
+    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let trees =
+        crate::workflow::discover_workflow_trees(std::path::Path::new(path));
+    serde_json::to_value(trees).map_err(|e| e.to_string())
+}
+
+fn serve_token_breakdown(params: &Value) -> Result<Value, String> {
+    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let project_root = params.get("projectRoot").and_then(Value::as_str);
+    let breakdown = crate::token_analysis::aggregate_task(
+        std::path::Path::new(path),
+        project_root.map(std::path::Path::new),
+    )?;
+    serde_json::to_value(breakdown).map_err(|e| e.to_string())
+}
+
+// Today's cumulative token/cost counter for the mobile header (mirrors
+// `LocalBackend::today_usage` / `/today_usage`).
+fn serve_today_usage(_params: &Value) -> Result<Value, String> {
+    let sources = crate::agent_source::build_sources();
+    let sessions = crate::session::scan_all_sources(&sources);
+    let usage = crate::today_usage::today_usage(&sessions);
+    serde_json::to_value(usage).map_err(|e| e.to_string())
+}
+
+// Account + rate-limit usage for the mobile 「账号与用量」 page: the Claude
+// account/plan with its 5h/7d bars, plus a normalised bar set for every
+// other available source. Runs on a plain thread rather than this ws
+// blocking task because every fetch inside builds its own tokio runtime
+// (`fetch_account_info_blocking` and friends) — see `account_usage_payload`.
+fn serve_account_usage(_params: &Value) -> Result<Value, String> {
+    std::thread::spawn(account_usage_payload)
+        .join()
+        .map_err(|_| "account/usage fetch panicked".to_string())
+}
+
+// Occupancy time series behind the mobile page's 24h chart. Pure disk
+// read of the snapshots the background sampler persists — no network, so
+// it stays on this thread (unlike `account_usage` above). Values are the
+// 0–1 fraction; the window defaults to the last 24h.
+fn serve_usage_history(params: &Value) -> Result<Value, String> {
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let from_ms = params
+        .get("fromMs")
+        .and_then(Value::as_i64)
+        .unwrap_or(now_ms - 24 * 3_600_000);
+    let to_ms = params.get("toMs").and_then(Value::as_i64).unwrap_or(now_ms);
+    let raw = crate::account::load_usage_history(from_ms, to_ms);
+    let points: Vec<Value> = downsample_history(&raw, HISTORY_BUCKET_MS)
+        .iter()
+        .map(|p| {
+            json!({
+                "ts": p.ts,
+                "fiveHour": p.five_hour,
+                "sevenDay": p.seven_day,
+                "sevenDaySonnet": p.seven_day_sonnet,
+            })
+        })
+        .collect();
+    Ok(Value::Array(points))
+}
+
+// Main-session invocations plus subagent sidecars, sorted by timestamp
+// (mirrors `LocalBackend::get_skill_history` / `/skill_history`).
+fn serve_skill_history(params: &Value) -> Result<Value, String> {
+    let path = params.get("path").and_then(Value::as_str).ok_or("missing path")?;
+    let sources = crate::agent_source::build_sources();
+    let source = crate::agent_source::find_source_for_path(&sources, path)
+        .ok_or_else(|| format!("no agent source for path: {path}"))?;
+    use crate::skill_history;
+    let main_msgs = source.get_messages(path)?;
+    let mut out = skill_history::extract_from_messages(&main_msgs, false);
+    for sub in skill_history::subagent_jsonl_paths(std::path::Path::new(path)) {
+        let sub_str = sub.to_string_lossy().to_string();
+        // Best-effort: a broken subagent file shouldn't lose the rest.
+        let Ok(msgs) = source.get_messages(&sub_str) else { continue };
+        out.extend(skill_history::extract_from_messages(&msgs, true));
+    }
+    skill_history::sort_by_timestamp(&mut out);
+    serde_json::to_value(out).map_err(|e| e.to_string())
+}
+
+// LLM risk analysis for a guard card (mirrors `/guard/analyze` and the
+// desktop's `analyze_guard_command`). Synchronous up to 30s — fine, we
+// run inside `spawn_blocking` so other frames keep flowing.
+fn serve_guard_analyze(params: &Value) -> Result<Value, String> {
+    let command =
+        params.get("command").and_then(Value::as_str).ok_or("missing command")?;
+    let context = params.get("context").and_then(Value::as_str).unwrap_or("");
+    let lang = params.get("lang").and_then(Value::as_str).unwrap_or("zh");
+    let risk_tags = crate::audit::classify_bash_command_pub(command)
+        .map(|(_, tags)| tags)
+        .unwrap_or_default();
+    let prompt = crate::guard::build_analysis_prompt(command, &risk_tags, context, lang);
+    let cfg = crate::llm_provider::shared_config();
+    if cfg.provider == "none" {
+        return Err("LLM provider is disabled".into());
+    }
+    let provider = crate::llm_provider::resolve_provider(&cfg.provider)
+        .ok_or("LLM provider not available")?;
+    if !provider.is_available() {
+        return Err(format!("{} CLI not found", provider.display_name()));
+    }
+    let analysis = crate::llm_usage::complete_accounted(
+        provider.as_ref(),
+        &prompt,
+        &cfg.fast_model,
+        Duration::from_secs(30),
+        crate::llm_usage::SCENARIO_GUARD_COMMAND,
+    )
+    .ok_or("LLM analysis timed out or failed")?;
+    Ok(json!({ "analysis": analysis }))
+}
+
+// Full-text search over the local session index — the mobile task list
+// wires this to the same FTS the desktop launchpad uses (search_sessions
+// Tauri command → SearchIndex::search). Returns SearchHit rows
+// (sessionId / jsonlPath / snippet with <mark> markers / rank); the
+// client resolves them against its own sessions snapshot by jsonlPath.
+fn serve_session_search(params: &Value) -> Result<Value, String> {
+    let query = params.get("query").and_then(Value::as_str).unwrap_or("");
+    let limit = params.get("limit").and_then(Value::as_u64).unwrap_or(50) as usize;
+    if query.trim().len() < 2 {
+        return Ok(Value::Array(Vec::new()));
+    }
+    let index = crate::search_index::SearchIndex::open()?;
+    let hits = index.search(query, limit)?;
+    serde_json::to_value(hits).map_err(|e| e.to_string())
+}
+
+// Wiki knowledge base: every published doc, newest-updated first
+// (mirrors the desktop's `list_wiki_docs` Tauri command).
+fn serve_wiki_list(_params: &Value) -> Result<Value, String> {
+    serde_json::to_value(crate::wiki::list_docs()).map_err(|e| e.to_string())
+}
+
+// One file — entry or asset — from a wiki doc version, base64-framed so
+// the mobile client can decode markdown/html text or blob-serve assets
+// (imgs/css/js) referenced by an htmlDir doc. `version` defaults to the
+// current one. The 16 MiB per-file cap keeps a single frame bounded even
+// though a whole doc can reach 100 MiB.
+fn serve_wiki_file(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let slug = params.get("slug").and_then(Value::as_str).ok_or("missing slug")?;
+    let version =
+        params.get("version").and_then(Value::as_str).unwrap_or("current");
+    let relpath =
+        params.get("relpath").and_then(Value::as_str).ok_or("missing relpath")?;
+    let file = crate::wiki::get_file(slug, version, relpath)?;
+    const MAX_WIKI_FILE_BYTES: usize = 16 * 1024 * 1024;
+    if file.bytes.len() > MAX_WIKI_FILE_BYTES {
+        return Err(format!("wiki file too large: {} bytes", file.bytes.len()));
+    }
+    Ok(json!({
+        "mime": file.mime,
+        "base64": base64::engine::general_purpose::STANDARD.encode(&file.bytes),
+    }))
+}
+
+// Full-text search over every published doc's metadata + entry body
+// (mirrors the desktop's `search_wiki_docs`). Returns WikiSearchHit rows
+// (slug / field=meta|content / snippet). The <2-char guard matches the
+// session_search arm so a single keystroke doesn't scan every doc.
+fn serve_wiki_search(params: &Value) -> Result<Value, String> {
+    let query = params.get("query").and_then(Value::as_str).unwrap_or("");
+    if query.trim().len() < 2 {
+        return Ok(Value::Array(Vec::new()));
+    }
+    serde_json::to_value(crate::wiki::search_docs(query)).map_err(|e| e.to_string())
+}
+
+// Export one doc as a downloadable artifact (single file for
+// markdown/html, a store-only zip of the whole version dir for htmlDir),
+// base64-framed. 64 MiB cap — a doc version can hold up to 100 MiB, but
+// a single export frame stays bounded.
+fn serve_wiki_export(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let slug = params.get("slug").and_then(Value::as_str).ok_or("missing slug")?;
+    let version =
+        params.get("version").and_then(Value::as_str).unwrap_or("current");
+    let export = crate::wiki::export_doc(slug, version)?;
+    const MAX_WIKI_EXPORT_BYTES: usize = 64 * 1024 * 1024;
+    if export.bytes.len() > MAX_WIKI_EXPORT_BYTES {
+        return Err(format!("wiki export too large: {} bytes", export.bytes.len()));
+    }
+    Ok(json!({
+        "filename": export.filename,
+        "mime": export.mime,
+        "base64": base64::engine::general_purpose::STANDARD.encode(&export.bytes),
+    }))
+}
+
+// Absolute path of this host's pure-chat workspace, created on demand.
+// The phone pins it in its new-session sheet; like the desktop it cannot
+// derive the path itself (it's under the *desktop* host's home).
+fn serve_chat_workspace(_params: &Value) -> Result<Value, String> {
+    let path = crate::chat_workspace::ensure_chat_workspace()?;
+    Ok(json!({ "path": path }))
+}
+
+// Directory picker for the new-session composer. Deliberately NOT gated
+// on `known_workspaces` the way the explorer/git methods below are: the
+// point is to reach a directory that has never had a session. It carries
+// its own boundary instead (home + off-home known workspaces, canonical,
+// directories only) — see `workspace_browse`.
+fn serve_browse_dir(params: &Value) -> Result<Value, String> {
+    let path = params.get("path").and_then(Value::as_str);
+    let resp = crate::workspace_browse::browse_dir(path, &known_workspaces())?;
+    serde_json::to_value(resp).map_err(|e| e.to_string())
+}
+
+// ── Write methods ────────────────────────────────────────────────
+// All of these run inside `spawn_blocking` (see ws_connect_once), so
+// process spawns / kills / file writes never block the ws runtime.
+fn serve_spawn_session(params: &Value) -> Result<Value, String> {
+    let req: crate::session_launch::SpawnSessionRequest =
+        serde_json::from_value(params.clone())
+            .map_err(|e| format!("bad spawn_session params: {e}"))?;
+    // Thread the phone-provided session id through so a dropped reply
+    // frame is still recoverable: the phone confirms success by finding
+    // this exact id in a later `sessions` snapshot (relay delivery is
+    // best-effort — see registry::forward).
+    let resp = crate::session_launch::spawn_new_session_with_id(
+        &req.workspace_path,
+        &req.prompt,
+        req.model.as_deref(),
+        req.effort.as_deref(),
+        req.permission_mode.as_deref(),
+        req.session_id.as_deref(),
+    )?;
+    serde_json::to_value(resp).map_err(|e| e.to_string())
+}
+
+fn serve_resume_session(params: &Value) -> Result<Value, String> {
+    let req: crate::auto_resume::ResumeSessionRequest =
+        serde_json::from_value(params.clone())
+            .map_err(|e| format!("bad resume_session params: {e}"))?;
+    crate::auto_resume::spawn_resume_prompt(
+        &req.session_id,
+        &req.workspace_path,
+        req.prompt.as_deref().unwrap_or("continue"),
+        req.model.as_deref(),
+        req.effort.as_deref(),
+        req.permission_mode.as_deref(),
+    )?;
+    Ok(json!({ "ok": true }))
+}
+
+// pid 0 would signal the desktop's own process group — reject before
+// it ever reaches kill() (same guard as the `/interrupt` endpoint).
+fn serve_interrupt(params: &Value) -> Result<Value, String> {
+    let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
+    if pid == 0 {
+        return Err("missing or invalid pid".into());
+    }
+    crate::session::interrupt_pid_impl(pid)?;
+    Ok(json!({ "ok": true }))
+}
+
+fn serve_stop(params: &Value) -> Result<Value, String> {
+    let pid = params.get("pid").and_then(Value::as_u64).unwrap_or(0) as u32;
+    if pid == 0 {
+        return Err("missing or invalid pid".into());
+    }
+    let force = params.get("force").and_then(Value::as_bool).unwrap_or(false);
+    #[cfg(unix)]
+    {
+        // Probe first so a stale pid errors; then take the whole tree,
+        // or the agent's tool children outlive it.
+        if unsafe { libc::kill(pid as libc::pid_t, 0) } != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+        crate::session::kill_pid_tree(pid, force)?;
+        Ok(json!({ "ok": true }))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = force;
+        Err("stop is not supported on this platform".into())
+    }
+}
+
+fn serve_stop_workspace(params: &Value) -> Result<Value, String> {
+    let path = params
+        .get("workspacePath")
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .ok_or("missing workspacePath")?;
+    crate::session::kill_workspace_impl(path)?;
+    Ok(json!({ "ok": true }))
+}
+
+fn serve_session_mark(params: &Value) -> Result<Value, String> {
+    let req: crate::session_mark::SetSessionMarkRequest =
+        serde_json::from_value(params.clone())
+            .map_err(|e| format!("bad session_mark params: {e}"))?;
+    crate::session_mark::set_mark(&req.session_id, &req.workspace_path, req.mark)?;
+    Ok(json!({ "ok": true }))
+}
+
+// Mobile-side attachment bytes → the desktop's content-addressed
+// user-attachments store. The returned absolute path is what the
+// client splices into an answer (`@<path>`) or a new-session prompt —
+// shared by the decision panel and the composer flows.
+fn serve_upload_attachment(params: &Value) -> Result<Value, String> {
+    use base64::Engine as _;
+    let name = params.get("name").and_then(Value::as_str).unwrap_or("attachment.bin");
+    let b64 = params.get("base64").and_then(Value::as_str).ok_or("missing base64")?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| format!("invalid base64: {e}"))?;
+    if bytes.len() as u64 > MAX_UPLOAD_BYTES {
+        return Err(format!(
+            "attachment too large: {} bytes (max {MAX_UPLOAD_BYTES})",
+            bytes.len()
+        ));
+    }
+    let stored = crate::user_attachments::ingest_bytes(&bytes, name)?;
+    Ok(json!({ "path": stored.to_string_lossy() }))
+}
+
+// Given a list of previously-uploaded attachment paths, return the
+// subset still present in the user-attachments store. The mobile
+// composer persists attachment chips across reloads and uses this to
+// drop ones whose backing file has been cleared, so a restored draft
+// never carries a `Context files:` path that no longer resolves.
+fn serve_attachments_exist(params: &Value) -> Result<Value, String> {
+    let paths = params.get("paths").and_then(Value::as_array).ok_or("missing paths")?;
+    let existing: Vec<String> = paths
+        .iter()
+        .filter_map(Value::as_str)
+        .filter(|p| {
+            crate::user_attachments::exists_in_store(std::path::Path::new(p))
+        })
+        .map(str::to_string)
+        .collect();
+    Ok(json!({ "existing": existing }))
+}
+
+fn serve_session_read(params: &Value) -> Result<Value, String> {
+    let req: crate::session_read::MarkSessionsReadRequest =
+        serde_json::from_value(params.clone())
+            .map_err(|e| format!("bad session_read params: {e}"))?;
+    crate::session_read::mark_read(&req.items)?;
+    Ok(json!({ "ok": true }))
+}
+
+// ── Repository "仓库" surface ─────────────────────────────────────
+// A loose-ends view over every git repo reachable from a known session
+// workspace: worktrees with commits not merged back into main, and the
+// main branch ahead of its upstream (unpushed). Access envelope matches
+// the read-only file explorer — `known` is the same session-workspace
+// list `/git_status` builds. push/pull run real `git` here (network),
+// which is fine: this whole handler runs inside `spawn_blocking`.
+fn serve_repo_list(_params: &Value) -> Result<Value, String> {
+    let known = known_workspaces();
+    serde_json::to_value(crate::git_ops::list_repos(&known)).map_err(|e| e.to_string())
+}
+
+fn serve_repo_detail(params: &Value) -> Result<Value, String> {
+    let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+    let known = known_workspaces();
+    serde_json::to_value(crate::git_ops::repo_detail(root, &known))
+        .map_err(|e| e.to_string())
+}
+
+fn serve_repo_push(params: &Value) -> Result<Value, String> {
+    let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+    let known = known_workspaces();
+    serde_json::to_value(crate::git_ops::repo_push(root, &known))
+        .map_err(|e| e.to_string())
+}
+
+fn serve_repo_pull(params: &Value) -> Result<Value, String> {
+    let root = params.get("root").and_then(Value::as_str).ok_or("missing root")?;
+    let known = known_workspaces();
+    serde_json::to_value(crate::git_ops::repo_pull(root, &known))
+        .map_err(|e| e.to_string())
 }
 
 // ── Account & usage (mobile 「账号与用量」 page) ─────────────────────────────────
