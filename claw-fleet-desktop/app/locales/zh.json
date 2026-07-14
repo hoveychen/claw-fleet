@@ -1721,6 +1721,7 @@
   "view_files": "仓库",
   "files": {
     "panel_title": "仓库",
+    "add_path": "添加路径",
     "tab_files": "文件",
     "no_workspaces_title": "暂无工作区",
     "no_workspaces_subtitle": "有会话跑起来之后，这里会列出它们的项目目录。",
