@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { distinctWorkspaces, repoRootPath } from "./NewSessionForm";
+import { distinctWorkspaces, isTempWorkspacePath, repoRootPath } from "./NewSessionForm";
+
+describe("isTempWorkspacePath", () => {
+  it("flags scratchpad paths under /private/tmp", () => {
+    expect(
+      isTempWorkspacePath(
+        "/private/tmp/claude-501/-Users-hoveychen-workspace-claude-fleet/abc/scratchpad",
+      ),
+    ).toBe(true);
+  });
+
+  it("flags paths under /tmp", () => {
+    expect(isTempWorkspacePath("/tmp/claude-501/foo")).toBe(true);
+  });
+
+  it("flags macOS per-user temp under /var/folders", () => {
+    expect(isTempWorkspacePath("/var/folders/xy/abc123/T/something")).toBe(true);
+  });
+
+  it("leaves a real project path alone", () => {
+    expect(isTempWorkspacePath("/Users/hoveychen/workspace/claude-fleet")).toBe(false);
+  });
+
+  it("does not flag a project whose name merely contains 'tmp'", () => {
+    expect(isTempWorkspacePath("/Users/hoveychen/workspace/tmp-tools")).toBe(false);
+  });
+});
 
 describe("repoRootPath", () => {
   it("collapses an in-repo worktree checkout to its repo root", () => {
@@ -99,5 +125,18 @@ describe("distinctWorkspaces", () => {
       { workspacePath: "/Users/foo/.fleet/chat", workspaceName: "Chat", lastActivityMs: 30 },
     ]);
     expect(out).toHaveLength(1);
+  });
+
+  it("drops sessions whose cwd is a temp/scratchpad path", () => {
+    const out = distinctWorkspaces([
+      {
+        workspacePath:
+          "/private/tmp/claude-501/-Users-hoveychen-workspace-claude-fleet/abc/scratchpad",
+        workspaceName: "scratchpad",
+        lastActivityMs: 100,
+      },
+      { workspacePath: "/Users/hoveychen/workspace/claude-fleet", workspaceName: "claude-fleet", lastActivityMs: 50 },
+    ]);
+    expect(out.map((w) => w.path)).toEqual(["/Users/hoveychen/workspace/claude-fleet"]);
   });
 });
