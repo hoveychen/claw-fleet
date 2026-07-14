@@ -862,8 +862,10 @@ pub trait Backend: Send + Sync {
     fn mobile_relay_status(&self) -> Result<crate::mobile_relay::MobileRelayStatus, String> {
         Err("mobile relay not configured".into())
     }
-    /// SVG QR code of the pairing URL (`<relay>/#k=<secret>`).
-    fn mobile_relay_qr_svg(&self) -> Result<String, String> {
+    /// SVG QR code of the pairing URL (`<relay>/#k=<secret>`). `lang` carries
+    /// the viewer's current UI language so a fresh scan opens the phone in the
+    /// same language (`&lang=zh|en`); `None` omits it.
+    fn mobile_relay_qr_svg(&self, _lang: Option<&str>) -> Result<String, String> {
         Err("mobile relay not configured".into())
     }
 }
