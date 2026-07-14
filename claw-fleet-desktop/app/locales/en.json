@@ -303,6 +303,7 @@
     "no_matching_events": "No operations match the current filter.",
     "overview_title": "Risk Overview",
     "all": "All",
+    "all_workspaces": "All workspaces",
     "refresh": "Refresh",
     "scanned": "Scanned {{count}} sessions",
     "workspace": "Workspace",

@@ -300,6 +300,7 @@
     "no_matching_events": "没有符合筛选条件的操作。",
     "overview_title": "风险操作概览",
     "all": "全部",
+    "all_workspaces": "全部工作区",
     "refresh": "刷新",
     "scanned": "已扫描 {{count}} 个会话",
     "workspace": "工作区",
