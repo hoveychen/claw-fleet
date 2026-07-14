@@ -1702,6 +1702,8 @@
     "unread": "Unread — new activity",
     "running": "Running",
     "waiting": "Waiting for input",
+    "running_subagents": "{{count}} subagents running",
+    "activity_via_subagent": "Latest activity is from a subagent (the main session itself is idle)",
     "resume_placeholder": "Type a follow-up prompt to resume…",
     "resume": "Resume session",
     "resume_permission_default": "Keep session settings",

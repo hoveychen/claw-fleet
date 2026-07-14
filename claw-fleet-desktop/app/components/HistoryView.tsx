@@ -9,6 +9,7 @@ import {
 } from "react";
 import { useTranslation } from "react-i18next";
 import {
+  Bot,
   CheckCheck,
   CheckCircle2,
   Circle,
@@ -291,7 +292,31 @@ const SessionRow = memo(function SessionRow({
                 {formatRunning(s.createdAtMs, t)}
               </span>
             )}
-            <span className={styles.row_time}>{timeAgo(s.lastActivityMs, t)}</span>
+            {s.runningSubagentCount > 0 && (
+              <span
+                className={styles.row_subagents}
+                style={{ color: runColor ?? undefined }}
+                title={t("history.running_subagents", {
+                  count: s.runningSubagentCount,
+                })}
+              >
+                <Bot size={10} strokeWidth={1.6} />
+                {s.runningSubagentCount}
+              </span>
+            )}
+            {/* Activity time uses the aggregate (own ∪ subagents): a session
+                delegating to subagents keeps a stale own `lastActivityMs` while
+                the tree churns, so this reflects the whole tree being alive. */}
+            <span
+              className={styles.row_time}
+              title={
+                s.agentLastActivityMs !== s.lastActivityMs
+                  ? t("history.activity_via_subagent")
+                  : undefined
+              }
+            >
+              {timeAgo(s.agentLastActivityMs, t)}
+            </span>
           </span>
           {snippet && <span className={styles.row_snippet}>{renderSnippet(snippet)}</span>}
         </span>
@@ -473,9 +498,11 @@ export function HistoryView() {
     for (const s of preMark) counts[markBucket(s)] += 1;
     const rows = preMark
       .filter((s) => markFilter === "all" || markBucket(s) === markFilter)
-      // Most recently *active* first, matching the row's displayed time — a
-      // created-at order would interleave stale rows between fresh ones.
-      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+      // Most recently *active* first, matching the row's displayed time. Uses
+      // the aggregate activity (own ∪ subagents) so a session that is quietly
+      // driving a subagent swarm doesn't sink below idle rows — its own
+      // `lastActivityMs` would be stale, but the tree is very much alive.
+      .sort((a, b) => b.agentLastActivityMs - a.agentLastActivityMs);
     return { rows, markCounts: counts };
   }, [adhocSessions, workspaceFilter, chatPath, activeOnly, query, ftsMatchPaths, markFilter]);
 
