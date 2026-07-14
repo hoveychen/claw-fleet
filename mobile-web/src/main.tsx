@@ -2,10 +2,12 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initTheme } from "./theme";
+import { initWakeLock } from "./wakeLock";
 import { lockZoom } from "./lockZoom";
 import "./index.css";
 
 initTheme();
+initWakeLock();
 lockZoom();
 
 if ("serviceWorker" in navigator) {
