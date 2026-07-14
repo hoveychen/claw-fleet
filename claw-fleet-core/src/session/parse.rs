@@ -758,6 +758,7 @@ pub fn parse_session_info(
         compact_pre_tokens: stats.compact_pre_tokens,
         compact_post_tokens: stats.compact_post_tokens,
         compact_cost_usd: stats.compact_cost_usd,
+        pending_messages: Vec::new(),
     })
     .map(|info| (info, state))
 }

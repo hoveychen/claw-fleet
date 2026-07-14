@@ -27,6 +27,7 @@ const MOCK_SESSIONS_SEED: Array<
     | "compactPreTokens"
     | "compactPostTokens"
     | "compactCostUsd"
+    | "pendingMessages"
   >
 > = [
   // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
@@ -459,6 +460,7 @@ export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
   compactPreTokens: 0,
   compactPostTokens: 0,
   compactCostUsd: 0,
+  pendingMessages: [],
   ...s,
 }));
 
@@ -503,6 +505,7 @@ function mkSession(
     compactPreTokens: 0,
     compactPostTokens: 0,
     compactCostUsd: 0,
+    pendingMessages: [],
     ...o,
   };
 }

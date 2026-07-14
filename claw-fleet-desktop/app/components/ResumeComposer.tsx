@@ -29,11 +29,21 @@ export function ResumeComposer({
   sessionId,
   workspacePath,
   onResumed,
+  mode = "resume",
+  pendingMessages = [],
 }: {
   sessionId: string;
   workspacePath: string;
   onResumed: () => void;
+  /** `"resume"`: the turn ended, submit spawns `claude --resume` now.
+   *  `"enqueue"`: the turn is still running, submit queues the message to be
+   *  delivered when the turn ends (see `pending_message`). */
+  mode?: "resume" | "enqueue";
+  /** Follow-ups already queued for this session (from `SessionInfo`), shown as
+   *  chips so the user sees what's waiting. */
+  pendingMessages?: string[];
 }) {
+  const enqueueing = mode === "enqueue";
   const { t } = useTranslation();
   // Draft (prompt / options / attachments) is lifted into a store keyed by the
   // session id, so switching to another session and back — or the resume dock
@@ -93,14 +103,24 @@ export function ResumeComposer({
     setSubmitting(true);
     setError(null);
     try {
-      await invoke("resume_rate_limited_session", {
-        sessionId,
-        workspacePath,
-        prompt: finalPrompt,
-        model: model || null,
-        effort: effort || null,
-        permissionMode: permissionMode || null,
-      });
+      if (enqueueing) {
+        // Turn still running: queue it. Model/effort are carried from the
+        // session's own launch flags at drain time, so no overrides here.
+        await invoke("enqueue_session_message", {
+          sessionId,
+          workspacePath,
+          text: finalPrompt,
+        });
+      } else {
+        await invoke("resume_rate_limited_session", {
+          sessionId,
+          workspacePath,
+          prompt: finalPrompt,
+          model: model || null,
+          effort: effort || null,
+          permissionMode: permissionMode || null,
+        });
+      }
       clear();
       onResumed();
     } catch (e) {
@@ -112,6 +132,18 @@ export function ResumeComposer({
 
   return (
     <div className={styles.wrap}>
+      {pendingMessages.length > 0 && (
+        <div className={styles.queued}>
+          <div className={styles.queued_label}>
+            {t("history.enqueue_queued_label", "已排队，本轮结束后自动发送")}
+          </div>
+          {pendingMessages.map((m, i) => (
+            <div key={i} className={styles.queued_chip}>
+              {m}
+            </div>
+          ))}
+        </div>
+      )}
       <ChatComposer
         ref={composerRef}
         value={prompt}
@@ -123,10 +155,15 @@ export function ResumeComposer({
         onSubmit={handleSubmit}
         submitting={submitting}
         submitDisabled={!prompt.trim()}
-        placeholder={t("history.resume_placeholder", "输入追问提示词后恢复会话…")}
+        placeholder={
+          enqueueing
+            ? t("history.enqueue_placeholder", "会话运行中，发送后排队，本轮结束自动接上…")
+            : t("history.resume_placeholder", "输入追问提示词后恢复会话…")
+        }
         disabled={submitting}
         wikiMentions
         toolbarSlot={
+          enqueueing ? undefined : (
           <SessionOptionPills
             placement="below"
             model={model}
@@ -138,6 +175,7 @@ export function ResumeComposer({
             disabled={submitting}
             permissionDefaultLabel={t("history.resume_permission_default", "沿用会话设置")}
           />
+          )
         }
         addMenuItems={[
           {

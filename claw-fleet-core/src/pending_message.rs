@@ -128,6 +128,49 @@ pub fn has_pending(session_id: &str) -> bool {
     get(session_id).map(|q| !q.messages.is_empty()).unwrap_or(false)
 }
 
+/// Every session's queued follow-ups, `session_id → messages`. One directory
+/// read; the store is normally empty, so this is cheap on the scan path.
+pub fn all_pending() -> std::collections::HashMap<String, Vec<String>> {
+    let mut map = std::collections::HashMap::new();
+    let Some(dir) = pending_dir() else {
+        return map;
+    };
+    let Ok(entries) = fs::read_dir(&dir) else {
+        return map;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        if let Some(q) = fs::read_to_string(&path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<PendingQueue>(&raw).ok())
+        {
+            if !q.messages.is_empty() {
+                map.insert(q.session_id, q.messages);
+            }
+        }
+    }
+    map
+}
+
+/// Attach each session's queued follow-ups to its [`SessionInfo`], so the
+/// desktop/mobile UIs can render "queued" chips without a separate fetch. Rides
+/// the existing sessions snapshot, so it works over both the local and remote
+/// backends. Sessions with no queue keep the empty default.
+pub fn enrich_sessions(sessions: &mut [crate::session::SessionInfo]) {
+    let map = all_pending();
+    if map.is_empty() {
+        return;
+    }
+    for s in sessions.iter_mut() {
+        if let Some(msgs) = map.get(&s.id) {
+            s.pending_messages = msgs.clone();
+        }
+    }
+}
+
 /// Whether a session's turn is over and its queue is safe to fire.
 ///
 /// The definitive signal is `proc_alive`: for a Fleet-spawned session it is true
