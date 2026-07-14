@@ -661,45 +661,16 @@ export interface GuardRequest {
   structuredCommand?: CommandView | null;
 }
 
-// ── Shell command structured view (mirror of claw-fleet-core::cmd_ast) ─────
-
-export type Connector = "and" | "or" | "pipe" | "semi";
-
-export type NestedKind =
-  | "bash-c"
-  | "sh-c"
-  | "zsh-c"
-  | "python-c"
-  | "node-e"
-  | "eval";
-
-export interface NestedScript {
-  kind: NestedKind;
-  raw: string;
-  view: CommandView;
-}
-
-export interface CommandLeaf {
-  argv: string[];
-  nested?: NestedScript | null;
-  /**
-   * Set by the backend when this leaf (taken in isolation) trips the audit
-   * blacklist.  Missing on older `fleet guard` payloads — treat as `false`.
-   */
-  triggering?: boolean;
-  /**
-   * Set by the backend when a user's existing guard allow rule already
-   * covers this leaf's command — meaningful only when `triggering` is true.
-   * Missing on older payloads — treat as `false`.
-   */
-  already_allowed?: boolean;
-}
-
-export interface CommandView {
-  leaves: CommandLeaf[];
-  /** `connectors[i]` joins `leaves[i]` to `leaves[i + 1]`. */
-  connectors: Connector[];
-}
+// ── Shell command structured view — generated from claw-fleet-core::cmd_ast ──
+// (see claw-fleet-core/tests/ts_export.rs; regenerate with the ts-export feature)
+import type {
+  Connector,
+  NestedKind,
+  NestedScript,
+  CommandLeaf,
+  CommandView,
+} from "./generated/types";
+export type { Connector, NestedKind, NestedScript, CommandLeaf, CommandView };
 
 /**
  * User-approved "always allow" rule for the Bash guard short-circuit path.
