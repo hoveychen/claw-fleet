@@ -36,7 +36,11 @@ use std::path::{Path, PathBuf};
 
 // ── Source locations (relative to claw-fleet-core/) ─────────────────────────
 const BACKEND_RS: &str = "src/backend.rs";
-const HOOKS_SERVER_RS: &str = "src/hooks_server.rs";
+/// `hooks_server` is a directory module (`mod.rs` + `routes_*.rs`); the route
+/// arm table lives in `mod.rs`, but the guard concatenates every file under the
+/// directory so it scans exactly the same source text it did when the module
+/// was a single `hooks_server.rs` file.
+const HOOKS_SERVER_DIR: &str = "src/hooks_server";
 const MOBILE_RELAY_RS: &str = "src/mobile_relay.rs";
 const ROUTES_RS: &str = "src/routes.rs";
 const LOCAL_BACKEND_RS: &str = "../claw-fleet-desktop/src/local_backend.rs";
@@ -72,6 +76,26 @@ fn read(rel: &str) -> String {
     let p = manifest_path(rel);
     fs::read_to_string(&p)
         .unwrap_or_else(|e| panic!("drift-guard: cannot read {}: {e}", p.display()))
+}
+
+/// Concatenate every `.rs` file under a directory module (sorted for
+/// determinism). Used for `hooks_server`, whose served-route arms and the route
+/// handler bodies are split across `mod.rs` + `routes_*.rs`.
+fn read_dir_concat(rel: &str) -> String {
+    let dir = manifest_path(rel);
+    let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("drift-guard: cannot read dir {}: {e}", dir.display()))
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().and_then(|s| s.to_str()) == Some("rs"))
+        .collect();
+    paths.sort();
+    let mut out = String::new();
+    for p in paths {
+        out.push_str(&fs::read_to_string(&p).unwrap_or_default());
+        out.push('\n');
+    }
+    out
 }
 
 // ── Rust source scanner ─────────────────────────────────────────────────────
@@ -451,7 +475,7 @@ fn remote_endpoints() -> HashSet<String> {
 /// Exact route literals + `starts_with` prefixes served by `hooks_server` —
 /// string literals and `routes::CONST` arm patterns both resolved to the path.
 fn hooks_server_routes() -> (HashSet<String>, Vec<String>) {
-    let src = read(HOOKS_SERVER_RS);
+    let src = read_dir_concat(HOOKS_SERVER_DIR);
     let consts = route_consts();
     // A route literal is a "/..." string immediately followed (after optional
     // whitespace) by `=>`, an `if`-guard, or a `|` alternation.
