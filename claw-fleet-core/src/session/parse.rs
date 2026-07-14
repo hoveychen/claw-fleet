@@ -733,6 +733,12 @@ pub fn parse_session_info(
         cost_speed_usd_per_min: stats.cost_speed_usd_per_min,
         last_message_preview,
         last_activity_ms,
+        // Seeded to own activity; the scan aggregation bumps a main session's
+        // value to the max across its subagents (cached pre-aggregation so cache
+        // hits never double-count, same as agent_token_speed).
+        agent_last_activity_ms: last_activity_ms,
+        // Filled by the scan aggregation for main sessions; stays 0 here.
+        running_subagent_count: 0,
         created_at_ms,
         jsonl_path: jsonl_path.to_string_lossy().to_string(),
         model,

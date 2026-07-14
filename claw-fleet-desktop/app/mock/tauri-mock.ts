@@ -363,6 +363,8 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
         totalOutputTokens: 0,
         lastMessagePreview: "Reading the workspace and drafting a plan...",
         lastActivityMs: Date.now(),
+        agentLastActivityMs: Date.now(),
+        runningSubagentCount: 0,
         createdAtMs: Date.now(),
         jsonlPath: `/Users/demo/.claude/projects/${name}/${id}.jsonl`,
         contextPercent: 0.01,
