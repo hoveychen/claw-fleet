@@ -2040,6 +2040,13 @@ mod tests {
         d
     }
 
+    /// Seed a live pending request file so `write_response`'s existence
+    /// precheck passes — mirrors a real decision whose producer is still
+    /// waiting. Content is irrelevant (the precheck only tests existence).
+    fn seed_request(dir: &std::path::Path, id: &str) {
+        fs::write(dir.join(format!("{id}.json")), "{}").unwrap();
+    }
+
     fn read_json(p: &std::path::Path) -> Value {
         let raw = fs::read_to_string(p)
             .unwrap_or_else(|e| panic!("expected response file at {}: {e}", p.display()));
@@ -2050,6 +2057,8 @@ mod tests {
     fn answer_guard_writes_response_file() {
         with_temp_home(|| {
             let dir = fleet_subdir("guard");
+            seed_request(&dir, "g1");
+            seed_request(&dir, "g2");
             handle_client_payload(&json!({
                 "event": "answer", "kind": "guard", "id": "g1",
                 "allow": false, "reason": "危险命令"
@@ -2067,9 +2076,29 @@ mod tests {
     }
 
     #[test]
+    fn answer_unknown_id_writes_no_orphan_response() {
+        // Regression: answering an id with no live pending request must not
+        // write an orphan response file (and the HTTP layer maps the resulting
+        // "no pending request" error to 404, not a raw 500). See the
+        // `write_response` existence precheck across the six decision channels.
+        with_temp_home(|| {
+            let dir = fleet_subdir("guard");
+            // Deliberately NOT seeded — no request file for "ghost".
+            handle_client_payload(&json!({
+                "event": "answer", "kind": "guard", "id": "ghost", "allow": true
+            }));
+            assert!(
+                !dir.join("ghost.response.json").exists(),
+                "responding to an unknown id must not write an orphan response file"
+            );
+        });
+    }
+
+    #[test]
     fn answer_elicitation_writes_response_file() {
         with_temp_home(|| {
             let dir = fleet_subdir("elicitation");
+            seed_request(&dir, "e1");
             handle_client_payload(&json!({
                 "event": "answer", "kind": "elicitation", "id": "e1",
                 "declined": false,
@@ -2085,6 +2114,7 @@ mod tests {
     fn answer_fleet_ask_writes_response_file() {
         with_temp_home(|| {
             let dir = fleet_subdir("fleet-ask");
+            seed_request(&dir, "f1");
             handle_client_payload(&json!({
                 "event": "answer", "kind": "fleet-ask", "id": "f1",
                 "cancelled": false,
@@ -2100,6 +2130,7 @@ mod tests {
     fn answer_plan_approval_writes_response_file() {
         with_temp_home(|| {
             let dir = fleet_subdir("plan-approval");
+            seed_request(&dir, "p1");
             handle_client_payload(&json!({
                 "event": "answer", "kind": "plan-approval", "id": "p1",
                 "decision": "reject", "feedback": "改一下再来"
@@ -2114,6 +2145,7 @@ mod tests {
     fn answer_permission_prompt_writes_response_file() {
         with_temp_home(|| {
             let dir = fleet_subdir("permission-prompt");
+            seed_request(&dir, "pp1");
             handle_client_payload(&json!({
                 "event": "answer", "kind": "permission-prompt", "id": "pp1",
                 "allow": true
@@ -2127,6 +2159,8 @@ mod tests {
     fn answer_a2ui_render_writes_response_file() {
         with_temp_home(|| {
             let dir = fleet_subdir("fleet-render-a2ui");
+            seed_request(&dir, "a1");
+            seed_request(&dir, "a2");
             handle_client_payload(&json!({
                 "event": "answer", "kind": "a2ui-render", "id": "a1",
                 "cancelled": false, "actionName": "submit",
@@ -2891,6 +2925,8 @@ mod tests {
     fn answer_guard_always_allow_persists_rule() {
         with_temp_home(|| {
             let dir = fleet_subdir("guard");
+            seed_request(&dir, "g10");
+            seed_request(&dir, "g11");
             handle_client_payload(&json!({
                 "event": "answer", "kind": "guard", "id": "g10",
                 "allow": true,
