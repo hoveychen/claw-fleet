@@ -34,8 +34,7 @@ type ToolTab = "cli" | "vscode" | "jetbrains" | "desktop";
 
 type Issue =
   | "no_claude_at_all"
-  | "not_logged_in"
-  | "credentials_invalid";
+  | "not_logged_in";
 
 interface HookSetupPlan {
   toAdd: string[];
@@ -277,27 +276,6 @@ function NoClaudeAtAllCard() {
           <p className={styles.hint}>{t("onboarding.no_claude_at_all.install_vscode_hint")}</p>
         </div>
         <p className={styles.hint}>{t("onboarding.cli_not_installed.after_install")}</p>
-      </div>
-    </div>
-  );
-}
-
-function CredentialsInvalidCard() {
-  const { t } = useTranslation();
-  return (
-    <div className={`${styles.card} ${styles.card_warn}`}>
-      <div className={styles.card_header}>
-        <span className={styles.card_icon}>&#x1F504;</span>
-        <span className={styles.card_title}>{t("onboarding.credentials_invalid.title")}</span>
-      </div>
-      <p className={styles.card_description}>{t("onboarding.credentials_invalid.description")}</p>
-      <div className={styles.solutions}>
-        <div className={styles.solution}>
-          <CopyableCommand cmd={t("onboarding.credentials_invalid.relogin_cmd")} />
-          <p className={styles.hint}>{t("onboarding.credentials_invalid.relogin_hint")}</p>
-        </div>
-        <p className={styles.hint}>{t("onboarding.credentials_invalid.check_network")}</p>
-        <p className={styles.hint}>{t("onboarding.credentials_invalid.still_works")}</p>
       </div>
     </div>
   );
@@ -954,8 +932,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   const { t } = useTranslation();
   const sessions = useSessionsStore((s) => s.sessions);
   const [status, setStatus] = useState<SetupStatus | null>(null);
-  const [loading, setLoading] = useState(mode === "full");
-  const [accountError, setAccountError] = useState(false);
   const [celebrating, setCelebrating] = useState(false);
   const prevSessionCount = useRef(0);
 
@@ -1212,22 +1188,14 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     }
   }, [onDismiss, guardEnabled, elicitationEnabled]);
 
+  // Environment detection runs in the background and streams into the
+  // diagnostics area — it must never block the first paint. Credential
+  // validation (a network call) deliberately does NOT happen here: offline
+  // users would see a false "credentials invalid" scare, and the account
+  // panel in the main UI surfaces real credential problems anyway.
   const check = useCallback(async () => {
-    setLoading(true);
     try {
       const s = await invoke<SetupStatus>("check_setup_status");
-
-      if (s.logged_in) {
-        try {
-          await invoke("get_account_info");
-          s.credentials_valid = true;
-          setAccountError(false);
-        } catch {
-          s.credentials_valid = false;
-          setAccountError(true);
-        }
-      }
-
       s.has_sessions = s.has_sessions || sessions.length > 0;
       setStatus(s);
     } catch {
@@ -1240,8 +1208,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
         has_sessions: false,
         credentials_valid: null,
       });
-    } finally {
-      setLoading(false);
     }
   }, [sessions.length]);
 
@@ -1254,7 +1220,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   // (avoids false celebration for existing users whose sessions loaded after the check).
   useEffect(() => {
     if (
-      !loading &&
       !celebrating &&
       sessions.length > 0 &&
       prevSessionCount.current === 0 &&
@@ -1264,7 +1229,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
       setCelebrating(true);
     }
     prevSessionCount.current = sessions.length;
-  }, [sessions.length, loading, celebrating, status]);
+  }, [sessions.length, celebrating, status]);
 
   // Determine issues
   const issues: Issue[] = [];
@@ -1277,7 +1242,6 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
       issues.push("no_claude_at_all");
     } else {
       if (!status.logged_in) issues.push("not_logged_in");
-      if (status.logged_in && accountError) issues.push("credentials_invalid");
     }
   }
 
@@ -1392,108 +1356,105 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
               <p className={styles.subtitle}>{t("onboarding.subtitle")}</p>
             </div>
 
-            {loading ? (
+            {/* Diagnostics area: a local spinner while detection runs, issue
+                cards when something needs fixing — never a full-page gate. */}
+            {status === null ? (
               <div className={styles.loading}>
                 <div className={styles.spinner} />
                 <span className={styles.loading_text}>{t("onboarding.checking")}</span>
               </div>
-            ) : (
-              <>
-                {issues.length > 0 && (
-                  <div className={styles.cards}>
-                    {issues.includes("no_claude_at_all") && <NoClaudeAtAllCard />}
-                    {issues.includes("not_logged_in") && status && (
-                      <NotLoggedInCard tools={status.detected_tools} />
-                    )}
-                    {issues.includes("credentials_invalid") && <CredentialsInvalidCard />}
-                  </div>
+            ) : issues.length > 0 ? (
+              <div className={styles.cards}>
+                {issues.includes("no_claude_at_all") && <NoClaudeAtAllCard />}
+                {issues.includes("not_logged_in") && (
+                  <NotLoggedInCard tools={status.detected_tools} />
                 )}
+              </div>
+            ) : null}
 
-                <div className={styles.cards}>
-                  <FeaturesCard />
+            <div className={styles.cards}>
+              <FeaturesCard />
+            </div>
+
+            <div className={styles.cards}>
+              <AppearanceCard />
+            </div>
+
+            {hasMultipleSources && sources.length > 0 && (
+              <div className={styles.cards}>
+                <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
+              </div>
+            )}
+
+            {noIssues && (
+              <div className={styles.cards}>
+                <NotificationSettingsCard
+                  notifMode={notifMode}
+                  onNotifModeChange={handleNotifModeChange}
+                  ttsMode={ttsMode}
+                  onTtsModeChange={handleTtsModeChange}
+                  chimePreset={chimePreset}
+                  onChimeChange={handleChimeChange}
+                  personalizedMascot={personalizedMascot}
+                  onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
+                  userTitle={userTitle}
+                  onUserTitleChange={handleUserTitleChange}
+                />
+                {hasClaudeCode && hooksPlan && (
+                  <HooksSetupCard
+                    hooksPlan={hooksPlan}
+                    onInstall={handleInstallHooks}
+                    status={hooksStatus}
+                    errorMsg={hooksError}
+                    guardEnabled={guardEnabled}
+                    onToggleGuard={handleToggleGuard}
+                    elicitationEnabled={elicitationEnabled}
+                    onToggleElicitation={handleToggleElicitation}
+                    planApprovalEnabled={planApprovalEnabled}
+                    onTogglePlanApproval={handleTogglePlanApproval}
+                  />
+                )}
+                {hasClaudeCode && (
+                  <InteractionModeCard
+                    enabled={interactionModeEnabled}
+                    onToggle={handleToggleInteractionMode}
+                    elicitationEnabled={elicitationEnabled}
+                  />
+                )}
+                {hasClaudeCode && (
+                  <PrdModeCard
+                    enabled={prdModeEnabled}
+                    onToggle={handleTogglePrdMode}
+                  />
+                )}
+                {hasClaudeCode && (
+                  <WikiGuidanceCard
+                    enabled={wikiGuidanceEnabled}
+                    onToggle={handleToggleWikiGuidance}
+                  />
+                )}
+              </div>
+            )}
+
+            {showWaiting && <WaitingForSession />}
+
+            {noIssues && status?.has_sessions && !celebrating && (
+              <div className={styles.cards}>
+                <div className={`${styles.card} ${styles.card_ok}`}>
+                  <div className={styles.card_header}>
+                    <span className={styles.card_icon}>&#x2705;</span>
+                    <span className={styles.card_title}>{t("onboarding.all_good.title")}</span>
+                  </div>
+                  <p className={styles.card_description}>{t("onboarding.all_good.description")}</p>
                 </div>
-
-                <div className={styles.cards}>
-                  <AppearanceCard />
-                </div>
-
-                {hasMultipleSources && sources.length > 0 && (
-                  <div className={styles.cards}>
-                    <SourceSelectionCard sources={sources} onToggle={handleToggleSource} />
-                  </div>
-                )}
-
-                {noIssues && (
-                  <div className={styles.cards}>
-                    <NotificationSettingsCard
-                      notifMode={notifMode}
-                      onNotifModeChange={handleNotifModeChange}
-                      ttsMode={ttsMode}
-                      onTtsModeChange={handleTtsModeChange}
-                      chimePreset={chimePreset}
-                      onChimeChange={handleChimeChange}
-                      personalizedMascot={personalizedMascot}
-                      onTogglePersonalizedMascot={handleTogglePersonalizedMascot}
-                      userTitle={userTitle}
-                      onUserTitleChange={handleUserTitleChange}
-                    />
-                    {hasClaudeCode && hooksPlan && (
-                      <HooksSetupCard
-                        hooksPlan={hooksPlan}
-                        onInstall={handleInstallHooks}
-                        status={hooksStatus}
-                        errorMsg={hooksError}
-                        guardEnabled={guardEnabled}
-                        onToggleGuard={handleToggleGuard}
-                        elicitationEnabled={elicitationEnabled}
-                        onToggleElicitation={handleToggleElicitation}
-                        planApprovalEnabled={planApprovalEnabled}
-                        onTogglePlanApproval={handleTogglePlanApproval}
-                      />
-                    )}
-                    {hasClaudeCode && (
-                      <InteractionModeCard
-                        enabled={interactionModeEnabled}
-                        onToggle={handleToggleInteractionMode}
-                        elicitationEnabled={elicitationEnabled}
-                      />
-                    )}
-                    {hasClaudeCode && (
-                      <PrdModeCard
-                        enabled={prdModeEnabled}
-                        onToggle={handleTogglePrdMode}
-                      />
-                    )}
-                    {hasClaudeCode && (
-                      <WikiGuidanceCard
-                        enabled={wikiGuidanceEnabled}
-                        onToggle={handleToggleWikiGuidance}
-                      />
-                    )}
-                  </div>
-                )}
-
-                {showWaiting && <WaitingForSession />}
-
-                {noIssues && status?.has_sessions && !celebrating && (
-                  <div className={styles.cards}>
-                    <div className={`${styles.card} ${styles.card_ok}`}>
-                      <div className={styles.card_header}>
-                        <span className={styles.card_icon}>&#x2705;</span>
-                        <span className={styles.card_title}>{t("onboarding.all_good.title")}</span>
-                      </div>
-                      <p className={styles.card_description}>{t("onboarding.all_good.description")}</p>
-                    </div>
-                  </div>
-                )}
-              </>
+              </div>
             )}
 
             <div className={styles.footer}>
               <button className={styles.btn_secondary} onClick={handleDismiss}>
                 {t("onboarding.skip")}
               </button>
-              {!loading && issues.length > 0 && (
+              {status !== null && issues.length > 0 && (
                 <button className={styles.btn_secondary} onClick={check}>
                   {t("onboarding.recheck")}
                 </button>
