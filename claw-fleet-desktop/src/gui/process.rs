@@ -61,13 +61,15 @@ pub(crate) fn spawn_new_claude_session(
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<String>,
+    // Which agent tool to launch: "claude" (or omitted) / "codex".
+    tool: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
     state
         .backend
         .read()
         .unwrap()
-        .spawn_new_session(workspace_path, prompt, model, effort, permission_mode)
+        .spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool)
 }
 
 /// Absolute path of the pure-chat workspace, created on demand. The launcher

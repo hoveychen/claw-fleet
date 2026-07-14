@@ -185,6 +185,7 @@ impl Backend for NullBackend {
         _: Option<String>,
         _: Option<String>,
         _: Option<String>,
+        _: Option<String>,
     ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
         Err("backend not ready".into())
     }

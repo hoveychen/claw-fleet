@@ -412,6 +412,7 @@ impl crate::backend::Backend for RemoteBackend {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
+        tool: Option<String>,
     ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
         let req = claw_fleet_core::session_launch::SpawnSessionRequest {
             workspace_path,
@@ -423,6 +424,7 @@ impl crate::backend::Backend for RemoteBackend {
             // the lossy relay broadcast), so it has no need to pre-assign the id
             // and keeps letting the server mint one.
             session_id: None,
+            tool,
         };
         // `session_id` deserializes to None when the probe is an older build
         // that only returns `pid`; the frontend then falls back to novelty
