@@ -1664,7 +1664,19 @@
     "add_to_claude_md": "Add to CLAUDE.md",
     "lesson_added": "Added",
     "no_insights": "No insights yet. Reports will appear here as data is collected.",
-    "earlier_section_title": "Earlier"
+    "earlier_section_title": "Earlier",
+    "decision_cards": "Decision Cards",
+    "dc_type": "Type",
+    "dc_triggered": "Triggered",
+    "dc_answered": "Answered",
+    "dc_recommended_hit": "Rec. hit",
+    "dc_other": "Other",
+    "dc_avg_latency": "Avg latency",
+    "dc_timeout": "Timed out",
+    "dc_type_elicitation": "Q&A card",
+    "dc_type_fleet_ask": "Rich card",
+    "dc_type_plan_approval": "Plan approval",
+    "dc_no_rec": "no rec."
   },
   "command": {
     "nested": {
