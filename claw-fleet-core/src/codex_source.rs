@@ -180,6 +180,122 @@ fn extract_session_meta(lines: &[Value]) -> Option<&Value> {
         .and_then(|v| v.get("payload"))
 }
 
+/// Read the rollout `originator` (`session_meta.payload.originator`) from a
+/// rollout file, reading **only the first line** — `session_meta` is always
+/// line 1, so this stays a few-hundred-byte read even for a huge transcript.
+///
+/// This is Codex's Fleet-ownership signal: Fleet stamps
+/// [`crate::codex_launch::CODEX_FLEET_ORIGINATOR`] via
+/// `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`, and it lands here (the SQLite `source`
+/// column does not carry it). Surfaced on [`SessionInfo::entrypoint`] so
+/// [`crate::session_launch::is_fleet_owned_entrypoint`] classifies the session
+/// uniformly with Claude. `None` when the file is unreadable or the line has no
+/// originator (e.g. an older rollout format).
+fn read_rollout_originator(rollout_path: &Path) -> Option<String> {
+    use std::io::{BufRead, BufReader};
+    let file = fs::File::open(rollout_path).ok()?;
+    let mut first_line = String::new();
+    BufReader::new(file).read_line(&mut first_line).ok()?;
+    let v: Value = serde_json::from_str(first_line.trim()).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
+        return None;
+    }
+    v.get("payload")
+        .and_then(|p| p.get("originator"))
+        .and_then(|o| o.as_str())
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+/// Read a rollout's first `session_meta` payload (only line 1). Same read shape
+/// as [`read_rollout_originator`], but returns the whole payload so callers can
+/// pull `id` / `cwd` / `originator` together.
+fn read_rollout_meta_payload(rollout_path: &Path) -> Option<Value> {
+    use std::io::{BufRead, BufReader};
+    let file = fs::File::open(rollout_path).ok()?;
+    let mut first_line = String::new();
+    BufReader::new(file).read_line(&mut first_line).ok()?;
+    let v: Value = serde_json::from_str(first_line.trim()).ok()?;
+    if v.get("type").and_then(|t| t.as_str()) != Some("session_meta") {
+        return None;
+    }
+    v.get("payload").cloned()
+}
+
+/// SQLite index lookup: a single thread's `(rollout_path, cwd)` by id. `None`
+/// when there is no SQLite DB or no matching row.
+fn lookup_thread_rollout_cwd(thread_id: &str) -> Option<(String, String)> {
+    let db_path = get_sqlite_path()?;
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = rusqlite::Connection::open_with_flags(
+        &db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()?;
+    let mut stmt = conn
+        .prepare("SELECT rollout_path, cwd FROM threads WHERE id = ?1 LIMIT 1")
+        .ok()?;
+    stmt.query_row([thread_id], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })
+    .ok()
+}
+
+/// For a Fleet-owned Codex session identified by `thread_id`, the workspace it
+/// was launched in; `None` if the thread is unknown or not Fleet-owned.
+///
+/// Codex's analogue of `session_entrypoint` + `resolve_session_cwd` folded into
+/// one: those read a `~/.claude` transcript and return `None` for every Codex
+/// thread, so the enqueue gate (`pending_message`) and drain belt-and-braces
+/// would reject Codex sessions outright (M5 P15). Ownership is the rollout
+/// `originator == "fleet"` marker ([`crate::codex_launch::CODEX_FLEET_ORIGINATOR`]);
+/// cwd comes from the SQLite row, or the rollout's own `session_meta` when SQLite
+/// is unavailable.
+pub fn codex_fleet_owned_cwd(thread_id: &str) -> Option<String> {
+    let thread_id = thread_id.trim();
+    if thread_id.is_empty() {
+        return None;
+    }
+    // Preferred: SQLite maps thread id → rollout path + cwd directly.
+    if let Some((rollout_path, cwd)) = lookup_thread_rollout_cwd(thread_id) {
+        let originator = read_rollout_originator(Path::new(&rollout_path));
+        if crate::session_launch::is_fleet_owned_entrypoint(originator.as_deref()) {
+            let cwd = cwd.trim();
+            if !cwd.is_empty() {
+                return Some(cwd.to_string());
+            }
+        }
+        return None;
+    }
+    // Fallback (no SQLite): find the rollout whose session_meta id matches and
+    // read ownership + cwd from its first line.
+    let sessions_dir = get_sessions_dir()?;
+    if !sessions_dir.is_dir() {
+        return None;
+    }
+    for path in find_rollout_files(&sessions_dir) {
+        let Some(payload) = read_rollout_meta_payload(&path) else {
+            continue;
+        };
+        if payload.get("id").and_then(|v| v.as_str()) != Some(thread_id) {
+            continue;
+        }
+        let originator = payload.get("originator").and_then(|v| v.as_str());
+        if !crate::session_launch::is_fleet_owned_entrypoint(originator) {
+            return None;
+        }
+        return payload
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|c| !c.is_empty())
+            .map(str::to_string);
+    }
+    None
+}
+
 /// Extract the model name from turn_context lines.
 fn extract_model(lines: &[Value]) -> Option<String> {
     for line in lines.iter().rev() {
@@ -597,7 +713,13 @@ fn extract_thread_id_from_args(args: &[String]) -> Option<String> {
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
         match arg.as_str() {
-            "--thread" | "--resume" | "-t" => {
+            // `--thread <id>` / `--resume <id>` / `-t <id>` flags, and the
+            // `resume` subcommand positional — `codex exec resume <id> …`, the
+            // exact shape Fleet's own resume launcher builds
+            // (`build_codex_resume_args`). Without the positional case a live
+            // Fleet resume wouldn't be thread-matched, so `proc_alive` stayed
+            // false for it.
+            "--thread" | "--resume" | "-t" | "resume" => {
                 if let Some(id) = iter.next() {
                     if !id.starts_with('-') {
                         return Some(id.clone());
@@ -855,6 +977,7 @@ fn build_session_from_sqlite(
 
     // PID resolution: prefer thread-id match, fall back to workspace path match.
     let (pid, pid_precise) = resolve_pid(codex_processes, &thread.id, &thread.cwd);
+    let proc_alive = codex_proc_alive(codex_processes, &thread.id);
 
     // Prefer: source-embedded nickname > SQLite agent_nickname > title
     let ai_title = source_info
@@ -872,6 +995,11 @@ fn build_session_from_sqlite(
         .agent_role
         .or_else(|| thread.agent_role.clone());
 
+    // Fleet-ownership marker: the rollout `originator` (see
+    // `read_rollout_originator`). Fleet-launched Codex sessions carry
+    // `originator == "fleet"`, which `is_fleet_owned_entrypoint` recognises.
+    let entrypoint = read_rollout_originator(&rollout_path);
+
     let uri = build_uri(&rollout_path)?;
 
     Some(SessionInfo {
@@ -879,7 +1007,7 @@ fn build_session_from_sqlite(
         workspace_path: thread.cwd.clone(),
         workspace_name,
         ide_name: source_info.ide_name,
-        entrypoint: None,
+        entrypoint,
         is_subagent: source_info.is_subagent,
         parent_session_id: source_info.parent_thread_id,
         agent_type,
@@ -904,8 +1032,10 @@ fn build_session_from_sqlite(
         thinking_level,
         pid,
         pid_precise,
-        // Codex sessions are never Fleet-spawned, so no argv carries their id.
-        proc_alive: false,
+        // Definitive liveness for Codex: a live process resuming exactly this
+        // thread (see `codex_proc_alive`). `apply_pid_liveness` runs only in the
+        // Claude scan path, so Codex stamps its own here.
+        proc_alive,
         pending_tool_batch: false,
         last_skill: None,
         context_percent,
@@ -924,8 +1054,187 @@ fn build_session_from_sqlite(
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_token_stats, extract_context_percent};
+    use super::{
+        codex_rate_limit_state_from_usage, compute_token_stats, extract_context_percent,
+        read_rollout_originator, CodexRateLimitWindow, CodexUsageItem,
+    };
     use serde_json::json;
+
+    /// The scanner's Fleet-ownership signal: the rollout's first `session_meta`
+    /// line carries `originator`, and Fleet stamps `"fleet"` there via
+    /// `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`. `read_rollout_originator` must pull
+    /// exactly that value (and only from a real `session_meta` line).
+    #[test]
+    fn read_rollout_originator_pulls_session_meta_originator() {
+        use std::io::Write;
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(
+            f,
+            r#"{{"type":"session_meta","payload":{{"id":"t1","originator":"fleet","source":"exec"}}}}"#
+        )
+        .unwrap();
+        writeln!(f, r#"{{"type":"turn_context","payload":{{"model":"gpt-5"}}}}"#).unwrap();
+        assert_eq!(
+            read_rollout_originator(f.path()).as_deref(),
+            Some("fleet"),
+            "must read originator from the first session_meta line"
+        );
+    }
+
+    #[test]
+    fn extract_thread_id_handles_exec_resume_positional() {
+        use super::extract_thread_id_from_args;
+        // Fleet's own resume argv (build_codex_resume_args): the thread id is a
+        // positional after the `resume` subcommand, not a `--resume` flag. This
+        // is the shape a live Fleet auto-resume / handoff-resume process has, so
+        // proc_alive depends on parsing it.
+        let argv: Vec<String> = ["exec", "resume", "019f-thread-xyz", "--json", "--skip-git-repo-check", "--", "hi"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            extract_thread_id_from_args(&argv).as_deref(),
+            Some("019f-thread-xyz")
+        );
+        // The flag forms must keep working.
+        let flagged: Vec<String> = ["--resume", "abc"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(extract_thread_id_from_args(&flagged).as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn codex_proc_alive_only_on_exact_thread_match() {
+        use super::{codex_proc_alive, CodexProcess};
+        let procs = vec![
+            CodexProcess { pid: 10, cwd: "/ws".into(), thread_id: Some("t-alive".into()) },
+            // Same cwd, different thread — must NOT make t-dead look alive (the
+            // pid-per-session hazard a cwd match would fall into).
+            CodexProcess { pid: 11, cwd: "/ws".into(), thread_id: None },
+        ];
+        assert!(codex_proc_alive(&procs, "t-alive"));
+        assert!(!codex_proc_alive(&procs, "t-dead"));
+        assert!(!codex_proc_alive(&[], "t-alive"));
+    }
+
+    /// A freshly spawned `codex exec` mints its thread id *after* launch, so that
+    /// id is in no argv while its first turn runs — the argv match above reads it
+    /// as dead. The spawn-pid note closes that gap: liveness falls back to "the
+    /// pid Fleet recorded at spawn is still a live Codex process". Without this,
+    /// the enqueue-drain gate fires a second `resume` on a still-running new
+    /// session and corrupts its transcript (M5 P15).
+    #[test]
+    fn codex_proc_alive_recognises_running_spawn_via_pid_note() {
+        use super::{codex_proc_alive, CodexProcess};
+        let _lock = crate::session::fleet_home_lock();
+        let tmp = std::env::temp_dir().join(format!(
+            "fleet-spawnpid-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&tmp).unwrap();
+        let prev = std::env::var_os("FLEET_HOME");
+        std::env::set_var("FLEET_HOME", &tmp);
+
+        crate::codex_launch::record_spawn_pid("t-new", 4242);
+
+        // The live Codex set has that pid but no thread id in argv — exactly what
+        // a mid-first-turn `codex exec` looks like.
+        let running = vec![CodexProcess { pid: 4242, cwd: "/ws".into(), thread_id: None }];
+        assert!(
+            codex_proc_alive(&running, "t-new"),
+            "a running new spawn must read as alive via its recorded pid"
+        );
+        // The pid leaving the live Codex set (session exited) makes it drainable.
+        assert!(
+            !codex_proc_alive(&[], "t-new"),
+            "spawn pid no longer live => not alive"
+        );
+        // A thread with no note must not borrow another session's liveness.
+        assert!(!codex_proc_alive(&running, "t-unknown"));
+
+        match prev {
+            Some(p) => std::env::set_var("FLEET_HOME", p),
+            None => std::env::remove_var("FLEET_HOME"),
+        }
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn read_rollout_originator_none_without_meta_or_field() {
+        use std::io::Write;
+        // First line is not session_meta → None (we only trust line 1).
+        let mut f = tempfile::NamedTempFile::new().unwrap();
+        writeln!(f, r#"{{"type":"turn_context","payload":{{"model":"gpt-5"}}}}"#).unwrap();
+        assert_eq!(read_rollout_originator(f.path()), None);
+
+        // session_meta without an originator field → None.
+        let mut g = tempfile::NamedTempFile::new().unwrap();
+        writeln!(g, r#"{{"type":"session_meta","payload":{{"id":"t2"}}}}"#).unwrap();
+        assert_eq!(read_rollout_originator(g.path()), None);
+    }
+
+    fn window(used_percent: i32, window_mins: i64, resets_at_secs: i64) -> CodexRateLimitWindow {
+        CodexRateLimitWindow {
+            used_percent,
+            window_duration_mins: Some(window_mins),
+            resets_at: Some(resets_at_secs),
+        }
+    }
+
+    #[test]
+    fn codex_rate_limit_state_none_when_not_reached() {
+        // No `rateLimitReachedType` → account not limited → no state.
+        let usage = CodexUsageItem {
+            primary: Some(window(2, 10080, 1_784_636_186)),
+            rate_limit_reached_type: None,
+            ..Default::default()
+        };
+        assert!(codex_rate_limit_state_from_usage(&usage, chrono::Utc::now()).is_none());
+    }
+
+    #[test]
+    fn codex_rate_limit_state_converts_resets_at_seconds() {
+        // resetsAt is epoch SECONDS (measured against codex-cli 0.144.4), not ms.
+        let resets_secs = 1_784_636_186_i64;
+        let usage = CodexUsageItem {
+            primary: Some(window(100, 10080, resets_secs)),
+            rate_limit_reached_type: Some("primary".into()),
+            ..Default::default()
+        };
+        let st = codex_rate_limit_state_from_usage(&usage, chrono::Utc::now())
+            .expect("reached → Some");
+        assert_eq!(
+            st.resets_at.timestamp(),
+            resets_secs,
+            "resets_at must be interpreted as epoch seconds"
+        );
+        // error_timestamp = window start = resets_at - 7d (10080 min).
+        assert_eq!(
+            (st.resets_at - st.error_timestamp),
+            chrono::Duration::minutes(10080)
+        );
+        // Unknown limit_type → skips the claude-metric recovery gate.
+        assert_eq!(st.limit_type, crate::rate_limit_parser::RateLimitType::Unknown);
+    }
+
+    #[test]
+    fn codex_rate_limit_state_prefers_secondary_when_reached() {
+        let usage = CodexUsageItem {
+            primary: Some(window(50, 10080, 2_000_000_000)),
+            secondary: Some(window(100, 300, 1_900_000_000)),
+            rate_limit_reached_type: Some("secondary".into()),
+            ..Default::default()
+        };
+        let st = codex_rate_limit_state_from_usage(&usage, chrono::Utc::now()).unwrap();
+        assert_eq!(st.resets_at.timestamp(), 1_900_000_000);
+        // secondary window is 300 min = 5h.
+        assert_eq!(
+            (st.resets_at - st.error_timestamp),
+            chrono::Duration::minutes(300)
+        );
+    }
 
     #[test]
     fn compute_token_stats_supports_new_token_count_shape() {
@@ -1008,6 +1317,46 @@ fn determine_status_from_age(age_secs: f64) -> SessionStatus {
 }
 
 /// Resolve PID for a session: prefer exact thread-id match, fall back to cwd match.
+/// Whether a live Codex process is definitively running this thread — an exact
+/// thread-id match on a running `codex exec resume <thread-id>` argv. This is
+/// Codex's analogue of Claude's `exact_proc_alive` ("a live process whose argv
+/// names exactly this session id"): unambiguous, so it never mis-attributes a
+/// sibling session's process the way a cwd match can (see the pid-per-session
+/// caveat in `resolve_pid`).
+///
+/// Only *resumed* sessions carry their thread id in argv. A freshly spawned
+/// `codex exec` does not — Codex mints the id after launch — so a new session
+/// mid-first-turn is invisible to the argv match. For those, Fleet's spawn-pid
+/// note (`codex_launch::record_spawn_pid`) closes the gap: liveness falls back
+/// to "the pid recorded at spawn is still a live Codex process". Matching that
+/// pid against `processes` (the live Codex set) makes it immune to pid reuse — a
+/// recycled pid owned by some other process simply is not in the set. Without
+/// this, the enqueue-drain gate (`pending_message`, M5 P15) reads a still-running
+/// new session as idle and fires a second `resume` on it, corrupting the
+/// transcript.
+fn codex_proc_alive(processes: &[CodexProcess], thread_id: &str) -> bool {
+    // Resumed sessions: exact thread-id argv match.
+    if processes
+        .iter()
+        .any(|p| p.thread_id.as_deref() == Some(thread_id))
+    {
+        return true;
+    }
+    // Freshly-spawned sessions: the recorded spawn pid still in the live set.
+    if let Some(pid) = crate::codex_launch::resolve_spawn_pid(thread_id) {
+        return processes.iter().any(|p| p.pid == pid);
+    }
+    false
+}
+
+/// A fresh liveness check for one Codex thread: scans the live Codex process set
+/// and applies [`codex_proc_alive`]. Used as the drain gate's belt-and-braces —
+/// the `SessionInfo.proc_alive` snapshot the gate is handed can lag a turn that
+/// started since the scan, so this re-checks against the current process table.
+pub fn codex_session_alive(thread_id: &str) -> bool {
+    codex_proc_alive(&scan_codex_processes(), thread_id)
+}
+
 fn resolve_pid(processes: &[CodexProcess], thread_id: &str, cwd: &str) -> (Option<u32>, bool) {
     // First: exact thread-id match (most precise).
     for p in processes {
@@ -1145,6 +1494,7 @@ fn parse_codex_session(
 
     // PID resolution: prefer thread-id match, fall back to workspace path.
     let (pid, pid_precise) = resolve_pid(codex_processes, &session_id, &workspace_path);
+    let proc_alive = codex_proc_alive(codex_processes, &session_id);
 
     // Prefer source-embedded nickname > rollout meta nickname
     let ai_title = source_info
@@ -1156,6 +1506,14 @@ fn parse_codex_session(
             .map(|s| s.to_string())
     });
 
+    // Fleet-ownership marker: rollout `originator` (already in the parsed
+    // `session_meta` here, so no extra read). Fleet-launched Codex sessions
+    // carry `originator == "fleet"`, recognised by `is_fleet_owned_entrypoint`.
+    let entrypoint = meta
+        .and_then(|m| m.get("originator").and_then(|o| o.as_str()))
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+
     let uri = build_uri(rollout_path)?;
 
     Some(SessionInfo {
@@ -1163,7 +1521,7 @@ fn parse_codex_session(
         workspace_path,
         workspace_name,
         ide_name: source_info.ide_name,
-        entrypoint: None,
+        entrypoint,
         is_subagent: source_info.is_subagent,
         parent_session_id: source_info.parent_thread_id,
         agent_type,
@@ -1188,8 +1546,10 @@ fn parse_codex_session(
         thinking_level,
         pid,
         pid_precise,
-        // Codex sessions are never Fleet-spawned, so no argv carries their id.
-        proc_alive: false,
+        // Definitive liveness for Codex: a live process resuming exactly this
+        // thread (see `codex_proc_alive`). `apply_pid_liveness` runs only in the
+        // Claude scan path, so Codex stamps its own here.
+        proc_alive,
         pending_tool_batch: false,
         last_skill: None,
         context_percent,
@@ -1746,6 +2106,38 @@ impl AgentSource for CodexSource {
         let val = serde_json::to_value(&info).ok()?;
         Some(SourceUsageSummary::from_codex(&val))
     }
+
+    fn spawn(
+        &self,
+        spec: &crate::agent_source::SpawnSpec,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+        // Codex mints its own thread id (no --session-id) and has no entrypoint
+        // env; session_id/entrypoint on the spec are ignored here. The
+        // permission_mode → sandbox/approval mapping is a later milestone.
+        crate::codex_launch::spawn_new_codex_session(
+            &spec.workspace_path,
+            &spec.prompt,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+        )
+    }
+
+    fn resume(
+        &self,
+        spec: &crate::agent_source::ResumeSpec,
+        on_exit: Box<dyn FnOnce(bool) + Send>,
+    ) -> Result<(), String> {
+        // permission_mode is Claude's --permission-mode; Codex's sandbox/approval
+        // mapping is a later milestone, so it's ignored here.
+        crate::codex_launch::resume_codex_session(
+            &spec.session_id,
+            &spec.workspace_path,
+            &spec.prompt,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+            on_exit,
+        )
+    }
 }
 
 // ── Codex usage via app-server protocol ──────────────────────────────────────
@@ -1787,13 +2179,103 @@ pub struct CodexUsageItem {
     pub secondary: Option<CodexRateLimitWindow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credits: Option<CodexCreditsSnapshot>,
+    /// Which window (if any) the account has actually hit: `"primary"` /
+    /// `"secondary"`, or `None`/absent when not currently rate-limited. This is
+    /// the authoritative "am I limited right now" signal from the app-server
+    /// (per `account/rateLimits/read`), used to decide codex auto-resume
+    /// eligibility rather than guessing from a per-session transcript line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_reached_type: Option<String>,
 }
 
-/// Locate the Codex binary shipped inside the OpenAI ChatGPT VSCode extension.
-fn find_codex_binary() -> Option<std::path::PathBuf> {
+/// Build a Claude-shaped [`crate::session::RateLimitState`] from a Codex
+/// account rate-limit snapshot, for feeding [`crate::auto_resume::should_auto_resume`].
+///
+/// Returns `None` unless the snapshot reports a window has actually been hit
+/// (`rate_limit_reached_type` set) — Fleet only auto-resumes a codex session
+/// that is genuinely limited.
+///
+/// Codex-specific semantics (all verified against codex-cli 0.144.4):
+/// - `resetsAt` is Unix epoch **seconds** (Claude's parsed reset is a
+///   `DateTime`), so it is converted with `from_timestamp(secs, 0)`.
+/// - `error_timestamp` is set to `resets_at − windowDuration`, i.e. the window
+///   *start*, NOT `now`. This makes `wait = resets_at − error_timestamp` equal
+///   the window length, so the `max_wait_hours` safety valve treats a codex
+///   **weekly** (10080-min) limit exactly like a Claude weekly limit — too long
+///   to auto-resume unattended — while a short **secondary** window (e.g. 5h)
+///   stays eligible once it resets. Unknown window duration → 7 days
+///   (conservatively blocked).
+/// - `limit_type` is `Unknown` so the Claude-metric recovery path
+///   ([`crate::auto_resume::limit_recovered`]) is skipped (codex has no
+///   five_hour/seven_day sample); recovery is purely the hinted `resetsAt` +
+///   grace.
+pub fn codex_rate_limit_state_from_usage(
+    usage: &CodexUsageItem,
+    _now: chrono::DateTime<chrono::Utc>,
+) -> Option<crate::session::RateLimitState> {
+    let reached = usage.rate_limit_reached_type.as_deref()?;
+    let window = match reached {
+        "secondary" => usage.secondary.as_ref().or(usage.primary.as_ref()),
+        // "primary" or any other non-empty marker → the primary window.
+        _ => usage.primary.as_ref(),
+    }?;
+    let resets_at_secs = window.resets_at?;
+    let resets_at = chrono::DateTime::<chrono::Utc>::from_timestamp(resets_at_secs, 0)?;
+    let window_dur = match window.window_duration_mins {
+        Some(mins) if mins > 0 => chrono::Duration::minutes(mins),
+        _ => chrono::Duration::days(7),
+    };
+    Some(crate::session::RateLimitState {
+        resets_at,
+        limit_type: crate::rate_limit_parser::RateLimitType::Unknown,
+        parsed: true,
+        error_timestamp: resets_at - window_dur,
+    })
+}
+
+/// Locate a runnable Codex binary.
+///
+/// Search order (first hit wins):
+///   1. The **standalone auto-update install** at
+///      `<CODEX_HOME>/packages/standalone/current/bin/codex` — the binary the
+///      `codex` CLI's own updater manages and the one the interactive TUI runs.
+///      Its `current` symlink always points at the newest installed release.
+///   2. The Codex binary shipped inside the OpenAI ChatGPT VSCode extension
+///      (`~/.vscode/extensions/openai.chatgpt-*/bin/<platform>/codex`), newest
+///      version first.
+///   3. Bare `codex` on `PATH`.
+///
+/// The standalone install is tried first deliberately: on machines where the
+/// only thing on `PATH` is a broken npm/homebrew `codex` wrapper (a JS shim
+/// whose vendored binary is missing → `ENOENT` on exec), the `which codex`
+/// fallback would hand back that broken shim. The standalone `current` binary
+/// is a real executable, so preferring it fixes both the usage probe and
+/// (P1+) session spawning without a per-call liveness check.
+///
+/// Shared by the rate-limit usage probe and the Codex session launcher
+/// (`codex_launch`), so both agree on which binary to run.
+pub fn find_codex_binary() -> Option<std::path::PathBuf> {
     let home = crate::session::real_home_dir()?;
 
-    // Check VSCode extension directories
+    #[cfg(windows)]
+    let exe = "codex.exe";
+    #[cfg(not(windows))]
+    let exe = "codex";
+
+    // 1. Standalone auto-update install (`current` → newest release).
+    if let Some(codex_dir) = get_codex_dir() {
+        let standalone = codex_dir
+            .join("packages")
+            .join("standalone")
+            .join("current")
+            .join("bin")
+            .join(exe);
+        if standalone.exists() {
+            return Some(standalone);
+        }
+    }
+
+    // 2. Check VSCode extension directories
     let ext_dirs = [
         home.join(".vscode").join("extensions"),
         home.join(".vscode-insiders").join("extensions"),

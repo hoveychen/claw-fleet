@@ -28,13 +28,18 @@ pub(crate) fn resume_rate_limited_session(
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<String>,
+    agent_source: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    state
-        .backend
-        .read()
-        .unwrap()
-        .resume_session(session_id, workspace_path, prompt, model, effort, permission_mode)
+    state.backend.read().unwrap().resume_session(
+        session_id,
+        workspace_path,
+        prompt,
+        model,
+        effort,
+        permission_mode,
+        agent_source.unwrap_or_default(),
+    )
 }
 
 /// Queue a follow-up message for a session that is still mid-turn. The message
@@ -61,13 +66,15 @@ pub(crate) fn spawn_new_claude_session(
     model: Option<String>,
     effort: Option<String>,
     permission_mode: Option<String>,
+    // Which agent tool to launch: "claude" (or omitted) / "codex".
+    tool: Option<String>,
     state: tauri::State<'_, AppState>,
 ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
     state
         .backend
         .read()
         .unwrap()
-        .spawn_new_session(workspace_path, prompt, model, effort, permission_mode)
+        .spawn_new_session(workspace_path, prompt, model, effort, permission_mode, tool)
 }
 
 /// Absolute path of the pure-chat workspace, created on demand. The launcher

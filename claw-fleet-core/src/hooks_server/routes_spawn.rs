@@ -20,13 +20,20 @@ pub(crate) fn route_resume_session(
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
                 match serde_json::from_str::<crate::auto_resume::ResumeSessionRequest>(&buf) {
                     Ok(req) => {
-                        match crate::auto_resume::spawn_resume_prompt(
-                            &req.session_id,
-                            &req.workspace_path,
-                            req.prompt.as_deref().unwrap_or("continue"),
-                            req.model.as_deref(),
-                            req.effort.as_deref(),
-                            req.permission_mode.as_deref(),
+                        // Route by source: codex sessions resume via
+                        // `codex exec resume`, claude via `claude --resume`.
+                        // Manual resume is untracked → no-op on_exit box.
+                        match crate::agent_source::resume_session(
+                            &req.agent_source,
+                            &crate::agent_source::ResumeSpec {
+                                session_id: req.session_id.clone(),
+                                workspace_path: req.workspace_path.clone(),
+                                prompt: req.prompt.clone().unwrap_or_else(|| "continue".to_string()),
+                                model: req.model.clone(),
+                                effort: req.effort.clone(),
+                                permission_mode: req.permission_mode.clone(),
+                            },
+                            Box::new(|_| {}),
                         ) {
                             Ok(()) => {
                                 let _ = request.respond(
@@ -169,13 +176,21 @@ pub(crate) fn route_spawn_session(
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
                 match serde_json::from_str::<crate::session_launch::SpawnSessionRequest>(&buf) {
                     Ok(req) => {
-                        match crate::session_launch::spawn_new_session_with_id(
-                            &req.workspace_path,
-                            &req.prompt,
-                            req.model.as_deref(),
-                            req.effort.as_deref(),
-                            req.permission_mode.as_deref(),
-                            req.session_id.as_deref(),
+                        // Route by tool ("claude" default / "codex"); the spec
+                        // preserves the caller-preassigned session_id for the
+                        // Claude idempotency path (Codex ignores it).
+                        let spec = crate::agent_source::SpawnSpec {
+                            workspace_path: req.workspace_path.clone(),
+                            prompt: req.prompt.clone(),
+                            model: req.model.clone(),
+                            effort: req.effort.clone(),
+                            permission_mode: req.permission_mode.clone(),
+                            session_id: req.session_id.clone(),
+                            entrypoint: String::new(),
+                        };
+                        match crate::agent_source::spawn_session(
+                            req.tool.as_deref().unwrap_or("claude"),
+                            &spec,
                         ) {
                             Ok(resp) => {
                                 let body =

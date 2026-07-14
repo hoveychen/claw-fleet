@@ -1420,14 +1420,22 @@ pub fn resume_session_impl(
     model: Option<&str>,
     effort: Option<&str>,
     permission_mode: Option<&str>,
+    agent_source: &str,
 ) -> Result<(), String> {
-    claw_fleet_core::auto_resume::spawn_resume_prompt(
-        session_id,
-        workspace_path,
-        prompt.unwrap_or("continue"),
-        model,
-        effort,
-        permission_mode,
+    // Route by source so a Codex session resumes via `codex exec resume` rather
+    // than `claude --resume`. Blank/"claude-code" → claude (normalised inside).
+    // Manual resume is untracked → no-op on_exit box.
+    claw_fleet_core::agent_source::resume_session(
+        agent_source,
+        &claw_fleet_core::agent_source::ResumeSpec {
+            session_id: session_id.to_string(),
+            workspace_path: workspace_path.to_string(),
+            prompt: prompt.unwrap_or("continue").to_string(),
+            model: model.map(str::to_string),
+            effort: effort.map(str::to_string),
+            permission_mode: permission_mode.map(str::to_string),
+        },
+        Box::new(|_| {}),
     )
 }
 
@@ -1494,7 +1502,10 @@ fn maybe_fire_auto_resume(
     // of the hinted `resets_at`. `None` (no snapshot yet) simply means we fall
     // back to the hint-time gate.
     let usage = claw_fleet_core::account::latest_usage_snapshot();
-    let candidates: Vec<(String, String)> = {
+    // (id, workspace, agent_source) — source is captured under the lock so the
+    // tracked resume can be dispatched by source (claude vs codex) after the
+    // lock is released.
+    let candidates: Vec<(String, String, String)> = {
         let sess = sessions.lock().unwrap();
         let mut fire_map = last_fire.lock().unwrap();
         let fail_map = failures.lock().unwrap();
@@ -1521,13 +1532,25 @@ fn maybe_fire_auto_resume(
         for (id, _) in &picked {
             fire_map.insert(id.clone(), Instant::now());
         }
+        // Attach each candidate's source from the same locked snapshot.
         picked
+            .into_iter()
+            .map(|(id, ws)| {
+                let source = sess
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| s.agent_source.clone())
+                    .unwrap_or_else(|| "claude-code".to_string());
+                (id, ws, source)
+            })
+            .collect()
     };
 
-    for (session_id, workspace_path) in candidates {
+    for (session_id, workspace_path, agent_source) in candidates {
         log_debug(&format!(
-            "auto_resume: firing for session {} in {} (in_flight={})",
+            "auto_resume: firing for session {} ({}) in {} (in_flight={})",
             session_id,
+            agent_source,
             workspace_path,
             in_flight.load(Ordering::SeqCst)
         ));
@@ -1536,10 +1559,17 @@ fn maybe_fire_auto_resume(
         let in_flight_done = in_flight.clone();
         let failures_done = failures.clone();
         let id_done = session_id.clone();
-        let spawn_result = claw_fleet_core::auto_resume::spawn_resume_tracked(
-            &session_id,
-            &workspace_path,
-            move |success| {
+        let spawn_result = claw_fleet_core::agent_source::resume_session(
+            &agent_source,
+            &claw_fleet_core::agent_source::ResumeSpec {
+                session_id: session_id.clone(),
+                workspace_path: workspace_path.clone(),
+                prompt: "continue".to_string(),
+                model: None,
+                effort: None,
+                permission_mode: None,
+            },
+            Box::new(move |success| {
                 in_flight_done.fetch_sub(1, Ordering::SeqCst);
                 if let Ok(mut fail_map) = failures_done.lock() {
                     claw_fleet_core::auto_resume::record_resume_outcome(
@@ -1548,7 +1578,7 @@ fn maybe_fire_auto_resume(
                         success,
                     );
                 }
-            },
+            }),
         );
         if let Err(e) = spawn_result {
             // Spawn failed before any process exists → release the slot here
@@ -1702,6 +1732,7 @@ impl Backend for LocalBackend {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
+        agent_source: String,
     ) -> Result<(), String> {
         resume_session_impl(
             &session_id,
@@ -1710,6 +1741,7 @@ impl Backend for LocalBackend {
             model.as_deref(),
             effort.as_deref(),
             permission_mode.as_deref(),
+            &agent_source,
         )?;
         // Trigger a rescan after a delay so the UI picks up the new turn
         // (which will also clear the RateLimited badge via detect_rate_limit).
@@ -1755,14 +1787,21 @@ impl Backend for LocalBackend {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
+        tool: Option<String>,
     ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
-        let resp = claw_fleet_core::session_launch::spawn_new_session(
-            &workspace_path,
-            &prompt,
-            model.as_deref(),
-            effort.as_deref(),
-            permission_mode.as_deref(),
-        )?;
+        let tool = tool.unwrap_or_default();
+        // The "新会话" button preassigns no id and uses the default entrypoint;
+        // the dispatcher routes to claude or codex by `tool`.
+        let spec = claw_fleet_core::agent_source::SpawnSpec {
+            workspace_path,
+            prompt,
+            model,
+            effort,
+            permission_mode,
+            session_id: None,
+            entrypoint: String::new(),
+        };
+        let resp = claw_fleet_core::agent_source::spawn_session(&tool, &spec)?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up
         // in the session list without waiting for the next scheduled scan.
         let app = self.app.clone();

@@ -16,6 +16,43 @@ use crate::backend::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::SessionInfo;
 
+/// Parameters for launching a brand-new session, source-agnostic.
+///
+/// Not every field applies to every source: `session_id` and `entrypoint` are
+/// Claude-specific (Codex mints its own thread id and has no entrypoint env);
+/// Codex ignores them. `permission_mode` is Claude's `--permission-mode` today;
+/// the Codex sandbox/approval mapping is a later milestone.
+#[derive(Clone, Debug, Default)]
+pub struct SpawnSpec {
+    pub workspace_path: String,
+    pub prompt: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission_mode: Option<String>,
+    /// Caller-pre-assigned session id (Claude `--session-id`); Codex ignores it.
+    pub session_id: Option<String>,
+    /// `CLAUDE_CODE_ENTRYPOINT` value (Claude only); empty → the source's default.
+    pub entrypoint: String,
+}
+
+/// Parameters for resuming an existing session, source-agnostic.
+///
+/// The analogue of [`SpawnSpec`] for the resume path. `session_id` is the
+/// source's own id (Claude session uuid / Codex thread id). `prompt` empty →
+/// the source's default follow-up ("continue"). `permission_mode` is Claude's
+/// `--permission-mode`; Codex ignores it (its sandbox/approval mapping is a
+/// later milestone).
+#[derive(Clone, Debug, Default)]
+pub struct ResumeSpec {
+    pub session_id: String,
+    pub workspace_path: String,
+    /// Follow-up prompt for the resumed turn; empty → source default.
+    pub prompt: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission_mode: Option<String>,
+}
+
 /// How a source should be monitored for changes.
 pub enum WatchStrategy {
     /// Watch filesystem paths with `notify` (Claude Code).
@@ -138,6 +175,31 @@ pub trait AgentSource: Send + Sync {
     /// Kill all processes in a workspace.
     fn kill_workspace(&self, _workspace_path: &str) -> Result<(), String> {
         Err(format!("{}: kill_workspace not supported", self.name()))
+    }
+
+    /// Launch a brand-new headless session for this source. Default is "not
+    /// supported"; sources that can be Fleet-launched (Claude, Codex) override.
+    fn spawn(
+        &self,
+        _spec: &SpawnSpec,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+        Err(format!("{}: spawn not supported", self.name()))
+    }
+
+    /// Headlessly resume an existing session for this source. Default is "not
+    /// supported"; sources that can be Fleet-resumed (Claude, Codex) override.
+    ///
+    /// `on_exit(success)` is invoked from the reaper thread when the spawned
+    /// resume process exits — the auto-resume scheduler uses it to free its
+    /// concurrency slot and record backoff. Manual (untracked) resume passes a
+    /// no-op. A boxed `FnOnce` (rather than a generic) keeps the trait
+    /// object-safe for `dyn AgentSource`.
+    fn resume(
+        &self,
+        _spec: &ResumeSpec,
+        _on_exit: Box<dyn FnOnce(bool) + Send>,
+    ) -> Result<(), String> {
+        Err(format!("{}: resume not supported", self.name()))
     }
 
     /// List memory files from this source.
@@ -307,6 +369,51 @@ pub fn build_sources() -> Vec<Box<dyn AgentSource>> {
     }
 
     sources
+}
+
+/// Launch a new session with the given `tool` ("claude" / "codex"), routing to
+/// that source's [`AgentSource::spawn`]. Empty/unknown-blank `tool` defaults to
+/// "claude" (older callers omitted it). Errors if the tool's source is not
+/// registered (e.g. Codex disabled in `fleet-sources.json`) or doesn't support
+/// spawning.
+pub fn spawn_session(
+    tool: &str,
+    spec: &SpawnSpec,
+) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    let tool = normalize_tool(tool);
+    let sources = build_sources();
+    let source = find_source_by_api_name(&sources, tool)
+        .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
+    source.spawn(spec)
+}
+
+/// Resume an existing session with the given `tool`, routing to that source's
+/// [`AgentSource::resume`]. Accepts both api names ("claude"/"codex") and
+/// config/`agent_source` names ("claude-code"); blank defaults to "claude"
+/// (older callers omitted it). `on_exit(success)` fires when the resume process
+/// exits (no-op box for untracked manual resume). Errors if the tool's source
+/// is not registered or doesn't support resuming.
+pub fn resume_session(
+    tool: &str,
+    spec: &ResumeSpec,
+    on_exit: Box<dyn FnOnce(bool) + Send>,
+) -> Result<(), String> {
+    let tool = normalize_tool(tool);
+    let sources = build_sources();
+    let source = find_source_by_api_name(&sources, tool)
+        .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
+    source.resume(spec, on_exit)
+}
+
+/// Normalise a caller-supplied tool string to a source api name. Blank →
+/// "claude"; the config name "claude-code" → its api name "claude" (the resume
+/// path receives `SessionInfo::agent_source`, which uses config names). Other
+/// values (e.g. "codex") pass through unchanged.
+fn normalize_tool(tool: &str) -> &str {
+    match tool.trim() {
+        "" | "claude-code" => "claude",
+        t => t,
+    }
 }
 
 /// Find a source by its API name (e.g. "claude", "codex").
@@ -573,5 +680,44 @@ mod tests {
 
         // other names pass through
         assert!(config.is_source_enabled("codex"));
+    }
+
+    /// An unknown tool name must fail loudly in the dispatcher rather than
+    /// silently launching Claude — the routing decision has to be explicit.
+    /// (Uses a bogus tool so no real process is ever spawned.)
+    #[test]
+    fn spawn_session_rejects_unknown_tool() {
+        let err = super::spawn_session("definitely-not-a-tool", &SpawnSpec::default())
+            .unwrap_err();
+        assert!(
+            err.contains("not available") || err.contains("disabled"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// The resume dispatcher must reject an unknown tool loudly rather than
+    /// silently falling back to Claude — same contract as `spawn_session`.
+    /// (Bogus tool → no real process is ever spawned.)
+    #[test]
+    fn resume_session_rejects_unknown_tool() {
+        let err = super::resume_session(
+            "definitely-not-a-tool",
+            &ResumeSpec::default(),
+            Box::new(|_| {}),
+        )
+        .unwrap_err();
+        assert!(
+            err.contains("not available") || err.contains("disabled"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn normalize_tool_maps_blank_and_claude_code_to_claude() {
+        assert_eq!(super::normalize_tool(""), "claude");
+        assert_eq!(super::normalize_tool("  "), "claude");
+        assert_eq!(super::normalize_tool("claude-code"), "claude");
+        assert_eq!(super::normalize_tool("claude"), "claude");
+        assert_eq!(super::normalize_tool("codex"), "codex");
     }
 }

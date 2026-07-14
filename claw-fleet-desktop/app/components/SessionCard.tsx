@@ -57,6 +57,7 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
       await invoke("resume_rate_limited_session", {
         sessionId: session.id,
         workspacePath: session.workspacePath,
+        agentSource: session.agentSource,
       });
     } catch (err) {
       console.error("resume failed", err);
@@ -69,10 +70,16 @@ export function RateLimitControls({ session }: { session: SessionInfo }) {
   //  - not a subagent (`agent-*` transcripts can't be resumed)
   //  - not attached to an interactive IDE (ideName == null); an IDE session
   //    (VS Code / Claude app) should be resumed from the editor, not
-  //    by firing a detached headless `claude --resume` behind it
-  //  - a claude-code transcript (`claude --resume` can't load codex/…)
+  //    by firing a detached headless resume behind it
+  //  - a source that supports headless resume. `should_auto_resume` no longer
+  //    gates on source (M2 dismantled the claude-code-only door); resume is
+  //    dispatched by `agentSource` (claude → `claude --resume`, codex →
+  //    `codex exec resume`), so both are resumable.
+  const RESUMABLE_SOURCES = ["claude-code", "codex"];
   const canResume =
-    !session.isSubagent && !session.ideName && session.agentSource === "claude-code";
+    !session.isSubagent &&
+    !session.ideName &&
+    RESUMABLE_SOURCES.includes(session.agentSource);
   return (
     <>
       <RateLimitCountdown state={session.rateLimit} />

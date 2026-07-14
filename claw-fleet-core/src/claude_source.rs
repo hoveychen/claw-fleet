@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 
-use crate::agent_source::{AgentSource, WatchStrategy};
+use crate::agent_source::{AgentSource, ResumeSpec, WatchStrategy};
 use crate::backend::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::{get_claude_dir, SessionInfo};
@@ -119,5 +119,43 @@ impl AgentSource for ClaudeCodeSource {
 
     fn get_memory_history(&self, path: &str) -> Vec<MemoryHistoryEntry> {
         crate::memory::trace_memory_history(path)
+    }
+
+    fn spawn(
+        &self,
+        spec: &crate::agent_source::SpawnSpec,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+        // Empty entrypoint → the "新会话" default, so a bare spawn is still
+        // classified as Fleet-owned by the scanner.
+        let entrypoint = if spec.entrypoint.is_empty() {
+            crate::session_launch::NEW_SESSION_ENTRYPOINT
+        } else {
+            spec.entrypoint.as_str()
+        };
+        crate::session_launch::spawn_new_session_impl(
+            &spec.workspace_path,
+            &spec.prompt,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+            spec.permission_mode.as_deref(),
+            spec.session_id.as_deref(),
+            entrypoint,
+        )
+    }
+
+    fn resume(
+        &self,
+        spec: &ResumeSpec,
+        on_exit: Box<dyn FnOnce(bool) + Send>,
+    ) -> Result<(), String> {
+        crate::auto_resume::spawn_resume_tracked_prompt(
+            &spec.session_id,
+            &spec.workspace_path,
+            &spec.prompt,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+            spec.permission_mode.as_deref(),
+            on_exit,
+        )
     }
 }

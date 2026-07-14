@@ -112,6 +112,11 @@ pub struct SpawnSessionRequest {
     /// fresh id server-side (the pre-idempotent behaviour).
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Which agent tool to launch: `"claude"` (default) or `"codex"`. Routed by
+    /// [`crate::agent_source::spawn_session`] to the matching source's launcher.
+    /// Older callers omit it → `"claude"`, preserving prior behaviour.
+    #[serde(default)]
+    pub tool: Option<String>,
 }
 
 /// Bring a caller-supplied workspace path into the shape the spawn gate
@@ -173,7 +178,12 @@ pub const NEW_SESSION_ENTRYPOINT: &str = "claw-fleet-newsession";
 pub fn is_fleet_owned_entrypoint(entrypoint: Option<&str>) -> bool {
     matches!(
         entrypoint,
-        Some(e) if e == NEW_SESSION_ENTRYPOINT || e == crate::handoff::HANDOFF_ENTRYPOINT
+        Some(e) if e == NEW_SESSION_ENTRYPOINT
+            || e == crate::handoff::HANDOFF_ENTRYPOINT
+            // Codex has no `CLAUDE_CODE_ENTRYPOINT`; the Codex scanner surfaces the
+            // rollout `originator` in this same field, and Fleet-launched Codex
+            // sessions carry `originator == "fleet"` (see `codex_launch`).
+            || e == crate::codex_launch::CODEX_FLEET_ORIGINATOR
     )
 }
 
@@ -567,7 +577,7 @@ pub fn spawn_new_session_with_entrypoint(
     )
 }
 
-fn spawn_new_session_impl(
+pub(crate) fn spawn_new_session_impl(
     workspace_path: &str,
     prompt: &str,
     model: Option<&str>,
@@ -948,6 +958,19 @@ mod fleet_owned_tests {
         assert!(!is_fleet_owned_entrypoint(Some("claude-vscode")));
         assert!(!is_fleet_owned_entrypoint(Some("sdk-py")));
         assert!(!is_fleet_owned_entrypoint(None));
+    }
+
+    #[test]
+    fn codex_fleet_originator_is_fleet_owned() {
+        // Fleet-launched Codex carries `originator == "fleet"` on the entrypoint
+        // field (the Codex scanner surfaces the rollout originator there).
+        assert!(is_fleet_owned_entrypoint(Some(
+            crate::codex_launch::CODEX_FLEET_ORIGINATOR
+        )));
+        // Foreign Codex origins (bare exec, the VS Code extension) must not be
+        // treated as Fleet-owned.
+        assert!(!is_fleet_owned_entrypoint(Some("codex_exec")));
+        assert!(!is_fleet_owned_entrypoint(Some("codex_vscode")));
     }
 }
 
