@@ -16,18 +16,15 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// Build an augmented PATH that includes common Node.js installation directories.
+/// Build an augmented PATH that includes common Node.js installation directories,
+/// with `front` dirs placed ahead of everything — used by
+/// [`spawn_claude_detached_with_envs`] to lead with `~/.claude/fleet/bin`.
+///
 /// GUI apps (like Tauri) launched by launchd carry a minimal PATH
 /// (`/usr/bin:/bin:/usr/sbin:/sbin`); a spawned `claude` child inheriting it
 /// can't find user-installed binaries (fleet, cws, node) from its Bash tool.
 /// Prepend the common Node/global install dirs so those tools resolve; the
 /// existing PATH stays at the tail so nothing is lost.
-pub(crate) fn augmented_path() -> String {
-    augmented_path_with_front(&[])
-}
-
-/// Like [`augmented_path`] but with `front` dirs placed ahead of everything —
-/// used by [`spawn_claude_detached_with_envs`] to lead with `~/.claude/fleet/bin`.
 ///
 /// The entries are joined with [`std::env::join_paths`], which uses the
 /// platform's PATH separator. The old body joined with a hardcoded `":"`, which
