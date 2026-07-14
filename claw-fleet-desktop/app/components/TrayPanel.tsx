@@ -106,9 +106,7 @@ export interface UsageSummary {
 function UsageRow({ summary }: { summary: UsageSummary }) {
   const sourceLabel: Record<string, string> = {
     claude: "Claude",
-    cursor: "Cursor",
     codex: "Codex",
-    openclaw: "OpenClaw",
   };
 
   const maxBar = summary.bars.reduce((a, b) => (b.utilization > a.utilization ? b : a), summary.bars[0]);

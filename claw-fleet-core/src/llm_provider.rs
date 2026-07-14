@@ -1,4 +1,4 @@
-//! LLM provider abstraction — trait + CLI implementations for Claude, Codex, and Cursor.
+//! LLM provider abstraction — trait + CLI implementations for Claude and Codex.
 //!
 //! Each provider wraps its respective CLI tool for non-interactive text completion.
 //! The trait is used by `claude_analyze` and `daily_report` modules so that any
@@ -89,7 +89,7 @@ pub struct Completion {
 }
 
 pub trait LlmProvider: Send + Sync {
-    /// Short identifier: "claude", "codex", "cursor".
+    /// Short identifier: "claude", "codex".
     fn name(&self) -> &str;
     /// Human-readable display name.
     fn display_name(&self) -> &str;
@@ -383,118 +383,6 @@ impl LlmProvider for CodexCliProvider {
     }
 }
 
-// ── Cursor Agent CLI provider ────────────────────────────────────────────────
-
-pub struct CursorCliProvider {
-    bin_path: Option<String>,
-}
-
-impl CursorCliProvider {
-    pub fn new() -> Self {
-        let bin_path = resolve_binary("agent", &[
-            "~/.local/bin/agent",
-            "/usr/local/bin/agent",
-        ]);
-        Self { bin_path }
-    }
-}
-
-impl LlmProvider for CursorCliProvider {
-    fn name(&self) -> &str { "cursor" }
-    fn display_name(&self) -> &str { "Cursor Agent" }
-
-    fn is_available(&self) -> bool {
-        self.bin_path.is_some()
-    }
-
-    fn list_models(&self) -> Vec<LlmModel> {
-        let bin = match self.bin_path.as_deref() {
-            Some(b) => b,
-            None => return Vec::new(),
-        };
-
-        // `agent models` outputs lines like:
-        //   model-id - Display Name
-        //   model-id - Display Name  (default)
-        // with ANSI escape codes mixed in.
-        let output = match crate::process_util::command(bin).arg("models").output() {
-            Ok(o) if o.status.success() => o,
-            _ => return Vec::new(),
-        };
-
-        let raw = String::from_utf8_lossy(&output.stdout);
-        parse_cursor_models(&raw)
-    }
-
-    fn default_fast_model(&self) -> &str { "composer-2-fast" }
-    fn default_standard_model(&self) -> &str { "composer-2" }
-
-    fn complete(&self, prompt: &str, model: &str, timeout: Duration) -> Option<Completion> {
-        let bin = self.bin_path.as_deref()?;
-        // -p: print mode (non-interactive, output to stdout)
-        // -f: trust workspace without interactive prompt
-        // --mode ask: read-only Q&A (no file writes)
-        let text = run_cli(
-            bin,
-            &["-p", "-f", "--model", model, "--mode", "ask", prompt],
-            timeout,
-            "llm:cursor",
-        )?;
-        Some(Completion { text, usage: None })
-    }
-}
-
-/// Strip ANSI escape codes from a string.
-fn strip_ansi(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        if c == '\x1b' {
-            // Skip ESC [ ... (final byte in 0x40–0x7E range)
-            if chars.peek() == Some(&'[') {
-                chars.next(); // consume '['
-                while let Some(&nc) = chars.peek() {
-                    chars.next();
-                    if nc.is_ascii() && (0x40..=0x7E).contains(&(nc as u8)) {
-                        break;
-                    }
-                }
-            }
-        } else {
-            result.push(c);
-        }
-    }
-    result
-}
-
-/// Parse `agent models` output into `LlmModel` entries.
-fn parse_cursor_models(raw: &str) -> Vec<LlmModel> {
-    let clean = strip_ansi(raw);
-    let mut models = Vec::new();
-
-    for line in clean.lines() {
-        let trimmed = line.trim();
-        // Skip headers, empty lines, and the "Tip:" line
-        if trimmed.is_empty()
-            || trimmed.starts_with("Available")
-            || trimmed.starts_with("Loading")
-            || trimmed.starts_with("Tip:")
-        {
-            continue;
-        }
-        // Expected format: "model-id - Display Name" or "model-id - Display Name  (default)"
-        if let Some((id, rest)) = trimmed.split_once(" - ") {
-            let display = rest.trim_end_matches("(default)").trim().to_string();
-            models.push(LlmModel {
-                id: id.trim().to_string(),
-                display_name: display,
-            });
-        }
-    }
-
-    models
-}
-
 /// Read `~/.codex/models_cache.json` and return non-hidden models.
 fn parse_codex_models_cache() -> Option<Vec<LlmModel>> {
     let path = crate::session::real_home_dir()?.join(".codex").join("models_cache.json");
@@ -527,7 +415,6 @@ pub fn resolve_provider(name: &str) -> Option<Box<dyn LlmProvider>> {
     match name {
         "claude" => Some(Box::new(ClaudeCliProvider::new())),
         "codex" => Some(Box::new(CodexCliProvider::new())),
-        "cursor" => Some(Box::new(CursorCliProvider::new())),
         _ => None,
     }
 }
@@ -538,7 +425,6 @@ pub fn all_provider_infos() -> Vec<LlmProviderInfo> {
     let providers: Vec<Box<dyn LlmProvider>> = vec![
         Box::new(ClaudeCliProvider::new()),
         Box::new(CodexCliProvider::new()),
-        Box::new(CursorCliProvider::new()),
     ];
 
     let mut infos: Vec<LlmProviderInfo> = providers
@@ -571,33 +457,6 @@ pub fn all_provider_infos() -> Vec<LlmProviderInfo> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn strip_ansi_basic() {
-        assert_eq!(strip_ansi("\x1b[2Khello"), "hello");
-        assert_eq!(strip_ansi("\x1b[1A\x1b[2K\x1b[Gtext"), "text");
-        assert_eq!(strip_ansi("no escapes"), "no escapes");
-    }
-
-    #[test]
-    fn parse_cursor_models_real_output() {
-        let raw = "\x1b[2K\x1b[GLoading models…\n\
-                    \x1b[2K\x1b[1A\x1b[2K\x1b[GAvailable models\n\
-                    \n\
-                    auto - Auto\n\
-                    composer-2-fast - Composer 2 Fast  (default)\n\
-                    composer-2 - Composer 2\n\
-                    grok-4-20 - Grok 4.20\n\
-                    \n\
-                    Tip: use --model <id> to switch.";
-        let models = parse_cursor_models(raw);
-        assert_eq!(models.len(), 4);
-        assert_eq!(models[0].id, "auto");
-        assert_eq!(models[0].display_name, "Auto");
-        assert_eq!(models[1].id, "composer-2-fast");
-        assert_eq!(models[1].display_name, "Composer 2 Fast");
-        assert_eq!(models[3].id, "grok-4-20");
-    }
 
     #[test]
     fn resolve_unknown_provider_returns_none() {

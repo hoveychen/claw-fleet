@@ -182,7 +182,7 @@ export interface SessionInfo {
   pendingToolBatch?: boolean;
   lastSkill: string | null;
   contextPercent: number | null;
-  agentSource: "claude-code" | "cursor" | "openclaw" | "codex";
+  agentSource: "claude-code" | "codex";
   lastOutcome: SessionOutcome[] | null;
   rateLimit?: RateLimitState | null;
   /** Snapshot of the latest TodoWrite state; absent when the session has never invoked TodoWrite. */
@@ -244,7 +244,7 @@ export interface WaitingAlert {
   summary: string;
   detectedAtMs: number;
   jsonlPath: string;
-  /** Originating agent source — e.g. "claude-code", "cursor", "codex". */
+  /** Originating agent source — e.g. "claude-code", "codex". */
   source: string;
 }
 
@@ -586,7 +586,7 @@ export interface RawMessage {
    *
    * Deliberately `unknown`. This is a Claude Code *internal* field, not a
    * public contract: its key set differs per tool, and only the Claude source
-   * emits it (codex / openclaw / agent sources never do). Narrow it through the
+   * emits it (codex / agent sources never do). Narrow it through the
    * guards in `toolResults.ts`, every one of which returns `null` on a shape
    * mismatch so callers degrade to the generic renderer.
    */

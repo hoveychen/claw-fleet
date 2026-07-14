@@ -5,7 +5,7 @@
 import type { RelayClient } from "./relay";
 import type { AccountUsage, UsageHistoryPoint } from "./types";
 
-/** Claude 账号档案 + 各源限流用量。桌面端会真去打 Anthropic / cursor / codex 的接口。 */
+/** Claude 账号档案 + 各源限流用量。桌面端会真去打 Anthropic / codex 的接口。 */
 export function fetchAccountUsage(client: RelayClient): Promise<AccountUsage> {
   return client.request<AccountUsage>("account_usage", undefined, ACCOUNT_TIMEOUT_MS);
 }
