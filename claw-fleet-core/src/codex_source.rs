@@ -924,8 +924,72 @@ fn build_session_from_sqlite(
 
 #[cfg(test)]
 mod tests {
-    use super::{compute_token_stats, extract_context_percent};
+    use super::{
+        codex_rate_limit_state_from_usage, compute_token_stats, extract_context_percent,
+        CodexRateLimitWindow, CodexUsageItem,
+    };
     use serde_json::json;
+
+    fn window(used_percent: i32, window_mins: i64, resets_at_secs: i64) -> CodexRateLimitWindow {
+        CodexRateLimitWindow {
+            used_percent,
+            window_duration_mins: Some(window_mins),
+            resets_at: Some(resets_at_secs),
+        }
+    }
+
+    #[test]
+    fn codex_rate_limit_state_none_when_not_reached() {
+        // No `rateLimitReachedType` → account not limited → no state.
+        let usage = CodexUsageItem {
+            primary: Some(window(2, 10080, 1_784_636_186)),
+            rate_limit_reached_type: None,
+            ..Default::default()
+        };
+        assert!(codex_rate_limit_state_from_usage(&usage, chrono::Utc::now()).is_none());
+    }
+
+    #[test]
+    fn codex_rate_limit_state_converts_resets_at_seconds() {
+        // resetsAt is epoch SECONDS (measured against codex-cli 0.144.4), not ms.
+        let resets_secs = 1_784_636_186_i64;
+        let usage = CodexUsageItem {
+            primary: Some(window(100, 10080, resets_secs)),
+            rate_limit_reached_type: Some("primary".into()),
+            ..Default::default()
+        };
+        let st = codex_rate_limit_state_from_usage(&usage, chrono::Utc::now())
+            .expect("reached → Some");
+        assert_eq!(
+            st.resets_at.timestamp(),
+            resets_secs,
+            "resets_at must be interpreted as epoch seconds"
+        );
+        // error_timestamp = window start = resets_at - 7d (10080 min).
+        assert_eq!(
+            (st.resets_at - st.error_timestamp),
+            chrono::Duration::minutes(10080)
+        );
+        // Unknown limit_type → skips the claude-metric recovery gate.
+        assert_eq!(st.limit_type, crate::rate_limit_parser::RateLimitType::Unknown);
+    }
+
+    #[test]
+    fn codex_rate_limit_state_prefers_secondary_when_reached() {
+        let usage = CodexUsageItem {
+            primary: Some(window(50, 10080, 2_000_000_000)),
+            secondary: Some(window(100, 300, 1_900_000_000)),
+            rate_limit_reached_type: Some("secondary".into()),
+            ..Default::default()
+        };
+        let st = codex_rate_limit_state_from_usage(&usage, chrono::Utc::now()).unwrap();
+        assert_eq!(st.resets_at.timestamp(), 1_900_000_000);
+        // secondary window is 300 min = 5h.
+        assert_eq!(
+            (st.resets_at - st.error_timestamp),
+            chrono::Duration::minutes(300)
+        );
+    }
 
     #[test]
     fn compute_token_stats_supports_new_token_count_shape() {
@@ -1819,6 +1883,58 @@ pub struct CodexUsageItem {
     pub secondary: Option<CodexRateLimitWindow>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub credits: Option<CodexCreditsSnapshot>,
+    /// Which window (if any) the account has actually hit: `"primary"` /
+    /// `"secondary"`, or `None`/absent when not currently rate-limited. This is
+    /// the authoritative "am I limited right now" signal from the app-server
+    /// (per `account/rateLimits/read`), used to decide codex auto-resume
+    /// eligibility rather than guessing from a per-session transcript line.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rate_limit_reached_type: Option<String>,
+}
+
+/// Build a Claude-shaped [`crate::session::RateLimitState`] from a Codex
+/// account rate-limit snapshot, for feeding [`crate::auto_resume::should_auto_resume`].
+///
+/// Returns `None` unless the snapshot reports a window has actually been hit
+/// (`rate_limit_reached_type` set) — Fleet only auto-resumes a codex session
+/// that is genuinely limited.
+///
+/// Codex-specific semantics (all verified against codex-cli 0.144.4):
+/// - `resetsAt` is Unix epoch **seconds** (Claude's parsed reset is a
+///   `DateTime`), so it is converted with `from_timestamp(secs, 0)`.
+/// - `error_timestamp` is set to `resets_at − windowDuration`, i.e. the window
+///   *start*, NOT `now`. This makes `wait = resets_at − error_timestamp` equal
+///   the window length, so the `max_wait_hours` safety valve treats a codex
+///   **weekly** (10080-min) limit exactly like a Claude weekly limit — too long
+///   to auto-resume unattended — while a short **secondary** window (e.g. 5h)
+///   stays eligible once it resets. Unknown window duration → 7 days
+///   (conservatively blocked).
+/// - `limit_type` is `Unknown` so the Claude-metric recovery path
+///   ([`crate::auto_resume::limit_recovered`]) is skipped (codex has no
+///   five_hour/seven_day sample); recovery is purely the hinted `resetsAt` +
+///   grace.
+pub fn codex_rate_limit_state_from_usage(
+    usage: &CodexUsageItem,
+    _now: chrono::DateTime<chrono::Utc>,
+) -> Option<crate::session::RateLimitState> {
+    let reached = usage.rate_limit_reached_type.as_deref()?;
+    let window = match reached {
+        "secondary" => usage.secondary.as_ref().or(usage.primary.as_ref()),
+        // "primary" or any other non-empty marker → the primary window.
+        _ => usage.primary.as_ref(),
+    }?;
+    let resets_at_secs = window.resets_at?;
+    let resets_at = chrono::DateTime::<chrono::Utc>::from_timestamp(resets_at_secs, 0)?;
+    let window_dur = match window.window_duration_mins {
+        Some(mins) if mins > 0 => chrono::Duration::minutes(mins),
+        _ => chrono::Duration::days(7),
+    };
+    Some(crate::session::RateLimitState {
+        resets_at,
+        limit_type: crate::rate_limit_parser::RateLimitType::Unknown,
+        parsed: true,
+        error_timestamp: resets_at - window_dur,
+    })
 }
 
 /// Locate a runnable Codex binary.
