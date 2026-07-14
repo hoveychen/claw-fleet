@@ -385,17 +385,24 @@ impl crate::backend::Backend for RemoteBackend {
             .map_err(|e| format!("probe /browse_dir failed: {e}"))
     }
 
+    // Auto-resume config is a desktop-local preference: the scheduler that
+    // consumes it (`maybe_fire_auto_resume`) runs inside the desktop's own
+    // scan threads and reads `AutoResumeConfig::load()` from this host's
+    // `~/.fleet`, never the probe's. That is why `fleet serve` deliberately
+    // dropped `/auto_resume_config` in Phase 4 P3 — the probe has no such
+    // config to serve. So both read and write delegate to the local file,
+    // identical to `LocalBackend`; querying the probe (the old code) hit the
+    // catch-all 404, silently masking the real config on read and failing the
+    // save with a raw `HTTP 404`.
     fn get_auto_resume_config(&self) -> claw_fleet_core::auto_resume::AutoResumeConfig {
-        self.probe
-            .get::<claw_fleet_core::auto_resume::AutoResumeConfig>("/auto_resume_config")
-            .unwrap_or_default()
+        claw_fleet_core::auto_resume::AutoResumeConfig::load()
     }
 
     fn set_auto_resume_config(
         &self,
         config: claw_fleet_core::auto_resume::AutoResumeConfig,
     ) -> Result<(), String> {
-        self.probe.post_json_ok("/auto_resume_config", &config)
+        config.save()
     }
 
     fn set_session_mark(
