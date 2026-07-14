@@ -14,6 +14,7 @@ dist-ssr
 
 # Rust build output
 target/
+target-*/
 claw-fleet-desktop/binaries/
 
 # Video pipeline output
