@@ -181,24 +181,6 @@ pub fn analyze_session_outcome(
     Some(parse_response(&raw))
 }
 
-/// Keep the old function signature as a thin wrapper for backward-compat
-/// callers (if any).
-pub fn analyze_waiting_input(
-    provider: &dyn LlmProvider,
-    model: &str,
-    last_text: &str,
-    locale: &str,
-    session_id: &str,
-    user_title: &str,
-) -> Option<String> {
-    let result = analyze_session_outcome(provider, model, last_text, locale, session_id, user_title)?;
-    if result.tags.contains(&"needs_input".to_string()) {
-        Some(result.summary.unwrap_or_else(|| "Waiting for input".to_string()))
-    } else {
-        None
-    }
-}
-
 // ── Response parser ─────────────────────────────────────────────────────────
 
 fn parse_response(raw: &str) -> AnalysisResult {
