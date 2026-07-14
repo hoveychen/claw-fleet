@@ -34,7 +34,7 @@ When you run AI coding agents across multiple projects — or lean on multi-agen
 - **See everything** — live status, token speed, real USD spend, AI-written daily reports.
 - **Approve anything** — every agent question, plan, permission request, and dangerous command lands in one Decision Panel.
 - **Dispatch and relay** — launch new agent sessions from the app (or your phone), chain long tasks across context windows, run recurring loops.
-- **From anywhere** — a mobile web app and a Feishu/Lark channel mean the fleet never waits for you to be at your desk.
+- **From anywhere** — a mobile web app means the fleet never waits for you to be at your desk.
 
 No server required, no API key needed beyond what your agents already use.
 
