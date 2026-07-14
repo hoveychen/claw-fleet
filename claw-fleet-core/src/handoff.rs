@@ -442,6 +442,11 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
         out.push_str("按交接信息继续完成这项工作。\n");
     }
     out.push_str(
+        "\n接手第一件事：交接信息里若含「测试已过 / build 绿 / 接口返回 X」这类**声称的**验证结论，\
+         别直接信任——先自己重跑对应的验证命令，确认它当下仍然成立，再据此往下做。\
+         上一棒的声称可能是伪造的，也可能在交接后已经失效；不核实就继续，会把未经证实的结论沿接力链一路传下去。\n",
+    );
+    out.push_str(
         "\n若你的上下文也接近上限，先用 `fleet handoff --note \"<交接信息>\"` 注册下一棒再结束 turn，不要中途弃工。",
     );
     out
@@ -943,6 +948,15 @@ mod tests {
         assert!(prompt.contains("P1-P3 已完成；P4 卡在 X"));
         assert!(prompt.contains("auth-refactor"));
         assert!(prompt.contains("P4"));
+        // The relay must not trust the predecessor's *claimed* verification: a
+        // "tests pass / build green" line in the note could be fabricated (or
+        // simply stale after the handoff), and blindly continuing would
+        // propagate that unverified claim down the whole chain. The successor
+        // is told to re-run before trusting.
+        assert!(
+            prompt.contains("重跑"),
+            "successor prompt must instruct re-running the predecessor's claimed verification:\n{prompt}"
+        );
         // `attribute_successor` already stamped the side-channel, so the prompt
         // must NOT ask the agent to declare focus — that ceremony is obsolete.
         assert!(
