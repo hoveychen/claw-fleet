@@ -521,6 +521,7 @@
     "tip_thinking": "Extended thinking: {{level}}",
     "tip_skill": "Last skill invoked: /{{skill}}",
     "tip_workflow": "{{total}} workflow run(s), {{running}} running",
+    "tip_subagents": "{{total}} subagent(s), {{running}} running",
     "tip_slug": "Session ID slug: {{slug}}",
     "tip_tokens": "Total output tokens generated",
     "tip_speed": "Output token generation speed",
