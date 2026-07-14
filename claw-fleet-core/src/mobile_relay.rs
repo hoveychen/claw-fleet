@@ -1,6 +1,6 @@
 //! Mobile relay channel — connects the desktop to a `fleet-relay` instance
-//! over an *outbound* WebSocket (same topology as the Feishu channel: no
-//! inbound port, works behind NAT) so the mobile web app can receive decision
+//! over an *outbound* WebSocket (no inbound port, works behind NAT) so the
+//! mobile web app can receive decision
 //! cards / session snapshots and send answers back.
 //!
 //! Transport frames (relay envelope, see `fleet-relay/src/frames.rs`):
@@ -15,7 +15,7 @@
 //!                   / `client_bye{clientId}`
 //!
 //! Answers are written back through the same channel-agnostic
-//! `write_response()` files the desktop panel and Feishu use, so the waiting
+//! `write_response()` files the desktop panel uses, so the waiting
 //! hook/MCP subprocess unblocks without any session-side changes.
 
 use std::collections::HashMap;
@@ -830,8 +830,7 @@ pub fn handle_client_payload(payload: &Value) -> Option<Value> {
 /// Route a mobile answer through `parked::deliver`, exactly as the desktop panel
 /// and the probe API do: a live card unblocks the waiting hook/MCP subprocess via
 /// its `<id>.response.json`, and a parked one (whose producer is long gone)
-/// resumes the session with the answer instead. See `feishu.rs::handle_card_action`
-/// for the sibling path.
+/// resumes the session with the answer instead.
 fn handle_answer(payload: &Value) -> Result<(), String> {
     let kind = payload.get("kind").and_then(Value::as_str).ok_or("missing kind")?;
     let id = payload
@@ -1572,7 +1571,7 @@ fn account_usage_payload() -> Value {
     json!({ "claude": claude, "claudeError": claude_error, "sources": sources })
 }
 
-// ── WebSocket client (mirrors feishu.rs's ensure_ws_client/ws_run_loop) ─────
+// ── WebSocket client (outbound connection + run loop) ───────────────────────
 
 /// Convert the configured https relay URL into the ws endpoint.
 fn ws_url(relay_url: &str) -> String {

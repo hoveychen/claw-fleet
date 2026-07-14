@@ -22,7 +22,6 @@ pub mod decision_panel_config;
 #[cfg(windows)]
 pub mod dpapi;
 pub mod elicitation;
-pub mod feishu;
 pub mod file_explorer;
 pub mod fleet_cli;
 pub mod foxy;
