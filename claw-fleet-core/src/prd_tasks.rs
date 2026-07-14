@@ -7,7 +7,7 @@
 //! detected problems (see [`SentinelProblem`]) so the agent can repair a broken
 //! file rather than have its plan silently vanish from the injection.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,6 +23,11 @@ pub struct PrdBlock {
     /// Schema version from the begin sentinel's `v="..."` attribute: `2` for
     /// v2, `1` for legacy blocks with no `v` attribute.
     pub version: u8,
+    /// `id` of the plan this one is a child of, from the begin sentinel's
+    /// `parent="..."` attribute. `None` for a top-level plan. A child plan is
+    /// side work spawned mid-parent; when it completes, Fleet points the agent
+    /// back at the nearest ancestor that still has pending P-tasks.
+    pub parent: Option<String>,
 }
 
 /// Attributes parsed off a sentinel comment (`<!-- fleet:prd:begin id="x" v="2" -->`).
@@ -30,6 +35,9 @@ pub struct PrdBlock {
 pub struct SentinelAttrs {
     pub id: Option<String>,
     pub version: u8,
+    /// `parent="..."` slot — the id of this plan's parent, if any. Only
+    /// meaningful on a `begin` sentinel; ignored (and typically absent) on `end`.
+    pub parent: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +46,9 @@ pub struct SourcedBlock {
     pub body: String,
     pub source: PathBuf,
     pub mtime: SystemTime,
+    /// `parent="..."` from the begin sentinel — carried so backtracking can walk
+    /// the plan tree across sources. `None` for a top-level plan.
+    pub parent: Option<String>,
 }
 
 // ── Display / Backend types ───────────────────────────────────────────────────
@@ -230,26 +241,31 @@ pub fn extract_prd_blocks(content: &str) -> Vec<PrdBlock> {
 pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<SentinelProblem>) {
     let mut out = Vec::new();
     let mut problems = Vec::new();
-    // (id, version, body)
-    let mut current: Option<(Option<String>, u8, String)> = None;
+    // (id, version, parent, body)
+    let mut current: Option<(Option<String>, u8, Option<String>, String)> = None;
 
     for line in content.lines() {
         let trimmed = line.trim();
         if let Some(attrs) = parse_sentinel(trimmed, "begin") {
             // A second `begin` while one is already open means the previous
             // block was never closed — drop it and start fresh.
-            if let Some((open_id, _, _)) = current.take() {
+            if let Some((open_id, _, _, _)) = current.take() {
                 problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
             }
-            current = Some((attrs.id, attrs.version, String::new()));
+            current = Some((attrs.id, attrs.version, attrs.parent, String::new()));
             continue;
         }
         if let Some(attrs) = parse_sentinel(trimmed, "end") {
             let id = attrs.id;
             match current.take() {
-                Some((open_id, version, body)) => {
+                Some((open_id, version, parent, body)) => {
                     if open_id == id {
-                        out.push(PrdBlock { id: open_id, body, version });
+                        out.push(PrdBlock {
+                            id: open_id,
+                            body,
+                            version,
+                            parent,
+                        });
                     } else {
                         // id mismatch → discard the dangling block; do not start
                         // a new one from the `end` line.
@@ -272,12 +288,12 @@ pub fn extract_prd_blocks_with_problems(content: &str) -> (Vec<PrdBlock>, Vec<Se
                 line: trimmed.to_string(),
             });
         }
-        if let Some((_, _, body)) = current.as_mut() {
+        if let Some((_, _, _, body)) = current.as_mut() {
             body.push_str(line);
             body.push('\n');
         }
     }
-    if let Some((open_id, _, _)) = current.take() {
+    if let Some((open_id, _, _, _)) = current.take() {
         problems.push(SentinelProblem::UnterminatedBegin { id: open_id });
     }
     (out, problems)
@@ -318,7 +334,16 @@ pub fn parse_sentinel(line: &str, kind: &str) -> Option<SentinelAttrs> {
         Some("2") => 2,
         _ => 1,
     };
-    Some(SentinelAttrs { id, version })
+    let parent = attrs
+        .iter()
+        .find(|(k, _)| k == "parent")
+        .map(|(_, v)| v.clone())
+        .filter(|v| !v.is_empty());
+    Some(SentinelAttrs {
+        id,
+        version,
+        parent,
+    })
 }
 
 /// Parse the inner text of a sentinel into ordered `key="value"` pairs.
@@ -401,6 +426,16 @@ pub fn plan_body(content: &str, plan_id: &str) -> Option<String> {
         .into_iter()
         .find(|b| b.id.as_deref() == Some(plan_id))
         .map(|b| b.body)
+}
+
+/// Return the `parent` id declared on the plan block with `plan_id`, if the
+/// block exists and carries a non-empty `parent="..."`. `None` when the plan is
+/// top-level or absent from this content.
+pub fn plan_parent(content: &str, plan_id: &str) -> Option<String> {
+    extract_prd_blocks(content)
+        .into_iter()
+        .find(|b| b.id.as_deref() == Some(plan_id))
+        .and_then(|b| b.parent)
 }
 
 /// Set the `[ ]`/`[x]` state of the top-level task matching `p_label` (matched
@@ -488,15 +523,26 @@ pub fn add_task(
 }
 
 /// Append a fresh empty v2 plan block. Errors when `plan_id` already exists.
-pub fn create_plan(content: &str, plan_id: &str, title: &str) -> Result<String, String> {
+/// `parent` records a `parent="..."` attribute so the block is a child plan —
+/// side work spawned mid-parent that Fleet backtracks from on completion.
+pub fn create_plan(
+    content: &str,
+    plan_id: &str,
+    title: &str,
+    parent: Option<&str>,
+) -> Result<String, String> {
     if extract_prd_blocks(content)
         .iter()
         .any(|b| b.id.as_deref() == Some(plan_id))
     {
         return Err(format!("plan '{plan_id}' already exists"));
     }
+    let parent_attr = match parent {
+        Some(p) if !p.trim().is_empty() => format!(" parent=\"{}\"", p.trim()),
+        _ => String::new(),
+    };
     let block = format!(
-        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\" -->\n\n**Plan:** {title}\n\n<!-- fleet:prd:end id=\"{plan_id}\" -->\n"
+        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\"{parent_attr} -->\n\n**Plan:** {title}\n\n<!-- fleet:prd:end id=\"{plan_id}\" -->\n"
     );
     let mut out = content.to_string();
     if out.is_empty() {
@@ -660,6 +706,7 @@ pub fn collect_from_sources(
                 body,
                 source: path.clone(),
                 mtime,
+                parent: b.parent,
             });
         }
     }
@@ -701,6 +748,68 @@ pub fn dedup_blocks_keep_latest_mtime(blocks: Vec<SourcedBlock>) -> Vec<SourcedB
         })
         .map(|(_, b)| b)
         .collect()
+}
+
+// ── Backtrack (child plan → nearest pending ancestor) ─────────────────────────
+
+/// The plan to return to once a child plan completes: the nearest ancestor that
+/// still has a pending P-task, plus that ancestor's first pending task.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BacktrackTarget {
+    pub plan_id: String,
+    /// First still-pending top-level P-task in that ancestor (e.g. `**P3** — …`).
+    /// `None` only if the pending line couldn't be turned into a P-label.
+    pub next_task: Option<String>,
+}
+
+/// After `completed_plan` is fully checked, find the nearest ancestor (walking
+/// `parent="..."` links upward) that still has a pending P-task. Returns `None`
+/// when the plan has no parent, every ancestor is already complete, an ancestor
+/// is missing, or a parent cycle is detected.
+///
+/// Multi-source: merges every TASKS.md the workspace can see (main checkout +
+/// sibling worktrees), deduped by id with latest mtime winning — the same view
+/// the hook renders — so a child living in a worktree can point at a parent in
+/// the main checkout. Completed ancestors are kept in the merge (`active_only`
+/// = false) so the walk can climb past a finished parent to a pending grandparent.
+pub fn resolve_backtrack_target(cwd: &Path, completed_plan: &str) -> Option<BacktrackTarget> {
+    let main_root = discover_main_checkout_root(cwd);
+    let sources = collect_task_sources(cwd, main_root.as_deref());
+    let (raw, _) = collect_from_sources(&sources, false);
+    let blocks = dedup_blocks_keep_latest_mtime(raw);
+    let by_id: HashMap<&str, &SourcedBlock> = blocks
+        .iter()
+        .filter_map(|b| b.id.as_deref().map(|id| (id, b)))
+        .collect();
+    resolve_backtrack_in(&by_id, completed_plan)
+}
+
+/// Pure core of [`resolve_backtrack_target`]: walk the parent chain over a
+/// pre-built id → block map. Split out so tests exercise the walk (including
+/// cycles and cross-source parents) without touching the filesystem.
+fn resolve_backtrack_in(
+    by_id: &HashMap<&str, &SourcedBlock>,
+    completed_plan: &str,
+) -> Option<BacktrackTarget> {
+    let mut visited: HashSet<String> = HashSet::new();
+    visited.insert(completed_plan.to_string());
+    let mut cursor = by_id.get(completed_plan)?.parent.clone();
+    while let Some(pid) = cursor {
+        // A parent pointing back into the already-visited chain is a cycle;
+        // stop rather than loop forever.
+        if !visited.insert(pid.clone()) {
+            return None;
+        }
+        let block = by_id.get(pid.as_str())?;
+        if block.body.lines().any(is_pending_task_line) {
+            return Some(BacktrackTarget {
+                plan_id: pid,
+                next_task: first_pending_task(&block.body),
+            });
+        }
+        cursor = block.parent.clone();
+    }
+    None
 }
 
 // ── Rendering (hook) ──────────────────────────────────────────────────────────
@@ -1132,6 +1241,7 @@ trailing notes outside\n";
             body: body.to_string(),
             source: source.to_path_buf(),
             mtime,
+            parent: None,
         }
     }
 
@@ -1447,14 +1557,119 @@ trailing notes outside\n";
 
     #[test]
     fn create_plan_appends_v2_block_and_rejects_dupes() {
-        let out = create_plan(TWO_PLAN, "c", "Gamma").unwrap();
+        let out = create_plan(TWO_PLAN, "c", "Gamma", None).unwrap();
         assert!(out.contains("<!-- fleet:prd:begin id=\"c\" v=\"2\" -->"));
         assert!(out.contains("**Plan:** Gamma"));
-        assert!(create_plan(&out, "c", "again").is_err());
+        assert!(create_plan(&out, "c", "again", None).is_err());
         // create into empty content seeds a header
-        let fresh = create_plan("", "x", "X").unwrap();
+        let fresh = create_plan("", "x", "X", None).unwrap();
         assert!(fresh.starts_with("# TASKS"));
         assert!(fresh.contains("id=\"x\" v=\"2\""));
+    }
+
+    #[test]
+    fn create_plan_with_parent_writes_parent_attr_and_is_parseable() {
+        let out = create_plan("", "child", "Child", Some("root")).unwrap();
+        assert!(
+            out.contains("id=\"child\" v=\"2\" parent=\"root\" -->"),
+            "parent attribute must land on the begin sentinel: {out}"
+        );
+        // round-trips back out through the parser
+        assert_eq!(plan_parent(&out, "child").as_deref(), Some("root"));
+        // blank parent degrades to a top-level plan (no attr written)
+        let blank = create_plan("", "x", "X", Some("   ")).unwrap();
+        assert!(!blank.contains("parent="));
+        assert_eq!(plan_parent(&blank, "x"), None);
+    }
+
+    #[test]
+    fn parse_sentinel_reads_parent_slot_any_order() {
+        // parent alongside id+v, order-independent, empty parent ignored
+        let a = parse_sentinel(
+            "<!-- fleet:prd:begin id=\"c\" v=\"2\" parent=\"p\" -->",
+            "begin",
+        )
+        .unwrap();
+        assert_eq!(a.parent.as_deref(), Some("p"));
+        let b = parse_sentinel(
+            "<!-- fleet:prd:begin parent=\"p\" id=\"c\" v=\"2\" -->",
+            "begin",
+        )
+        .unwrap();
+        assert_eq!(b.parent.as_deref(), Some("p"));
+        let none = parse_sentinel("<!-- fleet:prd:begin id=\"c\" v=\"2\" -->", "begin").unwrap();
+        assert_eq!(none.parent, None);
+        let empty =
+            parse_sentinel("<!-- fleet:prd:begin id=\"c\" parent=\"\" -->", "begin").unwrap();
+        assert_eq!(empty.parent, None, "empty parent slot is treated as absent");
+    }
+
+    /// Build a parented SourcedBlock for backtrack-walk tests.
+    fn sbp(id: &str, body: &str, parent: Option<&str>) -> SourcedBlock {
+        SourcedBlock {
+            id: Some(id.to_string()),
+            body: body.to_string(),
+            source: PathBuf::from("/r/TASKS.md"),
+            mtime: UNIX_EPOCH,
+            parent: parent.map(|s| s.to_string()),
+        }
+    }
+
+    fn by_id_map<'a>(blocks: &'a [SourcedBlock]) -> HashMap<&'a str, &'a SourcedBlock> {
+        blocks
+            .iter()
+            .filter_map(|b| b.id.as_deref().map(|id| (id, b)))
+            .collect()
+    }
+
+    #[test]
+    fn backtrack_skips_completed_parent_to_pending_grandparent() {
+        let blocks = [
+            sbp("gp", "- [ ] **P2** — g\n- [x] **P1** — g0\n", None),
+            sbp("par", "- [x] **P1** — p\n", Some("gp")),
+            sbp("child", "- [x] **P1** — c\n", Some("par")),
+        ];
+        let t = resolve_backtrack_in(&by_id_map(&blocks), "child").unwrap();
+        assert_eq!(t.plan_id, "gp");
+        assert_eq!(t.next_task.as_deref(), Some("**P2** — g"));
+    }
+
+    #[test]
+    fn backtrack_returns_immediate_parent_when_it_has_pending() {
+        let blocks = [
+            sbp("par", "- [x] **P1** — p1\n- [ ] **P3** — p3\n", None),
+            sbp("child", "- [x] **P1** — c\n", Some("par")),
+        ];
+        let t = resolve_backtrack_in(&by_id_map(&blocks), "child").unwrap();
+        assert_eq!(t.plan_id, "par");
+        assert_eq!(t.next_task.as_deref(), Some("**P3** — p3"));
+    }
+
+    #[test]
+    fn backtrack_none_when_no_parent_or_all_ancestors_complete() {
+        // no parent at all
+        let top = [sbp("solo", "- [x] **P1** — x\n", None)];
+        assert_eq!(resolve_backtrack_in(&by_id_map(&top), "solo"), None);
+        // parent chain fully complete
+        let done = [
+            sbp("par", "- [x] **P1** — p\n", None),
+            sbp("child", "- [x] **P1** — c\n", Some("par")),
+        ];
+        assert_eq!(resolve_backtrack_in(&by_id_map(&done), "child"), None);
+    }
+
+    #[test]
+    fn backtrack_none_on_cycle_and_missing_ancestor() {
+        // a → b → a cycle, both complete so the walk keeps climbing and must
+        // detect the loop instead of spinning forever.
+        let cyc = [
+            sbp("a", "- [x] **P1** — a\n", Some("b")),
+            sbp("b", "- [x] **P1** — b\n", Some("a")),
+        ];
+        assert_eq!(resolve_backtrack_in(&by_id_map(&cyc), "a"), None);
+        // parent id names a plan absent from the merged view
+        let missing = [sbp("child", "- [x] **P1** — c\n", Some("ghost"))];
+        assert_eq!(resolve_backtrack_in(&by_id_map(&missing), "child"), None);
     }
 
     #[test]
