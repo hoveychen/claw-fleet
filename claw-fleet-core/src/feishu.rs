@@ -10,9 +10,9 @@
 //! - **Done:** types, env probe, PKCE S256, OAuth `state` (UUIDv4),
 //!   localhost:51823 listener, code → token exchange, persistence
 //!   (`~/.fleet/feishu.json`), disconnect, tenant_access_token cache,
-//!   Card 2.0 send/update/urgent_app, decision_id → message_id map.
-//! - **TODO (separate slice):** webhook `/webhook/feishu` signature
-//!   verification + `card.action.trigger` dispatch.
+//!   Card 2.0 send/update/urgent_app, decision_id → message_id map,
+//!   webhook `/webhook/feishu` (`X-Lark-Signature` verification +
+//!   `card.action.trigger` dispatch, see `handle_webhook`).
 //!
 //! Operator setup: see `design/feishu-integration.md#operator-setup-checklist`.
 
