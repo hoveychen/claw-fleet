@@ -569,33 +569,7 @@ pub fn scan_claude_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<Se
         }
     }
 
-    // Aggregate subagent cost into each main session's `agent_total_cost_usd`.
-    // Main sessions already hold their own cost in that field from parse; we add
-    // the sum of every subagent that points back to them.
-    // Token speed rolls up identically: a parent's `agent_token_speed` starts at
-    // its own speed (set in parse, cached pre-aggregation so no double-count on
-    // cache hits) and gains every subagent's speed — including the workflow
-    // fan-out agents hidden from the session list.
-    let mut subagent_cost_by_parent: HashMap<String, f64> = HashMap::new();
-    let mut subagent_speed_by_parent: HashMap<String, f64> = HashMap::new();
-    for s in &sessions {
-        if s.is_subagent {
-            if let Some(pid) = &s.parent_session_id {
-                *subagent_cost_by_parent.entry(pid.clone()).or_insert(0.0) += s.total_cost_usd;
-                *subagent_speed_by_parent.entry(pid.clone()).or_insert(0.0) += s.token_speed;
-            }
-        }
-    }
-    for session in &mut sessions {
-        if !session.is_subagent {
-            if let Some(extra) = subagent_cost_by_parent.get(&session.id) {
-                session.agent_total_cost_usd += *extra;
-            }
-            if let Some(extra) = subagent_speed_by_parent.get(&session.id) {
-                session.agent_token_speed += *extra;
-            }
-        }
-    }
+    aggregate_subagent_rollup(&mut sessions);
 
     // Prune stale entries from session cache.
     {
@@ -701,6 +675,63 @@ pub fn scan_sessions(claude_dir: &Path, scan_cache: &ScanCache) -> Vec<SessionIn
     sessions
 }
 
+/// Roll every subagent's contribution up onto its parent main session, keyed by
+/// `parent_session_id`. Four aggregates land here in one pass over the list:
+///
+/// - `agent_total_cost_usd` / `agent_token_speed` — *accumulators*: a main
+///   session already holds its own value from parse (cached pre-aggregation so
+///   no double-count on a cache hit) and gains the sum of every subagent's.
+/// - `agent_last_activity_ms` / `running_subagent_count` — *overwrites*: the
+///   freshest activity across the parent and any subagent, and the count of
+///   subagents working right now. Recomputed from scratch each scan, so they are
+///   immune to the cached seed being stale.
+///
+/// Every subagent counts — including the hidden workflow fan-out agents — so the
+/// per-card rollup reconciles with the global aggregate.
+fn aggregate_subagent_rollup(sessions: &mut [SessionInfo]) {
+    let mut cost_by_parent: HashMap<String, f64> = HashMap::new();
+    let mut speed_by_parent: HashMap<String, f64> = HashMap::new();
+    let mut activity_by_parent: HashMap<String, u64> = HashMap::new();
+    let mut running_by_parent: HashMap<String, u32> = HashMap::new();
+    for s in sessions.iter() {
+        if s.is_subagent {
+            if let Some(pid) = &s.parent_session_id {
+                *cost_by_parent.entry(pid.clone()).or_insert(0.0) += s.total_cost_usd;
+                *speed_by_parent.entry(pid.clone()).or_insert(0.0) += s.token_speed;
+                let act = activity_by_parent.entry(pid.clone()).or_insert(0);
+                *act = (*act).max(s.last_activity_ms);
+                // Same in-flight set as `active_parent_ids` (WaitingInput
+                // excluded — a parked subagent has finished its turn).
+                if matches!(
+                    s.status,
+                    SessionStatus::Thinking
+                        | SessionStatus::Executing
+                        | SessionStatus::Streaming
+                        | SessionStatus::Delegating
+                        | SessionStatus::Processing
+                ) {
+                    *running_by_parent.entry(pid.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+    for session in sessions.iter_mut() {
+        if session.is_subagent {
+            continue;
+        }
+        if let Some(extra) = cost_by_parent.get(&session.id) {
+            session.agent_total_cost_usd += *extra;
+        }
+        if let Some(extra) = speed_by_parent.get(&session.id) {
+            session.agent_token_speed += *extra;
+        }
+        let sub_activity = activity_by_parent.get(&session.id).copied().unwrap_or(0);
+        session.agent_last_activity_ms = session.last_activity_ms.max(sub_activity);
+        session.running_subagent_count =
+            running_by_parent.get(&session.id).copied().unwrap_or(0);
+    }
+}
+
 /// Minimal `SessionInfo` for tests. Lives here (rather than being re-spelled as
 /// a 40-field literal in each module's test mod) so the enricher suites can
 /// build one cheaply.
@@ -728,6 +759,8 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         cost_speed_usd_per_min: 0.0,
         last_message_preview: None,
         last_activity_ms: 0,
+        agent_last_activity_ms: 0,
+        running_subagent_count: 0,
         created_at_ms: 0,
         jsonl_path: format!("/tmp/{id}.jsonl"),
         model: None,
@@ -778,5 +811,78 @@ pub fn scan_all_sources(sources: &[Box<dyn crate::agent_source::AgentSource>]) -
     enrich_all(&mut sessions);
     sort_sessions(&mut sessions);
     sessions
+}
+
+#[cfg(test)]
+mod rollup_tests {
+    use super::*;
+
+    /// Build a subagent pointing at `parent`, with a given status/activity/cost.
+    fn sub(id: &str, parent: &str, status: SessionStatus, activity: u64, cost: f64, speed: f64) -> SessionInfo {
+        let mut s = test_session(id);
+        s.is_subagent = true;
+        s.parent_session_id = Some(parent.into());
+        s.status = status;
+        s.last_activity_ms = activity;
+        s.total_cost_usd = cost;
+        // Subagents carry only their own speed/cost pre-aggregation.
+        s.agent_total_cost_usd = cost;
+        s.token_speed = speed;
+        s.agent_token_speed = speed;
+        s
+    }
+
+    #[test]
+    fn rolls_up_running_count_and_freshest_activity() {
+        // Parent with its own stale activity; three subagents — two in-flight,
+        // one parked on input (must NOT count as running), and the freshest
+        // activity lives on a subagent.
+        let mut main = test_session("main");
+        main.last_activity_ms = 1_000;
+        main.total_cost_usd = 0.10;
+        main.agent_total_cost_usd = 0.10;
+        main.token_speed = 5.0;
+        main.agent_token_speed = 5.0;
+
+        let mut sessions = vec![
+            main,
+            sub("a", "main", SessionStatus::Executing, 9_000, 0.02, 3.0),
+            sub("b", "main", SessionStatus::Streaming, 5_000, 0.03, 7.0),
+            // Parked — finished its turn; excluded from the running count.
+            sub("c", "main", SessionStatus::WaitingInput, 8_000, 0.01, 0.0),
+        ];
+
+        aggregate_subagent_rollup(&mut sessions);
+        let m = &sessions[0];
+
+        assert_eq!(m.running_subagent_count, 2, "only the two in-flight subagents run");
+        assert_eq!(m.agent_last_activity_ms, 9_000, "freshest is subagent a, not the parent's 1000");
+        // Accumulators sum own + all subagents (parked ones included for cost).
+        assert!((m.agent_total_cost_usd - 0.16).abs() < 1e-9);
+        assert!((m.agent_token_speed - 15.0).abs() < 1e-9);
+        // Own scalar fields are untouched.
+        assert_eq!(m.last_activity_ms, 1_000);
+    }
+
+    #[test]
+    fn no_subagents_leaves_activity_at_own_and_zero_count() {
+        let mut main = test_session("solo");
+        main.last_activity_ms = 4_242;
+        let mut sessions = vec![main];
+        aggregate_subagent_rollup(&mut sessions);
+        assert_eq!(sessions[0].running_subagent_count, 0);
+        assert_eq!(sessions[0].agent_last_activity_ms, 4_242, "falls back to own activity");
+    }
+
+    #[test]
+    fn subagent_rows_are_never_credited_a_count() {
+        // A subagent is never itself a parent in the rollup, even if some other
+        // row erroneously pointed at it — the loop only writes to `!is_subagent`.
+        let mut sub_row = sub("x", "main", SessionStatus::Executing, 2_000, 0.0, 1.0);
+        sub_row.running_subagent_count = 0;
+        let mut sessions = vec![sub_row];
+        aggregate_subagent_rollup(&mut sessions);
+        assert_eq!(sessions[0].running_subagent_count, 0);
+    }
 }
 

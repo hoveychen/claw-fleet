@@ -427,6 +427,8 @@ mod tests {
             cost_speed_usd_per_min: 0.0,
             last_message_preview: None,
             last_activity_ms: 0,
+            agent_last_activity_ms: 0,
+            running_subagent_count: 0,
             created_at_ms: 0,
             jsonl_path: "/w/s1.jsonl".into(),
             model: None,

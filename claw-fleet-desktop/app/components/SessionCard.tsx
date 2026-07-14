@@ -314,6 +314,13 @@ interface Props {
   hideHeader?: boolean;
   /** Number of subagents attached to this main session (group-main only). */
   subagentCount?: number;
+  /** How many of those `subagentCount` subagents are working right now
+   *  (group-main only). Scoped to the SAME set as `subagentCount` — i.e. direct
+   *  subagents, NOT the workflow fan-out agents, which the caller surfaces
+   *  through the separate `wf` chip. (The task-page row, which has no `wf` chip,
+   *  instead uses the backend `session.runningSubagentCount`, which folds the
+   *  workflow agents in.) */
+  runningSubagentCount?: number;
 }
 
 export function useMultiSource() {
@@ -324,7 +331,7 @@ export function useMultiSource() {
   }, [sessions]);
 }
 
-export function SessionCard({ session, isSelected, onClick, variant, hideHeader, subagentCount }: Props) {
+export function SessionCard({ session, isSelected, onClick, variant, hideHeader, subagentCount, runningSubagentCount }: Props) {
   const { t } = useTranslation();
   const openDetail = useDetailStore((s) => s.open);
   const multiSource = useMultiSource();
@@ -380,7 +387,17 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             <span className={styles.gm_skill} title={t("card.tip_skill", { skill: session.lastSkill })}>/{session.lastSkill}</span>
           )}
           {(subagentCount ?? 0) > 0 && (
-            <span className={styles.gm_sub_count}>+{subagentCount} sub</span>
+            <span
+              className={styles.gm_sub_count}
+              data-running={(runningSubagentCount ?? 0) > 0 ? "true" : undefined}
+              title={t("card.tip_subagents", {
+                total: subagentCount,
+                running: runningSubagentCount ?? 0,
+              })}
+            >
+              +{subagentCount} sub
+              {(runningSubagentCount ?? 0) > 0 ? ` · ${runningSubagentCount}▶` : ""}
+            </span>
           )}
           {workflowRun && workflowRun.total > 0 && (
             <span
@@ -597,7 +614,11 @@ export function SessionCard({ session, isSelected, onClick, variant, hideHeader,
             ctx {Math.round(session.contextPercent * 100)}%
           </span>
         )}
-        <TimeAgo ms={session.lastActivityMs} />
+        {/* Aggregate activity (own ∪ subagents): a delegating main session's own
+            `lastActivityMs` goes stale while its subagents churn — this keeps the
+            card's "last activity" alive with the whole tree. Equals
+            `lastActivityMs` for subagents and for mains with none. */}
+        <TimeAgo ms={session.agentLastActivityMs} />
       </div>
     </div>
   );

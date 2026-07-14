@@ -437,6 +437,23 @@
   white-space: nowrap;
 }
 
+/* Running-subagent count (bot icon + N). Colour inherits the status accent via
+   an inline style (green while delegating), so it reads as a live "there are N
+   agents working under this one" signal — the reason the row's activity time can
+   look fresh while the parent's own last message is old. */
+.row_subagents {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  color: var(--color-success);
+  background: var(--color-bg-card-hover);
+  border-radius: 5px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
+
 .row_time {
   margin-left: auto;
   font-size: 10px;
