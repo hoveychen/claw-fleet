@@ -10,3 +10,34 @@
   color: #e06a6a;
   word-break: break-word;
 }
+
+/* Queued follow-ups waiting for the current turn to end. */
+.queued {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.queued_label {
+  font-size: 10px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.queued_chip {
+  font-size: 11px;
+  line-height: 1.4;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}

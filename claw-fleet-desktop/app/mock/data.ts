@@ -27,6 +27,7 @@ const MOCK_SESSIONS_SEED: Array<
     | "compactPreTokens"
     | "compactPostTokens"
     | "compactCostUsd"
+    | "pendingMessages"
     | "agentLastActivityMs"
     | "runningSubagentCount"
   >
@@ -461,6 +462,7 @@ export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
   compactPreTokens: 0,
   compactPostTokens: 0,
   compactCostUsd: 0,
+  pendingMessages: [],
   // Mocks don't model a live subagent tree, so the aggregate activity just
   // tracks the session's own and nothing is "running".
   agentLastActivityMs: s.lastActivityMs,
@@ -511,6 +513,7 @@ function mkSession(
     compactPreTokens: 0,
     compactPostTokens: 0,
     compactCostUsd: 0,
+    pendingMessages: [],
     ...o,
   };
 }

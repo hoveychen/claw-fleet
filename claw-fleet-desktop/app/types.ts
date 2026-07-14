@@ -94,6 +94,21 @@ export function canResumeSession(s: SessionInfo): boolean {
 }
 
 /**
+ * Whether the detail view should offer to *queue* a follow-up: a Fleet-launched
+ * main session whose turn is still in flight. Resuming now would race the live
+ * turn, so instead the message is enqueued and delivered via `claude --resume`
+ * when the turn ends (see `pending_message` / `enqueue_session_message`). The
+ * exact complement of `canResumeSession` for Fleet-owned main sessions.
+ */
+export function canEnqueueSession(s: SessionInfo): boolean {
+  return (
+    !s.isSubagent &&
+    isFleetOwnedEntrypoint(s.entrypoint) &&
+    (s.procAlive || IN_FLIGHT_STATUSES.has(s.status))
+  );
+}
+
+/**
  * Whether a session counts as *unread*: it has newer activity than the last
  * time it was read. `overrideReadMs` is the optimistic client-side read stamp
  * (from `useReadStore`) that covers the window between a dwell-read and the next

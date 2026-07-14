@@ -1406,6 +1406,7 @@ fn make_session_info_for_date(
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
+        pending_messages: Vec::new(),
     })
 }
 
@@ -1994,6 +1995,7 @@ mod tests {
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
+            pending_messages: Vec::new(),
         };
 
         let s2 = crate::session::SessionInfo {
@@ -2039,6 +2041,7 @@ mod tests {
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
+            pending_messages: Vec::new(),
         };
 
         let sessions: Vec<&crate::session::SessionInfo> = vec![&s1, &s2];

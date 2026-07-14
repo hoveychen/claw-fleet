@@ -96,6 +96,9 @@ export interface SessionInfo {
   lastReadMs?: number | null;
   /** True when the session's agent process is still alive. */
   procAlive?: boolean;
+  /** Follow-ups queued while the session was mid-turn, delivered via
+   *  `claude --resume` when the turn ends. Mirrors the desktop SessionInfo. */
+  pendingMessages?: string[];
   /** Relay-chain position when this session took part in a handoff
    *  (`fleet handoff`); absent otherwise. Mirrors the desktop launchpad chip. */
   handoff?: SessionHandoffInfo | null;
@@ -129,6 +132,17 @@ export function canResumeSession(s: SessionInfo): boolean {
     isFleetOwnedEntrypoint(s.entrypoint) &&
     !s.procAlive &&
     !IN_FLIGHT.includes(s.status)
+  );
+}
+
+/** Enqueue-able = a Fleet-owned headless session whose turn is still in flight,
+ *  so a follow-up is queued (not resumed now). Complement of canResumeSession;
+ *  mirrors the desktop's canEnqueueSession. */
+export function canEnqueueSession(s: SessionInfo): boolean {
+  return (
+    !s.isSubagent &&
+    isFleetOwnedEntrypoint(s.entrypoint) &&
+    (!!s.procAlive || IN_FLIGHT.includes(s.status))
   );
 }
 

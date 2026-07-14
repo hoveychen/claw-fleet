@@ -261,6 +261,18 @@ pub trait Backend: Send + Sync {
         effort: Option<String>,
         permission_mode: Option<String>,
     ) -> Result<(), String>;
+    /// Queue a follow-up message for a session that is still mid-turn. Fleet
+    /// sessions are one-shot `-p` processes with no live stdin, so a message
+    /// typed while the turn runs can't be delivered now; it is stored and the
+    /// session-refresh tick fires it via `claude --resume` the moment the turn
+    /// ends (see [`claw_fleet_core::pending_message`]). Rejects sessions Fleet
+    /// didn't launch (they can't be headlessly resumed).
+    fn enqueue_message(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        text: String,
+    ) -> Result<(), String>;
     /// Start a brand-new headless Claude Code session: spawns
     /// `claude -p "<prompt>" --session-id <uuid> [--model <m>] [--effort <e>]
     /// [--permission-mode <pm>]` detached in `workspace_path`. The session is
@@ -916,6 +928,7 @@ mod tests {
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
+            pending_messages: Vec::new(),
         }
     }
 

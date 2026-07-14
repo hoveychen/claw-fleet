@@ -784,6 +784,7 @@ pub(crate) fn test_session(id: &str) -> SessionInfo {
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
+        pending_messages: Vec::new(),
     }
 }
 
@@ -796,6 +797,7 @@ pub fn enrich_all(sessions: &mut [SessionInfo]) {
     crate::handoff::enrich_sessions(sessions);
     crate::session_mark::enrich_sessions(sessions);
     crate::session_read::enrich_sessions(sessions);
+    crate::pending_message::enrich_sessions(sessions);
 }
 
 /// Scan all registered agent sources and merge into a single sorted list.

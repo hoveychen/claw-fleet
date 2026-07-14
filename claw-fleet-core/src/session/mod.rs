@@ -28,7 +28,7 @@ pub struct IdeSession {
 
 // ── Exported types ───────────────────────────────────────────────────────────
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum SessionStatus {
@@ -39,6 +39,7 @@ pub enum SessionStatus {
     Processing,   // last stop_reason = tool_use, recent activity (waiting for tool result)
     WaitingInput, // last stop_reason = end_turn
     Active,       // file written < 30s ago
+    #[default]
     Idle,         // no recent activity
     RateLimited,  // last assistant message was isApiErrorMessage + error=rate_limit;
                   // details (resets_at, limit_type) live on SessionInfo.rate_limit
@@ -61,7 +62,7 @@ pub struct RateLimitState {
     pub error_timestamp: chrono::DateTime<chrono::Utc>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
@@ -221,6 +222,12 @@ pub struct SessionInfo {
     /// turn, so this is computed as `cache_read_price × pre + output_price × post`.
     #[serde(default)]
     pub compact_cost_usd: f64,
+    /// Follow-up messages the user queued while this session was mid-turn, oldest
+    /// first. Delivered via `claude --resume` when the turn ends (see
+    /// [`crate::pending_message`]). Empty for the common case; populated by
+    /// `pending_message::enrich_sessions` on the scan path.
+    #[serde(default)]
+    pub pending_messages: Vec<String>,
 }
 
 
@@ -535,6 +542,7 @@ mod tests {
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
+            pending_messages: Vec::new(),
         }
     }
 
