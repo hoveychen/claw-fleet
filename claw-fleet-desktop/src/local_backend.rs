@@ -1755,14 +1755,21 @@ impl Backend for LocalBackend {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
+        tool: Option<String>,
     ) -> Result<claw_fleet_core::session_launch::SpawnSessionResponse, String> {
-        let resp = claw_fleet_core::session_launch::spawn_new_session(
-            &workspace_path,
-            &prompt,
-            model.as_deref(),
-            effort.as_deref(),
-            permission_mode.as_deref(),
-        )?;
+        let tool = tool.unwrap_or_default();
+        // The "新会话" button preassigns no id and uses the default entrypoint;
+        // the dispatcher routes to claude or codex by `tool`.
+        let spec = claw_fleet_core::agent_source::SpawnSpec {
+            workspace_path,
+            prompt,
+            model,
+            effort,
+            permission_mode,
+            session_id: None,
+            entrypoint: String::new(),
+        };
+        let resp = claw_fleet_core::agent_source::spawn_session(&tool, &spec)?;
         // Trigger a rescan after a delay so the freshly created JSONL shows up
         // in the session list without waiting for the next scheduled scan.
         let app = self.app.clone();

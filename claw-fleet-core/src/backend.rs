@@ -285,6 +285,8 @@ pub trait Backend: Send + Sync {
         model: Option<String>,
         effort: Option<String>,
         permission_mode: Option<String>,
+        // Which agent tool to launch: "claude" (or None) / "codex".
+        tool: Option<String>,
     ) -> Result<crate::session_launch::SpawnSessionResponse, String>;
     /// Absolute path of the pure-chat workspace, creating it if absent. The
     /// launcher pins this as a fixed entry because, unlike a project, it has no
