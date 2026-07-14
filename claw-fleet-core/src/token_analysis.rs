@@ -96,7 +96,7 @@ pub struct SourceBuckets {
     pub fleet_reminders: u64,
     /// `~/.claude/projects/<encoded>/memory/MEMORY.md` (index only).
     pub memory_files: u64,
-    /// Sum of frontmatter tokens for all installed skills (`~/.claude/skills/*/SKILL.md`).
+    /// Sum of frontmatter tokens for all installed skills (each `~/.claude/skills/<name>/SKILL.md`).
     pub skills_manifest: u64,
 
     // === Visible (extracted from JSONL via chars/4) ===

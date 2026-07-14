@@ -4,7 +4,7 @@
  * statuses, and workspaces to showcase all core features.
  */
 
-import type { AuditEvent, AuditSummary, DailyReport, DailyReportStats, HandoffChain, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
+import type { AuditEvent, AuditSummary, DailyMetrics, DailyReport, DailyReportStats, HandoffChain, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
 
 const NOW = Date.now();
 const MIN = 60_000;
@@ -18,7 +18,12 @@ const DAY = 24 * HOUR;
  *  compares against it. */
 export const MOCK_CHAT_WORKSPACE = "/Users/demo/.fleet/chat";
 
-export const MOCK_SESSIONS: SessionInfo[] = [
+const MOCK_SESSIONS_SEED: Array<
+  Omit<
+    SessionInfo,
+    "pendingToolBatch" | "compactCount" | "compactPreTokens" | "compactPostTokens" | "compactCostUsd"
+  >
+> = [
   // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
   {
     id: "sess-fleet-main",
@@ -439,6 +444,18 @@ export const MOCK_SESSIONS: SessionInfo[] = [
   },
 ];
 
+// These fields are always serialized by the backend (plain Rust fields), so the
+// generated SessionInfo requires them; fill trivial defaults here rather than on
+// every seed literal above.
+export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
+  pendingToolBatch: false,
+  compactCount: 0,
+  compactPreTokens: 0,
+  compactPostTokens: 0,
+  compactCostUsd: 0,
+  ...s,
+}));
+
 // ── Large-scale scenario: the "v2.4 release train" ──────────────────────────
 // Extra sessions that turn the board into a believable big-team day: a dozen
 // services shipping one release, delegating swarms, and three live handoff
@@ -474,6 +491,11 @@ function mkSession(
     contextPercent: null,
     agentSource: "claude-code",
     lastOutcome: null,
+    pendingToolBatch: false,
+    compactCount: 0,
+    compactPreTokens: 0,
+    compactPostTokens: 0,
+    compactCostUsd: 0,
     ...o,
   };
 }
@@ -1391,6 +1413,10 @@ export const MOCK_DAILY_REPORT: DailyReport = {
     totalSessions: 13,
     totalSubagents: 7,
     totalToolCalls: 287,
+    totalCacheCreationTokens: 0,
+    totalCacheReadTokens: 0,
+    totalWebSearchRequests: 0,
+    totalCostUsd: 0,
     toolCallBreakdown: {
       Read: 68,
       Write: 42,
@@ -1406,9 +1432,9 @@ export const MOCK_DAILY_REPORT: DailyReport = {
       NotebookEdit: 4,
     },
     modelBreakdown: {
-      "claude-opus-4-20250805": { inputTokens: 612_300, outputTokens: 234_800 },
-      "claude-sonnet-4-20250514": { inputTokens: 198_150, outputTokens: 87_320 },
-      "o3": { inputTokens: 82_000, outputTokens: 23_000 },
+      "claude-opus-4-20250805": { inputTokens: 612_300, outputTokens: 234_800, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+      "claude-sonnet-4-20250514": { inputTokens: 198_150, outputTokens: 87_320, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
+      "o3": { inputTokens: 82_000, outputTokens: 23_000, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 },
     },
     projects: [
       {
@@ -1418,13 +1444,17 @@ export const MOCK_DAILY_REPORT: DailyReport = {
         subagentCount: 4,
         totalInputTokens: 312_400,
         totalOutputTokens: 128_600,
+        totalCacheCreationTokens: 0,
+        totalCacheReadTokens: 0,
+        totalWebSearchRequests: 0,
+        totalCostUsd: 0,
         toolCalls: 112,
         sessions: [
-          { id: "sess-fleet-main", title: "Implement mock mode for demo screenshots", lastMessage: "Creating mock data module with realistic sessions...", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 48720, agentSource: "claude-code" },
-          { id: "sess-fleet-explore", title: null, lastMessage: "Searching for component files...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 12340, agentSource: "claude-code" },
-          { id: "sess-fleet-gp", title: null, lastMessage: "Writing src/mock/data.ts...", model: "claude-opus-4-20250805", isSubagent: true, outputTokens: 8930, agentSource: "claude-code" },
-          { id: "sess-fleet-test", title: null, lastMessage: "Running vitest suite...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 6240, agentSource: "claude-code" },
-          { id: "sess-fleet-review", title: null, lastMessage: "Analyzing diff for potential issues...", model: "claude-opus-4-20250805", isSubagent: true, outputTokens: 3180, agentSource: "claude-code" },
+          { id: "sess-fleet-main", title: "Implement mock mode for demo screenshots", lastMessage: "Creating mock data module with realistic sessions...", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 48720, agentSource: "claude-code", costUsd: 0 },
+          { id: "sess-fleet-explore", title: null, lastMessage: "Searching for component files...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 12340, agentSource: "claude-code", costUsd: 0 },
+          { id: "sess-fleet-gp", title: null, lastMessage: "Writing src/mock/data.ts...", model: "claude-opus-4-20250805", isSubagent: true, outputTokens: 8930, agentSource: "claude-code", costUsd: 0 },
+          { id: "sess-fleet-test", title: null, lastMessage: "Running vitest suite...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 6240, agentSource: "claude-code", costUsd: 0 },
+          { id: "sess-fleet-review", title: null, lastMessage: "Analyzing diff for potential issues...", model: "claude-opus-4-20250805", isSubagent: true, outputTokens: 3180, agentSource: "claude-code", costUsd: 0 },
         ],
       },
       {
@@ -1434,10 +1464,14 @@ export const MOCK_DAILY_REPORT: DailyReport = {
         subagentCount: 1,
         totalInputTokens: 218_500,
         totalOutputTokens: 100_860,
+        totalCacheCreationTokens: 0,
+        totalCacheReadTokens: 0,
+        totalWebSearchRequests: 0,
+        totalCostUsd: 0,
         toolCalls: 64,
         sessions: [
-          { id: "sess-api-main", title: "Fix JWT token validation in auth middleware", lastMessage: "Running test suite after applying the fix...", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 95240, agentSource: "claude-code" },
-          { id: "sess-api-plan", title: null, lastMessage: "Plan complete. Recommended approach: ...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 5620, agentSource: "claude-code" },
+          { id: "sess-api-main", title: "Fix JWT token validation in auth middleware", lastMessage: "Running test suite after applying the fix...", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 95240, agentSource: "claude-code", costUsd: 0 },
+          { id: "sess-api-plan", title: null, lastMessage: "Plan complete. Recommended approach: ...", model: "claude-sonnet-4-20250514", isSubagent: true, outputTokens: 5620, agentSource: "claude-code", costUsd: 0 },
         ],
       },
       {
@@ -1447,9 +1481,13 @@ export const MOCK_DAILY_REPORT: DailyReport = {
         subagentCount: 0,
         totalInputTokens: 82_000,
         totalOutputTokens: 34_560,
+        totalCacheCreationTokens: 0,
+        totalCacheReadTokens: 0,
+        totalWebSearchRequests: 0,
+        totalCostUsd: 0,
         toolCalls: 22,
         sessions: [
-          { id: "sess-codex-pipeline", title: "Optimize Spark job partitioning strategy", lastMessage: "Analyzing current partition distribution...", model: "o3", isSubagent: false, outputTokens: 34560, agentSource: "codex" },
+          { id: "sess-codex-pipeline", title: "Optimize Spark job partitioning strategy", lastMessage: "Analyzing current partition distribution...", model: "o3", isSubagent: false, outputTokens: 34560, agentSource: "codex", costUsd: 0 },
         ],
       },
       {
@@ -1459,9 +1497,13 @@ export const MOCK_DAILY_REPORT: DailyReport = {
         subagentCount: 0,
         totalInputTokens: 89_200,
         totalOutputTokens: 123_400,
+        totalCacheCreationTokens: 0,
+        totalCacheReadTokens: 0,
+        totalWebSearchRequests: 0,
+        totalCostUsd: 0,
         toolCalls: 31,
         sessions: [
-          { id: "sess-web-waiting", title: "Refactor shared components into design system", lastMessage: "Should I proceed with breaking changes to the Button component API?", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 123400, agentSource: "claude-code" },
+          { id: "sess-web-waiting", title: "Refactor shared components into design system", lastMessage: "Should I proceed with breaking changes to the Button component API?", model: "claude-opus-4-20250805", isSubagent: false, outputTokens: 123400, agentSource: "claude-code", costUsd: 0 },
         ],
       },
     ],
@@ -1473,7 +1515,7 @@ export const MOCK_DAILY_REPORT: DailyReport = {
       0, 0, 0, 0, 0, 0, 0, 0,  // 00:00–07:00
       1, 2, 3, 4, 4, 3, 3, 2,  // 08:00–15:00
       2, 1, 1, 0, 1, 1, 0, 0,  // 16:00–23:00
-    ],
+    ] as DailyMetrics["hourlyActivity"],
   },
 };
 
@@ -1608,11 +1650,15 @@ function buildMockReport(entry: typeof TIMELINE_SUMMARIES[0]): DailyReport {
       totalSessions: entry.sessions,
       totalSubagents: entry.subagents,
       totalToolCalls: entry.tools,
+      totalCacheCreationTokens: 0,
+      totalCacheReadTokens: 0,
+      totalWebSearchRequests: 0,
+      totalCostUsd: 0,
       toolCallBreakdown: { Read: Math.round(entry.tools * 0.3), Edit: Math.round(entry.tools * 0.25), Bash: Math.round(entry.tools * 0.2), Grep: Math.round(entry.tools * 0.15), Write: Math.round(entry.tools * 0.1) },
-      modelBreakdown: { "claude-sonnet-4-5-20250514": { inputTokens: entry.input, outputTokens: entry.output } },
-      projects: [{ workspacePath: "/Users/demo/workspace/project", workspaceName: "project", sessionCount: entry.sessions, subagentCount: entry.subagents, totalInputTokens: entry.input, totalOutputTokens: entry.output, toolCalls: entry.tools, sessions: [] }],
+      modelBreakdown: { "claude-sonnet-4-5-20250514": { inputTokens: entry.input, outputTokens: entry.output, cacheCreationTokens: 0, cacheReadTokens: 0, costUsd: 0 } },
+      projects: [{ workspacePath: "/Users/demo/workspace/project", workspaceName: "project", sessionCount: entry.sessions, subagentCount: entry.subagents, totalInputTokens: entry.input, totalOutputTokens: entry.output, totalCacheCreationTokens: 0, totalCacheReadTokens: 0, totalWebSearchRequests: 0, totalCostUsd: 0, toolCalls: entry.tools, sessions: [] }],
       sourceBreakdown: { "claude-code": entry.sessions },
-      hourlyActivity: Array.from({ length: 24 }, (_, h) => h >= 9 && h <= 18 ? Math.round(Math.random() * 5) : 0),
+      hourlyActivity: Array.from({ length: 24 }, (_, h) => h >= 9 && h <= 18 ? Math.round(Math.random() * 5) : 0) as DailyMetrics["hourlyActivity"],
     },
   };
 }

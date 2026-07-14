@@ -1220,7 +1220,7 @@ function FormFieldControl({
           {label}
           <textarea
             rows={3}
-            placeholder={field.placeholder}
+            placeholder={field.placeholder ?? undefined}
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -1297,7 +1297,7 @@ function FormFieldControl({
           {label}
           <input
             type={type}
-            placeholder={field.placeholder}
+            placeholder={field.placeholder ?? undefined}
             value={value}
             onChange={(e) => onChange(e.target.value)}
           />
@@ -1461,7 +1461,7 @@ function ImageGallery({
   qidx,
   client,
 }: {
-  images: { name: string; caption?: string }[];
+  images: { name: string; caption?: string | null }[];
   requestId: string;
   qidx: number;
   client: RelayClient | null;
