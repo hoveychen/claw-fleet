@@ -518,6 +518,7 @@
     "tip_thinking": "扩展思考：{{level}}",
     "tip_skill": "最近调用的 Skill：/{{skill}}",
     "tip_workflow": "{{total}} 个 workflow run，{{running}} 个运行中",
+    "tip_subagents": "{{total}} 个子代，{{running}} 个运行中",
     "tip_slug": "会话 ID 标识：{{slug}}",
     "tip_tokens": "已生成的 Token 总数",
     "tip_speed": "Token 输出速度",

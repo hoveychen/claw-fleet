@@ -102,6 +102,7 @@ function GalleryRow({ main, subagents, onSelect }: RowProps) {
           variant="group-main"
           hideHeader
           subagentCount={subagents.length}
+          runningSubagentCount={activeSubagents.length}
         />
       </div>
 
