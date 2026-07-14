@@ -377,7 +377,8 @@
     "filter_feedback": "Feedback",
     "filter_project": "Project",
     "filter_reference": "Reference",
-    "unindexed_section": "Unindexed"
+    "unindexed_section": "Unindexed",
+    "all_workspaces": "All workspaces"
   },
   "wiki": {
     "panel_title": "Wiki",

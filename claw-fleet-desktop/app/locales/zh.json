@@ -374,7 +374,8 @@
     "filter_feedback": "反馈",
     "filter_project": "项目",
     "filter_reference": "引用",
-    "unindexed_section": "未索引"
+    "unindexed_section": "未索引",
+    "all_workspaces": "全部工作区"
   },
   "wiki": {
     "panel_title": "知识库",
