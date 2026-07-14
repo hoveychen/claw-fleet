@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetAskRequest {
     pub id: String,
@@ -43,6 +44,7 @@ pub struct FleetAskRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetAskQuestion {
     pub question: String,
@@ -69,6 +71,7 @@ pub struct FleetAskQuestion {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetAskImage {
     /// Filename the image is served as inside the question's asset dir; also
@@ -96,6 +99,7 @@ pub struct DecisionAssetBytes {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct FleetAskOption {
     pub label: String,
     pub description: String,
@@ -104,6 +108,7 @@ pub struct FleetAskOption {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetAskFormField {
     pub name: String,
@@ -116,6 +121,7 @@ pub struct FleetAskFormField {
     #[serde(default)]
     pub required: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
     pub default: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min: Option<f64>,
@@ -126,6 +132,8 @@ pub struct FleetAskFormField {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(rename = "FleetAskFormFieldKind"))]
 #[serde(rename_all = "lowercase")]
 pub enum FormFieldKind {
     Text,

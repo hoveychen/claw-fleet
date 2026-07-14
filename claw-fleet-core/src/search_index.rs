@@ -28,6 +28,7 @@ const SCHEMA_VERSION: i64 = 2;
 // ── SearchHit ────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SearchHit {
     pub session_id: String,

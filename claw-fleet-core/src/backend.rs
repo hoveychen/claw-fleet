@@ -56,6 +56,7 @@ pub struct SetupStatus {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct WaitingAlert {
     pub session_id: String,
@@ -78,6 +79,7 @@ pub struct WaitingAlert {
 /// attached at emit time — e.g. on a cold app restart while a `fleet
 /// elicitation` / `fleet mcp` child process is still blocking on its poll).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PendingDecisions {
     pub guard: Vec<crate::guard::GuardRequest>,

@@ -68,6 +68,7 @@ pub fn ensure_sidecar_dir() -> Result<PathBuf, String> {
 
 /// The live thinking snapshot for one session.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct LiveThinking {
     #[serde(rename = "sessionId")]
     pub session_id: String,

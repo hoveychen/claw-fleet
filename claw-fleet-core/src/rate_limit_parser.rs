@@ -15,6 +15,7 @@ use chrono_tz::Tz;
 
 /// Which rate-limit bucket the user hit, parsed from the error prefix.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum RateLimitType {
     /// "You've hit your session limit" — 5-hour rolling window

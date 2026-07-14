@@ -71,6 +71,7 @@ pub struct PendingHandoff {
 
 /// One consumed relay step: `from` yielded its turn and `to` was spawned.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffLink {
     pub from_session_id: String,
@@ -87,6 +88,7 @@ pub struct HandoffLink {
 /// A full relay chain. `links.len()` handoffs connect `links.len() + 1`
 /// sessions; session N's transcript ends where session N+1's begins.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct HandoffChain {
     pub chain_id: String,
@@ -122,6 +124,7 @@ impl HandoffChain {
 /// Lightweight per-session relay position, embedded into `SessionInfo` so the
 /// session card can render the "接力 n/N" chip without an extra round-trip.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionHandoffInfo {
     pub chain_id: String,

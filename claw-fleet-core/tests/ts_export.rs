@@ -51,6 +51,110 @@ fn build_bundle() -> String {
         claw_fleet_core::cmd_ast::Connector,
     );
 
+    // ── session ────────────────────────────────────────────────────────────
+    emit!(
+        claw_fleet_core::session::SessionStatus,
+        claw_fleet_core::session::RateLimitState,
+        claw_fleet_core::session::SessionInfo,
+        claw_fleet_core::session_mark::SessionMark,
+        claw_fleet_core::rate_limit_parser::RateLimitType,
+        claw_fleet_core::today_usage::TodayUsage,
+        claw_fleet_core::search_index::SearchHit,
+        claw_fleet_core::backend::WaitingAlert,
+        claw_fleet_core::backend::PendingDecisions,
+        claw_fleet_core::skill_history::SkillInvocation,
+    );
+
+    // ── workflow ───────────────────────────────────────────────────────────
+    emit!(
+        claw_fleet_core::workflow::WorkflowAgentStatus,
+        claw_fleet_core::workflow::WorkflowAgent,
+        claw_fleet_core::workflow::WorkflowPhase,
+        claw_fleet_core::workflow::WorkflowNodeKind,
+        claw_fleet_core::workflow::WorkflowNodeStatus,
+        claw_fleet_core::workflow::WorkflowNode,
+        claw_fleet_core::workflow::WorkflowEdge,
+        claw_fleet_core::workflow::WorkflowTree,
+    );
+
+    // ── token analysis ───────────────────────────────────────────────────────
+    emit!(
+        claw_fleet_core::token_analysis::UsageTotals,
+        claw_fleet_core::token_analysis::SourceBuckets,
+        claw_fleet_core::token_analysis::OutputBuckets,
+        claw_fleet_core::token_analysis::SessionTokenBreakdown,
+        claw_fleet_core::token_analysis::TaskTokenBreakdown,
+    );
+
+    // ── todos / bg / prd / handoff / live thinking ───────────────────────────
+    emit!(
+        claw_fleet_core::session_todos::TodoItem,
+        claw_fleet_core::session_todos::TodoSummary,
+        claw_fleet_core::bg_guard::BackgroundTask,
+        claw_fleet_core::prd_tasks::TaskPlanSummary,
+        claw_fleet_core::prd_tasks::TaskItem,
+        claw_fleet_core::prd_tasks::TaskPlanDetail,
+        claw_fleet_core::handoff::HandoffLink,
+        claw_fleet_core::handoff::HandoffChain,
+        claw_fleet_core::handoff::SessionHandoffInfo,
+        claw_fleet_core::live_thinking::LiveThinking,
+    );
+
+    // ── audit / guard ────────────────────────────────────────────────────────
+    emit!(
+        claw_fleet_core::audit::AuditRiskLevel,
+        claw_fleet_core::audit::AuditEvent,
+        claw_fleet_core::audit::AuditSummary,
+        claw_fleet_core::audit::MatchMode,
+        claw_fleet_core::audit::GuardAllowRule,
+        claw_fleet_core::audit::AuditRuleInfo,
+        claw_fleet_core::audit::SuggestedRule,
+        claw_fleet_core::guard::GuardRequest,
+    );
+
+    // ── decision channels (elicitation / fleet-ask / plan / a2ui / perm) ──────
+    emit!(
+        claw_fleet_core::elicitation::ElicitationOption,
+        claw_fleet_core::elicitation::ElicitationQuestion,
+        claw_fleet_core::elicitation::ElicitationRequest,
+        claw_fleet_core::mcp_ipc::FleetAskRequest,
+        claw_fleet_core::mcp_ipc::FleetAskQuestion,
+        claw_fleet_core::mcp_ipc::FleetAskImage,
+        claw_fleet_core::mcp_ipc::FleetAskOption,
+        claw_fleet_core::mcp_ipc::FleetAskFormField,
+        claw_fleet_core::mcp_ipc::FormFieldKind,
+        claw_fleet_core::plan_approval::PlanApprovalRequest,
+        claw_fleet_core::mcp_a2ui_ipc::A2uiRenderRequest,
+        claw_fleet_core::permission_prompt_ipc::PermissionPromptRequest,
+    );
+
+    // ── decision history ─────────────────────────────────────────────────────
+    emit!(
+        claw_fleet_core::decision_history::ElicitationOutcome,
+        claw_fleet_core::decision_history::PlanApprovalOutcome,
+        claw_fleet_core::decision_history::FleetAskOutcome,
+        claw_fleet_core::decision_history::SelectedOption,
+        claw_fleet_core::decision_history::DecisionHistoryRecord,
+        claw_fleet_core::decision_history::UserPromptRecord,
+        claw_fleet_core::decision_history::ElicitationRecord,
+        claw_fleet_core::decision_history::FleetAskRecord,
+        claw_fleet_core::decision_history::PlanApprovalRecord,
+    );
+
+    // ── daily report / proc runner ───────────────────────────────────────────
+    emit!(
+        claw_fleet_core::daily_report::DailyReport,
+        claw_fleet_core::daily_report::DailyMetrics,
+        claw_fleet_core::daily_report::ModelTokens,
+        claw_fleet_core::daily_report::ProjectMetrics,
+        claw_fleet_core::daily_report::SessionSummary,
+        claw_fleet_core::daily_report::DailyReportStats,
+        claw_fleet_core::daily_report::Lesson,
+        claw_fleet_core::proc_runner::ProcStatus,
+        claw_fleet_core::proc_runner::ProcRecord,
+        claw_fleet_core::proc_runner::ProcOutputChunk,
+    );
+
     out
 }
 

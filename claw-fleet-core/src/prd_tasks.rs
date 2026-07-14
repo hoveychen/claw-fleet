@@ -47,6 +47,7 @@ pub struct SourcedBlock {
 /// only produced when the `task_progress` side-channel attributes the session to
 /// an active plan, so `done`/`total` always match the named plan and its P-label.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskPlanSummary {
     pub done: u32,
@@ -70,6 +71,7 @@ pub struct TaskPlanSummary {
 
 /// One checkbox line in a plan, for the full task-list view.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskItem {
     pub text: String,
@@ -78,6 +80,7 @@ pub struct TaskItem {
 
 /// A full plan with all of its task items, for the detail panel.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskPlanDetail {
     pub id: Option<String>,

@@ -24,6 +24,7 @@ use std::time::Duration;
 
 /// Written by the `fleet mcp` server → read by Fleet desktop / `fleet serve`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct PermissionPromptRequest {
     pub id: String,
@@ -43,6 +44,7 @@ pub struct PermissionPromptRequest {
     /// The tool's full input payload, displayed on the card so the user can
     /// judge the action. Passed back verbatim as `updatedInput` on allow.
     #[serde(default)]
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
     pub tool_input: serde_json::Value,
     /// Claude Code's tool_use id, if provided; carried for log correlation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
