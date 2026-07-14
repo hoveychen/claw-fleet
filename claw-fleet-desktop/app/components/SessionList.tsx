@@ -255,7 +255,9 @@ export function SessionList() {
           </svg>
         </button>
 
-        {/* Sidebar nav — sessions / audit / report + memory / skills / plugins. */}
+        {/* Sidebar nav — sessions / audit / report + memory / skills. Plugins
+            are a source of skills, so they live under the 技能 entry as a
+            segmented tab (SkillsSourceTabs), not a separate nav item. */}
         <nav className={`${styles.nav}${sidebarCollapsed ? ` ${styles.nav_collapsed}` : ""}`} data-wizard="view-toggle">
           <button
             className={`${styles.nav_item} ${isSessionView ? styles.nav_active : ""}`}
@@ -319,18 +321,11 @@ export function SessionList() {
             <span className={styles.nav_label}>{t("view_wiki", "知识库")}</span>
           </button>
           <button
-            className={`${styles.nav_item} ${viewMode === "skills" ? styles.nav_active : ""}`}
-            onClick={() => navTo("skills")}
+            className={`${styles.nav_item} ${viewMode === "skills" || viewMode === "plugins" ? styles.nav_active : ""}`}
+            onClick={() => navTo(viewMode === "plugins" ? "plugins" : "skills")}
           >
             <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M9 1.5 3.5 9h4L7 14.5 12.5 7h-4L9 1.5Z"/></svg></span>
             <span className={styles.nav_label}>{t("view_skills")}</span>
-          </button>
-          <button
-            className={`${styles.nav_item} ${viewMode === "plugins" ? styles.nav_active : ""}`}
-            onClick={() => navTo("plugins")}
-          >
-            <span className={styles.nav_icon}><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"><path d="M5.5 1.5v3h-3v3.5a2 2 0 0 0 2 2H6v3a2 2 0 0 0 2 2 2 2 0 0 0 2-2v-3h1.5a2 2 0 0 0 2-2v-3.5h-3v-3a2 2 0 0 0-2-2 2 2 0 0 0-2 2Z"/></svg></span>
-            <span className={styles.nav_label}>{t("view_plugins")}</span>
           </button>
           <button
             className={`${styles.nav_item} ${viewMode === "mobile" ? styles.nav_active : ""}`}

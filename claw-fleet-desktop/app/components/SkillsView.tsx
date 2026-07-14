@@ -8,6 +8,7 @@ import { useConnectionStore } from "../store";
 import { useResizableWidth } from "../hooks/useResizableWidth";
 import { ResizeHandle } from "./ResizeHandle";
 import { PageShell } from "./PageShell";
+import { SkillsSourceTabs } from "./SkillsSourceTabs";
 import styles from "./MemoryView.module.css";
 import skillStyles from "./SkillsView.module.css";
 
@@ -137,6 +138,7 @@ export function SkillsView() {
         onChange: setQuery,
         placeholder: t("skills.panel_title"),
       }}
+      bannerCenter={<SkillsSourceTabs />}
       secondary={
         <div className={styles.list_pane}>
           {!loaded && <p className={styles.empty}>{t("skills.loading")}</p>}
