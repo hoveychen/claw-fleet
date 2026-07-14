@@ -1972,7 +1972,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                                 let body = serde_json::json!({"error": e}).to_string();
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
+                                        .with_status_code(if e.contains("no pending request") { 404 } else { 500 })
                                         .with_header(json_header),
                                 );
                             }
@@ -2750,7 +2750,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                                 let body = serde_json::json!({"error": e}).to_string();
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
+                                        .with_status_code(if e.contains("no pending request") { 404 } else { 500 })
                                         .with_header(json_header),
                                 );
                             }
@@ -2790,7 +2790,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                                 let body = serde_json::json!({"error": e}).to_string();
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
+                                        .with_status_code(if e.contains("no pending request") { 404 } else { 500 })
                                         .with_header(json_header),
                                 );
                             }
@@ -2867,7 +2867,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                                 let body = serde_json::json!({"error": e}).to_string();
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
+                                        .with_status_code(if e.contains("no pending request") { 404 } else { 500 })
                                         .with_header(json_header),
                                 );
                             }
@@ -2925,7 +2925,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                                 let body = serde_json::json!({"error": e}).to_string();
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
+                                        .with_status_code(if e.contains("no pending request") { 404 } else { 500 })
                                         .with_header(json_header),
                                 );
                             }
@@ -3000,7 +3000,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                                 let body = serde_json::json!({"error": e}).to_string();
                                 let _ = request.respond(
                                     tiny_http::Response::from_string(body)
-                                        .with_status_code(500)
+                                        .with_status_code(if e.contains("no pending request") { 404 } else { 500 })
                                         .with_header(json_header),
                                 );
                             }

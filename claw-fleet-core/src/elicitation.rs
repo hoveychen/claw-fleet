@@ -128,6 +128,10 @@ pub fn try_read_response(id: &str) -> Option<ElicitationResponse> {
 
 /// Write an elicitation response.  Called by the desktop app.
 pub fn write_response(resp: &ElicitationResponse) -> Result<(), String> {
+    // Only a live pending request may be answered — see guard::write_response.
+    if !request_path(&resp.id).map(|p| p.exists()).unwrap_or(false) {
+        return Err(format!("no pending request for id {}", resp.id));
+    }
     let path = response_path(&resp.id).ok_or("cannot determine home dir")?;
     let json = serde_json::to_string(resp).map_err(|e| format!("serialize: {e}"))?;
     fs::write(&path, json).map_err(|e| format!("write elicitation response: {e}"))
