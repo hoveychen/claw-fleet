@@ -92,8 +92,11 @@ pub(crate) fn mobile_relay_status(
 }
 
 #[tauri::command]
-pub(crate) fn mobile_relay_qr_svg(state: tauri::State<AppState>) -> Result<String, String> {
-    state.backend.read().unwrap().mobile_relay_qr_svg()
+pub(crate) fn mobile_relay_qr_svg(
+    state: tauri::State<AppState>,
+    lang: Option<String>,
+) -> Result<String, String> {
+    state.backend.read().unwrap().mobile_relay_qr_svg(lang.as_deref())
 }
 
 /// Read the last non-tool-use assistant message from a session, for guard context.

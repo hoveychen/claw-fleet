@@ -94,7 +94,8 @@ pub(crate) fn route_mobile_relay_qr(
     path: &str,
 ) {
 
-                let (status, body) = match crate::mobile_relay::qr_svg() {
+                let lang = query.get("lang").map(String::as_str);
+                let (status, body) = match crate::mobile_relay::qr_svg(lang) {
                     Ok(svg) => (200, serde_json::json!({"svg": svg}).to_string()),
                     Err(e) => (404, serde_json::json!({"error": e}).to_string()),
                 };
