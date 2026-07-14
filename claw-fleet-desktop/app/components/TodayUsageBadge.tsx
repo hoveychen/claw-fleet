@@ -19,7 +19,8 @@ function fmtTokens(n: number): string {
  */
 export function TodayUsageBadge({
   collapsed = false,
-}: { collapsed?: boolean } = {}) {
+  inline = false,
+}: { collapsed?: boolean; inline?: boolean } = {}) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<TodayUsage | null>(null);
 
@@ -53,6 +54,17 @@ export function TodayUsageBadge({
       ? `\nagent $${usage.agentCostUsd.toFixed(2)} + fleet $${usage.fleetCostUsd.toFixed(2)}`
       : "";
   const title = `${label}: $${cost.toFixed(2)} · ${fmtTokens(tokens)} tok${breakdown}`;
+
+  // Compact one-line variant for narrow chrome (lite mode's drag bar):
+  // "$x · xK tok" on a single row, no section title.
+  if (inline) {
+    return (
+      <span className={styles.badge_inline} title={title}>
+        <span className={styles.cost}>${cost.toFixed(2)}</span>
+        <span className={styles.tokens}>{fmtTokens(tokens)}</span>
+      </span>
+    );
+  }
 
   if (collapsed) {
     return (

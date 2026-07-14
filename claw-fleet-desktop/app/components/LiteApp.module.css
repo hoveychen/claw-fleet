@@ -114,6 +114,103 @@
   color: var(--color-text-dim);
 }
 
+/* Workspace filter + active-only toggle row. */
+.filter_row {
+  display: flex;
+  gap: 6px;
+}
+
+.ws_select {
+  flex: 1;
+  min-width: 0;
+  height: 26px;
+  padding: 0 6px;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  background: var(--color-bg-hover, rgba(255, 255, 255, 0.05));
+  color: var(--color-text);
+  font-size: 11px;
+  cursor: pointer;
+  outline: none;
+}
+
+.active_toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 8px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.active_toggle:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.active_dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-text-dim);
+  flex-shrink: 0;
+}
+
+.active_toggle_on {
+  background: var(--color-accent-soft, rgba(255, 255, 255, 0.08));
+  border-color: var(--color-accent, var(--color-text-dim));
+  color: var(--color-text);
+}
+
+.active_toggle_on .active_dot {
+  background: var(--color-success, #3fb950);
+}
+
+.active_count {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-dim);
+}
+
+.active_toggle_on .active_count {
+  color: var(--color-text);
+}
+
+/* Mark-all-read shortcut — a compact icon+count button sharing the filter row
+   with the active toggle, shown only when there are unread tasks. */
+.mark_all_read {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  height: 26px;
+  padding: 0 7px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-border, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-sm, 6px);
+  background: transparent;
+  color: var(--color-text-dim);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.mark_all_read:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text);
+}
+
+.mark_all_read_count {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
 .segments {
   display: flex;
   gap: 4px;
