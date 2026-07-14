@@ -112,6 +112,11 @@ pub struct SpawnSessionRequest {
     /// fresh id server-side (the pre-idempotent behaviour).
     #[serde(default)]
     pub session_id: Option<String>,
+    /// Which agent tool to launch: `"claude"` (default) or `"codex"`. Routed by
+    /// [`crate::agent_source::spawn_session`] to the matching source's launcher.
+    /// Older callers omit it → `"claude"`, preserving prior behaviour.
+    #[serde(default)]
+    pub tool: Option<String>,
 }
 
 /// Bring a caller-supplied workspace path into the shape the spawn gate
@@ -567,7 +572,7 @@ pub fn spawn_new_session_with_entrypoint(
     )
 }
 
-fn spawn_new_session_impl(
+pub(crate) fn spawn_new_session_impl(
     workspace_path: &str,
     prompt: &str,
     model: Option<&str>,
