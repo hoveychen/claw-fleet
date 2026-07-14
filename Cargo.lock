@@ -2195,6 +2195,7 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
+ "claw-fleet-core",
  "env_logger",
  "futures-util",
  "log",

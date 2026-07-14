@@ -163,3 +163,69 @@ async fn wrong_secret_is_isolated_and_short_secret_rejected() {
     let reply = recv_json(&mut ws).await;
     assert_eq!(reply["type"], "error");
 }
+
+/// Full mobile end-to-end encryption (方案A) through the REAL relay: a payload
+/// sealed with the desktop/phone crypto survives a round-trip in both
+/// directions, and the frame the relay forwards is ciphertext only — the relay
+/// never sees the pairing secret (it auths with the derived channel token) nor
+/// the plaintext body. Guards the blind-forwarder contract this whole feature
+/// rests on. The seal/open primitives and cross-language vectors are unit-tested
+/// in claw-fleet-core::relay_crypto / mobile-web relayCrypto.test.ts; this proves
+/// the two halves compose over a live socket.
+#[tokio::test]
+async fn sealed_payload_round_trips_through_relay() {
+    use claw_fleet_core::relay_crypto::{derive_keys, open, seal, SealedBox};
+
+    let url = spawn_server().await;
+    // The pairing secret rides only in the QR fragment; the relay is handed the
+    // derived channel token, never this.
+    let keys = derive_keys("boss-pairing-secret-abcdef0123456789");
+    assert_ne!(keys.channel_token, "boss-pairing-secret-abcdef0123456789");
+
+    let (mut agent, _) = connect(&url, "agent", &keys.channel_token).await;
+    let (mut client, _) = connect(&url, "client", &keys.channel_token).await;
+    // drain the agent's presence bump from the client joining
+    let _ = recv_json(&mut agent).await;
+
+    // --- desktop -> phone --------------------------------------------------
+    const DOWN_MARKER: &str = "TOP-SECRET-WORKSPACE-机密";
+    let downlink = json!({"event": "sessions", "sessions": [{"id": "s1", "name": DOWN_MARKER}]});
+    let sealed = serde_json::to_value(seal(&keys.enc_key, downlink.to_string().as_bytes())).unwrap();
+    agent
+        .send(Message::Text(json!({"type": "msg", "payload": sealed}).to_string().into()))
+        .await
+        .unwrap();
+    let got = recv_json(&mut client).await;
+    assert_eq!(got["type"], "msg");
+    assert_eq!(got["payload"]["enc"], "box", "relay forwards a sealed envelope");
+    assert!(
+        !got.to_string().contains(DOWN_MARKER),
+        "plaintext must not appear in the frame the relay forwarded: {got}"
+    );
+    let opened: SealedBox = serde_json::from_value(got["payload"].clone()).unwrap();
+    let plain = open(&keys.enc_key, &opened).expect("phone opens the sealed downlink");
+    assert_eq!(serde_json::from_slice::<Value>(&plain).unwrap(), downlink);
+
+    // --- phone -> desktop --------------------------------------------------
+    const UP_MARKER: &str = "APPROVED-老板批准";
+    let uplink = json!({"event": "answer", "kind": "guard", "id": "req-42", "note": UP_MARKER});
+    let sealed = serde_json::to_value(seal(&keys.enc_key, uplink.to_string().as_bytes())).unwrap();
+    client
+        .send(Message::Text(json!({"type": "msg", "payload": sealed}).to_string().into()))
+        .await
+        .unwrap();
+    let got = recv_json(&mut agent).await;
+    assert_eq!(got["payload"]["enc"], "box");
+    assert!(
+        !got.to_string().contains(UP_MARKER),
+        "plaintext must not appear in the forwarded uplink frame: {got}"
+    );
+    let opened: SealedBox = serde_json::from_value(got["payload"].clone()).unwrap();
+    let plain = open(&keys.enc_key, &opened).expect("desktop opens the sealed uplink");
+    assert_eq!(serde_json::from_slice::<Value>(&plain).unwrap(), uplink);
+
+    // A different pairing secret derives a different key that cannot open the
+    // ciphertext the relay just forwarded — confirms confidentiality end-to-end.
+    let wrong = derive_keys("some-other-secret-0000000000000000");
+    assert!(open(&wrong.enc_key, &opened).is_err());
+}
