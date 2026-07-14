@@ -51,7 +51,7 @@ function timeAgo(ms: number, t: (k: string, opts?: Record<string, unknown>) => s
 
 /** 「移动端」板块 — 启用 mobile relay 通道并展示配对 QR code。 */
 export function MobileView() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [config, setConfig] = useState<MobileRelayConfig | null>(null);
   const [status, setStatus] = useState<MobileRelayStatus | null>(null);
   const [qrSvg, setQrSvg] = useState<string | null>(null);
@@ -65,12 +65,15 @@ export function MobileView() {
       setQrSvg(null);
       return;
     }
+    // Carry the desktop's current UI language into the QR so a fresh scan opens
+    // the phone in the same language (core accepts only "zh"/"en").
+    const lang = i18n.language.startsWith("zh") ? "zh" : "en";
     try {
-      setQrSvg(await invoke<string>("mobile_relay_qr_svg"));
+      setQrSvg(await invoke<string>("mobile_relay_qr_svg", { lang }));
     } catch {
       setQrSvg(null);
     }
-  }, []);
+  }, [i18n]);
 
   const load = useCallback(async () => {
     try {
