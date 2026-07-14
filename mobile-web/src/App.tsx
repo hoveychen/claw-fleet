@@ -435,10 +435,12 @@ export function App() {
         {todayUsage && (
           <span
             className={styles.usage}
-            title={`${t("今日累计")} $${todayUsage.costUsd.toFixed(2)} · ${fmtTokens(todayUsage.outputTokens)} tok`}
+            title={`${t("今日累计")} $${todayUsage.costUsd.toFixed(2)} · ${fmtTokens(todayUsage.inputTokens + todayUsage.outputTokens)} tok`}
           >
             <span className={styles.usageCost}>${todayUsage.costUsd.toFixed(2)}</span>
-            <span className={styles.usageTokens}>{fmtTokens(todayUsage.outputTokens)}</span>
+            <span className={styles.usageTokens}>
+              {fmtTokens(todayUsage.inputTokens + todayUsage.outputTokens)}
+            </span>
           </span>
         )}
         <span
