@@ -167,6 +167,7 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   const [filter, setFilter] = useState<AuditRiskLevel | "all">("all");
   const [catFilter, setCatFilter] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
+  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
   const { sessions } = useSessionsStore();
   const { open } = useDetailStore();
   const { setViewMode } = useUIStore();
@@ -238,9 +239,24 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
     return ordered;
   }, [summary, resolveFor]);
 
+  // Distinct workspaces for the filter dropdown, keyed by absolute path
+  // (mirrors the wiki/memory filters — path avoids same-name collisions when
+  // two different projects share a folder basename). Events with no workspace
+  // path are dropped from the option list.
+  const workspaces = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const e of summary?.events ?? []) {
+      if (e.workspacePath && !seen.has(e.workspacePath)) {
+        seen.set(e.workspacePath, e.workspaceName || e.workspacePath);
+      }
+    }
+    return [...seen.entries()].map(([path, name]) => ({ path, name }));
+  }, [summary]);
+
   const filtered = (summary?.events ?? []).filter((e) => {
     if (filter !== "all" && e.riskLevel !== filter) return false;
     if (catFilter && resolveFor(e).category !== catFilter) return false;
+    if (workspaceFilter !== "all" && e.workspacePath !== workspaceFilter) return false;
     return true;
   });
 
@@ -344,6 +360,20 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
             onClick={() => setFilter(level)}
           />
         ))}
+        {workspaces.length > 1 && (
+          <select
+            className={styles.ws_select}
+            value={workspaceFilter}
+            onChange={(e) => setWorkspaceFilter(e.target.value)}
+          >
+            <option value="all">{t("audit.all_workspaces")}</option>
+            {workspaces.map((ws) => (
+              <option key={ws.path} value={ws.path}>
+                {ws.name}
+              </option>
+            ))}
+          </select>
+        )}
         <div className={styles.filter_spacer} />
         {unreadCriticalCount > 0 && (
           <button
