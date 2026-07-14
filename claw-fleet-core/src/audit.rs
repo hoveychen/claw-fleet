@@ -35,6 +35,10 @@ pub enum AuditRiskLevel {
 pub struct AuditEvent {
     pub session_id: String,
     pub workspace_name: String,
+    /// Absolute path of the owning session's workspace (UI filter key, so the
+    /// audit page can filter by workspace precisely — mirrors `WikiDoc` /
+    /// `WorkspaceMemory`, which key on the path to avoid same-name collisions).
+    pub workspace_path: String,
     pub agent_source: String,
     pub tool_name: String,
     pub command_summary: String,
@@ -1413,6 +1417,7 @@ pub fn extract_audit_events(
                 events.push(AuditEvent {
                     session_id: session.id.clone(),
                     workspace_name: session.workspace_name.clone(),
+                    workspace_path: session.workspace_path.clone(),
                     agent_source: session.agent_source.clone(),
                     tool_name: "Bash".to_string(),
                     command_summary: truncate(cmd, 120),
@@ -1580,6 +1585,7 @@ mod tests {
         let ev = AuditEvent {
             session_id: "sess-1".into(),
             workspace_name: "ws".into(),
+            workspace_path: "/tmp/ws".into(),
             agent_source: "claude".into(),
             tool_name: "Bash".into(),
             command_summary: "ls".into(),
