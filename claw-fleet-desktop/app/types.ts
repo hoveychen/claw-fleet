@@ -1166,6 +1166,31 @@ export interface DailyMetrics {
   projects: ProjectMetrics[];
   sourceBreakdown: Record<string, number>;
   hourlyActivity: number[];
+  /** Per-type decision-card analytics. Absent on reports generated before
+   * this field existed. */
+  decisionCards?: DecisionCardStats;
+}
+
+export interface DecisionTypeStats {
+  triggered: number;
+  answered: number;
+  declined: number;
+  heartbeatLost: number;
+  timeout: number;
+  /** Answered cards that offered an explicit "(Recommended)" option — the
+   * denominator for the hit rate. */
+  withRecommendation: number;
+  /** Answered cards where the user picked the recommended option. */
+  recommendedHit: number;
+  /** Answered cards where the user's first-question pick came via "Other". */
+  otherPick: number;
+  latencySecsSum: number;
+  latencyCount: number;
+}
+
+export interface DecisionCardStats {
+  /** Keyed by card type: "elicitation" | "fleet-ask" | "plan-approval". */
+  byType: Record<string, DecisionTypeStats>;
 }
 
 export interface ProjectMetrics {

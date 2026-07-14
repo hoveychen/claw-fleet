@@ -1661,7 +1661,19 @@
     "add_to_claude_md": "添加到 CLAUDE.md",
     "lesson_added": "已添加",
     "no_insights": "暂无动态。收集到数据后报告会出现在这里。",
-    "earlier_section_title": "← 更早"
+    "earlier_section_title": "← 更早",
+    "decision_cards": "决策卡",
+    "dc_type": "类型",
+    "dc_triggered": "触发",
+    "dc_answered": "已答",
+    "dc_recommended_hit": "命中推荐",
+    "dc_other": "走 Other",
+    "dc_avg_latency": "平均应答",
+    "dc_timeout": "超时",
+    "dc_type_elicitation": "问答卡",
+    "dc_type_fleet_ask": "富交互卡",
+    "dc_type_plan_approval": "计划审批",
+    "dc_no_rec": "无推荐"
   },
   "command": {
     "nested": {

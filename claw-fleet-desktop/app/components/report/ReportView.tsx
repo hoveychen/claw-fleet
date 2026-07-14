@@ -5,6 +5,7 @@ import type { DailyReport } from "../../types";
 import { ContributionsHeatmap } from "./ContributionsHeatmap";
 import { HourlyActivityChart } from "./HourlyActivityChart";
 import { MetricsCards } from "./MetricsCards";
+import { DecisionCardsPanel } from "./DecisionCardsPanel";
 import { AISummaryCard } from "./AISummaryCard";
 import { LessonsCard } from "./LessonsCard";
 import { ToolCallChart } from "./ToolCallChart";
@@ -254,6 +255,7 @@ function ReportDetail() {
               <ToolCallChart breakdown={currentReport.metrics.toolCallBreakdown} />
               <HourlyActivityChart hourly={currentReport.metrics.hourlyActivity} />
             </div>
+            <DecisionCardsPanel stats={currentReport.metrics.decisionCards} />
             <AISummaryCard
               date={currentReport.date}
               summary={currentReport.aiSummary}
