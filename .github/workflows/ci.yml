@@ -56,6 +56,17 @@ jobs:
       - name: Run unit tests
         run: cargo test --release -p fleet-cli -p claw-fleet-core -p fleet-hooks-server
 
+      # Drift-guard: regenerate the Rust→TS bindings and fail if the committed
+      # copies are stale. A Rust wire struct changed without re-running the
+      # generator (or a hand edit to a generated file) shows up as a git diff.
+      - name: TS bindings drift-guard
+        run: |
+          cargo test -p claw-fleet-core --features ts-export --test ts_export
+          git diff --exit-code -- \
+            claw-fleet-desktop/app/generated/types.ts \
+            mobile-web/src/generated/types.ts \
+          || { echo "::error::Generated TS bindings are stale. Run: cargo test -p claw-fleet-core --features ts-export --test ts_export"; exit 1; }
+
   # ═══════════════════════════════════════════════════════════════════════════
   # Lint every tracked shell script. shellcheck ships pre-installed on the
   # ubuntu runner, so this is a seconds-long, Rust-free job. Discovering scripts

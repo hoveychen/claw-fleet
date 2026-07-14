@@ -23,6 +23,7 @@ use crate::plan_approval::{PlanApprovalRequest, PlanApprovalResponse};
 
 /// Terminal outcome of an elicitation card.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum ElicitationOutcome {
     /// User picked an option (or typed via "Other"). `answers` is populated.
@@ -37,6 +38,7 @@ pub enum ElicitationOutcome {
 
 /// Terminal outcome of a plan-approval card.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum PlanApprovalOutcome {
     Approved,
@@ -48,6 +50,7 @@ pub enum PlanApprovalOutcome {
 
 /// Terminal outcome of a fleet__ask card.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum FleetAskOutcome {
     /// User submitted answers via the Decision Panel. `answers` is populated.
@@ -66,6 +69,7 @@ pub enum FleetAskOutcome {
 /// matching option's label/description so the history is readable without
 /// cross-referencing.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SelectedOption {
     /// Option label as shown in the card. Falls back to the raw answer string
@@ -87,6 +91,7 @@ fn is_false(b: &bool) -> bool {
 // ── Record envelope ──────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum DecisionHistoryRecord {
     Elicitation(ElicitationRecord),
@@ -107,6 +112,8 @@ pub enum DecisionHistoryRecord {
 /// `id` is the jsonl entry's uuid, which is stable across re-scans and used
 /// for de-duplication when syncing into `decision_history.jsonl`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(rename = "UserPromptHistoryRecord"))]
 #[serde(rename_all = "camelCase")]
 pub struct UserPromptRecord {
     pub id: String,
@@ -122,6 +129,8 @@ pub struct UserPromptRecord {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(rename = "ElicitationHistoryRecord"))]
 #[serde(rename_all = "camelCase")]
 pub struct ElicitationRecord {
     pub id: String,
@@ -155,6 +164,8 @@ pub struct ElicitationRecord {
 /// but the history viewer must NOT re-render it as an iframe — display only
 /// an "[HTML preview was shown]" marker.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(rename = "FleetAskHistoryRecord"))]
 #[serde(rename_all = "camelCase")]
 pub struct FleetAskRecord {
     pub id: String,
@@ -171,6 +182,8 @@ pub struct FleetAskRecord {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
+#[cfg_attr(feature = "ts-export", ts(rename = "PlanApprovalHistoryRecord"))]
 #[serde(rename_all = "camelCase")]
 pub struct PlanApprovalRecord {
     pub id: String,
@@ -339,6 +352,7 @@ pub fn build_fleet_ask_record(
 /// `otherPick` are meaningful; `plan-approval` only populates the outcome
 /// counters (approve counts as `answered`, reject as `declined`).
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionTypeStats {
     /// Total cards of this type whose `requestedAt` falls on the day.
@@ -369,6 +383,7 @@ pub struct DecisionTypeStats {
 /// A day's decision-card analytics, keyed by card type
 /// (`elicitation` | `fleet-ask` | `plan-approval`). Embedded in `DailyMetrics`.
 #[derive(Serialize, Deserialize, Clone, Debug, Default, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionCardStats {
     #[serde(default)]

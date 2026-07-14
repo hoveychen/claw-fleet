@@ -19,6 +19,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct A2uiRenderRequest {
     pub id: String,
@@ -36,6 +37,7 @@ pub struct A2uiRenderRequest {
     pub parked: bool,
     /// The A2UI v0.9 agent-to-client message tree, passed through verbatim
     /// to `@a2ui/web_core`'s `MessageProcessor` on the desktop side.
+    #[cfg_attr(feature = "ts-export", ts(type = "unknown"))]
     pub message_tree: serde_json::Value,
 }
 

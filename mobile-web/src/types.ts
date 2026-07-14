@@ -1,167 +1,35 @@
-// Mirrors of the desktop app's TypeScript types (claw-fleet-desktop/app/types.ts)
-// for the payloads that cross the relay. Field names are the serde camelCase
-// forms — keep in sync with the Rust structs.
+// Wire types shared with the desktop app and the Rust core, generated from the
+// Rust structs in claw-fleet-core — see claw-fleet-core/tests/ts_export.rs
+// (regenerate with the ts-export feature). DO NOT hand-write those here.
+//
+// The blanket re-export below covers every generated wire type. Only the
+// mobile-specific projections (a slimmed SessionInfo, a reduced WorkflowTree),
+// the mobile-only decision/wiki/repo/account types, consts, and helpers are
+// hand-maintained in this file.
+export * from "./generated/types";
 
-// ── Decision requests ────────────────────────────────────────────────────────
+// The Rust type is `Connector`; the mobile UI has always referred to it as
+// `CmdConnector`, so keep that alias for the StructuredCommand consumer.
+export type { Connector as CmdConnector } from "./generated/types";
 
-/** Structured shell AST shipped in GuardRequest (claw-fleet-core/src/cmd_ast.rs).
- *  CommandLeaf has no serde rename_all — fields stay snake_case on the wire. */
-export type CmdConnector = "and" | "or" | "pipe" | "semi";
+// Generated types referenced *by name* below (the mobile SessionInfo shadow, the
+// decision unions, and the status helpers). `export *` re-exports for consumers
+// but does not create local bindings, so import the ones used unqualified here.
+import type {
+  SessionStatus,
+  SessionMark,
+  TodoSummary,
+  TaskPlanSummary,
+  SessionHandoffInfo,
+  GuardRequest,
+  ElicitationRequest,
+  FleetAskRequest,
+  PlanApprovalRequest,
+  PermissionPromptRequest,
+  A2uiRenderRequest,
+} from "./generated/types";
 
-export interface NestedScript {
-  kind: string;
-  raw: string;
-  view: CommandView;
-}
-
-export interface CommandLeaf {
-  argv: string[];
-  nested?: NestedScript | null;
-  triggering?: boolean;
-  already_allowed?: boolean;
-}
-
-export interface CommandView {
-  leaves: CommandLeaf[];
-  connectors: CmdConnector[];
-}
-
-export interface GuardRequest {
-  id: string;
-  sessionId: string;
-  workspaceName: string;
-  aiTitle?: string | null;
-  toolName: string;
-  command: string;
-  commandSummary: string;
-  riskTags: string[];
-  timestamp: string;
-  structuredCommand?: CommandView | null;
-}
-
-export interface ElicitationOption {
-  label: string;
-  description: string;
-  preview?: string;
-}
-
-export interface ElicitationQuestion {
-  question: string;
-  header: string;
-  options: ElicitationOption[];
-  multiSelect: boolean;
-}
-
-export interface ElicitationRequest {
-  id: string;
-  sessionId: string;
-  workspaceName: string;
-  aiTitle?: string | null;
-  questions: ElicitationQuestion[];
-  timestamp: string;
-  /**
-   * The wait timed out: the turn that asked was interrupted and the session is
-   * paused, holding for this answer. Answering resumes it with the reply
-   * attached (the desktop and the phone both route through `parked::deliver`).
-   */
-  parked?: boolean;
-}
-
-export type FleetAskFormFieldKind =
-  | "text"
-  | "textarea"
-  | "number"
-  | "select"
-  | "radio"
-  | "checkbox"
-  | "date"
-  | "datetime"
-  | "time"
-  | "range";
-
-export interface FleetAskFormField {
-  name: string;
-  kind: FleetAskFormFieldKind;
-  label: string;
-  placeholder?: string;
-  options?: string[];
-  required?: boolean;
-  default?: unknown;
-  min?: number;
-  max?: number;
-  step?: number;
-}
-
-export interface FleetAskImage {
-  name: string;
-  caption?: string;
-}
-
-export interface FleetAskQuestion {
-  question: string;
-  header: string;
-  multiSelect: boolean;
-  options?: ElicitationOption[];
-  html?: string;
-  formFields?: FleetAskFormField[];
-  images?: FleetAskImage[];
-}
-
-export interface FleetAskRequest {
-  id: string;
-  sessionId: string;
-  workspaceName: string;
-  aiTitle?: string | null;
-  questions: FleetAskQuestion[];
-  timestamp: string;
-  /**
-   * The wait timed out: the turn that asked was interrupted and the session is
-   * paused, holding for this answer. Answering resumes it with the reply
-   * attached (the desktop and the phone both route through `parked::deliver`).
-   */
-  parked?: boolean;
-}
-
-export interface PlanApprovalRequest {
-  id: string;
-  sessionId: string;
-  workspaceName: string;
-  aiTitle?: string | null;
-  planContent: string;
-  planFilePath?: string | null;
-  timestamp: string;
-  /**
-   * The wait timed out: the turn that asked was interrupted and the session is
-   * paused, holding for this answer. Answering resumes it with the reply
-   * attached (the desktop and the phone both route through `parked::deliver`).
-   */
-  parked?: boolean;
-}
-
-export interface PermissionPromptRequest {
-  id: string;
-  sessionId: string;
-  workspaceName: string;
-  aiTitle?: string | null;
-  timestamp: string;
-  toolName: string;
-  toolInput: unknown;
-  toolUseId?: string | null;
-}
-
-/** fleet__render_a2ui request (claw-fleet-core/src/mcp_a2ui_ipc.rs). The
- *  message tree is opaque to the mobile client — it renders a placeholder
- *  card (desktop renders the real surface via @a2ui/react). */
-export interface A2uiRenderRequest {
-  id: string;
-  sessionId: string;
-  workspaceName: string;
-  aiTitle?: string | null;
-  timestamp: string;
-  /** Timed out and parked — see `FleetAskRequest.parked`. */
-  parked?: boolean;
-  messageTree: unknown;
-}
+// ── Decision panel (mobile-flat projection) ──────────────────────────────────
 
 export type DecisionKind =
   | "guard"
@@ -198,34 +66,9 @@ export interface PendingSnapshot {
 
 // ── Sessions / tasks ─────────────────────────────────────────────────────────
 
-export type SessionStatus =
-  | "thinking"
-  | "executing"
-  | "streaming"
-  | "delegating"
-  | "processing"
-  | "waitingInput"
-  | "active"
-  | "idle"
-  | "rateLimited";
-
-export interface TodoSummary {
-  completed: number;
-  inProgress: number;
-  pending: number;
-  currentActive?: string | null;
-}
-
-export interface TaskPlanSummary {
-  done: number;
-  total: number;
-  currentPlan?: string | null;
-  planId?: string | null;
-  currentTask?: string | null;
-}
-
-export type SessionMark = "pending" | "done";
-
+/** Slim, mobile-only projection of the desktop/core SessionInfo: the relay
+ *  whitelists just the fields the phone renders (mobile_relay::SNAPSHOT_FIELDS),
+ *  so this deliberately shadows the generated (full) SessionInfo. */
 export interface SessionInfo {
   id: string;
   workspacePath: string;
@@ -256,26 +99,6 @@ export interface SessionInfo {
   /** Relay-chain position when this session took part in a handoff
    *  (`fleet handoff`); absent otherwise. Mirrors the desktop launchpad chip. */
   handoff?: SessionHandoffInfo | null;
-}
-
-/** Relay-chain position embedded on SessionInfo (drives the 接力 chip).
- *  Mirrors claw-fleet-desktop/app/types.ts SessionHandoffInfo. */
-export interface SessionHandoffInfo {
-  chainId: string;
-  /** This session's 1-based position on the chain. */
-  hop: number;
-  /** Total sessions currently on the chain. */
-  chainLen: number;
-}
-
-/** One full-text search hit from the `session_search` relay method — mirrors
- *  the desktop `search_sessions` command's SearchHit. `snippet` carries literal
- *  `<mark>…</mark>` markers around matches. */
-export interface SearchHit {
-  sessionId: string;
-  jsonlPath: string;
-  snippet: string;
-  rank: number;
 }
 
 /** Sessions Fleet spawned itself ("新会话" / handoff relay) — the only ones
@@ -309,18 +132,6 @@ export function canResumeSession(s: SessionInfo): boolean {
   );
 }
 
-export interface TaskItem {
-  text: string;
-  done: boolean;
-}
-
-export interface TaskPlanDetail {
-  id?: string | null;
-  title?: string | null;
-  source?: string | null;
-  items: TaskItem[];
-}
-
 // ── Session detail (v2) ──────────────────────────────────────────────────────
 
 /** One transcript jsonl record, loosely typed — we only look at a few fields. */
@@ -348,40 +159,9 @@ export interface RawMessage {
   };
 }
 
-/** `live_thinking` reply (null when no live sidecar). */
-export interface LiveThinking {
-  sessionId: string;
-  thinking: string;
-  streaming: boolean;
-  updatedSecsAgo: number;
-}
-
-/** `handoff_chain` reply (null when the session is on no chain). */
-export interface HandoffLink {
-  fromSessionId: string;
-  toSessionId: string;
-  note: string;
-  planId?: string | null;
-  nextTask?: string | null;
-  handedAt: number;
-}
-
-export interface HandoffChain {
-  chainId: string;
-  workspacePath: string;
-  planId?: string | null;
-  links: HandoffLink[];
-}
-
-/** `skill_history` reply items. */
-export interface SkillInvocation {
-  skill: string;
-  args?: string | null;
-  timestamp: string;
-  isSubagent: boolean;
-}
-
-/** `workflow_trees` reply items (loosely typed — display only). */
+/** `workflow_trees` reply items (loosely typed — display only). Shadows the
+ *  generated WorkflowTree: the mobile UI renders only a reduced projection with
+ *  its own WorkflowAgentInfo (reads label/prompt), not the full DAG. */
 export interface WorkflowAgentInfo {
   agentId?: string;
   label?: string | null;
@@ -398,17 +178,6 @@ export interface WorkflowTree {
 }
 
 /** `token_breakdown` reply — only the totals the mobile UI shows. */
-/** Today's cumulative token/cost counter (header widget).
- *  Mirrors `claw_fleet_core::today_usage::TodayUsage`. */
-export interface TodayUsage {
-  date: string;
-  outputTokens: number;
-  costUsd: number;
-  agentCostUsd: number;
-  fleetCostUsd: number;
-  sessionCount: number;
-}
-
 export interface TokenBreakdown {
   totalsUsage?: {
     inputTokens?: number;
@@ -420,61 +189,6 @@ export interface TokenBreakdown {
   main?: unknown;
   subagents?: unknown[];
 }
-
-/** `session_decisions` reply items — serde `#[serde(tag = "kind")]` envelope
- *  over the four record variants (claw-fleet-core/src/decision_history.rs). */
-export interface SelectedOption {
-  label: string;
-  description?: string;
-  other?: boolean;
-}
-
-interface DecisionRecordBase {
-  id: string;
-  sessionId: string;
-  workspaceName?: string;
-  aiTitle?: string | null;
-  requestedAt?: string;
-  resolvedAt?: string;
-}
-
-export interface ElicitationHistoryRecord extends DecisionRecordBase {
-  kind: "elicitation";
-  outcome: "answered" | "declined" | "heartbeat-lost" | "timeout";
-  questions: ElicitationQuestion[];
-  answers: Record<string, SelectedOption>;
-}
-
-export interface PlanApprovalHistoryRecord extends DecisionRecordBase {
-  kind: "plan-approval";
-  outcome: "approved" | "approved-with-edits" | "rejected" | "heartbeat-lost" | "timeout";
-  planContent: string;
-  planFilePath?: string | null;
-  editedPlan?: string | null;
-  feedback?: string | null;
-}
-
-export interface UserPromptHistoryRecord {
-  kind: "user-prompt";
-  id: string;
-  sessionId: string;
-  text: string;
-  hasImage?: boolean;
-  sentAt: string;
-}
-
-export interface FleetAskHistoryRecord extends DecisionRecordBase {
-  kind: "fleet-ask";
-  outcome: "answered" | "cancelled" | "heartbeat-lost" | "timeout";
-  questions: FleetAskQuestion[];
-  answers: Record<string, string>;
-}
-
-export type DecisionHistoryRecord =
-  | ElicitationHistoryRecord
-  | PlanApprovalHistoryRecord
-  | UserPromptHistoryRecord
-  | FleetAskHistoryRecord;
 
 // ── Wiki knowledge base (mirrors claw-fleet-core/src/wiki.rs) ─────────────────
 

@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 use crate::session::SessionInfo;
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TodayUsage {
     /// YYYY-MM-DD in the user's local timezone.

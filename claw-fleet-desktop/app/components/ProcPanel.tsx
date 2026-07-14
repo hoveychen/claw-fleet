@@ -186,7 +186,7 @@ function statusLabel(p: ProcRecord, t: (k: string, o?: Record<string, unknown>) 
   // Exited rows gain "took Xs · Y ago": duration = finish − start, "ago" anchored
   // to when the command was launched. finishedMs is absent on inferred exits.
   const parts = [exited];
-  if (p.finishedMs !== undefined) {
+  if (p.finishedMs != null) {
     parts.push(t("files.proc_took", { d: fmtDuration(p.finishedMs - p.startedMs) }));
   }
   parts.push(timeAgo(p.startedMs, t));

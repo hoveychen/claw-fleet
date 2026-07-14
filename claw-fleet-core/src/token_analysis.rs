@@ -61,6 +61,7 @@ fn tok_text_len(len: usize) -> u64 {
 /// Exact billed totals from API usage fields, summed across all assistant
 /// messages in a session. These numbers are authoritative (not estimated).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct UsageTotals {
     pub input_tokens: u64,
@@ -81,6 +82,7 @@ pub struct UsageTotals {
 ///   - `residual_unexplained` is what's left after attribution; should be <30%
 ///     on validated session shapes.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SourceBuckets {
     // === Bundle (disk snapshot, charged once per cache TTL window) ===
@@ -94,7 +96,7 @@ pub struct SourceBuckets {
     pub fleet_reminders: u64,
     /// `~/.claude/projects/<encoded>/memory/MEMORY.md` (index only).
     pub memory_files: u64,
-    /// Sum of frontmatter tokens for all installed skills (`~/.claude/skills/*/SKILL.md`).
+    /// Sum of frontmatter tokens for all installed skills (each `~/.claude/skills/<name>/SKILL.md`).
     pub skills_manifest: u64,
 
     // === Visible (extracted from JSONL via chars/4) ===
@@ -150,6 +152,7 @@ impl SourceBuckets {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct OutputBuckets {
     pub output_text: u64,
@@ -176,6 +179,7 @@ impl OutputBuckets {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionTokenBreakdown {
     pub session_id: String,
@@ -195,6 +199,7 @@ pub struct SessionTokenBreakdown {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct TaskTokenBreakdown {
     pub main: SessionTokenBreakdown,

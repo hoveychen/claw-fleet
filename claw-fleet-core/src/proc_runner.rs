@@ -44,6 +44,7 @@ const OUTPUT_CHUNK: u64 = 256 * 1024;
 const STARTING_TIMEOUT_MS: u64 = 15_000;
 
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum ProcStatus {
     Starting,
@@ -52,6 +53,7 @@ pub enum ProcStatus {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ProcRecord {
     pub id: String,
@@ -81,6 +83,7 @@ pub struct ProcRecord {
 /// current metadata so the terminal view doesn't need a second poll to learn
 /// the proc exited.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ProcOutputChunk {
     pub data_b64: String,

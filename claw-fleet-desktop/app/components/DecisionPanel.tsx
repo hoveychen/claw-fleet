@@ -802,7 +802,7 @@ function ElicitationCard({ decision, compact = false }: { decision: ElicitationD
 interface SharedOptionsQuestion {
   question: string;
   multiSelect: boolean;
-  options: Array<{ label: string; description: string; preview?: string }>;
+  options: Array<{ label: string; description: string; preview?: string | null }>;
 }
 
 // Renders the option list + "Other" input. Splits into side-by-side layout
