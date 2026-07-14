@@ -98,6 +98,7 @@
   "new_session": {
     "button": "新会话",
     "title": "新建 Claude 会话",
+    "tool": "Agent",
     "workspace": "工作目录",
     "chat": "纯聊天",
     "chat_sub": "不绑定任何项目目录，随便聊",

@@ -1,8 +1,11 @@
 import { useTranslation } from "react-i18next";
 import {
+  AGENT_TOOL_CHOICES,
   CLAUDE_EFFORT_CHOICES,
   CLAUDE_MODEL_CHOICES,
   CLAUDE_PERMISSION_MODE_CHOICES,
+  CODEX_EFFORT_CHOICES,
+  CODEX_MODEL_CHOICES,
 } from "../modelChoices";
 import { PillMenu } from "./PillMenu";
 
@@ -20,6 +23,8 @@ export function SessionOptionPills({
   disabled,
   permissionDefaultLabel,
   placement = "above",
+  tool = "claude",
+  onToolChange,
 }: {
   model: string;
   effort: string;
@@ -34,10 +39,21 @@ export function SessionOptionPills({
    *  composer in SessionDetail's header) must open below or the menu is cut
    *  off by the panel's overflow:hidden. */
   placement?: "above" | "below";
+  /** Which agent tool the model/effort choices belong to. Codex has its own
+   *  model ids + reasoning-effort scale and ignores Claude's permission modes,
+   *  so the permission pill is hidden for it. */
+  tool?: string;
+  /** When provided, a leading tool-selector pill is shown (new-session only).
+   *  Resume composers omit it — you can't change tool on an existing session. */
+  onToolChange?: (v: string) => void;
 }) {
   const { t } = useTranslation();
+  const isCodex = tool === "codex";
+  const toolLabel = AGENT_TOOL_CHOICES.find((x) => x.value === tool)?.label ?? "Claude";
+  const modelChoices = isCodex ? CODEX_MODEL_CHOICES : CLAUDE_MODEL_CHOICES;
+  const effortChoices = isCodex ? CODEX_EFFORT_CHOICES : CLAUDE_EFFORT_CHOICES;
   const modelLabel =
-    CLAUDE_MODEL_CHOICES.find((m) => m.value === model)?.label ??
+    modelChoices.find((m) => m.value === model)?.label ??
     t("new_session.model_pill_default");
   const effortLabel = effort || t("new_session.effort_pill_default");
   const permissionLabel = permissionMode
@@ -45,6 +61,20 @@ export function SessionOptionPills({
     : t("new_session.permission_pill_default");
   return (
     <>
+      {onToolChange && (
+        <PillMenu
+          placement={placement}
+          label={toolLabel}
+          title={t("new_session.tool")}
+          disabled={disabled}
+          items={AGENT_TOOL_CHOICES.map((x) => ({
+            id: x.value,
+            label: x.label,
+            checked: x.value === tool,
+            onSelect: () => onToolChange(x.value),
+          }))}
+        />
+      )}
       <PillMenu
         placement={placement}
         label={modelLabel}
@@ -57,7 +87,7 @@ export function SessionOptionPills({
             checked: model === "",
             onSelect: () => onModelChange(""),
           },
-          ...CLAUDE_MODEL_CHOICES.map((m) => ({
+          ...modelChoices.map((m) => ({
             id: m.value,
             label: m.label,
             checked: m.value === model,
@@ -77,7 +107,7 @@ export function SessionOptionPills({
             checked: effort === "",
             onSelect: () => onEffortChange(""),
           },
-          ...CLAUDE_EFFORT_CHOICES.map((e) => ({
+          ...effortChoices.map((e) => ({
             id: e,
             label: e,
             checked: e === effort,
@@ -85,26 +115,30 @@ export function SessionOptionPills({
           })),
         ]}
       />
-      <PillMenu
-        placement={placement}
-        label={permissionLabel}
-        title={t("new_session.permission")}
-        disabled={disabled}
-        items={[
-          {
-            id: "",
-            label: permissionDefaultLabel ?? t("new_session.permission_default"),
-            checked: permissionMode === "",
-            onSelect: () => onPermissionModeChange(""),
-          },
-          ...CLAUDE_PERMISSION_MODE_CHOICES.map((m) => ({
-            id: m,
-            label: t(`new_session.permission_${m}`),
-            checked: m === permissionMode,
-            onSelect: () => onPermissionModeChange(m),
-          })),
-        ]}
-      />
+      {/* Codex has no --permission-mode analogue (its sandbox/approval mapping
+          is a later milestone), so the permission pill is Claude-only. */}
+      {!isCodex && (
+        <PillMenu
+          placement={placement}
+          label={permissionLabel}
+          title={t("new_session.permission")}
+          disabled={disabled}
+          items={[
+            {
+              id: "",
+              label: permissionDefaultLabel ?? t("new_session.permission_default"),
+              checked: permissionMode === "",
+              onSelect: () => onPermissionModeChange(""),
+            },
+            ...CLAUDE_PERMISSION_MODE_CHOICES.map((m) => ({
+              id: m,
+              label: t(`new_session.permission_${m}`),
+              checked: m === permissionMode,
+              onSelect: () => onPermissionModeChange(m),
+            })),
+          ]}
+        />
+      )}
     </>
   );
 }

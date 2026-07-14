@@ -144,11 +144,17 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
     permissionMode: "acceptEdits",
   });
   const { prompt, model, effort, permissionMode, attachments, workspace } = draft;
+  // Empty tool means Claude (older drafts / resume composers never set it).
+  const tool = draft.tool || "claude";
   const setPrompt = (v: string) => patch({ prompt: v });
   const setModel = (v: string) => patch({ model: v });
   const setEffort = (v: string) => patch({ effort: v });
   const setPermissionMode = (v: string) => patch({ permissionMode: v });
   const setWorkspace = (v: string) => patch({ workspace: v });
+  // Switching tool clears model/effort: Claude and Codex model ids are
+  // disjoint, so a leftover Claude model would reach `codex exec -m` (and vice
+  // versa) as an invalid value.
+  const setTool = (v: string) => patch({ tool: v, model: "", effort: "" });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pathDraft, setPathDraft] = useState("");
@@ -253,6 +259,7 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
           model: model || null,
           effort: effort || null,
           permissionMode: permissionMode || null,
+          tool,
         },
       );
       clear();
@@ -345,6 +352,8 @@ export function NewSessionForm({ onCreated, onCancel }: NewSessionFormProps) {
       model={model}
       effort={effort}
       permissionMode={permissionMode}
+      tool={tool}
+      onToolChange={setTool}
       onModelChange={setModel}
       onEffortChange={setEffort}
       onPermissionModeChange={setPermissionMode}
