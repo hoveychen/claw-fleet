@@ -49,7 +49,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
     };
 
     format!(
-        "# Fleet Interaction Mode (managed by Claude Fleet — do not edit)\n\
+        "# Fleet Interaction Mode (managed by Claw Fleet — do not edit)\n\
 \n\
 When the `AskUserQuestion` tool is available in this session, every turn that \
 would otherwise hand control back to the user via plain text output MUST be \
