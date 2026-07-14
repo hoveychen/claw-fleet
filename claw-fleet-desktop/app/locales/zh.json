@@ -588,14 +588,6 @@
         "step2": "2. 按照提示使用你的 Anthropic 账户登录。"
       }
     },
-    "credentials_invalid": {
-      "title": "凭据可能已过期",
-      "description": "找到了凭据但无法加载账户信息，令牌可能已过期。",
-      "relogin_cmd": "claude login",
-      "relogin_hint": "运行此命令刷新身份验证。",
-      "check_network": "如果你在代理或防火墙后面，请检查网络连接。",
-      "still_works": "即使凭据无效，会话监控仍然正常工作 —— 仅「账户和用量」面板受到影响。"
-    },
     "waiting": {
       "title": "等待第一个会话...",
       "description": "一切就绪！在任何地方启动一个 Claude Code 会话，它将自动出现在这里。",

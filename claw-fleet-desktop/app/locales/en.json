@@ -591,14 +591,6 @@
         "step2": "2. Sign in with your Anthropic account when prompted."
       }
     },
-    "credentials_invalid": {
-      "title": "Credentials may be expired",
-      "description": "We found credentials but couldn't load your account info. Your token may have expired.",
-      "relogin_cmd": "claude login",
-      "relogin_hint": "Run this command to refresh your authentication.",
-      "check_network": "If you're behind a proxy or firewall, check your network connection.",
-      "still_works": "Session monitoring still works without valid credentials — only the Account & Usage panel is affected."
-    },
     "waiting": {
       "title": "Waiting for first session...",
       "description": "Everything looks good! Start a Claude Code session anywhere and it will appear here automatically.",
