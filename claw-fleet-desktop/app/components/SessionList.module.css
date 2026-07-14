@@ -649,6 +649,13 @@
   opacity: 1;
 }
 
+/* Theme cycle button holds a text glyph (☀/☽/⊙) rather than an SVG — size it
+   to sit level with the 14px lite-mode icon beside it. */
+.footer_theme_btn {
+  font-size: 15px;
+  line-height: 1;
+}
+
 /* ── Main content area (list mode) ─────────────────────────────────────── */
 
 /* The page frame is PageShell's; this is only the scroller inside its main
