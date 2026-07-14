@@ -220,6 +220,7 @@ export const MOCK_FLEET_ASK: FleetAskRequest = {
 
 export const MOCK_TODAY_USAGE: TodayUsage = {
   date: new Date(NOW).toISOString().slice(0, 10),
+  inputTokens: 8_920_000,
   outputTokens: 1_284_500,
   costUsd: 23.87,
   agentCostUsd: 21.4,
