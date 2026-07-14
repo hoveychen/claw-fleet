@@ -109,6 +109,23 @@ pub struct SessionInfo {
     pub cost_speed_usd_per_min: f64,
     pub last_message_preview: Option<String>,
     pub last_activity_ms: u64,
+    /// Freshest activity across this session AND every subagent that points back
+    /// to it (main sessions only; equals `last_activity_ms` for subagents and
+    /// for mains with no subagents). A main session that has delegated to
+    /// subagents keeps a stale `last_activity_ms` while the subagents churn —
+    /// this field advances with them, so the launchpad row's "last activity"
+    /// reflects the whole tree being alive rather than just the parent's last
+    /// message. Rolled up in `scan.rs` on the same beat as `agent_token_speed`,
+    /// which sees even the hidden workflow fan-out agents.
+    #[serde(default)]
+    pub agent_last_activity_ms: u64,
+    /// Count of subagents pointing at this main session that are actively
+    /// working right now (in-flight statuses — the same set that promotes the
+    /// parent to `Delegating`). `0` for subagents and for mains with none
+    /// running. Includes hidden workflow fan-out agents. Drives the
+    /// "running subagents" badge on the session row / card.
+    #[serde(default)]
+    pub running_subagent_count: u32,
     pub created_at_ms: u64,
     pub jsonl_path: String,
     pub model: Option<String>,
@@ -503,6 +520,8 @@ mod tests {
             cost_speed_usd_per_min: 0.0,
             last_message_preview: None,
             last_activity_ms: 0,
+            agent_last_activity_ms: 0,
+            running_subagent_count: 0,
             created_at_ms: 0,
             jsonl_path: "/tmp/test.jsonl".into(),
             model: None,

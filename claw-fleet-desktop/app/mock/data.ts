@@ -28,6 +28,8 @@ const MOCK_SESSIONS_SEED: Array<
     | "compactPostTokens"
     | "compactCostUsd"
     | "pendingMessages"
+    | "agentLastActivityMs"
+    | "runningSubagentCount"
   >
 > = [
   // ── 1. Active main session: "claw-fleet" (this project) — thinking ──
@@ -461,6 +463,10 @@ export const MOCK_SESSIONS: SessionInfo[] = MOCK_SESSIONS_SEED.map((s) => ({
   compactPostTokens: 0,
   compactCostUsd: 0,
   pendingMessages: [],
+  // Mocks don't model a live subagent tree, so the aggregate activity just
+  // tracks the session's own and nothing is "running".
+  agentLastActivityMs: s.lastActivityMs,
+  runningSubagentCount: 0,
   ...s,
 }));
 
@@ -489,6 +495,8 @@ function mkSession(
     agentTotalCostUsd: 0,
     costSpeedUsdPerMin: 0,
     lastActivityMs: NOW - 1 * MIN,
+    agentLastActivityMs: o.lastActivityMs ?? NOW - 1 * MIN,
+    runningSubagentCount: 0,
     createdAtMs: NOW - 40 * MIN,
     jsonlPath: `/Users/demo/.claude/projects/${o.workspaceName}/${o.id}.jsonl`,
     model: "claude-opus-4-20250805",
@@ -720,6 +728,27 @@ for (const s of MOCK_SESSIONS) {
   s.costSpeedUsdPerMin = Math.round(s.tokenSpeed * 1.2) / 100;
   s.totalCostUsd = Math.round(s.totalOutputTokens * 0.45) / 10000;
   s.agentTotalCostUsd = s.totalCostUsd;
+}
+
+// Roll subagents up onto their parents so mock mode faithfully shows the running
+// count + aggregate activity — mirrors `aggregate_subagent_rollup` in scan.rs.
+const IN_FLIGHT: ReadonlySet<SessionInfo["status"]> = new Set([
+  "thinking",
+  "executing",
+  "streaming",
+  "delegating",
+  "processing",
+]);
+for (const main of MOCK_SESSIONS) {
+  if (main.isSubagent) continue;
+  const subs = MOCK_SESSIONS.filter(
+    (s) => s.isSubagent && s.parentSessionId === main.id,
+  );
+  main.runningSubagentCount = subs.filter((s) => IN_FLIGHT.has(s.status)).length;
+  main.agentLastActivityMs = subs.reduce(
+    (max, s) => Math.max(max, s.lastActivityMs),
+    main.lastActivityMs,
+  );
 }
 
 // ── Handoff chains (drives the 接力 chip + expanded chain panel) ─────────────
