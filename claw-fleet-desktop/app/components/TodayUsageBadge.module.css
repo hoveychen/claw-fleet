@@ -29,6 +29,27 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Inline mode (lite drag bar) ─────────────────────────────────────────── */
+
+.badge_inline {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  padding: 0 2px;
+  user-select: none;
+  cursor: default;
+  white-space: nowrap;
+}
+
+.badge_inline .cost {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge_inline .tokens {
+  font-size: 10px;
+}
+
 /* ── Collapsed rail mode ─────────────────────────────────────────────────── */
 
 .badge_collapsed {
