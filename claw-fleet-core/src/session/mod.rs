@@ -205,6 +205,12 @@ pub struct SessionInfo {
     /// turn, so this is computed as `cache_read_price × pre + output_price × post`.
     #[serde(default)]
     pub compact_cost_usd: f64,
+    /// Follow-up messages the user queued while this session was mid-turn, oldest
+    /// first. Delivered via `claude --resume` when the turn ends (see
+    /// [`crate::pending_message`]). Empty for the common case; populated by
+    /// `pending_message::enrich_sessions` on the scan path.
+    #[serde(default)]
+    pub pending_messages: Vec<String>,
 }
 
 
@@ -517,6 +523,7 @@ mod tests {
             compact_pre_tokens: 0,
             compact_post_tokens: 0,
             compact_cost_usd: 0.0,
+            pending_messages: Vec::new(),
         }
     }
 

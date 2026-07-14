@@ -148,6 +148,7 @@ impl LocalBackend {
             let mut list = self.sessions.lock().unwrap();
             claw_fleet_core::session_mark::enrich_sessions(&mut list);
             claw_fleet_core::session_read::enrich_sessions(&mut list);
+            claw_fleet_core::pending_message::enrich_sessions(&mut list);
             list.clone()
         };
         let _ = self.app.emit("sessions-updated", &snapshot);
@@ -1729,7 +1730,11 @@ impl Backend for LocalBackend {
         workspace_path: String,
         text: String,
     ) -> Result<(), String> {
-        claw_fleet_core::pending_message::enqueue(&session_id, &workspace_path, &text)
+        claw_fleet_core::pending_message::enqueue(&session_id, &workspace_path, &text)?;
+        // Re-enrich + emit so the queued chip shows immediately, without waiting
+        // for the next scan tick.
+        self.restamp_marks_and_emit();
+        Ok(())
     }
 
     fn chat_workspace(&self) -> Result<String, String> {

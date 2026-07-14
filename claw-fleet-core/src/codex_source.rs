@@ -916,6 +916,7 @@ fn build_session_from_sqlite(
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
+        pending_messages: Vec::new(),
     })
 }
 
@@ -1197,6 +1198,7 @@ fn parse_codex_session(
         compact_pre_tokens: 0,
         compact_post_tokens: 0,
         compact_cost_usd: 0.0,
+        pending_messages: Vec::new(),
     })
 }
 

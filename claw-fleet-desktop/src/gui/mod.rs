@@ -1703,6 +1703,7 @@ pub fn run() {
             kill_session,
             kill_workspace_sessions,
             resume_rate_limited_session,
+            enqueue_session_message,
             spawn_new_claude_session,
             chat_workspace,
             browse_dir,
