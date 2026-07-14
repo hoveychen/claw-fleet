@@ -621,6 +621,7 @@ pub fn cmd_matches_rule(cmd_str: &str, rule_str: &str) -> bool {
 /// the GuardRequest wire so the front-end can render a structured command
 /// block (rather than one giant un-readable string).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct CommandView {
     pub leaves: Vec<CommandLeaf>,
     /// `connectors.len() == leaves.len().saturating_sub(1)`.  The connector
@@ -638,6 +639,7 @@ pub struct CommandView {
 /// `GuardRequest`; default-false leaves stay invisible in JSON so older
 /// desktop clients keep round-tripping the wire format.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct CommandLeaf {
     pub argv: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -653,6 +655,7 @@ fn is_false(b: &bool) -> bool {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct NestedScript {
     pub kind: NestedKind,
     /// The raw script string before re-parsing.
@@ -663,6 +666,7 @@ pub struct NestedScript {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "kebab-case")]
 pub enum NestedKind {
     /// `bash -c "..."`
@@ -680,6 +684,7 @@ pub enum NestedKind {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum Connector {
     /// `&&`

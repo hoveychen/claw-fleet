@@ -5,26 +5,22 @@
 // ── Decision requests ────────────────────────────────────────────────────────
 
 /** Structured shell AST shipped in GuardRequest (claw-fleet-core/src/cmd_ast.rs).
- *  CommandLeaf has no serde rename_all — fields stay snake_case on the wire. */
-export type CmdConnector = "and" | "or" | "pipe" | "semi";
-
-export interface NestedScript {
-  kind: string;
-  raw: string;
-  view: CommandView;
-}
-
-export interface CommandLeaf {
-  argv: string[];
-  nested?: NestedScript | null;
-  triggering?: boolean;
-  already_allowed?: boolean;
-}
-
-export interface CommandView {
-  leaves: CommandLeaf[];
-  connectors: CmdConnector[];
-}
+ *  Generated from the Rust structs — see claw-fleet-core/tests/ts_export.rs.
+ *  `CmdConnector` keeps the mobile-side name (Rust type is `Connector`). */
+import type {
+  Connector,
+  NestedKind,
+  NestedScript,
+  CommandLeaf,
+  CommandView,
+} from "./generated/types";
+export type {
+  Connector as CmdConnector,
+  NestedKind,
+  NestedScript,
+  CommandLeaf,
+  CommandView,
+};
 
 export interface GuardRequest {
   id: string;

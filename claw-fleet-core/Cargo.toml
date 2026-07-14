@@ -49,6 +49,16 @@ ctrlc = { version = "3", features = ["termination"] }
 git2 = { version = "0.18", default-features = false }
 # Outbound WebSocket long-connection for the mobile relay channel.
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+# Rust→TypeScript type generation. Optional + feature-gated so a normal `cargo
+# build` never pulls the proc-macro: the `#[derive(TS)]` attrs are wrapped in
+# `#[cfg_attr(feature = "ts-export", ...)]`, and bindings are (re)generated only
+# by `cargo test --features ts-export` (the drift-guard). Keeps core's default
+# build free of any codegen dependency.
+ts-rs = { version = "12", features = ["serde-compat", "chrono-impl"], optional = true }
+
+[features]
+# Enables the ts-rs derives + `#[ts(export)]` binding generation. Off by default.
+ts-export = ["dep:ts-rs"]
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_Security_Cryptography", "Win32_Foundation", "Win32_System_Console"] }
