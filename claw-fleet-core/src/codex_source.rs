@@ -1746,6 +1746,21 @@ impl AgentSource for CodexSource {
         let val = serde_json::to_value(&info).ok()?;
         Some(SourceUsageSummary::from_codex(&val))
     }
+
+    fn spawn(
+        &self,
+        spec: &crate::agent_source::SpawnSpec,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+        // Codex mints its own thread id (no --session-id) and has no entrypoint
+        // env; session_id/entrypoint on the spec are ignored here. The
+        // permission_mode → sandbox/approval mapping is a later milestone.
+        crate::codex_launch::spawn_new_codex_session(
+            &spec.workspace_path,
+            &spec.prompt,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+        )
+    }
 }
 
 // ── Codex usage via app-server protocol ──────────────────────────────────────

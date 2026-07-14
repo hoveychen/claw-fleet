@@ -16,6 +16,25 @@ use crate::backend::SourceUsageSummary;
 use crate::memory::{MemoryHistoryEntry, WorkspaceMemory};
 use crate::session::SessionInfo;
 
+/// Parameters for launching a brand-new session, source-agnostic.
+///
+/// Not every field applies to every source: `session_id` and `entrypoint` are
+/// Claude-specific (Codex mints its own thread id and has no entrypoint env);
+/// Codex ignores them. `permission_mode` is Claude's `--permission-mode` today;
+/// the Codex sandbox/approval mapping is a later milestone.
+#[derive(Clone, Debug, Default)]
+pub struct SpawnSpec {
+    pub workspace_path: String,
+    pub prompt: String,
+    pub model: Option<String>,
+    pub effort: Option<String>,
+    pub permission_mode: Option<String>,
+    /// Caller-pre-assigned session id (Claude `--session-id`); Codex ignores it.
+    pub session_id: Option<String>,
+    /// `CLAUDE_CODE_ENTRYPOINT` value (Claude only); empty → the source's default.
+    pub entrypoint: String,
+}
+
 /// How a source should be monitored for changes.
 pub enum WatchStrategy {
     /// Watch filesystem paths with `notify` (Claude Code).
@@ -138,6 +157,15 @@ pub trait AgentSource: Send + Sync {
     /// Kill all processes in a workspace.
     fn kill_workspace(&self, _workspace_path: &str) -> Result<(), String> {
         Err(format!("{}: kill_workspace not supported", self.name()))
+    }
+
+    /// Launch a brand-new headless session for this source. Default is "not
+    /// supported"; sources that can be Fleet-launched (Claude, Codex) override.
+    fn spawn(
+        &self,
+        _spec: &SpawnSpec,
+    ) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+        Err(format!("{}: spawn not supported", self.name()))
     }
 
     /// List memory files from this source.
@@ -307,6 +335,25 @@ pub fn build_sources() -> Vec<Box<dyn AgentSource>> {
     }
 
     sources
+}
+
+/// Launch a new session with the given `tool` ("claude" / "codex"), routing to
+/// that source's [`AgentSource::spawn`]. Empty/unknown-blank `tool` defaults to
+/// "claude" (older callers omitted it). Errors if the tool's source is not
+/// registered (e.g. Codex disabled in `fleet-sources.json`) or doesn't support
+/// spawning.
+pub fn spawn_session(
+    tool: &str,
+    spec: &SpawnSpec,
+) -> Result<crate::session_launch::SpawnSessionResponse, String> {
+    let tool = match tool.trim() {
+        "" => "claude",
+        t => t,
+    };
+    let sources = build_sources();
+    let source = find_source_by_api_name(&sources, tool)
+        .ok_or_else(|| format!("agent tool '{tool}' is not available or is disabled"))?;
+    source.spawn(spec)
 }
 
 /// Find a source by its API name (e.g. "claude", "codex").
@@ -573,5 +620,18 @@ mod tests {
 
         // other names pass through
         assert!(config.is_source_enabled("codex"));
+    }
+
+    /// An unknown tool name must fail loudly in the dispatcher rather than
+    /// silently launching Claude — the routing decision has to be explicit.
+    /// (Uses a bogus tool so no real process is ever spawned.)
+    #[test]
+    fn spawn_session_rejects_unknown_tool() {
+        let err = super::spawn_session("definitely-not-a-tool", &SpawnSpec::default())
+            .unwrap_err();
+        assert!(
+            err.contains("not available") || err.contains("disabled"),
+            "unexpected error: {err}"
+        );
     }
 }
