@@ -29,7 +29,7 @@ type IndexRequest = Vec<(String, String)>; // Vec<(jsonl_path, session_id)>
 
 /// Mutex on "a session scan is in flight". The initial scan thread and the
 /// polling thread share one of these so they never run concurrently — on
-/// Windows with massive Cursor history a single scan can pull GB-sized JSON
+/// machines with massive session history a single scan can pull large JSON
 /// blobs into memory; two concurrent scans push the process into pagefile
 /// thrashing and freeze the webview that lives in the same process.
 pub(crate) struct ScanGate(AtomicBool);
@@ -62,7 +62,7 @@ impl<'a> Drop for ScanGuard<'a> {
 
 pub struct LocalBackend {
     app: AppHandle,
-    /// Registered agent sources (Claude Code, Cursor, OpenClaw, …).
+    /// Registered agent sources (Claude Code, Codex, …).
     sources: Arc<Vec<Box<dyn AgentSource>>>,
     sessions: Arc<Mutex<Vec<SessionInfo>>>,
     watch: Arc<crate::WatchState>,
@@ -552,7 +552,7 @@ impl LocalBackend {
                         break;
                     }
                     // Skip this round if the initial scan (or a previous poll
-                    // tick) is still running — on Windows with massive Cursor
+                    // tick) is still running — on machines with massive session
                     // history a single scan can take tens of seconds and a
                     // second concurrent scan pushes the process into pagefile
                     // thrashing.
@@ -1484,7 +1484,7 @@ fn emit_tail_lines(path: &std::path::Path, app: &AppHandle, watch: &crate::Watch
 
 use crate::agent_source::find_source_for_path;
 
-// ── Public kill helpers (used by ClaudeCodeSource and OpenClawSource) ────────
+// ── Public kill helpers (used by ClaudeCodeSource) ──────────────────────────
 
 /// Kill a process by PID (with process tree cleanup).
 pub fn kill_pid_impl(pid: u32) -> Result<(), String> {
@@ -3618,7 +3618,7 @@ mod tests {
             Box::new(MockSource {
                 account: Ok(json!({"email": "u@example.com"})),
                 usage: Ok(json!({"requests": 100})),
-                ..MockSource::new("cursor", "cursor", "cursor://")
+                ..MockSource::new("codex", "codex", "codex://")
             }),
         ];
 
@@ -3626,7 +3626,7 @@ mod tests {
         let s = crate::agent_source::find_source_by_api_name(&sources, "claude").unwrap();
         assert_eq!(s.fetch_account().unwrap()["plan"], "max5x");
 
-        let s = crate::agent_source::find_source_by_api_name(&sources, "cursor").unwrap();
+        let s = crate::agent_source::find_source_by_api_name(&sources, "codex").unwrap();
         assert_eq!(s.fetch_usage().unwrap()["requests"], 100);
 
         // Unknown source
