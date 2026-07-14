@@ -208,9 +208,11 @@ plan/P, with a timestamp — so the desktop app can show *your* current plan and
 P even when several sessions share one TASKS.md (Fleet knows your \
 `FLEET_SESSION_ID`; you can't read the wall clock yourself). Commands:\n\
 \n\
-- `fleet plan create <id> --title \"...\"` — add a new v2 plan block **and** \
-  record this session as its executor. Creating a plan is starting it, so no \
-  separate declaration is needed.\n\
+- `fleet plan create <id> --title \"...\" [--parent <parent-id>]` — add a new \
+  v2 plan block **and** record this session as its executor. Creating a plan is \
+  starting it, so no separate declaration is needed. Pass `--parent` when the \
+  new plan is **side work you spun off mid-parent** (a detour you must return \
+  from) — see \"Child plans & backtracking\" below.\n\
 - `fleet plan check <id> <P>` — tick a task done (`[ ]`→`[x]`) and refresh this \
   session's focus onto `<id>`. e.g. `fleet plan check auth-refactor P2`.\n\
 - `fleet plan uncheck <id> <P>` — untick.\n\
@@ -226,6 +228,32 @@ P even when several sessions share one TASKS.md (Fleet knows your \
 Hand-editing TASKS.md still works — the file is the source of truth for \
 checkboxes — but it records no attribution, so the desktop app cannot tell \
 which plan your session is on and shows nothing on your card.\n\
+\n\
+### Child plans & backtracking\n\
+\n\
+Mid-plan you sometimes have to spin off a **side branch** — a distinct chunk \
+of work that must finish before the main plan can continue (a prerequisite \
+refactor, a bug the current P depends on). Create it as a **child plan** so \
+the detour doesn't strand the plan you came from:\n\
+\n\
+```\n\
+fleet plan create <side-id> --title \"...\" --parent <current-plan-id>\n\
+```\n\
+\n\
+This records `parent=\"<current-plan-id>\"` on the side plan's sentinel. When \
+you tick the **last** box of that child with `fleet plan check`, Fleet walks \
+up the `parent` chain to the nearest ancestor that still has pending P-tasks, \
+**re-points your focus back onto it**, and prints a directive telling you the \
+next P to resume. You do not run `fleet plan resume` yourself — just follow \
+the directive and keep going; do NOT end your turn because the child finished. \
+A backstop in the prd-context hook re-issues the same nudge every prompt if \
+your focus is ever left on a completed child (e.g. the last box was \
+hand-edited rather than ticked via `fleet plan check`).\n\
+\n\
+Children may nest (a child can have its own child) and the walk skips \
+already-complete ancestors, so backtracking always lands on the nearest \
+unfinished work up the tree. A plan with no `--parent` is top-level: \
+completing it backtracks nowhere and the plan is simply done.\n\
 \n\
 Rules of thumb for the format itself:\n\
 - Use `- [ ]` for pending and `- [x]` for done (`fleet plan check/uncheck` \
