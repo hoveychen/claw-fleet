@@ -700,3 +700,46 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ── Decision-card panel ─────────────────────────────────────────────── */
+.dc_table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.dc_table th {
+  text-align: right;
+  font-weight: 600;
+  color: var(--color-text-dim);
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--color-border);
+  white-space: nowrap;
+}
+.dc_table th:first-child,
+.dc_table td:first-child {
+  text-align: left;
+}
+.dc_table td {
+  text-align: right;
+  padding: 6px;
+  color: var(--color-text);
+  border-bottom: 1px solid var(--color-border);
+}
+.dc_table tr:last-child td {
+  border-bottom: none;
+}
+.dc_type_name {
+  font-weight: 600;
+}
+.dc_rate {
+  color: var(--color-text-dim);
+  font-size: 10px;
+  margin-left: 4px;
+}
+.dc_warn {
+  color: var(--color-accent);
+}
+.dc_dim {
+  color: var(--color-text-dim);
+}
