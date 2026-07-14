@@ -438,6 +438,10 @@ pub fn compose_successor_prompt(p: &PendingHandoff) -> String {
             )),
         }
         out.push_str("plan 的完整任务清单会由 prd-context hook 自动注入你的上下文，以 TASKS.md 为准。\n");
+        out.push_str(
+            "若该 plan 是子 plan（sentinel 带 `parent=`），做完最后一个 P 后 Fleet 会把你的焦点\
+             切回父 plan 并指示下一个 P——按提示继续，别因为子 plan 完成就收工。\n",
+        );
     } else {
         out.push_str("按交接信息继续完成这项工作。\n");
     }
