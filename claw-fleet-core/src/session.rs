@@ -29,6 +29,7 @@ pub struct IdeSession {
 // ── Exported types ───────────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub enum SessionStatus {
     Thinking,     // streaming: last partial assistant msg has thinking blocks
@@ -51,6 +52,7 @@ pub enum SessionStatus {
 /// for the UI countdown and the auto-resume scheduler. `parsed` is `false` when
 /// `resets_at` is an estimate derived from `error_timestamp + fallback_duration`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct RateLimitState {
     pub resets_at: chrono::DateTime<chrono::Utc>,
@@ -60,6 +62,7 @@ pub struct RateLimitState {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct SessionInfo {
     pub id: String,

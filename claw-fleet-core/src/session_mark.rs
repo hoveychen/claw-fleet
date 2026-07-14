@@ -29,6 +29,7 @@ use serde::{Deserialize, Serialize};
 /// record, not a variant here, so the frontend's `userMark === undefined` means
 /// "new / needs review".
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "lowercase")]
 pub enum SessionMark {
     /// Seen by the human, work not finished.

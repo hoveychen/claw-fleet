@@ -41,6 +41,7 @@ use serde::{Deserialize, Serialize};
 /// and monitors/MCP tasks carry `server`/`tool` fields we don't need), so every
 /// other field tolerates absence.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 pub struct BackgroundTask {
     pub id: String,
     /// `shell` | `monitor` | `subagent` | `workflow` | `teammate` | ...

@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 
 /// A single question option from AskUserQuestion.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ElicitationOption {
     pub label: String,
@@ -31,6 +32,7 @@ pub struct ElicitationOption {
 
 /// A single question from AskUserQuestion.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ElicitationQuestion {
     pub question: String,
@@ -42,6 +44,7 @@ pub struct ElicitationQuestion {
 
 /// Written by `fleet elicitation` → read by Fleet desktop app.
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[cfg_attr(feature = "ts-export", derive(ts_rs::TS))]
 #[serde(rename_all = "camelCase")]
 pub struct ElicitationRequest {
     pub id: String,
