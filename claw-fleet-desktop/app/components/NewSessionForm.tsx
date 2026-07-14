@@ -63,6 +63,23 @@ export function repoRootPath(path: string): string {
   return before || path;
 }
 
+/** True when `path` lives under an OS temp/scratchpad directory that should never
+ *  be offered as a launchable workspace. Fleet (and Claude Code) drop per-session
+ *  scratchpads under `/tmp` (`/private/tmp` on macOS, where `/tmp` symlinks) and
+ *  the system uses `/var/folders/.../T` for per-user temp — sessions whose cwd is
+ *  one of these are transient and would clutter the launcher's recents. Matches on
+ *  a leading path segment so a real project merely *named* `tmp-tools` is kept. */
+export function isTempWorkspacePath(path: string): boolean {
+  const p = path.replace(/\\/g, "/");
+  return (
+    p === "/tmp" ||
+    p.startsWith("/tmp/") ||
+    p === "/private/tmp" ||
+    p.startsWith("/private/tmp/") ||
+    p.startsWith("/var/folders/")
+  );
+}
+
 export interface WorkspaceOption {
   path: string;
   name: string;
@@ -92,6 +109,7 @@ export function distinctWorkspaces(
   for (const s of sessions) {
     if (!s.workspacePath) continue;
     const path = repoRootPath(s.workspacePath);
+    if (isTempWorkspacePath(path)) continue;
     if (chatPath && path === chatPath) continue;
     const prev = byPath.get(path);
     if (!prev || s.lastActivityMs > prev.lastMs) {
