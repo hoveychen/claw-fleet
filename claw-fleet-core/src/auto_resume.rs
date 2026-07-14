@@ -154,10 +154,13 @@ pub fn should_auto_resume(
     // Source is no longer a hard gate here: the resume *form* is dispatched by
     // `agent_source` at spawn time (claude → `claude --resume`, codex →
     // `codex exec resume`), so eligibility is decided purely by the rate-limit
-    // payload below. A Codex session only becomes a candidate once the scanner
-    // populates its `rate_limit` from Codex's own `rateLimits.resetsAt` (M2 P7);
-    // until then codex sessions carry `rate_limit: None` and fail the check
-    // below, so removing the string gate changes nothing for codex today.
+    // payload below. A codex session's `rate_limit` is built by
+    // [`crate::codex_source::codex_rate_limit_state_from_usage`] (M2 P7), which
+    // encodes codex's own reset semantics (epoch-seconds `resetsAt`, weekly vs
+    // secondary windows) into the same `RateLimitState` this predicate reads —
+    // so the gate below is source-agnostic. Live population of that payload onto
+    // a rate-limited codex session lands with the Fleet-owned marking (M3 P9)
+    // and is validated end-to-end in P8.
     if session.status != crate::session::SessionStatus::RateLimited {
         return false;
     }
@@ -595,6 +598,66 @@ mod tests {
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
         s.agent_source = "codex".into();
         assert!(should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    /// Build a codex account rate-limit snapshot with the given reached window,
+    /// then feed it through the real codex→RateLimitState converter (M2 P7) so
+    /// these tests exercise the actual codex reset judgment, not a hand-rolled
+    /// RateLimitState.
+    fn codex_state(
+        reached: &str,
+        window_mins: i64,
+        resets_at: chrono::DateTime<chrono::Utc>,
+    ) -> RateLimitState {
+        let usage = crate::codex_source::CodexUsageItem {
+            primary: Some(crate::codex_source::CodexRateLimitWindow {
+                used_percent: 100,
+                window_duration_mins: Some(window_mins),
+                resets_at: Some(resets_at.timestamp()),
+            }),
+            rate_limit_reached_type: Some(reached.to_string()),
+            ..Default::default()
+        };
+        crate::codex_source::codex_rate_limit_state_from_usage(&usage, Utc::now())
+            .expect("reached snapshot → Some")
+    }
+
+    #[test]
+    fn codex_secondary_window_eligible_once_reset_passed() {
+        // A codex secondary (short, 5h) window whose reset has passed is
+        // auto-resume eligible — same as a claude session limit. Source is no
+        // longer a gate (P6); the codex reset judgment (P7) supplies the state.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, None);
+        s.agent_source = "codex".into();
+        // reset was 2 min ago (past the 60s grace); 5h window → wait 5h ≤ 12h.
+        s.rate_limit = Some(codex_state("secondary", 300, Utc::now() - Duration::minutes(2)));
+        assert!(should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    #[test]
+    fn codex_weekly_window_blocked_by_max_wait() {
+        // A codex primary (weekly, 10080-min) window is too long to auto-resume
+        // unattended — the max_wait_hours valve blocks it exactly like a claude
+        // weekly limit, because error_timestamp is set to the window start.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, None);
+        s.agent_source = "codex".into();
+        // Even with the reset already passed, the 7-day wait exceeds max_wait.
+        s.rate_limit = Some(codex_state("primary", 10080, Utc::now() - Duration::minutes(2)));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    #[test]
+    fn codex_secondary_window_blocked_before_reset() {
+        // Before the secondary window's reset (+grace), the hint gate blocks —
+        // and codex has no claude usage metric, so there's no early-recovery path.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, None);
+        s.agent_source = "codex".into();
+        // reset is 30 min out.
+        s.rate_limit = Some(codex_state("secondary", 300, Utc::now() + Duration::minutes(30)));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
 
     #[test]
