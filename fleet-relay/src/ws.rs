@@ -1,5 +1,12 @@
 //! WebSocket endpoint: first frame authenticates (role + secret), then frames
 //! are routed per role until the socket closes.
+//!
+//! Under the mobile end-to-end encryption (方案A), the `secret` here is the
+//! HKDF-derived **channel token**, never the pairing secret — and every `msg`
+//! payload is AES-256-GCM ciphertext (`{enc:"box",…}`). The relay is a blind
+//! forwarder: it only ever sees the opaque channel token (which it hashes into
+//! a routing bucket) and sealed bytes it passes through verbatim. It holds no
+//! key and does no crypto; do not add any decrypt/encrypt logic here.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -26,6 +33,9 @@ async fn handle_socket(state: Arc<AppState>, mut socket: WebSocket) {
     let auth = tokio::time::timeout(AUTH_TIMEOUT, next_text(&mut socket)).await;
     let (role, secret) = match auth {
         Ok(Some(text)) => match serde_json::from_str::<InFrame>(&text) {
+            // `secret` is the opaque channel token (64 hex chars, so the
+            // ≥16 length gate always passes); the relay never learns the
+            // pairing secret it was derived from.
             Ok(InFrame::Auth { role, secret }) if secret.len() >= MIN_SECRET_LEN => (role, secret),
             Ok(InFrame::Auth { .. }) => {
                 let _ = send_frame(&mut socket, &OutFrame::Error { message: "secret too short".into() }).await;
