@@ -54,7 +54,7 @@ pub fn render_guidance(user_title: &str, locale: &str) -> String {
     };
 
     format!(
-        "# Fleet PRD Discipline (managed by Claude Fleet — do not edit)\n\
+        "# Fleet PRD Discipline (managed by Claw Fleet — do not edit)\n\
 \n\
 This mode locks down three failure modes that hurt long multi-step plans:\n\
 \n\

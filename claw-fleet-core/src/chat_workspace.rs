@@ -52,7 +52,7 @@ const CHAT_MCP_FILE: &str = "chat-mcp.json";
 /// prose over bullets, no engagement-farming, don't blame your behaviour on a
 /// file the user can't see, own mistakes without grovelling, default to helping.
 /// A coding agent's habits are the wrong defaults for a conversation.
-const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claude Fleet — do not edit)
+const CHAT_CLAUDE_MD: &str = r#"# 纯聊天工作区 (managed by Claw Fleet — do not edit)
 
 这是 Fleet 的纯聊天工作区。这里没有代码库，也不对应任何项目——老板来这儿是为了聊天：问问题、
 聊想法、查东西、让你帮忙把一件事想清楚。
