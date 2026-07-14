@@ -49,6 +49,7 @@ pub mod relay_crypto;
 pub mod model_cost;
 pub mod launch_spec;
 pub mod parked;
+pub mod pending_message;
 pub mod pattern_update;
 pub mod permission_prompt_ipc;
 pub mod permissions_injector;

@@ -9,7 +9,7 @@ import {
   useSessionsStore,
   useUIStore,
 } from "../store";
-import { canResumeSession } from "../types";
+import { canResumeSession, canEnqueueSession } from "../types";
 import type { DecisionHistoryRecord, LiveThinking, RawMessage, SessionInfo, TaskPlanDetail } from "../types";
 import { AgentNavProvider } from "./AgentNavContext";
 import { DecisionHistory } from "./DecisionHistory";
@@ -328,6 +328,9 @@ export function SessionDetail({
   // lives in ResumeComposer, docked at the bottom of the 对话 tab whenever the
   // session is resumable — no separate "恢复会话" toggle to click.
   const canResume = !!liveSession && canResumeSession(liveSession);
+  // While the turn is still running, the same dock offers to *queue* a
+  // follow-up instead of resuming (which would race the live turn).
+  const canEnqueue = !!liveSession && canEnqueueSession(liveSession);
 
   useEffect(() => {
     const sid = liveSession?.id;
@@ -929,15 +932,18 @@ export function SessionDetail({
                 </button>
               )}
 
-              {/* Resume composer, docked at the bottom of the conversation. Shown
-                  inline whenever the session is resumable — resuming flips the
-                  status to active, canResume goes false, and this unmounts. */}
-              {canResume && liveSession && (
+              {/* Resume/enqueue composer, docked at the bottom of the
+                  conversation. When the turn has ended it resumes; while the
+                  turn is still running it queues a follow-up (delivered when the
+                  turn ends). One of canResume / canEnqueue holds at a time. */}
+              {(canResume || canEnqueue) && liveSession && (
                 <div className={styles.resume_dock}>
                   <ResumeComposer
                     sessionId={liveSession.id}
                     workspacePath={liveSession.workspacePath}
                     onResumed={() => {}}
+                    mode={canEnqueue ? "enqueue" : "resume"}
+                    pendingMessages={liveSession.pendingMessages ?? []}
                   />
                 </div>
               )}

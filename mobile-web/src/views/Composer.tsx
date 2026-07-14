@@ -444,9 +444,14 @@ export function NewSessionSheet({ sessions, client, onClose }: NewSessionProps) 
 interface ResumeProps {
   session: SessionInfo;
   client: RelayClient | null;
+  /** `"resume"`: turn ended, submit resumes now. `"enqueue"`: turn still
+   *  running, submit queues the message for delivery when the turn ends. */
+  mode?: "resume" | "enqueue";
 }
 
-export function ResumeComposer({ session, client }: ResumeProps) {
+export function ResumeComposer({ session, client, mode = "resume" }: ResumeProps) {
+  const enqueueing = mode === "enqueue";
+  const pendingMessages = session.pendingMessages ?? [];
   // 每个会话各自的续写草稿，按 sessionId 分 key——切到别的会话再回来，
   // 各自的半截输入互不覆盖；发送成功后清空。
   const [prompt, setPrompt, clearPrompt] = useDraft(`resume:${session.id}`, "");
@@ -462,17 +467,29 @@ export function ResumeComposer({ session, client }: ResumeProps) {
 
   const submit = async () => {
     if (!client || busy || uploading) return;
+    const text = withContextFiles(prompt.trim(), attachments);
+    // Enqueue needs actual text (there's no "continue" fallback for a queued
+    // follow-up); resume tolerates empty (= continue).
+    if (enqueueing && !text) return;
     setBusy(true);
     try {
-      await client.request("resume_session", {
-        sessionId: session.id,
-        workspacePath: session.workspacePath,
-        // Empty prompt = "continue" (relay side supplies the fallback).
-        prompt: withContextFiles(prompt.trim(), attachments) || undefined,
-        ...(model ? { model } : {}),
-        ...(effort ? { effort } : {}),
-        ...(permissionMode ? { permissionMode } : {}),
-      });
+      if (enqueueing) {
+        await client.request("enqueue_message", {
+          sessionId: session.id,
+          workspacePath: session.workspacePath,
+          text,
+        });
+      } else {
+        await client.request("resume_session", {
+          sessionId: session.id,
+          workspacePath: session.workspacePath,
+          // Empty prompt = "continue" (relay side supplies the fallback).
+          prompt: text || undefined,
+          ...(model ? { model } : {}),
+          ...(effort ? { effort } : {}),
+          ...(permissionMode ? { permissionMode } : {}),
+        });
+      }
       clearPrompt();
       reset();
       setSent(true);
@@ -486,9 +503,23 @@ export function ResumeComposer({ session, client }: ResumeProps) {
 
   return (
     <div className={styles.resumeBox}>
+      {pendingMessages.length > 0 && (
+        <div className={styles.queuedList}>
+          <div className={styles.queuedLabel}>{t("已排队，本轮结束后自动发送")}</div>
+          {pendingMessages.map((m, i) => (
+            <div key={i} className={styles.queuedChip}>
+              {m}
+            </div>
+          ))}
+        </div>
+      )}
       <textarea
         className={styles.promptInput}
-        placeholder={t("继续这个会话（留空 = continue）…")}
+        placeholder={
+          enqueueing
+            ? t("会话运行中，发送后排队，本轮结束自动接上…")
+            : t("继续这个会话（留空 = continue）…")
+        }
         rows={2}
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
@@ -500,33 +531,35 @@ export function ResumeComposer({ session, client }: ResumeProps) {
         onRemove={remove}
       />
       <div className={styles.resumeActions}>
-        <OptionSelects
-          model={model}
-          effort={effort}
-          permissionMode={permissionMode}
-          permissionDefaultLabel="沿用权限"
-          onChange={(p) => {
-            if (p.model !== undefined) setModel(p.model);
-            if (p.effort !== undefined) setEffort(p.effort);
-            if (p.permissionMode !== undefined) setPermissionMode(p.permissionMode);
-          }}
-        />
+        {!enqueueing && (
+          <OptionSelects
+            model={model}
+            effort={effort}
+            permissionMode={permissionMode}
+            permissionDefaultLabel="沿用权限"
+            onChange={(p) => {
+              if (p.model !== undefined) setModel(p.model);
+              if (p.effort !== undefined) setEffort(p.effort);
+              if (p.permissionMode !== undefined) setPermissionMode(p.permissionMode);
+            }}
+          />
+        )}
         <button
           className={styles.submit}
-          disabled={busy || uploading || !client}
+          disabled={busy || uploading || !client || (enqueueing && !prompt.trim())}
           onClick={() => void submit()}
         >
           {busy ? (
-            t("发送中…")
+            enqueueing ? t("排队中…") : t("发送中…")
           ) : sent ? (
             <>
               <Check size={15} />
-              {t("已发送")}
+              {enqueueing ? t("已排队") : t("已发送")}
             </>
           ) : (
             <>
               <Send size={15} />
-              {t("继续会话")}
+              {enqueueing ? t("排队") : t("继续会话")}
             </>
           )}
         </button>

@@ -148,6 +148,7 @@ impl LocalBackend {
             let mut list = self.sessions.lock().unwrap();
             claw_fleet_core::session_mark::enrich_sessions(&mut list);
             claw_fleet_core::session_read::enrich_sessions(&mut list);
+            claw_fleet_core::pending_message::enrich_sessions(&mut list);
             list.clone()
         };
         let _ = self.app.emit("sessions-updated", &snapshot);
@@ -475,6 +476,7 @@ impl LocalBackend {
                         &llm_config2,
                     );
                     maybe_fire_auto_resume(&sess2, &ar2, &arif2, &arfail2);
+                    maybe_drain_pending_messages(&sess2);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx2.send(sessions_to_index_request(&sess2.lock().unwrap()));
                     last_rescan = Instant::now();
@@ -586,6 +588,7 @@ impl LocalBackend {
                         &llm_config3,
                     );
                     maybe_fire_auto_resume(&sess3, &ar3, &arif3, &arfail3);
+                    maybe_drain_pending_messages(&sess3);
                     // Send to indexer thread (non-blocking).
                     let _ = idx_tx3.send(sessions_to_index_request(&sess3.lock().unwrap()));
                 }
@@ -608,6 +611,7 @@ impl LocalBackend {
                     break;
                 }
                 maybe_fire_auto_resume(&sess_ar, &ar_ar, &arif_ar, &arfail_ar);
+                maybe_drain_pending_messages(&sess_ar);
             });
         }
 
@@ -1447,6 +1451,24 @@ const AUTO_RESUME_FAILURE_BACKOFF: u32 = 3;
 /// - **Concurrency cap**: at most `AUTO_RESUME_MAX_CONCURRENT` resume processes
 ///   run at once. A tick that finds 300 eligible sessions fires only enough to
 ///   fill the free slots; `in_flight` is decremented by each process's reaper.
+/// Deliver any queued follow-up message to a session whose turn just ended.
+///
+/// Runs on the same session-refresh ticks as [`maybe_fire_auto_resume`]. Each
+/// session snapshot carries a fresh `proc_alive`, which is the gate
+/// [`claw_fleet_core::pending_message::drain_if_idle`] uses to know the turn is
+/// over — so a message typed while the session was running is fired here, on the
+/// first tick after the `claude` process exits. Independent of the auto-resume
+/// enabled toggle: queuing a follow-up is a direct user action, not the
+/// rate-limit recovery policy.
+fn maybe_drain_pending_messages(sessions: &Arc<Mutex<Vec<SessionInfo>>>) {
+    // Snapshot under the lock, then drain without holding it — draining spawns a
+    // detached `claude`, which must not run inside the sessions mutex.
+    let snapshot: Vec<SessionInfo> = { sessions.lock().unwrap().clone() };
+    for session in &snapshot {
+        claw_fleet_core::pending_message::maybe_drain(session);
+    }
+}
+
 fn maybe_fire_auto_resume(
     sessions: &Arc<Mutex<Vec<SessionInfo>>>,
     last_fire: &Arc<Mutex<HashMap<String, Instant>>>,
@@ -1699,6 +1721,19 @@ impl Backend for LocalBackend {
             std::thread::sleep(Duration::from_millis(1500));
             rescan_and_emit(&sources, &app, &sessions, &outcomes);
         });
+        Ok(())
+    }
+
+    fn enqueue_message(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        text: String,
+    ) -> Result<(), String> {
+        claw_fleet_core::pending_message::enqueue(&session_id, &workspace_path, &text)?;
+        // Re-enrich + emit so the queued chip shows immediately, without waiting
+        // for the next scan tick.
+        self.restamp_marks_and_emit();
         Ok(())
     }
 

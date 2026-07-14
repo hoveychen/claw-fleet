@@ -44,7 +44,8 @@ lastReadMs?: number | null,
 compactCount: number, 
 compactPreTokens: number, 
 compactPostTokens: number, 
-compactCostUsd: number, };
+compactCostUsd: number, 
+pendingMessages: Array<string>, };
 
 export type SessionMark = "pending" | "done";
 

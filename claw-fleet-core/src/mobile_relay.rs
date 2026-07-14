@@ -1012,6 +1012,7 @@ fn serve_request(method: &str, params: &Value) -> Result<Value, String> {
         // ── Write methods ────────────────────────────────────────────────
         "spawn_session" => serve_spawn_session(params),
         "resume_session" => serve_resume_session(params),
+        "enqueue_message" => serve_enqueue_message(params),
         "interrupt" => serve_interrupt(params),
         "stop" => serve_stop(params),
         "stop_workspace" => serve_stop_workspace(params),
@@ -1451,6 +1452,14 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
         req.effort.as_deref(),
         req.permission_mode.as_deref(),
     )?;
+    Ok(json!({ "ok": true }))
+}
+
+fn serve_enqueue_message(params: &Value) -> Result<Value, String> {
+    let req: crate::pending_message::EnqueueMessageRequest =
+        serde_json::from_value(params.clone())
+            .map_err(|e| format!("bad enqueue_message params: {e}"))?;
+    crate::pending_message::enqueue(&req.session_id, &req.workspace_path, &req.text)?;
     Ok(json!({ "ok": true }))
 }
 
