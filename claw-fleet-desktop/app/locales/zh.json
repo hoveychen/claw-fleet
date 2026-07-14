@@ -537,7 +537,10 @@
     "welcome": "欢迎使用 Claw Fleet",
     "subtitle": "监控你的 AI 编程 Agent，获取每日 AI 摘要，将失误转化为知识",
     "checking": "正在检查环境...",
-    "skip": "跳过",
+    "check_timeout": {
+      "title": "环境检测超时",
+      "description": "检测还没返回，但不影响使用——你可以直接开始，或点击重试。"
+    },
     "dismiss": "好的，开始使用",
     "recheck": "重新检查",
     "no_claude_at_all": {
@@ -588,20 +591,6 @@
         "step2": "2. 按照提示使用你的 Anthropic 账户登录。"
       }
     },
-    "credentials_invalid": {
-      "title": "凭据可能已过期",
-      "description": "找到了凭据但无法加载账户信息，令牌可能已过期。",
-      "relogin_cmd": "claude login",
-      "relogin_hint": "运行此命令刷新身份验证。",
-      "check_network": "如果你在代理或防火墙后面，请检查网络连接。",
-      "still_works": "即使凭据无效，会话监控仍然正常工作 —— 仅「账户和用量」面板受到影响。"
-    },
-    "waiting": {
-      "title": "等待第一个会话...",
-      "description": "一切就绪！在任何地方启动一个 Claude Code 会话，它将自动出现在这里。",
-      "hint_terminal": "终端：运行 \"claude\" 即可启动会话",
-      "hint_ide": "IDE：在 VS Code、JetBrains 或任何支持的编辑器中使用 Claude Code 扩展"
-    },
     "celebration": {
       "title": "首个会话已检测到！",
       "description": "恭喜！Claw Fleet 已开始监控你的会话。尽情享受仪表盘吧！"
@@ -620,19 +609,18 @@
       "title": "一切就绪！",
       "description": "Claude Code 已安装，你已登录，会话正在被监控。"
     },
+    "ready": {
+      "title": "一切就绪！",
+      "description": "环境检查通过。在任意项目目录里启动一次 Claude Code 会话，Fleet 就会自动发现并展示它。"
+    },
     "features": {
-      "title": "你可以做什么",
-      "description": "Claw Fleet 不只是会话监控器 —— 以下功能已为你准备就绪。",
       "ai_summary_title": "AI 每日摘要",
-      "ai_summary_desc": "自动生成 Agent 每日工作叙述，一键复制 Markdown 用于站会汇报。",
-      "lessons_title": "经验总结",
-      "lessons_desc": "AI 从会话日志中提取失误并转化为 CLAUDE.md 规则 —— 让你的 Agent 越用越聪明。",
       "live_status_title": "实时状态仪表盘",
-      "live_status_desc": "8 种实时状态，支持父子 Agent 层级关系。可直接从仪表盘停止卡住的 Agent。",
-      "audit_title": "安全审计",
-      "audit_desc": "每条 Shell 命令都经过扫描和风险分级，在危险操作变成事故前拦截它们。",
-      "memory_title": "记忆浏览器",
-      "memory_desc": "所有项目的 CLAUDE.md 文件和记忆条目，汇聚在一处浏览管理。"
+      "audit_title": "安全审计"
+    },
+    "advanced": {
+      "title": "高级设置",
+      "description": "通知、安全审计、交互模式等——都有合理默认值，之后也可在设置中调整"
     },
     "settings_appearance": {
       "title": "外观",
