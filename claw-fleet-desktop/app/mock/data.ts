@@ -4,7 +4,7 @@
  * statuses, and workspaces to showcase all core features.
  */
 
-import type { AuditEvent, AuditSummary, DailyReport, DailyReportStats, HandoffChain, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
+import type { AuditEvent, AuditRuleInfo, AuditSummary, DailyReport, DailyReportStats, HandoffChain, Lesson, RawMessage, SessionInfo, SkillInvocation, WaitingAlert } from "../types";
 
 const NOW = Date.now();
 const MIN = 60_000;
@@ -1325,6 +1325,108 @@ export const MOCK_AUDIT_SUMMARY: AuditSummary = {
   events: MOCK_AUDIT_EVENTS,
   totalSessionsScanned: 42,
 };
+
+// Mock rules whose `tag` matches the primary tag of each mock event, so the
+// dev/browser build exercises the tag→description join exactly like production
+// (where events carry real rule tags and `get_audit_rules` returns real rules).
+export const MOCK_AUDIT_RULES: AuditRuleInfo[] = [
+  {
+    id: "builtin-recursive-delete",
+    level: "critical",
+    tag: "recursive-delete",
+    matchMode: "command_start",
+    patterns: ["rm -rf"],
+    descriptionEn: "Recursively force-deletes files or directories",
+    descriptionZh: "递归强制删除文件或目录",
+    enabled: true,
+    builtin: true,
+    category: "filesystem",
+  },
+  {
+    id: "builtin-external-api",
+    level: "critical",
+    tag: "external-api",
+    matchMode: "contains",
+    patterns: ["curl -X POST"],
+    descriptionEn: "Sends data to an external API (may carry production keys)",
+    descriptionZh: "向外部 API 发送数据（可能携带生产密钥）",
+    enabled: true,
+    builtin: true,
+    category: "data_exfiltration",
+  },
+  {
+    id: "builtin-force-push",
+    level: "high",
+    tag: "force-push",
+    matchMode: "command_start",
+    patterns: ["git push --force"],
+    descriptionEn: "Force-pushes, overwriting remote branch history",
+    descriptionZh: "强制推送，覆盖远端分支历史",
+    enabled: true,
+    builtin: true,
+    category: "git",
+  },
+  {
+    id: "builtin-npm-publish",
+    level: "high",
+    tag: "npm-publish",
+    matchMode: "command_start",
+    patterns: ["npm publish"],
+    descriptionEn: "Publishes a package to the public npm registry",
+    descriptionZh: "向公共 npm registry 发布软件包",
+    enabled: true,
+    builtin: true,
+    category: "package",
+  },
+  {
+    id: "builtin-secrets",
+    level: "critical",
+    tag: "secrets",
+    matchMode: "contains",
+    patterns: [".env"],
+    descriptionEn: "Writes a file containing secrets / API keys",
+    descriptionZh: "写入包含密钥 / API Key 的文件",
+    enabled: true,
+    builtin: true,
+    category: "data_exfiltration",
+  },
+  {
+    id: "builtin-drop-table",
+    level: "critical",
+    tag: "drop-table",
+    matchMode: "contains",
+    patterns: ["DROP TABLE"],
+    descriptionEn: "Drops a production database table (cascading)",
+    descriptionZh: "删除生产数据库表（级联删除）",
+    enabled: true,
+    builtin: true,
+    category: "filesystem",
+  },
+  {
+    id: "builtin-terraform-destroy",
+    level: "critical",
+    tag: "terraform-destroy",
+    matchMode: "command_start",
+    patterns: ["terraform destroy"],
+    descriptionEn: "Destroys Terraform-managed infrastructure",
+    descriptionZh: "销毁 Terraform 管理的基础设施",
+    enabled: true,
+    builtin: true,
+    category: "cloud",
+  },
+  {
+    id: "builtin-remote-execution",
+    level: "critical",
+    tag: "remote-execution",
+    matchMode: "contains",
+    patterns: ["| bash", "| sh"],
+    descriptionEn: "Downloads and executes a remote script (pipe to shell)",
+    descriptionZh: "下载并执行远端脚本（管道到 shell）",
+    enabled: true,
+    builtin: true,
+    category: "network",
+  },
+];
 
 // ── AI tool detection ───────────────────────────────────────────────────────
 

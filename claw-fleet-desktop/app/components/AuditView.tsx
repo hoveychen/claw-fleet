@@ -11,7 +11,23 @@ import type {
   GuardAllowRule,
   SuggestedRule,
 } from "../types";
-import { ShieldCheck } from "lucide-react";
+import {
+  ShieldCheck,
+  ShieldAlert,
+  Upload,
+  Globe,
+  GitBranch,
+  FolderCog,
+  Box,
+  Package,
+  Cpu,
+  Cloud,
+  CalendarClock,
+  FileCode,
+  Wrench,
+  AlertCircle,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { EmptyState } from "./EmptyState";
 import { PageShell } from "./PageShell";
 import styles from "./AuditView.module.css";
@@ -43,7 +59,65 @@ const CATEGORY_ORDER = [
   "scheduled_task",
   "python",
   "custom",
+  "other",
 ];
+
+// Category → icon. Icons are pure UI decoration (not domain data), so a small
+// static map here is fine; the human-readable *label* comes from i18n
+// (`audit.cat_<category>`) and the *description* from the matched rule.
+const CATEGORY_ICONS: Record<string, LucideIcon> = {
+  privilege_escalation: ShieldAlert,
+  data_exfiltration: Upload,
+  network: Globe,
+  git: GitBranch,
+  filesystem: FolderCog,
+  container: Box,
+  package: Package,
+  process: Cpu,
+  cloud: Cloud,
+  scheduled_task: CalendarClock,
+  python: FileCode,
+  custom: Wrench,
+  other: AlertCircle,
+};
+
+function categoryIcon(cat: string): LucideIcon {
+  return CATEGORY_ICONS[cat] ?? AlertCircle;
+}
+
+const RISK_RANK: Record<AuditRiskLevel, number> = { medium: 0, high: 1, critical: 2 };
+
+// A risk event carries only opaque `riskTags` (e.g. "sudo"). The matching rule —
+// fetched via `get_audit_rules`, the same command the Rules tab uses — carries a
+// human-readable `descriptionZh/En` and a `category`. Joining event.riskTags to
+// rule.tag turns the raw shell command into plain language, fully offline, using
+// data that already ships in the rule definitions (built-in *and* custom).
+interface ResolvedEvent {
+  category: string;
+  headline: string; // human-readable risk description
+  raw: string; // the original command (commandSummary)
+}
+
+function resolveEvent(
+  event: AuditEvent,
+  ruleByTag: Map<string, AuditRuleInfo>,
+  lang: string,
+): ResolvedEvent {
+  const matched = event.riskTags
+    .map((tag) => ruleByTag.get(tag))
+    .filter((r): r is AuditRuleInfo => Boolean(r));
+  // Primary rule = the one that set this event's risk level; else the highest-
+  // risk rule that matched; else none (falls back to the raw command).
+  const primary =
+    matched.find((r) => r.level === event.riskLevel) ??
+    matched.slice().sort((a, b) => RISK_RANK[b.level] - RISK_RANK[a.level])[0];
+  const desc = primary ? (lang.startsWith("zh") ? primary.descriptionZh : primary.descriptionEn) : "";
+  return {
+    category: primary?.category || "other",
+    headline: desc || event.commandSummary,
+    raw: event.commandSummary,
+  };
+}
 
 // ── Tab type ────────────────────────────────────────────────────────────────
 
@@ -85,10 +159,13 @@ export function AuditView() {
 // ── Events Tab ──────────────────────────────────────────────────────────────
 
 function EventsTab({ tabBar }: { tabBar: ReactNode }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
+  const lang = i18n.language;
   const [summary, setSummary] = useState<AuditSummary | null>(null);
+  const [rules, setRules] = useState<AuditRuleInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<AuditRiskLevel | "all">("all");
+  const [catFilter, setCatFilter] = useState<string | null>(null);
   const [selectedEvent, setSelectedEvent] = useState<AuditEvent | null>(null);
   const { sessions } = useSessionsStore();
   const { open } = useDetailStore();
@@ -99,8 +176,15 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await invoke<AuditSummary>("get_audit_events");
+      // Events + rules together: the rules supply the human-readable description
+      // and category that turn each raw command into plain language. `get_audit_rules`
+      // is the same command the Rules tab uses, so both backends already support it.
+      const [data, ruleList] = await Promise.all([
+        invoke<AuditSummary>("get_audit_events"),
+        invoke<AuditRuleInfo[]>("get_audit_rules").catch(() => [] as AuditRuleInfo[]),
+      ]);
       setSummary(data);
+      setRules(ruleList);
       setCriticalEvents(data.events.filter((e) => e.riskLevel === "critical"));
     } catch {
       setSummary({ events: [], totalSessionsScanned: 0 });
@@ -111,9 +195,54 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const filtered = summary?.events.filter(
-    (e) => filter === "all" || e.riskLevel === filter,
-  ) ?? [];
+  const ruleByTag = useMemo(() => {
+    const map = new Map<string, AuditRuleInfo>();
+    // First rule wins per tag; built-ins are listed first so a custom rule
+    // can't shadow a built-in description.
+    for (const r of rules) if (!map.has(r.tag)) map.set(r.tag, r);
+    return map;
+  }, [rules]);
+
+  // Resolve every event to {category, headline, raw} once per fetch.
+  const resolved = useMemo(() => {
+    const m = new Map<AuditEvent, ResolvedEvent>();
+    for (const e of summary?.events ?? []) m.set(e, resolveEvent(e, ruleByTag, lang));
+    return m;
+  }, [summary, ruleByTag, lang]);
+
+  const resolveFor = useCallback(
+    (e: AuditEvent): ResolvedEvent => resolved.get(e) ?? resolveEvent(e, ruleByTag, lang),
+    [resolved, ruleByTag, lang],
+  );
+
+  const catLabel = useCallback(
+    (cat: string) => {
+      const key = `audit.cat_${cat}`;
+      const val = t(key);
+      return val === key ? cat : val;
+    },
+    [t],
+  );
+
+  // Category overview: counts across ALL events (ignoring active filters, so the
+  // overview stays a stable "what did my agents actually do" summary).
+  const categoryOverview = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of summary?.events ?? []) {
+      const cat = resolveFor(e).category;
+      counts.set(cat, (counts.get(cat) ?? 0) + 1);
+    }
+    const ordered: Array<[string, number]> = [];
+    for (const cat of CATEGORY_ORDER) if (counts.has(cat)) ordered.push([cat, counts.get(cat)!]);
+    for (const [cat, n] of counts) if (!CATEGORY_ORDER.includes(cat)) ordered.push([cat, n]);
+    return ordered;
+  }, [summary, resolveFor]);
+
+  const filtered = (summary?.events ?? []).filter((e) => {
+    if (filter !== "all" && e.riskLevel !== filter) return false;
+    if (catFilter && resolveFor(e).category !== catFilter) return false;
+    return true;
+  });
 
   const grouped = useMemo(() => {
     const map = new Map<string, AuditEvent[]>();
@@ -130,6 +259,8 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
     counts[e.riskLevel]++;
   }
 
+  const hasEvents = (summary?.events.length ?? 0) > 0;
+
   const navigateToSession = (jsonlPath: string) => {
     const session = sessions.find((s) => s.jsonlPath === jsonlPath);
     if (session) {
@@ -138,7 +269,10 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
     }
   };
 
-  const eventsDetail = selectedEvent ? (
+  const selResolved = selectedEvent ? resolveFor(selectedEvent) : null;
+
+  const SelIcon = selResolved ? categoryIcon(selResolved.category) : AlertCircle;
+  const eventsDetail = selectedEvent && selResolved ? (
     <>
         <div className={styles.detail_header}>
           <div className={styles.detail_title}>
@@ -152,6 +286,11 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
           <button className={styles.detail_close} onClick={() => setSelectedEvent(null)}>✕</button>
         </div>
         <div className={styles.detail_body}>
+          <div className={styles.detail_risk_headline}>
+            <SelIcon size={16} strokeWidth={2} />
+            <span>{selResolved.headline}</span>
+          </div>
+          <DetailRow label={t("audit.rule_category")} value={catLabel(selResolved.category)} />
           <DetailRow label={t("audit.workspace")} value={selectedEvent.workspaceName} />
           <DetailRow label={t("audit.source")} value={selectedEvent.agentSource} />
           {selectedEvent.timestamp && <DetailRow label={t("audit.time")} value={new Date(selectedEvent.timestamp).toLocaleString()} />}
@@ -231,12 +370,38 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
     >
         <div className={styles.list_pane}>
           {loading && <p className={styles.empty}>{t("audit.scanning")}</p>}
-          {!loading && filtered.length === 0 && (
+          {!loading && !hasEvents && (
             <EmptyState
               icon={<ShieldCheck size={28} strokeWidth={1.5} />}
               title={t("empty_state.audit_title")}
               subtitle={t("empty_state.audit_subtitle")}
             />
+          )}
+          {!loading && hasEvents && (
+            <div className={styles.overview}>
+              <div className={styles.overview_title}>{t("audit.overview_title")}</div>
+              <div className={styles.overview_chips}>
+                {categoryOverview.map(([cat, n]) => {
+                  const Icon = categoryIcon(cat);
+                  const active = catFilter === cat;
+                  return (
+                    <button
+                      key={cat}
+                      className={`${styles.overview_chip} ${active ? styles.overview_chip_active : ""}`}
+                      onClick={() => setCatFilter(active ? null : cat)}
+                      title={catLabel(cat)}
+                    >
+                      <Icon size={15} strokeWidth={2} className={styles.overview_icon} />
+                      <span className={styles.overview_label}>{catLabel(cat)}</span>
+                      <span className={styles.overview_count}>{n}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+          {!loading && hasEvents && filtered.length === 0 && (
+            <p className={styles.empty}>{t("audit.no_matching_events")}</p>
           )}
           {!loading && Array.from(grouped.entries()).map(([sessionId, events]) => (
             <div key={sessionId} className={styles.workspace_group}>
@@ -253,6 +418,8 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
                 {events.map((event, i) => {
                   const read = event.riskLevel === "critical" && isRead(event);
                   const active = selectedEvent === event;
+                  const rv = resolveFor(event);
+                  const CatIcon = categoryIcon(rv.category);
                   return (
                     <button
                       key={`${sessionId}-${i}`}
@@ -263,15 +430,17 @@ function EventsTab({ tabBar }: { tabBar: ReactNode }) {
                         {RISK_LABELS[event.riskLevel]}
                       </span>
                       <div className={styles.card_body}>
-                        <div className={styles.card_title}>{event.commandSummary}</div>
+                        <div className={styles.card_title_row}>
+                          <CatIcon size={14} strokeWidth={2} className={styles.card_cat_icon} />
+                          <span className={styles.card_headline}>{rv.headline}</span>
+                        </div>
+                        {rv.headline !== rv.raw && (
+                          <div className={styles.card_raw}>{rv.raw}</div>
+                        )}
                         <div className={styles.card_meta}>
                           {event.timestamp && <span>{formatTime(event.timestamp)}</span>}
-                          {event.riskTags.length > 0 && (
-                            <>
-                              <span className={styles.meta_dot}>·</span>
-                              <span className={styles.card_tags_inline}>{event.riskTags.join(" · ")}</span>
-                            </>
-                          )}
+                          <span className={styles.meta_dot}>·</span>
+                          <span>{catLabel(rv.category)}</span>
                         </div>
                       </div>
                       {event.riskLevel === "critical" && !read && (

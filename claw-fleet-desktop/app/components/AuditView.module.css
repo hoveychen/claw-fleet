@@ -344,10 +344,118 @@
   opacity: 0.6;
 }
 
-.card_tags_inline {
+/* ── Humanized card: category icon + plain-language headline + demoted cmd ─── */
+
+.card_cat_icon {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+  margin-top: 1px;
+}
+
+.card_headline {
+  font-size: 12.5px;
+  font-weight: 550;
+  color: var(--color-text);
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  min-width: 0;
+}
+
+/* The raw command is demoted to a dimmed monospace second line — present for
+   the power user, no longer the headline the newcomer has to decode. */
+.card_raw {
+  font-size: 10.5px;
+  color: var(--color-text-dim);
+  font-family: "SF Mono", "Fira Code", "JetBrains Mono", monospace;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+
+/* ── Category overview strip ──────────────────────────────────────────────── */
+
+.overview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 4px 10px;
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 4px;
+}
+
+.overview_title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.overview_chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.overview_chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  padding: 4px 10px 4px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text);
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+
+.overview_chip:hover {
+  border-color: var(--color-text-dim);
+}
+
+.overview_chip_active {
+  background: rgba(var(--color-accent-rgb), 0.12);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+
+.overview_icon {
+  flex-shrink: 0;
+  color: var(--color-text-dim);
+}
+
+.overview_chip_active .overview_icon {
+  color: var(--color-accent);
+}
+
+.overview_count {
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Detail pane: plain-language risk headline ────────────────────────────── */
+
+.detail_risk_headline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text);
+  line-height: 1.4;
+}
+
+.detail_risk_headline svg {
+  flex-shrink: 0;
+  color: var(--color-accent);
 }
 
 /* ── Risk badge (Linear-style left-side block) ────────────────────────────── */
