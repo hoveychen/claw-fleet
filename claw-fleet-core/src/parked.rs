@@ -406,8 +406,8 @@ where
 /// **Every consumer must answer a card through this**, not by calling the
 /// channel's `write_response` directly. There are four surfaces that resolve
 /// Decision Cards — the desktop panel (`local_backend`), the probe API
-/// (`hooks_server`, which is what a remote desktop talks to), the phone
-/// (`mobile_relay`) and Feishu — and "is this card parked?" is a property of the
+/// (`hooks_server`, which is what a remote desktop talks to) and the phone
+/// (`mobile_relay`) — and "is this card parked?" is a property of the
 /// *card*, not of the surface. Leaving each surface to remember the check is how
 /// the phone shipped broken: it filed answers into `<id>.response.json` for a
 /// producer that had already exited, so a parked card answered from a phone

@@ -883,29 +883,6 @@ pub trait Backend: Send + Sync {
         name: &str,
     ) -> Result<crate::mcp_ipc::DecisionAssetBytes, String>;
 
-    // ── Feishu (Lark) Decision Panel mirror ─────────────────────────────────
-    // Skeleton: default impls report "not configured" until the operator sets
-    // the FEISHU_APP_ID / FEISHU_APP_SECRET / FEISHU_ENCRYPT_KEY env vars and
-    // wires up the Feishu app per design/feishu-integration.md.
-    fn start_feishu_oauth(&self) -> Result<crate::feishu::OauthHandle, String> {
-        Err("feishu integration not configured".into())
-    }
-    fn poll_feishu_oauth(&self, _state: &str) -> Result<crate::feishu::OauthStatus, String> {
-        Err("feishu integration not configured".into())
-    }
-    fn feishu_status(&self) -> Result<crate::feishu::FeishuConnection, String> {
-        Ok(crate::feishu::FeishuConnection::NotConnected)
-    }
-    fn disconnect_feishu(&self) -> Result<(), String> {
-        Err("feishu integration not configured".into())
-    }
-    fn get_feishu_creds(&self) -> Result<crate::feishu::StoredCreds, String> {
-        Ok(crate::feishu::StoredCreds::default())
-    }
-    fn set_feishu_creds(&self, _creds: crate::feishu::StoredCreds) -> Result<(), String> {
-        Err("feishu integration not configured".into())
-    }
-
     // ── Mobile relay (移动端 mobile web channel) ────────────────────────────
     fn get_mobile_relay_config(&self) -> Result<crate::mobile_relay::MobileRelayConfig, String> {
         Ok(crate::mobile_relay::MobileRelayConfig::default())
