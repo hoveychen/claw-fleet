@@ -406,11 +406,60 @@ pub fn migrate_v1_to_v2(content: &str) -> String {
 /// Re-attach a trailing newline iff the source had one — keeps mutations from
 /// silently adding/stripping the final newline.
 fn join_preserving_eol(lines: Vec<String>, original: &str) -> String {
-    let mut s = lines.join("\n");
+    // `str::lines()` (used by every caller to split `original`) drops the `\r`
+    // of a `\r\n` pair, so re-joining with a bare `"\n"` silently flattens a
+    // CRLF file to LF. Re-emit the source's line ending instead.
+    let eol = if original.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut s = lines.join(eol);
     if original.ends_with('\n') {
-        s.push('\n');
+        s.push_str(eol);
     }
     s
+}
+
+#[cfg(test)]
+mod eol_tests {
+    use super::join_preserving_eol;
+
+    #[test]
+    fn crlf_is_preserved_not_flattened_to_lf() {
+        // A Windows checkout (git autocrlf) stores TASKS.md with CRLF lines.
+        // `str::lines()` strips the `\r`, so joining back with `"\n"` rewrites
+        // the whole file to LF — a one-checkbox `fleet plan check` then shows a
+        // whole-file diff. The join must re-emit the source's line ending.
+        let original = "- [ ] a\r\n- [ ] b\r\n";
+        let lines: Vec<String> = original.lines().map(str::to_string).collect();
+        assert_eq!(
+            join_preserving_eol(lines, original),
+            "- [ ] a\r\n- [ ] b\r\n",
+            "CRLF source must round-trip as CRLF"
+        );
+    }
+
+    #[test]
+    fn lf_stays_lf() {
+        let original = "- [ ] a\n- [ ] b\n";
+        let lines: Vec<String> = original.lines().map(str::to_string).collect();
+        assert_eq!(join_preserving_eol(lines, original), "- [ ] a\n- [ ] b\n");
+    }
+
+    #[test]
+    fn no_trailing_newline_is_not_added() {
+        let original = "- [ ] a\n- [ ] b";
+        let lines: Vec<String> = original.lines().map(str::to_string).collect();
+        assert_eq!(join_preserving_eol(lines, original), "- [ ] a\n- [ ] b");
+    }
+
+    #[test]
+    fn create_plan_does_not_inject_lf_into_a_crlf_file() {
+        // Appending a plan to an existing CRLF TASKS.md must not leave lone LFs
+        // (a mixed-ending file that the next mutation then flattens wholesale).
+        let content = "# TASKS\r\n\r\n<!-- fleet:prd:begin id=\"a\" v=\"2\" -->\r\n\r\n\
+                       **Plan:** A\r\n\r\n<!-- fleet:prd:end id=\"a\" -->\r\n";
+        let out = super::create_plan(content, "b", "B", None).expect("create_plan failed");
+        let lone_lf = out.matches('\n').count() - out.matches("\r\n").count();
+        assert_eq!(lone_lf, 0, "every LF must be part of a CRLF pair, got: {out:?}");
+    }
 }
 
 /// Flip a top-level checkbox in-place: line `"- [ ]…"`/`"- [x]…"` → the
@@ -541,17 +590,21 @@ pub fn create_plan(
         Some(p) if !p.trim().is_empty() => format!(" parent=\"{}\"", p.trim()),
         _ => String::new(),
     };
+    // Match the existing file's line ending so appending a plan to a CRLF
+    // TASKS.md doesn't leave lone LFs (a mixed-ending file the next mutation
+    // then flattens wholesale).
+    let eol = if content.contains("\r\n") { "\r\n" } else { "\n" };
     let block = format!(
-        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\"{parent_attr} -->\n\n**Plan:** {title}\n\n<!-- fleet:prd:end id=\"{plan_id}\" -->\n"
+        "<!-- fleet:prd:begin id=\"{plan_id}\" v=\"2\"{parent_attr} -->{eol}{eol}**Plan:** {title}{eol}{eol}<!-- fleet:prd:end id=\"{plan_id}\" -->{eol}"
     );
     let mut out = content.to_string();
     if out.is_empty() {
-        out.push_str("# TASKS\n\n");
+        out.push_str(&format!("# TASKS{eol}{eol}"));
     } else {
         if !out.ends_with('\n') {
-            out.push('\n');
+            out.push_str(eol);
         }
-        out.push('\n');
+        out.push_str(eol);
     }
     out.push_str(&block);
     Ok(out)
