@@ -29,8 +29,6 @@ pub struct DetectedTools {
     pub vscode: bool,
     pub jetbrains: bool,
     pub desktop: bool,
-    pub cursor: bool,
-    pub openclaw: bool,
     pub codex: bool,
 }
 
@@ -41,8 +39,6 @@ impl Default for DetectedTools {
             vscode: false,
             jetbrains: false,
             desktop: false,
-            cursor: false,
-            openclaw: false,
             codex: false,
         }
     }
@@ -67,7 +63,7 @@ pub struct WaitingAlert {
     pub summary: String,
     pub detected_at_ms: u64,
     pub jsonl_path: String,
-    /// Originating agent source id (e.g. "claude-code", "cursor", "codex").
+    /// Originating agent source id (e.g. "claude-code", "codex").
     /// Used by the UI to suppress audible alerts for sources whose waits are
     /// already surfaced through the Decision Panel (AskUserQuestion bridge).
     pub source: String,
@@ -147,7 +143,7 @@ pub struct UsageBar {
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceUsageSummary {
-    /// Source identifier: "claude", "cursor", "codex", "openclaw".
+    /// Source identifier: "claude", "codex".
     pub source: String,
     /// Plan / tier label (e.g. "Max 5x", "pro", "Plus").
     pub plan: Option<String>,
@@ -187,32 +183,6 @@ impl SourceUsageSummary {
         }
     }
 
-    /// Convert Cursor's `CursorAccountInfo` JSON value into a unified summary.
-    pub fn from_cursor(val: &Value) -> Self {
-        let membership = val["membershipType"].as_str().unwrap_or("").to_string();
-        let mut bars = Vec::new();
-        if let Some(items) = val["usage"].as_array() {
-            for item in items {
-                let name = item["name"].as_str().unwrap_or("unknown");
-                let utilization = item["utilization"].as_f64().unwrap_or_else(|| {
-                    let used = item["used"].as_u64().unwrap_or(0) as f64;
-                    let limit = item["limit"].as_u64().unwrap_or(1) as f64;
-                    if limit > 0.0 { used / limit } else { 0.0 }
-                });
-                bars.push(UsageBar {
-                    label: name.to_string(),
-                    utilization,
-                    resets_at: item["resetsAt"].as_str().map(|s| s.to_string()),
-                });
-            }
-        }
-        SourceUsageSummary {
-            source: "cursor".into(),
-            plan: if membership.is_empty() { None } else { Some(membership) },
-            bars,
-        }
-    }
-
     /// Convert Codex's `CodexUsageItem` JSON value into a unified summary.
     pub fn from_codex(val: &Value) -> Self {
         let plan = val["planType"].as_str().map(|s| s.to_string());
@@ -244,31 +214,6 @@ impl SourceUsageSummary {
         SourceUsageSummary {
             source: "codex".into(),
             plan,
-            bars,
-        }
-    }
-
-    /// Convert OpenClaw's `OpenClawUsageInfo` JSON value into a unified summary.
-    /// Shows the highest context utilisation across active sessions.
-    pub fn from_openclaw(val: &Value) -> Self {
-        let mut bars = Vec::new();
-        if let Some(sessions) = val["sessions"].as_array() {
-            // Pick the session with the highest context usage as the representative bar.
-            if let Some(top) = sessions.iter()
-                .filter_map(|s| s["percentUsed"].as_f64().map(|p| (p, s)))
-                .max_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal))
-            {
-                let model = top.1["model"].as_str().unwrap_or("unknown");
-                bars.push(UsageBar {
-                    label: format!("ctx ({})", model),
-                    utilization: top.0 / 100.0,
-                    resets_at: None,
-                });
-            }
-        }
-        SourceUsageSummary {
-            source: "openclaw".into(),
-            plan: None,
             bars,
         }
     }
@@ -420,9 +365,9 @@ pub trait Backend: Send + Sync {
     }
 
     fn account_info(&self) -> AccountInfoFuture;
-    /// Fetch account/profile info for the given source (e.g. "claude", "cursor", "openclaw").
+    /// Fetch account/profile info for the given source (e.g. "claude", "codex").
     fn source_account(&self, source: &str) -> SourceDataFuture;
-    /// Fetch usage info for the given source (e.g. "claude", "cursor", "codex", "openclaw").
+    /// Fetch usage info for the given source (e.g. "claude", "codex").
     fn source_usage(&self, source: &str) -> SourceDataFuture;
     /// Fetch usage summaries for all detected sources (for tray menu display).
     fn usage_summaries(&self) -> Vec<SourceUsageSummary>;
@@ -806,7 +751,7 @@ pub trait Backend: Send + Sync {
     /// Enumerate every Claude CLI binary fleet can find on the host, ranked by
     /// priority. The first entry is what fleet would auto-pick if no override
     /// is set. Multiple entries cover the case where the user has the official
-    /// installer **and** the VS Code / Cursor extension bundle installed
+    /// installer **and** the VS Code extension bundle installed
     /// simultaneously — the Settings panel uses this list to let the user
     /// pick which binary fleet should drive.
     fn list_claude_binaries(&self) -> Vec<crate::claude_binary::ClaudeBinary>;
@@ -1086,35 +1031,6 @@ mod tests {
         assert!(s.bars.is_empty());
     }
 
-    // ── SourceUsageSummary::from_cursor tests ───────────────────────────────
-
-    #[test]
-    fn from_cursor_with_usage_items() {
-        let val = json!({
-            "membershipType": "pro",
-            "usage": [
-                {"name": "Premium", "utilization": 0.6, "resetsAt": "2026-01-01T00:00:00Z"},
-                {"name": "Standard", "used": 50, "limit": 200}
-            ]
-        });
-        let s = SourceUsageSummary::from_cursor(&val);
-        assert_eq!(s.source, "cursor");
-        assert_eq!(s.plan, Some("pro".into()));
-        assert_eq!(s.bars.len(), 2);
-        assert!((s.bars[0].utilization - 0.6).abs() < f64::EPSILON);
-        // Computed from used/limit: 50/200 = 0.25
-        assert!((s.bars[1].utilization - 0.25).abs() < f64::EPSILON);
-        assert!(s.bars[1].resets_at.is_none());
-    }
-
-    #[test]
-    fn from_cursor_empty_usage() {
-        let val = json!({"membershipType": "", "usage": []});
-        let s = SourceUsageSummary::from_cursor(&val);
-        assert_eq!(s.plan, None); // empty → None
-        assert!(s.bars.is_empty());
-    }
-
     // ── SourceUsageSummary::from_codex tests ────────────────────────────────
 
     #[test]
@@ -1138,31 +1054,6 @@ mod tests {
         let val = json!({});
         let s = SourceUsageSummary::from_codex(&val);
         assert_eq!(s.plan, None);
-        assert!(s.bars.is_empty());
-    }
-
-    // ── SourceUsageSummary::from_openclaw tests ─────────────────────────────
-
-    #[test]
-    fn from_openclaw_picks_highest_utilization() {
-        let val = json!({
-            "sessions": [
-                {"percentUsed": 30.0, "model": "gpt-4"},
-                {"percentUsed": 80.0, "model": "claude-opus"},
-                {"percentUsed": 50.0, "model": "gpt-4"}
-            ]
-        });
-        let s = SourceUsageSummary::from_openclaw(&val);
-        assert_eq!(s.source, "openclaw");
-        assert_eq!(s.bars.len(), 1);
-        assert!((s.bars[0].utilization - 0.8).abs() < f64::EPSILON);
-        assert!(s.bars[0].label.contains("claude-opus"));
-    }
-
-    #[test]
-    fn from_openclaw_empty_sessions() {
-        let val = json!({"sessions": []});
-        let s = SourceUsageSummary::from_openclaw(&val);
         assert!(s.bars.is_empty());
     }
 

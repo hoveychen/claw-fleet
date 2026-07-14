@@ -1,6 +1,6 @@
 // 「账号与用量」子页面：把桌面端 AccountInfo + UsagePanel 两块搬到手机上——
 // 今日累计花费（复用 App 已在轮询的 today_usage）、Claude 账号档案与 5h/7d 限流条、
-// 以及其它 agent 源（cursor / codex / openclaw）的归一化用量条。
+// 以及其它 agent 源（codex）的归一化用量条。
 // 数据走 relay 的 `account_usage`（见 ../account.ts）。
 
 import { useCallback, useEffect, useState } from "react";
@@ -21,9 +21,7 @@ interface Props {
 
 /** 各源在标题里的显示名；未知源回落到原始 id。 */
 const SOURCE_LABEL: Record<string, string> = {
-  cursor: "Cursor",
   codex: "Codex",
-  openclaw: "OpenClaw",
 };
 
 /** 紧凑 token 数：1.2M / 34.5K / 780。 */

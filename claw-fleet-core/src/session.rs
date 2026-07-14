@@ -128,7 +128,7 @@ pub struct SessionInfo {
     /// usage data is available.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_percent: Option<f64>,
-    /// Source of this session: "claude-code" or "cursor"
+    /// Source of this session: "claude-code" or "codex"
     pub agent_source: String,
     /// Semantic outcome tags from the last completed turn (e.g. "bug_fixed",
     /// "needs_input").  Set by background analysis, cleared when a new turn

@@ -13,10 +13,7 @@ import {
   MOCK_CHAT_WORKSPACE,
   mockBrowseDir,
   MOCK_ACCOUNT_INFO,
-  MOCK_CURSOR_USAGE,
   MOCK_CODEX_USAGE,
-  MOCK_OPENCLAW_USAGE,
-  MOCK_OPENCLAW_ACCOUNT,
   MOCK_MEMORIES,
   MOCK_WIKI_DOCS,
   MOCK_WIKI_BODIES,
@@ -199,16 +196,11 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "get_account_info":
       return MOCK_ACCOUNT_INFO;
     case "get_source_account": {
-      const source = args.source as string;
-      if (source === "openclaw") return MOCK_OPENCLAW_ACCOUNT;
-      if (source === "cursor") return MOCK_CURSOR_USAGE;
       return null;
     }
     case "get_source_usage": {
       const source = args.source as string;
-      if (source === "cursor") return MOCK_CURSOR_USAGE;
       if (source === "codex") return MOCK_CODEX_USAGE;
-      if (source === "openclaw") return MOCK_OPENCLAW_USAGE;
       return null;
     }
     case "list_memories":

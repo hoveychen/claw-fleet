@@ -29,24 +29,6 @@ export interface AccountInfoData {
   seven_day_sonnet: UsageStats | null;
 }
 
-export interface CursorUsageItem {
-  name: string;
-  used: number;
-  limit: number | null;
-  utilization: number | null;
-  resetsAt: string | null;
-}
-
-export interface CursorAccountInfoData {
-  email: string;
-  signUpType: string;
-  membershipType: string;
-  subscriptionStatus: string;
-  totalPrompts: number;
-  dailyStats: unknown[];
-  usage: CursorUsageItem[];
-}
-
 export interface CodexRateLimitWindow {
   usedPercent: number;
   windowDurationMins?: number | null;
@@ -62,21 +44,7 @@ export interface CodexUsageItem {
   credits?: { hasCredits: boolean; unlimited: boolean; balance?: string | null } | null;
 }
 
-export interface OpenClawSessionUsage {
-  sessionId: string;
-  agentId: string;
-  model: string;
-  contextTokens: number;
-  totalTokens: number | null;
-  percentUsed: number | null;
-  ageSecs: number;
-}
-
-export interface OpenClawUsageInfo {
-  sessions: OpenClawSessionUsage[];
-}
-
-export type UsageSourceKey = "claude" | "cursor" | "codex" | "openclaw";
+export type UsageSourceKey = "claude" | "codex";
 
 export interface SourceState<T> {
   data: T | null;
@@ -88,9 +56,7 @@ export interface SourceState<T> {
 
 interface UsageStoreState {
   claude: SourceState<AccountInfoData>;
-  cursor: SourceState<CursorAccountInfoData>;
   codex: SourceState<CodexUsageItem>;
-  openclaw: SourceState<OpenClawUsageInfo>;
   load: (source: UsageSourceKey) => Promise<void>;
   setAutoRefresh: (source: UsageSourceKey, enabled: boolean) => void;
 }
@@ -129,16 +95,12 @@ function initialSource<T>(source: UsageSourceKey): SourceState<T> {
 
 const timers: Record<UsageSourceKey, ReturnType<typeof setInterval> | null> = {
   claude: null,
-  cursor: null,
   codex: null,
-  openclaw: null,
 };
 
 const inflight: Record<UsageSourceKey, Promise<void> | null> = {
   claude: null,
-  cursor: null,
   codex: null,
-  openclaw: null,
 };
 
 async function fetchOne(source: UsageSourceKey): Promise<unknown> {
@@ -165,9 +127,7 @@ function armClaudeTimer(get: () => UsageStoreState): void {
 
 export const useUsageStore = create<UsageStoreState>((set, get) => ({
   claude: initialSource<AccountInfoData>("claude"),
-  cursor: initialSource<CursorAccountInfoData>("cursor"),
   codex: initialSource<CodexUsageItem>("codex"),
-  openclaw: initialSource<OpenClawUsageInfo>("openclaw"),
 
   load: (source) => {
     if (inflight[source]) return inflight[source]!;
@@ -225,7 +185,7 @@ export const useUsageStore = create<UsageStoreState>((set, get) => ({
 // Respects the per-source toggle persisted in storage.ts (defaults to on).
 // Claude is special-cased: its cadence is always on and adapts to
 // usage_source (foxy=10s / anthropic=5m) — see armClaudeTimer.
-const SOURCES: UsageSourceKey[] = ["claude", "cursor", "codex", "openclaw"];
+const SOURCES: UsageSourceKey[] = ["claude", "codex"];
 for (const src of SOURCES) {
   const store = useUsageStore.getState();
   store.load(src);

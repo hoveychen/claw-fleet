@@ -5,8 +5,8 @@
 //!
 //! Why this matters: a single user can simultaneously have Claude Code installed
 //! by the native installer (`~/.local/bin/claude`), Homebrew, npm, **and**
-//! bundled inside the VS Code / Cursor extension. The extension bundles
-//! (`~/.{vscode,cursor}/extensions/anthropic.claude-code-<ver>-<plat>-<arch>/resources/native-binary/claude`)
+//! bundled inside the VS Code extension. The extension bundles
+//! (`~/.vscode/extensions/anthropic.claude-code-<ver>-<plat>-<arch>/resources/native-binary/claude`)
 //! are 200MB+ files that the older `which claude` + hardcoded path probe never
 //! found, so users who only installed the IDE extension showed up as "Claude not
 //! detected" even though they had a working CLI on disk.
@@ -46,8 +46,6 @@ pub enum ClaudeBinarySource {
     VsCodeExtension,
     /// `~/.vscode-insiders/extensions/anthropic.claude-code-*/...`.
     VsCodeInsidersExtension,
-    /// `~/.cursor/extensions/anthropic.claude-code-*/...`.
-    CursorExtension,
     /// `~/.windsurf/extensions/anthropic.claude-code-*/...`.
     WindsurfExtension,
 }
@@ -63,7 +61,6 @@ impl ClaudeBinarySource {
             Self::UsrLocalBin => "usr-local-bin",
             Self::VsCodeExtension => "vscode-extension",
             Self::VsCodeInsidersExtension => "vscode-insiders-extension",
-            Self::CursorExtension => "cursor-extension",
             Self::WindsurfExtension => "windsurf-extension",
         }
     }
@@ -151,7 +148,6 @@ pub fn discover() -> Vec<ClaudeBinary> {
         let editor_roots: &[(PathBuf, ClaudeBinarySource)] = &[
             (home.join(".vscode").join("extensions"), ClaudeBinarySource::VsCodeExtension),
             (home.join(".vscode-insiders").join("extensions"), ClaudeBinarySource::VsCodeInsidersExtension),
-            (home.join(".cursor").join("extensions"), ClaudeBinarySource::CursorExtension),
             (home.join(".windsurf").join("extensions"), ClaudeBinarySource::WindsurfExtension),
         ];
         for (root, source) in editor_roots {
@@ -294,7 +290,7 @@ mod tests {
         fs::create_dir_all(&dir94).unwrap();
         fs::write(dir94.join("claude"), b"fake").unwrap();
 
-        let bin = scan_editor_extensions(root, ClaudeBinarySource::CursorExtension).unwrap();
+        let bin = scan_editor_extensions(root, ClaudeBinarySource::VsCodeInsidersExtension).unwrap();
         assert_eq!(bin.version.as_deref(), Some("2.1.94"));
     }
 

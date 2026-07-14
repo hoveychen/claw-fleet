@@ -1,6 +1,6 @@
 //! AgentSource trait — abstraction for different AI agent backends.
 //!
-//! Each agent source (Claude Code, Cursor, OpenClaw) implements this trait
+//! Each agent source (Claude Code, Codex) implements this trait
 //! to provide session scanning, message reading, and lifecycle management.
 //! `LocalBackend` owns a `Vec<Box<dyn AgentSource>>` and delegates to
 //! the appropriate source based on URI prefix matching.
@@ -18,24 +18,23 @@ use crate::session::SessionInfo;
 
 /// How a source should be monitored for changes.
 pub enum WatchStrategy {
-    /// Watch filesystem paths with `notify` (Claude Code, OpenClaw).
+    /// Watch filesystem paths with `notify` (Claude Code).
     Filesystem,
-    /// Poll periodically at the given interval (Cursor SQLite).
+    /// Poll periodically at the given interval.
     Poll(Duration),
 }
 
-/// Trait implemented by each agent source (Claude Code, Cursor, OpenClaw, …).
+/// Trait implemented by each agent source (Claude Code, Codex, …).
 ///
 /// Default implementations return "not supported" for optional capabilities,
 /// so sources only need to implement what they actually support.
 pub trait AgentSource: Send + Sync {
-    /// Unique identifier: "claude-code", "cursor", "openclaw".
+    /// Unique identifier: "claude-code", "codex".
     fn name(&self) -> &'static str;
 
     /// URI scheme prefix used in `SessionInfo::jsonl_path`.
     /// - Claude Code: `""` (bare file paths)
-    /// - Cursor: `"cursor://"`
-    /// - OpenClaw: `"openclaw://"`
+    /// - Codex: `"codex://"`
     fn uri_prefix(&self) -> &'static str;
 
     /// Whether this source is currently available on the system.
@@ -105,7 +104,7 @@ pub trait AgentSource: Send + Sync {
         Some(PathBuf::from(path))
     }
 
-    /// Short API name used by the frontend (e.g. "claude", "cursor", "codex", "openclaw").
+    /// Short API name used by the frontend (e.g. "claude", "codex").
     /// Defaults to `self.name()`, override for sources where the config name differs
     /// (e.g. "claude-code" → "claude").
     fn api_name(&self) -> &'static str {
@@ -165,8 +164,7 @@ pub trait AgentSource: Send + Sync {
 /// ```json
 /// {
 ///   "claude-code": { "enabled": true },
-///   "cursor":      { "enabled": false },
-///   "openclaw":    { "enabled": true }
+///   "codex":       { "enabled": true }
 /// }
 /// ```
 ///
@@ -258,19 +256,6 @@ pub fn get_sources_config_local() -> Vec<SourceInfo> {
             };
             cli_exists || home.as_ref().map_or(false, |h| h.join(".claude").is_dir())
         }),
-        ("cursor", {
-            crate::session::real_home_dir().map_or(false, |h| h.join(".cursor").is_dir())
-        }),
-        ("openclaw", {
-            let home = crate::session::real_home_dir();
-            home.as_ref().map_or(false, |h| h.join(".openclaw").is_dir())
-                || {
-                    #[cfg(unix)]
-                    { crate::process_util::command("which").arg("openclaw").output().map_or(false, |o| o.status.success()) }
-                    #[cfg(not(unix))]
-                    { crate::process_util::command("where").arg("openclaw").output().map_or(false, |o| o.status.success()) }
-                }
-        }),
         ("codex", {
             let home = crate::session::real_home_dir();
             home.as_ref().map_or(false, |h| h.join(".codex").is_dir())
@@ -316,16 +301,6 @@ pub fn build_sources() -> Vec<Box<dyn AgentSource>> {
         sources.push(Box::new(crate::claude_source::ClaudeCodeSource::new()));
     }
 
-    // Cursor
-    if config.is_enabled("cursor") {
-        sources.push(Box::new(crate::cursor::CursorSource));
-    }
-
-    // OpenClaw
-    if config.is_enabled("openclaw") {
-        sources.push(Box::new(crate::openclaw_source::OpenClawSource::new()));
-    }
-
     // Codex
     if config.is_enabled("codex") {
         sources.push(Box::new(crate::codex_source::CodexSource::new()));
@@ -334,7 +309,7 @@ pub fn build_sources() -> Vec<Box<dyn AgentSource>> {
     sources
 }
 
-/// Find a source by its API name (e.g. "claude", "cursor", "codex", "openclaw").
+/// Find a source by its API name (e.g. "claude", "codex").
 pub fn find_source_by_api_name<'a>(
     sources: &'a [Box<dyn AgentSource>],
     api_name: &str,
@@ -453,12 +428,8 @@ mod tests {
                     .with_usage(json!({"plan": "max", "utilization": 0.5})),
             ),
             Box::new(
-                MockAgentSource::new("cursor", "cursor", "cursor://")
-                    .with_account(json!({"email": "test@example.com"}))
-                    .with_usage(json!({"usage": []})),
-            ),
-            Box::new(
                 MockAgentSource::new("codex", "codex", "codex://")
+                    .with_account(json!({"email": "test@example.com"}))
                     .with_usage(json!({"planType": "plus"})),
             ),
         ]
@@ -472,10 +443,6 @@ mod tests {
         assert!(claude.is_some());
         assert_eq!(claude.unwrap().name(), "claude-code");
 
-        let cursor = find_source_by_api_name(&sources, "cursor");
-        assert!(cursor.is_some());
-        assert_eq!(cursor.unwrap().name(), "cursor");
-
         let codex = find_source_by_api_name(&sources, "codex");
         assert!(codex.is_some());
         assert_eq!(codex.unwrap().name(), "codex");
@@ -486,11 +453,6 @@ mod tests {
     #[test]
     fn find_source_for_path_matches_uri_prefix() {
         let sources = make_sources();
-
-        // cursor:// prefix should match cursor source
-        let cursor = find_source_for_path(&sources, "cursor://abc123");
-        assert!(cursor.is_some());
-        assert_eq!(cursor.unwrap().name(), "cursor");
 
         // codex:// prefix should match codex source
         let codex = find_source_for_path(&sources, "codex://session1");
@@ -512,15 +474,10 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap()["plan"], "max");
 
-        let cursor = find_source_by_api_name(&sources, "cursor").unwrap();
-        let result = cursor.fetch_account();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap()["email"], "test@example.com");
-
-        // codex has no account endpoint
         let codex = find_source_by_api_name(&sources, "codex").unwrap();
         let result = codex.fetch_account();
-        assert!(result.is_err());
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap()["email"], "test@example.com");
     }
 
     #[test]
@@ -615,6 +572,6 @@ mod tests {
         assert!(!config.is_source_enabled("claude-code"));
 
         // other names pass through
-        assert!(config.is_source_enabled("cursor"));
+        assert!(config.is_source_enabled("codex"));
     }
 }

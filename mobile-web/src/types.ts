@@ -607,7 +607,7 @@ export interface ClaudeAccount {
   bars: UsageBar[];
 }
 
-/** 非 Claude 源（cursor / codex / openclaw）的归一化用量（`SourceUsageSummary`）。 */
+/** 非 Claude 源（codex）的归一化用量（`SourceUsageSummary`）。 */
 export interface SourceUsage {
   source: string;
   plan: string | null;

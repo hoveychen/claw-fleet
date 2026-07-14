@@ -1139,7 +1139,7 @@ pub fn build_suggest_rules_prompt(concern: &str, lang: &str, existing_tags: &[St
     format!(
         r#"You are a security audit rule designer for an AI agent monitoring tool called Fleet.
 
-Fleet monitors AI coding agents (Claude Code, Cursor, Codex, etc.) and flags risky Bash commands they execute. Rules are pattern-matching based:
+Fleet monitors AI coding agents (Claude Code, Codex, etc.) and flags risky Bash commands they execute. Rules are pattern-matching based:
 
 Each rule has:
 - id: unique snake_case identifier

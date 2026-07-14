@@ -11,7 +11,7 @@
  *
  * 1. `toolUseResult` is an *internal* Claude Code field, not a public contract.
  *    Key sets differ per tool and may change across CLI versions.
- * 2. Only the Claude agent source emits it. Codex, OpenClaw and the generic
+ * 2. Only the Claude agent source emits it. Codex and the generic
  *    agent source never do.
  *
  * So each guard validates the shape it needs and returns `null` otherwise. A

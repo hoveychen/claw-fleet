@@ -1,6 +1,6 @@
 //! Semantic analysis of agent output — classifies outcome tags and produces
 //! short summaries.  Uses the [`LlmProvider`] trait so any supported CLI
-//! (Claude Code, Codex, Cursor Agent) can power the analysis.
+//! (Claude Code, Codex) can power the analysis.
 
 use std::time::Duration;
 

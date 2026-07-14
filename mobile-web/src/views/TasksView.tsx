@@ -66,7 +66,7 @@ function stopMode(s: SessionInfo): StopMode {
 }
 
 function canControl(s: SessionInfo): boolean {
-  return !s.isSubagent && s.agentSource !== "cursor";
+  return !s.isSubagent;
 }
 
 type MarkFilter = "all" | "pending" | "done";
