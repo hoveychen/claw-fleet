@@ -3,23 +3,12 @@
 // Source of truth: claw-fleet-core/tests/ts_export.rs
 
 export type CommandView = { leaves: Array<CommandLeaf>, 
-/**
- * `connectors.len() == leaves.len().saturating_sub(1)`.  The connector
- * at index `i` joins `leaves[i]` to `leaves[i + 1]`.
- */
 connectors: Array<Connector>, };
 
 export type CommandLeaf = { argv: Array<string>, nested?: NestedScript | null, triggering?: boolean, already_allowed?: boolean, };
 
 export type NestedScript = { kind: NestedKind, 
-/**
- * The raw script string before re-parsing.
- */
 raw: string, 
-/**
- * Parsed view of the script.  Boxed to keep the enclosing type small
- * and to break the recursive size cycle.
- */
 view: CommandView, };
 
 export type NestedKind = "bash-c" | "sh-c" | "zsh-c" | "python-c" | "node-e" | "eval";
@@ -31,143 +20,27 @@ export type SessionStatus = "thinking" | "executing" | "streaming" | "delegating
 export type RateLimitState = { resetsAt: string, limitType: RateLimitType, parsed: boolean, errorTimestamp: string, };
 
 export type SessionInfo = { id: string, workspacePath: string, workspaceName: string, ideName: string | null, 
-/**
- * Launch identity persisted by the Claude CLI into every `user` record
- * (from the `CLAUDE_CODE_ENTRYPOINT` env var at spawn time): "cli",
- * "claude-vscode", `session_launch::NEW_SESSION_ENTRYPOINT`, … Taken
- * from the FIRST user record so later `--resume` runs (which stamp their
- * own entrypoint) don't reclassify the session. `None` for transcripts
- * predating the field.
- */
 entrypoint: string | null, isSubagent: boolean, parentSessionId: string | null, agentType: string | null, agentDescription: string | null, slug: string | null, aiTitle: string | null, status: SessionStatus, tokenSpeed: number, 
-/**
- * Token speed of this session + all its subagents' speeds (main sessions
- * only). For subagents this equals `token_speed`. Lets a parent card show
- * the speed of its hidden workflow fan-out agents so the per-card sum
- * reconciles with the global aggregate.
- */
 agentTokenSpeed: number, totalOutputTokens: number, 
-/**
- * Cumulative USD cost for this session alone (main or subagent).
- */
 totalCostUsd: number, 
-/**
- * Cost of this session + all its subagents' costs (main sessions only).
- * For subagents this equals `total_cost_usd`.
- */
 agentTotalCostUsd: number, 
-/**
- * USD/min cost rate over the last 5-minute window.
- */
 costSpeedUsdPerMin: number, lastMessagePreview: string | null, lastActivityMs: number, createdAtMs: number, jsonlPath: string, model: string | null, thinkingLevel: string | null, pid: number | null, 
-/**
- * True when the PID is unambiguously matched to this specific session.
- * False when multiple claude processes share the same cwd and none carries
- * a matching --resume flag — stopping may affect sibling sessions.
- */
 pidPrecise: boolean, 
-/**
- * True when a live CLI process carries this exact session id in its argv
- * (`--session-id` on the first turn, `--resume` on follow-ups). Unlike
- * `pid_precise` — which also goes true for a lone root process in the cwd
- * that never named this session — this is a definitive liveness signal for
- * Fleet-spawned sessions, and the only way to tell apart the two meanings
- * of `WaitingInput`: "turn ended, process gone" (resumable) vs "process
- * alive, parked on a decision card" (resuming would race a live turn).
- */
 procAlive: boolean, 
-/**
- * True when the most recent assistant tool_use batch has a non-interactive
- * tool whose `tool_result` never arrived (see
- * [`has_pending_noninteractive_tool_batch`]). Computed at parse time and
- * carried across cache hits; `apply_pid_liveness` combines it with
- * `proc_alive` + an age floor to promote the status to `Stuck`.
- */
 pendingToolBatch: boolean, lastSkill: string | null, 
-/**
- * Approximate context-window utilisation (0.0 – 1.0) derived from the
- * last finalized assistant message's usage fields.  `None` when no
- * usage data is available.
- */
 contextPercent: number | null, 
-/**
- * Source of this session: "claude-code" or "codex"
- */
 agentSource: string, 
-/**
- * Semantic outcome tags from the last completed turn (e.g. "bug_fixed",
- * "needs_input").  Set by background analysis, cleared when a new turn
- * starts.  `None` means no analysis has run yet or the session is busy.
- */
 lastOutcome: Array<string> | null, 
-/**
- * Populated when `status == RateLimited`. Carries reset time and limit
- * type for the UI countdown and the auto-resume scheduler.
- */
 rateLimit?: RateLimitState | null, 
-/**
- * Snapshot of the most recent TodoWrite invocation (`None` = session has
- * never invoked TodoWrite).  Drives the compact progress row on the
- * session card.
- */
 todos?: TodoSummary | null, 
-/**
- * Aggregate TASKS.md plan progress for this session's workspace (active
- * plans only, across the main checkout + sibling worktrees). `None` when
- * PRD Discipline isn't in use (no TASKS.md / no active plan). Drives the
- * compact task-progress row on the session card.
- */
 taskPlan?: TaskPlanSummary | null, 
-/**
- * Background tasks (shells, monitors, …) that were still running the last
- * time this session ended a turn — i.e. what it is waiting on. Empty for
- * the overwhelming majority of sessions.
- *
- * Read from the `background_tasks` array of the Stop hook payload, which
- * Fleet already records. Stamped at scan time from the hook snapshot rather
- * than the cached deep parse: the task list changes while the jsonl doesn't.
- */
 backgroundTasks?: Array<BackgroundTask>, 
-/**
- * Relay-chain position when this session is part of a handoff chain
- * (`fleet handoff`). `None` = never relayed. Stamped by
- * `handoff::enrich_sessions` at scan time, not during the cached deep
- * parse — chain membership changes while the predecessor's jsonl doesn't.
- */
 handoff?: SessionHandoffInfo | null, 
-/**
- * Manual review mark set by the human ("done" / "pending"). `None` = the
- * session is unmarked, i.e. "new / needs review". Orthogonal to `status`
- * (which is the auto-computed run state). Stamped by
- * `session_mark::enrich_sessions` at scan time, not during the cached deep
- * parse — the mark changes while the session's jsonl doesn't.
- */
 userMark?: SessionMark | null, 
-/**
- * Epoch-ms of the last time the human read this session, or `None` if never
- * read. Orthogonal to both `status` and `user_mark`: a session is "unread"
- * when `last_activity_ms > last_read_ms` (or this is `None`). Stamped by
- * `session_read::enrich_sessions` at scan time, not during the cached deep
- * parse — the read state changes while the session's jsonl doesn't.
- */
 lastReadMs?: number | null, 
-/**
- * Number of times this session was context-compacted (auto or manual /compact).
- */
 compactCount: number, 
-/**
- * Sum of context sizes (in tokens) right before each compaction.
- */
 compactPreTokens: number, 
-/**
- * Sum of summary sizes (in tokens) produced by each compaction.
- */
 compactPostTokens: number, 
-/**
- * Estimated USD cost of the compact LLM calls. Approximation —
- * the compact invocation is not recorded as a standalone assistant
- * turn, so this is computed as `cache_read_price × pre + output_price × post`.
- */
 compactCostUsd: number, };
 
 export type SessionMark = "pending" | "done";
@@ -175,48 +48,19 @@ export type SessionMark = "pending" | "done";
 export type RateLimitType = "sessionLimit" | "weeklyLimit" | "opusLimit" | "sonnetLimit" | "usageLimit" | "outOfExtraUsage" | "unknown";
 
 export type TodayUsage = { 
-/**
- * YYYY-MM-DD in the user's local timezone.
- */
 date: string, 
-/**
- * Output tokens today: agent sessions created today + Fleet's own LLM calls.
- */
 outputTokens: number, 
-/**
- * Total USD cost today = `agent_cost_usd` + `fleet_cost_usd`.
- */
 costUsd: number, 
-/**
- * Cost from agent (Claude Code) sessions created today.
- */
 agentCostUsd: number, 
-/**
- * Cost from Fleet's own LLM calls today (guard / audit / report summaries).
- */
 fleetCostUsd: number, 
-/**
- * Number of top-level (non-subagent) sessions created today that contributed.
- */
 sessionCount: number, };
 
 export type SearchHit = { sessionId: string, jsonlPath: string, snippet: string, rank: number, };
 
 export type WaitingAlert = { sessionId: string, workspaceName: string, summary: string, detectedAtMs: number, jsonlPath: string, 
-/**
- * Originating agent source id (e.g. "claude-code", "codex").
- * Used by the UI to suppress audible alerts for sources whose waits are
- * already surfaced through the Decision Panel (AskUserQuestion bridge).
- */
 source: string, };
 
 export type PendingDecisions = { guard: Array<GuardRequest>, elicitation: Array<ElicitationRequest>, fleetAsk: Array<FleetAskRequest>, a2uiRender: Array<A2uiRenderRequest>, planApproval: Array<PlanApprovalRequest>, 
-/**
- * Native permission prompts from headless sessions, routed through the
- * `fleet__permission_prompt` MCP tool (`--permission-prompt-tool`).
- * `#[serde(default)]` keeps older `fleet serve` probes (whose
- * `/pending_decisions` payload predates this field) deserializable.
- */
 permissionPrompt: Array<PermissionPromptRequest>, };
 
 export type SkillInvocation = { skill: string, args: string | null, timestamp: string, isSubagent: boolean, };
@@ -224,24 +68,9 @@ export type SkillInvocation = { skill: string, args: string | null, timestamp: s
 export type WorkflowAgentStatus = "running" | "done";
 
 export type WorkflowAgent = { 
-/**
- * Opaque agent id from the journal (`agentId`).
- */
 agentId: string, 
-/**
- * The journal pairing key (`v2:<hash>`); stable across started/result.
- */
 key: string, status: WorkflowAgentStatus, 
-/**
- * Final result text, present only once the agent is `done`.
- */
 result: string | null, 
-/**
- * Runtime `agentType` from the sibling `agent-<id>.meta.json`
- * (e.g. `"Explore"`, `"workflow-subagent"`). Populated during discovery,
- * not from the journal (which carries no agentType). Used to route agents
- * back to their script call-site during DAG binding.
- */
 agentType: string | null, };
 
 export type WorkflowPhase = { title: string, detail: string | null, };
@@ -251,240 +80,84 @@ export type WorkflowNodeKind = "single" | "parallel" | "pipeline";
 export type WorkflowNodeStatus = "pending" | "running" | "done";
 
 export type WorkflowNode = { 
-/**
- * Stable id (`n0`, `n1`, ...), referenced by [`WorkflowEdge`].
- */
 id: string, 
-/**
- * Human label: the script's `label:` opt when present, else derived from
- * the enclosing phase, else `agent#N`.
- */
 label: string, 
-/**
- * Enclosing phase title (`phase('X')` or the agent's `phase:` opt).
- */
 phase: string | null, kind: WorkflowNodeKind, status: WorkflowNodeStatus, 
-/**
- * Runtime agent ids bound to this call-site (0..N).
- */
 agentIds: Array<string>, 
-/**
- * True when the agent→node binding for this node is heuristic rather than
- * exact (dynamic fan-out / order fallback). The UI flags these as
- * approximate so the binding limitation is honest.
- */
 approximate: boolean, 
-/**
- * A readable rendering of this call-site's prompt (interpolation points as
- * "…"), recovered by the execution-based extractor for the UI to show on
- * hover/selection. `None` when only the static scan ran.
- */
 resolvedPrompt: string | null, };
 
 export type WorkflowEdge = { from: string, to: string, };
 
 export type WorkflowTree = { 
-/**
- * The `wf_<run-id>` directory name, e.g. `wf_c3ab5242-718`.
- */
 runId: string, 
-/**
- * `meta.name` from the script, if found.
- */
 name: string | null, 
-/**
- * `meta.description` from the script, if found.
- */
 description: string | null, 
-/**
- * Declared phases (script `meta.phases`), best-effort.
- */
 phases: Array<WorkflowPhase>, 
-/**
- * Fan-out agents, in first-seen journal order.
- */
 agents: Array<WorkflowAgent>, 
-/**
- * Reconstructed orchestration DAG nodes (one per `agent(...)` call-site),
- * in script order. Empty when the script could not be parsed.
- */
 nodes: Array<WorkflowNode>, 
-/**
- * Directed edges between DAG nodes (pipeline chains + phase progression).
- */
 edges: Array<WorkflowEdge>, 
-/**
- * Absolute path to the `wf_<run-id>` transcript dir.
- */
 transcriptDir: string, };
 
 export type UsageTotals = { inputTokens: number, outputTokens: number, cacheCreationTokens: number, cacheReadTokens: number, ephemeral5mTokens: number, ephemeral1hTokens: number, };
 
 export type SourceBuckets = { 
-/**
- * CC base system prompt (hardcoded constant; see CC_SYSTEM_PROMPT_TOKENS).
- */
 ccBaseSystemPrompt: number, 
-/**
- * CC stock tool defs (hardcoded constant; see STOCK_TOOL_DEFS_TOKENS).
- */
 toolDefs: number, userClaudemd: number, projectClaudemd: number, 
-/**
- * `~/.claude/fleet-interaction-mode.md` + `fleet-prd-discipline.md`.
- */
 fleetReminders: number, 
-/**
- * `~/.claude/projects/<encoded>/memory/MEMORY.md` (index only).
- */
 memoryFiles: number, 
-/**
- * Sum of frontmatter tokens for all installed skills (`~/.claude/skills/*/SKILL.md`).
- */
 skillsManifest: number, visibleUserText: number, visibleToolResult: number, visibleSystemReminder: number, visiblePrevAssistant: number, visibleCompactSummary: number, 
-/**
- * `cache_creation_input_tokens` of all turns where it exceeds
- * TTL_REFRESH_THRESHOLD (excluding the first turn). Not sliced further.
- */
 ttlRefreshOverhead: number, 
-/**
- * What's left after attribution. Mostly `chars/4` slippage on long
- * sessions + mid-size cache events below the TTL threshold.
- */
 residualUnexplained: number, };
 
 export type OutputBuckets = { outputText: number, 
-/**
- * Visible `thinking` block text chars / 4. Usually 0 on Opus (extended
- * thinking is billed but invisible in transcript).
- */
 outputThinkingVisible: number, 
-/**
- * `tool_use` block input JSON + name chars / 4.
- */
 outputToolUse: number, 
-/**
- * Residual: `output_tokens - visible block estimates`. Captures Opus
- * extended thinking. Negative residuals are clamped to 0.
- */
 outputReasoningInvisible: number, };
 
 export type SessionTokenBreakdown = { sessionId: string, jsonlPath: string, model: string | null, isSidechain: boolean, messages: number, bundleLoads: number, ttlRefreshCount: number, 
-/**
- * Estimated USD cost given Anthropic public pricing. None for unknown models.
- */
 estimatedCostUsd: number | null, usage: UsageTotals, sources: SourceBuckets, output: OutputBuckets, 
-/**
- * 1.0 means residual_unexplained = 0; lower means more was unattributed.
- */
 fitConfidence: number, };
 
 export type TaskTokenBreakdown = { main: SessionTokenBreakdown, subagents: Array<SessionTokenBreakdown>, totalsUsage: UsageTotals, totalsSources: SourceBuckets, totalsOutput: OutputBuckets, totalsEstimatedCostUsd: number | null, 
-/**
- * True when the disk-snapshot baseline was successfully loaded; false
- * when project_root was unknown or files were missing.
- */
 baselineLoaded: boolean, 
-/**
- * Bundle size used at analysis time. UI uses this for the tooltip.
- */
 bundleSizeTokens: number, };
 
 export type SessionTodo = { content: string, activeForm: string, 
-/**
- * One of: "pending", "in_progress", "completed".
- */
 status: string, };
 
 export type TodoSummary = { completed: number, inProgress: number, pending: number, 
-/**
- * `activeForm` of the first in-progress item (falls back to its `content`
- * when `activeForm` is empty).  `None` when nothing is in progress.
- */
 currentActive: string | null, };
 
 export type BackgroundTask = { id: string, 
-/**
- * `shell` | `monitor` | `subagent` | `workflow` | `teammate` | ...
- */
 type: string, 
-/**
- * `running` when the task is still live. Anything else is terminal.
- */
 status: string, description: string, 
-/**
- * Shell tasks only — the command line as the agent wrote it.
- */
 command: string | null, };
 
 export type TaskPlanSummary = { done: number, total: number, 
-/**
- * Display name of the attributed plan — its `**Plan:**` title, falling back
- * to its sentinel id. `None` for a legacy anonymous block with no title.
- */
 currentPlan: string | null, 
-/**
- * Sentinel id of the attributed plan (e.g. `scene-items`). Carried alongside
- * `current_plan` because the two diverge whenever the block has a title: the
- * card shows the title, but humans refer to the plan by its id, and the
- * launcher's search box matches both.
- */
 planId: string | null, 
-/**
- * First still-pending top-level task in the focused plan (e.g. `**P3** — …`).
- * `None` when the focused plan has no pending task (shouldn't happen for an
- * active plan, but kept optional for safety).
- */
 currentTask: string | null, };
 
 export type TaskItem = { text: string, done: boolean, };
 
 export type TaskPlanDetail = { id: string | null, 
-/**
- * Human-readable plan title from the `**Plan:** …` line, when present.
- * `None` for a plan block with no title line (e.g. a bare anonymous block).
- */
 title: string | null, 
-/**
- * `None` when the plan lives in the main checkout's TASKS.md; otherwise a
- * relative (or absolute fallback) path to the worktree source file.
- */
 source: string | null, items: Array<TaskItem>, };
 
 export type HandoffLink = { fromSessionId: string, toSessionId: string, note: string, planId?: string | null, nextTask?: string | null, 
-/**
- * Epoch ms the successor was spawned.
- */
 handedAt: number, };
 
 export type HandoffChain = { chainId: string, workspacePath: string, 
-/**
- * Plan of the most recent plan-bound link, for grouping in the UI.
- */
 planId?: string | null, links: Array<HandoffLink>, };
 
 export type SessionHandoffInfo = { chainId: string, 
-/**
- * This session's 1-based position on the chain.
- */
 hop: number, 
-/**
- * Total sessions currently on the chain.
- */
 chainLen: number, };
 
 export type LiveThinking = { sessionId: string, 
-/**
- * Accumulated text of the most recent thinking block in the current turn.
- */
 thinking: string, 
-/**
- * True while the turn appears in progress (no terminal `result` line yet
- * and the sidecar was written to recently).
- */
 streaming: boolean, 
-/**
- * Seconds since the sidecar file was last modified.
- */
 updatedSecsAgo: number, };
 
 export type AuditRiskLevel = "medium" | "high" | "critical";
@@ -496,20 +169,7 @@ export type AuditSummary = { events: Array<AuditEvent>, totalSessionsScanned: nu
 export type MatchMode = "contains" | "command_start";
 
 export type GuardAllowRule = { id: string, prefix: string, 
-/**
- * The audit tag that originally triggered the guard (for UI/debugging).
- */
 sourceTag: string | null, createdAt: string, 
-/**
- * DEC-017: who signed off on this whitelist rule. A rule with
- * `approved_by == None` is **unsigned** and MUST NOT take effect — the
- * signature is the require-approval gate. A signed rule may short-circuit
- * the guard prompt even for a Critical command (the classifier's false
- * positives are exactly what the whitelist is for); non-silence is still
- * guaranteed by the independent `extract_audit_events` transcript trail.
- * Older on-disk files predate this field; `#[serde(default)]` loads them as
- * unsigned so they stop short-circuiting until a human explicitly approves.
- */
 approvedBy: string | null, };
 
 export type AuditRuleInfo = { id: string, level: AuditRiskLevel, tag: string, matchMode: MatchMode, patterns: Array<string>, descriptionEn: string, descriptionZh: string, enabled: boolean, builtin: boolean, category: string, };
@@ -517,84 +177,28 @@ export type AuditRuleInfo = { id: string, level: AuditRiskLevel, tag: string, ma
 export type SuggestedRule = { id: string, level: AuditRiskLevel, tag: string, matchMode: MatchMode, patterns: Array<string>, descriptionEn: string, descriptionZh: string, category: string, reasoning: string, };
 
 export type GuardRequest = { id: string, sessionId: string, workspaceName: string, 
-/**
- * AI-generated session title (distinct from workspace_name).
- */
 aiTitle?: string | null, toolName: string, command: string, commandSummary: string, riskTags: Array<string>, timestamp: string, 
-/**
- * Structured view of `command` (shell AST flattened into a list of
- * leaves + connectors) for UI rendering.  Optional: an older CLI may
- * not populate it, in which case the front-end falls back to showing
- * the raw `command` string.
- */
 structuredCommand?: CommandView | null, };
 
 export type ElicitationOption = { label: string, description: string, 
-/**
- * Optional markdown preview shown when this option is focused (from
- * AskUserQuestion's per-option `preview` field). Side-by-side layout.
- */
 preview?: string | null, };
 
 export type ElicitationQuestion = { question: string, header: string, options: Array<ElicitationOption>, multiSelect: boolean, };
 
 export type ElicitationRequest = { id: string, sessionId: string, workspaceName: string, 
-/**
- * AI-generated session title (distinct from workspace_name).
- */
 aiTitle?: string | null, questions: Array<ElicitationQuestion>, timestamp: string, 
-/**
- * Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
- */
 parked?: boolean, };
 
 export type FleetAskRequest = { id: string, 
-/**
- * Originating Claude Code session id (passed via env var
- * `CLAUDE_CODE_SESSION_ID` when the MCP server is launched). Used by the
- * desktop watcher to resolve workspace + AI title for the Decision
- * Card header, exactly like `ElicitationRequest::session_id`.
- */
 sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
-/**
- * True once the card has been through [`crate::parked`]: the wait timed
- * out, the turn that asked was interrupted, and the question is now sitting
- * in `~/.fleet/parked/` until the user gets to it. Answering a parked card
- * resumes the session instead of unblocking a (long-gone) MCP poll.
- */
 parked?: boolean, questions: Array<FleetAskQuestion>, };
 
 export type FleetAskQuestion = { question: string, header: string, multiSelect: boolean, options?: Array<FleetAskOption>, html?: string | null, formFields?: Array<FleetAskFormField>, 
-/**
- * Local image files the agent wants shown WITHOUT base64-inlining them
- * into `html`. Each entry names a file on the agent's host; on the way in
- * [`ingest_images`] copies it once into Fleet's persistent decision-asset
- * store (`~/.fleet/decision-assets/<id>/q<idx>/<name>`) and blanks the
- * `path`. The card then loads a served `index.html` (the `html` field, or
- * a synthesized gallery when `html` is absent) through the
- * `fleet-decision://` protocol, so `<img src="<name>">` resolves without a
- * single base64 byte crossing the tool-call boundary — and the copies
- * survive for later decision-history review.
- */
 images?: Array<FleetAskImage>, };
 
 export type FleetAskImage = { 
-/**
- * Filename the image is served as inside the question's asset dir; also
- * the string the agent references in `html` (e.g. `<img src="chart.png">`).
- * Must be a bare filename — no path separators, no `..`.
- */
 name: string, 
-/**
- * Absolute (or agent-cwd-relative) path to the source file. Consumed by
- * [`ingest_images`] and blanked afterwards, so it never lands in the
- * persisted request or decision history.
- */
 path?: string, 
-/**
- * Optional caption rendered beneath the image in the synthesized gallery
- * (ignored when the agent supplies its own `html`).
- */
 caption?: string | null, };
 
 export type FleetAskOption = { label: string, description: string, preview?: string | null, };
@@ -604,57 +208,20 @@ export type FleetAskFormField = { name: string, kind: FleetAskFormFieldKind, lab
 export type FleetAskFormFieldKind = "text" | "textarea" | "number" | "select" | "radio" | "checkbox" | "date" | "datetime" | "time" | "range";
 
 export type PlanApprovalRequest = { id: string, sessionId: string, workspaceName: string, 
-/**
- * AI-generated session title (distinct from workspace_name).
- */
 aiTitle?: string | null, 
-/**
- * The plan markdown content (already extracted from tool_input.plan).
- */
 planContent: string, 
-/**
- * Absolute path where the plan is persisted (from tool_input.planFilePath).
- */
 planFilePath?: string | null, timestamp: string, 
-/**
- * Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
- */
 parked?: boolean, };
 
 export type A2uiRenderRequest = { id: string, 
-/**
- * Originating Claude Code session id (same role as `FleetAskRequest::session_id`).
- */
 sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
-/**
- * Timed out and parked — see [`crate::mcp_ipc::FleetAskRequest::parked`].
- */
 parked?: boolean, 
-/**
- * The A2UI v0.9 agent-to-client message tree, passed through verbatim
- * to `@a2ui/web_core`'s `MessageProcessor` on the desktop side.
- */
 messageTree: unknown, };
 
 export type PermissionPromptRequest = { id: string, 
-/**
- * Originating Claude Code session id (from `CLAUDE_CODE_SESSION_ID`,
- * same resolution as `FleetAskRequest::session_id`).
- */
 sessionId: string, workspaceName: string, aiTitle?: string | null, timestamp: string, 
-/**
- * The tool Claude Code wants to run (e.g. `Write`, `Bash`,
- * `NotebookEdit`, an MCP tool name).
- */
 toolName: string, 
-/**
- * The tool's full input payload, displayed on the card so the user can
- * judge the action. Passed back verbatim as `updatedInput` on allow.
- */
 toolInput: unknown, 
-/**
- * Claude Code's tool_use id, if provided; carried for log correlation.
- */
 toolUseId?: string | null, };
 
 export type ElicitationOutcome = "answered" | "declined" | "heartbeat-lost" | "timeout";
@@ -664,62 +231,26 @@ export type PlanApprovalOutcome = "approved" | "approved-with-edits" | "rejected
 export type FleetAskOutcome = "answered" | "cancelled" | "heartbeat-lost" | "timeout";
 
 export type SelectedOption = { 
-/**
- * Option label as shown in the card. Falls back to the raw answer string
- * when the user typed via "Other" (no matching option).
- */
 label: string, 
-/**
- * Option description shown as helper text. `None` when the user typed
- * via "Other".
- */
 description?: string | null, 
-/**
- * Was this answer typed via the "Other" escape hatch?
- */
 other?: boolean, };
 
 export type DecisionHistoryRecord = { "kind": "elicitation" } & ElicitationHistoryRecord | { "kind": "plan-approval" } & PlanApprovalHistoryRecord | { "kind": "user-prompt" } & UserPromptHistoryRecord | { "kind": "fleet-ask" } & FleetAskHistoryRecord;
 
 export type UserPromptHistoryRecord = { id: string, sessionId: string, 
-/**
- * Concatenated user-typed text (one block per `\n\n`). Injected blocks
- * that match the filter list are stripped before joining.
- */
 text: string, 
-/**
- * True when the user pasted at least one image alongside their prompt.
- */
 hasImage?: boolean, 
-/**
- * jsonl entry timestamp (ISO-8601 UTC).
- */
 sentAt: string, };
 
 export type ElicitationHistoryRecord = { id: string, sessionId: string, workspaceName: string, aiTitle?: string | null, 
-/**
- * When the request was originally raised.
- */
 requestedAt: string, 
-/**
- * When the terminal outcome was recorded.
- */
 resolvedAt: string, outcome: ElicitationOutcome, questions: Array<ElicitationQuestion>, 
-/**
- * `question text → selected option`. Empty unless `outcome = answered`.
- */
 answers: { [key in string]: SelectedOption }, };
 
 export type FleetAskHistoryRecord = { id: string, sessionId: string, workspaceName: string, aiTitle?: string | null, requestedAt: string, resolvedAt: string, outcome: FleetAskOutcome, questions: Array<FleetAskQuestion>, answers: { [key in string]: string }, };
 
 export type PlanApprovalHistoryRecord = { id: string, sessionId: string, workspaceName: string, aiTitle?: string | null, requestedAt: string, resolvedAt: string, outcome: PlanApprovalOutcome, planContent: string, planFilePath?: string | null, 
-/**
- * Present when outcome = approved-with-edits.
- */
 editedPlan?: string | null, 
-/**
- * Present when outcome = rejected and the user supplied feedback.
- */
 feedback?: string | null, };
 
 export type DailyReport = { date: string, timezone: string, generatedAt: number, metrics: DailyMetrics, aiSummary: string | null, aiSummaryGeneratedAt: number | null, sessionIds: Array<string>, lessons: Array<Lesson> | null, lessonsGeneratedAt: number | null, };
@@ -735,38 +266,16 @@ export type ReportSessionSummary = { id: string, title: string | null, lastMessa
 export type DailyReportStats = { date: string, totalTokens: number, totalSessions: number, totalToolCalls: number, totalProjects: number, };
 
 export type Lesson = { 
-/**
- * The lesson content (actionable instruction).
- */
 content: string, 
-/**
- * Why this lesson was identified (brief explanation).
- */
 reason: string, 
-/**
- * Workspace where the mistake occurred.
- */
 workspaceName: string, 
-/**
- * Session ID where the mistake occurred.
- */
 sessionId: string, };
 
 export type ProcStatus = "starting" | "running" | "exited";
 
 export type ProcRecord = { id: string, workspacePath: string, command: string, status: ProcStatus, 
-/**
- * Pid of the command's shell — also its pgid (it is a session leader).
- */
 childPid?: number | null, hostPid?: number | null, 
-/**
- * Start time of the host process — pid-reuse guard for self-healing.
- */
 hostStartTime?: number | null, 
-/**
- * `None` on an exited record means the exit was inferred (host died
- * without reporting), not observed.
- */
 exitCode?: number | null, startedMs: number, finishedMs?: number | null, cols: number, rows: number, };
 
 export type ProcOutputChunk = { dataB64: string, nextOffset: number, record: ProcRecord, };

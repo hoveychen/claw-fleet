@@ -36,9 +36,27 @@ fn build_bundle() -> String {
     out.push_str("// DO NOT EDIT — edit the Rust structs in claw-fleet-core and regenerate.\n");
     out.push_str("// Source of truth: claw-fleet-core/tests/ts_export.rs\n\n");
 
+    // ts-rs copies Rust doc comments verbatim into the TS output as `/** … */`
+    // blocks. Rust prose is free to contain `*/` (e.g. a glob path like
+    // `skills/*/SKILL.md`), which would close the JSDoc block early and desync
+    // the TS parser — a silent build break gated only on unrelated Rust wording.
+    // We don't need the implementation prose in a machine-generated wire-type
+    // file, so strip every doc-comment line. ts-rs always emits comments on
+    // their own lines (`/**`, ` * …`, ` */`) — never inline with a field — so a
+    // stateless line filter is safe and also removes ~500 lines of noise.
+    fn strip_doc_comments(decl: &str) -> String {
+        decl.lines()
+            .filter(|line| {
+                let t = line.trim_start();
+                !(t.starts_with("/**") || t.starts_with('*'))
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
     macro_rules! emit {
         ($($t:ty),* $(,)?) => {
-            $( out.push_str(&format!("export {}\n\n", <$t>::decl(&cfg))); )*
+            $( out.push_str(&format!("export {}\n\n", strip_doc_comments(&<$t>::decl(&cfg)))); )*
         };
     }
 
