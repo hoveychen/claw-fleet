@@ -194,3 +194,32 @@
   flex-direction: column;
   gap: 8px;
 }
+
+/* Queued follow-ups waiting for the running turn to end. */
+.queuedList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.queuedLabel {
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+
+.queuedChip {
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 9px;
+  border-radius: 8px;
+  background: var(--color-bg-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}
