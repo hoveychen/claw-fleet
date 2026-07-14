@@ -21,6 +21,9 @@ SIGNING_CONF="$SCRIPT_DIR/signing.local"
 APPLE_SIGNING_IDENTITY=""
 APPLE_INSTALLER_IDENTITY=""
 if [[ -f "$SIGNING_CONF" ]]; then
+  # signing.local is a user-local, gitignored file — there is no in-repo target
+  # for shellcheck to follow, so silence SC1090 rather than chase a phantom path.
+  # shellcheck source=/dev/null
   source "$SIGNING_CONF"
   echo "==> Signing identity: $APPLE_SIGNING_IDENTITY"
   [[ -n "$APPLE_INSTALLER_IDENTITY" ]] && echo "==> Installer identity: $APPLE_INSTALLER_IDENTITY"

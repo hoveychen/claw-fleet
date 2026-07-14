@@ -53,11 +53,11 @@ const MOBILE_WEB_SRC: &str = "../mobile-web/src";
 const CHECK_A_KNOWN_DRIFT: &[&str] = &["apply_mcp_injector"];
 
 /// Endpoints the remote client calls that `hooks_server` no longer serves.
-/// `/auto_resume_config`: removed server-side in Phase 4 P3 (see the comment in
-/// hooks_server.rs) but remote.rs still GET/POSTs it, so `get_auto_resume_config`
-/// silently returns the default and `set_auto_resume_config` 404s. Fix = drop the
-/// remote call or re-add the route.
-const CHECK_B_KNOWN_DRIFT: &[&str] = &["/auto_resume_config"];
+/// Empty: the former `/auto_resume_config` drift was fixed by
+/// fix-remote-autoresume-config (RemoteBackend now reads/writes the local
+/// AutoResumeConfig directly instead of calling the dropped probe endpoint), so
+/// the guard's stale-detection required removing it from this list.
+const CHECK_B_KNOWN_DRIFT: &[&str] = &[];
 
 /// mobile-web request methods not handled by the relay dispatcher. Empty — the
 /// mobile surface is currently fully covered; keep it that way.
