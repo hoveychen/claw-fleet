@@ -16,6 +16,53 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Build an augmented PATH that includes common Node.js installation directories.
+/// GUI apps (like Tauri) launched by launchd carry a minimal PATH
+/// (`/usr/bin:/bin:/usr/sbin:/sbin`); a spawned `claude` child inheriting it
+/// can't find user-installed binaries (fleet, cws, node) from its Bash tool.
+/// Prepend the common Node/global install dirs so those tools resolve; the
+/// existing PATH stays at the tail so nothing is lost.
+pub(crate) fn augmented_path() -> String {
+    let mut dirs: Vec<String> = vec![
+        "/opt/homebrew/bin".to_string(),
+        "/usr/local/bin".to_string(),
+    ];
+    if let Some(home) = crate::session::real_home_dir() {
+        let h = home.display().to_string();
+        // nvm
+        if let Ok(nvm_dir) = std::env::var("NVM_DIR") {
+            // Try to find the default node version
+            let default_path = std::path::PathBuf::from(&nvm_dir).join("alias/default");
+            if let Ok(version) = std::fs::read_to_string(&default_path) {
+                let version = version.trim();
+                let nvm_bin = format!("{nvm_dir}/versions/node/v{version}/bin");
+                if std::path::Path::new(&nvm_bin).is_dir() {
+                    dirs.push(nvm_bin);
+                }
+            }
+            // Also try current symlink
+            let current = format!("{nvm_dir}/current/bin");
+            if std::path::Path::new(&current).is_dir() {
+                dirs.push(current);
+            }
+        }
+        // fnm
+        dirs.push(format!("{h}/Library/Application Support/fnm/aliases/default/bin"));
+        dirs.push(format!("{h}/.local/share/fnm/aliases/default/bin"));
+        // volta
+        dirs.push(format!("{h}/.volta/bin"));
+        // Common global install paths
+        dirs.push(format!("{h}/.local/bin"));
+        dirs.push(format!("{h}/.npm-global/bin"));
+        dirs.push(format!("{h}/.cargo/bin"));
+    }
+    // Append the existing PATH so we don't lose anything
+    if let Ok(existing) = std::env::var("PATH") {
+        dirs.push(existing);
+    }
+    dirs.join(":")
+}
+
 /// Request body for the remote `/spawn_session` endpoint.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -309,7 +356,7 @@ pub fn spawn_claude_detached_with_envs(
     // user-installed binaries (fleet, cws, node) from its Bash tool.
     // Prepend ~/.claude/fleet/bin (populated by fleet_cli::ensure_fleet_cli_link)
     // and the common install dirs; the parent's PATH stays at the tail.
-    let mut path = crate::openclaw_source::augmented_path();
+    let mut path = augmented_path();
     if let Some(home) = crate::session::real_home_dir() {
         path = format!(
             "{}:{}",

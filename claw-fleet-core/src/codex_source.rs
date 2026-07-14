@@ -1781,13 +1781,12 @@ pub struct CodexUsageItem {
     pub credits: Option<CodexCreditsSnapshot>,
 }
 
-/// Locate the Codex binary shipped inside the OpenAI ChatGPT VSCode/Cursor extension.
+/// Locate the Codex binary shipped inside the OpenAI ChatGPT VSCode extension.
 fn find_codex_binary() -> Option<std::path::PathBuf> {
     let home = crate::session::real_home_dir()?;
 
-    // Check Cursor and VSCode extension directories
+    // Check VSCode extension directories
     let ext_dirs = [
-        home.join(".cursor").join("extensions"),
         home.join(".vscode").join("extensions"),
         home.join(".vscode-insiders").join("extensions"),
     ];
