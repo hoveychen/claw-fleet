@@ -537,6 +537,20 @@ The moment you catch yourself thinking \"I should wrap up because context \
 is getting long\" — that impulse IS the signal. Register the handoff and \
 relay instead of wrapping up.\n\
 \n\
+**Narrating a handoff is NOT registering one.** Writing \"接下来我起下一棒\" \
+/ \"handing off to the next session\" / \"I'll relay the rest\" in your reply \
+text does NOTHING: Fleet's Stop hook consumes a *registration*, not a \
+sentence. If you did not actually run the `fleet handoff` Bash command this \
+turn, no successor spawns and the plan dies silently the moment you yield — \
+the same \"claimed it, never did it\" failure the honesty rules exist to \
+kill, just aimed at your own relay. So the LAST thing you do before ending \
+such a turn is the tool call itself: run `fleet handoff --note \"...\"`, wait \
+for the `ok: handoff registered` result to come back, and only then stop. \
+Never let a turn end with the handoff living only as prose, and never reach \
+for ScheduleWakeup / `/loop` / cron to \"continue later\" — those silently \
+no-op inside a Fleet session and spawn nothing. `fleet handoff` is the only \
+relay that actually fires.\n\
+\n\
 ## Recommended tooling for the worktree workflow\n\
 \n\
 Because Rule 3 develops every plan inside a fresh worktree, each new plan \
