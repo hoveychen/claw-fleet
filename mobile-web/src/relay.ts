@@ -4,6 +4,7 @@
 // answer / req / reply) — see claw-fleet-core/src/mobile_relay.rs.
 
 import { t } from "./i18n";
+import { deriveKeys, isSealed, open, openBytes, seal, type SealedBox } from "./relayCrypto";
 import type { DecisionKind, SessionInfo } from "./types";
 
 /** Self-description this phone announces to the desktop so it appears in the
@@ -18,10 +19,10 @@ export interface DeviceInfo {
    *  `DecompressionStream`. The desktop only compresses when every live client
    *  reports `true`, so a browser without the API keeps receiving plaintext. */
   supportsGzip: boolean;
-  /** Whether this client runs the generic-compression codec: it decodes both
-   *  raw binary `msg` frames and the `{enc:"gzip",data}` text envelope. The
-   *  desktop gates *all* generic compression on every live client reporting
-   *  `true`, so an old PWA (which omits this) transparently keeps plaintext. */
+  /** Vestigial. Under always-on end-to-end encryption every `msg` payload is a
+   *  sealed `{enc:"box"}` text envelope, so the old raw-binary / `{enc:"gzip"}`
+   *  transports are gone and nothing gates on this. Still reported so a desktop
+   *  that reads the field stays wire-compatible. */
   supportsBinary: boolean;
 }
 
@@ -60,21 +61,14 @@ export function gzipSupported(): boolean {
   return typeof DecompressionStream !== "undefined";
 }
 
-/** Whether this build understands binary `msg` frames and the generic
- *  `{enc:"gzip",data}` envelope. Requires `DecompressionStream` to inflate;
- *  binary WebSocket receive is universal where that API exists. */
+/** Vestigial companion to `supportsBinary` (see `DeviceInfo`). Retained so the
+ *  `client_hello` field keeps a truthful value; no transport depends on it. */
 export function binarySupported(): boolean {
   return gzipSupported();
 }
 
-/** Inflate a base64-encoded gzip blob back into its JSON string. */
-async function inflateGzipBase64(b64: string): Promise<string> {
-  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-  return inflateGzipBytes(bytes.buffer);
-}
-
-/** Inflate raw gzip bytes (a binary `msg` frame's body) into its JSON string,
- *  using the streaming DecompressionStream API. */
+/** Inflate raw gzip bytes (the plaintext of a sealed `z:true` payload) into its
+ *  JSON string, using the streaming DecompressionStream API. */
 async function inflateGzipBytes(buf: ArrayBuffer): Promise<string> {
   const stream = new Blob([buf]).stream().pipeThrough(new DecompressionStream("gzip"));
   return new Response(stream).text();
@@ -133,6 +127,14 @@ export class RelayClient {
   private reconnectDelay = 1000;
   private closed = false;
   private authed = false;
+  // End-to-end encryption keys derived from the pairing secret (方案A). The
+  // relay only ever sees `channelToken` (what we auth with) and sealed
+  // ciphertext; the raw secret and `encKey` never leave this device. Derivation
+  // is async (WebCrypto), so it's memoized in `keysReady` and awaited before the
+  // first socket opens and before every seal/open.
+  private channelToken?: string;
+  private encKey?: CryptoKey;
+  private keysReady?: Promise<void>;
 
   constructor(secret: string, handlers: RelayHandlers, deviceInfo?: () => DeviceInfo) {
     this.secret = secret;
@@ -140,9 +142,20 @@ export class RelayClient {
     this.deviceInfo = deviceInfo;
   }
 
+  /** Derive (once) the channel token and AES key from the pairing secret. */
+  private ensureKeys(): Promise<void> {
+    if (!this.keysReady) {
+      this.keysReady = deriveKeys(this.secret).then((k) => {
+        this.channelToken = k.channelToken;
+        this.encKey = k.encKey;
+      });
+    }
+    return this.keysReady;
+  }
+
   connect() {
     this.closed = false;
-    this.open();
+    void this.open();
   }
 
   close() {
@@ -183,27 +196,21 @@ export class RelayClient {
     return this.authed;
   }
 
-  private open() {
+  private async open() {
     if (this.closed) return;
+    // Keys must exist before we auth: the `auth` frame carries `channelToken`,
+    // not the raw secret. Memoized, so reconnects resolve instantly.
+    await this.ensureKeys();
+    if (this.closed) return; // close() may have fired while deriving
     const ws = new WebSocket(relayWsUrl());
     this.ws = ws;
     this.authed = false;
-    // Binary frames arrive as ArrayBuffers so we can inflate them directly.
-    ws.binaryType = "arraybuffer";
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "auth", role: "client", secret: this.secret }));
+      // Auth with the HKDF-derived channel token, never the raw secret — the
+      // relay routes by a one-way function of the secret and never learns it.
+      ws.send(JSON.stringify({ type: "auth", role: "client", secret: this.channelToken }));
     };
     ws.onmessage = (ev) => {
-      // A binary frame is a gzipped `msg` payload the relay forwarded verbatim:
-      // inflate → parse → dispatch as a business payload. Decode is async; a
-      // failure is dropped silently (the next snapshot is full state and self-
-      // heals; a lost reply just times out like any dropped frame).
-      if (ev.data instanceof ArrayBuffer) {
-        void inflateGzipBytes(ev.data)
-          .then((json) => this.handlePayload(JSON.parse(json) as Record<string, unknown>))
-          .catch(() => {});
-        return;
-      }
       let frame: Record<string, unknown>;
       try {
         frame = JSON.parse(String(ev.data));
@@ -221,7 +228,7 @@ export class RelayClient {
       if (this.closed) return;
       const delay = wasAuthed ? 1000 : this.reconnectDelay;
       this.reconnectDelay = Math.min(this.reconnectDelay * 2, 15_000);
-      window.setTimeout(() => this.open(), delay);
+      window.setTimeout(() => void this.open(), delay);
     };
     ws.onerror = () => {
       ws.close();
@@ -251,17 +258,30 @@ export class RelayClient {
     }
   }
 
-  /** A text `msg` frame's payload. The generic compressed envelope
-   *  `{enc:"gzip",data}` wraps any event, so inflate it here before dispatch;
-   *  otherwise dispatch as-is. */
+  /** A `msg` frame's payload is a sealed `{enc:"box",iv,ct,z?}` envelope under
+   *  always-on encryption: open it, inflate if it was gzipped before sealing
+   *  (`z:true`), then dispatch the JSON business payload. Anything that isn't a
+   *  well-formed sealed envelope can't have come from our paired desktop, so
+   *  it's dropped (the next full snapshot self-heals, and a lost reply just
+   *  times out like any dropped frame). */
   private dispatchMsgPayload(payload: Record<string, unknown>) {
-    if (payload.enc === "gzip" && typeof payload.data === "string") {
-      void inflateGzipBase64(payload.data)
-        .then((json) => this.handlePayload(JSON.parse(json) as Record<string, unknown>))
-        .catch(() => {});
-      return;
+    const gzipped = payload.z === true;
+    if (!isSealed(payload)) return;
+    void this.openInbound(payload, gzipped)
+      .then((json) => this.handlePayload(JSON.parse(json) as Record<string, unknown>))
+      .catch(() => {});
+  }
+
+  /** Decrypt a sealed inbound payload into its JSON string, inflating first when
+   *  the desktop gzipped it before sealing (`z:true` — the plaintext is then raw
+   *  gzip bytes, so it must be opened at the byte level, not through a decoder). */
+  private async openInbound(sealed: SealedBox, gzipped: boolean): Promise<string> {
+    await this.ensureKeys();
+    if (gzipped) {
+      const bytes = await openBytes(this.encKey!, sealed);
+      return inflateGzipBytes(bytes);
     }
-    this.handlePayload(payload);
+    return open(this.encKey!, sealed);
   }
 
   private handlePayload(payload: Record<string, unknown>) {
@@ -285,19 +305,9 @@ export class RelayClient {
         );
         break;
       case "sessions": {
-        const raw = payload.sessions;
-        // Legacy compressed shape from an un-updated desktop: the snapshot array
-        // is gzipped+base64 under `sessions` itself. Newer desktops compress the
-        // whole payload via the generic envelope (handled in dispatchMsgPayload),
-        // so this branch only fires against an older peer. Decode is async; a
-        // failure is dropped silently because the next snapshot self-heals.
-        if (payload.enc === "gzip" && typeof raw === "string") {
-          void inflateGzipBase64(raw)
-            .then((json) => this.handlers.onSessions?.(JSON.parse(json) as SessionInfo[]))
-            .catch(() => {});
-        } else {
-          this.handlers.onSessions?.((raw ?? []) as SessionInfo[]);
-        }
+        // Whole-payload compression is handled at the envelope (`z`) in
+        // openInbound, so by here the snapshot is already plain JSON.
+        this.handlers.onSessions?.((payload.sessions ?? []) as SessionInfo[]);
         break;
       }
       case "reply": {
@@ -325,8 +335,25 @@ export class RelayClient {
     return true;
   }
 
+  /** Seal a business payload and send it as a `msg` frame. The phone's outbound
+   *  payloads (answer/req/hello/bye) are small, so it never gzips before sealing
+   *  — `z` is only ever set by the desktop. Best-effort: a closed socket or a
+   *  seal failure drops the frame (the desktop's next snapshot reconciles). */
+  private async sealAndSend(payload: unknown): Promise<void> {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    await this.ensureKeys();
+    const sealed = await seal(this.encKey!, JSON.stringify(payload));
+    this.sendRaw({ type: "msg", payload: sealed });
+  }
+
+  /** Fire-and-forget seal+send shell so the synchronous callers (answer / hello
+   *  / bye) keep their boolean signature. The boolean reports whether the socket
+   *  was open at call time; the encrypted send itself completes on a later
+   *  microtask (sealing is async). */
   private sendPayload(payload: unknown): boolean {
-    return this.sendRaw({ type: "msg", payload });
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return false;
+    void this.sealAndSend(payload);
+    return true;
   }
 
   /** Answer a decision — mirrors mobile_relay::handle_answer's shapes. */
@@ -339,6 +366,12 @@ export class RelayClient {
   request<T>(method: string, params?: Record<string, unknown>, timeoutMs?: number): Promise<T> {
     const reqId = `${this.reqPrefix}-${++this.reqSeq}`;
     return new Promise<T>((resolve, reject) => {
+      // Sealing is async, so probe the socket up front (not via sendPayload's
+      // return) to fail-fast the "not connected" case before registering pending.
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        reject(new RelayRequestError(t("尚未连接 relay"), false));
+        return;
+      }
       const timer = window.setTimeout(() => {
         this.pending.delete(reqId);
         reject(new RelayRequestError(t("请求超时（桌面端可能离线）"), false));
@@ -348,11 +381,18 @@ export class RelayClient {
         reject,
         timer,
       });
-      if (!this.sendPayload({ event: "req", req_id: reqId, method, params: params ?? {} })) {
-        this.pending.delete(reqId);
-        window.clearTimeout(timer);
-        reject(new RelayRequestError(t("尚未连接 relay"), false));
-      }
+      // Only the body is encrypted; reqId/pending bookkeeping is unchanged. If
+      // the seal/send fails (socket dropped mid-flight, crypto error), clear the
+      // pending entry and reject now rather than sitting out the full timeout.
+      void this.sealAndSend({ event: "req", req_id: reqId, method, params: params ?? {} }).catch(
+        () => {
+          const entry = this.pending.get(reqId);
+          if (!entry) return;
+          this.pending.delete(reqId);
+          window.clearTimeout(entry.timer);
+          entry.reject(new RelayRequestError(t("尚未连接 relay"), false));
+        },
+      );
     });
   }
 

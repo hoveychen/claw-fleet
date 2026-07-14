@@ -92,27 +92,44 @@ export async function deriveKeys(secret: string): Promise<RelayKeys> {
   return { channelToken: toHex(new Uint8Array(channelBits)), encKey };
 }
 
-/** Encrypt a plaintext string under `encKey` with a fresh random 12-byte IV. */
-export async function seal(encKey: CryptoKey, plaintext: string): Promise<SealedBox> {
+/** Encrypt raw plaintext bytes under `encKey` with a fresh random 12-byte IV —
+ *  the peer of Rust `seal`, which takes `&[u8]`. Used for the `z:true` transport
+ *  path where the sealed plaintext is gzip bytes (not UTF-8 text). */
+export async function sealBytes(encKey: CryptoKey, plaintext: BufferSource): Promise<SealedBox> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ct = await crypto.subtle.encrypt(
     { name: "AES-GCM", iv, additionalData: AAD, tagLength: 128 },
     encKey,
-    enc.encode(plaintext),
+    plaintext,
   );
   return { enc: "box", iv: b64encode(iv), ct: b64encode(new Uint8Array(ct)) };
 }
 
-/** Decrypt a sealed envelope back into its plaintext string. Rejects on a bad
- *  key, tampered ciphertext, or malformed base64 — the caller drops the frame. */
-export async function open(encKey: CryptoKey, sealed: SealedBox): Promise<string> {
+/** Encrypt a plaintext string under `encKey` with a fresh random 12-byte IV.
+ *  Thin wrapper over `sealBytes` for the common (uncompressed) case. */
+export async function seal(encKey: CryptoKey, plaintext: string): Promise<SealedBox> {
+  return sealBytes(encKey, enc.encode(plaintext));
+}
+
+/** Decrypt a sealed envelope back into its raw plaintext bytes — the peer of
+ *  Rust `open`, which returns `Vec<u8>`. Needed for the `z:true` transport path
+ *  where the plaintext is gzip bytes (not UTF-8 text), so it must not go through
+ *  a TextDecoder. Rejects on a bad key, tampered ciphertext, or malformed
+ *  base64 — the caller drops the frame. */
+export async function openBytes(encKey: CryptoKey, sealed: SealedBox): Promise<ArrayBuffer> {
   const iv = b64decode(sealed.iv);
   if (iv.length !== 12) throw new Error(`iv must be 12 bytes, got ${iv.length}`);
   const ct = b64decode(sealed.ct);
-  const pt = await crypto.subtle.decrypt(
+  return crypto.subtle.decrypt(
     { name: "AES-GCM", iv, additionalData: AAD, tagLength: 128 },
     encKey,
     ct,
   );
-  return dec.decode(pt);
+}
+
+/** Decrypt a sealed envelope back into its plaintext string. Thin wrapper over
+ *  `openBytes` for the common (uncompressed) case. Rejects on a bad key,
+ *  tampered ciphertext, or malformed base64 — the caller drops the frame. */
+export async function open(encKey: CryptoKey, sealed: SealedBox): Promise<string> {
+  return dec.decode(await openBytes(encKey, sealed));
 }
