@@ -111,6 +111,7 @@ export function MemoryView() {
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
   const [filterType, setFilterType] = useState<MemType | "all">("all");
+  const [workspaceFilter, setWorkspaceFilter] = useState<string>("all");
   const [expandedUnindexed, setExpandedUnindexed] = useState<Set<string>>(new Set());
   const [selection, setSelection] = useState<Selection>(null);
 
@@ -154,12 +155,34 @@ export function MemoryView() {
     return counts;
   }, [memories]);
 
-  // Filter by query (name/title/hook/description) + by selected type.
+  // Distinct workspaces for the filter dropdown, stable order. Keyed by
+  // projectKey (not path) so the global bucket "__global__" is a clean,
+  // collision-free option; the label falls back to the localized global name.
+  const workspaces = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const ws of memories) {
+      if (!seen.has(ws.projectKey)) {
+        seen.set(
+          ws.projectKey,
+          ws.projectKey === "__global__"
+            ? t("memory.global_label")
+            : ws.workspaceName,
+        );
+      }
+    }
+    return [...seen.entries()].map(([key, name]) => ({ key, name }));
+  }, [memories, t]);
+
+  // Filter by query (name/title/hook/description) + by selected type +
+  // by selected workspace.
   // MEMORY.md is always kept (it's the index).
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return memories
       .map((ws) => {
+        if (workspaceFilter !== "all" && ws.projectKey !== workspaceFilter) {
+          return null;
+        }
         const wsMatch = q && ws.workspaceName.toLowerCase().includes(q);
         const files = ws.files.filter((f) => {
           if (f.name === "MEMORY.md") return filterType === "all" && !q;
@@ -180,7 +203,7 @@ export function MemoryView() {
         return { ...ws, files } satisfies WorkspaceMemory;
       })
       .filter((x): x is WorkspaceMemory => x !== null);
-  }, [memories, query, filterType]);
+  }, [memories, query, filterType, workspaceFilter]);
 
   // Keep selection valid after refresh / filter changes.
   useEffect(() => {
@@ -218,6 +241,20 @@ export function MemoryView() {
         onChange: setQuery,
         placeholder: t("memory.search_placeholder"),
       }}
+      bannerCenter={
+        <select
+          className={styles.ws_select}
+          value={workspaceFilter}
+          onChange={(e) => setWorkspaceFilter(e.target.value)}
+        >
+          <option value="all">{t("memory.all_workspaces")}</option>
+          {workspaces.map((ws) => (
+            <option key={ws.key} value={ws.key}>
+              {ws.name}
+            </option>
+          ))}
+        </select>
+      }
       subBar={
         <>
           <FilterChip

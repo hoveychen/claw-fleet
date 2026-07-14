@@ -303,6 +303,7 @@
     "no_matching_events": "No operations match the current filter.",
     "overview_title": "Risk Overview",
     "all": "All",
+    "all_workspaces": "All workspaces",
     "refresh": "Refresh",
     "scanned": "Scanned {{count}} sessions",
     "workspace": "Workspace",
@@ -377,7 +378,8 @@
     "filter_feedback": "Feedback",
     "filter_project": "Project",
     "filter_reference": "Reference",
-    "unindexed_section": "Unindexed"
+    "unindexed_section": "Unindexed",
+    "all_workspaces": "All workspaces"
   },
   "wiki": {
     "panel_title": "Wiki",
