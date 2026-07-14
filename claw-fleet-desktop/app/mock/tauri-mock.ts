@@ -219,11 +219,16 @@ function handleIPC(cmd: string, args: Record<string, unknown> = {}): unknown {
     case "check_setup_status": {
       // Harness override: seed `mock-setup-status` with a JSON object to merge
       // over the default (e.g. {"cli_installed":false}) for onboarding-branch
-      // screenshots.
+      // screenshots. `mock-setup-delay` (ms) delays the response to exercise
+      // the diagnostics-timeout fallback.
       const override = window.localStorage.getItem("mock-setup-status");
-      return override
+      const result = override
         ? { ...MOCK_SETUP_STATUS, ...JSON.parse(override) }
         : MOCK_SETUP_STATUS;
+      const delayMs = Number(window.localStorage.getItem("mock-setup-delay") ?? 0);
+      return delayMs > 0
+        ? new Promise((resolve) => setTimeout(() => resolve(result), delayMs))
+        : result;
     }
     case "get_hooks_setup_plan":
       return MOCK_HOOKS_PLAN;

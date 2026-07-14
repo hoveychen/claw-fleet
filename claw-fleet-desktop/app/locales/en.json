@@ -540,6 +540,10 @@
     "welcome": "Welcome to Claw Fleet",
     "subtitle": "Monitor your AI coding agents, get daily AI summaries, and turn mistakes into knowledge",
     "checking": "Checking setup...",
+    "check_timeout": {
+      "title": "Environment check timed out",
+      "description": "Detection hasn't returned yet, but nothing is blocked — start right away, or retry."
+    },
     "dismiss": "Got it, let's go",
     "recheck": "Re-check",
     "no_claude_at_all": {

@@ -537,6 +537,10 @@
     "welcome": "欢迎使用 Claw Fleet",
     "subtitle": "监控你的 AI 编程 Agent，获取每日 AI 摘要，将失误转化为知识",
     "checking": "正在检查环境...",
+    "check_timeout": {
+      "title": "环境检测超时",
+      "description": "检测还没返回，但不影响使用——你可以直接开始，或点击重试。"
+    },
     "dismiss": "好的，开始使用",
     "recheck": "重新检查",
     "no_claude_at_all": {

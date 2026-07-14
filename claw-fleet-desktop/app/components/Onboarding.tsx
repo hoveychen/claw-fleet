@@ -898,6 +898,7 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
   const [status, setStatus] = useState<SetupStatus | null>(null);
   const [celebrating, setCelebrating] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [checkTimedOut, setCheckTimedOut] = useState(false);
   const prevSessionCount = useRef(0);
 
   // Compute which features are unseen (used in whats_new mode to filter cards).
@@ -1181,6 +1182,20 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
     check();
   }, []);
 
+  // Degrade the diagnostics spinner after 5s so a pathological environment
+  // (hung subprocess, dead backend) never shows an endless spinner. The card
+  // is informational only — the primary button stays clickable throughout.
+  useEffect(() => {
+    if (status !== null) return;
+    const timer = setTimeout(() => setCheckTimedOut(true), 5000);
+    return () => clearTimeout(timer);
+  }, [status]);
+
+  const retryCheck = useCallback(() => {
+    setCheckTimedOut(false);
+    check();
+  }, [check]);
+
   // Watch for first session appearing → trigger celebration.
   // Only celebrate if the backend also confirmed there were no sessions before
   // (avoids false celebration for existing users whose sessions loaded after the check).
@@ -1325,10 +1340,31 @@ export function Onboarding({ mode, onDismiss }: { mode: OnboardingMode; onDismis
                 cards when something needs fixing, a green card when the
                 environment is healthy — never a full-page gate. */}
             {status === null ? (
-              <div className={styles.loading}>
-                <div className={styles.spinner} />
-                <span className={styles.loading_text}>{t("onboarding.checking")}</span>
-              </div>
+              checkTimedOut ? (
+                <div className={styles.cards}>
+                  <div className={`${styles.card} ${styles.card_info}`}>
+                    <div className={styles.card_header}>
+                      <span className={styles.card_icon}>&#x23F3;</span>
+                      <span className={styles.card_title}>{t("onboarding.check_timeout.title")}</span>
+                    </div>
+                    <p className={styles.card_description}>{t("onboarding.check_timeout.description")}</p>
+                    <div className={styles.hooks_actions}>
+                      <button
+                        className={styles.btn_secondary}
+                        onClick={retryCheck}
+                        style={{ padding: "8px 20px", fontSize: 12 }}
+                      >
+                        {t("onboarding.recheck")}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className={styles.loading}>
+                  <div className={styles.spinner} />
+                  <span className={styles.loading_text}>{t("onboarding.checking")}</span>
+                </div>
+              )
             ) : issues.length > 0 ? (
               <div className={styles.cards}>
                 {issues.includes("no_claude_at_all") && <NoClaudeAtAllCard />}
