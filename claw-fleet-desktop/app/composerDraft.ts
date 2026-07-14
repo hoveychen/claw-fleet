@@ -14,6 +14,9 @@ export interface ComposerDraft {
   attachments: ChatComposerAttachment[];
   /** New-session only: the chosen workspace directory. */
   workspace: string;
+  /** New-session only: which agent tool to launch ("" / "claude" / "codex").
+   *  Empty is treated as "claude". Resume composers leave it empty. */
+  tool: string;
 }
 
 const EMPTY_DRAFT: ComposerDraft = {
@@ -23,6 +26,7 @@ const EMPTY_DRAFT: ComposerDraft = {
   permissionMode: "",
   attachments: [],
   workspace: "",
+  tool: "",
 };
 
 interface ComposerDraftState {

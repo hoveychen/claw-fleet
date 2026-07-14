@@ -98,6 +98,14 @@ pub(crate) fn cmd_handoff(
     let effort = std::env::var("CLAUDE_EFFORT")
         .ok()
         .filter(|e| !e.trim().is_empty());
+    // Fleet stamps `FLEET_AGENT_SOURCE` on the sessions it launches (Codex sets
+    // it to "codex"; Claude sessions have no stamp). Absent → "claude-code", the
+    // historical default, so the successor is relayed on the same tool.
+    let agent_source = std::env::var("FLEET_AGENT_SOURCE")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "claude-code".to_string());
     match claw_fleet_core::handoff::register(
         &sid,
         &ws,
@@ -107,6 +115,7 @@ pub(crate) fn cmd_handoff(
         next,
         model.as_deref(),
         effort.as_deref(),
+        &agent_source,
     ) {
         Ok(rec) => println!(
             "ok: handoff registered (chain {}, 第 {} 棒, model={}, effort={}). \

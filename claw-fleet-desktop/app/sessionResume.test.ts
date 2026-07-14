@@ -86,4 +86,18 @@ describe("canResumeSession", () => {
     expect(canResumeSession(session({ isSubagent: true }))).toBe(false);
     expect(canResumeSession(session({ entrypoint: "cli" }))).toBe(false);
   });
+
+  it("offers the composer for a Fleet-launched codex session, not a foreign codex one", () => {
+    // A Fleet-spawned codex session carries originator "fleet" on `entrypoint`
+    // and resumes via `codex exec resume` (M2/M3).
+    expect(
+      canResumeSession(
+        session({ agentSource: "codex", entrypoint: "fleet", status: "idle" }),
+      ),
+    ).toBe(true);
+    // Bare `codex exec` / the VS Code extension are read-only here.
+    expect(
+      canResumeSession(session({ agentSource: "codex", entrypoint: "codex_exec" })),
+    ).toBe(false);
+  });
 });

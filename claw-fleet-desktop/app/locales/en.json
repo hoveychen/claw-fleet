@@ -98,6 +98,7 @@
   "new_session": {
     "button": "New Session",
     "title": "New Claude Session",
+    "tool": "Agent",
     "workspace": "Workspace",
     "chat": "Just chat",
     "chat_sub": "Not tied to any project directory",

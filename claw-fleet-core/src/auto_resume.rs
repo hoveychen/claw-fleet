@@ -113,8 +113,6 @@ pub fn limit_recovered(
 /// - the session is NOT a subagent (`agent-*` transcripts can't be resumed)
 /// - the session is NOT attached to an interactive IDE (`ide_name == None`);
 ///   IDE (VS Code / Claude app) sessions must not be resumed headlessly
-/// - the session's `agent_source == "claude-code"` (only claude-code transcripts
-///   are loadable by `claude --resume`)
 /// - the session is in `RateLimited` state with a `rate_limit` payload
 /// - EITHER `now >= resets_at + RESET_GRACE` (the hint wait has elapsed plus a
 ///   grace window so we don't race the reset boundary) OR [`limit_recovered`]
@@ -153,11 +151,16 @@ pub fn should_auto_resume(
     if session.ide_name.is_some() {
         return false;
     }
-    // `claude --resume` can only reload a claude-code transcript. Codex
-    // sessions carry a different `agent_source` and would just fail the resume.
-    if session.agent_source != "claude-code" {
-        return false;
-    }
+    // Source is no longer a hard gate here: the resume *form* is dispatched by
+    // `agent_source` at spawn time (claude → `claude --resume`, codex →
+    // `codex exec resume`), so eligibility is decided purely by the rate-limit
+    // payload below. A codex session's `rate_limit` is built by
+    // [`crate::codex_source::codex_rate_limit_state_from_usage`] (M2 P7), which
+    // encodes codex's own reset semantics (epoch-seconds `resetsAt`, weekly vs
+    // secondary windows) into the same `RateLimitState` this predicate reads —
+    // so the gate below is source-agnostic. Live population of that payload onto
+    // a rate-limited codex session lands with the Fleet-owned marking (M3 P9)
+    // and is validated end-to-end in P8.
     if session.status != crate::session::SessionStatus::RateLimited {
         return false;
     }
@@ -250,6 +253,11 @@ pub struct ResumeSessionRequest {
     /// [`crate::session_launch::PERMISSION_MODES`]).
     #[serde(default)]
     pub permission_mode: Option<String>,
+    /// Session's source ("claude-code" / "codex"), so the probe routes the
+    /// resume to the right launcher. Blank/absent (older desktop clients)
+    /// defaults to claude, preserving backward compatibility.
+    #[serde(default)]
+    pub agent_source: String,
 }
 
 /// Headlessly resume a rate-limited session by spawning
@@ -293,8 +301,13 @@ pub fn spawn_resume_tracked(
     spawn_resume_tracked_prompt(session_id, workspace_path, "continue", None, None, None, on_exit)
 }
 
+/// Full-featured Claude resume: `claude --resume <id> -p <prompt>` with
+/// optional `--model` / `--effort` / `--permission-mode` overrides, live-thinking
+/// tee, and a reaper that invokes `on_exit(success)`. All the other
+/// `spawn_resume*` helpers are thin wrappers over this; [`ClaudeCodeSource::resume`]
+/// calls it directly so the resume dispatch stays per-source.
 #[allow(clippy::too_many_arguments)]
-fn spawn_resume_tracked_prompt(
+pub fn spawn_resume_tracked_prompt(
     session_id: &str,
     workspace_path: &str,
     prompt: &str,
@@ -575,11 +588,86 @@ mod tests {
     }
 
     #[test]
-    fn blocked_when_not_claude_code_source() {
-        // `claude --resume` can only reload a claude-code transcript. A Codex
-        // session must never be a candidate.
+    fn source_no_longer_gates_eligibility() {
+        // M2 P6 dismantled the hard `agent_source == "claude-code"` gate:
+        // eligibility is now decided by the rate-limit payload alone, and the
+        // resume *form* is dispatched by source at spawn time. A codex session
+        // that carries a valid, elapsed rate_limit is therefore eligible — same
+        // as an equivalent claude-code session.
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
+        s.agent_source = "codex".into();
+        assert!(should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    /// Build a codex account rate-limit snapshot with the given reached window,
+    /// then feed it through the real codex→RateLimitState converter (M2 P7) so
+    /// these tests exercise the actual codex reset judgment, not a hand-rolled
+    /// RateLimitState.
+    fn codex_state(
+        reached: &str,
+        window_mins: i64,
+        resets_at: chrono::DateTime<chrono::Utc>,
+    ) -> RateLimitState {
+        let usage = crate::codex_source::CodexUsageItem {
+            primary: Some(crate::codex_source::CodexRateLimitWindow {
+                used_percent: 100,
+                window_duration_mins: Some(window_mins),
+                resets_at: Some(resets_at.timestamp()),
+            }),
+            rate_limit_reached_type: Some(reached.to_string()),
+            ..Default::default()
+        };
+        crate::codex_source::codex_rate_limit_state_from_usage(&usage, Utc::now())
+            .expect("reached snapshot → Some")
+    }
+
+    #[test]
+    fn codex_secondary_window_eligible_once_reset_passed() {
+        // A codex secondary (short, 5h) window whose reset has passed is
+        // auto-resume eligible — same as a claude session limit. Source is no
+        // longer a gate (P6); the codex reset judgment (P7) supplies the state.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, None);
+        s.agent_source = "codex".into();
+        // reset was 2 min ago (past the 60s grace); 5h window → wait 5h ≤ 12h.
+        s.rate_limit = Some(codex_state("secondary", 300, Utc::now() - Duration::minutes(2)));
+        assert!(should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    #[test]
+    fn codex_weekly_window_blocked_by_max_wait() {
+        // A codex primary (weekly, 10080-min) window is too long to auto-resume
+        // unattended — the max_wait_hours valve blocks it exactly like a claude
+        // weekly limit, because error_timestamp is set to the window start.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, None);
+        s.agent_source = "codex".into();
+        // Even with the reset already passed, the 7-day wait exceeds max_wait.
+        s.rate_limit = Some(codex_state("primary", 10080, Utc::now() - Duration::minutes(2)));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    #[test]
+    fn codex_secondary_window_blocked_before_reset() {
+        // Before the secondary window's reset (+grace), the hint gate blocks —
+        // and codex has no claude usage metric, so there's no early-recovery path.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, None);
+        s.agent_source = "codex".into();
+        // reset is 30 min out.
+        s.rate_limit = Some(codex_state("secondary", 300, Utc::now() + Duration::minutes(30)));
+        assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    #[test]
+    fn codex_without_rate_limit_is_blocked() {
+        // The real-world codex case today: no rate_limit payload (codex
+        // rate-limit population lands in M2 P7), so a codex session is not an
+        // auto-resume candidate — it fails the `Some(rl)` check, not a source
+        // string check.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, None);
         s.agent_source = "codex".into();
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }
@@ -786,5 +874,127 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    // ── M2 P8: live end-to-end codex resume validation ──────────────────────
+    //
+    // These spawn a real `codex` session + model, so they are ignored by
+    // default. Run manually:
+    //   cargo test -p claw-fleet-core auto_resume::tests::live_codex -- --ignored
+
+    /// Manual resume of a codex session through the real dispatcher
+    /// (`agent_source::resume_session("codex", …)`) continues the thread and the
+    /// resumed process exits 0. Validates the whole manual-resume path a user
+    /// hits from the resume composer / rate-limit button.
+    #[test]
+    #[ignore = "spawns + resumes a real codex session; run manually with --ignored"]
+    fn live_codex_manual_resume_via_dispatcher_continues() {
+        let ws = std::env::temp_dir().join(format!("fleet-codex-p8-manual-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let resp = crate::codex_launch::spawn_new_codex_session(
+            ws.to_str().unwrap(),
+            "reply with exactly: FIRST",
+            None,
+            None,
+        )
+        .expect("initial codex spawn");
+        let tid = resp.session_id.expect("thread id");
+
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok_cb = ok.clone();
+        let done_cb = done.clone();
+        crate::agent_source::resume_session(
+            "codex",
+            &crate::agent_source::ResumeSpec {
+                session_id: tid.clone(),
+                workspace_path: ws.to_string_lossy().into_owned(),
+                prompt: "reply with exactly: SECOND".to_string(),
+                ..Default::default()
+            },
+            Box::new(move |success| {
+                ok_cb.store(success, std::sync::atomic::Ordering::SeqCst);
+                done_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("dispatcher should route codex resume");
+
+        let mut waited = std::time::Duration::ZERO;
+        while waited < std::time::Duration::from_secs(90)
+            && !done.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            waited += std::time::Duration::from_millis(500);
+        }
+        assert!(done.load(std::sync::atomic::Ordering::SeqCst), "resume never exited");
+        assert!(ok.load(std::sync::atomic::Ordering::SeqCst), "resume exited non-zero");
+        let _ = std::fs::remove_dir_all(&ws);
+    }
+
+    /// Auto-resume end-to-end with a *constructed* codex rate limit (a live limit
+    /// can't be triggered at low usage). Spawns a real codex thread, marks a
+    /// SessionInfo RateLimited with a codex secondary-window state whose reset has
+    /// passed, confirms `select_resume_candidates` picks it, then fires the resume
+    /// via the same source-routed dispatcher the scheduler uses and confirms it
+    /// continues (exit 0). The only piece NOT exercised here is the scanner
+    /// *populating* that rate_limit onto a live rate-limited codex session, which
+    /// depends on the Fleet-owned marking (M3 P9).
+    #[test]
+    #[ignore = "spawns + resumes a real codex session; run manually with --ignored"]
+    fn live_codex_auto_resume_selects_and_fires() {
+        let ws = std::env::temp_dir().join(format!("fleet-codex-p8-auto-{}", std::process::id()));
+        std::fs::create_dir_all(&ws).unwrap();
+        let resp = crate::codex_launch::spawn_new_codex_session(
+            ws.to_str().unwrap(),
+            "reply with exactly: FIRST",
+            None,
+            None,
+        )
+        .expect("initial codex spawn");
+        let tid = resp.session_id.expect("thread id");
+
+        // Construct the rate-limited codex session the scanner will build in P9.
+        let mut s = mk_session(SessionStatus::RateLimited, None);
+        s.id = tid.clone();
+        s.workspace_path = ws.to_string_lossy().into_owned();
+        s.agent_source = "codex".into();
+        s.rate_limit = Some(codex_state("secondary", 300, Utc::now() - Duration::minutes(2)));
+
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let picked =
+            select_resume_candidates(std::slice::from_ref(&s), &cfg, Utc::now(), None, |_| false, 4);
+        assert_eq!(picked.len(), 1, "constructed codex rate-limit must be selected");
+        assert_eq!(picked[0].0, tid, "selected the codex session");
+
+        // Fire the resume exactly as the scheduler does — routed by source.
+        let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let ok_cb = ok.clone();
+        let done_cb = done.clone();
+        crate::agent_source::resume_session(
+            &s.agent_source,
+            &crate::agent_source::ResumeSpec {
+                session_id: picked[0].0.clone(),
+                workspace_path: picked[0].1.clone(),
+                prompt: "continue".to_string(),
+                ..Default::default()
+            },
+            Box::new(move |success| {
+                ok_cb.store(success, std::sync::atomic::Ordering::SeqCst);
+                done_cb.store(true, std::sync::atomic::Ordering::SeqCst);
+            }),
+        )
+        .expect("scheduler-shaped codex resume should fire");
+
+        let mut waited = std::time::Duration::ZERO;
+        while waited < std::time::Duration::from_secs(90)
+            && !done.load(std::sync::atomic::Ordering::SeqCst)
+        {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            waited += std::time::Duration::from_millis(500);
+        }
+        assert!(done.load(std::sync::atomic::Ordering::SeqCst), "auto-resume never exited");
+        assert!(ok.load(std::sync::atomic::Ordering::SeqCst), "auto-resume exited non-zero");
+        let _ = std::fs::remove_dir_all(&ws);
     }
 }

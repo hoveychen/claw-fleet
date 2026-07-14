@@ -1477,15 +1477,21 @@ fn serve_spawn_session(params: &Value) -> Result<Value, String> {
     // Thread the phone-provided session id through so a dropped reply
     // frame is still recoverable: the phone confirms success by finding
     // this exact id in a later `sessions` snapshot (relay delivery is
-    // best-effort — see registry::forward).
-    let resp = crate::session_launch::spawn_new_session_with_id(
-        &req.workspace_path,
-        &req.prompt,
-        req.model.as_deref(),
-        req.effort.as_deref(),
-        req.permission_mode.as_deref(),
-        req.session_id.as_deref(),
-    )?;
+    // best-effort — see registry::forward). Codex mints its own thread id and
+    // ignores the preassigned one, so a dropped reply for a codex spawn is not
+    // recoverable by preassigned id — the phone must read the real id off the
+    // reply frame.
+    let spec = crate::agent_source::SpawnSpec {
+        workspace_path: req.workspace_path.clone(),
+        prompt: req.prompt.clone(),
+        model: req.model.clone(),
+        effort: req.effort.clone(),
+        permission_mode: req.permission_mode.clone(),
+        session_id: req.session_id.clone(),
+        entrypoint: String::new(),
+    };
+    let resp =
+        crate::agent_source::spawn_session(req.tool.as_deref().unwrap_or("claude"), &spec)?;
     serde_json::to_value(resp).map_err(|e| e.to_string())
 }
 
@@ -1493,13 +1499,18 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     let req: crate::auto_resume::ResumeSessionRequest =
         serde_json::from_value(params.clone())
             .map_err(|e| format!("bad resume_session params: {e}"))?;
-    crate::auto_resume::spawn_resume_prompt(
-        &req.session_id,
-        &req.workspace_path,
-        req.prompt.as_deref().unwrap_or("continue"),
-        req.model.as_deref(),
-        req.effort.as_deref(),
-        req.permission_mode.as_deref(),
+    // Route by source (blank → claude); manual resume is untracked → no-op box.
+    crate::agent_source::resume_session(
+        &req.agent_source,
+        &crate::agent_source::ResumeSpec {
+            session_id: req.session_id.clone(),
+            workspace_path: req.workspace_path.clone(),
+            prompt: req.prompt.clone().unwrap_or_else(|| "continue".to_string()),
+            model: req.model.clone(),
+            effort: req.effort.clone(),
+            permission_mode: req.permission_mode.clone(),
+        },
+        Box::new(|_| {}),
     )?;
     Ok(json!({ "ok": true }))
 }

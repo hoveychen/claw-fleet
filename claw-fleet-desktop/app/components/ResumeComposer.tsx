@@ -28,12 +28,16 @@ function basename(p: string): string {
 export function ResumeComposer({
   sessionId,
   workspacePath,
+  agentSource,
   onResumed,
   mode = "resume",
   pendingMessages = [],
 }: {
   sessionId: string;
   workspacePath: string;
+  /** Session's source ("claude-code" / "codex"), so the resume routes to the
+   *  right launcher. Defaults to claude when omitted. */
+  agentSource?: string;
   onResumed: () => void;
   /** `"resume"`: the turn ended, submit spawns `claude --resume` now.
    *  `"enqueue"`: the turn is still running, submit queues the message to be
@@ -119,6 +123,7 @@ export function ResumeComposer({
           model: model || null,
           effort: effort || null,
           permissionMode: permissionMode || null,
+          agentSource: agentSource || null,
         });
       }
       clear();

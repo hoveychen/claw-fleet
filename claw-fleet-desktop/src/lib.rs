@@ -161,6 +161,7 @@ impl Backend for NullBackend {
         _: Option<String>,
         _: Option<String>,
         _: Option<String>,
+        _: String,
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }
@@ -182,6 +183,7 @@ impl Backend for NullBackend {
         &self,
         _: String,
         _: String,
+        _: Option<String>,
         _: Option<String>,
         _: Option<String>,
         _: Option<String>,

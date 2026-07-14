@@ -107,11 +107,16 @@ pub fn parkable_workspace(session_id: &str) -> Option<String> {
     if session_id.trim().is_empty() {
         return None;
     }
+    // Claude sessions: ownership + cwd from the `~/.claude` transcript.
     let entrypoint = crate::session::session_entrypoint(session_id);
-    if !crate::session_launch::is_fleet_owned_entrypoint(entrypoint.as_deref()) {
-        return None;
+    if crate::session_launch::is_fleet_owned_entrypoint(entrypoint.as_deref()) {
+        return crate::session::resolve_session_cwd(session_id);
     }
-    crate::session::resolve_session_cwd(session_id)
+    // Codex sessions: the identity lives in the rollout (`session_meta`), not a
+    // Claude transcript, so the lookup above returns `None` for every Codex
+    // thread. Fall back to the Codex-native lookup, which returns the workspace
+    // only when the rollout is Fleet-owned (`originator == "fleet"`).
+    crate::codex_source::codex_fleet_owned_cwd(session_id)
 }
 
 /// Move a timed-out request into the parked store. `request` is the channel's
@@ -544,6 +549,7 @@ mod tests {
     struct TmpHome {
         dir: PathBuf,
         prev: Option<std::ffi::OsString>,
+        prev_codex: Option<std::ffi::OsString>,
         _lock: std::sync::MutexGuard<'static, ()>,
     }
 
@@ -561,9 +567,15 @@ mod tests {
             ));
             fs::create_dir_all(&dir).unwrap();
             let prev = std::env::var_os("FLEET_HOME");
-            // SAFETY: serialized on the process-wide FLEET_HOME lock.
-            unsafe { std::env::set_var("FLEET_HOME", &dir) };
-            Self { dir, prev, _lock: lock }
+            let prev_codex = std::env::var_os("CODEX_HOME");
+            // SAFETY: serialized on the process-wide FLEET_HOME lock. CODEX_HOME
+            // is redirected under the same lock so the Codex rollout lookup reads
+            // this temp dir, not the real `~/.codex`.
+            unsafe {
+                std::env::set_var("FLEET_HOME", &dir);
+                std::env::set_var("CODEX_HOME", dir.join(".codex"));
+            }
+            Self { dir, prev, prev_codex, _lock: lock }
         }
 
         /// Plant a transcript for `session_id` carrying `entrypoint` + `cwd`,
@@ -581,6 +593,30 @@ mod tests {
             )
             .unwrap();
         }
+
+        /// Plant a Codex rollout for `thread_id` carrying `originator` + `cwd` in
+        /// its `session_meta` line — the shape the Codex scanner reads ownership
+        /// and cwd from (no SQLite, so the filesystem fallback resolves it).
+        fn plant_codex_session(&self, thread_id: &str, originator: Option<&str>, cwd: &str) {
+            let sessions = self
+                .dir
+                .join(".codex")
+                .join("sessions")
+                .join("2026")
+                .join("07")
+                .join("14");
+            fs::create_dir_all(&sessions).unwrap();
+            let mut payload = json!({ "id": thread_id, "cwd": cwd, "source": "exec" });
+            if let Some(o) = originator {
+                payload["originator"] = json!(o);
+            }
+            let meta = json!({ "type": "session_meta", "payload": payload });
+            fs::write(
+                sessions.join(format!("rollout-2026-07-14T00-00-00-{thread_id}.jsonl")),
+                format!("{meta}\n"),
+            )
+            .unwrap();
+        }
     }
 
     impl Drop for TmpHome {
@@ -589,6 +625,10 @@ mod tests {
                 match self.prev.take() {
                     Some(p) => std::env::set_var("FLEET_HOME", p),
                     None => std::env::remove_var("FLEET_HOME"),
+                }
+                match self.prev_codex.take() {
+                    Some(p) => std::env::set_var("CODEX_HOME", p),
+                    None => std::env::remove_var("CODEX_HOME"),
                 }
             }
             let _ = fs::remove_dir_all(&self.dir);
@@ -633,6 +673,31 @@ mod tests {
         assert_eq!(parkable_workspace("no-entrypoint"), None);
         assert_eq!(parkable_workspace("never-existed"), None);
         assert_eq!(parkable_workspace(""), None);
+    }
+
+    /// The gate must recognise Fleet-owned *Codex* sessions too, not only Claude
+    /// ones. A Codex session's identity lives in its rollout (`session_meta`), not
+    /// a `~/.claude` transcript, so the Claude-only lookup returns `None` for
+    /// every Codex thread — which would wrongly reject a queued follow-up on a
+    /// Codex session (M5 P15). Ownership is `originator == "fleet"`; the workspace
+    /// is the rollout `cwd`.
+    #[test]
+    fn fleet_owned_codex_sessions_are_parkable() {
+        let home = TmpHome::new("codex-gate");
+        home.plant_codex_session("codex-fleet", Some("fleet"), "/ws/codex-fleet");
+        home.plant_codex_session("codex-user", Some("codex_cli_rs"), "/ws/codex-user");
+
+        assert_eq!(
+            parkable_workspace("codex-fleet").as_deref(),
+            Some("/ws/codex-fleet"),
+            "a Fleet-launched codex session must be parkable/enqueueable"
+        );
+        assert_eq!(
+            parkable_workspace("codex-user"),
+            None,
+            "a user-launched codex session stays non-parkable"
+        );
+        assert_eq!(parkable_workspace("codex-missing"), None);
     }
 
     /// A parked card outlives the process that asked the question: it must round
