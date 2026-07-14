@@ -31,8 +31,13 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY fleet-relay/ fleet-relay/
 # The workspace lists members this image doesn't build; trim to fleet-relay so
-# COPY of the full source tree isn't needed.
+# COPY of the full source tree isn't needed. Also drop the `claw-fleet-core`
+# path dev-dependency: it is used only by the `#[cfg(test)]` crypto-interop test
+# (ws_e2e_tests.rs), which a release build never compiles, but cargo would still
+# try to read its manifest during dependency resolution — and that crate isn't
+# COPYed into this image. Stripping the line keeps the "boring" single-crate build.
 RUN sed -i 's/^members = .*/members = ["fleet-relay"]/' Cargo.toml \
+    && sed -i '/^claw-fleet-core = /d' fleet-relay/Cargo.toml \
     && cargo build --release -p fleet-relay
 
 # ── runtime ──────────────────────────────────────────────────────────────────
