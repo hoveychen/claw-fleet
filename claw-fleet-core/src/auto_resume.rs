@@ -113,8 +113,6 @@ pub fn limit_recovered(
 /// - the session is NOT a subagent (`agent-*` transcripts can't be resumed)
 /// - the session is NOT attached to an interactive IDE (`ide_name == None`);
 ///   IDE (VS Code / Claude app) sessions must not be resumed headlessly
-/// - the session's `agent_source == "claude-code"` (only claude-code transcripts
-///   are loadable by `claude --resume`)
 /// - the session is in `RateLimited` state with a `rate_limit` payload
 /// - EITHER `now >= resets_at + RESET_GRACE` (the hint wait has elapsed plus a
 ///   grace window so we don't race the reset boundary) OR [`limit_recovered`]
@@ -153,11 +151,13 @@ pub fn should_auto_resume(
     if session.ide_name.is_some() {
         return false;
     }
-    // `claude --resume` can only reload a claude-code transcript. Codex
-    // sessions carry a different `agent_source` and would just fail the resume.
-    if session.agent_source != "claude-code" {
-        return false;
-    }
+    // Source is no longer a hard gate here: the resume *form* is dispatched by
+    // `agent_source` at spawn time (claude → `claude --resume`, codex →
+    // `codex exec resume`), so eligibility is decided purely by the rate-limit
+    // payload below. A Codex session only becomes a candidate once the scanner
+    // populates its `rate_limit` from Codex's own `rateLimits.resetsAt` (M2 P7);
+    // until then codex sessions carry `rate_limit: None` and fail the check
+    // below, so removing the string gate changes nothing for codex today.
     if session.status != crate::session::SessionStatus::RateLimited {
         return false;
     }
@@ -250,6 +250,11 @@ pub struct ResumeSessionRequest {
     /// [`crate::session_launch::PERMISSION_MODES`]).
     #[serde(default)]
     pub permission_mode: Option<String>,
+    /// Session's source ("claude-code" / "codex"), so the probe routes the
+    /// resume to the right launcher. Blank/absent (older desktop clients)
+    /// defaults to claude, preserving backward compatibility.
+    #[serde(default)]
+    pub agent_source: String,
 }
 
 /// Headlessly resume a rate-limited session by spawning
@@ -293,8 +298,13 @@ pub fn spawn_resume_tracked(
     spawn_resume_tracked_prompt(session_id, workspace_path, "continue", None, None, None, on_exit)
 }
 
+/// Full-featured Claude resume: `claude --resume <id> -p <prompt>` with
+/// optional `--model` / `--effort` / `--permission-mode` overrides, live-thinking
+/// tee, and a reaper that invokes `on_exit(success)`. All the other
+/// `spawn_resume*` helpers are thin wrappers over this; [`ClaudeCodeSource::resume`]
+/// calls it directly so the resume dispatch stays per-source.
 #[allow(clippy::too_many_arguments)]
-fn spawn_resume_tracked_prompt(
+pub fn spawn_resume_tracked_prompt(
     session_id: &str,
     workspace_path: &str,
     prompt: &str,
@@ -575,11 +585,26 @@ mod tests {
     }
 
     #[test]
-    fn blocked_when_not_claude_code_source() {
-        // `claude --resume` can only reload a claude-code transcript. A Codex
-        // session must never be a candidate.
+    fn source_no_longer_gates_eligibility() {
+        // M2 P6 dismantled the hard `agent_source == "claude-code"` gate:
+        // eligibility is now decided by the rate-limit payload alone, and the
+        // resume *form* is dispatched by source at spawn time. A codex session
+        // that carries a valid, elapsed rate_limit is therefore eligible — same
+        // as an equivalent claude-code session.
         let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
         let mut s = mk_session(SessionStatus::RateLimited, Some(mk_rl(-2, 5)));
+        s.agent_source = "codex".into();
+        assert!(should_auto_resume(&s, &cfg, Utc::now(), None));
+    }
+
+    #[test]
+    fn codex_without_rate_limit_is_blocked() {
+        // The real-world codex case today: no rate_limit payload (codex
+        // rate-limit population lands in M2 P7), so a codex session is not an
+        // auto-resume candidate — it fails the `Some(rl)` check, not a source
+        // string check.
+        let cfg = AutoResumeConfig { enabled: true, max_wait_hours: 12 };
+        let mut s = mk_session(SessionStatus::RateLimited, None);
         s.agent_source = "codex".into();
         assert!(!should_auto_resume(&s, &cfg, Utc::now(), None));
     }

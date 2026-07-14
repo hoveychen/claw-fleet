@@ -161,6 +161,7 @@ impl Backend for NullBackend {
         _: Option<String>,
         _: Option<String>,
         _: Option<String>,
+        _: String,
     ) -> Result<(), String> {
         Err("backend not ready".into())
     }

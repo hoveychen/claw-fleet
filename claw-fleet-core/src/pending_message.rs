@@ -268,8 +268,23 @@ where
 /// [`drain_if_idle`] with the real resume spawn wired in. This is what the
 /// desktop session-refresh tick calls per session.
 pub fn maybe_drain(session: &crate::session::SessionInfo) {
+    // Dispatch the drain resume by the session's source, so a queued follow-up
+    // on a Codex session is delivered via `codex exec resume`, not
+    // `claude --resume`. Untracked → no-op on_exit box.
+    let source = session.agent_source.clone();
     drain_if_idle(session, |sid, ws, prompt, model, effort, perm| {
-        crate::auto_resume::spawn_resume_prompt(sid, ws, prompt, model, effort, perm)
+        crate::agent_source::resume_session(
+            &source,
+            &crate::agent_source::ResumeSpec {
+                session_id: sid.to_string(),
+                workspace_path: ws.to_string(),
+                prompt: prompt.to_string(),
+                model: model.map(str::to_string),
+                effort: effort.map(str::to_string),
+                permission_mode: perm.map(str::to_string),
+            },
+            Box::new(|_| {}),
+        )
     });
 }
 

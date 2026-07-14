@@ -1761,6 +1761,23 @@ impl AgentSource for CodexSource {
             spec.effort.as_deref(),
         )
     }
+
+    fn resume(
+        &self,
+        spec: &crate::agent_source::ResumeSpec,
+        on_exit: Box<dyn FnOnce(bool) + Send>,
+    ) -> Result<(), String> {
+        // permission_mode is Claude's --permission-mode; Codex's sandbox/approval
+        // mapping is a later milestone, so it's ignored here.
+        crate::codex_launch::resume_codex_session(
+            &spec.session_id,
+            &spec.workspace_path,
+            &spec.prompt,
+            spec.model.as_deref(),
+            spec.effort.as_deref(),
+            on_exit,
+        )
+    }
 }
 
 // ── Codex usage via app-server protocol ──────────────────────────────────────

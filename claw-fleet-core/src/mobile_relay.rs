@@ -1450,13 +1450,18 @@ fn serve_resume_session(params: &Value) -> Result<Value, String> {
     let req: crate::auto_resume::ResumeSessionRequest =
         serde_json::from_value(params.clone())
             .map_err(|e| format!("bad resume_session params: {e}"))?;
-    crate::auto_resume::spawn_resume_prompt(
-        &req.session_id,
-        &req.workspace_path,
-        req.prompt.as_deref().unwrap_or("continue"),
-        req.model.as_deref(),
-        req.effort.as_deref(),
-        req.permission_mode.as_deref(),
+    // Route by source (blank → claude); manual resume is untracked → no-op box.
+    crate::agent_source::resume_session(
+        &req.agent_source,
+        &crate::agent_source::ResumeSpec {
+            session_id: req.session_id.clone(),
+            workspace_path: req.workspace_path.clone(),
+            prompt: req.prompt.clone().unwrap_or_else(|| "continue".to_string()),
+            model: req.model.clone(),
+            effort: req.effort.clone(),
+            permission_mode: req.permission_mode.clone(),
+        },
+        Box::new(|_| {}),
     )?;
     Ok(json!({ "ok": true }))
 }
