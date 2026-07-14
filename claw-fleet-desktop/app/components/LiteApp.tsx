@@ -1,54 +1,68 @@
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useState } from "react";
+import { Plus, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   openSettingsWindow,
-  useDecisionStore,
   useDetailStore,
   useSessionsStore,
   useUIStore,
-  useWaitingAlertsStore,
+  type MarkFilter,
 } from "../store";
 import type { SessionInfo } from "../types";
+import { LIVE_STATUSES, isFleetOwnedEntrypoint } from "../types";
+import { useSessionSearch } from "../hooks/useSessionSearch";
 import { getItem, setItem } from "../storage";
-import { CostSpeedChart } from "./CostSpeedChart";
-import { DecisionPanel } from "./DecisionPanel";
 import { LiteDecisionHistory } from "./LiteDecisionHistory";
 import { LiteSessionCard } from "./LiteSessionCard";
-import { MascotAlertBubble } from "./MascotAlertBubble";
-import { MascotEyes } from "./MascotEyes";
-import { useUsageRing } from "../hooks/useUsageRing";
+import { MarkControl } from "./MarkControl";
+import { NewSessionForm, type NewSessionCreated } from "./NewSessionForm";
 import { SessionDetail } from "./SessionDetail";
-import { TokenSpeedChart } from "./TokenSpeedChart";
-import { UsagePanel } from "./UsagePanel";
+import { StopControl, canControl } from "./StopControl";
 import styles from "./LiteApp.module.css";
 
-const ACTIVE_STATUSES = [
-  "thinking",
-  "executing",
-  "streaming",
-  "processing",
-  "waitingInput",
-  "active",
-  "delegating",
-] as const;
+const MARK_SEGMENTS: MarkFilter[] = ["all", "pending", "done"];
 
+/** Which mark bucket a session falls in — mirrors HistoryView.markBucket. */
+function markBucket(s: SessionInfo): "pending" | "done" {
+  return s.userMark === "done" ? "done" : "pending";
+}
+
+/** A row shows the stop control only when the session is controllable and
+ *  actually live/has a pid — mirrors HistoryView.showsControl. */
+function showsControl(s: SessionInfo): boolean {
+  return canControl(s) && (s.pid !== null || LIVE_STATUSES.has(s.status));
+}
+
+/**
+ * Lite mode = a phone-shaped portrait strip that mirrors the mobile app's
+ * **task page** in a desktop mini-window:
+ *
+ *   • Task list  — the launchpad's `adhocSessions` (sessions Fleet itself
+ *     spawned via the "新会话" button, i.e. `isFleetOwnedEntrypoint`), with the
+ *     same search + all/pending/done mark filter and inline stop/mark controls
+ *     as the desktop task page. NOT the full session list (that's the "会话页").
+ *   • New session — a prominent "+ 新会话" button opens the shared
+ *     `NewSessionForm` full-window; the spawned session opens automatically.
+ *   • Detail page — tapping a task pushes SessionDetail over the full window;
+ *     its own close button acts as the back affordance.
+ *
+ * Decision cards are NOT rendered here — in lite mode they always pop out as
+ * the standalone `decision-float` window (see App.tsx's float bridge).
+ */
 export function LiteApp() {
   const { t } = useTranslation();
   const { sessions, setSessions, refresh } = useSessionsStore();
   const { open, session: openedSession } = useDetailStore();
-  const {
-    setLiteMode,
-    liteDecisionHistorySessionId,
-    mascotVisible,
-  } = useUIStore();
-  const hasDecision = useDecisionStore((s) => s.decisions.length > 0);
-  const hasAlerts = useWaitingAlertsStore(
-    (s) => s.alerts.some((a) => !s.dismissedIds.has(a.sessionId)),
-  );
+  const { setLiteMode, liteDecisionHistorySessionId } = useUIStore();
   const [ttsMuted, setTtsMuted] = useState(() => getItem("tts-muted") === "true");
-  const [showUsage, setShowUsage] = useState(false);
-  const usageRing = useUsageRing();
+  // Local (lite-scoped) filters — independent from the desktop task page's
+  // persisted history* filters so toggling one window doesn't move the other.
+  const [query, setQuery] = useState("");
+  const [markFilter, setMarkFilter] = useState<MarkFilter>("all");
+  // New-session composer + auto-open of the freshly spawned session.
+  const [composing, setComposing] = useState(false);
+  const [spawnedId, setSpawnedId] = useState<string | null>(null);
 
   const toggleTtsMuted = () => {
     const next = !ttsMuted;
@@ -67,14 +81,57 @@ export function LiteApp() {
     };
   }, [setSessions, refresh]);
 
-  const active = sessions.filter((s) =>
-    ACTIVE_STATUSES.includes(s.status as typeof ACTIVE_STATUSES[number]),
-  );
+  // After spawning a new session, open its detail as soon as the scanner
+  // surfaces it (matches by the pre-assigned id).
+  useEffect(() => {
+    if (!spawnedId) return;
+    const match = sessions.find((s) => s.id === spawnedId);
+    if (match) {
+      open(match).catch(() => {});
+      setSpawnedId(null);
+    }
+  }, [spawnedId, sessions, open]);
 
-  const openSession = (s: typeof active[number]) => {
-    // Stay in lite mode — render SessionDetail inline instead of the drawer.
-    open(s).catch(() => {});
+  const { ftsMatchPaths } = useSessionSearch(query);
+
+  // Task list = launchpad adhoc sessions, filtered/sorted exactly like the
+  // desktop task page (HistoryView).
+  const { rows, markCounts } = useMemo(() => {
+    const adhoc = sessions.filter(
+      (s) => !s.isSubagent && isFleetOwnedEntrypoint(s.entrypoint),
+    );
+    const q = query.trim().toLowerCase();
+    const preMark = adhoc.filter((s) => {
+      if (!q) return true;
+      const clientMatch =
+        (s.aiTitle?.toLowerCase().includes(q) ?? false) ||
+        (s.slug?.toLowerCase().includes(q) ?? false) ||
+        (s.lastMessagePreview?.toLowerCase().includes(q) ?? false) ||
+        s.workspaceName.toLowerCase().includes(q) ||
+        (s.taskPlan?.planId?.toLowerCase().includes(q) ?? false) ||
+        (s.taskPlan?.currentPlan?.toLowerCase().includes(q) ?? false) ||
+        (s.taskPlan?.currentTask?.toLowerCase().includes(q) ?? false);
+      return clientMatch || ftsMatchPaths.has(s.jsonlPath);
+    });
+    const counts: Record<MarkFilter, number> = { all: preMark.length, pending: 0, done: 0 };
+    for (const s of preMark) counts[markBucket(s)] += 1;
+    const rows = preMark
+      .filter((s) => markFilter === "all" || markBucket(s) === markFilter)
+      .sort((a, b) => b.lastActivityMs - a.lastActivityMs);
+    return { rows, markCounts: counts };
+  }, [sessions, query, ftsMatchPaths, markFilter]);
+
+  const onCreated = (info: NewSessionCreated) => {
+    setComposing(false);
+    if (info.sessionId) setSpawnedId(info.sessionId);
   };
+
+  const segmentLabel = (seg: MarkFilter) =>
+    seg === "all"
+      ? t("history.mark_f_all", "全部")
+      : seg === "pending"
+        ? t("history.mark_f_pending", "进行中")
+        : t("history.mark_f_done", "已完成");
 
   return (
     <div className={styles.lite}>
@@ -123,66 +180,76 @@ export function LiteApp() {
         </button>
       </div>
 
-      {showUsage && (
-        <div className={styles.usage_overlay} onClick={() => setShowUsage(false)}>
-          <div className={styles.usage_panel} onClick={(e) => e.stopPropagation()}>
-            <button
-              className={styles.usage_close}
-              onClick={() => setShowUsage(false)}
-              aria-label="Close"
-            >×</button>
-            <UsagePanel />
-          </div>
+      {composing ? (
+        <div className={styles.detail_area}>
+          <NewSessionForm onCreated={onCreated} onCancel={() => setComposing(false)} />
         </div>
-      )}
-
-      {liteDecisionHistorySessionId ? (
+      ) : liteDecisionHistorySessionId ? (
         <div className={styles.detail_area}>
           <LiteDecisionHistory sessionId={liteDecisionHistorySessionId} />
         </div>
-      ) : hasDecision ? (
-        <DecisionPanel compact />
       ) : openedSession ? (
         <div className={styles.detail_area}>
           <SessionDetail lite />
         </div>
       ) : (
         <div className={styles.body}>
-          <div className={styles.monitor}>
-            <TokenSpeedChart compact />
-            <CostSpeedChart compact />
+          {/* Toolbar — search + all/pending/done mark filter (mobile task page). */}
+          <div className={styles.toolbar}>
+            <label className={styles.search}>
+              <Search size={13} strokeWidth={1.6} className={styles.search_icon} />
+              <input
+                className={styles.search_input}
+                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder={t("history.search_placeholder", "搜索标题、计划、全文…")}
+              />
+            </label>
+            <div className={styles.segments}>
+              {MARK_SEGMENTS.map((seg) => (
+                <button
+                  key={seg}
+                  className={`${styles.segment} ${markFilter === seg ? styles.segment_active : ""}`}
+                  onClick={() => setMarkFilter(seg)}
+                >
+                  {segmentLabel(seg)}
+                  <span className={styles.segment_count}>{markCounts[seg]}</span>
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* New session — the primary action. */}
+          <button
+            className={styles.new_session}
+            onClick={() => setComposing(true)}
+            title={t("new_session.title")}
+          >
+            <Plus size={15} strokeWidth={2} />
+            <span>{t("new_session.button")}</span>
+          </button>
+
+          {/* Task list — launchpad adhoc sessions with inline stop/mark. */}
           <div className={styles.list}>
-            {active.length > 0 ? (
-              active.map((s, i) => (
-                <LiteSessionCard
-                  key={s.jsonlPath}
-                  session={s}
-                  nextIsSubagent={active[i + 1]?.isSubagent === true}
-                  onClick={() => openSession(s)}
-                />
-              ))
+            {rows.length === 0 ? (
+              <p className={styles.empty}>
+                {query.trim()
+                  ? t("history.no_match", "没有匹配的会话")
+                  : t("history.empty_hint", "还没有会话，点上方新建一个")}
+              </p>
             ) : (
-              <p className={styles.empty}>{t("no_sessions")}</p>
+              rows.map((s) => (
+                <div key={s.jsonlPath} className={styles.task_row}>
+                  <LiteSessionCard session={s} onClick={() => open(s).catch(() => {})} />
+                  <div className={styles.task_actions}>
+                    {showsControl(s) && <StopControl session={s} />}
+                    <MarkControl session={s} />
+                  </div>
+                </div>
+              ))
             )}
           </div>
-
-          {mascotVisible && (
-            <div className={styles.mascot_slot}>
-              <MascotAlertBubble />
-              <MascotEyes
-                suppressQuip={hasAlerts}
-                dashboardMode
-                usageRing={usageRing ? {
-                  percent: usageRing.overall,
-                  topSource: usageRing.topSource,
-                  sources: usageRing.sources,
-                  onClick: () => setShowUsage(true),
-                } : null}
-              />
-            </div>
-          )}
         </div>
       )}
     </div>
