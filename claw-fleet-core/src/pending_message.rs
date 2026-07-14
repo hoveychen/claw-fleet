@@ -29,6 +29,17 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+/// Request body for the `/enqueue_message` endpoint and the relay
+/// `enqueue_message` method. Crosses the HTTP/relay boundary, so it needs both
+/// `Serialize` and `Deserialize`.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "camelCase")]
+pub struct EnqueueMessageRequest {
+    pub session_id: String,
+    pub workspace_path: String,
+    pub text: String,
+}
+
 /// The queued follow-ups for one session, oldest first.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 #[serde(rename_all = "camelCase")]

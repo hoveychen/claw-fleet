@@ -1723,6 +1723,15 @@ impl Backend for LocalBackend {
         Ok(())
     }
 
+    fn enqueue_message(
+        &self,
+        session_id: String,
+        workspace_path: String,
+        text: String,
+    ) -> Result<(), String> {
+        claw_fleet_core::pending_message::enqueue(&session_id, &workspace_path, &text)
+    }
+
     fn chat_workspace(&self) -> Result<String, String> {
         claw_fleet_core::chat_workspace::ensure_chat_workspace()
     }
