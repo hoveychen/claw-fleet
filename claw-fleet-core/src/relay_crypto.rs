@@ -244,4 +244,29 @@ mod tests {
         hk.expand(INFO_CHANNEL, &mut ch).unwrap();
         to_hex(&ch)
     }
+
+    /// A sealed envelope produced with a *fixed* nonce so the mobile-web suite
+    /// can decrypt this exact ciphertext and prove AEAD interop (AAD binding,
+    /// tag placement, iv handling) — not just that each side round-trips its
+    /// own output. A fixed nonce is a test-only device; production always draws
+    /// a fresh random one.
+    #[test]
+    fn frozen_sealed_vector_cross_decrypt() {
+        let keys = derive_keys("fleet-relay-test-vector-secret-01");
+        let plaintext = br#"{"event":"decision_created","kind":"guard"}"#;
+        let fixed_iv = [0u8; 12]; // 000000000000000000000000
+        let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(&keys.enc_key));
+        let ct = cipher
+            .encrypt(Nonce::from_slice(&fixed_iv), Payload { msg: plaintext, aad: AAD })
+            .unwrap();
+        let sealed = SealedBox {
+            enc: "box".to_string(),
+            iv: B64.encode(fixed_iv),
+            ct: B64.encode(&ct),
+        };
+        // Round-trips here…
+        assert_eq!(open(&keys.enc_key, &sealed).unwrap(), plaintext);
+        // …and the JS suite asserts against these exact strings.
+        println!("SEALVEC iv={} ct={}", sealed.iv, sealed.ct);
+    }
 }
