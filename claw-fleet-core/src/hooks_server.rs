@@ -523,7 +523,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
         let json_header: tiny_http::Header = "Content-Type: application/json".parse().unwrap();
 
         match path {
-            "/health" => {
+            crate::routes::HEALTH => {
                 let body = format!(
                     r#"{{"version":"{}","status":"ok"}}"#,
                     env!("CARGO_PKG_VERSION")
@@ -533,7 +533,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/sessions" => {
+            crate::routes::SESSIONS => {
                 let sessions = scan_all_sources(&sources);
                 // Incrementally update the search index with the latest session list.
                 let pairs: Vec<(String, String)> = sessions
@@ -547,7 +547,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/interrupt" => {
+            crate::routes::INTERRUPT => {
                 let pid: u32 = query.get("pid").and_then(|s| s.parse().ok()).unwrap_or(0);
                 if pid == 0 {
                     let _ = request.respond(tiny_http::Response::empty(400));
@@ -571,7 +571,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/stop" => {
+            crate::routes::STOP => {
                 let pid: u32 = query.get("pid").and_then(|s| s.parse().ok()).unwrap_or(0);
                 if pid == 0 {
                     let _ = request.respond(tiny_http::Response::empty(400));
@@ -621,7 +621,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // RemoteBackend::kill_workspace never stopped calling it, so a remote
             // stop on an imprecise pid 404'd silently. Re-added to match the
             // still-live client. `?path=` is percent-encoded (slashes as %2F).
-            "/stop_workspace" => {
+            crate::routes::STOP_WORKSPACE => {
                 let path_param = query
                     .get("path")
                     .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
@@ -654,7 +654,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // panel — see the handler further down.
 
             // ── Unified /sources/{name}/account and /sources/{name}/usage ──
-            _ if path.starts_with("/sources/") => {
+            _ if path.starts_with(crate::routes::SOURCES_PREFIX) => {
                 let parts: Vec<&str> = path.trim_start_matches('/').split('/').collect();
                 // Expected: ["sources", "<name>", "account"|"usage"]
                 if parts.len() == 3 {
@@ -708,7 +708,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/setup-status" => {
+            crate::routes::SETUP_STATUS => {
                 let sessions = scan_all_sources(&sources);
                 let detected_tools = crate::detect_installed_tools(&sessions);
                 let (cli_installed, cli_path) = crate::check_cli_installed();
@@ -731,7 +731,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/usage_summaries" => {
+            crate::routes::USAGE_SUMMARIES => {
                 let summaries = crate::agent_source::fetch_usage_summaries_from_sources(&sources);
                 let body = serde_json::to_string(&summaries).unwrap_or_default();
                 let _ = request.respond(
@@ -739,7 +739,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/today_usage" => {
+            crate::routes::TODAY_USAGE => {
                 let sessions = scan_all_sources(&sources);
                 let usage = crate::today_usage::today_usage(&sessions);
                 let body = serde_json::to_string(&usage).unwrap_or_default();
@@ -748,7 +748,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/session_decisions" => {
+            crate::routes::SESSION_DECISIONS => {
                 let raw_id = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
                 let session_id = percent_decode_str(raw_id).decode_utf8_lossy().to_string();
                 let jsonl_path = query.get("jsonl_path").map(|s| {
@@ -776,7 +776,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/messages" => {
+            crate::routes::MESSAGES => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 let tail: Option<usize> = query.get("tail").and_then(|s| s.parse().ok());
@@ -801,7 +801,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/file_size" => {
+            crate::routes::FILE_SIZE => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 let resolved = find_source_for_path(&sources, &uri)
@@ -816,7 +816,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/tail" => {
+            crate::routes::TAIL => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let uri = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 let offset: u64 = query
@@ -867,7 +867,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/memories" => {
+            crate::routes::MEMORIES => {
                 let mut memories = Vec::new();
                 for source in &sources {
                     memories.extend(source.list_memories());
@@ -878,7 +878,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/live_thinking" => {
+            crate::routes::LIVE_THINKING => {
                 let raw = query.get("session_id").map(|s| s.as_str()).unwrap_or("");
                 let session_id = percent_decode_str(raw).decode_utf8_lossy().to_string();
                 // Sidecars live on the machine running `fleet serve`, so read
@@ -891,7 +891,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/memory_content" => {
+            crate::routes::MEMORY_CONTENT => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 // Try each source for memory content; fall back to direct read for Claude Code
@@ -911,7 +911,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/memory_history" => {
+            crate::routes::MEMORY_HISTORY => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 // Aggregate history from all sources; fall back to direct trace
@@ -932,7 +932,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/handoff_chain" => {
+            crate::routes::HANDOFF_CHAIN => {
                 let raw = query.get("session").map(|s| s.as_str()).unwrap_or("");
                 let sid = percent_decode_str(raw).decode_utf8_lossy().to_string();
                 let chain = crate::handoff::chain_containing(&sid);
@@ -941,14 +941,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     .respond(tiny_http::Response::from_string(body).with_header(json_header));
             }
 
-            "/wiki_docs" => {
+            crate::routes::WIKI_DOCS => {
                 let body = serde_json::to_string(&crate::wiki::list_docs()).unwrap_or_default();
                 let _ = request.respond(
                     tiny_http::Response::from_string(body).with_header(json_header),
                 );
             }
 
-            "/wiki_doc" => {
+            crate::routes::WIKI_DOC => {
                 let raw = query.get("slug").map(|s| s.as_str()).unwrap_or("");
                 let slug = percent_decode_str(raw).decode_utf8_lossy().to_string();
                 match crate::wiki::get_doc(&slug) {
@@ -964,7 +964,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/wiki_file" => {
+            crate::routes::WIKI_FILE => {
                 let dec = |key: &str| {
                     query
                         .get(key)
@@ -986,7 +986,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/decision_asset" => {
+            crate::routes::DECISION_ASSET => {
                 let dec = |key: &str| {
                     query
                         .get(key)
@@ -1008,7 +1008,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/wiki_search" => {
+            crate::routes::WIKI_SEARCH => {
                 let raw = query.get("q").map(|s| s.as_str()).unwrap_or("");
                 let q = percent_decode_str(raw).decode_utf8_lossy().to_string();
                 let body =
@@ -1018,7 +1018,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/wiki_export" => {
+            crate::routes::WIKI_EXPORT => {
                 let dec = |key: &str| {
                     query
                         .get(key)
@@ -1039,7 +1039,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/wiki_delete" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::WIKI_DELETE if request.method() == &tiny_http::Method::Post => {
                 let dec = |key: &str| {
                     query
                         .get(key)
@@ -1070,7 +1070,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/wiki_move" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::WIKI_MOVE if request.method() == &tiny_http::Method::Post => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -1100,7 +1100,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // Folder ops. `to: ""` dissolves the folder into the tree root.
-            "/wiki_move_folder" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::WIKI_MOVE_FOLDER if request.method() == &tiny_http::Method::Post => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -1129,7 +1129,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/wiki_delete_folder" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::WIKI_DELETE_FOLDER if request.method() == &tiny_http::Method::Post => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -1157,7 +1157,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/task_plans" => {
+            crate::routes::TASK_PLANS => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let workspace_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 // Optional `session` scopes the result to that session's focused
@@ -1173,7 +1173,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/skills" => {
+            crate::routes::SKILLS => {
                 let items = skills::scan_all_skills();
                 let body = serde_json::to_string(&items).unwrap_or_default();
                 let _ = request.respond(
@@ -1181,7 +1181,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/plugins" => {
+            crate::routes::PLUGINS => {
                 let items = plugins::scan_with_catalog();
                 let body = serde_json::to_string(&items).unwrap_or_default();
                 let _ = request.respond(
@@ -1189,7 +1189,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/plugins/set_enabled" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PLUGINS_SET_ENABLED
+                if request.method() == &tiny_http::Method::Post =>
+            {
                 #[derive(serde::Deserialize)]
                 struct Body {
                     plugin_id: String,
@@ -1232,7 +1234,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/plugins/marketplaces" if request.method() == &tiny_http::Method::Get => {
+            crate::routes::PLUGINS_MARKETPLACES if request.method() == &tiny_http::Method::Get => {
                 let items =
                     crate::claude_cli::list_marketplaces().unwrap_or_default();
                 let body = serde_json::to_string(&items).unwrap_or_default();
@@ -1241,7 +1243,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/plugins/marketplaces/add" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PLUGINS_MARKETPLACES_ADD if request.method() == &tiny_http::Method::Post => {
                 #[derive(serde::Deserialize)]
                 struct Body {
                     source: String,
@@ -1277,7 +1279,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/plugins/marketplaces/remove" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PLUGINS_MARKETPLACES_REMOVE if request.method() == &tiny_http::Method::Post => {
                 #[derive(serde::Deserialize)]
                 struct Body {
                     name: String,
@@ -1313,14 +1315,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/plugins/install" | "/plugins/uninstall"
+            crate::routes::PLUGINS_INSTALL | crate::routes::PLUGINS_UNINSTALL
                 if request.method() == &tiny_http::Method::Post =>
             {
                 #[derive(serde::Deserialize)]
                 struct Body {
                     plugin_id: String,
                 }
-                let is_install = request.url().starts_with("/plugins/install");
+                let is_install = request.url().starts_with(crate::routes::PLUGINS_INSTALL);
                 let mut buf = String::new();
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
                 let parsed: Result<Body, _> = serde_json::from_str(&buf);
@@ -1364,7 +1366,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // (history panel's "恢复会话", remote backend). Detached
             // `claude --resume <sid> -p <prompt>`; the resumed turn appears
             // via the scanner as the JSONL grows.
-            "/resume_session" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::RESUME_SESSION if request.method() == &tiny_http::Method::Post => {
                 let mut buf = String::new();
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
                 match serde_json::from_str::<crate::auto_resume::ResumeSessionRequest>(&buf) {
@@ -1407,7 +1409,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // Absolute path of this host's pure-chat workspace, created on
             // demand. The remote desktop pins it in its launcher but cannot
             // derive it — the path is under *this* host's home.
-            "/chat_workspace" if request.method() == &tiny_http::Method::Get => {
+            crate::routes::CHAT_WORKSPACE if request.method() == &tiny_http::Method::Get => {
                 match crate::chat_workspace::ensure_chat_workspace() {
                     Ok(path) => {
                         let body = serde_json::json!({"path": path}).to_string();
@@ -1434,7 +1436,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // Not gated on known session workspaces — picking a directory that has
             // never had a session is the entire point. `workspace_browse` carries
             // its own boundary (home + off-home known workspaces, canonical).
-            "/browse_dir" if request.method() == &tiny_http::Method::Get => {
+            crate::routes::BROWSE_DIR if request.method() == &tiny_http::Method::Get => {
                 let path = query
                     .get("path")
                     .map(|s| percent_decode_str(s).decode_utf8_lossy().to_string())
@@ -1465,7 +1467,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             // Spawn a brand-new headless Claude Code session (sessions page's
             // "new session" button, remote backend). Detached `claude -p`;
             // the session appears via the scanner once its JSONL exists.
-            "/spawn_session" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::SPAWN_SESSION if request.method() == &tiny_http::Method::Post => {
                 let mut buf = String::new();
                 let _ = std::io::Read::read_to_string(request.as_reader(), &mut buf);
                 match serde_json::from_str::<crate::session_launch::SpawnSessionRequest>(&buf) {
@@ -1507,7 +1509,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/skill_history" => {
+            crate::routes::SKILL_HISTORY => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 if let Some(source) = find_source_for_path(&sources, &file_path) {
@@ -1532,7 +1534,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/workflow_trees" => {
+            crate::routes::WORKFLOW_TREES => {
                 // Claude Code Workflow runs for a session. `path` is the parent
                 // session's .jsonl transcript path; discovery reads the sibling
                 // `<sid>/subagents/workflows/wf_*/` dirs server-side so remote
@@ -1547,7 +1549,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     .respond(tiny_http::Response::from_string(body).with_header(json_header));
             }
 
-            "/token_breakdown" => {
+            crate::routes::TOKEN_BREAKDOWN => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 let project_root = query.get("project_root").map(|s| {
@@ -1572,8 +1574,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/explorer_roots" | "/explorer_dir" | "/explorer_file" | "/scratchpad_dir"
-            | "/scratchpad_file" => {
+            crate::routes::EXPLORER_ROOTS | crate::routes::EXPLORER_DIR | crate::routes::EXPLORER_FILE | crate::routes::SCRATCHPAD_DIR
+            | crate::routes::SCRATCHPAD_FILE => {
                 let decode = |key: &str| {
                     query
                         .get(key)
@@ -1587,9 +1589,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     .map(|s| s.workspace_path)
                     .collect();
                 let result: Result<String, String> = match path {
-                    "/explorer_roots" => crate::file_explorer::list_roots(&ws, &known)
+                    crate::routes::EXPLORER_ROOTS => crate::file_explorer::list_roots(&ws, &known)
                         .map(|r| serde_json::to_string(&r).unwrap_or_default()),
-                    "/explorer_dir" => {
+                    crate::routes::EXPLORER_DIR => {
                         let show_ignored = query.get("ignored").map(|s| s == "true").unwrap_or(false);
                         crate::file_explorer::list_dir(
                             &ws,
@@ -1600,14 +1602,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                         )
                         .map(|e| serde_json::to_string(&e).unwrap_or_default())
                     }
-                    "/scratchpad_dir" => crate::file_explorer::list_scratchpad_dir(
+                    crate::routes::SCRATCHPAD_DIR => crate::file_explorer::list_scratchpad_dir(
                         &ws,
                         &decode("session"),
                         &decode("rel"),
                         &known,
                     )
                     .map(|e| serde_json::to_string(&e).unwrap_or_default()),
-                    "/scratchpad_file" => crate::file_explorer::read_scratchpad_file(
+                    crate::routes::SCRATCHPAD_FILE => crate::file_explorer::read_scratchpad_file(
                         &ws,
                         &decode("session"),
                         &decode("rel"),
@@ -1634,8 +1636,8 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/git_status" | "/git_push" | "/git_pull"
-                if path == "/git_status"
+            crate::routes::GIT_STATUS | crate::routes::GIT_PUSH | crate::routes::GIT_PULL
+                if path == crate::routes::GIT_STATUS
                     || request.method() == &tiny_http::Method::Post =>
             {
                 let decode = |key: &str| {
@@ -1652,9 +1654,9 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                     .map(|s| s.workspace_path)
                     .collect();
                 let result: Result<String, String> = match path {
-                    "/git_status" => crate::git_ops::git_status(&ws, &root, &known)
+                    crate::routes::GIT_STATUS => crate::git_ops::git_status(&ws, &root, &known)
                         .map(|s| serde_json::to_string(&s).unwrap_or_default()),
-                    "/git_push" => crate::git_ops::git_push(&ws, &root, &known)
+                    crate::routes::GIT_PUSH => crate::git_ops::git_push(&ws, &root, &known)
                         .map(|r| serde_json::to_string(&r).unwrap_or_default()),
                     _ => crate::git_ops::git_pull(&ws, &root, &known)
                         .map(|r| serde_json::to_string(&r).unwrap_or_default()),
@@ -1676,7 +1678,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/skill_content" => {
+            crate::routes::SKILL_CONTENT => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let file_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 match skills::read_skill_file(&file_path) {
@@ -1692,7 +1694,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/skill_files" => {
+            crate::routes::SKILL_FILES => {
                 let raw_path = query.get("path").map(|s| s.as_str()).unwrap_or("");
                 let skill_path = percent_decode_str(raw_path).decode_utf8_lossy().to_string();
                 match skills::list_skill_files(&skill_path) {
@@ -1708,7 +1710,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/skill_delete" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::SKILL_DELETE if request.method() == &tiny_http::Method::Post => {
                 #[derive(serde::Deserialize)]
                 struct Body {
                     skill_path: String,
@@ -1744,7 +1746,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/hooks_plan" => {
+            crate::routes::HOOKS_PLAN => {
                 let plan = hooks::plan_hook_setup();
                 let body = serde_json::to_string(&plan).unwrap_or_default();
                 let _ = request.respond(
@@ -1752,7 +1754,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/apply_hooks" => {
+            crate::routes::APPLY_HOOKS => {
                 match hooks::apply_hook_setup() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -1771,7 +1773,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/sources_config" => {
+            crate::routes::SOURCES_CONFIG => {
                 let info = agent_source::get_sources_config_local();
                 let body = serde_json::to_string(&info).unwrap_or_default();
                 let _ = request.respond(
@@ -1779,7 +1781,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/set_source_enabled" => {
+            crate::routes::SET_SOURCE_ENABLED => {
                 let name = query.get("name").cloned().unwrap_or_default();
                 let enabled: bool = query.get("enabled").map(|s| s == "true").unwrap_or(false);
                 if name.is_empty() {
@@ -1808,7 +1810,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/list_claude_binaries" => {
+            crate::routes::LIST_CLAUDE_BINARIES => {
                 let bins = crate::claude_binary::discover();
                 let body = serde_json::to_string(&bins).unwrap_or_default();
                 let _ = request.respond(
@@ -1816,7 +1818,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/claude_binary_override" => {
+            crate::routes::CLAUDE_BINARY_OVERRIDE => {
                 if request.method() == &tiny_http::Method::Post {
                     #[derive(serde::Deserialize)]
                     struct Body { path: Option<String> }
@@ -1854,7 +1856,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/remove_hooks" => {
+            crate::routes::REMOVE_HOOKS => {
                 match hooks::remove_fleet_hooks() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -1874,7 +1876,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Guard hook endpoints ──────────────────────────────────────
-            "/apply_guard_hook" => {
+            crate::routes::APPLY_GUARD_HOOK => {
                 match hooks::apply_guard_hook() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -1893,7 +1895,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/remove_guard_hook" => {
+            crate::routes::REMOVE_GUARD_HOOK => {
                 match hooks::remove_guard_hook() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -1912,7 +1914,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/guard/pending" => {
+            crate::routes::GUARD_PENDING => {
                 let ids = guard::list_pending_requests();
                 let sessions = scan_all_sources(&sources);
                 let mut requests = Vec::new();
@@ -1935,7 +1937,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/guard/respond" => {
+            crate::routes::GUARD_RESPOND => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<guard::GuardRespondPayload>(&body_bytes) {
@@ -1989,7 +1991,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/guard/analyze" => {
+            crate::routes::GUARD_ANALYZE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -2045,7 +2047,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/guard/allow-rules" => {
+            crate::routes::GUARD_ALLOW_RULES => {
                 let rules = audit::list_guard_allow_rules();
                 let body = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
                 let _ = request.respond(
@@ -2053,7 +2055,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/guard/allow-rules/remove" => {
+            crate::routes::GUARD_ALLOW_RULES_REMOVE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -2086,7 +2088,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Elicitation hook endpoints ───────────────────────────────────
-            "/apply_elicitation_hook" => {
+            crate::routes::APPLY_ELICITATION_HOOK => {
                 match hooks::apply_elicitation_hook() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -2105,7 +2107,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/remove_elicitation_hook" => {
+            crate::routes::REMOVE_ELICITATION_HOOK => {
                 match hooks::remove_elicitation_hook() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -2124,7 +2126,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/elicitation/pending" => {
+            crate::routes::ELICITATION_PENDING => {
                 let ids = elicitation::list_pending_requests();
                 let sessions = scan_all_sources(&sources);
                 let mut requests = Vec::new();
@@ -2162,7 +2164,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Session mark (manual done/pending review state) ──────────────
-            "/session_mark" => {
+            crate::routes::SESSION_MARK => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::session_mark::SetSessionMarkRequest>(
@@ -2202,7 +2204,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Session read (batch mark-read; unread is derived) ─────────────
-            "/session_read" => {
+            crate::routes::SESSION_READ => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::session_read::MarkSessionsReadRequest>(
@@ -2236,14 +2238,14 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Workspace command runner (proc_runner) ───────────────────────
-            "/procs" => {
+            crate::routes::PROCS => {
                 let body =
                     serde_json::to_string(&crate::proc_runner::list_procs()).unwrap_or_default();
                 let _ = request
                     .respond(tiny_http::Response::from_string(body).with_header(json_header));
             }
 
-            "/proc_run" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PROC_RUN if request.method() == &tiny_http::Method::Post => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::proc_runner::SpawnProcRequest>(&body_bytes) {
@@ -2288,7 +2290,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/proc_output" => {
+            crate::routes::PROC_OUTPUT => {
                 let id = query.get("id").map(|s| s.as_str()).unwrap_or("");
                 let offset: Option<u64> = query.get("offset").and_then(|s| s.parse().ok());
                 match crate::proc_runner::proc_output(id, offset) {
@@ -2309,7 +2311,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/proc_input" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PROC_INPUT if request.method() == &tiny_http::Method::Post => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::proc_runner::ProcInputRequest>(&body_bytes) {
@@ -2342,7 +2344,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/proc_resize" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PROC_RESIZE if request.method() == &tiny_http::Method::Post => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::proc_runner::ProcResizeRequest>(&body_bytes) {
@@ -2379,7 +2381,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/proc_kill" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PROC_KILL if request.method() == &tiny_http::Method::Post => {
                 let id = query.get("id").map(|s| s.as_str()).unwrap_or("");
                 let force = query.get("force").map(|s| s == "true").unwrap_or(false);
                 match crate::proc_runner::kill_proc(id, force) {
@@ -2400,7 +2402,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/proc_clear" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::PROC_CLEAR if request.method() == &tiny_http::Method::Post => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::proc_runner::ClearProcRequest>(&body_bytes) {
@@ -2441,7 +2443,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Interaction mode endpoints ───────────────────────────────────
-            "/apply_interaction_mode" => {
+            crate::routes::APPLY_INTERACTION_MODE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -2476,7 +2478,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/remove_interaction_mode" => {
+            crate::routes::REMOVE_INTERACTION_MODE => {
                 match interaction_mode::remove_interaction_mode() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -2496,7 +2498,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Wiki guidance endpoints ──────────────────────────────────────
-            "/apply_wiki_guidance" => {
+            crate::routes::APPLY_WIKI_GUIDANCE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -2522,7 +2524,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/remove_wiki_guidance" => {
+            crate::routes::REMOVE_WIKI_GUIDANCE => {
                 match crate::wiki_guidance::remove_wiki_guidance() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -2541,7 +2543,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/interaction_diagnostics" => {
+            crate::routes::INTERACTION_DIAGNOSTICS => {
                 let checks = crate::interaction_mode_diagnostics::run_checks();
                 let body = serde_json::to_string(&checks).unwrap_or_else(|_| "[]".into());
                 let _ = request.respond(
@@ -2549,7 +2551,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/test_decision_end_to_end" => {
+            crate::routes::TEST_DECISION_END_TO_END => {
                 match crate::interaction_mode_test::run_end_to_end_test(
                     std::time::Duration::from_secs(10),
                 ) {
@@ -2570,7 +2572,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/test_decision_via_claude_cli" => {
+            crate::routes::TEST_DECISION_VIA_CLAUDE_CLI => {
                 match crate::interaction_mode_test::run_claude_cli_test(
                     std::time::Duration::from_secs(60),
                 ) {
@@ -2592,7 +2594,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── PRD Discipline mode endpoints ────────────────────────────────
-            "/apply_prd_mode" => {
+            crate::routes::APPLY_PRD_MODE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -2632,7 +2634,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/remove_prd_mode" => {
+            crate::routes::REMOVE_PRD_MODE => {
                 let r1 = prd_discipline::remove_prd_discipline();
                 let r2 = hooks::remove_prd_context_hook();
                 match r1.and(r2) {
@@ -2654,7 +2656,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Plan-approval hook endpoints ─────────────────────────────────
-            "/apply_plan_approval_hook" => {
+            crate::routes::APPLY_PLAN_APPROVAL_HOOK => {
                 match hooks::apply_plan_approval_hook() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -2673,7 +2675,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/remove_plan_approval_hook" => {
+            crate::routes::REMOVE_PLAN_APPROVAL_HOOK => {
                 match hooks::remove_plan_approval_hook() {
                     Ok(()) => {
                         let _ = request.respond(
@@ -2692,7 +2694,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/plan-approval/pending" => {
+            crate::routes::PLAN_APPROVAL_PENDING => {
                 let ids = plan_approval::list_pending_requests();
                 let sessions = scan_all_sources(&sources);
                 let mut requests = Vec::new();
@@ -2729,7 +2731,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/plan-approval/respond" => {
+            crate::routes::PLAN_APPROVAL_RESPOND => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<plan_approval::PlanApprovalResponse>(&body_bytes) {
@@ -2767,7 +2769,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/elicitation/respond" => {
+            crate::routes::ELICITATION_RESPOND => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<elicitation::ElicitationResponse>(&body_bytes) {
@@ -2807,7 +2809,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/fleet-ask/pending" => {
+            crate::routes::FLEET_ASK_PENDING => {
                 let ids = crate::mcp_ipc::list_pending_requests();
                 let sessions = scan_all_sources(&sources);
                 let mut requests = Vec::new();
@@ -2844,7 +2846,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/fleet-ask/respond" => {
+            crate::routes::FLEET_ASK_RESPOND => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::mcp_ipc::FleetAskResponse>(&body_bytes) {
@@ -2884,7 +2886,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/permission-prompt/pending" => {
+            crate::routes::PERMISSION_PROMPT_PENDING => {
                 let ids = crate::permission_prompt_ipc::list_pending_requests();
                 let sessions = scan_all_sources(&sources);
                 let mut requests = Vec::new();
@@ -2907,7 +2909,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/permission-prompt/respond" => {
+            crate::routes::PERMISSION_PROMPT_RESPOND => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::permission_prompt_ipc::PermissionPromptResponse>(&body_bytes) {
@@ -2942,7 +2944,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/a2ui-render/pending" => {
+            crate::routes::A2UI_RENDER_PENDING => {
                 let ids = crate::mcp_a2ui_ipc::list_pending_requests();
                 let sessions = scan_all_sources(&sources);
                 let mut requests = Vec::new();
@@ -2979,7 +2981,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/a2ui-render/respond" => {
+            crate::routes::A2UI_RENDER_RESPOND => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::mcp_a2ui_ipc::A2uiRenderResponse>(&body_bytes) {
@@ -3017,7 +3019,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/elicitation/upload" => {
+            crate::routes::ELICITATION_UPLOAD => {
                 let raw_name = query.get("name").map(|s| s.as_str()).unwrap_or("");
                 let decoded = percent_decode_str(raw_name).decode_utf8_lossy().to_string();
                 let safe_name: String = std::path::Path::new(&decoded)
@@ -3121,7 +3123,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/user_attachment" => {
+            crate::routes::USER_ATTACHMENT => {
                 let dec = |key: &str| {
                     query
                         .get(key)
@@ -3143,7 +3145,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/search" => {
+            crate::routes::SEARCH => {
                 let q = query.get("q").cloned().unwrap_or_default();
                 let limit: usize = query
                     .get("limit")
@@ -3156,7 +3158,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/audit" => {
+            crate::routes::AUDIT => {
                 use crate::audit::extract_audit_events;
                 let sessions = scan_all_sources(&sources);
                 let active_ids: std::collections::HashSet<String> = sessions
@@ -3216,7 +3218,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/audit/pattern-info" => {
+            crate::routes::AUDIT_PATTERN_INFO => {
                 let (version, path) = crate::pattern_update::get_patterns_info();
                 let body = serde_json::json!({
                     "version": version,
@@ -3227,7 +3229,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/audit/check-update" => {
+            crate::routes::AUDIT_CHECK_UPDATE => {
                 let msg = crate::pattern_update::check_update_now();
                 let body = serde_json::json!({ "message": msg }).to_string();
                 let _ = request.respond(
@@ -3235,7 +3237,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/audit/rules" => {
+            crate::routes::AUDIT_RULES => {
                 let rules = crate::audit::get_all_rules();
                 let body = serde_json::to_string(&rules).unwrap_or_else(|_| "[]".into());
                 let _ = request.respond(
@@ -3243,7 +3245,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/audit/rules/toggle" => {
+            crate::routes::AUDIT_RULES_TOGGLE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -3275,7 +3277,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/audit/rules/save" => {
+            crate::routes::AUDIT_RULES_SAVE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<crate::audit::AuditRuleInfo>(&body_bytes) {
@@ -3305,7 +3307,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/audit/rules/delete" => {
+            crate::routes::AUDIT_RULES_DELETE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -3337,7 +3339,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/audit/rules/suggest" => {
+            crate::routes::AUDIT_RULES_SUGGEST => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 #[derive(serde::Deserialize)]
@@ -3417,7 +3419,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/daily_report" => {
+            crate::routes::DAILY_REPORT => {
                 let date = query.get("date").cloned().unwrap_or_default();
                 let store = report_store.lock().unwrap();
                 match store.get_report(&date) {
@@ -3438,7 +3440,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/daily_report_stats" => {
+            crate::routes::DAILY_REPORT_STATS => {
                 let from = query.get("from").cloned().unwrap_or_default();
                 let to = query.get("to").cloned().unwrap_or_default();
                 let store = report_store.lock().unwrap();
@@ -3449,7 +3451,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/daily_report/generate" => {
+            crate::routes::DAILY_REPORT_GENERATE => {
                 let date = query.get("date").cloned().unwrap_or_default();
                 let sessions = scan_sessions_for_date(&date);
                 if sessions.is_empty() {
@@ -3471,7 +3473,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/daily_report/ai_summary" => {
+            crate::routes::DAILY_REPORT_AI_SUMMARY => {
                 let date = query.get("date").cloned().unwrap_or_default();
                 let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
                 let store = report_store.lock().unwrap();
@@ -3517,7 +3519,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/daily_report/lessons" => {
+            crate::routes::DAILY_REPORT_LESSONS => {
                 let date = query.get("date").cloned().unwrap_or_default();
                 let lang = query.get("lang").map(|s| s.as_str()).unwrap_or("en");
                 let store = report_store.lock().unwrap();
@@ -3563,7 +3565,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/daily_report/append_lesson" => {
+            crate::routes::DAILY_REPORT_APPEND_LESSON => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<Lesson>(&body_bytes) {
@@ -3595,7 +3597,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── LLM provider endpoints ──────────────────────────────────
-            "/llm/providers" => {
+            crate::routes::LLM_PROVIDERS => {
                 let infos = llm_provider::all_provider_infos();
                 let body = serde_json::to_string(&infos).unwrap_or_default();
                 let _ = request.respond(
@@ -3603,7 +3605,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/llm/config" if request.method() == &tiny_http::Method::Get => {
+            crate::routes::LLM_CONFIG if request.method() == &tiny_http::Method::Get => {
                 let cfg = llm_config.lock().unwrap().clone();
                 let body = serde_json::to_string(&cfg).unwrap_or_default();
                 let _ = request.respond(
@@ -3611,7 +3613,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/llm/config" => {
+            crate::routes::LLM_CONFIG => {
                 // POST: update config
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
@@ -3636,7 +3638,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/fleet_llm_usage/daily" => {
+            crate::routes::FLEET_LLM_USAGE_DAILY => {
                 let from_ms = query
                     .get("from_ms")
                     .and_then(|s| s.parse::<u64>().ok())
@@ -3652,7 +3654,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/usage_history" => {
+            crate::routes::USAGE_HISTORY => {
                 let from_ms = query
                     .get("from_ms")
                     .and_then(|s| s.parse::<i64>().ok())
@@ -3669,7 +3671,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
             }
 
             // ── Session outcome analysis (delegated from remote clients) ──
-            "/analyze" => {
+            crate::routes::ANALYZE => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 match serde_json::from_slice::<claude_analyze::AnalyzeRequest>(&body_bytes) {
@@ -3718,7 +3720,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 }
             }
 
-            "/mobile-relay/config" if request.method() == &tiny_http::Method::Get => {
+            crate::routes::MOBILE_RELAY_CONFIG if request.method() == &tiny_http::Method::Get => {
                 let cfg = crate::mobile_relay::load_config();
                 let body = serde_json::to_string(&cfg).unwrap_or_default();
                 let _ = request.respond(
@@ -3726,7 +3728,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/mobile-relay/config" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::MOBILE_RELAY_CONFIG if request.method() == &tiny_http::Method::Post => {
                 let mut body_bytes = Vec::new();
                 let _ = std::io::Read::read_to_end(&mut request.as_reader(), &mut body_bytes);
                 let parsed: Result<crate::mobile_relay::MobileRelayConfig, _> =
@@ -3748,7 +3750,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/mobile-relay/rotate" if request.method() == &tiny_http::Method::Post => {
+            crate::routes::MOBILE_RELAY_ROTATE if request.method() == &tiny_http::Method::Post => {
                 let (status, body) = match crate::mobile_relay::rotate_secret() {
                     Ok(cfg) => (200, serde_json::to_string(&cfg).unwrap_or_default()),
                     Err(e) => (500, serde_json::json!({"error": e}).to_string()),
@@ -3760,7 +3762,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/mobile-relay/status" => {
+            crate::routes::MOBILE_RELAY_STATUS => {
                 let status = crate::mobile_relay::status();
                 let body = serde_json::to_string(&status).unwrap_or_default();
                 let _ = request.respond(
@@ -3768,7 +3770,7 @@ pub fn serve(port: u16, token: String, port_file: Option<std::path::PathBuf>) {
                 );
             }
 
-            "/mobile-relay/qr" => {
+            crate::routes::MOBILE_RELAY_QR => {
                 let (status, body) = match crate::mobile_relay::qr_svg() {
                     Ok(svg) => (200, serde_json::json!({"svg": svg}).to_string()),
                     Err(e) => (404, serde_json::json!({"error": e}).to_string()),
