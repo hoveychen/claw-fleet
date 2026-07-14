@@ -628,6 +628,65 @@ pub const HANDOFF_ENTRYPOINT: &str = "claw-fleet-handoff";
 mod tests {
     use super::*;
 
+    /// Live end-to-end (M3 P11 acceptance): a Codex handoff must relay to a
+    /// *Codex* successor, not silently fall back to `claude`. Register a
+    /// pending handoff whose `agent_source` is "codex", consume it through the
+    /// real source-routing spawner, and confirm a Codex session was launched
+    /// (non-empty successor thread id). Ignored — spawns a real `codex`.
+    ///   `cargo test -p claw-fleet-core handoff::tests::live_codex_handoff -- --ignored`
+    #[test]
+    #[ignore = "spawns a real codex session; run manually with --ignored"]
+    fn live_codex_handoff_relays_to_codex_successor() {
+        let (root, pdir, cdir) = fresh_dirs("live-codex-relay");
+        let ws = std::env::temp_dir().join(format!("fleet-codex-relay-ws-{}", std::process::id()));
+        fs::create_dir_all(&ws).unwrap();
+        register_in(
+            &pdir,
+            &cdir,
+            "pred-thread",
+            ws.to_str().unwrap(),
+            None,
+            "relay to codex",
+            None,
+            None,
+            None,
+            None,
+            "codex",
+            now_ms(),
+        )
+        .unwrap();
+
+        // Real spawner: routes by agent_source → CodexSource::spawn → codex exec.
+        let to = consume_and_spawn_in(
+            &pdir,
+            &cdir,
+            None,
+            "pred-thread",
+            now_ms(),
+            spawn_successor_by_source,
+        )
+        .expect("consume should not error")
+        .expect("a successor session id");
+
+        assert!(
+            to.len() >= 8 && to.contains('-'),
+            "successor is a codex thread id (uuid-shaped): {to}"
+        );
+        // The successor rollout must carry the Fleet originator (proves it went
+        // through the codex launcher, not the claude spawner).
+        let owned = crate::agent_source::build_sources()
+            .iter()
+            .find(|s| s.api_name() == "codex")
+            .map(|s| s.scan_sessions())
+            .unwrap_or_default()
+            .into_iter()
+            .any(|si| si.id == to && si.entrypoint.as_deref() == Some("fleet"));
+        assert!(owned, "successor {to} scans as a Fleet-owned codex session");
+
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&ws);
+    }
+
     fn fresh_dirs(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
         let root = std::env::temp_dir().join(format!(
             "fleet-handoff-{}-{}-{}",
